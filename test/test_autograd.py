@@ -57,6 +57,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     expectedFailureMPS,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     skipMeta,
@@ -13249,7 +13250,7 @@ class TestAutogradDeviceType(TestCase):
                 ):
                     f()
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_advanced_indexing_backwards_large(self, device):
         # See https://github.com/pytorch/pytorch/issues/22843
         n = 1 << 16
@@ -13266,70 +13267,6 @@ class TestAutogradDeviceType(TestCase):
         )
         x = torch.randn(shape, requires_grad=True, device=device)
         x[i].sum().backward()
-
-    def _test_reentrant_parent_error_on_cpu(self, device):
-        t1 = torch.rand([3, 3], requires_grad=True)
-        t2 = torch.rand([3, 3], device=device, requires_grad=True)
-        t3 = torch.rand([3, 3], device=device, requires_grad=True)
-
-        # Parent graph cpu graph.
-        t4 = t1 * t1
-        t5 = TestAutograd.SimulateBackwardError.apply(t4)
-
-        # Child gpu graph (much longer than parent graph).
-        prev = t2 * t2
-        for _ in range(10):
-            prev = prev * t2
-        reentrant_root = prev
-
-        class ReentrantFunc(Function):
-            @staticmethod
-            def forward(ctx, inp):
-                return inp.clone()
-
-            @staticmethod
-            def backward(ctx, grad):
-                # Reentrant backward in child will take much longer.
-                reentrant_root.backward(grad)
-                return grad
-
-        # Parent gpu graph.
-        t6 = ReentrantFunc.apply(t3)
-        t7 = t6 * t6
-
-        # Parent graph will error out first, while child graph will continue executing.
-        with self.assertRaisesRegex(Exception, "Simulate error"):
-            torch.autograd.backward([t5.sum(), t7.sum()])
-
-        # No grads should be accumulated since child graph will stop execution
-        # after parent receives error.
-        self.assertIsNone(t2.grad)
-        self.assertIsNone(t1.grad)
-        self.assertIsNone(t3.grad)
-
-    @onlyCUDA
-    def test_reentrant_parent_error_on_cpu(self, device):
-        def _get_cuda_memory_usage():
-            # we don't need CUDA synchronize because the statistics are not tracked at
-            # actual freeing, but at when marking the block as free.
-            num_devices = torch.cuda.device_count()
-            gc.collect()
-            return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
-
-        before = _get_cuda_memory_usage()
-
-        # Run as separate function so that gc can clean up everything when we
-        # check for memory usage.
-        self._test_reentrant_parent_error_on_cpu(device)
-
-        # Wait for autograd thread to cleanup failed tasks.
-        after = _get_cuda_memory_usage()
-        start = time.time()
-        while before != after and time.time() - start < 30:
-            time.sleep(0.1)
-            after = _get_cuda_memory_usage()
-
-        self.assertEqual(before, after)
 
     # TODO: see if these tests can be ported to OpInfos or moved to where's test suite
     @skipIfMPS  # the test doesn't work on MPS
@@ -13367,22 +13304,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(where_scalar_second, (cond, x))
         gradgradcheck(where_scalar_second, (cond, x))
 
-    @onlyCUDA
-    def test_free_unneeded_tensor(self, device):
-        x = torch.randn(2, 3, 10, 10, device=device, requires_grad=True)
-        m = torch.randn(1, 3, 1, 1, device=device)
-
-        z = x.sum()
-        base_mem = torch.cuda.memory_allocated()
-        z = ((x + 2) * m).sum()
-        end_mem = torch.cuda.memory_allocated()
-
-        # In the end the memory usage should remain equal, because neither of
-        # (x + 2) and ((x + 2) * m) should be kept alive for backward, while the
-        # previous allocation of z had the same size as the current one.
-        self.assertEqual(base_mem, end_mem)
-
-    @onlyCUDA
+    @onlyAccelerator
     def test_pin_memory(self, device):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         self.assertEqual(x, x.pin_memory())
@@ -13391,18 +13313,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(lambda x: x.pin_memory(), [x])
         gradgradcheck(lambda x: x.pin_memory(), [x])
 
-    @onlyCUDA
-    def test_profiler_emit_nvtx(self, device):
-        # This test is not intended to ensure correctness of nvtx ranges.
-        # That would require something a great deal more complex (you'd have to create a
-        # profile in a subprocess, open it, and parse the sql somehow).
-        # This test is merely intended to catch if emit_nvtx breaks on construction.
-        a = torch.tensor([1, 2, 3], dtype=torch.float32, device=device)
-        with torch.cuda.profiler.profile():
-            with emit_nvtx():
-                a.add(1.0)
-
-    @onlyCUDA
+    @onlyAccelerator
     def test_rnn_backward_to_input_but_not_parameters(self, device):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
@@ -13545,75 +13456,6 @@ class TestAutogradDeviceType(TestCase):
             non_dual = torch.tensor([[1.0], [2.0]])
             non_dual.copy_(x_dual)
             self.assertTrue(fwAD.unpack_dual(non_dual).tangent is not tangent)
-
-    @onlyCUDA
-    def test_simple_reentrant_cross_device(self, device):
-        class ReentrantFunc(Function):
-            _cpu_mode = True
-
-            @staticmethod
-            def forward(ctx, x):
-                return x * (x + 2)
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                with torch.enable_grad():
-                    if ReentrantFunc._cpu_mode:
-                        new_param = torch.randn(2, 2, requires_grad=True)
-                        (new_param**2).sum().backward()
-                    else:
-                        new_param = torch.randn(2, 2, device=device, requires_grad=True)
-                        (new_param**2).sum().backward()
-                return grad_output
-
-        # Reentrant starts on GPU thread, finishes on GPU thread
-        x = torch.randn(2, 2, device=device, requires_grad=True)
-        out = ReentrantFunc.apply(x)
-        out.sum().backward()
-
-        # Reentrant starts on CPU thread, finishes on GPU thread
-        x = torch.randn(2, 2, requires_grad=True)
-        # set ReentrantFunc node to GPU to emit tasks to GPU queue
-        ReentrantFunc._cpu_mode = False
-        out = ReentrantFunc.apply(x)
-        out.sum().backward()
-
-        # Reentrant starts on GPU thread, finishes on CPU thread
-        x = torch.randn(2, 2, device=device, requires_grad=True)
-        # set ReentrantFunc node to CPU to emit tasks to CPU queue
-        ReentrantFunc._cpu_mode = True
-        out = ReentrantFunc.apply(x)
-        out.sum().backward()
-
-    @onlyCUDA
-    def test_cross_device_reentrant_autograd(self, device):
-        # Output on gpu so that this task will be associated with the gpu thread
-        def fn_on_gpu(inp):
-            # Artificially increase the priority of the next op to make sure it runs
-            # as soon as we reach it before the ops of branch1.
-            dummy = inp * 2 * 2 * 2 * 2
-            return inp.to(device=device)
-
-        def parent_on_cpu(inp):
-            # Slow branch of ops on gpu so that the work queue for the gpu thread
-            # won't empty too quickly. They also have smaller priorities than the
-            # ones created by fn_on_gpu
-            branch1 = inp.to(device=device)
-            branch1 = branch1 / branch1
-            branch1 = branch1 / branch1
-            branch1 = branch1 / branch1
-            # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
-            # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
-            # So the cpu thread will notify the gpu thread with an empty NodeTask.
-            branch2 = checkpoint(fn_on_gpu, inp, use_reentrant=True)
-            out = branch2 + branch1
-            return out
-
-        inp = torch.rand(2, requires_grad=True)
-        out = parent_on_cpu(inp)
-        # This will segfault if the empty NodeTask is not handled properly in the
-        # gpu thread ReadyQueue
-        out.sum().backward()
 
     def test_inplace_on_view_backprop_base(self, device):
         # modify view and back-prop through base
@@ -13851,14 +13693,6 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(fn, (vec))
         gradgradcheck(fn, (vec))
-
-    @onlyCUDA
-    def test_gradcheck_input_output_different_device(self, device):
-        x = torch.ones((1,), dtype=torch.double, device="cuda", requires_grad=True)
-        gradcheck(lambda x: x.to("cpu"), (x,))
-
-        x = torch.ones((1,), dtype=torch.double, device="cpu", requires_grad=True)
-        gradcheck(lambda x: x.to("cuda"), (x,))
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181229"
@@ -16717,60 +16551,6 @@ class TestAutogradMultipleDispatch(TestCase):
             )
 
     @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181272"
-    )
-    @onlyCUDA
-    def test_backward_single_threaded(self):
-        threads_eq = None
-
-        class TestFn(Function):
-            @staticmethod
-            def forward(ctx, x, self):
-                ctx.self = self
-                ctx.tid = threading.get_ident()
-                return x.clone()
-
-            @staticmethod
-            def backward(ctx, gO):
-                nonlocal threads_eq
-                threads_eq = ctx.tid == threading.get_ident()
-                return gO, None
-
-        inp = torch.rand(10, device="cuda", requires_grad=True)
-
-        with torch.autograd.set_multithreading_enabled(False):
-            TestFn.apply(inp, None).sum().backward()
-        self.assertTrue(threads_eq)
-
-        TestFn.apply(inp, None).sum().backward()
-        self.assertFalse(threads_eq)
-
-    @onlyCUDA
-    def test_backward_tls_stash(self):
-        local = threading.local()
-        local.my_obj = {}
-        local.my_obj[10] = 10
-        test_self = self
-        torch._C._stash_obj_in_tls("my_obj", local.my_obj)
-
-        class TestFn(Function):
-            @staticmethod
-            def forward(ctx, x, self):
-                return x.clone()
-
-            @staticmethod
-            def backward(ctx, gO):
-                test_self.assertTrue(torch._C._is_key_in_tls("my_obj"))
-                test_self.assertTrue(torch._C._get_obj_in_tls("my_obj")[10] == 10)
-                torch._C._get_obj_in_tls("my_obj")[10] = 5
-                return gO, None
-
-        inp = torch.rand(10, device="cuda", requires_grad=True)
-
-        TestFn.apply(inp, None).sum().backward()
-        self.assertEqual(local.my_obj[10], 5)
-
-    @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181323"
     )
     @unittest.skipIf(
@@ -16932,6 +16712,224 @@ class TestAutogradMultipleDispatch(TestCase):
                 self.assertEqual(x.grad, expected)
 
 
+class TestAutogradCUDA(TestCase):
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
+
+    def _test_reentrant_parent_error_on_cpu(self, device):
+        t1 = torch.rand([3, 3], requires_grad=True)
+        t2 = torch.rand([3, 3], device=device, requires_grad=True)
+        t3 = torch.rand([3, 3], device=device, requires_grad=True)
+
+        # Parent graph cpu graph.
+        t4 = t1 * t1
+        t5 = TestAutograd.SimulateBackwardError.apply(t4)
+
+        # Child gpu graph (much longer than parent graph).
+        prev = t2 * t2
+        for _ in range(10):
+            prev = prev * t2
+        reentrant_root = prev
+
+        class ReentrantFunc(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, grad):
+                # Reentrant backward in child will take much longer.
+                reentrant_root.backward(grad)
+                return grad
+
+        # Parent gpu graph.
+        t6 = ReentrantFunc.apply(t3)
+        t7 = t6 * t6
+
+        # Parent graph will error out first, while child graph will continue executing.
+        with self.assertRaisesRegex(Exception, "Simulate error"):
+            torch.autograd.backward([t5.sum(), t7.sum()])
+
+        # No grads should be accumulated since child graph will stop execution
+        # after parent receives error.
+        self.assertIsNone(t2.grad)
+        self.assertIsNone(t1.grad)
+        self.assertIsNone(t3.grad)
+
+    def test_reentrant_parent_error_on_cpu(self, device):
+        def _get_cuda_memory_usage():
+            # we don't need CUDA synchronize because the statistics are not tracked at
+            # actual freeing, but at when marking the block as free.
+            num_devices = torch.cuda.device_count()
+            gc.collect()
+            return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+
+        before = _get_cuda_memory_usage()
+
+        # Run as separate function so that gc can clean up everything when we
+        # check for memory usage.
+        self._test_reentrant_parent_error_on_cpu(device)
+
+        # Wait for autograd thread to cleanup failed tasks.
+        after = _get_cuda_memory_usage()
+        start = time.time()
+        while before != after and time.time() - start < 30:
+            time.sleep(0.1)
+            after = _get_cuda_memory_usage()
+
+        self.assertEqual(before, after)
+
+    def test_free_unneeded_tensor(self, device):
+        x = torch.randn(2, 3, 10, 10, device=device, requires_grad=True)
+        m = torch.randn(1, 3, 1, 1, device=device)
+
+        z = x.sum()
+        base_mem = torch.cuda.memory_allocated()
+        z = ((x + 2) * m).sum()
+        end_mem = torch.cuda.memory_allocated()
+
+        # In the end the memory usage should remain equal, because neither of
+        # (x + 2) and ((x + 2) * m) should be kept alive for backward, while the
+        # previous allocation of z had the same size as the current one.
+        self.assertEqual(base_mem, end_mem)
+
+    def test_profiler_emit_nvtx(self, device):
+        # This test is not intended to ensure correctness of nvtx ranges.
+        # That would require something a great deal more complex (you'd have to create a
+        # profile in a subprocess, open it, and parse the sql somehow).
+        # This test is merely intended to catch if emit_nvtx breaks on construction.
+        a = torch.tensor([1, 2, 3], dtype=torch.float32, device=device)
+        with torch.cuda.profiler.profile():
+            with emit_nvtx():
+                a.add(1.0)
+
+    def test_simple_reentrant_cross_device(self, device):
+        class ReentrantFunc(Function):
+            _cpu_mode = True
+
+            @staticmethod
+            def forward(ctx, x):
+                return x * (x + 2)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                with torch.enable_grad():
+                    if ReentrantFunc._cpu_mode:
+                        new_param = torch.randn(2, 2, requires_grad=True)
+                        (new_param**2).sum().backward()
+                    else:
+                        new_param = torch.randn(2, 2, device=device, requires_grad=True)
+                        (new_param**2).sum().backward()
+                return grad_output
+
+        # Reentrant starts on GPU thread, finishes on GPU thread
+        x = torch.randn(2, 2, device=device, requires_grad=True)
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+        # Reentrant starts on CPU thread, finishes on GPU thread
+        x = torch.randn(2, 2, requires_grad=True)
+        # set ReentrantFunc node to GPU to emit tasks to GPU queue
+        ReentrantFunc._cpu_mode = False
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+        # Reentrant starts on GPU thread, finishes on CPU thread
+        x = torch.randn(2, 2, device=device, requires_grad=True)
+        # set ReentrantFunc node to CPU to emit tasks to CPU queue
+        ReentrantFunc._cpu_mode = True
+        out = ReentrantFunc.apply(x)
+        out.sum().backward()
+
+    def test_cross_device_reentrant_autograd(self, device):
+        # Output on gpu so that this task will be associated with the gpu thread
+        def fn_on_gpu(inp):
+            # Artificially increase the priority of the next op to make sure it runs
+            # as soon as we reach it before the ops of branch1.
+            dummy = inp * 2 * 2 * 2 * 2
+            return inp.to(device=device)
+
+        def parent_on_cpu(inp):
+            # Slow branch of ops on gpu so that the work queue for the gpu thread
+            # won't empty too quickly. They also have smaller priorities than the
+            # ones created by fn_on_gpu
+            branch1 = inp.to(device=device)
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
+            # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
+            # So the cpu thread will notify the gpu thread with an empty NodeTask.
+            branch2 = checkpoint(fn_on_gpu, inp, use_reentrant=True)
+            out = branch2 + branch1
+            return out
+
+        inp = torch.rand(2, requires_grad=True)
+        out = parent_on_cpu(inp)
+        # This will segfault if the empty NodeTask is not handled properly in the
+        # gpu thread ReadyQueue
+        out.sum().backward()
+
+    def test_gradcheck_input_output_different_device(self, device):
+        x = torch.ones((1,), dtype=torch.double, device="cuda", requires_grad=True)
+        gradcheck(lambda x: x.to("cpu"), (x,))
+
+        x = torch.ones((1,), dtype=torch.double, device="cpu", requires_grad=True)
+        gradcheck(lambda x: x.to("cuda"), (x,))
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181272"
+    )
+    def test_backward_single_threaded(self, device):
+        threads_eq = None
+
+        class TestFn(Function):
+            @staticmethod
+            def forward(ctx, x, self):
+                ctx.self = self
+                ctx.tid = threading.get_ident()
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                nonlocal threads_eq
+                threads_eq = ctx.tid == threading.get_ident()
+                return gO, None
+
+        inp = torch.rand(10, device=device, requires_grad=True)
+
+        with torch.autograd.set_multithreading_enabled(False):
+            TestFn.apply(inp, None).sum().backward()
+        self.assertTrue(threads_eq)
+
+        TestFn.apply(inp, None).sum().backward()
+        self.assertFalse(threads_eq)
+
+    def test_backward_tls_stash(self, device):
+        local = threading.local()
+        local.my_obj = {}
+        local.my_obj[10] = 10
+        test_self = self
+        torch._C._stash_obj_in_tls("my_obj", local.my_obj)
+
+        class TestFn(Function):
+            @staticmethod
+            def forward(ctx, x, self):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                test_self.assertTrue(torch._C._is_key_in_tls("my_obj"))
+                test_self.assertTrue(torch._C._get_obj_in_tls("my_obj")[10] == 10)
+                torch._C._get_obj_in_tls("my_obj")[10] = 5
+                return gO, None
+
+        inp = torch.rand(10, device=device, requires_grad=True)
+
+        TestFn.apply(inp, None).sum().backward()
+        self.assertEqual(local.my_obj[10], 5)
+
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
@@ -16950,6 +16948,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None
 )
+instantiate_device_type_tests(TestAutogradCUDA, globals(), only_for=("cuda",))
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)
