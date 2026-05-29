@@ -107,7 +107,6 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
-    convert_shape_to_inductor,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
@@ -587,7 +586,7 @@ class GraphLowering(torch.fx.Interpreter):
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
 
-    def symbolic_sizes_strides(
+    def get_placeholder_sizes_strides(
         self, ex: torch.Tensor
     ) -> tuple[Sequence[int | Expr], Sequence[int | Expr]]:
         """
@@ -596,9 +595,7 @@ class GraphLowering(torch.fx.Interpreter):
         have the same size they get assigned the same symbolic variable.
         """
         if self.reuse_shape_env:
-            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
-                ex.stride()
-            )
+            size, stride = ex.size(), ex.stride()
         else:
             from torch._dynamo.source import ConstantSource
 
@@ -611,20 +608,33 @@ class GraphLowering(torch.fx.Interpreter):
             source = ConstantSource(
                 f"__inductor_unknown_tensor_{len(self._shape_env.backed_var_to_val)}"
             )
-            (
-                size,
-                stride,
-                _,
-            ) = self._shape_env.transfer_symbols_from_foreign_shape_env(
+            size, stride, _ = self._shape_env.transfer_symbols_from_foreign_shape_env(
                 ex.size(),
                 ex.stride(),
                 ex.storage_offset(),
                 source,
             )
 
-        r_size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
-        r_stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
-        return r_size, r_stride
+        # Use _get_placeholder_expr so input-tensor sizes/strides carry the
+        # raw (pre-replacement) symbol from the FakeTensor.  This way each
+        # input declares its own original symbol in codegen, and deferred
+        # runtime asserts (which reference the pre-replacement symbols)
+        # resolve to defined variables.
+        #
+        # Skip this in backward (use the post-replacement i.node.expr instead)
+        # as a known-issue workaround pending https://github.com/pytorch/pytorch/issues/155468
+        # — backward partitioning currently mis-handles raw placeholder
+        # exprs.  This mirrors the same is_backward gate in placeholder()
+        # below for SymInt placeholders.  Remove this branch once the
+        # partitioning fix lands.
+        def to_expr(i: int | torch.SymInt) -> int | Expr:
+            if not isinstance(i, torch.SymInt):
+                return i
+            if self.is_backward:
+                return i.node.expr
+            return _get_placeholder_expr(i.node)
+
+        return [to_expr(i) for i in size], [to_expr(i) for i in stride]
 
     def static_sizes_strides(
         self, ex: torch.Tensor
@@ -1298,7 +1308,7 @@ class GraphLowering(torch.fx.Interpreter):
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
         else:
-            sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
+            sizes, strides = self.get_placeholder_sizes_strides(example)  # type: ignore[assignment]
 
         if (
             self.is_backward

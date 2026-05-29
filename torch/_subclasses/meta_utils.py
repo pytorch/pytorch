@@ -2005,11 +2005,16 @@ class MetaConverter(Generic[_TensorT]):
                     s = t.storage
                     if s is None:
                         raise AssertionError("t.storage must not be None")
+                    from torch.fx.experimental.symbolic_shapes import (
+                        guard_or_false,
+                        sym_eq,
+                    )
+
                     if s.id not in self.storage_memo and (
                         r.is_nested
                         or (
-                            r.stride() == strides
-                            and r.storage_offset() == storage_offset
+                            guard_or_false(sym_eq(r.stride(), strides))
+                            and guard_or_false(r.storage_offset() == storage_offset)
                         )
                     ):
                         # You're normal and happy, install the fresh storage into the memo
