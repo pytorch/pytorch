@@ -237,6 +237,8 @@ class CuteDSLTemplateKernel(Kernel):
         from torch._inductor.select_algorithm import PartialRender
 
         """Render the kernel using the template, returning PartialRender object with hooks."""
+        self._template_kwargs = dict(kwargs)
+
         # Available {{}} hooks for jinja rendering
         template_env = {
             "def_kernel": self.def_kernel,
