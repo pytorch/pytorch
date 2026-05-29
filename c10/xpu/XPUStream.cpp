@@ -361,25 +361,19 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
 /*
  * Note [Synchronize Streams on Device]
  *
- * syncStreamsOnDevice blocks the host until all work previously submitted to
- * the SYCL queues we manage on the given device has completed. There are two
- * implementation paths:
+ * syncStreamsOnDevice waits for all work previously submitted to the SYCL
+ * queues we manage on `device`. Two paths exist:
  *
- *  1. Legacy path (old SYCL compilers, or new compilers where the device does
- *     not expose the `ext_oneapi_device_wait` aspect): iterate over all
- *     reserved queues in every priority pool and `wait()` on each. This only
- *     drains the queues we created, so there is a semantic gap with a true
- *     device-wide synchronization -- SYCL queues outside our pools are not
- *     affected.
- *
- *  2. Fast path (SYCL >= 2026.0 and the device exposes
- *     `ext_oneapi_device_wait`): call `device_synchronize(device)`, which
- *     issues a single `ext_oneapi_wait_and_throw()` on the underlying SYCL
- *     device. This is both cheaper and closer to a real device-wide wait.
+ *  1. Fast path (SYCL >= 2026.0 and device exposes `ext_oneapi_device_wait`):
+ *     delegate to `device_synchronize`, which issues a single
+ *     `ext_oneapi_wait_and_throw()` -- a true device-wide wait.
+ *  2. Legacy path (otherwise): walk every reserved queue in each priority
+ *     pool and `wait()` on it. This only drains queues we own; SYCL queues
+ *     outside our pools are unaffected.
  */
 
-// Note: The stream pools will be initialized if needed, at the first invocation
-// to this function.
+// Note: The stream pools are lazily initialized on the legacy path; the fast
+// path bypasses our pools entirely.
 void syncStreamsOnDevice(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
