@@ -3,7 +3,7 @@
 
 import dataclasses
 from collections.abc import Mapping, Sequence
-from enum import Enum, auto
+from enum import auto, Enum
 
 import sympy
 
