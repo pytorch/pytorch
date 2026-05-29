@@ -74,10 +74,13 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.12-gcc11-pallas-tpu
       docker-image-name: ci-image:pytorch-linux-jammy-tpu-py3.12-pallas
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "inductor-pallas-tpu", shard: 1, num_shards: 1, runner: "linux.google.tpuv7x.1" },
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.12"
     secrets: inherit
 
   linux-jammy-py3_12-inductor-pallas-tpu-test:
