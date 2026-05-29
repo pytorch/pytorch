@@ -893,7 +893,7 @@ class MKLDNNSubgraphSlicer {
     // subgraphs and then unmerge them into the graph
     buildupSubgraphs();
     computeSubgraphsInMKLDNN();
-    // Run CSE globally onceto eliminate duplicates that may have occurred
+    // Run CSE globally once to eliminate duplicates that may have occurred
     // while inlining subgraphs.
     EliminateCommonSubexpression(graph_);
   }
