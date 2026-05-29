@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     parametrize,
     xfailIfTorchDynamo,
+    skipIfXpu,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -2168,6 +2169,36 @@ class TestMetaKernelRegistrations(TestCase):
             self.assertEqual(out.stride(), original_stride)
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_hardtanh_out_bound_error_resizes_out(self):
+        cases = (
+            (
+                torch.empty(2, 3, dtype=torch.int8, device="meta"),
+                200,
+                0,
+                "value cannot be converted to type int8_t without overflow",
+            ),
+            (
+                torch.empty(2, 3, dtype=torch.float32, device="meta"),
+                1e100,
+                0,
+                "value cannot be converted to type float without overflow",
+            ),
+        )
+
+        for x, min_val, max_val, error in cases:
+            out = torch.empty(0, dtype=x.dtype, device="meta")
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.ops.aten.hardtanh.out(
+                    x,
+                    min_val=min_val,
+                    max_val=max_val,
+                    out=out,
+                )
+
+            self.assertEqual(out.shape, x.shape)
+            self.assertEqual(out.stride(), x.stride())
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_pad_sequence_decomp_left(self):
         from torch._decomp import decompositions
 
@@ -2214,6 +2245,7 @@ class TestMetaKernelRegistrations(TestCase):
             )
             self.assertEqual(result, expected)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181490")
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_zero(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
