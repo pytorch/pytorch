@@ -331,6 +331,29 @@ class NestedTensor(torch.Tensor):
             inner_tensors.append("_max_seqlen_tensor")
         return inner_tensors, ctx
 
+    def __coerce_tangent_metadata__(self):
+        # Min/max sequence lengths are cached metadata. Tangents can use offsets
+        # to recover them, so keep tangent subclass attrs stable by dropping them.
+        if (
+            self._metadata_cache.get("min_seqlen", None) is None
+            and self._metadata_cache.get("max_seqlen", None) is None
+        ):
+            return self
+
+        metadata_cache = {
+            key: value
+            for key, value in self._metadata_cache.items()
+            if key not in ("min_seqlen", "max_seqlen")
+        }
+        return NestedTensor(
+            self._values,
+            offsets=self._offsets,
+            lengths=self._lengths,
+            requires_grad=self.requires_grad,
+            _ragged_idx=self._ragged_idx,
+            _metadata_cache=metadata_cache,
+        )
+
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
         from torch._subclasses.fake_tensor import FakeTensor
