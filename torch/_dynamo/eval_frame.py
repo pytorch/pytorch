@@ -2189,6 +2189,7 @@ def rewrite_signature(
             argument_names(f_sig, orig_args, orig_kwargs),
             in_spec,
             out_spec_traced,
+            True,
         )
     )
     new_graph.recompile()
