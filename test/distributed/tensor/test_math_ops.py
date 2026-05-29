@@ -1153,7 +1153,11 @@ class DistMathOpsTest(DTensorOpTestBase):
     @with_comms
     def test_dim_reductions_with_indices(self):
         device_mesh = self.build_device_mesh()
-        tensor = torch.randn(12, 8, device=self.device_type)
+        # Use a deterministic tensor so all threads see the same data
+        # (torch.randn gives independent values per thread under MultiThreadedTestCase).
+        tensor = torch.arange(
+            96, dtype=torch.float, device=self.device_type
+        ).reshape(12, 8)
         shard_dim = 0
         dtensor = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
 
