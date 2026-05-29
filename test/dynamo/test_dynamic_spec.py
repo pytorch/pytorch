@@ -1830,7 +1830,7 @@ class TestWalkSpecRaises(TestCase):
         self.assertEqual(
             str(ctx.exception),
             "shapes_spec walk: ObjectSpec at \"['x']\" expects an attribute "
-            "access (.name), got subscript (['x'])",
+            "access (.name), got \"['x']\"",
         )
         # sanity: the matching ``.x`` (AttrToken) form still resolves.
         ts = _walk_spec(root, [_AttrToken("x")])
@@ -1850,7 +1850,7 @@ class TestWalkSpecRaises(TestCase):
         self.assertEqual(
             str(ctx.exception),
             "shapes_spec walk: DictSpec at '.x' expects a subscript "
-            "(['key']), got attribute access (.x)",
+            "(['key']), got '.x'",
         )
         # sanity: the matching ``["x"]`` (SubscriptToken) form still resolves.
         ts = _walk_spec(root, [_SubscriptToken("x")])
@@ -1866,7 +1866,7 @@ class TestWalkSpecRaises(TestCase):
         self.assertEqual(
             str(ctx.exception),
             "shapes_spec walk: SeqSpec at \"['x']\" expects an int subscript "
-            "([i]), got subscript (['x'])",
+            "([i]), got \"['x']\"",
         )
         # sanity: an int subscript still resolves.
         ts = _walk_spec(root, [_SubscriptToken(0)])
@@ -1883,7 +1883,7 @@ class TestWalkSpecRaises(TestCase):
             str(ctx.exception),
             "shapes_spec walk: reached leaf spec (TensorSpec) at "
             "'.something', but the input is not a leaf — remaining access "
-            "attribute access (.something) cannot be consumed by a leaf spec",
+            "'.something' cannot be consumed by a leaf spec",
         )
 
 

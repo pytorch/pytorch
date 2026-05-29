@@ -400,6 +400,7 @@ def _format_access_path(tokens: _AccessPath) -> str:
         [_LocalToken("cfg"), _SubscriptToken("x")]       -> "cfg['x']"
         [_LocalToken("m"), _AttrToken("weight")]         -> "m.weight"
         [_SubscriptToken(0)]                             -> "[0]"
+        [_AttrToken("weight")]                           -> ".weight"
     """
     parts: list[str] = []
     for tok in tokens:
@@ -411,26 +412,6 @@ def _format_access_path(tokens: _AccessPath) -> str:
             case _SubscriptToken(key=key):
                 parts.append(f"[{key!r}]")
     return "".join(parts) if parts else "<empty path>"
-
-
-def _format_token(token: _AccessToken) -> str:
-    """Format a single access token as a Python source-like fragment.
-
-    Examples:
-        _AttrToken("weight")    -> "attribute access (.weight)"
-        _SubscriptToken("x")    -> "subscript (['x'])"
-        _SubscriptToken(0)      -> "subscript ([0])"
-        _LocalToken("xs")       -> "local (xs)"
-    """
-    match token:
-        case _LocalToken(name=name):
-            return f"local ({name})"
-        case _AttrToken(name=name):
-            return f"attribute access (.{name})"
-        case _SubscriptToken(key=key):
-            return f"subscript ([{key!r}])"
-        case _:
-            return repr(token)
 
 
 def _source_to_access_path(source: Source) -> _AccessPath | None:
@@ -509,7 +490,7 @@ def _walk_spec(
                     raise RuntimeError(
                         f"shapes_spec walk: ObjectSpec at {_format_access_path(remaining_tokens)!r} "
                         f"expects an attribute access (.name), got "
-                        f"{_format_token(token)}"
+                        f"{_format_access_path([token])!r}"
                     )
                 current_spec = current_spec._fields.get(token.name)
             case DictSpec():
@@ -517,7 +498,7 @@ def _walk_spec(
                     raise RuntimeError(
                         f"shapes_spec walk: DictSpec at {_format_access_path(remaining_tokens)!r} "
                         f"expects a subscript (['key']), got "
-                        f"{_format_token(token)}"
+                        f"{_format_access_path([token])!r}"
                     )
                 current_spec = current_spec._entries.get(token.key)
             case SeqSpec():
@@ -527,7 +508,7 @@ def _walk_spec(
                     raise RuntimeError(
                         f"shapes_spec walk: SeqSpec at {_format_access_path(remaining_tokens)!r} "
                         f"expects an int subscript ([i]), got "
-                        f"{_format_token(token)}"
+                        f"{_format_access_path([token])!r}"
                     )
                 # Out-of-range index: unspecified -> treat as static (None),
                 if 0 <= token.key < len(current_spec):
@@ -542,7 +523,7 @@ def _walk_spec(
                     f"shapes_spec walk: reached leaf spec "
                     f"({type(current_spec).__name__}) at "
                     f"{_format_access_path(remaining_tokens)!r}, but the input "
-                    f"is not a leaf — remaining access {_format_token(token)} "
+                    f"is not a leaf — remaining access {_format_access_path([token])!r} "
                     f"cannot be consumed by a leaf spec"
                 )
     if not isinstance(current_spec, LeafSpec):
