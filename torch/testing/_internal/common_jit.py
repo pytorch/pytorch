@@ -285,7 +285,7 @@ class JitCommonTestCase(TestCase):
 
     def checkShapeAnalysis(self, out_sizes: list[int] | list[list[int]],
                            traced_graph, assert_propagation, constant_prop=True):
-        # repropagte input shapes provided by tracing,
+        # repropagate input shapes provided by tracing,
         prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
         for enable_test_mode in [True, False]:
             # here we are testing allowing/disallowing substituting in complete shapes as constants,

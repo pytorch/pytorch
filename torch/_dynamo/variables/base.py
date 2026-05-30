@@ -1670,7 +1670,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     "that Dynamo cannot reconstruct, then remove it from the return statement.",
                     "Remove the self-reference in the variable. A self-referring list, for example, is `l = []; l.append(l)`.",
                     *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
-                    "Report an issue to PyTorch if you need self-referential reconstrtuction support.",
+                    "Report an issue to PyTorch if you need self-referential reconstruction support.",
                 ],
             )
 

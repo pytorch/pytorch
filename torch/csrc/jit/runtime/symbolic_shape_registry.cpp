@@ -190,7 +190,7 @@ void checkInputAndOutputTypes(
 
   TORCH_CHECK(
       graph->outputs().size() == schema->returns().size(),
-      "Shape function equal number of outputs as schema. Got ",
+      "Shape function must have equal number of outputs as schema. Got ",
       graph->outputs().size(),
       " graph outputs and ",
       schema->returns().size(),

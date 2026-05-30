@@ -53,7 +53,7 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
 };
 
 // This value maps attributes CONSTANTS.c0 CONSTANTS.c1 to entries
-// in the 'constants' vector. This table is will be stored in a container format
+// in the 'constants' vector. This table will be stored in a container format
 // and given to the import_method when restoring the code.
 struct ConstantTableValue : public SugaredValue {
   explicit ConstantTableValue(const std::vector<at::IValue>* constants)

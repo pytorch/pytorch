@@ -16,7 +16,7 @@ class Flatten(Module):
     For use with :class:`~nn.Sequential`, see :meth:`torch.flatten` for details.
 
     Shape:
-        - Input: :math:`(*, S_{\text{start}},..., S_{i}, ..., S_{\text{end}}, *)`,'
+        - Input: :math:`(*, S_{\text{start}},..., S_{i}, ..., S_{\text{end}}, *)`,
           where :math:`S_{i}` is the size at dimension :math:`i` and :math:`*` means any
           number of dimensions including none.
         - Output: :math:`(*, \prod_{i=\text{start}}^{\text{end}} S_{i}, *)`.

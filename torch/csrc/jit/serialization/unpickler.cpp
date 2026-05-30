@@ -456,7 +456,7 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.size() > start,
           "Parsing error: wrong start index ",
           start,
-          " for stack_ which of size ",
+          " for stack_ of size ",
           stack_.size());
       auto dict = c10::impl::GenericDict(AnyType::get(), AnyType::get());
       TORCH_CHECK(

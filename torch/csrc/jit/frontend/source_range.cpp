@@ -8,7 +8,7 @@ namespace torch::jit {
 
 // A stringlike class backed by a vector of string_view
 // the string represented are logically the concatenation of  the string_views
-// This has advantage of not needing continues memory.
+// This has the advantage of not needing contiguous memory.
 StringCordView::StringCordView() {
   accumulated_sizes_.push_back(0);
 }

@@ -299,7 +299,7 @@ class LossWrapper(torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError(
-            "This instance of LossWrapper does not have an overridden"
+            "This instance of LossWrapper does not have an overridden "
             "forward(). Please implement forward() to specify the arguments, "
             "connection between the module and loss, and loss output "
             "value."

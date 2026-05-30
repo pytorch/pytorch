@@ -356,7 +356,7 @@ struct ExitTransformer {
     return transformIf(new_if);
   }
 
-  // these nodes my have uses,
+  // these nodes may have uses,
   // such as in the case:
   // if i == 1:
   //    break
