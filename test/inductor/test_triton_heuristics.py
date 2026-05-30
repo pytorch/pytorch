@@ -304,14 +304,50 @@ class TestTritonHeuristics(TestCase):
         with self.assertRaisesRegex(AssertionError, "pre_hook"):
             CachingAutotuner(**args)
 
+    def test_validate_launcher_args_too_many(self):
+        """
+        Test that _validate_launcher_args raises TypeError with a clear message
+        when too many arguments are passed to the launcher.
+        See https://github.com/pytorch/pytorch/issues/146018
+        """
+        args = self._get_cos_kernel_caching_autotuner_args()
+        autotuner = CachingAutotuner(**args)
+        # Mock a launcher that expects 3 args (co_argcount=4, minus 1 for stream)
+        mock_launcher = MagicMock()
+        mock_launcher.__code__ = MagicMock()
+        mock_launcher.__code__.co_argcount = 4  # expects 3 args + stream
+        with self.assertRaisesRegex(TypeError, "Too many arguments"):
+            autotuner._validate_launcher_args(
+                mock_launcher,
+                [1, 2, 3, 4],
+                "test_kernel",  # 4 args, expects 3
+            )
+
+    def test_validate_launcher_args_too_few(self):
+        """
+        Test that _validate_launcher_args raises TypeError with a clear message
+        when too few arguments are passed to the launcher.
+        See https://github.com/pytorch/pytorch/issues/146018
+        """
+        args = self._get_cos_kernel_caching_autotuner_args()
+        autotuner = CachingAutotuner(**args)
+        # Mock a launcher that expects 3 args (co_argcount=4, minus 1 for stream)
+        mock_launcher = MagicMock()
+        mock_launcher.__code__ = MagicMock()
+        mock_launcher.__code__.co_argcount = 4  # expects 3 args + stream
+        with self.assertRaisesRegex(TypeError, "Too few arguments"):
+            autotuner._validate_launcher_args(
+                mock_launcher,
+                [1, 2],
+                "test_kernel",  # 2 args, expects 3
+            )
+
     def test_autotune_hints_to_configs(self):
         device_props = DeviceProperties.create(torch.device(GPU_TYPE))
         device_props = device_props._replace(warp_size=8)
-
         hints = {AutotuneHint.ONE_ELEMENT_PER_THREAD}
         size_hints = (1024,)
         block_size = 256
-
         seen_num_elements_per_warp = set()
 
         def mock_triton_config(
