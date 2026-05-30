@@ -10,6 +10,21 @@ from torch._inductor.test_case import run_tests, TestCase
 
 
 class TestCacheDirUtils(TestCase):
+    def test_cache_dir_resolves_relative_env(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_cwd = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+                with mock.patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": "cache"}):
+                    expected = os.path.abspath("cache")
+                    self.assertEqual(cache_dir_utils.cache_dir(), expected)
+                    self.assertEqual(os.environ["TORCHINDUCTOR_CACHE_DIR"], expected)
+
+                    os.chdir(os.path.dirname(tmpdir))
+                    self.assertEqual(cache_dir_utils.cache_dir(), expected)
+            finally:
+                os.chdir(old_cwd)
+
     def test_default_cache_dir_falls_back_to_uid(self):
         for exception in (
             KeyError("getpwuid(): uid not found: 1001"),
