@@ -308,11 +308,7 @@ class TestAccelerator(TestCase):
 instantiate_device_type_tests(
     TestAccelerator,
     globals(),
-    only_for=(
-        "cuda",
-        "xpu",
-        "mps",
-    ),
+    except_for=("cpu",),
     allow_mps=True,
     allow_xpu=True,
 )
