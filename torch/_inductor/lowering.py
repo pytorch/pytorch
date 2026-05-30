@@ -1567,11 +1567,27 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     new_strides = list(x.get_stride())
     new_sizes[dim] = sym_size
     new_strides[dim] *= step
-    return as_strided(x, new_sizes, new_strides, new_storage_offset)
+    return as_strided(
+        x,
+        new_sizes,
+        new_strides,
+        new_storage_offset,
+        storage_offset_relative_to_input_storage=False,
+    )
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
-def as_strided(x, size, stride, storage_offset=None):
+def as_strided(
+    x,
+    size,
+    stride,
+    storage_offset=None,
+    *,
+    storage_offset_relative_to_input_storage=True,
+):
+    explicit_storage_offset = (
+        storage_offset is not None and storage_offset_relative_to_input_storage
+    )
     new_device = None
     new_dtype = None
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
@@ -1591,12 +1607,23 @@ def as_strided(x, size, stride, storage_offset=None):
     if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
     storage, old_layout = ir.as_storage_and_layout(x)
+    storage_offset = (
+        convert_symint_to_expr(storage_offset) if storage_offset is not None else 0
+    )
+    storage_data = storage.data if isinstance(storage, ir.StorageBox) else storage
+    if explicit_storage_offset and isinstance(storage_data, ir.InputBuffer):
+        # Runtime graph input pointers already include the input tensor's
+        # storage_offset(), but explicit as_strided offsets are storage-relative.
+        storage_offset = sympy.expand(
+            storage_offset
+            - V.graph.graph_input_storage_offsets.get(storage_data.get_name(), 0)
+        )
     new_layout = ir.FixedLayout(
         new_device if new_device else old_layout.device,
         new_dtype if new_dtype else old_layout.dtype,
         [sympy.expand(s) for s in size],
         [sympy.expand(s) for s in stride],
-        sympy.expand(storage_offset or 0),
+        sympy.expand(storage_offset),
     )
     return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
@@ -2340,7 +2367,13 @@ def select(x, dim, idx):
 
             del new_size[dim]
             del new_stride[dim]
-            return as_strided(x, new_size, new_stride, new_storage_offset)
+            return as_strided(
+                x,
+                new_size,
+                new_stride,
+                new_storage_offset,
+                storage_offset_relative_to_input_storage=False,
+            )
         else:
             # no need to clamp, this function handles negative indexing itself
             slice_result = slice_(x, dim, actual_index, actual_index + 1, clamp=False)
@@ -2375,7 +2408,13 @@ def select(x, dim, idx):
 
     del new_size[dim]
     del new_stride[dim]
-    return as_strided(x, new_size, new_stride, new_storage_offset)
+    return as_strided(
+        x,
+        new_size,
+        new_stride,
+        new_storage_offset,
+        storage_offset_relative_to_input_storage=False,
+    )
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
@@ -5086,6 +5125,7 @@ def inplace_constant_pad_nd(
         padded_size,
         layout.stride,
         layout.offset,
+        storage_offset_relative_to_input_storage=False,
     )
 
     sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad, clamp=False)
