@@ -2888,7 +2888,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
     (also called "depth first").
 
     This schedule is mostly similar to the original paper.
-    It differs by being relaxing the requirement of num_microbatch % pp_size == 0.
+    It differs by relaxing the requirement of num_microbatch % pp_size == 0.
     Using the flex_pp schedule, we will have num_rounds = max(1, n_microbatches // pp_group_size) and
     it works as long as n_microbatches % num_rounds is 0. As a few examples, support
 

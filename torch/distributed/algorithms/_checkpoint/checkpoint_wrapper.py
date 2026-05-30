@@ -94,7 +94,7 @@ class ActivationWrapper(torch.nn.Module, ABC):
         *args: Any,
     ) -> None:
         """
-        ``_pre_state_dict_hook` is called before ``self._load_from_state_dict()`` is called.
+        ``_pre_state_dict_hook`` is called before ``self._load_from_state_dict()`` is called.
 
         For ``checkpoint_wrapper``, it will add back the module
         prefix so that non-checkpointed modules can be loaded into

@@ -251,7 +251,7 @@ def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
     return X, (scale, zp, axis, qparams[2])
 
 """Strategy for generating test cases for tensors used in Conv.
-The resulting tensors is in float32 format.
+The resulting tensors are in float32 format.
 
 Args:
     spatial_dim: Spatial Dim for feature maps. If given as an iterable, randomly
@@ -275,7 +275,7 @@ Args:
              Could be either a single strategy (used for all) or a list of
              three strategies for X, w, b.
 Generates:
-    (X, W, b, g): Tensors of type `float32` of the following drawen shapes:
+    (X, W, b, g): Tensors of type `float32` of the following drawn shapes:
         X: (`batch_size, input_channels, H, W`)
         W: (`output_channels, input_channels_per_group) + kernel_shape
         b: `(output_channels,)`

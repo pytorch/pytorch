@@ -128,8 +128,8 @@ class profile:
             using the cudaEvent API. (will be deprecated)
 
         use_device (str, optional): Enables timing of device events.
-            Adds approximately 4us of overhead to each tensor operation when use cuda.
-            The valid devices options are 'cuda', 'xpu', 'mtia' and 'privateuseone'.
+            Adds approximately 4us of overhead to each tensor operation when using CUDA.
+            The valid device options are 'cuda', 'xpu', 'mtia' and 'privateuseone'.
 
         record_shapes (bool, optional): If shapes recording is set, information
             about input dimensions will be collected. This allows one to see which
@@ -179,7 +179,7 @@ class profile:
         overhead
 
     .. warning::
-        This context managers should not be called recursively, i.e. no nested
+        This context manager should not be called recursively, i.e. no nested
         instances are allowed
 
     .. warning::
@@ -926,7 +926,7 @@ class record_function(_ContextDecorator):
 
         Returns:
             A future that completes with the value of the passed in future when
-            the profiling callbacks have ran.
+            the profiling callbacks have run.
 
         """
         # Throw if we have already attached a callback onto the future.

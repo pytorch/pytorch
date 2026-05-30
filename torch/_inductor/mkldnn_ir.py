@@ -180,7 +180,7 @@ def _prepare_convolution_fusion_create(
         output_stride: StrideType = FlexibleLayout.contiguous_strides(output_size)
     # Currently we don't support channel last for the situation that stride of input's batch dim is 0,
     # eg. input_size = (1, 1280, 64, 64), but input_stride=(0, 1, 81920, 1280).
-    # So we use NCHW hear instead.
+    # So we use NCHW here instead.
     # Different with cpu, cpu conv always use channels_last for convolution when weight is prepacked,
     # but xpu does not do the prepack, so the problem exposed here is only for xpu.
     # TODO support channels_last for such zero stride input.

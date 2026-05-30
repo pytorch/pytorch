@@ -3963,7 +3963,7 @@ def check_verbose(
     if fi.code is not None and fi.code is typing.cast.__code__:
         return SkipResult(True, "typing.cast is a no-op, skip at top level")
 
-    # Consulte the central trace rules defined in torch._dynamo.trace_rules.
+    # Consult the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
     if rule is None:

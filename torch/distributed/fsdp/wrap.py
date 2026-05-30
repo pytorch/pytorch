@@ -582,7 +582,7 @@ class _ConfigAutoWrap:
     def enable_autowrap_context(kwargs: Any) -> None:
         if _ConfigAutoWrap.in_autowrap_context:
             raise NotImplementedError(
-                "You are already within an autowrap context and we currently do not supported nested autowrap."
+                "You are already within an autowrap context and we currently do not support nested autowrap."
             )
         _ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.

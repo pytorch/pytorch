@@ -330,7 +330,7 @@ struct TORCH_API CompilationUnit {
   mutable NameMangler mangler_;
 };
 
-// An owning pointer to a Function. Just a pair of a raw Function ptr and it's
+// An owning pointer to a Function. Just a pair of a raw Function ptr and its
 // owning CU. We need this because pybind requires a ref-counted way to refer to
 // Functions.
 struct StrongFunctionPtr {

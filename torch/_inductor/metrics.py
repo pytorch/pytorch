@@ -371,7 +371,7 @@ def _parse_kernel_args_num_gb(
         return float(m.group(1))
     else:
         """
-        There are a few cases that kernel_num_gdb field can be missing:
+        There are a few cases that kernel_num_gb field can be missing:
         1. the field will be missing if config.benchmark_kernel and
            config.profile_bandwidth are false
         2. even if config.benchmark_kernel or config.profile_bandwidth is true.
@@ -398,7 +398,7 @@ def log_kernel_metadata(
 
     proper_kernel_fn_code = _parse_proper_kernel_fn_code(kernel_fn_code)
 
-    # the line of code excluding the decortors
+    # the line of code excluding the decorators
     kernel_line_of_code = _parse_kernel_line_of_code(proper_kernel_fn_code)
 
     get_metric_table("kernel_metadata").add_row(

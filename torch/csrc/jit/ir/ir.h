@@ -346,7 +346,7 @@ struct TORCH_API Node {
   // place in the Node list of the Graph. The Graph itself is a circular
   // doubly-linked list. The Return Node is used as the sentinel for the
   // "beginning"/"end" of the list. This means that you can tell when
-  // you've traversed the entire list without means worrying about null
+  // you've traversed the entire list without worrying about null
   // pointers. `next_in_graph[0]` is the pointer to the next Node, while
   // `next_in_graph[1]` is the pointer to the previous Node. The
   // linked list is implemented as an array to allow the same iterator
@@ -498,7 +498,7 @@ struct TORCH_API Node {
         kind().toDisplayString(),
         "' which has ",
         inputs_.size(),
-        " outputs. You may consider using node.inputs() instead.");
+        " inputs. You may consider using node.inputs() instead.");
     return inputs_.at(0);
   }
   Value* output() {
@@ -528,7 +528,7 @@ struct TORCH_API Node {
         kind().toDisplayString(),
         "' which has ",
         inputs_.size(),
-        " outputs. You may consider using node.inputs() instead.");
+        " inputs. You may consider using node.inputs() instead.");
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.

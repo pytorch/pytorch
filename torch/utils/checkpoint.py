@@ -342,7 +342,7 @@ def noop_context_fn():
 
 # Note: [torch.compile and checkpoint]
 # TorchDynamo does not step inside utils.checkpoint function.  The flow
-# looks likes this
+# looks like this
 #  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
 #     speculatively checking if the forward function is safe to trace.
 #  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
@@ -551,12 +551,12 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
     .. warning::
         The ``use_reentrant`` parameter should be passed explicitly. In version
         2.9 we will raise an exception if ``use_reentrant`` is not passed.
-        If you are using the ``use_reentrant=True` variant, please see
+        If you are using the ``use_reentrant=True`` variant, please see
         :func:`~torch.utils.checkpoint.checkpoint` for
         the important considerations and limitations of this variant. It is
         recommended that you use ``use_reentrant=False``.
 
-    .. warning:
+    .. warning::
         Since PyTorch 1.4, it allows only one Tensor as the input and
         intermediate outputs, just like :class:`torch.nn.Sequential`.
 
@@ -980,8 +980,8 @@ Operations executed during recomputation:
  ERROR: Detected non-determinism while running activation checkpointing
 
  You are seeing this error because you passed `debug=True` to checkpoint and
- tensors to be saved during the original forward and differ between those saved
- during recomputation. This can happen if different operators were ran in the
+ tensors saved during the original forward differ from those saved
+ during recomputation. This can happen if different operators were run in the
  original forward and in the recomputation.
 
  To identify where the mismatch may be coming from, you can do the following:

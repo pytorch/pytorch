@@ -437,7 +437,7 @@ class _Constraint(_ConstraintTarget):
     @property
     def serializable_spec(self):
         # We need a serialization compatible format of the constraint so that it
-        # can be savedin the graph module w/o breaking the module serialization.
+        # can be saved in the graph module w/o breaking the module serialization.
         # The saved constraints will be used directly for the post-exporting pass
         # that converts constraints to runtime assertion. The saved constraints
         # will not be saved in the serialized module.

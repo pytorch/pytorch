@@ -1048,7 +1048,7 @@ class TestFreezing(JitTestCase):
         m_s = torch.jit.script(m)
         m_s.eval()
         with self.assertRaisesRegex(
-            RuntimeError, "attempted to freeze a module that return itself"
+            RuntimeError, "attempted to freeze a module that returns itself"
         ):
             m_f = torch._C._freeze_module(m_s._c)
 
