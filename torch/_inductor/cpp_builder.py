@@ -553,7 +553,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
             [cpp_compiler, "/help"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            check=False
+            check=False,
         )
 
         output_msg = result.stdout.strip().decode(*SUBPROCESS_DECODE_ARGS)
