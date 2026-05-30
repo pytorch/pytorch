@@ -13,6 +13,7 @@ Environment variables:
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -83,10 +84,20 @@ def shell_quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
+_BASH_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 def write_env_exports(env: dict[str, str], path: Path | None) -> None:
+    # Skip keys that aren't valid bash identifiers; see the matching
+    # filter in build_env_setup.py for context (bash function exports
+    # like BASH_FUNC_retry%% can't be re-exported via `export NAME=...`).
     if path is None:
         return
-    lines = [f"export {k}={shell_quote(v)}" for k, v in env.items()]
+    lines = [
+        f"export {k}={shell_quote(v)}"
+        for k, v in env.items()
+        if _BASH_IDENT_RE.match(k)
+    ]
     path.write_text("\n".join(lines) + "\n")
 
 

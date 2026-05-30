@@ -17,6 +17,7 @@ Environment variables expected:
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -402,16 +403,31 @@ def shell_quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
+_BASH_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 def write_env_exports(env: dict[str, str], path: Path | None) -> None:
     """Write `export KEY=VALUE` lines for build.sh to source.
 
     Forward-slash-normalize PATH-like values so the parent bash sees them as
     POSIX paths; the build subprocess re-converts on Windows transparently
     via cygpath-aware tooling.
+
+    Skip keys that aren't valid bash identifiers. When CI bash exports a
+    function (e.g. `export -f retry` in binary_populate_env.sh), bash
+    serializes it into the env as `BASH_FUNC_retry%%=() { ... }`. That
+    leaks into the Python interpreter's `os.environ` and from there into
+    the diff captured by `_capture_cmd_env`, but bash cannot re-export an
+    identifier containing `%`, so sourcing the env file would die on
+    `not a valid identifier`.
     """
     if path is None:
         return
-    lines = [f"export {k}={shell_quote(v)}" for k, v in env.items()]
+    lines = [
+        f"export {k}={shell_quote(v)}"
+        for k, v in env.items()
+        if _BASH_IDENT_RE.match(k)
+    ]
     path.write_text("\n".join(lines) + "\n")
 
 
