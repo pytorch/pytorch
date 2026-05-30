@@ -47,6 +47,7 @@ PIP_PACKAGES: list[str] = [
     "typing_extensions",
     "setuptools==78.1.1",
     "scikit-build-core",
+    "spin==0.17",
 ]
 
 
