@@ -61,7 +61,7 @@ Here are some output descriptors you might find on the Joint FX graph:
   the joint graph, clone all outputs before returning from the graph.
 
 * SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), idx="inner") - this
-  tensor correspondings to the inner tensor of the first original output which
+  tensor corresponds to the inner tensor of the first original output which
   is a tensor subclass.  This and other subclass components of that output will
   get repacked into a tensor subclass.
 
@@ -160,7 +160,7 @@ wrapper construction.  Instead, you would have::
 
     SubclassGetAttrAOTOutput(GradAOTOutput(PlainAOTInput(...)))  # OK
 
-This intuitively captures the fact that we always to autograd directly on the
+This intuitively captures the fact that we always do autograd directly on the
 subclass, rather than after desugaring the subclass into its inner tensors.
 
 Descriptor index

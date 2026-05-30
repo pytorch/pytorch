@@ -191,7 +191,7 @@ class MapAutogradOp(torch.autograd.Function):
         ctx._num_pos_args = len(flat_args) - num_mapped_args
 
         # We snapshot the dispatch keys in forward for materializing the
-        # the bw_graph in backward.
+        # bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         save_values_for_backward(ctx, flat_args)
@@ -219,7 +219,7 @@ class MapAutogradOp(torch.autograd.Function):
 
         grads_tensor_masks = []
 
-        # Create a wrapper around thefor the bw_f
+        # Create a wrapper around the bw_f
         def bw_f_wrapper(*args):
             nonlocal grads_tensor_masks
 

@@ -197,7 +197,7 @@ def associative_scan(
 
     # The reason we flatten xs before calling into dynamo is that
     # we want to create a consistent input ordering for combine_fn
-    # and we also want to the input ordering matches the output ordering.
+    # and we also want the input ordering to match the output ordering.
     leaves_xs_orig, spec_xs = pytree.tree_flatten(xs)
 
     def _validate_input(cfn, lxs, d, r, cm):
@@ -679,7 +679,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         ctx._scan_length = scan_length
 
         # We snapshot the dispatch keys in forward for materializing the
-        # the bw_graph in backward.
+        # bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
 

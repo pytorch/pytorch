@@ -84,7 +84,7 @@ class TORCH_API Node {
   // for the operation. The num_outputs tells how many outputs a given operation
   // generates.
   //
-  // None leaf node's node_hash does not contains shape information always.
+  // Non-leaf node's node_hash does not contain shape information always.
   // So we pass in the hash value rather than a function.
   Node(OpKind op, size_t num_outputs);
 

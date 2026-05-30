@@ -162,7 +162,7 @@ LayoutPlan DisjointStorageGroupsPlanner(
   plan.allocations.reserve(allocation_specs.size());
 
   for (const auto& spec : allocation_specs) {
-    // specs in storage groups lifetime's shouldn't be overlapping
+    // specs in storage groups' lifetimes shouldn't be overlapping
     // so we can just set their offset to the offset of the group
     plan.allocations.emplace_back(Allocation{
         spec.size,

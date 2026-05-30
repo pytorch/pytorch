@@ -235,7 +235,7 @@ TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
 }
 
 // It requires compilation_unit_ when parsing function schema. Keep it in
-// BytecodeDeserializer. It may be refacotred later to make it independent
+// BytecodeDeserializer. It may be refactored later to make it independent
 // of the specific BytecodeDeserializer, like parsing other tables
 void BytecodeDeserializer::parseFunctionSchema(
     const std::string& function_name,
@@ -389,7 +389,7 @@ void BytecodeDeserializer::parseMethods(
         debug_handles_m_tuple,
         function.get());
 
-    // 3. If upgrader is needed, change change the OP instruction to CALL
+    // 3. If upgrader is needed, change the OP instruction to CALL
     // instruction (In next PR, use_upgrader will be parsed to parseInstruction
     // function and do the actual change)
     if (use_upgrader) {

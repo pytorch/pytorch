@@ -252,7 +252,7 @@ class _FSDPDeviceHandle:
             return getattr(self.__backend, name)
         except AttributeError as exc:
             raise AttributeError(
-                f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{name}'"
+                f"Custom backend '{self.__device.type}' does not implement 'torch.{self.__device.type}.{name}'"
             ) from exc
 
 
@@ -326,7 +326,7 @@ def _get_module_fsdp_state_if_fully_sharded_module(
 
 class TrainingState(Enum):
     """
-    An enum that indicates the state of a ``FullyShardedDataParallel` instance.
+    An enum that indicates the state of a ``FullyShardedDataParallel`` instance.
     """
 
     IDLE = auto()
@@ -336,7 +336,7 @@ class TrainingState(Enum):
 
 class HandleTrainingState(Enum):
     """
-    An enum that indicates the state of a ``FlatParamHandle`.
+    An enum that indicates the state of a ``FlatParamHandle``.
     """
 
     IDLE = auto()

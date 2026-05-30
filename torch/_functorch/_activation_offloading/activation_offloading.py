@@ -160,7 +160,7 @@ def reload_activation_bw(graph: fx.Graph) -> None:
             continue
 
         # Find insertion point, which is the first use or output node if no users
-        # The later should not happen, but inserting before output node is safe
+        # The latter should not happen, but inserting before output node is safe
         insert_point: fx.Node = (
             min(node.users.keys(), key=lambda n: node_to_index[n])
             if node.users

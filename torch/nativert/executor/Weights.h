@@ -133,7 +133,7 @@ class Weights {
   // This is used in AOTIDelegateExecutor.
   std::unordered_map<std::string, std::string> customObjsPaths_;
 
-  // The liftcycle of folded consts should be tied with the weights from which
+  // The lifecycle of folded consts should be tied with the weights from which
   // it was derived. The ordering of the constant should be consistent with
   // the output order of const graph.
   std::vector<c10::IValue> foldedConsts_;

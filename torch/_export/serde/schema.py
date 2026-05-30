@@ -204,7 +204,7 @@ class TokenArgument:
     name: Annotated[str, 10]
 
 
-# This is use for storing the contents of a list which contain optional tensors
+# This is used for storing the contents of a list which contain optional tensors
 # (Tensor?[], ex. [Tensor, None, ...]), where the list will be serialized to the
 # type List[OptionalTensorArgument], with tensor values serialized to the
 # "as_tensor" field, and None values serialized to the "as_none" field.

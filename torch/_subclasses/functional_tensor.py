@@ -108,7 +108,7 @@ def _assert_functionalize_not_active(msg: str) -> None:
 # In addition to patching .to() method call in functionalization, we will have to
 # patch other similar methods like float() and cpu(), because they intentionally
 # don't fall back to .to() methods, but have the same behavior as .to() according to
-# pytorch document. https://pytorch.org/docs/stable/generated/torch.Tensor.float.html
+# pytorch documentation. https://pytorch.org/docs/stable/generated/torch.Tensor.float.html
 # thus we simply force them to go through .to() call.
 def _conversion_method_template(**extra_kwargs: Any) -> Callable[..., Any]:
     def _(self: FunctionalTensor, *args: Any, **kwargs: Any) -> Any:

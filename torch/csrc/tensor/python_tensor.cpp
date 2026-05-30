@@ -298,7 +298,7 @@ static THPObjectPtr get_tensor_dict() {
 // though, because it means that the memory of PyTensorType is deallocated at
 // some point during the exit: if by chance we have another global destructor
 // and/or atexit() function which tries to access the PyTensorTypes, we risk
-// an use-after-free error. This happens for example if we embed CPython and
+// a use-after-free error. This happens for example if we embed CPython and
 // call Py_Finalize inside an atexit() function which was registered before
 // importing torch.
 static std::vector<PyTensorType*> tensor_types;

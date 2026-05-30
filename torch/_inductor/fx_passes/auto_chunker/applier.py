@@ -146,7 +146,7 @@ class ChunkingApplier:
                 aten.full.default, (fake_tensor.shape, 1), _factory_args(fake_tensor)
             )
 
-            name = "tangent_overriden_as_one_{idx}"
+            name = "tangent_overridden_as_one_{idx}"
             one._rename(name)
             one.meta = copy.copy(node.meta)
             node.replace_all_uses_with(one)

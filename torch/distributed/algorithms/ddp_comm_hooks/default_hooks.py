@@ -42,10 +42,10 @@ def allreduce_hook(
     callback takes the mean and returns the result.
 
     If user registers this DDP communication hook,
-    DDP results is expected to be same as the case where no hook was registered.
+    DDP results are expected to be the same as the case where no hook was registered.
     Hence, this won't change behavior of DDP and user can use this as a reference
-    or modify this hook to log useful information or any other purposes while
-    unaffecting DDP behavior.
+    or modify this hook to log useful information or any other purposes without
+    affecting DDP behavior.
 
     Example::
         >>> # xdoctest: +SKIP
