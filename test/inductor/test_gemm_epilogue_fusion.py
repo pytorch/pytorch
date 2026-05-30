@@ -1688,6 +1688,71 @@ class GemmEpilogueFusionTests(TestCase):
             )
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_scaled_mm_v2_bias(self):
+        if not PLATFORM_SUPPORTS_MX_GEMM:
+            self.skipTest("MX GEMM is not supported")
+
+        swizzle = (
+            F.SwizzleType.NO_SWIZZLE
+            if torch.version.hip
+            else F.SwizzleType.SWIZZLE_32_4_4
+        )
+
+        def fn(a, b, scale_a, scale_b, bias):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={
+                    "scale_recipe_a": F.ScalingType.BlockWise1x32,
+                    "scale_recipe_b": F.ScalingType.BlockWise1x32,
+                    "swizzle_a": swizzle,
+                    "swizzle_b": swizzle,
+                    "bias": bias,
+                    "output_dtype": torch.bfloat16,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a, b, scale_a, scale_b = self._mxfp8_scaled_mm_v2_inputs()
+        bias = torch.ones((a.shape[0], b.shape[1]), device="cuda", dtype=torch.bfloat16)
+        with self.assertRaisesRegex(Exception, "bias"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                a, b, scale_a, scale_b, bias
+            )
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_scaled_mm_v2_wrong_swizzle(self):
+        if not PLATFORM_SUPPORTS_MX_GEMM:
+            self.skipTest("MX GEMM is not supported")
+
+        wrong_swizzle = (
+            F.SwizzleType.SWIZZLE_32_4_4
+            if torch.version.hip
+            else F.SwizzleType.NO_SWIZZLE
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={
+                    "scale_recipe_a": F.ScalingType.BlockWise1x32,
+                    "scale_recipe_b": F.ScalingType.BlockWise1x32,
+                    "swizzle_a": wrong_swizzle,
+                    "swizzle_b": wrong_swizzle,
+                    "output_dtype": torch.bfloat16,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        with self.assertRaisesRegex(Exception, "swizzle"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                *self._mxfp8_scaled_mm_v2_inputs()
+            )
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_routes_scaled_mm_relu_to_quack_hook(self):
         if not PLATFORM_SUPPORTS_MX_GEMM:
             self.skipTest("MX GEMM is not supported")
