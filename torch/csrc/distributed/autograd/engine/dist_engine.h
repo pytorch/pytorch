@@ -100,7 +100,7 @@ class TORCH_API DistEngine {
   //
   // When `incrementOutstandingTasks=false`, the function does not increment
   // 'outstanding_tasks_' in the appropriate GraphTask. It is assumed we've
-  // already done this before hand for this task (to ensure we don't pre-mark
+  // already done this beforehand for this task (to ensure we don't pre-mark
   // this graph_task as completed). This is useful in the distributed autograd
   // case where we need to increment 'outstanding_tasks_' first to indicate the
   // local autograd engine the graph task is not completed until it receives the

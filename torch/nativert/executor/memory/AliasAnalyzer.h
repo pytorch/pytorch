@@ -97,7 +97,7 @@ class AliasAnalyzer {
   // instead of aliases[x2] = x1
   //
   // the result is aliases_ will contain a
-  // mapping from each alias to its backed
+  // mapping from each alias to its backing
   // source (i.e., the value that owns its
   // associated dataptr)
   void squash_deep_aliases(const Graph& graph);

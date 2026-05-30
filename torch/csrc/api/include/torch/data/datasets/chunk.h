@@ -34,7 +34,7 @@ class ChunkDataReader {
   /// Returns the number of chunks available in this reader.
   virtual size_t chunk_count() = 0;
 
-  /// This will clear any internal state associate with this reader.
+  /// This will clear any internal state associated with this reader.
   virtual void reset() = 0;
 };
 

@@ -700,7 +700,7 @@ def scatter_mm_meta(
 
     if SPLIT_N is None:
         # Assume NVIDIA GeForce RTX 2060 SUPER:
-        # With the probality of 92% (99.9% when N > 512), the
+        # With the probability of 92% (99.9% when N > 512), the
         # performance will not be worse more than 2% from the
         # performance when using an optimal value.  Otherwise, when N
         # <= 512, using the following heuristics may give upto 15%

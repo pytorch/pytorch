@@ -162,7 +162,7 @@ struct TORCH_API Object {
   ///   IValue output = module->run("relu_script", a, b);
   /// @endcode
   ///
-  /// To get a compile a module from a source string, see torch::jit::compile
+  /// To compile a module from a source string, see torch::jit::compile
   ///
   /// @param method_name The name of the method to run
   /// @param args Arguments to be passed to the method

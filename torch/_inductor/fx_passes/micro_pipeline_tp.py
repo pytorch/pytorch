@@ -157,7 +157,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
 
     # If two patterns with the same res_node_target have the same suffix, the
     # longer pattern should appear first in the list.
-    # e.g. supposed we have (1) A -> B -> C -> D and (2) B -> C -> D, (1)
+    # e.g. suppose we have (1) A -> B -> C -> D and (2) B -> C -> D, (1)
     # should appear before (2) in the list.
     res_node_target_to_patterns = {
         aten.cat.default: [

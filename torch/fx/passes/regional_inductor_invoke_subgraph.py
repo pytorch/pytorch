@@ -42,7 +42,7 @@ def _compile_submod(
 
     for inp_node in sub_node.all_input_nodes[
         1:
-    ]:  # exlucde the graph module input to torch.ops.higher_order.invoke_subgraph
+    ]:  # exclude the graph module input to torch.ops.higher_order.invoke_subgraph
         if hasattr(inp_node, "meta") and "val" in inp_node.meta:
             fake_inputs.append(inp_node.meta["val"])
         else:
@@ -102,7 +102,7 @@ def _compile_submod(
 def _needs_inductor_compile(node: torch.fx.Node) -> bool:
     # TODO: maybe we could change to check
     # node.meta.get("partitioner_tag") != "is_forward"
-    # if the tag is relibable
+    # if the tag is reliable
     return bool(
         (
             node.op not in ("placeholder", "output")

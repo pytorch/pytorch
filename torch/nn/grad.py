@@ -16,7 +16,7 @@ def conv1d_input(
 ):
     r"""Compute the gradient of conv1d with respect to the input of the convolution.
 
-    This is same as the 1D transposed convolution operator under the hood but requires
+    This is the same as the 1D transposed convolution operator under the hood but requires
     the shape of the gradient w.r.t. input to be specified explicitly.
 
     Args:
@@ -114,7 +114,7 @@ def conv2d_input(
 ):
     r"""Compute the gradient of conv2d with respect to the input of the convolution.
 
-    This is same as the 2D transposed convolution operator under the hood but requires
+    This is the same as the 2D transposed convolution operator under the hood but requires
     the shape of the gradient w.r.t. input to be specified explicitly.
 
     Args:
@@ -212,7 +212,7 @@ def conv3d_input(
 ):
     r"""Compute the gradient of conv3d with respect to the input of the convolution.
 
-    This is same as the 3D transposed convolution operator under the hood but requires
+    This is the same as the 3D transposed convolution operator under the hood but requires
     the shape of the gradient w.r.t. input to be specified explicitly.
 
     Args:

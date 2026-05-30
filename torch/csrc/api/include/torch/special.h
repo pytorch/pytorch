@@ -78,7 +78,7 @@ inline Tensor& multigammaln_out(Tensor& result, const Tensor& self, int64_t p) {
 }
 
 /// Computes the nth derivative of the digamma function on the input.
-/// See https:://pytorch.org/docs/main/special.html#torch.special.polygamma.
+/// See https://pytorch.org/docs/main/special.html#torch.special.polygamma.
 ///
 /// Example:
 /// ```

@@ -32,7 +32,7 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
 /// following cases:
 ///   - If there is no Error raised in the inner try/catch, the
 ///     buffered warnings are processed as python warnings.
-///     - If they don't raise an error, the function process with the
+///     - If they don't raise an error, the function proceeds with the
 ///       original return code.
 ///     - If any of them raise an error, the error is set (PyErr_*) and
 ///       the destructor will raise a cpp exception python_error() that
@@ -41,7 +41,7 @@ inline void PyErr_SetString(PyObject* type, const std::string& message) {
 ///   - If an Error was raised in the inner try/catch, the inner try/catch
 ///     must set the python error. The buffered warnings are then
 ///     processed as cpp warnings as we cannot predict before hand
-///     whether a python warning will raise an error or not and we
+///     whether a python warning will raise an error or not, and we
 ///     cannot handle two errors at the same time.
 /// This advanced handler will only be used in the current thread.
 /// If any other thread is used, warnings will be processed as
