@@ -1416,7 +1416,15 @@ class TestCuteDSLSubprocessCompile(TestCase):
 
                 key, path = codecache.PyCodeCache.write(source)
                 config_key = ("test_corrupt_e2e",)
-                runtime_key = ((8, 4), torch.float32, (8, 4), torch.float32)
+                x = torch.randn(8, 4, device=device, dtype=torch.float32)
+                y = torch.randn(8, 4, device=device, dtype=torch.float32)
+                out = torch.empty(8, 4, device=device, dtype=torch.float32)
+                runtime_key = (
+                    tuple(x.shape),
+                    x.dtype,
+                    tuple(y.shape),
+                    y.dtype,
+                )
                 h = _make_disk_key(path, config_key, runtime_key, device_index=dev_idx)
                 obj_path = cache_dir / f"{h}.o"
 
@@ -1428,9 +1436,6 @@ class TestCuteDSLSubprocessCompile(TestCase):
                 mod = codecache.PyCodeCache.load_by_key_path(key, path)
                 self.assertEqual(mod.compile_count, 0)
 
-                x = torch.randn(8, 4, device=device, dtype=torch.float32)
-                y = torch.randn(8, 4, device=device, dtype=torch.float32)
-                out = torch.empty(8, 4, device=device, dtype=torch.float32)
                 mod.test_kernel_main(x, y, out)
 
                 self.assertEqual(
