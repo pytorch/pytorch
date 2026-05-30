@@ -453,11 +453,31 @@ communicator for the process group if it doesn't already exist.
 .. autofunction:: get_mem_pool
 ```
 
+```{eval-rst}
+.. autofunction:: is_symm_mem_tensor
+```
+
+```{eval-rst}
+.. autofunction:: set_signal_pad_size
+```
+
+```{eval-rst}
+.. autofunction:: get_signal_pad_size
+```
+
 ## Op Reference
 :::{note}
 The following ops are hosted in the `torch.ops.symm_mem` namespace. You can call
 them directly via `torch.ops.symm_mem.<op_name>`.
 :::
+
+```{eval-rst}
+.. currentmodule:: torch.distributed._symmetric_memory
+```
+
+```{eval-rst}
+.. autofunction:: reduce_scatter_offset
+```
 
 ```{eval-rst}
 .. currentmodule:: torch.ops.symm_mem
