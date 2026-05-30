@@ -81,23 +81,12 @@ extern "C" void __avx_chk_kernel() {
 }
 """
 
-    # Skipping `import torch` in the child avoids multiple seconds of startup
-    # per spawn and the hangs under load seen in CI (the motivation for this
-    # rework), but only Linux can do so safely today: the parent prepends
-    # torch's lib dir to LD_LIBRARY_PATH and the dynamic linker resolves
-    # libtorch_cpu for the test .so automatically.
-    #
-    # macOS and Windows fall back to `import torch`, which pulls torch's whole
-    # dependency closure into the process the way the probe did before this
-    # rework. On macOS the env-based approach does not work at all (SIP strips
-    # DYLD_LIBRARY_PATH from spawned children and the test .so's @rpath dep on
-    # libtorch_cpu.dylib cannot be resolved from the parent env). On Windows a
-    # find_spec + os.add_dll_directory scheme is plausible, but the Windows CI
-    # build is currently red on an unrelated infra flake, so that path cannot
-    # be validated; rather than ship an untested loader change (which is how
-    # the macOS breakage slipped in), keep Windows on the proven import until
-    # it can actually be exercised. Each probed ISA imports torch at most once
-    # per process and is still bounded by the 60s timeout in _probe_load.
+    # Skip the slow `import torch` (which has hung under load in CI) on Linux
+    # only: the parent puts torch's lib dir on LD_LIBRARY_PATH so the linker
+    # resolves libtorch_cpu for the test .so on its own. macOS can't do this --
+    # SIP strips DYLD_LIBRARY_PATH from the child -- so it falls back to import.
+    # TODO: extend the no-import path to Windows once its CI build is green
+    # enough to validate it.
     _avx_py_load = """
 import sys
 if sys.platform != "linux":
