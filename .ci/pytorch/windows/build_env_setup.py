@@ -359,7 +359,7 @@ def install_xpu_bundle() -> None:
     subprocess.run(["cmd", "/c", str(bat)], cwd=WIN_CI_DIR, check=True)
 
 
-def setup_xpu() -> dict[str, str]:
+def setup_xpu(vs_install_dir: Path) -> dict[str, str]:
     install_xpu_bundle()
 
     xpu_root = Path(
@@ -372,16 +372,17 @@ def setup_xpu() -> dict[str, str]:
     if not xpu_root.is_dir():
         sys.exit(f"XPU bundle root not found at {xpu_root}")
 
-    # VS2022INSTALLDIR alias for downstream tools that look there instead
-    # of VS15INSTALLDIR (carried over from xpu.bat).
-    vs15 = os.environ.get("VS15INSTALLDIR")
+    # oneAPI's vars.bat probes VS<year>INSTALLDIR to locate the host MSVC
+    # toolchain; without it the script aborts before exporting anything.
+    # Legacy xpu.bat got VS15INSTALLDIR from check_deps.bat's vswhere pass;
+    # we derive it from the vcvarsall path we already discovered.
     pre_env: dict[str, str] = {
         "USE_CUDA": "0",
         "USE_ONEMKL": "1",
         "XPU_BUNDLE_ROOT": str(xpu_root),
+        "VS15INSTALLDIR": str(vs_install_dir),
+        "VS2022INSTALLDIR": str(vs_install_dir),
     }
-    if vs15:
-        pre_env["VS2022INSTALLDIR"] = vs15
 
     # Push the static vars into os.environ before sourcing oneAPI so its
     # PATH/CMAKE_PREFIX_PATH extensions layer on top.
@@ -481,13 +482,19 @@ def main() -> None:
 
     env_out: dict[str, str] = {**COMMON_BUILD_ENV}
 
+    # Locate vcvarsall.bat up front so XPU can hand the VS install root to
+    # oneAPI's vars.bat. vcvarsall lives at
+    # <VS_INSTALL>/VC/Auxiliary/Build/vcvarsall.bat.
+    vcvarsall = find_vcvarsall(vc_year)
+    vs_install_dir = vcvarsall.parents[3]
+
     if gpu_arch_type == "cpu":
         env_out.update(CPU_BUILD_ENV)
         print("CPU environment configured")
     elif gpu_arch_type == "cuda":
         env_out.update(setup_cuda())
     elif gpu_arch_type == "xpu":
-        env_out.update(setup_xpu())
+        env_out.update(setup_xpu(vs_install_dir))
     else:
         sys.exit(
             f"build_env_setup.py: GPU_ARCH_TYPE={gpu_arch_type!r} not supported. "
@@ -500,7 +507,6 @@ def main() -> None:
 
     # vcvarsall env -- captured last so its PATH/LIB/etc. extensions stack
     # on top of whatever we just configured.
-    vcvarsall = find_vcvarsall(vc_year)
     print(f"Sourcing {vcvarsall}")
     vsdevcmd_args = os.environ.get("VSDEVCMD_ARGS", "")
     env_out.update(capture_vcvars_env(vcvarsall, f"x64 {vsdevcmd_args}".strip()))
