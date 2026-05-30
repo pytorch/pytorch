@@ -3427,6 +3427,36 @@ def native_group_norm(
     return (out, mean, rstd)
 
 
+def _check_native_layer_norm_cuda_param_dtype(
+    input: Tensor,
+    normalized_ndim: int,
+    weight: Tensor | None,
+    bias: Tensor | None,
+) -> None:
+    if input.device.type != "cuda":
+        return
+
+    mismatched_dtype = None
+    if weight is not None and weight.dtype != input.dtype:
+        mismatched_dtype = weight.dtype
+    elif bias is not None and bias.dtype != input.dtype:
+        mismatched_dtype = bias.dtype
+
+    if mismatched_dtype is None:
+        return
+
+    axis = input.ndim - normalized_ndim
+    num_rows = math.prod(input.shape[:axis])
+    torch._check(
+        num_rows == 0,
+        lambda: "layer_norm expected CUDA affine parameter dtype to match "
+        "input dtype for non-empty inputs, but got input dtype "
+        + str(input.dtype)
+        + " and parameter dtype "
+        + str(mismatched_dtype),
+    )
+
+
 @register_decomposition(aten.native_layer_norm)
 @out_wrapper("out0", "out1", "out2")
 def native_layer_norm(
@@ -3483,6 +3513,7 @@ def native_layer_norm(
         not input.is_complex(),
         lambda: "native_layer_norm does not support complex inputs",
     )
+    _check_native_layer_norm_cuda_param_dtype(input, normalized_ndim, weight, bias)
 
     input = contiguous(input)
     if weight is not None:
