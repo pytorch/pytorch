@@ -406,12 +406,38 @@ def shell_quote(value: str) -> str:
 _BASH_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+def _to_posix_path_list(windows_path_list: str) -> str:
+    """Convert a Windows `;`-separated path list to POSIX `:`-separated.
+
+    vcvarsall.bat (and other cmd-side env-setup scripts) write PATH in
+    Windows format with `;` separators and `\\` directory separators. The
+    parent bash uses `:` separators and POSIX-style paths to find
+    executables; sourcing PATH unmodified leaves bash with a single
+    bogus PATH entry and the next `python` lookup dies with exit 127.
+
+    `cygpath -up` is the canonical translator (Git Bash / MSYS ship it
+    and the rest of PyTorch's Windows CI already uses it). Calling it
+    once on the whole list is fine for this hot path.
+    """
+    if not windows_path_list:
+        return windows_path_list
+    result = subprocess.run(
+        ["cygpath", "-up", windows_path_list],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
 def write_env_exports(env: dict[str, str], path: Path | None) -> None:
     """Write `export KEY=VALUE` lines for build.sh to source.
 
-    Forward-slash-normalize PATH-like values so the parent bash sees them as
-    POSIX paths; the build subprocess re-converts on Windows transparently
-    via cygpath-aware tooling.
+    PATH is converted from Windows-format (`;`-separated, backslashes)
+    to POSIX-format (`:`-separated, forward slashes) so the parent bash
+    can find executables in subsequent steps. Other path-like env vars
+    (INCLUDE, LIB, LIBPATH, ...) are left in Windows format because the
+    MSVC tools that consume them expect that.
 
     Skip keys that aren't valid bash identifiers. When CI bash exports a
     function (e.g. `export -f retry` in binary_populate_env.sh), bash
@@ -423,11 +449,16 @@ def write_env_exports(env: dict[str, str], path: Path | None) -> None:
     """
     if path is None:
         return
-    lines = [
-        f"export {k}={shell_quote(v)}"
-        for k, v in env.items()
-        if _BASH_IDENT_RE.match(k)
-    ]
+    lines = []
+    for k, v in env.items():
+        if not _BASH_IDENT_RE.match(k):
+            continue
+        if k.upper() == "PATH" and ";" in v:
+            # ';' separator marks the captured PATH as Windows-form; if
+            # some future caller already feeds POSIX form (no ';') we
+            # leave it alone rather than double-convert.
+            v = _to_posix_path_list(v)
+        lines.append(f"export {k}={shell_quote(v)}")
     path.write_text("\n".join(lines) + "\n")
 
 
