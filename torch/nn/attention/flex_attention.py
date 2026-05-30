@@ -389,9 +389,28 @@ _DEFAULT_SPARSE_BLOCK_SIZE = 128
 _LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 
-def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor) -> Tensor:
-    num_rows = col_indices.shape[-2]
+def _infer_num_cols_from_ordered(num_blocks_in_row: Tensor, col_indices: Tensor) -> int:
     num_cols = col_indices.shape[-1]
+    if col_indices.numel() == 0:
+        return num_cols
+
+    block_idx = torch.arange(num_cols, dtype=torch.int, device=col_indices.device)
+    valid_block = block_idx < num_blocks_in_row.unsqueeze(-1)
+    valid_indices = torch.where(
+        valid_block,
+        col_indices,
+        col_indices.new_full((), -1),
+    )
+    return max(num_cols, int(valid_indices.max().item()) + 1)
+
+
+def _ordered_to_dense(
+    num_blocks_in_row: Tensor, col_indices: Tensor, num_cols: int | None = None
+) -> Tensor:
+    num_rows = col_indices.shape[-2]
+    max_blocks_in_row = col_indices.shape[-1]
+    if num_cols is None:
+        num_cols = _infer_num_cols_from_ordered(num_blocks_in_row, col_indices)
     batch_dims = num_blocks_in_row.shape[:-1]
     device = num_blocks_in_row.device
 
@@ -401,7 +420,7 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor) -> Tensor:
         row_indices = torch.arange(num_rows, dtype=torch.int, device=device).unsqueeze(
             -1
         )
-        col_range = torch.arange(num_cols, dtype=torch.int, device=device)
+        col_range = torch.arange(max_blocks_in_row, dtype=torch.int, device=device)
         index_mask = col_range < kv_num_blocks.unsqueeze(-1)
 
         # We write to one spot "out of bounds"
@@ -431,9 +450,9 @@ def _dense_to_ordered(dense_mask: Tensor) -> tuple[Tensor, Tensor]:
 
 
 def _transpose_ordered(
-    num_blocks_in_row: Tensor, col_indices: Tensor
+    num_blocks_in_row: Tensor, col_indices: Tensor, num_cols: int | None = None
 ) -> tuple[Tensor, Tensor]:
-    dense = _ordered_to_dense(num_blocks_in_row, col_indices)
+    dense = _ordered_to_dense(num_blocks_in_row, col_indices, num_cols)
     return _dense_to_ordered(dense.transpose(-2, -1))
 
 
@@ -950,14 +969,34 @@ class BlockMask:
                 "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
             )
 
+        if isinstance(BLOCK_SIZE, int):
+            BLOCK_SIZE = (BLOCK_SIZE, BLOCK_SIZE)
+
+        if seq_lengths is None:
+            num_kv_block_cols = _infer_num_cols_from_ordered(kv_num_blocks, kv_indices)
+            if full_kv_num_blocks is not None:
+                if full_kv_indices is None:
+                    raise AssertionError("full_kv_indices must not be None")
+                num_kv_block_cols = max(
+                    num_kv_block_cols,
+                    _infer_num_cols_from_ordered(full_kv_num_blocks, full_kv_indices),
+                )
+            q_length = kv_indices.shape[-2] * BLOCK_SIZE[0]
+            kv_length = num_kv_block_cols * BLOCK_SIZE[1]
+            seq_lengths = (q_length, kv_length)
+        else:
+            num_kv_block_cols = (seq_lengths[1] + BLOCK_SIZE[1] - 1) // BLOCK_SIZE[1]
+
         # Generate q_num_blocks and q_indices
         if compute_q_blocks:
-            q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
+            q_num_blocks, q_indices = _transpose_ordered(
+                kv_num_blocks, kv_indices, num_kv_block_cols
+            )
             if full_kv_num_blocks is not None:
                 if full_kv_indices is None:
                     raise AssertionError("full_kv_indices must not be None")
                 full_q_num_blocks, full_q_indices = _transpose_ordered(
-                    full_kv_num_blocks, full_kv_indices
+                    full_kv_num_blocks, full_kv_indices, num_kv_block_cols
                 )
             else:
                 full_q_num_blocks, full_q_indices = None, None
@@ -965,14 +1004,7 @@ class BlockMask:
             q_num_blocks, q_indices = None, None
             full_q_num_blocks, full_q_indices = None, None
 
-        if isinstance(BLOCK_SIZE, int):
-            BLOCK_SIZE = (BLOCK_SIZE, BLOCK_SIZE)
-
         mask_mod = mask_mod if mask_mod is not None else noop_mask
-        if seq_lengths is None:
-            q_length = kv_indices.shape[-2] * BLOCK_SIZE[0]
-            kv_length = kv_indices.shape[-1] * BLOCK_SIZE[1]
-            seq_lengths = (q_length, kv_length)
 
         return cls(
             seq_lengths=seq_lengths,
@@ -1212,13 +1244,18 @@ class BlockMask:
 
     def to_dense(self) -> Tensor:
         """Returns a dense block that is equivalent to the block mask."""
-        partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
+        num_kv_block_cols = (
+            self.seq_lengths[1] + self.BLOCK_SIZE[1] - 1
+        ) // self.BLOCK_SIZE[1]
+        partial_dense = _ordered_to_dense(
+            self.kv_num_blocks, self.kv_indices, num_kv_block_cols
+        )
         if self.full_kv_num_blocks is not None:
             if self.full_kv_indices is None:
                 raise AssertionError("full_kv_indices must not be None")
             # pyrefly: ignore [bad-return]
             return partial_dense | _ordered_to_dense(
-                self.full_kv_num_blocks, self.full_kv_indices
+                self.full_kv_num_blocks, self.full_kv_indices, num_kv_block_cols
             )
         return partial_dense
 
