@@ -2501,7 +2501,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_floor_divide_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -2517,14 +2517,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_inplace_floor_divide_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
         return self.call_method(tx, "__ifloordiv__", [other], {})
 
     def nb_true_divide_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -2540,14 +2540,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_inplace_true_divide_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
         return self.call_method(tx, "__itruediv__", [other], {})
 
     def nb_remainder_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -2563,7 +2563,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_inplace_remainder_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
         return self.call_method(tx, "__imod__", [other], {})
