@@ -15,7 +15,6 @@ handling of iterator operations during code transformation and optimization.
 
 import itertools
 import sys
-from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 from .. import graph_break_hints, polyfills, variables
@@ -267,32 +266,6 @@ class IteratorVariable(VariableTracker):
             explanation="This abstract method must be implemented",
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
-
-    # NOTE: only call when unpacking this iterator safely done eagerly!
-    # Normally, iterators are accessed lazily.
-    # Example of safe eager unpacking: list(map(f, seq))
-    # Example of unsafe eager unpacking: list(islice(map(f, seq), 5))
-    def force_unpack_var_sequence(
-        self, tx: "InstructionTranslatorBase"
-    ) -> list[VariableTracker]:
-        result: list[VariableTracker] = []
-        self.force_apply_to_var_sequence(tx, result.append)
-        return result
-
-    def force_apply_to_var_sequence(
-        self, tx: "InstructionTranslatorBase", fn: Callable[[Any], Any]
-    ) -> None:
-        while True:
-            try:
-                fn(self.tp_iternext_impl(tx))
-            except ObservedUserStopIteration:
-                handle_observed_exception(tx)
-                break
-
-    # don't call force_unpack_var_sequence since it can mutate
-    # IteratorVariable state!
-    def has_force_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return True
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
