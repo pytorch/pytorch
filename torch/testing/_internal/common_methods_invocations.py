@@ -15884,6 +15884,9 @@ op_db: list[OpInfo] = [
             # No Inductor lowering for the chunked custom op.
             DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
                          "TestInductorOpInfo", "test_comprehensive"),
+            DecorateInfo(unittest.skip("chunked op falls back to reference under "
+                                       "torch.jit.trace; covered by unchunked variant"),
+                         "TestNNCOpInfo", "test_nnc_correctness"),
             # nll_loss2d decomposition mismatch (chunked path also dispatches
             # through nll_loss2d for the per-row reduction).
             DecorateInfo(
