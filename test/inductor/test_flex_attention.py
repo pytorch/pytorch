@@ -72,6 +72,7 @@ from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (  # noqa: F401
     IS_LINUX,
     MI200_ARCH,
+    serialTest,
     skipIfRocm,
     skipIfRocmArch,
     TEST_WITH_ROCM,
@@ -6130,6 +6131,7 @@ class GraphModule(torch.nn.Module):
     @supported_platform
     @skip_on_cpu
     @largeTensorTest("12GB", inductor=True)
+    @serialTest()
     def test_large_kv_int64_pointer_math(self, device):
         # Regression test for #185262: load_checked_2d (and a few inline
         # pointer-arithmetic sites in the backwards template) computed
