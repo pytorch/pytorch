@@ -7,11 +7,10 @@ import itertools
 import pprint
 from typing import Any, Protocol, TYPE_CHECKING
 
-import sympy
-
 import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Max
 
 from .. import config
 from ..utils import _align, align, cache_on_self, CachedMethod, IndentedBuffer
@@ -28,6 +27,8 @@ from .wrapper import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    import sympy
 
 
 @dataclasses.dataclass
@@ -317,8 +318,8 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
     @cache_on_self
     def get_symbolic_size(self) -> sympy.Expr:
         if not self.allocations:
-            return 0
-        return sympy.Max(*[x.get_symbolic_size() for x in self.allocations])
+            return 0  # type: ignore[return-value]
+        return Max(*[x.get_symbolic_size() for x in self.allocations])
 
     def is_empty(self):
         return len(self.allocations) == 1 and self.allocations[0].is_empty()
