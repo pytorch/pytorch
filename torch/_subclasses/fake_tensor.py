@@ -236,6 +236,18 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
     return False
 
 
+def maybe_get_fake_tensor_from_functorch_wrapped(t: object) -> FakeTensor | None:
+    if not isinstance(t, Tensor):
+        return None
+
+    while is_functorch_wrapped_tensor(t):
+        t = torch._C._functorch.get_unwrapped(t)
+
+    if isinstance(t, FakeTensor):
+        return t
+    return None
+
+
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     from torch._subclasses.functional_tensor import FunctionalTensor
 
@@ -1005,21 +1017,26 @@ class FakeTensor(Tensor):
         def is_device_meta(device: torch.device) -> bool:
             return device.type == "meta"
 
-        def cpu_zero_dim(t: Tensor) -> bool:
-            return is_device_cpu(t.device) and t.dim() == 0
+        def cpu_zero_dim(t: Tensor, device: torch.device) -> bool:
+            return is_device_cpu(device) and t.dim() == 0
 
         def merge_devices(t: object) -> None:
             nonlocal common_device
             nonlocal is_cpu_zero_dim
-            if not isinstance(t, FakeTensor):
+            if not isinstance(t, Tensor):
                 return
+            logical_t = t
+            maybe_fake = maybe_get_fake_tensor_from_functorch_wrapped(t)
+            if maybe_fake is None:
+                return
+            t = maybe_fake
 
             if common_device is None:
                 common_device = t.device
-                is_cpu_zero_dim = cpu_zero_dim(t)
+                is_cpu_zero_dim = cpu_zero_dim(logical_t, t.device)
                 return
 
-            t_is_cpu_zero_dim = cpu_zero_dim(t)
+            t_is_cpu_zero_dim = cpu_zero_dim(logical_t, t.device)
             if t.device == common_device:
                 if is_cpu_zero_dim:
                     is_cpu_zero_dim = t_is_cpu_zero_dim
@@ -1444,6 +1461,12 @@ class FakeTensorMode(TorchDispatchMode):
     # what this function does.
     def is_our_fake(self, t: object) -> TypeGuard[FakeTensor]:
         return isinstance(t, FakeTensor) and t.fake_mode is self
+
+    def maybe_get_wrapped_fake(self, t: object) -> FakeTensor | None:
+        maybe_fake = maybe_get_fake_tensor_from_functorch_wrapped(t)
+        if maybe_fake is not None and maybe_fake.fake_mode is self:
+            return maybe_fake
+        return None
 
     # If we should avoid device init. This changes the behavior of various APIs:
     # - We avoid constant-prop on Tensors with ops that move them to another device
@@ -2479,10 +2502,23 @@ class FakeTensorMode(TorchDispatchMode):
             )
             return NotImplemented
 
-        flat_arg_fake_tensors = [t for t in flat_args if self.is_our_fake(t)]
-        has_symbolic_sizes = any(
-            i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
-        ) or any(isinstance(a, SymInt) for a in flat_args)
+        def collect_fake_arg(t: object) -> FakeTensor | None:
+            if self.is_our_fake(t):
+                return t
+            return self.maybe_get_wrapped_fake(t)
+
+        flat_arg_fake_tensors: list[FakeTensor] = []
+        for t in flat_args:
+            fake_arg = collect_fake_arg(t)
+            if fake_arg is not None:
+                flat_arg_fake_tensors.append(fake_arg)
+
+        def has_symbolic_sizes_or_inputs() -> bool:
+            return any(
+                i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
+            ) or any(isinstance(a, SymInt) for a in flat_args)
+
+        has_symbolic_sizes = has_symbolic_sizes_or_inputs()
 
         converter = self.fake_tensor_converter
 
@@ -2563,6 +2599,7 @@ class FakeTensorMode(TorchDispatchMode):
         (flat_args, flat_arg_fake_tensors) = self.validate_and_convert_non_fake_tensors(
             func, converter, flat_args, args_spec
         )
+        has_symbolic_sizes = has_symbolic_sizes_or_inputs()
         del args, kwargs  # Invalidated
 
         # The current constant handling only support tracing systems
@@ -3017,6 +3054,16 @@ class FakeTensorMode(TorchDispatchMode):
 
             nonlocal flat_arg_fake_tensors
             if not self.is_our_fake(x):
+                wrapped_fake = self.maybe_get_wrapped_fake(x)
+                if wrapped_fake is not None:
+                    flat_arg_fake_tensors.append(wrapped_fake)
+                    return x
+                if x.device.type == "meta" and x._is_zerotensor():
+                    # ZeroTensor kernels use real meta tensors for internal
+                    # shape/type propagation.
+                    out = converter.from_meta_and_device(self, x, x.device)
+                    flat_arg_fake_tensors.append(out)
+                    return out
                 if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags:
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                     raise AssertionError(

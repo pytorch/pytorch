@@ -287,6 +287,17 @@ class FakeTensorTest(TestCase):
             self.assertTrue(isinstance(out, FakeTensor))
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_functorch_wrapped_zero_dim_common_device(self):
+        with FakeTensorMode():
+            x = torch.arange(4.0)
+            x = _add_batch_dim(x, 0, 0)
+            y = torch.rand([2, 2], device="cuda")
+
+            device, _ = FakeTensor._find_common_device(aten.add.Tensor, [x, y])
+
+            self.assertEqual(device, y.device)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_op_with_zero_dim_bypassed(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("Propagate real tensor not supported")
