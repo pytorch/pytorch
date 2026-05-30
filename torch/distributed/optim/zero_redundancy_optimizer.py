@@ -305,7 +305,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     ``ZeroRedundancyOptimizer`` uses a sorted-greedy algorithm to pack a number
     of parameters at each rank. Each parameter belongs to a single rank and is
     not divided among ranks. The partition is arbitrary and might not match the
-    the parameter registration or usage order.
+    parameter registration or usage order.
 
     Arguments:
         params (``Iterable``): an ``Iterable`` of :class:`torch.Tensor` s
@@ -1425,7 +1425,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         r"""
         Verify the type of ``params`` and initializes ``self._all_params`` as a :class:`list` of all parameters.
 
-        The initializagtion will first make sure that provided ``params`` is valid.
+        The initialization will first make sure that provided ``params`` is valid.
 
         Arguments:
             params (Any): Candidate parameter list or parameter groups to verify.

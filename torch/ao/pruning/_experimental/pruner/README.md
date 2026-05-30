@@ -2,7 +2,7 @@
 
 ## Intro / Motivation
 
-**Pruning** is the technique of removing parameters from a model to reduce the computational cost. The goal of pruning is to improve the performance of the model while maintaining it's accuracy.
+**Pruning** is the technique of removing parameters from a model to reduce the computational cost. The goal of pruning is to improve the performance of the model while maintaining its accuracy.
 
 ### Unstructured vs. Structured Pruning
 One way to do this is to consider each parameter individually. This gives us the greatest granularity when pruning and is called **unstructured pruning**.
@@ -47,7 +47,7 @@ By removing a row from U and a column from W, we can avoid a shape mismatch.
 ![](./images/prune_6.png)
 
 
-One benefit of **structured pruning** is that it uses the same dense kernels that the original model uses, and does not rely on custom sparse kernel like **unstructured pruning**.
+One benefit of **structured pruning** is that it uses the same dense kernels that the original model uses, and does not rely on custom sparse kernels like **unstructured pruning**.
 However, structured pruning degrades accuracy more than unstructured pruning because of the lack of granularity, so it is not always the right choice.
 
 Generally the structured pruning process looks something like this:

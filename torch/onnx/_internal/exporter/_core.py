@@ -181,7 +181,7 @@ class TorchTensor(ir.Tensor):
         # On big-endian machines, call the super's tobytes() which returns a little-endian result.
         if sys.byteorder == "big":
             return super().tobytes()
-        # Implement tobytes to support native PyTorch types so we can use types like bloat16
+        # Implement tobytes to support native PyTorch types so we can use types like bfloat16
         # Reading from memory directly is also more efficient because
         # it avoids copying to a NumPy array
         _, data = self._get_cbytes()
