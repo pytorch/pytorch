@@ -4965,7 +4965,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 else:
                     result_prefix = cast(CSEVariable, result_var)
                     block_value = self.reduction_resize(f"{result_var}_val")
-                    block_index = self.reduction_resize(str(result_var))
+                    block_index = self.reduction_resize(f"{result_var}_idx")
                 block_value_name = f"{result_prefix}_bval"
                 self.post_loop_combine.writeline(f"{block_value_name} = {block_value}")
                 peer_val = self.codegen_cooperative_reduction_peer_combine(

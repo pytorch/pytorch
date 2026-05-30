@@ -188,9 +188,23 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetConstantDataSize(
     size_t* data_size);
 
 // Extract the constants that is being used in the container.
+//
+// DEPRECATED: V1 API; see AOTInductorModelContainerExtractConstantsMapEntries.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive);
+
+// C-ABI-safe variant of AOTInductorModelContainerExtractConstantsMap.
+// On success, `entries` points to `num_entries` container-owned entries.
+// The returned array and each `entries[i].name` are valid until the next
+// AOTInductorModelContainerExtractConstantsMapEntries call on the same
+// container, until the container's constants are mutated, or until the
+// container is deleted. Callers that need to retain names should copy them.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMapEntries(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry** entries,
+    size_t* num_entries,
     bool use_inactive);
 
 // Setup the constant buffer in model container with provided ConstantMap.
@@ -215,26 +229,58 @@ AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
 // Setup the constant buffer in model container with provided ConstantMap
 // use_inactive should be set as true if the inactive buffer is to be updated.
 // validate_full_update checks if all constants are included in the ConstantMap
+//
+// DEPRECATED: V1 API; see AOTInductorModelContainerUpdateConstantBufferPairs.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
     bool use_inactive,
     bool validate_full_update);
 
+// C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBuffer.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update);
+
 // Same as AOTInductorModelContainerUpdateConstantBuffer, but the caller is
 // allowed to pass CPU tensors even when the model lives on a non-CPU device.
 // CPU tensors are silently copied to the model's device.
+//
+// DEPRECATED: V1 API; see
+// AOTInductorModelContainerUpdateConstantBufferFromCpuPairs.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
     bool use_inactive,
     bool validate_full_update);
 
+// C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBufferFromCpu.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateConstantBufferFromCpuPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update);
+
 // Setup the inactive constant buffer in model container with provided
 // ConstantMap
+//
+// DEPRECATED: V1 API; see
+// AOTInductorModelContainerUpdateInactiveConstantBufferPairs.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle);
+
+// C-ABI-safe variant of AOTInductorModelContainerUpdateInactiveConstantBuffer.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateInactiveConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs);
 
 // Free the inactive constant buffer in model container.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
