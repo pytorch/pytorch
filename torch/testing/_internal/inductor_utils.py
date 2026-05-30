@@ -230,8 +230,8 @@ def dummy_graph() -> GraphLowering:
 
 def maybe_skip_size_asserts(op):
     """
-    For certain ops, there meta and eager implementation returns different
-    strides. This cause size/strides assert fail. Skip adding those
+    For certain ops, their meta and eager implementation return different
+    strides. This causes size/strides assert fail. Skip adding those
     asserts for now.
     """
     if (

@@ -542,7 +542,7 @@ def optimize_scatter_mm(
 
     def step_meta_parameter(name, value, direction, meta, m=m, n=n, k=k, bm=bm, bk=bk):
         # return next value in positive or negative direction, or
-        # input value if the step will result an invalid
+        # input value if the step will result in an invalid
         # value. The input value is assumed to be valid.
 
         is_log = name in {"SPLIT_N", "TILE_M", "TILE_N", "num_warps"}
@@ -713,7 +713,7 @@ def tune_bsr_dense_addmm(
     # The step function that increments a specified meta parameter:
     def step_meta_parameter(name, value, direction, meta, M=M, N=N, K=K, BM=BM, BK=BK):
         # return next value in positive or negative direction, or
-        # input value if the step will result an invalid
+        # input value if the step will result in an invalid
         # value. The input value is assumed to be valid.
         is_log = name in {"SPLIT_N", "num_warps"}
         min_value = dict(SPLIT_N=1, num_warps=1, num_stages=1, GROUP_SIZE_ROW=1)[name]

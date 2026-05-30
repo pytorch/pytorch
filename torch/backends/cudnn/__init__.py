@@ -59,7 +59,7 @@ if _cudnn is not None:
                     return True
                 base_error_msg = (
                     f"cuDNN version incompatibility: "
-                    f"PyTorch was compiled  against {compile_version} "
+                    f"PyTorch was compiled against {compile_version} "
                     f"but found runtime version {runtime_version}. "
                     f"PyTorch already comes bundled with cuDNN. "
                     f"One option to resolving this error is to ensure PyTorch "

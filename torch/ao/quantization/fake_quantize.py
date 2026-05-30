@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-"""Implements modules  used to perform fake quantization."""
+"""Implements modules used to perform fake quantization."""
 
 import re
 from abc import ABC, abstractmethod
@@ -134,7 +134,7 @@ class FakeQuantize(FakeQuantizeBase):
             clamp(round(x / scale + zero_point), quant_min, quant_max) - zero_point
         ) * scale
 
-    * :attr:`is_dynamic` indicates whether the fake quantie is a placeholder for dynamic quantization
+    * :attr:`is_dynamic` indicates whether the fake quantize is a placeholder for dynamic quantization
       operators (choose_qparams -> q -> dq) or static quantization operators (q -> dq)
 
     * :attr:`scale` defines the scale factor used for quantization.
@@ -531,7 +531,7 @@ default_histogram_fake_quant = FakeQuantize.with_args(
     reduce_range=True,
 )
 """
-Fake_quant for activations using a histogram..
+Fake_quant for activations using a histogram.
 """
 
 

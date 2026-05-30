@@ -1622,7 +1622,7 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     # The original implementation 'beta * self + out' would return a strided tensor if `self` is strided.
     # We thus use `out`, the output of torch.mm, which is always contiguous, as the first argument for addition.
     # This is relying on TensorIterator's behavior that it takes higher precedence on the stride of first input.
-    # Alternative, we can write `(beta * self + out).contiguous()`, but it introduces another copy in some cases.
+    # Alternatively, we can write `(beta * self + out).contiguous()`, but it introduces another copy in some cases.
     # This implementation is not ideal, and we should revisit this when we have a better solution.
     return out + beta * self
 
@@ -4051,7 +4051,7 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 
 
 def select_one_layer_lstm_function(input, hx, params):
-    r"""Check whether we could use decompose lstm with mkldnn_rnn_layer.
+    r"""Check whether we could decompose lstm with mkldnn_rnn_layer.
     All the below conditions need to be met:
         * ``torch._C._get_mkldnn_enabled()`` returns ``True``.
         * All the input args are on CPU.

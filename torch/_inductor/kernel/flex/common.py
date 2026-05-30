@@ -50,7 +50,7 @@ SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
 
 
 def zeros_and_scatter_lowering(shape: list[int], indices, values):
-    """To support backwards on captured buffers we register a specific lowering for our specific custom up"""
+    """To support backwards on captured buffers we register a specific lowering for our specific custom op"""
     # Always accumulate into fp32 then cast
     grad = _full(0, values.get_device(), torch.float32, shape)
     assert isinstance(grad, TensorBox)

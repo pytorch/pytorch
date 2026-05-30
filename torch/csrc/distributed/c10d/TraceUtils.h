@@ -236,7 +236,7 @@ inline std::string retrieveDesyncReport(
       !thisCol.empty(),
       "Timeout rank [",
       myRank,
-      "] must have collective tracking iteam in c10::Store trace");
+      "] must have collective tracking item in c10::Store trace");
   TORCH_INTERNAL_ASSERT(
       traceMap[thisSeq][myRank].second == kEventStart,
       "Timeout rank [",

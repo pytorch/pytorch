@@ -217,7 +217,7 @@ def is_jump_absolute(target: Instruction) -> bool:
 def create_load_const(val: Any, checked: bool = True) -> Instruction:
     """
     In general we should only create `LOAD_CONST` for immutable objects, but
-    sometimes it's convenient _and safe_ for Dynamo create `LOAD_CONST` for
+    sometimes it's convenient _and safe_ for Dynamo to create `LOAD_CONST` for
     mutable objects. In such cases, use `checked=False`.
     """
     if checked:
@@ -582,7 +582,7 @@ def create_binary_slice(
     start: int | None, end: int | None, store: bool = False
 ) -> list[Instruction]:
     """
-    BINARY_SLICE and STORE_SLICE (if `set` is True) for all Python versions
+    BINARY_SLICE and STORE_SLICE (if `store` is True) for all Python versions
     """
     if sys.version_info >= (3, 14):
         subscr_inst = (
@@ -742,7 +742,7 @@ if sys.version_info >= (3, 11):
             def _update(delta: int, size: int) -> None:
                 if not (0 < size <= 8):
                     raise AssertionError(f"size must be in range (0, 8], got {size}")
-                # first byte - use 13 (no column info) is positions is
+                # first byte - use 13 (no column info) if positions is
                 # malformed, otherwise use 14 (long form)
                 other_varints: tuple[int, ...] = ()
                 if (

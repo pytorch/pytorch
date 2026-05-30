@@ -14,7 +14,7 @@ via test/dynamo_skips and test/dynamo_expected_failures.
 
 *These are not exactly unittest.expectedFailure and unittest.skip. We'll
 always execute the test and then suppress the signal, if necessary.
-If your tests crashes, or is slow, please use @skipIfTorchDynamo instead.
+If your test crashes, or is slow, please use @skipIfTorchDynamo instead.
 
 The expected failure and skip files are located in test/dynamo_skips and
 test/dynamo_expected_failures. They're individual files rather than a list so

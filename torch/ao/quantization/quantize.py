@@ -153,7 +153,7 @@ def _observer_forward_hook(self, input, output):
 
 
 def _observer_forward_pre_hook(self, input):
-    r"""Forward pre hook that calls observer on the output"""
+    r"""Forward pre hook that calls observer on the input"""
     return self.activation_post_process(input[0])
 
 

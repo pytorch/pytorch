@@ -1071,7 +1071,7 @@ def _get_im2col_indices_along_dim(
     kernel_grid = torch.arange(0, kernel_size_d * dilation_d, dilation_d)
     kernel_grid = g.op("Constant", value_t=kernel_grid.unsqueeze(0))
 
-    # Broadcast and add kernel staring positions (indices) with
+    # Broadcast and add kernel starting positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d
     blocks_d_indices = symbolic_helper._unsqueeze_helper(
         g, blocks_d_indices, [0]
@@ -1141,11 +1141,11 @@ def im2col(g: jit_utils.GraphContext, input, kernel_size, dilation, padding, str
     #     [4., 5., 6.]],
     #    [[4., 5., 6.],
     #     [7., 8., 9.]]]]]
-    # And then gather along cols (dim=4) with blocks_row_indices = [[0,1], [1,2]] to get:
+    # And then gather along cols (dim=4) with blocks_col_indices = [[0,1], [1,2]] to get:
     # [[[[[[1., 2.],
     #      [4., 5.]],
     #     [[2., 3.],
-    #      [5., 6]]],
+    #      [5., 6.]]],
     #    [[[4., 5.],
     #      [7., 8.]],
     #     [[5., 6.],

@@ -516,12 +516,12 @@ def xfailCUDAIfSM89OrLaterOnWindows(test_fn):
     return _xfail_cuda_on_windows_wrapper(test_fn) if IS_WINDOWS and SM89OrLater else test_fn
 
 
-# When using nvcc from the CUDA toolkit its versuib must be at least the one from ptxas bundled with Triton
+# When using nvcc from the CUDA toolkit its version must be at least the one from ptxas bundled with Triton
 TRITON_PTXAS_VERSION = (12, 8)
 requires_triton_ptxas_compat = unittest.skipIf(not torch.version.xpu
                                                and torch.version.hip is None
                                                and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
-                                               "Requires CUDA {}.{} to match Tritons ptxas version".format(*TRITON_PTXAS_VERSION))
+                                               "Requires CUDA {}.{} to match Triton's ptxas version".format(*TRITON_PTXAS_VERSION))
 
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:

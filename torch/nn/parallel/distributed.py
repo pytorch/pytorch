@@ -610,7 +610,7 @@ class DistributedDataParallel(Module, Joinable):
         DDP will work as expected when there are no unused parameters in the model
         and each layer is checkpointed at most once (make sure you are not passing
         `find_unused_parameters=True` to DDP). We currently do not support the
-        case where a layer is checkpointed multiple times, or when there unused
+        case where a layer is checkpointed multiple times, or when there are unused
         parameters in the checkpointed model.
 
     .. note::
@@ -1941,7 +1941,7 @@ class DistributedDataParallel(Module, Joinable):
             authoritative_rank = self._find_common_rank(self._distributed_rank, False)
             self._sync_module_buffers(authoritative_rank)
 
-    # When running in join model, agrees upon a common rank and broadcast model
+    # When running in join mode, agrees upon a common rank and broadcast model
     # parameters to all other ranks.
     def _sync_final_model(self, is_last_joiner):
         # Agree upon the process that will be the authoritative model copy.

@@ -243,9 +243,9 @@ class CPUOffload:
 
 class StateDictType(Enum):
     """
-    This enum indicates that which type of ``state_dict`` the FSDP module is
+    This enum indicates which type of ``state_dict`` the FSDP module is
     currently processing (returning or loading).
-    The default value is FULL_STATE_DICT to comply the PyTorch convention.
+    The default value is FULL_STATE_DICT to comply with the PyTorch convention.
 
     .. note::
         FSDP currently supports three types of ``state_dict``:

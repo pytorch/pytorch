@@ -69,7 +69,7 @@ AdamW.__doc__ = (
             &\hspace{13mm}      \lambda \text{(weight decay)},  \: \textit{amsgrad},
                 \: \textit{maximize}                                                             \\
             &\textbf{initialize} : m_0 \leftarrow 0 \text{ (first moment)}, v_0 \leftarrow 0
-                \text{ ( second moment)}, \: v_0^{max}\leftarrow 0                        \\[-1.ex]
+                \text{ (second moment)}, \: v_0^{max}\leftarrow 0                        \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
 
