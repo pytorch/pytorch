@@ -11,6 +11,7 @@ from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
+    _is_fake_tensor_same,
     count_flops_fx,
     countable_fx,
     FakeTensorUpdater,
@@ -378,6 +379,26 @@ class TestFP4Support(TestCase):
         self.assertTrue(t.is_cuda)
 
 
+class TestTritonTypeMapping(TestCase):
+    """Tests for acc_type() dtype conversions."""
+
+    def test_acc_type(self):
+        from torch._inductor.kernel.mm_common import acc_type
+
+        cases = {
+            "half promotes to float32": (torch.float16, "tl.float32"),
+            "bfloat16 promotes to float32": (torch.bfloat16, "tl.float32"),
+            "float32 passthrough": (torch.float32, "tl.float32"),
+            "fp8 e4m3fn promotes to float32": (torch.float8_e4m3fn, "tl.float32"),
+            "fp8 e5m2 promotes to float32": (torch.float8_e5m2, "tl.float32"),
+            "fp8 e4m3fnuz promotes to float32": (torch.float8_e4m3fnuz, "tl.float32"),
+            "fp8 e5m2fnuz promotes to float32": (torch.float8_e5m2fnuz, "tl.float32"),
+        }
+        for desc, (dtype, expected) in cases.items():
+            with self.subTest(desc=desc, dtype=dtype):
+                self.assertEqual(acc_type(dtype), expected)
+
+
 class TestFakeTensorUpdater(TestCase):
     @staticmethod
     def _get_faketensormode(
@@ -526,6 +547,14 @@ class TestFakeTensorUpdater(TestCase):
         # tensors.
         for m in mul_nodes:
             self.assertEqual(len(m.meta["val"].size()), 4)
+
+    def test_fake_tensor_same_recursion(self):
+        l = [1, 2, 3]
+        l.append(l)
+        m = [4, 5, 6, l]
+        # If recursion is broken, we'll get a recursion error here.
+        self.assertTrue(_is_fake_tensor_same(l, l, {}))
+        self.assertFalse(_is_fake_tensor_same(l, m, {}))
 
 
 if __name__ == "__main__":

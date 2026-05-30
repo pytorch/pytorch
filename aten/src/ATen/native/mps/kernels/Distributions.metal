@@ -1,4 +1,7 @@
+#include <c10/metal/atomic.h>
+#include <c10/metal/error.h>
 #include <c10/metal/random.h>
+#include <c10/metal/reduction_utils.h>
 #include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
@@ -280,6 +283,7 @@ kernel void bernoulli_tensor(
     device const float* probs [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
     constant uint& numel [[buffer(3)]],
+    device c10::metal::ErrorMessages* error_buf [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   uint base = tid * 4;
   uint4 raw =
@@ -288,6 +292,10 @@ kernel void bernoulli_tensor(
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
     float p = probs[base + i];
+    if (!(p >= 0.0f && p <= 1.0f)) {
+      TORCH_REPORT_ERROR(error_buf, "bernoulli_mps_ expects p to be in [0, 1]");
+      return;
+    }
     output[base + i] = c10::metal::cast_to<T>(u < p ? 1u : 0u);
   }
 }
@@ -302,6 +310,7 @@ kernel void bernoulli_tensor(
       device const float*,                                                     \
       constant long2&,                                                         \
       constant uint&,                                                          \
+      device c10::metal::ErrorMessages*,                                       \
       uint)
 
 REGISTER_BERNOULLI(float);
@@ -323,24 +332,20 @@ REGISTER_BERNOULLI(half2);
 // rejection loops without colliding with other threads' random streams.
 constant constexpr int GAMMA_RANDOMS_STRIDE = 32;
 
-template <typename T>
-kernel void standard_gamma(
-    device T* output [[buffer(0)]],
-    device const T* alpha_in [[buffer(1)]],
-    constant long2& seed_base_offset [[buffer(2)]],
-    uint tid [[thread_position_in_grid]]) {
-  float alpha = static_cast<float>(alpha_in[tid]);
+static float gen_gamma(
+    float alpha,
+    constant long2& seed_base_offset,
+    uint32_t elem_idx) {
   float scale = 1.0f;
   long base =
-      seed_base_offset.y + static_cast<long>(tid) * GAMMA_RANDOMS_STRIDE;
+      seed_base_offset.y + static_cast<long>(elem_idx) * GAMMA_RANDOMS_STRIDE;
   long seed = seed_base_offset.x;
   int rng_idx = 0;
 
   // Boost alpha < 1 for higher acceptance probability
   if (alpha < 1.0f) {
     if (alpha == 0.0f) {
-      output[tid] = static_cast<T>(0.0f);
-      return;
+      return 0.0f;
     }
     float u = c10::metal::rand(seed, base + rng_idx++);
     scale = ::metal::precise::pow(1.0f - u, 1.0f / alpha);
@@ -361,16 +366,24 @@ kernel void standard_gamma(
     float xx = x * x;
     if (u < 1.0f - 0.0331f * xx * xx) {
       float result = scale * d * v;
-      output[tid] = static_cast<T>(max(result, FLT_MIN));
-      return;
+      return max(result, FLT_MIN);
     }
     if (::metal::precise::log(u) <
         0.5f * xx + d * (1.0f - v + ::metal::precise::log(v))) {
       float result = scale * d * v;
-      output[tid] = static_cast<T>(max(result, FLT_MIN));
-      return;
+      return max(result, FLT_MIN);
     }
   }
+}
+
+template <typename T>
+kernel void standard_gamma(
+    device T* output [[buffer(0)]],
+    device const T* alpha_in [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  float alpha = static_cast<float>(alpha_in[tid]);
+  output[tid] = static_cast<T>(gen_gamma(alpha, seed_base_offset, tid));
 }
 
 #define REGISTER_GAMMA(DTYPE)                      \
@@ -381,6 +394,57 @@ kernel void standard_gamma(
 REGISTER_GAMMA(float);
 REGISTER_GAMMA(half);
 REGISTER_GAMMA(bfloat);
+
+template <typename T>
+kernel void standard_dirichlet(
+    device T* output [[buffer(0)]],
+    device const T* alpha_in [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& num_alpha [[buffer(3)]],
+    uint tgid [[threadgroup_position_in_grid]],
+    uint lane [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]]) {
+  threadgroup float smem[1024];
+  uint32_t batch_offset = tgid * num_alpha;
+  float gamma_partial_sum = 0;
+
+  // Generate a gamma value for each output element
+  for (uint32_t alpha_idx = lane; alpha_idx < num_alpha; alpha_idx += tptg) {
+    uint32_t elem_idx = batch_offset + alpha_idx;
+    float alpha = static_cast<float>(alpha_in[elem_idx]);
+    float gamma_val = gen_gamma(alpha, seed_base_offset, elem_idx);
+    gamma_partial_sum += gamma_val;
+    output[elem_idx] = T(gamma_val);
+  }
+
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+
+  // Sum all the gamma values in each batch
+  auto gamma_sum = threadgroup_sum(smem, gamma_partial_sum, lane, tptg);
+
+  // Divide the gamma values by their sum
+  for (uint32_t alpha_idx = lane; alpha_idx < num_alpha; alpha_idx += tptg) {
+    uint32_t elem_idx = batch_offset + alpha_idx;
+    auto gamma_val = float(output[elem_idx]);
+    auto out_val = gamma_val / gamma_sum;
+    output[elem_idx] = T(::metal::clamp(out_val, FLT_MIN, 1.0f - eps));
+  }
+}
+
+#define REGISTER_DIRICHLET(DTYPE)                                  \
+  template [[host_name("standard_dirichlet_" #DTYPE)]] kernel void \
+  standard_dirichlet<DTYPE>(                                       \
+      device DTYPE*,                                               \
+      device const DTYPE*,                                         \
+      constant long2&,                                             \
+      constant uint&,                                              \
+      uint,                                                        \
+      uint,                                                        \
+      uint)
+
+REGISTER_DIRICHLET(float);
+REGISTER_DIRICHLET(half);
+REGISTER_DIRICHLET(bfloat);
 
 // Reparameterized gradient for Gamma distribution.
 // Computes -(d/dalpha cdf(x;alpha)) / pdf(x;alpha).
