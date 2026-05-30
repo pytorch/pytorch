@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     IS_S390X,
+    IS_ARM64,
     parametrize,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
@@ -538,9 +539,9 @@ class TestTensorCreation(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/155306
         msg = "expected a non-empty list of Tensors"
         with self.assertRaisesRegex(ValueError, msg):
-            torch.concat([], dim='N')
+            torch.concat([], dim=0)
         with self.assertRaisesRegex(ValueError, msg):
-            torch.concatenate([], dim='N')
+            torch.concatenate([], dim=0)
 
     def test_cat_out(self, device):
         x = torch.zeros((0), device=device)
@@ -1110,6 +1111,9 @@ class TestTensorCreation(TestCase):
         elif dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
             info = torch.iinfo(dtype)
             refs = (info.min, info.max, 0)
+        elif IS_ARM64:
+            # Unsigned casts intentionally keep their existing platform behavior.
+            refs = (0, torch.iinfo(dtype).max, 0)
         else:
             refs = (0, 0, 0)
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
