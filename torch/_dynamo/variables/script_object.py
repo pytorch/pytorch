@@ -59,7 +59,7 @@ from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
@@ -114,7 +114,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
     def nb_or_impl(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         other: "VariableTracker",
         reverse: bool = False,
     ) -> "VariableTracker":
@@ -134,9 +134,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value})"
 
-    def var_getattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         obj = None
         try:
             obj = inspect.getattr_static(self.value, name)
@@ -178,7 +176,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -235,7 +233,6 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
             fake_script_obj,
             (constant_args, constant_kwargs),
             ctor_arg_sources=ctor_arg_sources,
-            tx=tx,
         )
 
 
@@ -256,8 +253,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         value: Any,
         ctor_args_kwargs: Any = None,
         ctor_arg_sources: tuple[Source | None, ...] | None = None,
-        *,
-        tx: "InstructionTranslatorBase | None" = None,
         **options: Any,
     ) -> "TorchScriptObjectVariable":
         if isinstance(value, enum.Enum):
@@ -268,11 +263,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
         )
         if isinstance(proxy, torch.fx.Proxy) and proxy.node.op != "placeholder":
-            if tx is None:
-                raise AssertionError(
-                    "tx must be provided to TorchScriptObjectVariable.create "
-                    "when proxy is a real Proxy"
-                )
+            from torch._dynamo.symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
             tx.output.current_tracer.record_proxyable_vt(out)
         return out
 
@@ -337,7 +330,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     def richcompare_impl(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         other: "VariableTracker",
         op: str,
     ) -> "VariableTracker":
@@ -366,9 +359,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )
-    def var_getattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from torch._higher_order_ops.torchbind import call_torchbind
 
         from .higher_order_ops import TorchHigherOrderOperatorVariable
@@ -457,7 +448,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     def mp_subscript_impl(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         key: "VariableTracker",
     ) -> "VariableTracker":
         # Call call_method directly on this class to avoid the __getitem__ →
@@ -473,7 +464,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     )
     def call_method(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         name: str,
         args: Iterable[Any],
         kwargs: dict[str, Any],

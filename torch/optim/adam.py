@@ -415,7 +415,7 @@ def _single_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform step weight decay
+                # Perform stepweight decay
                 param.mul_(1 - lr * weight_decay)
             else:
                 # Nested if is necessary to bypass jitscript rules
@@ -687,7 +687,7 @@ def _multi_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform step weight decay
+                # Perform stepweight decay
                 torch._foreach_mul_(device_params, 1 - lr * weight_decay)
             else:
                 # Reuse the intermediate memory (device_grads) already allocated for maximize

@@ -3564,6 +3564,9 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
 
+# Needs dimname support
+make_fallback(aten.zeros.names)
+
 # 6) Pattern-matched
 make_fallback(
     aten._scaled_dot_product_efficient_attention.default,
@@ -3844,9 +3847,6 @@ def _unwrap(x):
 
 @register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
-    # Match eager/meta scalar_tensor behavior; NJT handles scalar broadcasting.
-    if layout == torch.jagged:
-        layout = torch.strided
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
@@ -4018,12 +4018,14 @@ def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(
         *size,
+        names=None,
         dtype=None,
         device=None,
         layout=None,
         pin_memory=False,
         memory_format=None,
     ):
+        assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
@@ -4050,12 +4052,14 @@ def tensor_constructor(fill_value):
 @register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
+    names=None,
     dtype=None,
     layout=None,
     device=None,
     pin_memory=None,
     memory_format=None,
 ):
+    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
@@ -6748,15 +6752,7 @@ def _make_reduction_inner(
         ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
     )
     if (
-        reduction_type
-        in (
-            "argmax",
-            "argmin",
-            "argmax_value",
-            "argmin_value",
-            "argmax_with_value",
-            "argmin_with_value",
-        )
+        reduction_type in ("argmax", "argmin")
         and len(reduced_sizes) > 1
         and supports_logical_index_argreduce
     ):
@@ -6783,7 +6779,7 @@ def _make_reduction_inner(
             new_index[idx] = var
         value = inner_loader(new_index)
 
-        # For argmax/argmin reductions, return tuple with logical linear index if needed
+        # For argmax/argmin, return tuple with logical linear index if needed
         if should_compute_logical_index:
             rindex = [sympy.expand(i) for i in reduction_index]
 
@@ -6843,25 +6839,6 @@ def make_reduction(
         ):  # Only realize if reduction isn't unrolled
             result.realize()
         return result
-
-    return inner
-
-
-def make_arg_with_value_reduction(
-    reduction_type: ReductionType,
-) -> Callable[..., Sequence[TensorBox]]:
-    def inner(x, axis=None, keepdims=False) -> Sequence[TensorBox]:
-        kwargs = _make_reduction_inner(
-            x,
-            axis=axis,
-            keepdims=keepdims,
-            dtype=None,
-            override_return_dtype=x.get_dtype(),
-            reduction_type=reduction_type,
-        )
-        return ir.ArgReduction.create(
-            reduction_type=reduction_type, input_node=x, **kwargs
-        )
 
     return inner
 
@@ -7433,27 +7410,6 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
-def _current_node_uses_all_tuple_outputs(indices: tuple[int, ...]) -> bool:
-    current_node = V.graph.current_node
-    if current_node is None:
-        return True
-
-    used_indices: OrderedSet[int] = OrderedSet()
-    for user in current_node.users:
-        if (
-            user.op == "call_function"
-            and user.target is operator.getitem
-            and len(user.args) >= 2
-            and isinstance(user.args[1], int)
-        ):
-            if len(user.users) > 0:
-                used_indices.add(user.args[1])
-        else:
-            return True
-
-    return all(index in used_indices for index in indices)
-
-
 @register_lowering(aten.any)
 def reduce_any(x, dim=None, keepdim=False):
     x = to_dtype(x, torch.bool)
@@ -7463,13 +7419,6 @@ def reduce_any(x, dim=None, keepdim=False):
 @register_lowering(aten.max, type_promotion_kind=None)
 def reduce_max(x, dim=None, keepdim=False):
     if dim is not None:
-        if is_triton(x) and x.get_dtype() != torch.bool:
-            if _current_node_uses_all_tuple_outputs((0, 1)):
-                return reduce_argmax_with_value(x, axis=dim, keepdims=keepdim)
-            return (
-                reduce_argmax_value(x, axis=dim, keepdims=keepdim),
-                reduce_argmax(x, axis=dim, keepdims=keepdim),
-            )
         return (
             reduce_amax(x, axis=dim, keepdims=keepdim),
             reduce_argmax(x, axis=dim, keepdims=keepdim),
@@ -7481,13 +7430,6 @@ def reduce_max(x, dim=None, keepdim=False):
 @register_lowering(aten.min, type_promotion_kind=None)
 def reduce_min(x, dim=None, keepdim=False):
     if dim is not None:
-        if is_triton(x) and x.get_dtype() != torch.bool:
-            if _current_node_uses_all_tuple_outputs((0, 1)):
-                return reduce_argmin_with_value(x, axis=dim, keepdims=keepdim)
-            return (
-                reduce_argmin_value(x, axis=dim, keepdims=keepdim),
-                reduce_argmin(x, axis=dim, keepdims=keepdim),
-            )
         return (
             reduce_amin(x, axis=dim, keepdims=keepdim),
             reduce_argmin(x, axis=dim, keepdims=keepdim),
@@ -7505,10 +7447,6 @@ reduce_argmax = register_lowering(aten.argmax)(
 reduce_argmin = register_lowering(aten.argmin)(
     make_reduction("argmin", override_return_dtype=torch.int64)
 )
-reduce_argmax_value = make_reduction("argmax_value")
-reduce_argmin_value = make_reduction("argmin_value")
-reduce_argmax_with_value = make_arg_with_value_reduction("argmax_with_value")
-reduce_argmin_with_value = make_arg_with_value_reduction("argmin_with_value")
 
 add = register_pointwise(
     aten.add,

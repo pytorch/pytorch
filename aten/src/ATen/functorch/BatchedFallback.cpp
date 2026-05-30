@@ -16,28 +16,26 @@
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/irange.h>
 
-#include <atomic>
-
 namespace at::functorch {
 
-static constinit std::atomic<bool> kVmapFallbackWarningEnabled{true};
+static bool kVmapFallbackWarningEnabled = true;
 
 bool isVmapFallbackWarningEnabled() {
-  return kVmapFallbackWarningEnabled.load(std::memory_order_relaxed);
+  return kVmapFallbackWarningEnabled;
 }
 
 void setVmapFallbackWarningEnabled(bool enabled) {
-  kVmapFallbackWarningEnabled.store(enabled, std::memory_order_relaxed);
+  kVmapFallbackWarningEnabled = enabled;
 }
 
-static constinit std::atomic<bool> kVmapFallbackEnabled{true};
+static bool kVmapFallbackEnabled = true;
 
 bool isVmapFallbackEnabled() {
-  return kVmapFallbackEnabled.load(std::memory_order_relaxed);
+  return kVmapFallbackEnabled;
 }
 
 void setVmapFallbackEnabled(bool enabled) {
-  kVmapFallbackEnabled.store(enabled, std::memory_order_relaxed);
+  kVmapFallbackEnabled = enabled;
 }
 
 // Given a linear index, return the actual index.
