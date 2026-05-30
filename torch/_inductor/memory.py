@@ -215,7 +215,7 @@ def compute_size_for_scheduler_buffer(
             return buf_size
 
     for sched_buf in name_to_buf.values():
-        # skip if sched_buf is already processed as an user of another SchedulerBuffer
+        # skip if sched_buf is already processed as a user of another SchedulerBuffer
         # whose layout is of the type MultiOutputLayout
         if sched_buf.get_name() not in sched_buf_to_size:
             _compute_and_update_buf_size(sched_buf)
