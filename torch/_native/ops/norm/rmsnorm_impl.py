@@ -12,6 +12,10 @@ from ... import cutedsl_utils as cu
 
 
 def _is_supported(input: torch.Tensor) -> bool:
+    if input.device.type != "cuda":
+        return False
+    if torch.version.hip is not None:
+        return False
     if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         return False
     major, _ = torch.cuda.get_device_capability(input.device)
