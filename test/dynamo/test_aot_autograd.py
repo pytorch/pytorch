@@ -1871,6 +1871,39 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             loss.backward()
         self.assertIsNotNone(x.grad)
 
+        captured_fw_graphs = []
+
+        def fw_compiler(gm, inputs):
+            captured_fw_graphs.append(gm)
+            return gm
+
+        from functorch.compile import aot_function, default_partition, nop
+
+        x = torch.randn(20, 16, requires_grad=True, device="cuda")
+        compiled_fn = aot_function(
+            fn,
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            partition_fn=default_partition,
+            dynamic=True,
+        )
+        loss = compiled_fn(x, splits_tensor, mask)
+        loss.backward()
+        self.assertEqual(len(captured_fw_graphs), 1)
+        output_node = next(
+            node for node in captured_fw_graphs[0].graph.nodes if node.op == "output"
+        )
+        outputs = output_node.args[0]
+        if not isinstance(outputs, (list, tuple)):
+            outputs = (outputs,)
+        self.assertFalse(
+            any(
+                isinstance(node, torch.fx.Node)
+                and isinstance(node.meta.get("val"), torch.SymBool)
+                for node in outputs
+            )
+        )
+
     def test_batched_matmul_inference_mode(self):
         # Regression test for torch.compile crash with batched matmul in inference_mode
         x = torch.randn(2, 4, 8)

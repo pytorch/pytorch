@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfNoCuteDSL,
     TestCase,
 )
 
@@ -44,6 +45,7 @@ class TestNativeDSLOps(TestCase):
 
     def setUp(self):
         """Clear all caches before each test to ensure test isolation."""
+        super().setUp()
         self._cache_functions_to_clear = [
             (
                 "torch._native.common_utils",
@@ -473,7 +475,6 @@ class TestNativeDSLOps(TestCase):
         """Test that DSL test helper decorators work"""
         from torch.testing._internal.common_utils import (
             skipIfDSLUnavailable,
-            skipIfNoCuteDSL,
             skipIfNoTritonDSL,
             skipUnlessDSLAvailable,
         )
@@ -564,6 +565,7 @@ class TestNativeDSLOps(TestCase):
 
 
 instantiate_parametrized_tests(TestNativeDSLOps)
+
 
 if __name__ == "__main__":
     run_tests()

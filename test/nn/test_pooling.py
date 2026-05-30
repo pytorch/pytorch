@@ -1,4 +1,5 @@
 # Owner(s): ["module: nn"]
+import contextlib
 import itertools
 import math
 import operator
@@ -27,6 +28,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyCPU,
     onlyCUDA,
+    onlyMPS,
     onlyNativeDeviceTypes,
     TEST_WITH_ROCM,
 )
@@ -655,9 +657,9 @@ class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool3d_errors(self, device):
         samples = torch.rand([0, 16, 3], device=device)
-        with self.assertRaisesRegex(ValueError, "kernel_size must greater than 0"):
+        with self.assertRaisesRegex(ValueError, "kernel_size must be greater than 0"):
             nn.FractionalMaxPool3d(0, output_size=[1, 1, 1], _random_samples=samples)
-        with self.assertRaisesRegex(ValueError, "kernel_size must greater than 0"):
+        with self.assertRaisesRegex(ValueError, "kernel_size must be greater than 0"):
             nn.FractionalMaxPool3d(
                 [0, 0, 0], output_size=[1, 1, 1], _random_samples=samples
             )
@@ -667,7 +669,7 @@ class TestPoolingNNDeviceType(NNTestCase):
                 kernel_size=9223372036854775803,
                 output_size=[1, 1, 1],
             )(samples)
-        with self.assertRaisesRegex(ValueError, "kernel_size must greater than 0"):
+        with self.assertRaisesRegex(ValueError, "kernel_size must be greater than 0"):
             nn.FractionalMaxPool3d(
                 kernel_size=-1,
                 output_size=[1, 1, 1],
@@ -676,7 +678,7 @@ class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     def test_MaxPool3d_errors(self, device):
         samples = torch.randn(1, 3, 10, 10, 10)
-        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
             nn.MaxPool3d(
                 kernel_size=9223372036854775803,
             )(samples)
@@ -914,7 +916,7 @@ torch.cuda.synchronize()
         ).to(device)
         inp = torch.randn(3, 15, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
             avgpool(inp)
 
     @onlyNativeDeviceTypes
@@ -1030,7 +1032,6 @@ torch.cuda.synchronize()
         c = out.size(1)
         self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
 
-    @expectedFailureMPS  # Runtime Error not raised for mps
     @expectedFailureMeta  # Runtime Error not raised for meta
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
@@ -1042,8 +1043,25 @@ torch.cuda.synchronize()
                 output_size = (2,) * numel
                 module = module_cls(output_size)
                 input = torch.randn((4,) * (numel + 1), device=device).to(dtype)
-                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                # MPS 2D supports int adaptive pool; 3D falls through.
+                if device.startswith("mps") and numel == 2:
+                    cm = contextlib.nullcontext()
+                else:
+                    cm = self.assertRaisesRegex(
+                        RuntimeError, r"not( currently)? implemented"
+                    )
+                with cm:
                     module(input)
+
+    # Max: verify against unfold+amax. (Avg int is implementation-defined.)
+    @onlyMPS
+    @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
+    def test_adaptive_max_pool2d_int_input_mps(self, device, dtype):
+        torch.manual_seed(0)
+        inp = torch.randint(0, 16, (3, 4, 4), dtype=dtype, device=device)
+        out = nn.AdaptiveMaxPool2d((2, 2))(inp)
+        expected = inp.unfold(-2, 2, 2).unfold(-2, 2, 2).amax(dim=(-2, -1))
+        self.assertEqual(out, expected)
 
     @expectedFailureMPS  # TODO: fixme
     @onlyNativeDeviceTypes
@@ -1794,7 +1812,6 @@ torch.cuda.synchronize()
         if adaptive:
             cls_name = f"AdaptiveMaxPool{num_dim}d"
         else:
-            # FIXME(#105716): Test fails when using f-string
             cls_name = f"MaxPool{num_dim}d"
         module_cls = getattr(nn, cls_name)
         module = module_cls(2, return_indices=True).to(device, dtype=dtype)
@@ -2094,7 +2111,6 @@ torch.cuda.synchronize()
             res2.backward(torch.randn_like(res2))
             self.assertTrue(math.isinf(res2.item()))
 
-    @expectedFailureMPS  # TODO: Fix me
     @onlyNativeDeviceTypes  # TODO: RuntimeError message different on XLA
     def test_pooling_zero_stride(self, device):
         for op in ("max", "avg"):

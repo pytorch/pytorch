@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
@@ -76,8 +77,8 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
 
 
   // Fill sortedOrigIndices with sequential indices
-  thrust::counting_iterator<int64_t> countIterI(0);
-  thrust::counting_iterator<int64_t> countIterO(0);
+  cccl_counting_iterator<int64_t> countIterI(0ll);
+  cccl_counting_iterator<int64_t> countIterO(0ll);
 
   thrust::copy(policy, countIterI, countIterI + nnz, origIndicesIter);
   thrust::copy(policy, countIterO, countIterO + nnz, uniqueOffsetsIter);

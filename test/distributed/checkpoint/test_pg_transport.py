@@ -415,6 +415,7 @@ class TestPrepareStateDict(TestCase):
 
 class TestPGTransportMocked(TestCase):
     def setUp(self):
+        super().setUp()
         self.device = torch.device("cpu")
         self.pg = MagicMock()
         self.timeout = timedelta(seconds=10)
@@ -573,6 +574,7 @@ class TestPGTransportMocked(TestCase):
 
 class TestPGTransportEdgeCases(TestCase):
     def setUp(self):
+        super().setUp()
         self.device = torch.device("cpu")
         self.pg = MagicMock()
         self.timeout = timedelta(seconds=10)

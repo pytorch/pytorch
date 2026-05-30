@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     run_tests,
     skipIfCrossRef,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -973,6 +974,89 @@ class inner_f(torch.nn.Module):
 ('call_function', 't_3', {'pp_stage': 0})""",
             )
 
+    def test_annotate_fn_anchors_nested_functional_call(self):
+        import torch.nn.functional as F
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        @fx_traceback.annotate_fn({"module_fqn": "loss"})
+        def compute_loss(pred, labels):
+            return F.cross_entropy(pred, labels)
+
+        def fwd(pred, labels):
+            return compute_loss(pred, labels)
+
+        gm = make_fx(fwd, record_stack_traces=True)(
+            torch.randn(4, 8), torch.randint(0, 8, (4,))
+        )
+        decomp_traces = [
+            n.meta.get("stack_trace") or ""
+            for n in gm.graph.nodes
+            if n.op == "call_function"
+            and any(p in n.name for p in ("log_softmax", "nll_loss"))
+        ]
+        self.assertTrue(decomp_traces)
+        for st in decomp_traces:
+            self.assertIn("compute_loss", st)
+
+    def test_annotate_fn_anchors_pure_tensor_ops(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        @fx_traceback.annotate_fn({"module_fqn": "decorated"})
+        def user_fn(x, y):
+            return (x * 2.0).sum() / y
+
+        def control_fn(x, y):
+            return (x * 2.0).sum() / y
+
+        x, y = torch.randn(4), torch.tensor(2.0)
+
+        gm = make_fx(lambda a, b: user_fn(a, b), record_stack_traces=True)(x, y)
+        anchored = [
+            n.meta.get("stack_trace") or ""
+            for n in gm.graph.nodes
+            if n.op == "call_function"
+            and "user_fn" in (n.meta.get("stack_trace") or "")
+        ]
+        self.assertGreaterEqual(len(anchored), 3)
+
+        gm_ctl = make_fx(lambda a, b: control_fn(a, b), record_stack_traces=True)(x, y)
+        anchored_ctl = [
+            n.meta.get("stack_trace") or ""
+            for n in gm_ctl.graph.nodes
+            if n.op == "call_function"
+            and "control_fn" in (n.meta.get("stack_trace") or "")
+        ]
+        self.assertEqual(len(anchored_ctl), 0)
+
+    def test_annotate_fn_nested_with_module_forward(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        class Inner(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4, bias=False)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        inner = Inner()
+
+        @fx_traceback.annotate_fn({"module_fqn": "outer"})
+        def outer_user_fn(x):
+            return inner(x)
+
+        gm = make_fx(lambda a: outer_user_fn(a), record_stack_traces=True)(
+            torch.randn(2, 4)
+        )
+
+        mm_node = next(
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target.__name__ == "mm.default"
+        )
+        self.assertIn("stack_trace", mm_node.meta)
+        self.assertGreater(len(mm_node.meta["stack_trace"]), 0)
+
     @skipIfCrossRef
     def test_custom_op_stack_trace(self):
         @torch.library.custom_op("my_lib::foo", mutates_args={})
@@ -1092,6 +1176,7 @@ class inner_f(torch.nn.Module):
                 )
         self.assertEqual(joint._aot_state.fw_metadata.static_input_indices, [0, 1])
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182599")
     def test_no_annotation_on_gradient_acc_nodes(self):
         """Test basic linear module with aot_export_joint_with_descriptors"""
 

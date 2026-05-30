@@ -75,6 +75,11 @@ class ContextWrappingVariable(VariableTracker):
         self.target_values = target_values
         self.initial_values = initial_values
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         if hasattr(self, "_call_func"):
             self._call_func(tx, self.target_values)
@@ -121,7 +126,7 @@ class ContextWrappingVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) != 1:
@@ -570,7 +575,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     @staticmethod
     def create(
         tx: "InstructionTranslator",
-        target_values: Sequence[VariableTracker],
+        target_values: list[VariableTracker],
         **kwargs: Any,
     ) -> "VmapIncrementNestingCtxManagerVariable":
         var = VmapIncrementNestingCtxManagerVariable(
@@ -659,7 +664,7 @@ class GradModeVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self._call_func(tx, self.initial_values)  # undo eager initialization
@@ -854,6 +859,34 @@ class AcceleratorDeviceIndexVariable(GenericDeviceVariable):
 
     def python_type(self) -> type:
         return torch.accelerator.device_index
+
+
+_device_context_manager_map: dict[type, type[GenericDeviceVariable]] = {
+    torch.cuda.device: CUDADeviceVariable,
+    torch.xpu.device: XPUDeviceVariable,
+    torch.accelerator.device_index: AcceleratorDeviceIndexVariable,
+}
+
+
+def register_device_context_manager(
+    device_context: type, variable_cls: type[GenericDeviceVariable]
+) -> None:
+    """Register a Dynamo variable class for a device context manager type.
+
+    Raises ``ValueError`` if ``device_context`` is already registered.
+    """
+    if device_context in _device_context_manager_map:
+        raise ValueError(
+            f"Device context {device_context} already has a registered context manager"
+        )
+    _device_context_manager_map[device_context] = variable_cls
+
+
+def get_device_context_manager(
+    device_context: type,
+) -> type[GenericDeviceVariable] | None:
+    """Return the Dynamo variable class for ``device_context``, or ``None`` if not registered."""
+    return _device_context_manager_map.get(device_context)
 
 
 class TorchFunctionDisableVariable(ContextWrappingVariable):
@@ -1169,7 +1202,7 @@ class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
     @staticmethod
     def create(
         func: Any,
-        record_args: Sequence[VariableTracker],
+        record_args: list[VariableTracker],
         record_kwargs: "dict[str, VariableTracker]",
         **kwargs: Any,
     ) -> "ProfilerRecordFunctionContextVariable":
@@ -1391,7 +1424,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # undo eager initialization
@@ -1701,13 +1734,18 @@ class WithEnterFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.ctx = ctx
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def python_type(self) -> type:
         return types.MethodType
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if args:
@@ -1748,6 +1786,11 @@ class WithExitFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def __init__(
         self,
         ctx: ContextWrappingVariable | GenericContextWrappingVariable,
@@ -1770,7 +1813,7 @@ class WithExitFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
+        args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if kwargs:
