@@ -9,7 +9,7 @@ struct TORCH_API resize__ViewMeta : public ViewMeta {
   FUNCTIONALIZATION_VIEWMETA_NAME(resize__ViewMeta)
   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
       bool /* reapply_views */,
-      const std::vector<int64_t>&);
+      std::vector<int64_t>);
 
   resize__ViewMeta(const SerializableTuple& tpl)
       : resize__ViewMeta(std::get<0>(tpl), std::get<1>(tpl)) {}
@@ -35,7 +35,7 @@ struct TORCH_API _unsafe_view_ViewMeta : public ViewMeta {
   FUNCTIONALIZATION_VIEWMETA_NAME(_unsafe_view_ViewMeta)
   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
       bool /* has_symbolic_inputs */,
-      const std::vector<c10::SymInt>&);
+      std::vector<c10::SymInt>);
 
   _unsafe_view_ViewMeta(const SerializableTuple& tpl)
       : _unsafe_view_ViewMeta(std::get<0>(tpl), std::get<1>(tpl)) {}
