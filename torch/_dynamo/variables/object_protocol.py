@@ -744,6 +744,12 @@ def generic_abs(
     )
 
 
+def vt_is_iterable(obj: VariableTracker) -> bool:
+    """Check if the object supports iteration (i.e. has tp_iter or sequence protocol)."""
+    T = maybe_get_python_type(obj)
+    return type_implements_tp_iter(T) or pysequence_check(T)
+
+
 def generic_getiter(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> "VariableTracker":
