@@ -142,7 +142,7 @@ namespace torch {
 
 static void processErrorMsgInplace(std::string& str) {
   // Translate Aten types to their respective pytorch ones
-  constexpr auto changes =
+  static constexpr auto changes =
       std::to_array<std::pair<std::string_view, std::string_view>>({
           {"SparseCUDAByteType", "torch.cuda.sparse.ByteTensor"},
           {"SparseCUDACharType", "torch.cuda.sparse.CharTensor"},

@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <algorithm>
 #include <cstdint>
+#include <initializer_list>
 #include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -2135,14 +2136,14 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
-  const static auto special_case_ops = std::to_array<c10::Symbol>(
-      {fromQualString("prim::TypeCheck"),
-       fromQualString("prim::IfThenElse"),
-       fromQualString("static_runtime::select_tensor"),
-       fromQualString("static_runtime::VarTupleUnpack"),
-       fromQualString("static_runtime::dict_unpack"),
-       fromQualString("static_runtime::fused_split_and_squeeze"),
-       fromQualString("static_runtime::create_owned_ref")});
+  const static auto special_case_ops = {
+      fromQualString("prim::TypeCheck"),
+      fromQualString("prim::IfThenElse"),
+      fromQualString("static_runtime::select_tensor"),
+      fromQualString("static_runtime::VarTupleUnpack"),
+      fromQualString("static_runtime::dict_unpack"),
+      fromQualString("static_runtime::fused_split_and_squeeze"),
+      fromQualString("static_runtime::create_owned_ref")};
   if (!force_check &&
       std::find(
           begin(special_case_ops), end(special_case_ops), node()->kind()) !=
