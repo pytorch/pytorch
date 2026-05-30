@@ -119,7 +119,7 @@ def _torchscript_schema_to_signature_impl(
         if name == "from":
             if kind != Parameter.POSITIONAL_OR_KEYWORD:
                 raise AssertionError(f"Expected POSITIONAL_OR_KEYWORD, got {kind}")
-            # ParameterKind type is internal implementation detail to inspec package
+            # ParameterKind type is internal implementation detail to inspect package
             # which makes it hard to do type annotation
             kind = Parameter.POSITIONAL_ONLY  # type: ignore[assignment]
             # This renders all previous arguments to positional only
