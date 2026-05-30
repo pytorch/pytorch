@@ -215,7 +215,7 @@ def write_view_information_to_args(
         def use_alias():
             kwargs[f"{prefix}_alias"] = True
 
-        # The start if the function
+        # The start of the function
         if tensor is None:
             kwargs[f"{prefix}_base_index"] = None
         else:

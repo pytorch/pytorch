@@ -124,7 +124,7 @@ def can_pad(
     if not check_dtype(mat1, mat2):
         return False
 
-    # For padding to be vaible each tensor should have at least one static dim.
+    # For padding to be viable each tensor should have at least one static dim.
     tensors = [t for t in (mat1, mat2, input) if t is not None]
     if not all(has_one_static_dim(t) for t in tensors):
         return False

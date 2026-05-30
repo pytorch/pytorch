@@ -38,7 +38,7 @@ _R = TypeVar("_R")
 # work with it. One day we might decide to change this, but until then,
 # we need to give the illusion that autograd.Function runs before those things.
 #
-# We do this by using creating a custom HigherOrderOperator that only functorch
+# We do this by creating a custom HigherOrderOperator that only functorch
 # dispatches specially.
 class CustomFunctionHigherOrderOperator(HigherOrderOperator):
     def __init__(self) -> None:

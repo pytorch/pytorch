@@ -437,7 +437,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       }
     } else {
       // Gradient is undefined. When find_unused_parameters=True, ensure it is
-      // not marked as locally used, otherwise we will be allreducing zero's
+      // not marked as locally used, otherwise we will be allreducing zeros
       // instead of not touching .grad field of parameter.
       if (this->dynamic_graph_find_unused() ||
           this->static_graph_first_iteration()) {
@@ -617,7 +617,7 @@ void Reducer::delay_all_reduce() {
   // To avoid confusion around why static graph is picking up
   // some parameters as unused on a rank vs not, we log
   // unused parameter names for each rank for better
-  // debugability when TORCH_DISTRIBUTED_DEBUG is set to
+  // debuggability when TORCH_DISTRIBUTED_DEBUG is set to
   // INFO or DETAIL
   if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     // construct one string to output
@@ -1466,7 +1466,7 @@ void Reducer::reset_bucket_counting() {
 
 // Traverse the autograd graph starting at the specified output.
 // All parameters for which we have a pointer to their gradient accumulation
-// functions, but don't show up in the autograd graph will be marked ready for
+// functions, but don't show up in the autograd graph will be marked ready
 // for reduction as soon as the first autograd hook is called. This is not
 // done immediately because the model output may be ignored, and we only
 // want to start performing reductions on `torch.autograd.backward()`.

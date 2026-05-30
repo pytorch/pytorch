@@ -528,7 +528,7 @@ def _decompose_scatter_mutating(
 
 
 # View ops whose view_scatter op is lowered into mutations anyway,
-# so is never a pessimisation to decompose.
+# so is never a pessimization to decompose.
 _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
     [
         aten.as_strided.default,

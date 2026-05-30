@@ -71,7 +71,7 @@ trivial_ops = {
 
 class _CommModeModuleTracker(ModTracker):
     """
-    Inherits ModuleTracker and expands on its functionality to track the
+    Inherits from ModuleTracker and expands on its functionality to track the
     parameters and sharding information of a model at a module-level
     """
 

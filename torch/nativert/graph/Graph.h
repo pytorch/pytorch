@@ -411,7 +411,7 @@ class Graph {
 
   // Create a node without inserting it into the execution graph.
   // A raw pointer to the node is created when `createNode()` on the
-  // owner Graph object is called. It is guranateed that to be valid
+  // owner Graph object is called. It is guaranteed that to be valid
   // until the Graph object is destructed.
   Node* createNode(
       std::string target,

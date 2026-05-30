@@ -17,7 +17,7 @@ namespace c10d::symmetric_memory {
 // identical-sized memory via SymmetricMemoryAllocator::alloc(), then invokes
 // SymmetricMemoryAllocator::rendezvous() on the memory to establish the
 // association across peer buffers. The rendezvous is a one-time process, and
-// the mapping between a local memory memory and the associated SymmetricMemory
+// the mapping between a local memory and the associated SymmetricMemory
 // object is unique.
 //
 // NOTE [symmetric memory signal pad]

@@ -111,7 +111,7 @@ def _generate_parameter_and_buffer_placements(
     parallel_strategies: dict[str, ParallelStyle],
 ) -> dict[str, Placement]:
     """
-    Build parameter placements based on the give parallel style of linear layers.
+    Build parameter placements based on the given parallel style of linear layers.
     """
     parameter_placements: dict[str, Placement] = {}
     for linear_fqn, parallel_style in parallel_strategies.items():

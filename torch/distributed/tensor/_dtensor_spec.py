@@ -114,7 +114,7 @@ class DTensorSpec:
         if self.use_strided_shard_as_shard_order:
             if self.shard_order is not None:
                 raise ValueError(
-                    "DTensorSpec doesn't allow specify shard_order when "
+                    "DTensorSpec doesn't allow specifying shard_order when "
                     "use_strided_shard_as_shard_order is True. This may result "
                     "in conflicting shard order."
                 )

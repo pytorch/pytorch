@@ -333,7 +333,7 @@ class CondAutogradOp(torch.autograd.Function):
             operands,
         )
         # We snapshot the dispatch keys in forward for materializing the
-        # the bw_graph in backward.
+        # bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         save_values_for_backward(ctx, operands)

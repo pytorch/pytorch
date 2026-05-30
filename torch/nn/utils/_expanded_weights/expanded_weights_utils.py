@@ -158,7 +158,7 @@ def unpack_expanded_weight_or_tensor(maybe_expanded_weight, func=lambda x: x):
     elif isinstance(maybe_expanded_weight, torch.Tensor):
         raise RuntimeError(
             "ExpandedWeights currently does not support a mixture of ExpandedWeight parameters "
-            "and normal Parameters. Please file and issue with pytorch/pytorch"
+            "and normal Parameters. Please file an issue with pytorch/pytorch"
         )
 
 

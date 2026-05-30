@@ -56,6 +56,6 @@ def _validate_sdpa_input(
         )
     if query.dim() < 2 or key.dim() < 2 or value.dim() < 2:
         raise ValueError(
-            f"Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: "
+            f"Expected query, key, and value to all be at least 2 dimensional, but got query.dim: "
             f"{query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead."
         )
