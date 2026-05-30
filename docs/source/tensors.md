@@ -561,6 +561,7 @@ view of a storage and defines numeric operations on it.
     Tensor.nextafter
     Tensor.nextafter_
     Tensor.nonzero
+    Tensor.nonzero_static
     Tensor.norm
     Tensor.normal_
     Tensor.numel
