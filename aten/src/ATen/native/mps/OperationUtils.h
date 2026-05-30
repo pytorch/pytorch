@@ -137,7 +137,7 @@ Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device);
 // randperm: for random keys the unsorted high bits are irrelevant, so fewer
 // passes give a uniform permutation more cheaply. Index dtype is int16 for
 // numel <= 65536, else int32; callers cast as needed.
-Tensor randperm_argsort_lowbits_metal(const Tensor& keys, int n_passes);
+Tensor randperm_argsort_lowbits_metal(const Tensor& keys, int n_passes, Tensor& sorted_keys);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph* mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, MPSDataType toType);

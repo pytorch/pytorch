@@ -291,6 +291,63 @@ kernel void randperm_small(
 REGISTER_RANDPERM(int);
 REGISTER_RANDPERM(long);
 
+// Removes the tie-bias left by the large-n "sort random keys" path. The radix
+// sort groups equal-key elements into contiguous "islands" whose internal order
+// is arbitrary; an exact Fisher-Yates shuffle within each island makes the full
+// permutation uniform over all n! (the across-island order already is, since
+// the distinct keys are uniform random). Mirrors CUDA's
+// randperm_handle_duplicate_keys. One thread per element; only island-start
+// threads do work, so cost scales with the (small) number of collisions, not n.
+template <typename T>
+kernel void randperm_dedup_islands(
+    device T* data [[buffer(0)]],
+    device const int* keys [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    constant uint& n [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  if (tid + 1 >= n) {
+    return;
+  }
+  const int k = keys[tid];
+  if (keys[tid + 1] != k) {
+    return; // not in an island
+  }
+  if (tid != 0 && keys[tid - 1] == k) {
+    return; // not the start of an island
+  }
+  uint island = 1;
+  while (tid + island < n && keys[tid + island] == k) {
+    island++;
+  }
+  // Distinct, non-overlapping Philox stream per island: a thread at `tid`
+  // consumes ceil((island-1)/4) < island indices starting at base_offset + tid,
+  // and the next island starts at least `island` positions later.
+  const long seed = seed_base_offset.x;
+  long offset = seed_base_offset.y + tid;
+  uint4 raw = uint4(0);
+  uint raw_idx = 4;
+  for (uint i = island - 1; i > 0; --i) {
+    if (raw_idx == 4) {
+      raw = c10::metal::philox4::rand(seed, offset++);
+      raw_idx = 0;
+    }
+    uint j = raw[raw_idx++] % (i + 1);
+    if (i != j) {
+      T tmp = data[tid + i];
+      data[tid + i] = data[tid + j];
+      data[tid + j] = tmp;
+    }
+  }
+}
+
+#define REGISTER_RANDPERM_DEDUP(DTYPE)                                 \
+  template [[host_name("randperm_dedup_islands_" #DTYPE)]] kernel void \
+  randperm_dedup_islands<DTYPE>(                                       \
+      device DTYPE*, device const int*, constant long2&, constant uint&, uint)
+
+REGISTER_RANDPERM_DEDUP(int);
+REGISTER_RANDPERM_DEDUP(long);
+
 #define REGISTER_EXPONENTIAL(DTYPE)                         \
   template [[host_name("exponential_" #DTYPE)]] kernel void \
   exponential<DTYPE>(                                       \

@@ -440,13 +440,15 @@ void kthvalue_out_mps_impl(const Tensor& self, int64_t k, int64_t dim, Tensor& v
 
 // sort
 namespace mps {
-Tensor randperm_argsort_lowbits_metal(const Tensor& keys, int n_passes) {
+Tensor randperm_argsort_lowbits_metal(const Tensor& keys, int n_passes, Tensor& sorted_keys) {
   const int sort_size = static_cast<int>(keys.numel());
-  Tensor values_scratch = at::empty_like(keys);
+  // `sorted_keys` (keys reordered by the sort) lets the caller find equal-key
+  // islands for the dedup pass that restores exact uniformity.
+  sorted_keys = at::empty_like(keys);
   // sort_radix always writes int64 permutation indices via its final scatter;
   // any narrower index width is internal staging chosen by sort_radix itself.
   Tensor indices = at::empty({sort_size}, at::TensorOptions().dtype(at::kLong).device(keys.device()));
-  sort_radix(keys, values_scratch, indices, /*dim=*/0, /*descending=*/false, sort_size, /*max_passes=*/n_passes);
+  sort_radix(keys, sorted_keys, indices, /*dim=*/0, /*descending=*/false, sort_size, /*max_passes=*/n_passes);
   return indices;
 }
 } // namespace mps

@@ -454,21 +454,46 @@ Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& 
     return result;
   }
 
-  // Very-large-n path: argsorting random keys is dominated by the radix sort,
-  // and a permutation of [0, n) doesn't need a *full* sort - sorting random
-  // keys by only their low bits already yields a uniform permutation. We
-  // generate 24-bit integer keys and run a 3-pass (low-24-bit) radix instead of
-  // the 4 passes a full 32-bit key sort needs, cutting sort cost ~25% with the
-  // same collision profile as the previous float32 keys (~6% of elements tie at
-  // n = 1M either way). Only worthwhile once the sort is firmly in the radix
-  // regime; smaller n keeps the plain argsort path, which already wins there.
+  // Large-n path: sort random integer keys, take the argsort permutation, then
+  // de-bias. A permutation of [0, n) doesn't need a *full* sort - sorting random
+  // keys by only their low bits already orders the distinct keys uniformly; an
+  // exact Fisher-Yates shuffle of each equal-key island (randperm_dedup_islands)
+  // removes the residual tie-bias so the result is uniform over all n!, matching
+  // CPU and CUDA. 24-bit keys keep the sort at 3 radix passes (vs 4 for full
+  // 32-bit keys); the islands they leave (~6% of elements at n = 1M) are cheap
+  // to dedup. Mirrors CUDA's radix_sort_pairs + randperm_handle_duplicate_keys.
   constexpr int64_t kRandpermRadixThreshold = 1 << 15;
   constexpr int kRandpermKeyBits = 24;
   constexpr int kRandpermRadixPasses = 3; // ceil(kRandpermKeyBits / 8-bit radix)
   if (n >= kRandpermRadixThreshold) {
     Tensor keys = at::empty({n}, result.options().dtype(kInt));
     keys.random_(0, int64_t(1) << kRandpermKeyBits, generator);
-    Tensor perm = randperm_argsort_lowbits_metal(keys, kRandpermRadixPasses);
+    Tensor sorted_keys;
+    Tensor perm = randperm_argsort_lowbits_metal(keys, kRandpermRadixPasses, sorted_keys);
+
+    auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(generator, at::mps::detail::getDefaultMPSGenerator());
+    auto stream = getCurrentMPSStream();
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("randperm_dedup_islands_" + scalarToMetalTypeString(perm));
+      int64_t seed;
+      int64_t base_offset;
+      {
+        std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+        seed = static_cast<int64_t>(mps_gen->current_seed());
+        base_offset = static_cast<int64_t>(mps_gen->get_offset());
+        mps_gen->set_offset(base_offset + n);
+      }
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          auto computeEncoder = stream->commandEncoder();
+          [computeEncoder setComputePipelineState:pso];
+          uint32_t numel = static_cast<uint32_t>(n);
+          mtl_setArgs(computeEncoder, perm, sorted_keys, std::array<long, 2>{seed, base_offset});
+          mtl_setBytes(computeEncoder, numel, 3);
+          mtl_dispatch1DJob(computeEncoder, pso, numel);
+        }
+      });
+    }
     result.copy_(perm);
     return result;
   }
