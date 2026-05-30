@@ -25,6 +25,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
 )
@@ -33,8 +34,12 @@ from torch.testing._internal.common_quantized import (
     ceil_div,
     to_blocked,
 )
-from torch.testing._internal.inductor_utils import _quantize_tensorwise
+from torch.testing._internal.inductor_utils import (
+    _quantize_blockwise,
+    _quantize_tensorwise,
+)
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.utils._triton import has_triton_tma_device
 
 
 class GemmEpilogueFusionTests(TestCase):
@@ -1239,6 +1244,64 @@ class GemmEpilogueFusionTests(TestCase):
         FileCheck().check("triton_tem_fused__scaled_mm").check("maximum").check_not(
             "extern_kernels._scaled_mm"
         ).run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_scaled_mm_blockwise_epilogue_fuses(self):
+        if not PLATFORM_SUPPORTS_FP8:
+            self.skipTest("FP8 is not supported")
+        if not has_triton_tma_device():
+            self.skipTest("Need device-side TMA support in Triton")
+        if _get_torch_cuda_version() < (12, 9):
+            self.skipTest("cuBLAS blockwise scaling added in CUDA 12.9")
+        if torch.cuda.get_device_capability() != (9, 0):
+            self.skipTest("cuBLAS 128-element blockwise scaling is SM90-only")
+
+        def fn(a, b, scale_a, scale_b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"out_dtype": torch.bfloat16},
+            )
+
+        m, k, n = 128, 256, 128
+        x = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        w = torch.randn(n, k, device="cuda", dtype=torch.bfloat16)
+        a, scale_a = _quantize_blockwise(
+            x, torch.float8_e4m3fn, block_outer=1, block_inner=128
+        )
+        w_fp8, scale_b = _quantize_blockwise(
+            w, torch.float8_e4m3fn, block_outer=128, block_inner=128
+        )
+        b = w_fp8.t()
+        scale_b = scale_b.t()
+
+        with inductor_config.patch(
+            {
+                "triton.enable_persistent_tma_matmul": True,
+                "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune": True,
+            }
+        ):
+            actual, (code,) = run_and_get_code(
+                torch.compile(
+                    fn, backend="inductor", fullgraph=True, mode="max-autotune"
+                ),
+                a,
+                b,
+                scale_a,
+                scale_b,
+            )
+
+        torch.testing.assert_close(
+            actual, fn(a, b, scale_a, scale_b), atol=0.05, rtol=1e-2
+        )
+        FileCheck().check("triton_scaled_mm_device_tma").check(
+            f"SCALE_RECIPE_A : tl.constexpr = {F.ScalingType.BlockWise1x128.value}"
+        ).check(
+            f"SCALE_RECIPE_B : tl.constexpr = {F.ScalingType.BlockWise128x128.value}"
+        ).check_not("extern_kernels._scaled_mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_scaled_mm_v2_epilogue_applies_row_scale(self):
