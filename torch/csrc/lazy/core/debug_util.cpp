@@ -114,8 +114,8 @@ std::string DebugUtil::GetTensorsGraphInfo(
     }
   }
   std::stringstream ss;
-  // Call into a function pointer that may backed by python or empty depending
-  // on runtime
+  // Call into a function pointer that may be backed by python or empty
+  // depending on runtime
   std::vector<SourceLocation> frames = GetPythonFramesFunction()();
   ss << "Python Stacktrace:\n";
   for (auto& location : frames) {

@@ -279,7 +279,7 @@ void ProcessGroupMPI::initMPIOnce() {
 
 c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
     std::vector<int> ranks) {
-  // Once initialization
+  // One-time initialization
   initMPIOnce();
 
   MPI_Comm groupComm = MPI_COMM_WORLD;
