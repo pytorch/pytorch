@@ -1557,7 +1557,7 @@ def insert_observers_for_model(
     )
 
     # Step 3, check if the requested target_dtype_info is supported by backend or not
-    # if not, we'll reset the target_dtye_info to use the default (float Tensor)
+    # if not, we'll reset the target_dtype_info to use the default (float Tensor)
 
     # reset the counters and set of processed_nodes
     processed_nodes: set[Node] = set()

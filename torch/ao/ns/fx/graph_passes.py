@@ -389,7 +389,7 @@ def _insert_dtype_cast_after_node(
                 results.append(new_dtype_cast_node)
         return results
     else:
-        raise AssertionError(f"type f{type(prev_node_c)} is not handled")
+        raise AssertionError(f"type {type(prev_node_c)} is not handled")
 
 
 # TODO(future PR): look into using copy_node API instead

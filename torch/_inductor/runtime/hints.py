@@ -148,7 +148,7 @@ class AutotuneHint(Enum):
     ONE_ELEMENT_PER_THREAD = 0
 
     # Triton codegen tries to codegen set of AutotuneHints.
-    # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
+    # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>"
     # which isn't valid python.
     # Enum.__str__ will just return "AutotuneHint.ELEMENTS_PER_WARP_32".
     __repr__ = Enum.__str__

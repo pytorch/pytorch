@@ -234,7 +234,7 @@ def data_parallel(
         module (Module): the module to evaluate in parallel
         inputs (Tensor): inputs to the module
         device_ids (list of int or torch.device): GPU ids on which to replicate module
-        output_device (list of int or torch.device): GPU location of the output  Use -1 to indicate the CPU.
+        output_device (list of int or torch.device): GPU location of the output. Use -1 to indicate the CPU.
             (default: device_ids[0])
     Returns:
         a Tensor containing the result of module(input) located on

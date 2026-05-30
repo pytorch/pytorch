@@ -178,7 +178,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
 
     _validate_device_maps(all_names, all_device_counts, all_device_maps, all_devices)
 
-    # passed all checked, construct reverse mapping and get list of devices handled by this agent
+    # passed all checks, construct reverse mapping and get list of devices handled by this agent
     reverse_device_maps = _create_reverse_mapping(my_name, all_names, all_device_maps)
     my_devices = _create_device_list(my_devices, my_device_maps, reverse_device_maps)
     return reverse_device_maps, my_devices

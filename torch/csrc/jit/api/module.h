@@ -376,7 +376,7 @@ two specializations will use static fusions, the following two specializations w
 dynamic fusion, and any inputs that satisfy none of the 4 options will run an
 unfused implementation.
 
-NB: in the future, if more as more fusion backends are added there may be more granular
+NB: in the future, as more fusion backends are added there may be more granular
 apis for specific fusers.
 */
 // clang-format on

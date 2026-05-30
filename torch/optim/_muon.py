@@ -231,7 +231,7 @@ Muon.__doc__ = (
             &\hspace{5mm} \theta_t \leftarrow \theta_t - \gamma\, O_t \\
             &\rule{110mm}{0.4pt} \\[-1.ex]
             &\mathbf{return}\ \theta_t \\[-1.ex]
-            &\rule{110mm}{0.4pt}s
+            &\rule{110mm}{0.4pt}
        \end{aligned}
 
     Here, :math:`\mathrm{NS}^{(a,b,c)}_{k}(\cdot;\varepsilon)` denotes :math:`k` iterations of the

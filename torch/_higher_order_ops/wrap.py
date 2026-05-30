@@ -42,7 +42,7 @@ class Wrap(HigherOrderOperator):
     def __call__(
         self, func: Callable[_P, _R], *args: _P.args, **kwargs: _P.kwargs
     ) -> _R:
-        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # Dynamo already traces the body of HigherOrderOp beforehand,
         # so no need to trace into it.
         import torch._dynamo  # noqa: F401
         from torch._dynamo import disable
@@ -235,7 +235,7 @@ class WrapWithSetGradEnabled(HigherOrderOperator):
         *args: _P.args,
         **kwargs: _P.kwargs,
     ) -> _R:
-        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # Dynamo already traces the body of HigherOrderOp beforehand,
         # so no need to trace into it.
         import torch._dynamo
         from torch._dynamo import disable
@@ -268,7 +268,7 @@ class WrapWithAutocast(HigherOrderOperator):
         *args: _P.args,
         **kwargs: _P.kwargs,
     ) -> _R:
-        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # Dynamo already traces the body of HigherOrderOp beforehand,
         # so no need to trace into it.
         import torch._dynamo
         from torch._dynamo import disable
@@ -301,7 +301,7 @@ class DynamoBypassingWrapper(HigherOrderOperator):
         *args,
         **kwargs,
     ):
-        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # Dynamo already traces the body of HigherOrderOp beforehand,
         # so no need to trace into it.
         import torch._dynamo
         from torch._dynamo import disable

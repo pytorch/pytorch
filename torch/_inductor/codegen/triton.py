@@ -160,7 +160,7 @@ def get_triton_reduction_function(reduction_type):
 
 
 def is_sympy_integer_like(expr: object):
-    """ "
+    """
     Is this expression a Sympy Integer or is it an integer sympy Expr
     containing no free symbols. The latter case can happen with Identity expr.
     """
@@ -3452,7 +3452,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     return None
 
                 # Compute the ND block shape from the linear block size.
-                # Use CielDiv to round leading dimensions up to 1.
+                # Use CeilDiv to round leading dimensions up to 1.
                 # Non-leading dimensions are clamped to the size of the iteration range,
                 # while the leading dimension can exceed this to accommodate a larger
                 # block size.

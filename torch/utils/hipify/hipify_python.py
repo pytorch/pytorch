@@ -463,12 +463,12 @@ def find_closure_group(input_string, start, group):
 
 
 def find_bracket_group(input_string, start):
-    """Finds the first balanced parentheses."""
+    """Finds the first balanced brackets."""
     return find_closure_group(input_string, start, group=["{", "}"])
 
 
 def find_parentheses_group(input_string, start):
-    """Finds the first balanced bracket."""
+    """Finds the first balanced parentheses."""
     return find_closure_group(input_string, start, group=["(", ")"])
 
 
@@ -684,7 +684,7 @@ def is_caffe2_gpu_file(rel_filepath):
 
 
 class TrieNode:
-    """A Trie node whose children are represented as a directory of char: TrieNode.
+    """A Trie node whose children are represented as a dictionary of char: TrieNode.
        A special char '' represents end of word
     """
 

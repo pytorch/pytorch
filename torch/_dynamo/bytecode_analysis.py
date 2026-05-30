@@ -93,7 +93,7 @@ def remove_dead_code(instructions: list["Instruction"]) -> list["Instruction"]:
     # change exception table entries if start/end instructions are dead
     # assumes that exception table entries have been propagated,
     # e.g. with bytecode_transformation.propagate_inst_exn_table_entries,
-    # and that instructions with an exn_tab_entry lies within its start/end.
+    # and that instructions with an exn_tab_entry lie within its start/end.
     if sys.version_info >= (3, 11):
         live_idx = sorted(live_code)
         for i, inst in enumerate(instructions):

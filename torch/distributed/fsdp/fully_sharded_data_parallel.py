@@ -1245,7 +1245,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     @staticmethod
     def _warn_legacy_optim_state_dict(curr: str, new: str, *, stacklevel: int = 1):
         warnings.warn(
-            f"``FullyShardedDataParallel.{curr}``is being deprecated and is "
+            f"``FullyShardedDataParallel.{curr}`` is being deprecated and is "
             f"replaced by ``FullyShardedDataParallel.{new}``. "
             f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2.",
             FutureWarning,

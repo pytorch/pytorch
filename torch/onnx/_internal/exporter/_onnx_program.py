@@ -428,7 +428,9 @@ ONNXProgram(
         if (
             byte_size := _count_initializer_size(self.model.graph)
         ) > _LARGE_MODEL_THRESHOLD:
-            logger.debug("The model initializers is larger than 1.5GB (%s).", byte_size)
+            logger.debug(
+                "The model initializers are larger than 1.5GB (%s).", byte_size
+            )
             # Save the model to a temporary file if too large
             self._tempdir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
             model_path = os.path.join(self._tempdir.name, "model.onnx")

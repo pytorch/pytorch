@@ -104,7 +104,7 @@ def report_compile_source_on_error():
                     # get the augmented line/col numbers.  Objects/codeobject.c,
                     # specifically _PyCode_InitAddressRange, reveals that
                     # this iterator is initialized from co_linetable and
-                    # co_firstfileno.  So copy these we must!
+                    # co_firstlineno.  So copy these we must!
                     code = code.replace(  # type: ignore[call-arg]
                         co_linetable=frame.f_code.co_linetable,  # type: ignore[attr-defined]
                         co_firstlineno=frame.f_code.co_firstlineno,  # type: ignore[attr-defined]
