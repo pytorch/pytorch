@@ -2129,12 +2129,15 @@ test_operator_benchmark() {
 
 _log_opbench_rocm_scaled_mm_debug() {
   local op="$1"
+  # hipBLASLt reads HIPBLASLT_LOG_LEVEL at first use; level 5 = API trace + kernel params.
+  export HIPBLASLT_LOG_LEVEL="${HIPBLASLT_LOG_LEVEL:-5}"
   echo "=== OPBENCH_ROCM_DEBUG op=${op} ==="
   echo "BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT:-}"
   echo "HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-unset}"
   echo "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-unset}"
   echo "ROCM_PATH=${ROCM_PATH:-unset}"
   echo "MIOPEN_FIND_MODE=${MIOPEN_FIND_MODE:-unset}"
+  echo "HIPBLASLT_LOG_LEVEL=${HIPBLASLT_LOG_LEVEL}"
   rocminfo 2>/dev/null | grep -E 'Name:.*gfx|Marketing' || true
   ls -la /opt/rocm/lib/hipblaslt/library/ 2>/dev/null | head -20 || true
   ls -la /opt/rocm/lib/hipblaslt/library/gfx950/ 2>/dev/null | head -10 || true
@@ -2147,8 +2150,49 @@ from torch.nn.functional import ScalingType
 
 print("torch", torch.__version__, "hip", torch.version.hip)
 print("cuda_available", torch.cuda.is_available())
+
+# hipBLASLt gfx950 kernel selection uses PCI chip ID + CU count (SPX=256, CPX=64).
+_MI350_CHIP_ID = 0x75A0
+_SPX_CU = 256
+_CPX_CU = 64
+_HIP_ATTR_MULTIPROCESSOR_COUNT = 16
+_HIP_ATTR_PHYSICAL_MULTIPROCESSOR_COUNT = 10015
+_HIP_ATTR_PCI_CHIP_ID = 10020
+
+def _hip_device_attr(attr, device=0):
+    import ctypes
+    lib = ctypes.CDLL("libamdhip64.so")
+    out = ctypes.c_int()
+    err = lib.hipDeviceGetAttribute(ctypes.byref(out), attr, device)
+    if err != 0:
+        return None
+    return out.value
+
+def _log_hip_partition_debug():
+    mp = _hip_device_attr(_HIP_ATTR_MULTIPROCESSOR_COUNT)
+    phys_mp = _hip_device_attr(_HIP_ATTR_PHYSICAL_MULTIPROCESSOR_COUNT)
+    pci_chip = _hip_device_attr(_HIP_ATTR_PCI_CHIP_ID)
+    print("hip_multiprocessor_count", mp)
+    print("hip_physical_multiprocessor_count", phys_mp)
+    print("hip_pci_chip_id", f"0x{pci_chip:04x}" if pci_chip is not None else None)
+    if phys_mp == _SPX_CU:
+        cu_hint = "SPX_like"
+    elif phys_mp == _CPX_CU:
+        cu_hint = "CPX_like"
+    else:
+        cu_hint = "other"
+    print("hipblaslt_cu_partition_hint", cu_hint)
+    if pci_chip == _MI350_CHIP_ID:
+        print("hipblaslt_chip_hint", "MI350")
+    elif pci_chip is not None:
+        print("hipblaslt_chip_hint", f"unknown_pci_0x{pci_chip:04x}")
+
 if torch.cuda.is_available():
+    prop = torch.cuda.get_device_properties(0)
     print("device0", torch.cuda.get_device_name(0))
+    print("gcnArchName", prop.gcnArchName)
+    print("torch_multi_processor_count", prop.multi_processor_count)
+    _log_hip_partition_debug()
 lib = "/opt/rocm/lib/hipblaslt/library"
 for tag in ("gfx950", "gfx942"):
     hits = glob.glob(f"{lib}/**/*{tag}*", recursive=True)
@@ -2210,6 +2254,8 @@ test_operator_microbenchmark() {
   # Use FAST mode (heuristics only) to keep benchmark CI from timing out.
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MIOPEN_FIND_MODE=FAST
+    # Log hipBLASLt heuristic/kernel selection (see hipblaslt docs: HIPBLASLT_LOG_LEVEL).
+    export HIPBLASLT_LOG_LEVEL="${HIPBLASLT_LOG_LEVEL:-5}"
   fi
 
   # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
