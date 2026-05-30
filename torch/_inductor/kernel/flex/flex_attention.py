@@ -119,10 +119,11 @@ def flex_attention(
     mask_mod_other_buffers,
 ):
     """The main lowering for the flex_attention hop
-    This can currently lower to one of 3 templates:
+    This can currently lower to one of 4 templates:
     1. Base Triton Template
     2. Flex Decode Triton Template
     3. Cpu specific CPP template
+    4. MPS specific Metal template
     """
     if query.get_device().type == "cpu":
         return lower_cpu(
@@ -136,7 +137,21 @@ def flex_attention(
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
-    # below is cuda path if device is not cpu
+    if query.get_device().type == "mps":
+        from .flex_mps import lower_mps
+
+        return lower_mps(
+            query,
+            key,
+            value,
+            subgraph,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
+    # below is cuda path if device is not cpu or mps
     # tl.dot does not support embedding size less than 16
     small_dqk = V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-1], 16))
     small_dv = V.graph.sizevars.evaluate_expr(sympy.Lt(value.get_size()[-1], 16))
@@ -648,6 +663,11 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers,
         mask_mod_other_buffers,
     ) = args
+    if query.get_device().type == "mps":
+        raise NotImplementedError(
+            "flex_attention backward is not yet supported on MPS. "
+            "Use torch.no_grad() for inference."
+        )
     (
         _,  # q_length
         _,  # kv_length
