@@ -195,6 +195,44 @@ def meta__standard_gamma(self, generator=None):
     return torch.empty_like(self)
 
 
+@register_meta(
+    [
+        aten._transformer_encoder_layer_fwd.default,
+        aten._transformer_encoder_layer_fwd.out,
+    ]
+)
+@out_wrapper()
+def meta__transformer_encoder_layer_fwd(
+    src: Tensor,
+    embed_dim: int,
+    num_heads: int,
+    qkv_weight: Tensor,
+    qkv_bias: Tensor,
+    proj_weight: Tensor,
+    proj_bias: Tensor,
+    use_gelu: bool,
+    norm_first: bool,
+    eps: float,
+    norm_weight_1: Tensor,
+    norm_bias_1: Tensor,
+    norm_weight_2: Tensor,
+    norm_bias_2: Tensor,
+    ffn_weight_1: Tensor,
+    ffn_bias_1: Tensor,
+    ffn_weight_2: Tensor,
+    ffn_bias_2: Tensor,
+    mask: torch.Tensor | None = None,
+    mask_type: int | None = None,
+) -> Tensor:
+    if src.is_nested:
+        raise NotImplementedError(
+            "_transformer_encoder_layer_fwd fake implementation does not support nested tensors"
+        )
+    if src.numel() == 0:
+        return src.clone()
+    return torch.empty_like(src)
+
+
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
 @out_wrapper()
 def linalg_cross(self, other, *, dim=-1):
@@ -1560,7 +1598,7 @@ def lu_unpack_meta(
     sizes = list(LU.shape)
     m = sizes[-2]
     n = sizes[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
     sizes[-1] = m
     if unpack_pivots:
         P = LU.new_empty(sizes)
@@ -1610,7 +1648,7 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
 
     m = A.shape[-2]
     n = A.shape[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
 
     if compute_q:
         Q_shape = list(A.shape)
@@ -2149,7 +2187,15 @@ def _pad2d_common(input, padding, *, is_reflection):
     if input.ndim == 3:
         return input.new_empty((nplane, output_h, output_w))
     else:
-        return input.new_empty((nbatch, nplane, output_h, output_w))
+        output = input.new_empty((nbatch, nplane, output_h, output_w))
+        # CPU kernels preserve channels_last via suggest_memory_format(),
+        # but CUDA kernels always produce contiguous output.
+        if (
+            device_hint(input) != "cuda"
+            and utils.suggest_memory_format(input) == torch.channels_last
+        ):
+            output = output.to(memory_format=torch.channels_last)
+        return output
 
 
 @register_meta(aten.reflection_pad2d)
@@ -2585,6 +2631,30 @@ def calc_conv_nd_return_shape(
             output_padding_list = [output_padding[0]] * len(dims)
         else:
             output_padding_list = output_padding
+
+    # Validate kernel size fits within padded input (mirrors C++ check_shape_forward
+    # in aten/src/ATen/native/Convolution.cpp).
+    if not is_transposed:
+        from torch.fx.experimental.symbolic_shapes import sym_and
+
+        # pyrefly: ignore [bad-index, index-error]
+        padded_input = [dims[i] + 2 * padding[i] for i in range(len(dims))]
+        effective_kernel = [
+            # pyrefly: ignore [bad-index, index-error]
+            dilation[i] * (kernel_size[i] - 1) + 1
+            for i in range(len(dims))
+        ]
+        torch._check(
+            sym_and(
+                *[p >= k for p, k in zip(padded_input, effective_kernel, strict=True)]
+            ),
+            lambda: (
+                f"Calculated padded input size per channel: "
+                f"({' x '.join(str(x) for x in padded_input)}). "
+                f"Kernel size: ({' x '.join(str(x) for x in effective_kernel)}). "
+                f"Kernel size can't be greater than actual input size"
+            ),
+        )
 
     for i in range(len(dims)):
         # If output_padding is present, we are dealing with a transposed convolution
@@ -4473,15 +4543,33 @@ def meta_zero_(self):
 @register_meta(
     [
         aten.mul_.Scalar,
-        aten.div_.Scalar,
         aten.mul_.Tensor,
-        aten.div_.Tensor,
         aten.logical_and_.default,
         aten.logical_or_.default,
         aten.logical_xor_.default,
     ],
 )
 def meta_binop_inplace(self, other):
+    if isinstance(other, torch.Tensor):
+        check_inplace_broadcast(self.shape, other.shape)
+    return self
+
+
+@register_meta([aten.div_.Scalar, aten.div_.Tensor])
+def meta_div_inplace(self, other):
+    _, result_dtype = elementwise_dtypes(
+        self,
+        other,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    torch._check(
+        utils.can_safe_cast_to(cast_from=result_dtype, cast_to=self.dtype),
+        lambda: (
+            f"result type {result_dtype} can't be cast to the desired "
+            f"output type {self.dtype}"
+        ),
+    )
+
     if isinstance(other, torch.Tensor):
         check_inplace_broadcast(self.shape, other.shape)
     return self
@@ -4762,13 +4850,9 @@ def meta_bmm_dtype(self, mat2, out_dtype):
 
 
 def div_rtn(x, y):
-    q = x // y
-    r = x % y
-    # WARNING: explicit bool conversion here is necessary;
-    # would be fixed by SymBool
-    if r != 0 and (bool(r < 0) != bool(y < 0)):
-        q -= 1
-    return q
+    # Python // already floors toward negative infinity, so the
+    # remainder-sign adjustment from the original C++ port is unnecessary.
+    return x // y
 
 
 def pooling_output_shape_pad_lr(
@@ -4830,6 +4914,8 @@ def pool2d_shape_check(
     outputWidth,
     memory_format,
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
     ndim = input.dim()
     nOutputPlane = nInputPlane
 
@@ -4846,29 +4932,31 @@ def pool2d_shape_check(
         lambda: f"dilation should be greater than zero, but got dilationH: {dilationH}, dilationW: {dilationW}",
     )
 
-    valid_dims = input.size(1) != 0 and input.size(2) != 0
+    valid_dims = sym_and(input.size(1) != 0, input.size(2) != 0)
 
     if memory_format == torch.channels_last:
         torch._check(
-            ndim == 4 and valid_dims and input.size(3) != 0,
+            ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
             lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout"
             f" with optional 0 dim batch size for input, but got: {input.size()}",
         )
     else:
         torch._check(
-            (ndim == 3 and input.size(0) != 0 and valid_dims)
-            or (ndim == 4 and valid_dims and input.size(3) != 0),
+            sym_or(
+                ndim == 3 and sym_and(input.size(0) != 0, valid_dims),
+                ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
+            ),
             lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got: {input.size()}",
         )
 
     torch._check(
-        kW // 2 >= padW and kH // 2 >= padH,
+        sym_and(kW // 2 >= padW, kH // 2 >= padH),
         lambda: "pad should be smaller than or equal to half of kernel size, but got "
         f"padW = {padW}, padH = {padH}, kW = {kW}, kH = {kH}",
     )
 
     torch._check(
-        outputWidth >= 1 and outputHeight >= 1,
+        sym_and(outputWidth >= 1, outputHeight >= 1),
         lambda: f"Given input size: ({nInputPlane}x{inputHeight}x{inputWidth}). "
         f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). "
         "Output size is too small",
@@ -4940,9 +5028,11 @@ def pool3d_shape_check(
             ),
         )
 
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     if check_input_size:  # AveragePool3d
         torch._check(
-            itime >= kT and iheight >= kH and iwidth >= kW,
+            sym_and(itime >= kT, iheight >= kH, iwidth >= kW),
             lambda: (
                 f"input image (T: {itime} H: {iheight} W: {iwidth}) smaller than "
                 f"kernel size (kT: {kT} kH: {kH} kW: {kW})"
@@ -4950,7 +5040,7 @@ def pool3d_shape_check(
         )
 
     torch._check(
-        kT / 2 >= pT and kW / 2 >= pW and kH / 2 >= pH,
+        sym_and(kT / 2 >= pT, kW / 2 >= pW, kH / 2 >= pH),
         lambda: (
             f"pad should be smaller than or equal to half of kernel size, but got "
             f"kT: {kT} kW: {kW} kH: {kH} padT: {pT} padW: {pW} padH: {pH}"
@@ -4958,7 +5048,7 @@ def pool3d_shape_check(
     )
 
     torch._check(
-        otime >= 1 and owidth >= 1 and oheight >= 1,
+        sym_and(otime >= 1, owidth >= 1, oheight >= 1),
         lambda: (
             f"Given input size: ({nslices}x{itime}x{iheight}x{iwidth}). "
             f"Calculated output size: ({nslices}x{otime}x{oheight}x{owidth}). "
@@ -5783,7 +5873,9 @@ def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     min = -dim_post_expr
     max = dim_post_expr - 1
     if dim < min or dim > max:
-        raise AssertionError(f"dim {dim} out of bounds ({min}, {max})")
+        raise IndexError(
+            f"Dimension out of range (expected to be in range of [{min}, {max}], but got {dim})"
+        )
     if dim < 0:
         dim += dim_post_expr
     return dim
@@ -6066,11 +6158,14 @@ def alloc_with_matching_layout(
         dim_order = sorted(
             [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
         )
-        permuted_shape = [res_shape[idx] for idx in dim_order]
-        final_permute = [dim_order.index(i) for i in range(len(dim_order))]
-        res = torch.empty(
-            permuted_shape, dtype=query.dtype, device=query.device
-        ).permute(final_permute)
+        strides = [0] * len(dim_order)
+        stride = 1
+        for idx in reversed(dim_order):
+            strides[idx] = stride
+            stride *= res_shape[idx]
+        res = torch.empty_strided(
+            res_shape, strides, dtype=query.dtype, device=query.device
+        )
 
     return res
 
@@ -7977,12 +8072,22 @@ def mkldnn_rnn_layer_backward(
     batch_first,
     workspace,
 ):
-    diff_x = input.new_empty(input.shape)
-    diff_hx = hx_.new_empty(hx_.shape)
-    diff_cx = cx_tmp.new_empty(cx_tmp.shape)
-    diff_w1 = weight0.new_empty(weight0.shape)
-    diff_w2 = weight1.new_empty(weight1.shape)
-    diff_b = weight2.new_empty(weight2.shape)
+    diff_x = input.new_empty(input.shape, dtype=torch.float)
+    diff_hx = hx_.new_empty(hx_.shape, dtype=torch.float)
+    diff_cx = cx_tmp.new_empty(cx_tmp.shape, dtype=torch.float)
+    diff_w1 = weight0.new_empty(weight0.shape, dtype=torch.float)
+    diff_w2 = weight1.new_empty(weight1.shape, dtype=torch.float)
+    # C++ computes bias = _shuffle_bias(weight2, weight3, mode) before
+    # creating diff_b. num_bias_gates: LSTM=4, GRU=4, RNN_RELU/TANH=1.
+    # GRU _shuffle_bias produces [4*hidden] from two [3*hidden] inputs.
+    # LSTM: bias_ih + bias_hh preserves [4*hidden].
+    # RNN: bias_ih + bias_hh preserves [hidden].
+    _GRU_MODE = 3
+    if mode == _GRU_MODE:
+        bias_size = 4 * hidden_size
+    else:
+        bias_size = weight2.shape[0]
+    diff_b = weight2.new_empty([bias_size], dtype=torch.float)
     return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 

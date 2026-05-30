@@ -27,6 +27,7 @@ from torch.distributed._symmetric_memory import (
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
+from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_cuda import (
     SM100OrLater,
     SM89OrLater,
@@ -39,6 +40,8 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
+    requires_nccl,
+    setup_torchcomms_pg,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
     skip_if_rocm_ver_lessthan_multiprocess,
@@ -49,6 +52,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     requires_cuda_p2p_access,
     run_tests,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -353,9 +357,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(symm_mem_hdl.rank, self.rank)
         self.assertEqual(symm_mem_hdl.world_size, self.world_size)
 
-        entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())[
-            "entries"
-        ]
+        entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())["entries"]
         ag_entries = [
             e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
         ]
@@ -1436,8 +1438,12 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_0 = torch.compile(func_0, fullgraph=True)
         code_0 = run_and_get_triton_code(compiled_0, arg)
 
-        self.assertIn("one_shot_all_reduce", code_0)
-        self.assertNotIn("return (buf0", code_0)
+        FileCheck().check("one_shot_all_reduce").run(code_0)
+        FileCheck().check_not("return (buf0").run(code_0)
+
+        eager_result_0 = func_0(arg.clone())
+        compiled_result_0 = compiled_0(arg.clone())
+        torch.testing.assert_close(eager_result_0, compiled_result_0)
 
         # All-reduce on a slice view
         def func_1(x):
@@ -1449,8 +1455,12 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_1 = torch.compile(func_1, fullgraph=True)
         code_1 = run_and_get_triton_code(compiled_1, arg)
 
-        self.assertIn("one_shot_all_reduce", code_1)
-        self.assertNotIn("return (buf0", code_1)
+        FileCheck().check("one_shot_all_reduce").run(code_1)
+        FileCheck().check_not("return (buf0").run(code_1)
+
+        eager_result_1 = func_1(arg.clone())
+        compiled_result_1 = compiled_1(arg.clone())
+        torch.testing.assert_close(eager_result_1, compiled_result_1)
 
         # All-reduce on input
         def func_2(x):
@@ -1460,7 +1470,11 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_2 = torch.compile(func_2, fullgraph=True)
         code_2 = run_and_get_triton_code(compiled_2, arg)
 
-        self.assertNotIn("one_shot_all_reduce", code_2)
+        FileCheck().check_not("one_shot_all_reduce").run(code_2)
+
+        eager_result_2 = func_2(arg.clone())
+        compiled_result_2 = compiled_2(arg.clone())
+        torch.testing.assert_close(eager_result_2, compiled_result_2)
 
         # All-reduce on matmul output
         def func_3(x):
@@ -1471,8 +1485,12 @@ class LoweringTest(MultiProcContinuousTest):
         compiled_3 = torch.compile(func_3, fullgraph=True)
         code_3 = run_and_get_triton_code(compiled_3, arg)
 
-        self.assertIn("one_shot_all_reduce", code_3)
-        self.assertNotIn("return (buf0", code_3)
+        FileCheck().check("one_shot_all_reduce").run(code_3)
+        FileCheck().check_not("return (buf0").run(code_3)
+
+        eager_result_3 = func_3(arg.clone())
+        compiled_result_3 = compiled_3(arg.clone())
+        torch.testing.assert_close(eager_result_3, compiled_result_3)
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
@@ -1746,6 +1764,46 @@ class LoweringTest(MultiProcContinuousTest):
             msg="Compiled and eager do not match",
         )
 
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_custom_op_symm_mem_realization(self):
+        """Test that torch.compile allocates symm_mem for custom ops with registered symm_mem_args."""
+        self._init_process()
+
+        from torch.library import Library  # noqa: SCOPED_LIBRARY
+
+        group_name = dist.group.WORLD.group_name
+
+        lib = Library("test_symm_realize", "DEF")  # noqa: SCOPED_LIBRARY
+        lib.define(
+            "my_collective(Tensor input, str reduce_op, str group_name) -> Tensor"
+        )
+        lib.register_symm_mem_args("my_collective", ["input"])
+
+        @torch.library.impl(lib, "my_collective", "Meta")
+        def meta_impl(input, reduce_op, group_name):
+            return torch.empty_like(input)
+
+        @torch.library.impl(lib, "my_collective", "CUDA")
+        def cuda_impl(input, reduce_op, group_name):
+            if not symm_mem.is_symm_mem_tensor(input):
+                raise ValueError(
+                    f"Expected input to be a symmetric memory tensor, but got {type(input)}"
+                )
+            return input.clone()
+
+        def func(x):
+            x = x + 1
+            return torch.ops.test_symm_realize.my_collective(x, "sum", group_name)
+
+        compiled = torch.compile(func, fullgraph=True)
+        x = torch.rand(4, 4, device=self.device)
+        code = run_and_get_triton_code(compiled, x)
+
+        # Verify that exactly one symm_mem allocation call is generated
+        FileCheck().check_count("empty_strided_p2p(", 1, exactly=True).run(code)
+
 
 class SymmMemSingleProcTest(TestCase):
     @requires_cuda
@@ -1835,6 +1893,7 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         torch.cuda.set_device(self.device)
         torch.manual_seed(42 + self.rank)
 
+    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -1881,6 +1940,59 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         y = torch.ops.symm_mem.one_shot_all_reduce(y, "sum", group_name)
         expected = torch.mm(x, w) * self.world_size
         self.assertEqual(y, expected)
+
+
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
+    """CUDA symm_mem rendezvous against a torchcomms-backed PG.
+
+    Builds a torchcomms comm, wraps it in _BackendWrapper, registers it as
+    the NCCL backend on a bare ProcessGroup, and exercises symm_mem on the
+    CUDA backend (cuMemMap/IPC).
+    """
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    @requires_nccl()
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skipIf(not _TORCHCOMM_AVAILABLE, "torchcomms not installed")
+    @skipIf(TEST_WITH_ROCM, "torchcomms nccl backend not available on ROCm")
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_pg_for_rendezvous", [True, False])
+    def test_cuda_symm_mem_rendezvous_nccl(self, use_pg_for_rendezvous: bool) -> None:
+        torch.cuda.set_device(self.device)
+        suffix = f"usepg_{use_pg_for_rendezvous}"
+        group_name = f"torchcomms_cuda_symm_mem_nccl_{suffix}"
+        store_path = os.environ.get(
+            "TORCHCOMM_STORE_PATH",
+            f"/tmp/test_torchcomms_cuda_symm_mem_"
+            f"{os.environ.get('MASTER_PORT', '0')}_{suffix}",
+        )
+        pg = setup_torchcomms_pg(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            device=self.device,
+            store_path=store_path,
+            group_name=group_name,
+        )
+        pg.use_pg_for_symm_mem_rendezvous = use_pg_for_rendezvous
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=group_name)
+        self.assertEqual(symm_mem_hdl.rank, self.rank)
+        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
+
+        symm_mem_hdl.barrier()
+        for peer in range(self.world_size):
+            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
+            self.assertTrue(buf.eq(peer).all())
+        symm_mem_hdl.barrier()
 
 
 if __name__ == "__main__":

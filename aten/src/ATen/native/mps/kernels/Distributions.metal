@@ -1,3 +1,5 @@
+#include <c10/metal/atomic.h>
+#include <c10/metal/error.h>
 #include <c10/metal/random.h>
 #include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
@@ -140,26 +142,52 @@ kernel void normal(
   }
 }
 
-// Random integer in [low, high). `params.x` carries `low`, `params.y` carries
-// the range `(high - low)`. Ranges that exceed 2^24 lose precision through the
-// uniform-float conversion; this is the same simplification the previous
-// `c10::metal::randint64` helper used.
+// Random integer in `[base, base + range)`. `params.x` is `base`, `params.y` is
+// the range. `range == 0` is the sentinel for "full T-bit-width range" which
+// we use both for the int64 `[int64_min, int64_max]` case (range = 2^64
+// doesn't fit in any signed type) and for `random_(self)` on any integer dtype
+// when the caller wants the full uniform output domain.
+//
+// Per Salmon, Moraes, Dror, Shaw, "Parallel Random Numbers: As Easy as 1, 2, 3"
+// (Random123, SC '11), the 128 bits a single Philox-4x32-10 round emits can be
+// consumed as 4 x uint32 or 2 x uint64 with full per-bit uniformity at either
+// projection. We deliberately keep the layout dtype-stable for narrow types: 4
+// outputs per thread for `sizeof(T) <= 4`, 2 outputs for `sizeof(T) == 8`. Each
+// narrow output takes one full `uint32` (low bits cast to T or `% range`),
+// which costs some throughput vs. byte/short packing but keeps `randint_like`
+// values identical across float/half/int dtypes - inductor's `fallback_random`
+// equivalence tests upcast to float for the reference and compare against the
+// half compiled output, and any dtype-dependent Philox stride breaks them.
 template <typename T>
 kernel void random_int(
     device T* output [[buffer(0)]],
-    constant float2& params [[buffer(1)]],
+    constant long2& params [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
     constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  uint base = tid * 4;
+  constexpr uint kBytes = sizeof(T);
+  constexpr uint kElts = (kBytes == 8) ? 2u : 4u;
+
+  uint base_idx = tid * kElts;
   uint4 raw =
       c10::metal::philox4::rand(seed_base_offset.x, seed_base_offset.y + tid);
-  float low = params.x;
-  float range = params.y;
-  uint count = min(4u, numel - base);
+  long add = params.x;
+  long range = params.y;
+  uint count = min(kElts, numel - base_idx);
+
   for (uint i = 0; i < count; ++i) {
-    float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
-    output[base + i] = static_cast<T>(static_cast<long>(low + range * u));
+    long out;
+    if IF_CONSTEXPR (kBytes == 8) {
+      ulong v = (static_cast<ulong>(raw[2 * i]) << 32) |
+          static_cast<ulong>(raw[2 * i + 1]);
+      out = (range == 0) ? static_cast<long>(v)
+                         : static_cast<long>(v % static_cast<ulong>(range));
+    } else {
+      uint v = raw[i];
+      out = (range == 0) ? static_cast<long>(static_cast<int>(v))
+                         : static_cast<long>(v % static_cast<uint>(range));
+    }
+    output[base_idx + i] = static_cast<T>(out + add);
   }
 }
 
@@ -192,15 +220,24 @@ REGISTER_OP(normal, float);
 REGISTER_OP(normal, half);
 REGISTER_OP(normal, bfloat);
 
-REGISTER_OP(random_int, int);
-REGISTER_OP(random_int, long);
-REGISTER_OP(random_int, short);
-REGISTER_OP(random_int, char);
-REGISTER_OP(random_int, uchar);
-REGISTER_OP(random_int, bool);
-REGISTER_OP(random_int, float);
-REGISTER_OP(random_int, half);
-REGISTER_OP(random_int, bfloat);
+// `random_int` takes `long2` params (different buffer layout from the float-
+// param distributions above), so it can't go through `REGISTER_OP`.
+#define REGISTER_RANDOM_INT(DTYPE)                                            \
+  template [[host_name("random_int_" #DTYPE)]] kernel void random_int<DTYPE>( \
+      device DTYPE*, constant long2&, constant long2&, constant uint&, uint)
+
+REGISTER_RANDOM_INT(int);
+REGISTER_RANDOM_INT(long);
+REGISTER_RANDOM_INT(short);
+REGISTER_RANDOM_INT(char);
+REGISTER_RANDOM_INT(uchar);
+REGISTER_RANDOM_INT(ushort);
+REGISTER_RANDOM_INT(uint);
+REGISTER_RANDOM_INT(ulong);
+REGISTER_RANDOM_INT(bool);
+REGISTER_RANDOM_INT(float);
+REGISTER_RANDOM_INT(half);
+REGISTER_RANDOM_INT(bfloat);
 
 #define REGISTER_EXPONENTIAL(DTYPE)                         \
   template [[host_name("exponential_" #DTYPE)]] kernel void \
@@ -245,6 +282,7 @@ kernel void bernoulli_tensor(
     device const float* probs [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
     constant uint& numel [[buffer(3)]],
+    device c10::metal::ErrorMessages* error_buf [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   uint base = tid * 4;
   uint4 raw =
@@ -253,6 +291,10 @@ kernel void bernoulli_tensor(
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
     float p = probs[base + i];
+    if (!(p >= 0.0f && p <= 1.0f)) {
+      TORCH_REPORT_ERROR(error_buf, "bernoulli_mps_ expects p to be in [0, 1]");
+      return;
+    }
     output[base + i] = c10::metal::cast_to<T>(u < p ? 1u : 0u);
   }
 }
@@ -267,6 +309,7 @@ kernel void bernoulli_tensor(
       device const float*,                                                     \
       constant long2&,                                                         \
       constant uint&,                                                          \
+      device c10::metal::ErrorMessages*,                                       \
       uint)
 
 REGISTER_BERNOULLI(float);

@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import unittest
 import warnings
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -53,6 +54,7 @@ from torch.testing._internal.common_distributed import (
     get_timeout,
     init_multigpu_helper,
     MultiProcessTestCase,
+    PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
     requires_nccl,
     requires_nccl_shrink,
@@ -66,14 +68,14 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     IS_SANDCASTLE,
-    MI300_ARCH,
     parametrize,
     retry_on_connect_failures,
     run_tests,
-    runOnRocmArch,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
@@ -89,10 +91,6 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
     torch.version.cuda is not None or torch.version.hip is not None
-)
-
-CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
-    torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
 )
 
 _start_time = time.time()
@@ -356,7 +354,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         #       exit code -6
         TEST_NAN_ASSERT_RETURN = (
             0
-            if (IS_SANDCASTLE and not (TEST_MULTIGPU and CUDA_12_AND_ABOVE))
+            if (IS_SANDCASTLE and not TEST_MULTIGPU)
             else (-signal.SIGABRT if torch.version.hip else signal.SIGABRT)
         )
         self.special_return_code_checks = {
@@ -549,11 +547,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # reset ENV
         os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "0"
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176975")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177007")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/166067")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177006")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/164426")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/166066")
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
-        # skip for cu126 as well due to https://github.com/pytorch/pytorch/issues/153479
-        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
-        "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
+        not TEST_MULTIGPU,
+        "NCCL test requires 2+ GPUs",
     )
     @parametrize(
         "type",
@@ -4621,9 +4624,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 output = torch.zeros(60 * self.world_size, device=device)
                 torch.distributed.all_gather_into_tensor(output, t)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/115859")
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @runOnRocmArch(MI300_ARCH)
     @parametrize(
         "custom_group_name",
         [True, False],
@@ -4632,13 +4635,16 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
         from torch.testing._internal.common_cuda import SM80OrLater
 
+        if not PLATFORM_SUPPORTS_SYMM_MEM:
+            raise SkipTest("Test requires SymmMem support")
+
         for peer in range(self.world_size):
             if peer == self.rank:
                 continue
             if not torch._C._cuda_canDeviceAccessPeer(self.rank, peer):
                 raise SkipTest("Test requires p2p access")
 
-        if not SM80OrLater:
+        if not SM80OrLater and not TEST_WITH_ROCM:
             raise SkipTest("Test requires sm>=80")
 
         group_name = ""
@@ -4817,6 +4823,24 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(pg_opts.config.min_ctas, -2147483648)
         self.assertEqual(pg_opts_2.config.min_ctas, 2)
         self.assertEqual(nccl_cfg_2.min_ctas, 4)
+
+    @requires_nccl()
+    @requires_nccl_version(
+        (2, 30), "Need NCCL 2.30+ for testing max_p2p_peers in ncclConfig_t"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config_max_p2p_peers(self):
+        nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
+        if not hasattr(nccl_cfg, "max_p2p_peers"):
+            raise SkipTest(
+                "max_p2p_peers binding absent (PyTorch might be built against NCCL < 2.30)"
+            )
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        new_max_p2p_peers = 1
+        pg_opts.config.max_p2p_peers = new_max_p2p_peers
+        self.assertEqual(pg_opts.config.max_p2p_peers, new_max_p2p_peers)
+        # Tests functionality when passing nccl config
+        self._test_pass_nccl_options(pg_opts)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -5008,6 +5032,69 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             for i in range(self.world_size):
                 dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_python_export", [False, True])
+    def test_profiler_nccl_annotations_on_gpu_kernels(self, use_python_export):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        device = torch.device(f"cuda:{self.rank}")
+        torch.cuda.set_device(device)
+
+        t = torch.ones(1024, device=device)
+        # Warmup so NCCL init doesn't land inside the profiled region
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
+            dist.all_reduce(t)
+            torch.cuda.synchronize()
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            trace_path = f.name
+        try:
+            if use_python_export:
+                from torch.profiler._chrome_trace_export import (
+                    export_chrome_trace as py_export,
+                )
+
+                py_export(prof.profiler.kineto_results, trace_path)
+            else:
+                prof.export_chrome_trace(trace_path)
+            with open(trace_path) as f:
+                trace = json.load(f)
+        finally:
+            os.unlink(trace_path)
+
+        nccl_keys = {"Collective name", "dtype", "In msg nelems", "Out msg nelems"}
+        gpu_kernels_with_nccl = []
+        for ev in trace.get("traceEvents", []):
+            if ev.get("cat") == "kernel":
+                args = ev.get("args", {})
+                if "Collective name" in args:
+                    gpu_kernels_with_nccl.append(ev)
+
+        self.assertGreater(
+            len(gpu_kernels_with_nccl),
+            0,
+            "Expected at least one GPU kernel with NCCL annotations",
+        )
+        for ev in gpu_kernels_with_nccl:
+            args = ev["args"]
+            missing = nccl_keys - set(args.keys())
+            self.assertEqual(
+                missing,
+                set(),
+                f"GPU kernel {ev['name']} missing NCCL metadata: {missing}",
+            )
 
 
 instantiate_parametrized_tests(CommTest)

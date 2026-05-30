@@ -31,6 +31,8 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 try:
+    import aiohttp  # noqa: F401  # type: ignore[import]
+
     from torch.distributed.debug._frontend import fetch_aiohttp
 
     HAS_AIOHTTP = True
@@ -417,6 +419,8 @@ class TestFetchTimeout(TestCase):
 
 
 class TestHandlerPartialDumps(TestCase):
+    import torch.distributed.debug._debug_handlers
+
     @patch("torch.distributed.debug._debug_handlers.fetch_all")
     def test_stacks_handler_partial_dump(self, mock_fetch_all) -> None:
         from torch.distributed.debug._debug_handlers import StacksHandler
