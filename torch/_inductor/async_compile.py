@@ -184,7 +184,6 @@ def shutdown_compile_workers() -> None:
 def after_fork():
     """Reset pools to initial state without shutting them down"""
     _pool_set.clear()
-    AsyncCompile._ready_future = None
     AsyncCompile.process_pool.cache_clear()
 
 
@@ -202,17 +201,6 @@ def get_compile_threads() -> int:
     if config.compile_threads is None:
         config.compile_threads = config.decide_compile_threads()
     return config.compile_threads
-
-
-def _process_pool_allowed() -> bool:
-    # Multiprocessing daemons are not allowed to create child processes. This
-    # only applies to direct multiprocessing modes: SubprocPool starts its
-    # sidecar with subprocess.Popen, so the sidecar does not inherit the
-    # multiprocessing daemon flag and can own its own ProcessPoolExecutor.
-    return (
-        config.worker_start_method == "subprocess"
-        or not multiprocessing.current_process().daemon
-    )
 
 
 @clear_on_fresh_cache
@@ -295,14 +283,6 @@ class AsyncCompile:
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
         assert get_compile_threads() > 1
-        if not _process_pool_allowed():
-            raise RuntimeError(
-                "Inductor async compile process pools are disabled in daemonic "
-                "multiprocessing processes. Set "
-                "torch._inductor.config.worker_start_method = 'subprocess' "
-                "(or TORCHINDUCTOR_WORKER_START=subprocess) to use the "
-                "SubprocPool path, which is not affected by the daemon restriction."
-            )
         AsyncCompile._ready_future = None
         log.info(
             "Creating '%s' pool with %d workers",
@@ -338,7 +318,7 @@ class AsyncCompile:
 
     @classmethod
     def warm_pool(cls) -> None:
-        if get_compile_threads() <= 1 or not _process_pool_allowed():
+        if get_compile_threads() <= 1:
             return
         _compile_start()
         # Pool is created on first access. Note for a SubprocPool, the sidecar process starts,
@@ -361,7 +341,7 @@ class AsyncCompile:
 
     @classmethod
     def use_process_pool(cls):
-        if get_compile_threads() <= 1 or not _process_pool_allowed():
+        if get_compile_threads() <= 1:
             return False
 
         # Proton instrumentation backend requires compilation to happen in the main

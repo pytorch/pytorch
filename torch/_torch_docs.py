@@ -1936,32 +1936,25 @@ along dimension :attr:`dim` according to the indices or number of sections speci
 by :attr:`indices_or_sections`. This function is based on NumPy's
 :func:`numpy.array_split`.
 
-.. function:: tensor_split(input, sections, dim=0) -> List of Tensors
-   :noindex:
-
-   Splits :attr:`input` into :attr:`sections` sections along dimension :attr:`dim`.
-   If :attr:`input` is divisible by :attr:`sections` along dimension :attr:`dim`, each
-   section will be of equal size, :code:`input.size(dim) / sections`. If :attr:`input`
-   is not divisible by :attr:`sections`, the sizes of the first
-   :code:`int(input.size(dim) % sections)` sections will have size
-   :code:`int(input.size(dim) / sections) + 1`, and the rest will have size
-   :code:`int(input.size(dim) / sections)`.
-
-   :attr:`sections` can also be a zero-dimensional long tensor.
-
-.. function:: tensor_split(input, indices, dim=0) -> List of Tensors
-   :noindex:
-
-   Splits :attr:`input` along dimension :attr:`dim` at each of the indices in
-   :attr:`indices`. For instance, :code:`indices=[2, 3]` and :code:`dim=0`
-   would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and
-   :code:`input[3:]`.
-
-   :attr:`indices` can be a list or tuple of ints, or a one-dimensional long
-   tensor on the CPU.
-
 Args:
     input (Tensor): the tensor to split
+    indices_or_sections (Tensor, int or list or tuple of ints):
+        If :attr:`indices_or_sections` is an integer ``n`` or a zero dimensional long tensor
+        with value ``n``, :attr:`input` is split into ``n`` sections along dimension :attr:`dim`.
+        If :attr:`input` is divisible by ``n`` along dimension :attr:`dim`, each
+        section will be of equal size, :code:`input.size(dim) / n`. If :attr:`input`
+        is not divisible by ``n``, the sizes of the first :code:`int(input.size(dim) % n)`
+        sections will have size :code:`int(input.size(dim) / n) + 1`, and the rest will
+        have size :code:`int(input.size(dim) / n)`.
+
+        If :attr:`indices_or_sections` is a list or tuple of ints, or a one-dimensional long
+        tensor, then :attr:`input` is split along dimension :attr:`dim` at each of the indices
+        in the list, tuple or tensor. For instance, :code:`indices_or_sections=[2, 3]` and :code:`dim=0`
+        would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
+
+        If :attr:`indices_or_sections` is a tensor, it must be a zero-dimensional or one-dimensional
+        long tensor on the CPU.
+
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
 
 Example::
