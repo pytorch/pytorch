@@ -352,13 +352,13 @@ jobs:
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' && steps.aws-creds.outcome == 'success' }}
         shell: bash
         run: |
-          aws s3 sync pytorch_docs/main/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }} --delete --quiet
+          aws s3 sync pytorch_docs/main/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }} --quiet
 
       - name: Upload C++ Docs Preview
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' && steps.aws-creds.outcome == 'success' }}
         shell: bash
         run: |
-          aws s3 sync cppdocs/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs --delete --quiet
+          aws s3 sync cppdocs/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs --quiet
 
       # Fallback for fork PRs where the pod could not authenticate to S3: stage
       # the built docs as a GHA artifact for the upload-docs-preview workflow.
