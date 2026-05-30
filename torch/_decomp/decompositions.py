@@ -1380,21 +1380,25 @@ def embedding_dense_backward(
     )
     grad_output = grad_output.to(computation_dtype)
     indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
+    valid_indices = (indices >= 0) & (indices < num_weights)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
-        counts = aten._unsafe_index_put(counts, [indices], ones, accumulate=True)
-        grad_weights_scale = counts[indices]
+        counts = aten._unsafe_masked_index_put_accumulate(
+            counts, valid_indices, [indices], ones
+        )
+        grad_weights_scale = aten._unsafe_masked_index(
+            counts, valid_indices, [indices], 1
+        )
         grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
-    mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
-    grad = grad_output.masked_fill(mask, 0)
+    mask = _unsqueeze_to_dim(valid_indices & (indices != padding_idx), grad_output.ndim)
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return aten._unsafe_index_put(grad_weight, [indices], grad, accumulate=True).to(
-        result_dtype
-    )
+    return aten._unsafe_masked_index_put_accumulate(
+        grad_weight, mask, [indices], grad_output
+    ).to(result_dtype)
 
 
 def prod(x: list[int]):
