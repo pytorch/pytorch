@@ -1192,6 +1192,16 @@ class CachingAutotuner(KernelInterface):
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
             kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
+            # check the number of args matches the launcher signature
+            if hasattr(launcher, "def_args"):
+                if len(cloned_args) != len(launcher.def_args):
+                    raise ValueError(
+                        f"kernel_call() received {len(cloned_args)} positional args but "
+                        f"launcher expects {len(launcher.def_args)} (excluding stream). "
+                        f"This may be caused by passing the same argument as both a positional "
+                        f"and keyword argument (e.g., grid). "
+                        f"kernel_name: {kernel_name}"
+                    )
             if autograd_profiler._is_profiler_enabled:
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
