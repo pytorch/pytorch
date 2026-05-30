@@ -111,14 +111,14 @@ networkx==2.8.8
 #Pinned versions: 2.8.8
 #test that import: functorch
 
-ninja==1.11.1.4
+ninja==1.13.0
 #Description: build system. Used in some tests. Used in build to generate build
 #time tracing information
-#Pinned versions: 1.11.1.4
+#Pinned versions: 1.13.0
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
 numba==0.57.1 ; python_version == "3.10" and platform_machine != "s390x"
-numba==0.60.0 ; python_version == "3.12" and platform_machine != "s390x"
+numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x"
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.55.2, 0.60.0
 #test that import: test_numba_integration.py
@@ -379,7 +379,7 @@ pip==26.0.1
 pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1
-packaging==24.0
+packaging==24.2
 six
 
 scons==4.5.2 ; platform_machine == "aarch64"
@@ -419,3 +419,13 @@ tqdm>=4.66.0
 
 aiohttp==3.13.4
 #Description: required for torch.distributed.debug
+
+spin==0.17
+#Description: required for testing spin commands
+#Pinned versions: 0.17
+#test that import: spincli/test_spin.py
+
+uv
+#Description: required for running spin commands via uvx
+#Pinned version:
+#test that import:

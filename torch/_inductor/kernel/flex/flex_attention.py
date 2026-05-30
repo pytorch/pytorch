@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import logging
 import math
-import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast, TYPE_CHECKING
@@ -173,6 +172,10 @@ def flex_attention(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        _,  # dq_write_order (backward-only)
+        _,  # dq_write_order_full (backward-only)
+        _,  # dq_kv_order (backward-only)
+        _,  # dq_kv_order_spt (backward-only)
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -676,6 +679,10 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        dq_write_order,
+        dq_write_order_full,
+        dq_kv_order,
+        dq_kv_order_spt,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -695,6 +702,9 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        dq_write_order,
+        dq_write_order_full,
+        dq_kv_order,
     ) = maybe_realize(
         [
             query,
@@ -710,6 +720,9 @@ def flex_attention_backward(*args, **kwargs):
             q_indices,
             full_q_num_blocks,
             full_q_indices,
+            dq_write_order,
+            dq_write_order_full,
+            dq_kv_order,
         ]
     )
 
@@ -813,20 +826,7 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers=score_mod_other_buffers,
     ):
         needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
-        if (
-            torch.are_deterministic_algorithms_enabled()
-            and not torch.is_deterministic_algorithms_warn_only_enabled()
-            and needs_block_mask
-        ):
-            raise NotImplementedError(
-                "Deterministic backward for flex_attention with block_mask using the FLASH backend "
-                "is not yet implemented. The TRITON backend supports deterministic backward."
-            )
-        if torch.is_deterministic_algorithms_warn_only_enabled() and needs_block_mask:
-            warnings.warn(
-                "Deterministic backward for flex_attention with block_mask using the FLASH backend "
-                "is not yet implemented. Running non-deterministic backward.",
-            )
+
         # TODO: Implement dLSE support in flash-attention backward by folding
         # grad_logsumexp into the dPsum preprocess step.
         if grad_logsumexp is not None:
@@ -858,6 +858,10 @@ def flex_attention_backward(*args, **kwargs):
             q_indices=q_indices if needs_block_mask else None,
             full_q_num_blocks=full_q_num_blocks if needs_block_mask else None,
             full_q_indices=full_q_indices if needs_block_mask else None,
+            dq_write_order=dq_write_order if needs_block_mask else None,
+            dq_write_order_full=dq_write_order_full if needs_block_mask else None,
+            dq_kv_order=dq_kv_order if needs_block_mask else None,
+            dq_kv_order_spt=dq_kv_order_spt,
         )
 
     # Construct layout with stride order matching K

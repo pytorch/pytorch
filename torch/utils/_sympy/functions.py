@@ -571,8 +571,8 @@ class CeilToInt(sympy.Function):
             return sympy.Integer(math.ceil(float(number)))
 
     def _ccode(self, printer) -> str:
-        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
-        return f"ceil({number})"
+        number = printer._print(self.args[0])
+        return f"(int64_t)(ceil({number}))"
 
 
 class FloorToInt(sympy.Function):
@@ -582,12 +582,16 @@ class FloorToInt(sympy.Function):
     def eval(cls, number):
         if number in (sympy.oo, int_oo):
             return int_oo
-        if number in (-sympy.oo, int_oo):
+        if number in (-sympy.oo, -int_oo):
             return -int_oo
         if isinstance(number, sympy.Integer):
             return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
+
+    def _ccode(self, printer) -> str:
+        number = printer._print(self.args[0])
+        return f"(int64_t)(floor({number}))"
 
 
 class CeilDiv(sympy.Function):
@@ -611,9 +615,9 @@ class LShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        if shift < 0:
+        if shift.is_negative:
             raise ValueError("negative shift count")
-        return base * 2**shift
+        return base * PowByNatural(sympy.Integer(2), shift)
 
 
 class RShift(sympy.Function):
@@ -621,9 +625,9 @@ class RShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        if shift < 0:
+        if shift.is_negative:
             raise ValueError("negative shift count")
-        return FloorDiv(base, 2**shift)
+        return FloorDiv(base, PowByNatural(sympy.Integer(2), shift))
 
 
 class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
@@ -1264,6 +1268,10 @@ class TruncToInt(sympy.Function):
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.trunc(float(number)))
 
+    def _ccode(self, printer) -> str:
+        number = printer._print(self.args[0])
+        return f"(int64_t)(trunc({number}))"
+
 
 # This is float -> int
 class RoundToInt(sympy.Function):
@@ -1321,6 +1329,10 @@ class ToFloat(sympy.Function):
             return sympy.oo
         if number is -int_oo:
             return -sympy.oo
+
+    def _ccode(self, printer) -> str:
+        number = printer._print(self.args[0])
+        return f"(double)({number})"
 
 
 class Identity(sympy.Function):

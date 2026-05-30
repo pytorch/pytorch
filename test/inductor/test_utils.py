@@ -11,6 +11,7 @@ from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
+    _is_fake_tensor_same,
     count_flops_fx,
     countable_fx,
     FakeTensorUpdater,
@@ -248,6 +249,57 @@ class TestUtils(TestCase):
                     countable_fx(fx_node_2), f"Expected false {f}: {fx_node_2}"
                 )
 
+    def test_flops_fx_higher_order_op(self):
+        """count_flops_fx must use the registered formula for HOP targets
+        rather than invoking the HOP. flex_attention.__call__ requires a
+        Dynamo/proxy tracing context (TransformGetItemToIndex) and raises
+        TypeError when invoked on bare (fake) tensors.
+        """
+        from torch.utils.flop_counter import flop_registry
+
+        flex_attention = torch.ops.higher_order.flex_attention
+        self.assertIn(flex_attention, flop_registry)
+
+        q_shape = (2, 16, 1024, 64)
+        k_shape = (2, 4, 1024, 64)
+        v_shape = (2, 4, 1024, 64)
+
+        with V.set_fake_mode(
+            torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+        ):
+            graph = torch.fx.Graph()
+            q = graph.placeholder("q")
+            k = graph.placeholder("k")
+            v = graph.placeholder("v")
+            q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
+            k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
+            v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
+            node = graph.call_function(flex_attention, args=(q, k, v))
+            node.meta["val"] = (
+                torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
+                torch.randn(
+                    q_shape[0],
+                    q_shape[1],
+                    q_shape[2],
+                    device="meta",
+                    dtype=torch.float32,
+                ),
+                torch.randn(
+                    q_shape[0],
+                    q_shape[1],
+                    q_shape[2],
+                    device="meta",
+                    dtype=torch.float32,
+                ),
+            )
+
+            self.assertTrue(countable_fx(node))
+            flops = count_flops_fx(node)
+            expected = flop_registry[flex_attention](
+                q.meta["val"], k.meta["val"], v.meta["val"], out_val=node.meta["val"]
+            )
+            self.assertEqual(flops, expected)
+
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
@@ -325,6 +377,26 @@ class TestFP4Support(TestCase):
         self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
         self.assertEqual(t.shape, (16, 32))
         self.assertTrue(t.is_cuda)
+
+
+class TestTritonTypeMapping(TestCase):
+    """Tests for acc_type() dtype conversions."""
+
+    def test_acc_type(self):
+        from torch._inductor.kernel.mm_common import acc_type
+
+        cases = {
+            "half promotes to float32": (torch.float16, "tl.float32"),
+            "bfloat16 promotes to float32": (torch.bfloat16, "tl.float32"),
+            "float32 passthrough": (torch.float32, "tl.float32"),
+            "fp8 e4m3fn promotes to float32": (torch.float8_e4m3fn, "tl.float32"),
+            "fp8 e5m2 promotes to float32": (torch.float8_e5m2, "tl.float32"),
+            "fp8 e4m3fnuz promotes to float32": (torch.float8_e4m3fnuz, "tl.float32"),
+            "fp8 e5m2fnuz promotes to float32": (torch.float8_e5m2fnuz, "tl.float32"),
+        }
+        for desc, (dtype, expected) in cases.items():
+            with self.subTest(desc=desc, dtype=dtype):
+                self.assertEqual(acc_type(dtype), expected)
 
 
 class TestFakeTensorUpdater(TestCase):
@@ -475,6 +547,14 @@ class TestFakeTensorUpdater(TestCase):
         # tensors.
         for m in mul_nodes:
             self.assertEqual(len(m.meta["val"].size()), 4)
+
+    def test_fake_tensor_same_recursion(self):
+        l = [1, 2, 3]
+        l.append(l)
+        m = [4, 5, 6, l]
+        # If recursion is broken, we'll get a recursion error here.
+        self.assertTrue(_is_fake_tensor_same(l, l, {}))
+        self.assertFalse(_is_fake_tensor_same(l, m, {}))
 
 
 if __name__ == "__main__":

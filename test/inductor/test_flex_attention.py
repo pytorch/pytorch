@@ -30,6 +30,7 @@ from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
     _apply_kernel_options,
+    _compute_dq_write_order_from_block_mask,
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
     _identity,
@@ -71,9 +72,12 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (  # noqa: F401
+    IS_LINUX,
     MI200_ARCH,
     skipIfRocm,
     skipIfRocmArch,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU, HAS_MPS
 from torch.utils._triton import has_triton, has_triton_tma_device
@@ -2731,6 +2735,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(out_only, out_legacy, atol=1e-6, rtol=1e-6)
         torch.testing.assert_close(aux_lse.lse, lse_legacy, atol=1e-6, rtol=1e-6)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/162464",
+    )
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
@@ -2896,6 +2904,42 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         eager_out2 = run(q2, k2, v2)
         compiled_out2 = compiled_run(q2, k2, v2)
+        torch.testing.assert_close(eager_out2, compiled_out2, atol=1e-3, rtol=1e-3)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_mask_mod_handles_derived_symint_closure(self, device):
+        dtype = torch.float16
+
+        def run(q, k, v, current_pos):
+            p_plus = current_pos + 1
+
+            def _opaque_mask(b, h, q_idx, kv_idx):
+                return kv_idx <= p_plus
+
+            block_mask = create_block_mask(
+                _opaque_mask,
+                B=None,
+                H=None,
+                Q_LEN=q.size(-2),
+                KV_LEN=k.size(-2),
+                device=device,
+            )
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        compiled_run = torch.compile(run, fullgraph=True, dynamic=True)
+
+        q = torch.randn(1, 2, 192, 32, device=device, dtype=dtype)
+        k = torch.randn(1, 2, 128, 32, device=device, dtype=dtype)
+        v = torch.randn(1, 2, 128, 32, device=device, dtype=dtype)
+
+        eager_out = run(q, k, v, 5)
+        compiled_out = compiled_run(q, k, v, 5)
+        torch.testing.assert_close(eager_out, compiled_out, atol=1e-3, rtol=1e-3)
+
+        # Exercise a different captured value to ensure derived SymInt captures remain well-formed.
+        eager_out2 = run(q, k, v, 9)
+        compiled_out2 = compiled_run(q, k, v, 9)
         torch.testing.assert_close(eager_out2, compiled_out2, atol=1e-3, rtol=1e-3)
 
     @supported_platform
@@ -5189,7 +5233,7 @@ class GraphModule(torch.nn.Module):
 
         score_mod_0 = self.score_mod_0
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, None, None, None, None, 128, 128, mask_fn_0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -5228,7 +5272,7 @@ class GraphModule(torch.nn.Module):
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, None, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, None, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, None, None, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_7: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
@@ -5590,6 +5634,44 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cuda
+    @skip_on_xpu
+    def test_cpu_qk_chunk_same_addmm_buffer(self, device):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.H = 2
+                self.D = 16
+                self.S = 128
+                self.project_qk = nn.Linear(self.H * self.D, self.H * self.D * 2)
+                self.project_v = nn.Linear(self.H * self.D, self.H * self.D)
+
+            def forward(self, hidden_states):
+                B = hidden_states.size(0)
+                qk = self.project_qk(hidden_states)
+                query, key = qk.chunk(2, dim=-1)
+
+                query = query.view(B, self.S, self.H, self.D).permute(0, 2, 1, 3)
+                key = key.view(B, self.S, self.H, self.D).permute(0, 2, 1, 3)
+                value = (
+                    self.project_v(hidden_states)
+                    .view(B, self.S, self.H, self.D)
+                    .permute(0, 2, 1, 3)
+                )
+
+                return flex_attention(query, key, value, score_mod=_identity)
+
+        torch.manual_seed(0)
+        x = torch.randn(1, 128, 32, device=device)
+        model = Model().to(device).eval()
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model)(x)
+
+        torch.testing.assert_close(compiled_out, eager_out, rtol=1e-4, atol=1e-4)
+
+    @supported_platform
+    @skip_on_cuda
     def test_cpu_error_message_return_lse(self, device):
         make_tensor = functools.partial(
             torch.randn,
@@ -5605,6 +5687,31 @@ class GraphModule(torch.nn.Module):
             r"NotImplementedError: torch.compile on CPU only supports inference and `return_lse` is not supported yet.",
         ):
             attention(query, key, value, return_lse=True)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    def test_nested_tensor_inputs_error(self, device):
+        def make_nt(lengths, heads=2, dim=8):
+            elems = [
+                torch.randn(s, heads, dim, device=device, dtype=torch.float32)
+                for s in lengths
+            ]
+            return torch.nested.nested_tensor(elems, layout=torch.jagged).transpose(
+                1, 2
+            )
+
+        q = make_nt([3, 2])
+        k = make_nt([3, 2])
+        v = make_nt([3, 2])
+        msg = "flex_attention does not support NestedTensor inputs"
+
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            flex_attention(q, k, v)
+
+        compiled_flex = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            compiled_flex(q, k, v)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_device_cuda_1(self, device):
@@ -6422,6 +6529,61 @@ class TestBlockMask(InductorTestCase):
             )
 
     @supported_platform
+    def test_block_mask_positional_constructor_preserves_block_size(self, device):
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        ref = create_block_mask(
+            causal_mask, B=1, H=1, Q_LEN=256, KV_LEN=256, BLOCK_SIZE=64, device=device
+        )
+        block_mask = BlockMask(
+            ref.seq_lengths,
+            ref.kv_num_blocks,
+            ref.kv_indices,
+            ref.full_kv_num_blocks,
+            ref.full_kv_indices,
+            ref.q_num_blocks,
+            ref.q_indices,
+            ref.full_q_num_blocks,
+            ref.full_q_indices,
+            ref.BLOCK_SIZE,
+            ref.mask_mod,
+        )
+
+        self.assertEqual(block_mask.BLOCK_SIZE, ref.BLOCK_SIZE)
+        self.assertIs(block_mask.mask_mod, ref.mask_mod)
+        self.assertIsNone(block_mask.dq_write_order)
+
+    @supported_platform
+    def test_block_mask_transform_preserves_dq_write_order(self, device):
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            causal_mask,
+            B=2,
+            H=2,
+            Q_LEN=256,
+            KV_LEN=256,
+            BLOCK_SIZE=128,
+            device=device,
+            compute_dq_write_order=True,
+            dq_kv_order=True,
+        )
+
+        sliced = block_mask[0]
+        self.assertIsNotNone(sliced.dq_write_order)
+        self.assertEqual(sliced._dq_kv_order(), True)
+
+        adjusted = block_mask._adjust(128, 128)
+        self.assertIsNotNone(adjusted.dq_write_order)
+        self.assertEqual(adjusted._dq_kv_order(), True)
+
+        moved = block_mask.to(device)
+        self.assertIsNotNone(moved.dq_write_order)
+        self.assertEqual(moved._dq_kv_order(), True)
+
+    @supported_platform
     def test_sliced_blockmask_mask_mod_error(self, device):
         """Test that sliced BlockMask raises helpful error when used with flex_attention"""
 
@@ -7145,6 +7307,133 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             self.assertIsNone(cpu_mask.q_indices)
 
     @supported_platform
+    def test_compute_dq_write_order_with_expanded_kv_indices(self, device):
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            causal_mask, B=1, H=1, Q_LEN=256, KV_LEN=256, BLOCK_SIZE=128, device=device
+        )
+        expanded_kv_block_mask = BlockMask(
+            seq_lengths=block_mask.seq_lengths,
+            kv_num_blocks=block_mask.kv_num_blocks.expand(2, 1, -1),
+            kv_indices=block_mask.kv_indices.expand(2, 1, -1, -1),
+            full_kv_num_blocks=(
+                block_mask.full_kv_num_blocks.expand(2, 1, -1)
+                if block_mask.full_kv_num_blocks is not None
+                else None
+            ),
+            full_kv_indices=(
+                block_mask.full_kv_indices.expand(2, 1, -1, -1)
+                if block_mask.full_kv_indices is not None
+                else None
+            ),
+            q_num_blocks=block_mask.q_num_blocks,
+            q_indices=block_mask.q_indices,
+            full_q_num_blocks=block_mask.full_q_num_blocks,
+            full_q_indices=block_mask.full_q_indices,
+            BLOCK_SIZE=block_mask.BLOCK_SIZE,
+            mask_mod=block_mask.mask_mod,
+        )
+        dq_write_order, dq_write_order_full = _compute_dq_write_order_from_block_mask(
+            expanded_kv_block_mask
+        )
+
+        self.assertEqual(dq_write_order.shape[:2], (2, 1))
+        self.assertEqual(dq_write_order[0], dq_write_order[1])
+        if dq_write_order_full is not None:
+            self.assertEqual(dq_write_order_full.shape[:2], (2, 1))
+            self.assertEqual(dq_write_order_full[0], dq_write_order_full[1])
+
+    @supported_platform
+    def test_create_block_mask_defaults_to_spt_dq_write_order(self, device):
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            Q_LEN=256,
+            KV_LEN=256,
+            BLOCK_SIZE=128,
+            device=device,
+            compute_dq_write_order=True,
+        )
+
+        self.assertIsNotNone(block_mask.dq_write_order)
+        self.assertEqual(block_mask._dq_kv_order(), True)
+
+    @supported_platform
+    def test_create_block_mask_rejects_non_bool_dq_kv_order(self, device):
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        dq_kv_order = torch.tensor([[[1, 0]]], dtype=torch.int32, device=device)
+        with self.assertRaisesRegex(
+            ValueError,
+            "dq_kv_order must be a bool",
+        ):
+            create_block_mask(
+                causal_mask,
+                B=1,
+                H=1,
+                Q_LEN=256,
+                KV_LEN=256,
+                BLOCK_SIZE=128,
+                device=device,
+                compute_dq_write_order=True,
+                dq_kv_order=dq_kv_order,
+            )
+
+    @supported_platform
+    def test_from_kv_blocks_accepts_dq_metadata(self, device):
+        kv_num_blocks = torch.tensor([[[1, 2]]], dtype=torch.int32, device=device)
+        kv_indices = torch.tensor(
+            [[[[0, 0], [0, 1]]]], dtype=torch.int32, device=device
+        )
+        dq_write_order = torch.zeros((1, 1, 2, 2), dtype=torch.int32, device=device)
+        dq_kv_order = torch.tensor([[[1, 0]]], dtype=torch.int32, device=device)
+
+        block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks,
+            kv_indices,
+            dq_write_order=dq_write_order,
+            dq_kv_order=dq_kv_order,
+        )
+        spt_block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks,
+            kv_indices,
+            dq_write_order=dq_write_order,
+            dq_kv_order=True,
+        )
+
+        self.assertEqual(block_mask.dq_write_order, dq_write_order)
+        self.assertEqual(block_mask.dq_kv_order, dq_kv_order)
+        self.assertIsNone(block_mask.dq_write_order_full)
+        self.assertEqual(spt_block_mask.dq_write_order, dq_write_order)
+        self.assertEqual(spt_block_mask._dq_kv_order(), True)
+
+        with self.assertRaisesRegex(ValueError, "dq_kv_order must be"):
+            BlockMask.from_kv_blocks(
+                kv_num_blocks,
+                kv_indices,
+                dq_write_order=dq_write_order,
+                dq_kv_order=1,
+            )
+        with self.assertRaisesRegex(ValueError, "dq_write_order_full requires"):
+            BlockMask.from_kv_blocks(
+                kv_num_blocks,
+                kv_indices,
+                dq_write_order_full=dq_write_order,
+            )
+
+        with self.assertRaisesRegex(NotImplementedError, "tensor dq_kv_order"):
+            block_mask[0]
+        with self.assertRaisesRegex(NotImplementedError, "tensor dq_kv_order"):
+            block_mask._adjust(128, 128)
+
+    @supported_platform
     @skip_on_cpu
     @expected_not_implemented_on_mps  # no captured buffers yet
     def test_broadcasted_head_block_mask(self, device):
@@ -7270,16 +7559,15 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         tensors_with_keys, context_with_keys = block_mask._flatten_with_keys()
 
-        self.assertEqual(len(tensors_with_keys), len(BlockMask._TENSOR_ATTRS))
-        self.assertEqual(len(context_with_keys), len(BlockMask._CONTEXT_ATTRS))
+        n_regular = sum(
+            getattr(block_mask, attr) is not None for attr in BlockMask._TENSOR_ATTRS
+        )
+        self.assertEqual(len(tensors_with_keys), n_regular)
+        self.assertEqual(len(context_with_keys), len(BlockMask._CONTEXT_ATTRS) + 1)
 
         from torch.utils._pytree import GetAttrKey
 
         for key, _tensor in tensors_with_keys:
-            self.assertIsInstance(key, GetAttrKey)
-            self.assertIsNotNone(key)
-
-        for key, _value in context_with_keys:
             self.assertIsInstance(key, GetAttrKey)
             self.assertIsNotNone(key)
 
@@ -7302,16 +7590,19 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         tensors, context = block_mask._flatten()
         reconstructed_mask = BlockMask._unflatten(tensors, context)
 
-        # Verify the number of tensors and context values matches the attribute lists
+        # Verify the number of tensors and context values matches the present attributes
+        n_regular = sum(
+            getattr(block_mask, attr) is not None for attr in BlockMask._TENSOR_ATTRS
+        )
         self.assertEqual(
             len(tensors),
-            len(BlockMask._TENSOR_ATTRS),
-            "Number of tensors should match _TENSOR_ATTRS length",
+            n_regular,
+            "Number of tensors should match present tensor attributes",
         )
         self.assertEqual(
             len(context),
-            len(BlockMask._CONTEXT_ATTRS),
-            "Number of context values should match _CONTEXT_ATTRS length",
+            len(BlockMask._CONTEXT_ATTRS) + 1,
+            "Context values should include optional_tensor_attrs",
         )
 
         # Verify all attributes from the lists exist and are equal after reconstruction
@@ -8574,7 +8865,7 @@ class TestLearnableBiases(InductorTestCase):
                 )
 
                 compiled_flex = torch.compile(
-                    flex_attention, mode="max-autotune-no-cudagraphs"
+                    flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
                 )
 
                 out = compiled_flex(

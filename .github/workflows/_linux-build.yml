@@ -479,10 +479,10 @@ jobs:
     if: github.repository_owner == 'pytorch' && inputs.use-arc
     runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64' }}
     container:
-      image: ghcr.io/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
+      image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
     timeout-minutes: 480
     outputs:
-      docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
+      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
       test-matrix: ${{ steps.map-runners.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
@@ -524,7 +524,13 @@ jobs:
           RUNNER_PREFIX: ${{ inputs.runner_prefix }}
         shell: bash
         run: |
-          python3 .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
+          # Run via uv so pyyaml is provisioned regardless of the build image's
+          # Python setup. Build containers like ubuntu-cross-riscv use the
+          # system apt python3, which doesn't include pyyaml. Matches the
+          # pattern used by parse_ref.py / filter_test_configs.py in
+          # .github/actions/filter-test-configs/action.yml.
+          uv run --no-project --with pyyaml==6.0.2 \
+            python .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
 
       - name: Configure AWS credentials
         id: aws-creds
@@ -569,7 +575,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/build-external-packages@main
         with:
           build-targets: ${{ inputs.build-external-packages }}
-          docker-image: ghcr.io/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
+          docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
           cuda-arch-list: ${{ inputs.cuda-arch-list }}
           output-dir: external
 

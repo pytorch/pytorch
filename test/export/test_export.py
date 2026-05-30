@@ -438,6 +438,45 @@ graph():
         }
         ep = export(MyModel(), inps, dynamic_shapes=spec)
 
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_view_unify_cross_symbols(self):
+        """
+        Cross-symbol view triggers `Eq(s, 1)` specialization in
+        `_view_unbacked_meta` because `is_contiguous_or_false` returns False
+        on the non-contiguous slice from `cat → split`, and the recursive
+        non-size-oblivious branch uses `eval_eager` to specialize.
+
+        - With `unify_view_symbols_bso_meta=False` (default): export
+          fails with ConstraintViolationError ("specialized value of 1").
+        - With `unify_view_symbols_bso_meta=True`: `_view_unbacked_meta`
+          discovers the cross-symbol equality automatically, unifies the
+          symbols, and export succeeds without specialization.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, getattr_1, values_1):
+                wide = torch.cat([values_1] * 9, dim=1)
+                a, _ = torch.split(wide, [33536, 3328], dim=1)
+                x = a.view(getattr_1.size(0), -1, 256)
+                return x.sum() + getattr_1.sum()
+
+        getattr_1 = torch.randn(1, 8)
+        values_1 = torch.randn(1, 4096)
+        B = Dim("B", min=0, max=1024)
+        ds = {"getattr_1": {0: B}, "values_1": {0: B}}
+
+        # Without the flag → must FAIL with ConstraintViolationError.
+        with torch.fx.experimental._config.patch(unify_view_symbols_bso_meta=False):
+            with self.assertRaises(
+                torch._dynamo.exc.UserError,
+            ):
+                export(M(), (getattr_1, values_1), dynamic_shapes=ds, strict=False)
+
+        # With the flag → must SUCCEED.
+        with torch.fx.experimental._config.patch(unify_view_symbols_bso_meta=True):
+            ep = export(M(), (getattr_1, values_1), dynamic_shapes=ds, strict=False)
+            self.assertIsNotNone(ep)
+
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
@@ -1239,7 +1278,7 @@ def forward(self, x):
     detach_21 = torch.ops.aten.detach.default(view_3);  view_3 = None
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
+    flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, None, None, None, None, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  getitem_1 = None
     getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None

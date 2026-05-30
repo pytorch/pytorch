@@ -15,7 +15,7 @@ from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ...codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
-from ...ir import Buffer, FixedLayout, TensorBox
+from ...ir import Buffer, ExternKernel, FixedLayout, TensorBox
 from ...select_algorithm import autotune_select_algorithm
 from .common import (
     build_subgraph_buffer,
@@ -38,6 +38,22 @@ def check_cpu_supported():
         and sys.platform != "darwin"
     )
     return supported
+
+
+def _realize_duplicate_buffer_inputs(inputs):
+    names = [inp.get_name() for inp in inputs]
+    duplicate_names = OrderedSet(name for name in names if names.count(name) > 1)
+    if not duplicate_names:
+        return inputs
+
+    # The C++ template names pointer arguments by storage buffer name.
+    # ReinterpretView inputs that share storage (for example, q/k from
+    # qk.chunk()) need distinct realized buffers so their view offsets are
+    # represented correctly at the template boundary.
+    return [
+        ExternKernel.copy_input(inp) if inp.get_name() in duplicate_names else inp
+        for inp in inputs
+    ]
 
 
 def lower_cpu(
@@ -63,6 +79,10 @@ def lower_cpu(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        _,  # dq_write_order
+        _,  # dq_write_order_full
+        _,  # dq_kv_order
+        _,  # dq_kv_order_spt
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -241,10 +261,7 @@ def lower_cpu(
         ]
     )
 
-    if len(OrderedSet([query.get_name(), key.get_name(), value.get_name()])) != 3:
-        raise NotImplementedError(
-            "Unsupported for now if query, key, value are the same buffer."
-        )
+    query, key, value = _realize_duplicate_buffer_inputs([query, key, value])
     if query.get_dtype() not in [torch.float, torch.bfloat16, torch.float16]:
         raise NotImplementedError(
             "`torch.float` , `torch.float16` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
@@ -289,13 +306,15 @@ def lower_cpu(
         input_nodes += [
             value
             for value in kernel_input_name_to_buffer.values()
-            if not isinstance(value, sympy.Symbol)
+            if not isinstance(value, sympy.Expr)
         ]
 
     skip_mask_score = kernel_options.get("SKIP_MASK_SCORE", False)
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+    # In flash decoding, the partition size of doing the parallelism on KV length dim
+    PARTITION_SIZE = kernel_options.get("PARTITION_SIZE", 128)
     assert V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
     ), (
@@ -315,6 +334,7 @@ def lower_cpu(
         mask_mod=None if skip_mask_score else mask_graph_buffer,
         kv_block_size=SPARSE_KV_BLOCK_SIZE,
         q_block_size=SPARSE_Q_BLOCK_SIZE,
+        partition_size=PARTITION_SIZE,
         has_other_buffer=has_other_buffer,
         no_full_kv_block=no_full_kv_block,
         fake_buffers=fake_buffers,

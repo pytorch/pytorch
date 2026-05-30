@@ -161,6 +161,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,  # q_indices
         _,  # full_q_num_blocks,
         _,  # full_q_indices,
+        _,  # dq_write_order
+        _,  # dq_write_order_full
+        _,  # dq_kv_order
+        _,  # dq_kv_order_spt
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         _,
@@ -385,10 +389,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         )
 
     filtered_score_mod_buffers = [
-        buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Symbol)
+        buf for buf in score_mod_other_buffers if not isinstance(buf, sympy.Expr)
     ]
     filtered_mask_mod_buffers = [
-        buf for buf in mask_mod_other_buffers if not isinstance(buf, sympy.Symbol)
+        buf for buf in mask_mod_other_buffers if not isinstance(buf, sympy.Expr)
     ]
 
     inputs_for_flex_decoding = (

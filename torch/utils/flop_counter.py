@@ -190,7 +190,8 @@ def conv_backward_flop(
         _output_padding,
         _groups,
         output_mask,
-        out_shape) -> int:
+        out_shape,
+        **kwargs) -> int:
 
     def t(shape):
         return [shape[1], shape[0]] + list(shape[2:])
@@ -530,7 +531,7 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
     # scores: [b, h_q, s_k, s_q] @ gradOut: [b, h_q, s_q, d_v] -> gradV: [b, h_q, s_k, d_v]
     total_flops += bmm_flop((b * h_q, s_k, s_q), (b * h_q, s_q, d_v))
 
-    # Step 3: We propagate th gradients through the k @ v operation
+    # Step 3: We propagate the gradients through the k @ v operation
     # gradScores: [b, h_q, s_q, s_k] @ k: [b, h_q, s_k, d_q] -> gradQ: [b, h_q, s_q, d_q]
     total_flops += bmm_flop((b * h_q, s_q, s_k), (b * h_q, s_k, d_q))
     # q: [b, h_q, d_q, s_q] @ gradScores: [b, h_q, s_q, s_k] -> gradK: [b, h_q, d_q, s_k]
@@ -617,20 +618,33 @@ def _register_flex_attention_flops() -> None:
         flex_attention_backward,
     )
 
+    def _get_sparsity_hint(kwargs: dict[str, Any]) -> float:
+        node_meta = kwargs.get("_node_meta")
+        if node_meta is None:
+            return 0.0
+        custom = node_meta.get("custom")
+        if custom is None:
+            return 0.0
+        return max(0.0, min(1.0, custom.get("sparsity_hint", 0.0)))
+
     @register_flop_formula(flex_attention, get_raw=True)
     def flex_attention_forward_flop(
         query, key, value, *args, out_val=None, **kwargs
     ) -> int:
-        return sdpa_flop_count(query.shape, key.shape, value.shape)
+        flops = sdpa_flop_count(query.shape, key.shape, value.shape)
+        sparsity = _get_sparsity_hint(kwargs)
+        return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
 
     @register_flop_formula(flex_attention_backward, get_raw=True)
     def flex_attention_backward_flop(
         query, key, value, out, logsumexp, grad_out, *args, out_val=None, **kwargs
     ) -> int:
         grad_out_shape = grad_out.shape if grad_out is not None else out.shape
-        return sdpa_backward_flop_count(
+        flops = sdpa_backward_flop_count(
             grad_out_shape, query.shape, key.shape, value.shape
         )
+        sparsity = _get_sparsity_hint(kwargs)
+        return int(flops * (1.0 - sparsity)) if sparsity > 0 else flops
 
 
 def _varlen_attn_forward_flop(

@@ -41,8 +41,8 @@ static inline std::tuple<Tensor, bool> ensure_4d(const Tensor& x) {
 
 // general version
 static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
-                                                   const Tensor& key,
-                                                   const Tensor& value,
+                                                   const Tensor& key_,
+                                                   const Tensor& value_,
                                                    const std::optional<Tensor>& attn_mask,
                                                    double dropout_p,
                                                    bool is_causal,
@@ -54,6 +54,19 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   // MPSGraph fallback path doesn't combine causal + attn_mask correctly
   TORCH_CHECK(!(is_causal && attn_mask.has_value()),
               "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
+
+  // MPSGraph matmul requires matched head counts, broadcast K/V here for GQA
+  auto key = key_;
+  auto value = value_;
+  if (key_.size(1) != query.size(1)) {
+    auto q_heads = query.size(1);
+    auto k_heads = key_.size(1);
+    TORCH_CHECK(
+        q_heads % k_heads == 0, "For GQA, q_heads (", q_heads, ") must be divisible by k_heads (", k_heads, ")");
+    auto repeat_factor = q_heads / k_heads;
+    key = key_.repeat_interleave(repeat_factor, /*dim=*/-3);
+    value = value_.repeat_interleave(repeat_factor, /*dim=*/-3);
+  }
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* qTensor = nil;
@@ -74,7 +87,7 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
   @autoreleasepool {
     auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" +
-        std::to_string(attn_mask.has_value());
+        std::to_string(attn_mask.has_value()) + ":" + std::to_string(scale_factor);
     auto cachedGraph =
         LookUpOrCreateCachedGraph<CachedGraph>(mkey, [&, q_ = query, k_ = key, v_ = value](auto mpsGraph, auto graph) {
           auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, q_);
@@ -175,6 +188,10 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   return {std::move(final_out), std::move(final_attn)};
 }
 
+static std::string sdpa_vector_mask_suffix(const std::optional<Tensor>& mask) {
+  return mask.has_value() ? mps::scalarToMetalTypeString(mask.value()) : "none";
+}
+
 // Vector mode (One–pass variant)
 static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                                                        const Tensor& k_,
@@ -197,6 +214,7 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
   uint maxSeqLength = k_.size(2);
   uint N = k_.size(2);
   uint B = q_.size(0) * q_.size(1);
+  uint gqa_factor = q_.size(1) / k_.size(1);
   uint q_batch_stride = q_.stride(0);
   uint q_head_stride = q_.stride(1);
   uint q_seq_stride = q_.stride(2);
@@ -216,10 +234,14 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
       auto computeEncoder = mpsStream->commandEncoder();
       auto group_dims = MTLSizeMake(1024, 1, 1);
       auto grid_dims = MTLSizeMake(batchSize * num_head, q_.size(2), 1);
-      bool has_mask = mask_.has_value();
+      const bool has_mask = mask_.has_value();
 
-      const std::string kname = fmt::format(
-          "sdpa_vector_{}_{}_{}{}", scalarToMetalTypeString(q_), q_.size(-1), v_.size(-1), is_causal ? "_causal" : "");
+      const std::string kname = fmt::format("sdpa_vector_{}_{}_{}_mask{}{}",
+                                            scalarToMetalTypeString(q_),
+                                            q_.size(-1),
+                                            v_.size(-1),
+                                            sdpa_vector_mask_suffix(mask_),
+                                            is_causal ? "_causal" : "");
       auto attentionPSO = lib.getPipelineStateForFunc(kname);
       [computeEncoder setComputePipelineState:attentionPSO];
       mtl_setArgs(computeEncoder,
@@ -227,22 +249,24 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                   k_,
                   v_,
                   out,
-                  1,
+                  gqa_factor,
                   N,
                   std::array<uint32_t, 3>{q_head_stride, k_head_stride, v_head_stride},
                   std::array<uint32_t, 3>{q_seq_stride, k_seq_stride, v_seq_stride},
                   scale_factor);
 
       if (has_mask) {
-        int nd = mask_.value().dim();
-        uint kv_seq_stride = (nd >= 1 && mask_.value().size(nd - 1) > 1) ? mask_.value().stride(nd - 1) : 0;
-        uint q_seq_stride = (nd >= 2 && mask_.value().size(nd - 2) > 1) ? mask_.value().stride(nd - 2) : 0;
-        uint head_stride = (nd >= 3 && mask_.value().size(nd - 3) > 1) ? mask_.value().stride(nd - 3) : 0;
+        auto mask = mask_.value();
+        int nd = mask.dim();
+        uint kv_seq_stride = (mask.size(3) > 1) ? mask.stride(3) : 0;
+        uint q_seq_stride = (mask.size(2) > 1) ? mask.stride(2) : 0;
+        uint head_stride = (mask.size(1) > 1) ? mask.stride(1) : 0;
+        uint batch_stride = (mask.size(0) > 1) ? mask.stride(0) : 0;
         mtl_setArgs<9>(
-            computeEncoder, mask_.value(), std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
+            computeEncoder, mask, std::array<uint32_t, 4>{kv_seq_stride, q_seq_stride, head_stride, batch_stride});
       }
-      mtl_setArgs<11>(
-          computeEncoder, has_mask, std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head});
+      mtl_setArgs<11>(computeEncoder,
+                      std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_head});
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
     }
   });
@@ -296,16 +320,17 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   auto maxs = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
 
   auto scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
-  bool has_mask = mask_.has_value();
+  const bool has_mask = mask_.has_value();
 
   MPSStream* mpsStream = getCurrentMPSStream();
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
-      const std::string kname_pass1 = fmt::format("sdpa_vector_2pass_1_{}_{}_{}{}",
+      const std::string kname_pass1 = fmt::format("sdpa_vector_2pass_1_{}_{}_{}_mask{}{}",
                                                   scalarToMetalTypeString(q_),
                                                   q_.size(-1),
                                                   v_.size(-1),
+                                                  sdpa_vector_mask_suffix(mask_),
                                                   is_causal ? "_causal" : "");
       const std::string kname_pass2 =
           fmt::format("sdpa_vector_2pass_2_{}_{}", scalarToMetalTypeString(q_), v_.size(-1));
@@ -330,15 +355,17 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                   scale_factor);
 
       if (has_mask) {
-        Tensor mask = mask_.value();
+        auto mask = mask_.value();
         int nd = mask.dim();
-        uint kv_seq_stride = (nd >= 1 && mask.size(nd - 1) > 1) ? mask.stride(nd - 1) : 0;
-        uint q_seq_stride = (nd >= 2 && mask.size(nd - 2) > 1) ? mask.stride(nd - 2) : 0;
-        uint head_stride = (nd >= 3 && mask.size(nd - 3) > 1) ? mask.stride(nd - 3) : 0;
-        mtl_setArgs<11>(computeEncoder, mask, std::array<uint32_t, 3>{kv_seq_stride, q_seq_stride, head_stride});
+        uint kv_seq_stride = (mask.size(3) > 1) ? mask.stride(3) : 0;
+        uint q_seq_stride = (mask.size(2) > 1) ? mask.stride(2) : 0;
+        uint head_stride = (mask.size(1) > 1) ? mask.stride(1) : 0;
+        uint batch_stride = (mask.size(0) > 1) ? mask.stride(0) : 0;
+        mtl_setArgs<11>(
+            computeEncoder, mask, std::array<uint32_t, 4>{kv_seq_stride, q_seq_stride, head_stride, batch_stride});
       }
-      mtl_setArgs<13>(
-          computeEncoder, has_mask, std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_heads});
+      mtl_setArgs<13>(computeEncoder,
+                      std::array<uint32_t, 4>{q_batch_stride, k_batch_stride, v_batch_stride, num_heads});
       [computeEncoder dispatchThreadgroups:grid_dims threadsPerThreadgroup:group_dims];
       // 2nd pass
       [computeEncoder setComputePipelineState:sdpa_vector_pass2PSO];
@@ -672,33 +699,30 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(value_.scalar_type()),
                               "scaled_dot_product_attention for MPS does not support dtype ",
                               value_.scalar_type());
+  TORCH_CHECK_NOT_IMPLEMENTED(dropout_p == 0.0f, "scaled_dot_product_attention for MPS does not support dropout.");
   const auto any_nested = query.is_nested() || key_.is_nested() || value_.is_nested();
   const auto all_contiguous =
       query.is_contiguous_or_false() && key_.is_contiguous_or_false() && value_.is_contiguous_or_false();
-  auto key = key_;
-  auto value = value_;
+  // The kernel paths (vector fast / 2pass / prefill) all broadcast K/V across
+  // GQA groups internally via their gqa_factor parameter, so we leave K/V at
+  // their original [B, H_kv, L, D] shape here. sdpa_general_mps expands K/V
+  // itself when it falls back to MPSGraph matmul.
   if (enable_gqa) {
     int64_t q_heads = query.size(-3);
     int64_t k_heads = key_.size(-3);
-    int64_t repeat_factor = q_heads / k_heads;
-
-    if (repeat_factor > 1) {
-      TORCH_CHECK(q_heads % k_heads == 0,
-                  "For GQA, the query tensor's head dimension (" + std::to_string(q_heads) +
-                      ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
-      key = key_.repeat_interleave(repeat_factor, /*dim=*/-3);
-      value = value_.repeat_interleave(repeat_factor, /*dim=*/-3);
-    }
+    TORCH_CHECK(q_heads % k_heads == 0,
+                "For GQA, the query tensor's head dimension (" + std::to_string(q_heads) +
+                    ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
   }
 
   auto query_tuple = ensure_4d(query);
   Tensor q_ = std::get<0>(query_tuple);
   bool unsqueezed = std::get<1>(query_tuple);
 
-  auto key_tuple = ensure_4d(key);
+  auto key_tuple = ensure_4d(key_);
   Tensor k_ = std::get<0>(key_tuple);
 
-  auto value_tuple = ensure_4d(value);
+  auto value_tuple = ensure_4d(value_);
   Tensor v_ = std::get<0>(value_tuple);
 
   std::optional<Tensor> mask_;
@@ -719,9 +743,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   int query_seq_len = q_.size(2);
   // Fast vector attention: when the sequence length is very short,
   // the key sequence length is large,
-  // the mask is boolean and head dims are supported
-  bool supports_sdpa_vector = (query_seq_len <= 8) && (query_seq_len <= k_.size(2)) &&
-      ((!mask_.has_value()) || (mask_.value().dtype() == at::kBool)) && sdpa_vector_supported_head_dim;
+  // the mask is boolean/float and head dims are supported
+  bool sdpa_vector_mask_ok =
+      !mask_.has_value() || mask_.value().dtype() == at::kBool || mask_.value().dtype() == q_.dtype();
+  bool supports_sdpa_vector =
+      (query_seq_len <= 8) && (query_seq_len <= k_.size(2)) && sdpa_vector_mask_ok && sdpa_vector_supported_head_dim;
 
   // boolean to decide if we can use kernel paths
   bool supports_fast_sdpa = supports_sdpa_vector && !(is_causal && mask_.has_value());
