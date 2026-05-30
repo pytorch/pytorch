@@ -1006,7 +1006,7 @@ def get_desired_device_type_test_bases(
 # device-specific tests (NB: this supports additional @parametrize usage).
 #
 # See note "Writing Test Templates"
-# TODO: remove "allow_xpu" option after Interl GPU support all test case instantiate by this function.
+# TODO: remove "allow_xpu" option after Intel GPU support all test case instantiate by this function.
 def instantiate_device_type_tests(
     generic_test_class,
     scope,
@@ -2041,9 +2041,7 @@ def has_cusolver():
 
 
 def has_hipsolver():
-    rocm_version = _get_torch_rocm_version()
-    # hipSOLVER is disabled on ROCM < 5.3
-    return rocm_version >= (5, 3)
+    return TEST_WITH_ROCM
 
 
 # Skips a test on CUDA if cuSOLVER is not available,
@@ -2296,6 +2294,7 @@ IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED = (
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0)
 )
+IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED = torch.mps.is_available()
 flex_attention_supported_platform = unittest.skipUnless(
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
     or (
@@ -2303,8 +2302,9 @@ flex_attention_supported_platform = unittest.skipUnless(
         and not torch.xpu.is_available()
         and not torch.cuda.is_available()
     )
-    or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
-    "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
+    or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
+    or IS_FLEX_ATTENTION_MPS_PLATFORM_SUPPORTED,
+    "Requires CUDA and Triton, Intel GPU and triton, MPS, or CPU with avx2 and later",
 )
 if (
     torch.version.hip
