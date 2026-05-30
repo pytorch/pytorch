@@ -2734,7 +2734,7 @@ class SymNodeVariable(VariableTracker):
 
     def nb_floor_divide_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -2751,7 +2751,7 @@ class SymNodeVariable(VariableTracker):
 
     def nb_true_divide_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -2768,7 +2768,7 @@ class SymNodeVariable(VariableTracker):
 
     def nb_remainder_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
