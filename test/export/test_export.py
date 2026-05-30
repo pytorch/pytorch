@@ -1968,9 +1968,15 @@ graph():
 
         f = Basic()
         args = (torch.randn(1, 3),)
-        # strict-mode will error out because foo is registered as parameter
-        # in dynamo (a behavior that's different from eager). We decided to
-        # follow eager behavior.
+        # foo is registered as a parameter in Dynamo, but not in eager.
+        # Follow eager behavior and treat it as a lifted tensor constant.
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        self.assertEqual(gm(*args), f(*args))
+
         ep = export(f, args, strict=False)
         gm = ep.module()
         self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 1)
@@ -1988,6 +1994,46 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %lifted_tensor_0), kwargs = {})
     return (add,)""",
         )
+
+    def test_strict_export_unregistered_module_list_parameters(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.ones(3, 3))
+
+            def forward(self, x):
+                return x + self.a
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.models = [A(), A()]
+
+            def forward(self, x):
+                for m in self.models:
+                    x = m(x)
+                return x
+
+        f = M()
+        args = (torch.ones(3, 3),)
+        ep = export(f, args, strict=True)
+        gm = ep.module()
+
+        self.assertEqual(
+            [spec.kind for spec in ep.graph_signature.input_specs],
+            [
+                InputKind.CONSTANT_TENSOR,
+                InputKind.CONSTANT_TENSOR,
+                InputKind.USER_INPUT,
+            ],
+        )
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 2)
+        self.assertEqual(len(ep.graph_signature.parameters), 0)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(list(gm.named_parameters())), 0)
+        for constant in ep.constants.values():
+            self.assertFalse(isinstance(constant, torch.nn.Parameter))
+        self.assertEqual(gm(*args), f(*args))
 
     def test_int_shape_specialization(self):
         class M(torch.nn.Module):
