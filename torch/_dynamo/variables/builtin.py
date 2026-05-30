@@ -2833,12 +2833,12 @@ class BuiltinVariable(BaseBuiltinVariable):
         return binary_iop(tx, a, b, "nb_inplace_rshift", "nb_rshift", ">>=")
 
     def call_floordiv(
-        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_op(tx, a, b, "nb_floor_divide", "//")
 
     def call_ifloordiv(
-        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_iop(tx, a, b, "nb_inplace_floor_divide", "nb_floor_divide", "//=")
 
