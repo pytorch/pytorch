@@ -23,6 +23,7 @@ from torch._higher_order_ops.gemm_epilogue import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -2679,6 +2680,51 @@ class GemmEpilogueFusionTests(TestCase):
             code
         )
 
+    def test_mx_e8m0_scale_edge_values(self):
+        values = torch.tensor(
+            [0.0, 1.0, 2.0, 8.0, 16.0, 448.0, float("nan")],
+            dtype=torch.float32,
+        )
+
+        actual = mx_e8m0_scale(values)
+        self.assertEqual(actual.dtype, torch.float8_e8m0fnu)
+        self.assertEqual(
+            actual.view(torch.uint8),
+            torch.tensor([0, 119, 120, 122, 123, 127, 255], dtype=torch.uint8),
+        )
+
+        actual_max_power_2 = mx_e8m0_scale(values, max_power=2)
+        self.assertEqual(
+            actual_max_power_2.view(torch.uint8),
+            torch.tensor([0, 125, 126, 128, 129, 133, 255], dtype=torch.uint8),
+        )
+
+        with FakeTensorMode():
+            fake_input = torch.empty_strided((2, 3), (3, 1))
+            fake_actual = mx_e8m0_scale(fake_input)
+            self.assertEqual(fake_actual.shape, fake_input.shape)
+            self.assertEqual(fake_actual.stride(), fake_input.stride())
+            self.assertEqual(fake_actual.dtype, torch.float8_e8m0fnu)
+
+    def test_nvfp4_e4m3_scale_edge_values(self):
+        values = torch.tensor(
+            [0.0, 1e-6, 6.0, 12.0, 448.0 * 6.0, 1e9], dtype=torch.float32
+        )
+
+        actual = nvfp4_e4m3_scale(values)
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertEqual(
+            actual.float(),
+            torch.tensor([1 / 64, 1 / 64, 1.0, 2.0, 448.0, 448.0]),
+        )
+
+        with FakeTensorMode():
+            fake_input = torch.empty_strided((2, 3), (3, 1))
+            fake_actual = nvfp4_e4m3_scale(fake_input)
+            self.assertEqual(fake_actual.shape, fake_input.shape)
+            self.assertEqual(fake_actual.stride(), fake_input.stride())
+            self.assertEqual(fake_actual.dtype, torch.float8_e4m3fn)
+
     def test_nvfp4_e2m1_pack_matches_reference(self):
         from torch.testing._internal.common_quantized import (
             _bfloat16_to_float4_e2m1fn_x2,
@@ -2691,8 +2737,6 @@ class GemmEpilogueFusionTests(TestCase):
         self.assertEqual(actual.shape, (4, 8))
         self.assertEqual(actual.stride(), (8, 1))
         self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
-
-        from torch._subclasses.fake_tensor import FakeTensorMode
 
         with FakeTensorMode():
             fake_actual = nvfp4_e2m1_pack(torch.empty(4, 16))
