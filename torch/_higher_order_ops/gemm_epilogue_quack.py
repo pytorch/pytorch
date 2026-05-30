@@ -18,6 +18,8 @@ QUACK_GEMM_OPS = (
 )
 SUPPORTED_QUACK_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_grouped_mm"
 QUACK_TENSORSSA_FRAGMENT_N = 32
+QUACK_REDUCE_DIM_M = 0
+QUACK_REDUCE_DIM_N = 1
 
 
 def unwrap_output(node: torch.fx.Node) -> Any:
@@ -47,7 +49,16 @@ def find_single_gemm_node(graph_module: torch.fx.GraphModule) -> torch.fx.Node:
 
 @dataclass(frozen=True)
 class QuackLocalReduceInfo:
-    """Plan for an epilogue-local reduction lowered inside QUACK TensorSSA."""
+    """Plan for one local reduction produced inside the fused epilogue.
+
+    Invariants:
+    - ``dim`` is one of ``QUACK_REDUCE_DIM_M`` or ``QUACK_REDUCE_DIM_N``.
+    - ``group_size`` is the logical reduction group from the epilogue reshape.
+    - ``producer_skip_nodes`` are FX nodes represented by this plan, not by
+      generic pointwise emission.
+    - ``epilogue_reduce_*`` is set only when the reduced value is derived from
+      an intermediate epilogue expression rather than directly from the GEMM acc.
+    """
     view_node: torch.fx.Node
     reduce_op_node: torch.fx.Node
     source_node: torch.fx.Node
@@ -165,6 +176,10 @@ def normalize_shape(shape: Any) -> Any:
     return shape
 
 
+def tensorssa_grouped_n_shape(group_size: int) -> str:
+    return f"((1, {group_size}, {QUACK_TENSORSSA_FRAGMENT_N // group_size}), 1, 1)"
+
+
 def method_clamp_bounds(node: torch.fx.Node) -> tuple[Any, Any]:
     min_value = node.kwargs["min"] if "min" in node.kwargs else None
     max_value = node.kwargs["max"] if "max" in node.kwargs else None
@@ -173,6 +188,16 @@ def method_clamp_bounds(node: torch.fx.Node) -> tuple[Any, Any]:
     if "max" not in node.kwargs and len(node.args) > 2:
         max_value = node.args[2]
     return min_value, max_value
+
+
+def is_abs_node(node: Any) -> bool:
+    return isinstance(node, torch.fx.Node) and (
+        (
+            node.op == "call_function"
+            and node.target in (torch.ops.aten.abs.default, torch.abs)
+        )
+        or (node.op == "call_method" and node.target == "abs")
+    )
 
 
 def match_view_or_reshape(node: Any) -> QuackViewMatch | None:
@@ -292,13 +317,7 @@ def match_local_n_amax_reduce(
     if bool(reduce_match.keepdim):
         return None
     abs_node = reduce_match.input_node
-    if not isinstance(abs_node, torch.fx.Node):
-        return None
-    is_abs = (
-        abs_node.op == "call_function"
-        and abs_node.target in (torch.ops.aten.abs.default, torch.abs)
-    ) or (abs_node.op == "call_method" and abs_node.target == "abs")
-    if not is_abs:
+    if not is_abs_node(abs_node):
         return None
     view_match = match_view_or_reshape(abs_node.args[0])
     if view_match is None:
@@ -323,7 +342,7 @@ def match_local_n_amax_reduce(
         source_node=source_node,
         keepdim=False,
         group_size=shape[-1],
-        dim=1,
+        dim=QUACK_REDUCE_DIM_N,
         kind="amax_abs",
         scale=scale,
         producer_skip_nodes=frozenset((abs_node,)),
@@ -453,13 +472,7 @@ def match_local_n_amax_scale_view(
     if not bool(reduce_match.keepdim):
         return None
     abs_node = reduce_match.input_node
-    if not isinstance(abs_node, torch.fx.Node):
-        return None
-    is_abs = (
-        abs_node.op == "call_function"
-        and abs_node.target in (torch.ops.aten.abs.default, torch.abs)
-    ) or (abs_node.op == "call_method" and abs_node.target == "abs")
-    if not is_abs:
+    if not is_abs_node(abs_node):
         return None
     view_match = match_view_or_reshape(abs_node.args[0])
     if view_match is None:
@@ -492,7 +505,7 @@ def match_local_n_amax_scale_view(
         source_node=source_node,
         keepdim=False,
         group_size=grouped_shape[-1],
-        dim=1,
+        dim=QUACK_REDUCE_DIM_N,
         kind="amax_abs",
         scale=scale,
         aux_output_node=aux_output_node,
@@ -534,13 +547,7 @@ def match_local_n_primitive_scale_view(
     if not bool(reduce_match.keepdim):
         return None
     abs_node = reduce_match.input_node
-    if not isinstance(abs_node, torch.fx.Node):
-        return None
-    is_abs = (
-        abs_node.op == "call_function"
-        and abs_node.target in (torch.ops.aten.abs.default, torch.abs)
-    ) or (abs_node.op == "call_method" and abs_node.target == "abs")
-    if not is_abs:
+    if not is_abs_node(abs_node):
         return None
     view_match = match_view_or_reshape(abs_node.args[0])
     if view_match is None:
@@ -566,7 +573,7 @@ def match_local_n_primitive_scale_view(
         source_node=source_node,
         keepdim=False,
         group_size=grouped_shape[-1],
-        dim=1,
+        dim=QUACK_REDUCE_DIM_N,
         kind=kind,
         max_power=op_max_power,
         aux_output_node=aux_view.node,
@@ -633,7 +640,7 @@ def match_local_n_reduce(
         source_node=source_node,
         keepdim=bool(sum_match.keepdim),
         group_size=group_size,
-        dim=1,
+        dim=QUACK_REDUCE_DIM_N,
     )
 
 
@@ -681,7 +688,7 @@ def match_local_m_reduce(
         source_node=source_node,
         keepdim=bool(sum_match.keepdim),
         group_size=group_size,
-        dim=0,
+        dim=QUACK_REDUCE_DIM_M,
     )
 
 
@@ -758,7 +765,7 @@ def match_local_n_norm(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalNormInfo | None:
     return match_local_norm(
-        node, mm_node, match_local_n_reduce, dim=1
+        node, mm_node, match_local_n_reduce, dim=QUACK_REDUCE_DIM_N
     )
 
 
@@ -766,7 +773,7 @@ def match_local_m_norm(
     node: Any, mm_node: torch.fx.Node
 ) -> QuackLocalNormInfo | None:
     return match_local_norm(
-        node, mm_node, match_local_m_reduce, dim=0
+        node, mm_node, match_local_m_reduce, dim=QUACK_REDUCE_DIM_M
     )
 
 
@@ -992,7 +999,7 @@ def analyze_output(output_value: Any, mm_node: torch.fx.Node) -> QuackOutputPlan
             source_node=local_norm.source_node,
             keepdim=True,
             group_size=local_norm.group_size,
-            dim=0,
+            dim=QUACK_REDUCE_DIM_M,
             feeds_main=True,
         )
     if isinstance(output_value, (tuple, list)):

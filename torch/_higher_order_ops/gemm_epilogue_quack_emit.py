@@ -32,6 +32,7 @@ from torch._higher_order_ops.gemm_epilogue_quack import (
     normalize_shape,
     fx_equivalent,
     grouped_n_fragment_shape,
+    tensorssa_grouped_n_shape,
     QUACK_TENSORSSA_FRAGMENT_N,
     QUACK_TENSORSSA_REDUCTIONS,
     unwrap_output,
@@ -299,12 +300,7 @@ def lower_view_or_reshape_node(
                     "aux reductions can use other static groups"
                 )
             group_size = group_shape[-1]
-        return emit_tensorssa_reshape(
-            kernel,
-            source,
-            f"((1, {group_size}, "
-            f"{QUACK_TENSORSSA_FRAGMENT_N // group_size}), 1, 1)",
-        )
+        return emit_tensorssa_reshape(kernel, source, tensorssa_grouped_n_shape(group_size))
     mm_meta = mm_node.meta.get("val")
     if (
         mm_meta is not None
@@ -739,10 +735,7 @@ def compile_pointwise_nodes(
                     _split_node, group_size, _concat_layout = split
                     source = cute_arg(mm_node, env)
                     env[node] = emit_tensorssa_reshape(
-                        kernel,
-                        source,
-                        f"((1, {group_size}, "
-                        f"{QUACK_TENSORSSA_FRAGMENT_N // group_size}), 1, 1)",
+                        kernel, source, tensorssa_grouped_n_shape(group_size)
                     )
                     grouped_tensors[node] = QuackGroupedTensorSSAInfo(
                         group_size=group_size,

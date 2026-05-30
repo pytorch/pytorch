@@ -78,6 +78,49 @@ class GemmEpilogueFusionTests(TestCase):
             file_check = file_check.check_not(pattern)
         file_check.run(code)
 
+    def _assert_compiled_matches(
+        self,
+        fn,
+        *args,
+        atol=1e-2,
+        rtol=1e-2,
+        checks=(),
+        check_nots=(),
+        contains=(),
+        assert_fn=None,
+    ):
+        actual, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), *args
+        )
+        expected = fn(*args)
+        if assert_fn is None:
+            torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+        else:
+            assert_fn(actual, expected)
+        code = "\n".join(codes)
+        self._check_code(code, checks=checks, check_nots=check_nots)
+        for pattern in contains:
+            self.assertIn(pattern, code)
+        return actual, expected, code
+
+    def _quack_codegen_invariants(self, *checks, extern="extern_kernels.mm"):
+        return ("@cute.jit", "gemm_epilogue(", *checks), (
+            "call_quack_gemm_epilogue",
+            "torch.ops.flex_gemm",
+            extern,
+        )
+
+    def _local_reduce_invariants(self, *, group, dim, op=None, feeds_main=False):
+        checks = [f"local_reduce_group={group}", f"local_reduce_dim={dim}"]
+        if op is not None:
+            checks.append(f"local_reduce_op='{op}'")
+        if feeds_main:
+            checks.append("local_reduce_feeds_main=True")
+        return tuple(checks)
+
+    def _tensorssa_grouped_n_invariants(self, group):
+        return (f"acc.reshape(((1, {group}, {32 // group}), 1, 1))",)
+
     def _assert_quack_tuple_epilogue(
         self,
         fn,
@@ -1453,16 +1496,12 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(128, 128, device="cuda", dtype=torch.float16)
         b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
 
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        checks, check_nots = self._quack_codegen_invariants(
+            "def flex_gemm_quack_epilogue_"
         )
-
-        torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
-        FileCheck().check("@cute.jit").check("def flex_gemm_quack_epilogue_").check(
-            "gemm_epilogue("
-        ).check_not("call_quack_gemm_epilogue").check_not(
-            "torch.ops.flex_gemm"
-        ).check_not("extern_kernels.mm").run(code)
+        self._assert_compiled_matches(
+            fn, a, b, checks=checks, check_nots=check_nots
+        )
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_generates_pointwise_epilogue(self):
@@ -1477,16 +1516,12 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(128, 128, device="cuda", dtype=torch.float16)
         b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
 
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
-        )
-
-        torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
-        FileCheck().check("@cute.jit").check(
+        checks, check_nots = self._quack_codegen_invariants(
             "tmp0 = (acc + cute.full_like(acc, 1.0))"
-        ).check("gemm_epilogue(").check_not("call_quack_gemm_epilogue").check_not(
-            "torch.ops.flex_gemm"
-        ).check_not("extern_kernels.mm").run(code)
+        )
+        self._assert_compiled_matches(
+            fn, a, b, checks=checks, check_nots=check_nots
+        )
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_positional_clamp_matches_reference(self):
@@ -1501,12 +1536,10 @@ class GemmEpilogueFusionTests(TestCase):
         a = torch.randn(128, 128, device="cuda", dtype=torch.float16)
         b = torch.randn(128, 64, device="cuda", dtype=torch.float16)
 
-        actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        checks, check_nots = self._quack_codegen_invariants("-0.5", "0.5")
+        self._assert_compiled_matches(
+            fn, a, b, checks=checks, check_nots=check_nots
         )
-
-        torch.testing.assert_close(actual, fn(a, b), atol=1e-2, rtol=1e-2)
-        FileCheck().check("@cute.jit").check("-0.5").check("0.5").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_local_reduce_feeds_main_groups(self):
@@ -1532,17 +1565,23 @@ class GemmEpilogueFusionTests(TestCase):
                 a = torch.rand(M, 64, device="cuda", dtype=torch.float16)
                 b = torch.rand(64, N, device="cuda", dtype=torch.float16)
 
-                actual, (code,) = run_and_get_code(
-                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                checks, check_nots = self._quack_codegen_invariants(
+                    "cute.ReductionOp.ADD",
+                    "broadcast_to",
                 )
-                expected = fn(a, b)
-
-                torch.testing.assert_close(
-                    actual.float(), expected, atol=5e-2, rtol=5e-2
+                self._assert_compiled_matches(
+                    fn,
+                    a,
+                    b,
+                    atol=5e-2,
+                    rtol=5e-2,
+                    checks=checks,
+                    check_nots=check_nots,
+                    contains=self._tensorssa_grouped_n_invariants(group),
+                    assert_fn=lambda actual, expected: torch.testing.assert_close(
+                        actual.float(), expected, atol=5e-2, rtol=5e-2
+                    ),
                 )
-                FileCheck().check("@cute.jit").check("cute.ReductionOp.ADD").check(
-                    "broadcast_to"
-                ).check("gemm_epilogue(").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_local_amax_feeds_main_groups(self):
@@ -1568,17 +1607,23 @@ class GemmEpilogueFusionTests(TestCase):
                 a = torch.randn(M, 64, device="cuda", dtype=torch.float16)
                 b = torch.randn(64, N, device="cuda", dtype=torch.float16)
 
-                actual, (code,) = run_and_get_code(
-                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                checks, check_nots = self._quack_codegen_invariants(
+                    "cute.ReductionOp.MAX",
+                    "broadcast_to",
                 )
-                expected = fn(a, b)
-
-                torch.testing.assert_close(
-                    actual.float(), expected, atol=5e-2, rtol=5e-2
+                self._assert_compiled_matches(
+                    fn,
+                    a,
+                    b,
+                    atol=5e-2,
+                    rtol=5e-2,
+                    checks=checks,
+                    check_nots=check_nots,
+                    contains=self._tensorssa_grouped_n_invariants(group),
+                    assert_fn=lambda actual, expected: torch.testing.assert_close(
+                        actual.float(), expected, atol=5e-2, rtol=5e-2
+                    ),
                 )
-                FileCheck().check("@cute.jit").check("cute.ReductionOp.MAX").check(
-                    "broadcast_to"
-                ).check("gemm_epilogue(").check_not("extern_kernels.mm").run(code)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_amax_without_abs_feeding_main(self):
@@ -1629,18 +1674,22 @@ class GemmEpilogueFusionTests(TestCase):
                 a = torch.rand(M, 64, device="cuda", dtype=torch.float16)
                 b = torch.rand(64, N, device="cuda", dtype=torch.float16)
 
-                actual, (code,) = run_and_get_code(
-                    torch.compile(fn, backend="inductor", fullgraph=True), a, b
+                checks, check_nots = self._quack_codegen_invariants(
+                    *self._local_reduce_invariants(
+                        group=group, dim=0, feeds_main=True
+                    )
                 )
-                expected = fn(a, b)
-
-                torch.testing.assert_close(
-                    actual.float(), expected.float(), atol=5e-2, rtol=5e-2
-                )
-                FileCheck().check(f"local_reduce_group={group}").check(
-                    "local_reduce_dim=0"
-                ).check("local_reduce_feeds_main=True").check_not("extern_kernels.mm").run(
-                    code
+                self._assert_compiled_matches(
+                    fn,
+                    a,
+                    b,
+                    atol=5e-2,
+                    rtol=5e-2,
+                    checks=checks,
+                    check_nots=check_nots,
+                    assert_fn=lambda actual, expected: torch.testing.assert_close(
+                        actual.float(), expected.float(), atol=5e-2, rtol=5e-2
+                    ),
                 )
 
     @requires_cuda_and_triton
