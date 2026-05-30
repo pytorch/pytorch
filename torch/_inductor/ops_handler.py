@@ -1100,9 +1100,6 @@ class OpCounterCSE(DefaultHandler):
         self._nontrivial_read_count = 0
 
     def _check_limit(self) -> None:
-        if self.max_ops is not None and self.op_count > self.max_ops:
-            self.limit_exceeded = True
-            raise OpCountLimitExceeded
         if self.max_visits is not None and self.visit_count > self.max_visits:
             self.limit_exceeded = True
             raise OpCountLimitExceeded
