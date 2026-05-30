@@ -688,7 +688,6 @@ def _produce_aten_artifact(
     _preserve_requires_grad_pass(
         gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args
     )
-    _normalize_slice_default_bounds(gm)
 
     return ATenExportArtifact(
         gm,
@@ -696,68 +695,6 @@ def _produce_aten_artifact(
         constants,
         inferred_out_spec=graph_signature.out_spec,
     )
-
-
-def _normalize_slice_default_bounds(gm: torch.fx.GraphModule) -> None:
-    """Represent traced Python slice defaults with aten.slice schema defaults."""
-
-    def is_plain_int(value, expected) -> bool:
-        return (
-            isinstance(value, int) and not isinstance(value, bool) and value == expected
-        )
-
-    def is_traced_tensor_getitem(node: torch.fx.Node) -> bool:
-        torch_fn = node.meta.get("torch_fn")
-        return (
-            isinstance(torch_fn, tuple)
-            and len(torch_fn) == 2
-            and torch_fn[1] == "wrapper_descriptor.__getitem__"
-        )
-
-    for _mod in gm.modules():
-        if not isinstance(_mod, torch.fx.GraphModule):
-            continue
-
-        graph_changed = False
-        for node in _mod.graph.nodes:
-            if (
-                node.op != "call_function"
-                or node.target is not torch.ops.aten.slice.Tensor
-            ):
-                continue
-            if not is_traced_tensor_getitem(node):
-                continue
-
-            node_changed = False
-            saw_default_end = False
-            args = list(node.args)
-            kwargs = dict(node.kwargs)
-
-            if len(args) > 3 and is_plain_int(args[3], sys.maxsize):
-                args[3] = None
-                node_changed = True
-                saw_default_end = True
-            if "end" in kwargs and is_plain_int(kwargs["end"], sys.maxsize):
-                kwargs["end"] = None
-                node_changed = True
-                saw_default_end = True
-
-            if saw_default_end:
-                if len(args) > 2 and is_plain_int(args[2], 0):
-                    args[2] = None
-                    node_changed = True
-                if "start" in kwargs and is_plain_int(kwargs["start"], 0):
-                    kwargs["start"] = None
-                    node_changed = True
-
-            if node_changed:
-                node.args = tuple(args)
-                node.kwargs = kwargs
-                graph_changed = True
-
-        if graph_changed:
-            _mod.graph.lint()
-            _mod.recompile()
 
 
 def _rename_constants_nodes(
