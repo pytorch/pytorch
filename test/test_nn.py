@@ -7870,6 +7870,33 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaises(RuntimeError):
             res = arg_class(*arg_4)
 
+    def test_max_pool1d_invalid_float_parameters(self):
+        invalid_args = (
+            ({"kernel_size": 1.0}, "kernel_size must be int or tuple of ints, not float"),
+            (
+                {"kernel_size": (1.0,)},
+                "kernel_size must be int or tuple of ints, "
+                "but found element of type float at pos 0",
+            ),
+            (
+                {"kernel_size": 1, "stride": 1.0},
+                "stride must be int or tuple of ints, not float",
+            ),
+            (
+                {"kernel_size": 1, "padding": 0.0},
+                "padding must be int or tuple of ints, not float",
+            ),
+            (
+                {"kernel_size": 1, "dilation": 1.0},
+                "dilation must be int or tuple of ints, not float",
+            ),
+        )
+
+        for kwargs, error in invalid_args:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(TypeError, re.escape(error)):
+                    nn.MaxPool1d(**kwargs)
+
     def test_pickle_module_no_weights_only_warning(self):
         with warnings.catch_warnings(record=True) as w:
             pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))

@@ -1,3 +1,5 @@
+import collections
+
 import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.common_types import (
@@ -40,6 +42,21 @@ __all__ = [
 ]
 
 
+def _check_maxpool_arg_type(name: str, value: object) -> None:
+    if isinstance(value, float):
+        raise TypeError(f"{name} must be int or tuple of ints, not float")
+
+    if isinstance(value, collections.abc.Iterable) and not isinstance(
+        value, (str, bytes, Tensor)
+    ):
+        for i, item in enumerate(value):
+            if isinstance(item, float):
+                raise TypeError(
+                    f"{name} must be int or tuple of ints, "
+                    f"but found element of type float at pos {i}"
+                )
+
+
 class _MaxPoolNd(Module):
     __constants__ = [
         "kernel_size",
@@ -62,6 +79,11 @@ class _MaxPoolNd(Module):
         ceil_mode: bool = False,
     ) -> None:
         super().__init__()
+        _check_maxpool_arg_type("kernel_size", kernel_size)
+        if stride is not None:
+            _check_maxpool_arg_type("stride", stride)
+        _check_maxpool_arg_type("padding", padding)
+        _check_maxpool_arg_type("dilation", dilation)
         self.kernel_size = kernel_size
         self.stride = stride if (stride is not None) else kernel_size
         self.padding = padding
