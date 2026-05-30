@@ -967,7 +967,7 @@ class AttributePropagator {
   // Contains user specified methods to be preserved in frozen module.
   std::unordered_set<Function*> preservedMethods_;
 
-  // Contains user specified sub module to be preserve in frozen module.
+  // Contains user specified sub module to be preserved in frozen module.
   std::unordered_set<ModulePtr> preservedSubModule_;
 
   // Track all used attributes ivalues that can be aliased.
@@ -1012,7 +1012,7 @@ void checkModuleDoesNotReturnSelf(const Module& module) {
     for (auto& output : method.graph()->outputs()) {
       TORCH_CHECK(
           output->type() != module.type(),
-          "attempted to freeze a module that return itself");
+          "attempted to freeze a module that returns itself");
     }
   }
 }

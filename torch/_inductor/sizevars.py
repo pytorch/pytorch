@@ -1246,7 +1246,7 @@ class SizeVarAllocator:
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})
 
-    # Return stride optimizaitons hints,
+    # Return stride optimizations hints,
     # only used for optimizations.
     def stride_hints(
         self,
@@ -1294,7 +1294,7 @@ class SizeVarAllocator:
         A pair of special ModularIndexing can be combined.
 
         E.g. ModularIndexing(ModularIndexing(x, 1, a), 1, b)
-        We can simplify this to ModuleIndexing(x, 1, b), if
+        We can simplify this to ModularIndexing(x, 1, b), if
         1. x is non negative integer
         2. a and b are positive integers
         3. a is a multiple of b.
@@ -1382,7 +1382,7 @@ class SizeVarAllocator:
                     var, sympy.Symbol
                 ):
                     return False
-                # It's easier to reason about the correceness of the transformation
+                # It's easier to reason about the correctness of the transformation
                 # for non-negative integers.
                 if not self.statically_known_geq(var, 0):
                     return False

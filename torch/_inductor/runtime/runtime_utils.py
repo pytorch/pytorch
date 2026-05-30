@@ -155,7 +155,7 @@ def get_first_attr(obj: Any, *attrs: str) -> Any:
         if hasattr(obj, attr):
             return getattr(obj, attr)
 
-    raise AssertionError(f"{obj} does not has any of the attributes: {attrs}")
+    raise AssertionError(f"{obj} does not have any of the attributes: {attrs}")
 
 
 dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]

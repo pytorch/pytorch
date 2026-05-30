@@ -468,7 +468,7 @@ class LoopBody:
 
     def is_memory_copy(self) -> bool:
         """
-        True of this contains only a single loads and store.
+        True if this contains only a single load and store.
         Note, this could involve a layout change.
         """
         return (

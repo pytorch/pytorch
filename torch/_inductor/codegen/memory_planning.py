@@ -106,7 +106,7 @@ class AllocationTreeNode:
 
     def allocate(self, block: Allocation, is_last: bool) -> bool:
         """
-        Try to assign block to a memory location in this bool.  Return True if
+        Try to assign block to a memory location in this pool.  Return True if
         an assignment was made.
         """
         return False

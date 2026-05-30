@@ -32,7 +32,7 @@ namespace torch::autograd {
 // This limit is based on the TSAN's deadlock detector, where it will
 // fail if a program hold more than 65 locks in one thread at once.
 // As we hold mutex in every of our custom C++ autograd Node, we would
-// like to avoid TSAN complains on this when doing reentrant backwards
+// like to avoid TSAN complaints on this when doing reentrant backwards
 // For reference, see https://github.com/google/sanitizers/issues/950
 static constexpr int MAX_DEPTH = 60;
 
@@ -161,7 +161,7 @@ struct TORCH_API Engine {
   // for the graph.
   //
   // NB: This API should only be used by internal autograd specific
-  // machinery and shouldn't be exposed to users in anyway.
+  // machinery and shouldn't be exposed to users in any way.
   virtual c10::intrusive_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
       c10::intrusive_ptr<Node> graph_root,

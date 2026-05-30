@@ -139,7 +139,7 @@ def async_execution(fn):
         >>> )
         >>> print(ret)  # prints tensor([4., 4.])
 
-        This decorator also works with RRef helpers, i.e., .
+        This decorator also works with RRef helpers, i.e.,
         :meth:`torch.distributed.rpc.RRef.rpc_sync`,
         :meth:`torch.distributed.rpc.RRef.rpc_async`, and
         :meth:`torch.distributed.rpc.RRef.remote`.

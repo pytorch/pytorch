@@ -57,7 +57,7 @@ class PackedSequence(PackedSequence_):
             information about the batch size at each sequence step
         sorted_indices (Tensor, optional): Tensor of integers holding how this
             :class:`PackedSequence` is constructed from sequences.
-        unsorted_indices (Tensor, optional): Tensor of integers holding how this
+        unsorted_indices (Tensor, optional): Tensor of integers holding how
             to recover the original sequences with correct order.
 
     .. note::
