@@ -158,6 +158,7 @@ class TestFlexAuxVectorization(InductorTestCase):
             "chained_rank4_batch_head_qkv",
             "kv_in_prefix",
             "rank1_kv",
+            "lane_uniform_aux",
             "mixed_gather",
             "gather_only",
         ],
@@ -205,6 +206,10 @@ class TestFlexAuxVectorization(InductorTestCase):
                 output = load(mask_bias, [kv_idx])
                 buffers = [FakeAuxBuffer((128,), (1,))]
                 expected = None
+            case "lane_uniform_aux":
+                mask_bias = graph.placeholder("mask_bias")
+                output = load(mask_bias, [h])
+                buffers = [FakeAuxBuffer((4,), (1,))]
             case "mixed_gather":
                 mask_bias = graph.placeholder("mask_bias")
                 block_keep = graph.placeholder("block_keep")
@@ -236,6 +241,43 @@ class TestFlexAuxVectorization(InductorTestCase):
                     other_buffers=buffers,
                 ),
                 expected,
+            )
+
+    def test_score_mod_vec_size_selector_allows_mixed_gather(self):
+        graph = torch.fx.Graph()
+        graph.placeholder("score")
+        graph.placeholder("b")
+        graph.placeholder("h")
+        q_idx = graph.placeholder("q_idx")
+        kv_idx = graph.placeholder("kv_idx")
+        bias = graph.placeholder("bias")
+        block_keep = graph.placeholder("block_keep")
+        direct_load = graph.call_function(
+            torch.ops.aten.index.Tensor, (bias, [q_idx, kv_idx])
+        )
+        block_idx = graph.call_function(
+            torch.ops.aten.div.Tensor_mode,
+            (kv_idx, 128),
+            {"rounding_mode": "floor"},
+        )
+        gather_load = graph.call_function(
+            torch.ops.aten.index.Tensor, (block_keep, [block_idx])
+        )
+        graph.output((direct_load, gather_load))
+        graph_module = torch.fx.GraphModule({}, graph)
+        with V.set_graph_handler(MockGraphHandler()):
+            self.assertEqual(
+                select_score_mod_vec_size(
+                    has_score_mod=True,
+                    has_aux_tensors=True,
+                    is_sm100_or_later=True,
+                    graph_module=graph_module,
+                    other_buffers=[
+                        FakeAuxBuffer((128, 128), (128, 1)),
+                        FakeAuxBuffer((1,), (1,)),
+                    ],
+                ),
+                8,
             )
 
     @parametrize("chained", [False, True], name_fn=lambda chained: str(chained))

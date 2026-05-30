@@ -75,9 +75,9 @@ class AuxVecPolicy:
     q_idx_placeholder: Placeholder index for the query lane.
     kv_idx_placeholder: Placeholder index for the vectorized KV lane.
     max_vec_size: Largest direct captured-tensor load width to consider.
-    min_index_rank_for_contiguous_load: Minimum indexed rank for direct loads.
-    allow_gather_loads: Whether non-vectorizable loads may stay scalar/gathered.
-    require_contiguous_load: Whether at least one direct contiguous load is needed.
+    min_index_rank_for_contiguous_load: Minimum indexed rank for direct vector loads.
+        mask_mod uses rank 2 so 1-D KV masks remain scalar per-lane gathers;
+        otherwise a short 1-D mask can shrink the packed-mask vector width.
     non_lane_placeholder_start: First non-lane placeholder participating in indices.
     """
 
@@ -85,8 +85,6 @@ class AuxVecPolicy:
     kv_idx_placeholder: int
     max_vec_size: int
     min_index_rank_for_contiguous_load: int = 1
-    allow_gather_loads: bool = False
-    require_contiguous_load: bool = False
     non_lane_placeholder_start: int = 0
 
 
@@ -95,8 +93,6 @@ MASK_MOD_AUX_VEC_POLICY = AuxVecPolicy(
     kv_idx_placeholder=3,
     max_vec_size=32,
     min_index_rank_for_contiguous_load=2,
-    allow_gather_loads=True,
-    require_contiguous_load=True,
 )
 SCORE_MOD_AUX_VEC_POLICY = AuxVecPolicy(
     q_idx_placeholder=3,
@@ -188,8 +184,8 @@ def select_aux_mod_vec_size(
     The analysis follows aten.index chains from captured tensor placeholders,
     accumulates partial indices that do not depend on the vectorized KV lane,
     classifies complete loads, and picks the narrowest required contiguous
-    width. Unsupported indexing falls back to scalar unless the policy allows
-    gather loads to coexist with vectorizable loads.
+    width. Gather-like loads stay scalar per lane and can coexist with any
+    vectorizable load that selects a non-scalar width.
     """
     if graph_module is None:
         return 1
@@ -212,7 +208,6 @@ def select_aux_mod_vec_size(
     ]
     selected_vec_size = policy.max_vec_size
     found_vectorizable_load = False
-    found_contiguous_load = False
     for node in graph_module.graph.nodes:
         if node.op != "call_function" or node.target != torch.ops.aten.index.Tensor:
             continue
@@ -221,10 +216,7 @@ def select_aux_mod_vec_size(
             continue
         indexed_tensor = aux_indexed_tensors[buffer_node]
         if not isinstance(indices, (list, tuple)) or not indices:
-            # Unknown index shape is a gather-like load; only mask_mod allows it.
-            if policy.allow_gather_loads:
-                continue
-            return 1
+            continue
         full_indices = indexed_tensor.indices + tuple(indices)
         rank = len(indexed_tensor.buffer.get_size())
         if len(full_indices) < rank:
@@ -238,14 +230,9 @@ def select_aux_mod_vec_size(
                 aux_indexed_tensors[node] = AuxIndexedTensor(
                     indexed_tensor.buffer, full_indices
                 )
-            elif not policy.allow_gather_loads:
-                return 1
             continue
         if len(full_indices) > rank:
-            # Over-indexed tensors cannot be proven to load contiguous KV lanes.
-            if policy.allow_gather_loads:
-                continue
-            return 1
+            continue
         aux_load_vec_info = direct_aux_load_vec_size_and_kind(
             full_indices,
             indexed_tensor.buffer,
@@ -259,18 +246,13 @@ def select_aux_mod_vec_size(
             case LoadKind.LANE_UNIFORM:
                 found_vectorizable_load = True
             case LoadKind.GATHER:
-                # Gather loads are allowed only when another load proves the vec width.
-                if not policy.allow_gather_loads:
-                    return 1
+                pass
             case LoadKind.CONTIGUOUS:
                 contiguous_vec_size = aux_load_vec_info.vec_size
                 assert contiguous_vec_size is not None
                 selected_vec_size = min(selected_vec_size, contiguous_vec_size)
                 found_vectorizable_load = True
-                found_contiguous_load = True
 
-    if policy.require_contiguous_load and not found_contiguous_load:
-        return 1
     return selected_vec_size if found_vectorizable_load else 1
 
 
