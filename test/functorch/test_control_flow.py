@@ -7296,6 +7296,47 @@ def forward(self, arg0_1):
         res_compiled = torch.compile(f)(*example_inputs)
         self.assertEqual(res, res_compiled)
 
+    @skipIfCrossRef  # Arg order changes with crossref
+    def test_cond_no_outputs_aot_autograd_graph(self):
+        backend = AotEagerAndRecordGraphs()
+
+        def f(pred, x):
+            def true_fn(x):
+                x.sin()
+
+            def false_fn(x):
+                x.cos()
+
+            torch.cond(pred, true_fn, false_fn, (x,))
+            return x + 1
+
+        x = torch.ones(3, 4)
+        compiled_f = torch.compile(f, backend=backend, fullgraph=True, dynamic=False)
+
+        self.assertEqual(compiled_f(torch.tensor(True), x), f(torch.tensor(True), x))
+        self.assertEqual(compiled_f(torch.tensor(False), x), f(torch.tensor(False), x))
+        self.assertEqual(len(backend.fw_graphs), 1)
+
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "b8[]", arg1_1: "f32[3, 4]"):
+        add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
+        return (add,)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = sin = None
+            return (None,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            cos: "f32[3, 4]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = cos = None
+            return (None,)
+""",
+        )
+
     @skipIfTorchDynamo("Skip because we're testing export")
     def test_cond_autograd_backward_inp_out_aliasing(self):
         from torch._dynamo.testing import AotEagerAndRecordGraphs
