@@ -194,7 +194,7 @@ class _WeightEqualizationObserver(nn.Module):
     def forward(self, w_orig):
         if w_orig.ndim < 2 or w_orig.ndim > 5:
             raise ValueError(
-                "InputEqualizationObserver only supports Linear and Conv layers"
+                "WeightEqualizationObserver only supports Linear and Conv layers"
             )
 
         return self.weight_col_obs(w_orig)
@@ -854,7 +854,7 @@ def convert_eq_obs(
                 inputs = (prev_node, eq_scale_node)
                 mul_node = model.graph.create_node("call_function", torch.mul, inputs)
 
-            # Set the mul nod to be the input_quant_obs_node's input instead of
+            # Set the mul node to be the input_quant_obs_node's input instead of
             # the previous node
             inp_quant_obs_node.replace_input_with(prev_node, mul_node)
             remove_node(model, node, inp_quant_obs_node)

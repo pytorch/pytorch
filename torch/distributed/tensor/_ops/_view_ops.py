@@ -374,7 +374,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     3) Split one dimension into multiple dimensions
 
     view_groups identifies these operations and returns, for each output dimension, what
-    is operation was performed in the input dimension. For example:
+    operation was performed on the input dimension. For example:
 
         view_groups([2, 3, 4], [2, 12]) -> (
             InputDim(0),

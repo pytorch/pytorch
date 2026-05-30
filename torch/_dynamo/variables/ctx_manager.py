@@ -237,7 +237,7 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
     def exit(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
-        # Custom enter implementation with side effects. Additionally, do not
+        # Custom exit implementation with side effects. Additionally, do not
         # worry about side effects for the hop, as they cancel each other out.
         with torch._dynamo.variables.higher_order_ops.dynamo_allow_side_effects_in_hop(
             tx

@@ -362,7 +362,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         used from within torch._inductor.wrapper.PythonWrapperCodegen
 
         name: Name of kernel function.
-        node: The CUTLASSTemplateBuffer node which contains information about the kernel, it's fused epilogue nodes
+        node: The CUTLASSTemplateBuffer node which contains information about the kernel, its fused epilogue nodes
         as well as all required inputs and outputs.
         """
         wrapper = V.graph.wrapper_code

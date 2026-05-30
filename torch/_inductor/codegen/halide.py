@@ -1579,7 +1579,7 @@ class HalideKernel(SIMDKernel):
             }
             cuda_device = max(0, current_device.index)
 
-        # strict_float is requires for correctness
+        # strict_float is required for correctness
         target.append("strict_float")
 
         # without this we will initialize cuda once per kernel and hit errors

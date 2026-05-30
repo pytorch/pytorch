@@ -48,7 +48,7 @@ class MultiKernelState:
         and
           https://gist.github.com/shunting314/02ee753b65c513c54e695626afe682bd
 
-        The only different is cache eviction policy.
+        The only difference is cache eviction policy.
 
         We should name the multi-kernel differently in these 2 cases.
 
@@ -364,7 +364,7 @@ class MultiKernelCall:
     def benchmark_sub_kernels(self, *args, **kwargs):
         """
         Benchmark all the sub kernels and return the execution time
-        (in milliseconds) for each of time.
+        (in milliseconds) for each of them.
 
         Unit test may mock this method to force a specific kernel to
         be picked.
@@ -430,7 +430,7 @@ class MultiKernelCall:
 
     @staticmethod
     def lookup_choice(multi_kernel_name: str) -> str:
-        # this should always been done during cpp-wrapper codegen
+        # this should always be done during cpp-wrapper codegen
         assert (
             V.graph.record_multi_kernel_choice
             and multi_kernel_name in V.graph.multi_kernel_to_choice

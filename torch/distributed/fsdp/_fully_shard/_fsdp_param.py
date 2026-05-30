@@ -77,7 +77,7 @@ FSDP dynamically frees and allocates the unsharded parameter. Since autograd
 can pack a reference to it or a view to save for backward, we use storage
 resizing to implement the freeing/allocation since that preserves the aliasing.
 This implies that we construct the unsharded parameter object once and write to
-it in-place thereafter. For the default ``torch.Tensor` original parameter
+it in-place thereafter. For the default ``torch.Tensor`` original parameter
 case, the all-gather output and unsharded parameter share the same
 data, so we use storage resizing on the all-gather output.
 """

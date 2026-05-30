@@ -404,7 +404,7 @@ class FSDPModule:
         """
         Sets whether the next backward is the last one. On the last backward,
         FSDP waits on pending gradient reduction and clears internal data
-        data structures for backward prefetching. This can be useful for
+        structures for backward prefetching. This can be useful for
         microbatching.
         """
         state = self._get_fsdp_state()
@@ -534,7 +534,7 @@ class FSDPModule:
         """
         Sets the FSDP modules for which this FSDP module should explicitly
         prefetch all-gathers in backward. This overrides the default backward
-        pretching implementation that prefetches the next FSDP module based on
+        prefetching implementation that prefetches the next FSDP module based on
         the reverse post-forward order.
 
         Passing a singleton list containing the previous FSDP module gives the
@@ -883,7 +883,7 @@ def share_comm_ctx(modules: list[FSDPModule]) -> None:
 
     For Pipeline Parallelism (PP), each model chunk is a FSDP root. We want
     to share cuda streams for all-gather, reduce-scatter, and all-reduce.
-    This avoids allocating inter-stream memory framgmentation
+    This avoids allocating inter-stream memory fragmentation
 
     Args:
         modules (List[FSDPModule]): modules to share cuda streams

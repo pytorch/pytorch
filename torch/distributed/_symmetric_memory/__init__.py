@@ -1132,7 +1132,7 @@ def _fused_all_gather_scaled_matmul(
     if len(out_dtypes) != len(Bs):
         raise ValueError("len(out_dtypes) must be the same as len(Bs)")
     if len(use_fast_accum) != len(Bs):
-        raise ValueError("len(use_gast_accum_list) must be the same as len(Bs)")
+        raise ValueError("len(use_fast_accum) must be the same as len(Bs)")
 
     if _is_test_mode:
         return _fused_all_gather_scaled_matmul_fallback(

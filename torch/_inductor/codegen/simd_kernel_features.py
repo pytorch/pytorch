@@ -268,7 +268,7 @@ class MemoryEstimator:
         self.groups = groups
         self.symbols = [make_symbol(SymT.INDEX, i) for i in range(len(groups))]
         # We are doing two estimates simultaneously:
-        # 1) the first is a for a non-persistent (aka looped) reduction, using self.outside_loop/self.loops
+        # 1) the first is for a non-persistent (aka looped) reduction, using self.outside_loop/self.loops
         # we add an item to loops each corresponding to each reduction loop in the kernel
         # outside_loop is only used for broadcasting or point-wise ops that don't use the reduction dimension
         # 2) the second is for a persistent kernel, using self.persistent
@@ -580,7 +580,7 @@ class StatsForReadsOrWrites:
                 else:
                     result.bytes_non_contiguous += nbytes
         if len(result.loop) > 1:
-            # the first loop represent the "outside of the loop" compute which could be long lived
+            # the first loop represents the "outside of the loop" compute which could be long lived
             result.loop = [result.loop[0] + x for x in result.loop[1:]]
         return result
 

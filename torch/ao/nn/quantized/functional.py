@@ -96,7 +96,7 @@ def avg_pool3d(
     divisor_override=None,
 ):
     r"""
-    Applies 3D average-pooling operation in :math:`kD \ times kH \times kW` regions by step size
+    Applies 3D average-pooling operation in :math:`kD \times kH \times kW` regions by step size
     :math:`sD \times sH \times sW` steps. The number of output features is equal to the number of
     input planes.
 
@@ -561,7 +561,7 @@ def leaky_relu(
     zero_point: int | None = None,
 ):
     r"""
-    Quantized version of the.
+    Quantized version of the
     leaky_relu(input, negative_slope=0.01, inplace=False, scale, zero_point) -> Tensor
 
     Applies element-wise,
@@ -658,7 +658,7 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
 
 
 def clamp(input: Tensor, min_: float, max_: float) -> Tensor:
-    r"""float(input, min\_, max\_) -> Tensor
+    r"""clamp(input, min\_, max\_) -> Tensor
 
     Applies the clamp function element-wise.
     See :class:`~torch.ao.nn.quantized.clamp` for more details.

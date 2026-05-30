@@ -389,7 +389,7 @@ class TypeDictSource(ChainedSource):
     @property
     def _name_template(self) -> str:
         # type(ob).__dict__ can return a proxy of the dict. But in the C++
-        # guard accessor, we are use type->tp_dict which is a dict. So,
+        # guard accessor, we use type->tp_dict which is a dict. So,
         # forcefully pass a dict object to ensure that the GuardManager
         # registers that its working on a dict object.
         return "dict({0}.__dict__)"
@@ -485,7 +485,7 @@ class UnspecializedParamBufferSource(AttrSource):
 # prioritized to be simplified out when e.g. compared against a symbol without an ephemeral
 # source. Guarding on this source is an error.
 #
-# Example: During subclass view fake-ification, any close-over ViewFunc state should be
+# Example: During subclass view fake-ification, any closed-over ViewFunc state should be
 # symbolicized / fake-ified to avoid invalid specialization during view replay. This source
 # is useful for symbols utilized in the middle of the view chain that are not expected to be
 # present within the final view shape metadata.

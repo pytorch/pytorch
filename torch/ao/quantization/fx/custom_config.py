@@ -498,7 +498,7 @@ class FuseCustomConfig:
     @classmethod
     def from_dict(cls, fuse_custom_config_dict: dict[str, Any]) -> FuseCustomConfig:
         """
-        Create a ``ConvertCustomConfig`` from a dictionary with the following items:
+        Create a ``FuseCustomConfig`` from a dictionary with the following items:
 
             "preserved_attributes": a list of attributes that persist even if they are not used in ``forward``
 
@@ -513,7 +513,7 @@ class FuseCustomConfig:
     def to_dict(self) -> dict[str, Any]:
         """
         Convert this ``FuseCustomConfig`` to a dictionary with the items described in
-        :func:`~torch.ao.quantization.fx.custom_config.ConvertCustomConfig.from_dict`.
+        :func:`~torch.ao.quantization.fx.custom_config.FuseCustomConfig.from_dict`.
         """
         d: dict[str, Any] = {}
         if len(self.preserved_attributes) > 0:
