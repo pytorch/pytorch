@@ -120,6 +120,8 @@ from .object_protocol import (
     generic_neg,
     generic_pos,
     generic_repr,
+    maybe_get_python_type,
+    pysequence_check,
     vt_add,
     vt_getitem,
     vt_identity_compare,
@@ -254,6 +256,11 @@ BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # In the builtin var, we check if there is a tensor in the first args position,
 # if not, we swap the args and use the r* version of the op.
 BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
+
+# Sentinel for `inspect.getattr_static` lookups that must distinguish
+# "attribute absent" from "attribute is None" (e.g. `__reversed__ = None`
+# opt-out).
+_MISSING_SENTINEL = object()
 
 
 def populate_builtin_to_tensor_fn_map() -> None:
@@ -1635,14 +1642,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                     tx=tx,
                 )
 
-            if (
-                self.fn is tuple
-                and len(args) == 2
-                and args[1].has_force_unpack_var_sequence(tx)
-                and not kwargs
-            ):
+            if self.fn is tuple and len(args) == 2 and not kwargs:
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    init_args = args[1].force_unpack_var_sequence(tx)
+                    init_args = unpack_iterable(tx, args[1])
                     return variables.TupleVariable(
                         init_args, mutation_type=ValueMutationNew()
                     )
@@ -1853,8 +1855,8 @@ class BuiltinVariable(BaseBuiltinVariable):
     def _call_min_max(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker | None:
-        if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
-            items = args[0].force_unpack_var_sequence(tx)
+        if len(args) == 1:
+            items = unpack_iterable(tx, args[0])
             return self._call_min_max_seq(tx, items)
         elif len(args) == 2:
             return self._call_min_max_binary(tx, args[0], args[1])
@@ -2052,78 +2054,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             tx.output.create_proxy(
                 "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
             ),
-        )
-
-    # NOTE must handle IteratorVariable separately!
-    def _call_iter_tuple_list(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker | None = None,
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker | None:
-        if isinstance(obj, variables.IteratorVariable):
-            raise AssertionError(
-                "IteratorVariable should not be passed to _call_iter_tuple_list"
-            )
-
-        if self._dynamic_args(*args, **kwargs):
-            return self._dyn_proxy(tx, *args, **kwargs)
-
-        cls = variables.BaseListVariable.cls_for(self.fn)
-        if obj is None:
-            return cls(
-                [],
-                mutation_type=ValueMutationNew(),
-            )
-        elif obj.has_unpack_var_sequence(tx):
-            if obj.source and not is_constant_source(obj.source):
-                if isinstance(obj, TupleIteratorVariable):
-                    install_guard(
-                        obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
-                    )
-                else:
-                    if getattr(obj, "source", False) and isinstance(
-                        obj,
-                        (
-                            ConstDictVariable,
-                            variables.OrderedSetVariable,
-                            variables.DictKeySetVariable,
-                        ),
-                    ):
-                        tx.output.guard_on_key_order.add(obj.source)
-
-                    if isinstance(obj, variables.MappingProxyVariable):
-                        # This could be an overguarding, but its rare to iterate
-                        # through a mapping proxy and not use the keys.
-                        install_guard(
-                            obj.source.make_guard(GuardBuilder.MAPPING_KEYS_CHECK)
-                        )
-                    elif not isinstance(obj, variables.UnspecializedNNModuleVariable):
-                        # Prevent calling __len__ method for guards, the tracing
-                        # of __iter__ will insert the right guards later.
-                        install_guard(
-                            obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH)
-                        )
-
-            return cls(
-                list(obj.unpack_var_sequence(tx)),
-                mutation_type=ValueMutationNew(),
-            )
-
-        return None
-
-    def _call_iter_tuple_generator(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker:
-        cls = variables.BaseListVariable.cls_for(self.fn)
-        return cls(
-            list(obj.force_unpack_var_sequence(tx)),  # exhaust generator
-            mutation_type=ValueMutationNew(),
         )
 
     def call_tuple(
@@ -2545,11 +2475,33 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_reversed(
         self, tx: "InstructionTranslatorBase", obj: VariableTracker
-    ) -> VariableTracker | None:
-        if obj.has_unpack_var_sequence(tx):
-            items = list(reversed(obj.unpack_var_sequence(tx)))
-            return variables.TupleVariable(items)
-        return None
+    ) -> VariableTracker:
+        # Mirrors CPython's builtin_reversed_impl (Python/enumobject.c)
+        # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/enumobject.c#L353-L395
+        # 1. Look up __reversed__ via _PyObject_LookupSpecial. If found, call it.
+        # 2. Else require PySequence_Check (sq_item). If absent, TypeError.
+        # 3. Else build a reverse sequence iterator over __len__ + __getitem__.
+
+        obj_type = maybe_get_python_type(obj)
+
+        # Type-level __reversed__ lookup, mirrors _PyObject_LookupSpecial.
+        # getattr_static skips descriptors / metaclass. CPython treats
+        # `__reversed__ = None` on the type as an explicit opt-out, raising
+        # TypeError even if the sequence protocol would otherwise work.
+        reversed_attr = inspect.getattr_static(
+            obj_type, "__reversed__", _MISSING_SENTINEL
+        )
+        if reversed_attr is None:
+            raise_type_error(tx, f"'{obj_type.__name__}' object is not reversible")
+        if reversed_attr is not _MISSING_SENTINEL:
+            return obj.call_method(tx, "__reversed__", [], {})
+
+        if not pysequence_check(obj_type):
+            raise_type_error(tx, "argument to reversed() must be a sequence")
+
+        return variables.UserFunctionVariable(
+            polyfills.builtins.reversed_sequence_iterator
+        ).call_function(tx, [obj], {})
 
     def call_sorted(
         self,
@@ -2557,11 +2509,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         obj: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
-        if obj.has_force_unpack_var_sequence(tx) and not isinstance(
-            obj, variables.TensorVariable
-        ):
+        if not isinstance(obj, variables.TensorVariable):
             list_var = variables.ListVariable(
-                obj.force_unpack_var_sequence(tx),
+                unpack_iterable(tx, obj),
                 mutation_type=ValueMutationNew(),
             )
             list_var.call_method(tx, "sort", [], kwargs)
@@ -3050,8 +3000,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if isinstance(arg, dict):
             arg_list = [VariableTracker.build(tx, k) for k in arg]
             return _make_result(dict.fromkeys(arg_list, value))
-        elif arg.has_force_unpack_var_sequence(tx):
-            keys = arg.force_unpack_var_sequence(tx)
+        elif iterator := generic_getiter(tx, arg):
+            keys = unpack_iterable(tx, iterator)
             if all(is_hashable(v) for v in keys):
                 return _make_result(dict.fromkeys(keys, value))
 
