@@ -71,7 +71,7 @@ def device_count() -> int:
 
 
 def is_available() -> bool:
-    r"""Check if the current accelerator is available at runtime: it was build, all the
+    r"""Check if the current accelerator is available at runtime: it was built, all the
     required drivers are available and at least one device is visible.
     See :ref:`accelerator<accelerators>` for details.
 
