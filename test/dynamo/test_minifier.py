@@ -2,6 +2,7 @@
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
@@ -182,6 +183,74 @@ class Repro(torch.nn.Module):
         )
 
 
+class TestAutocastDeviceDetection(torch._dynamo.test_case.TestCase):
+    def _make_options(
+        self, accuracy="", autocast=False, backend="eager", only_fwd=True
+    ):
+        import argparse
+
+        return argparse.Namespace(
+            accuracy=accuracy,
+            autocast=autocast,
+            backend=backend,
+            only_fwd=only_fwd,
+        )
+
+    def test_repro_minify_autocast_uses_tensor_device(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("device detection only meaningful for non-CPU devices")
+
+        from torch._dynamo.repro.after_dynamo import repro_minify
+
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        args = [torch.randn(4, device=device)]
+        options = self._make_options()
+
+        def fake_compiler(gm, example_inputs, compiler_name=None):
+            return gm.forward
+
+        mock_autocast = MagicMock()
+
+        with (
+            patch("torch._dynamo.repro.after_dynamo.run_load_args", return_value=args),
+            patch(
+                "torch._dynamo.repro.after_dynamo.lookup_backend",
+                return_value=fake_compiler,
+            ),
+            patch("torch._dynamo.optimize", new=lambda backend: lambda m: m),
+            patch("torch.amp.autocast", mock_autocast),
+        ):
+            repro_minify(options, gm, None)
+
+        mock_autocast.assert_called_once_with(torch.device(device).type, enabled=False)
+
+    def test_repro_run_accuracy_branch_autocast_uses_tensor_device(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("device detection only meaningful for non-CPU devices")
+
+        from torch._dynamo.repro.after_dynamo import repro_run
+
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        args = [torch.randn(4, device=device)]
+        options = self._make_options(accuracy="strict")
+        mock_autocast = MagicMock()
+
+        with (
+            patch("torch._dynamo.repro.after_dynamo.run_load_args", return_value=args),
+            patch("torch._dynamo.optimize", new=lambda backend: lambda m: m),
+            patch(
+                "torch._dynamo.repro.after_dynamo.same_two_models", return_value=True
+            ),
+            patch("torch.amp.autocast", mock_autocast),
+        ):
+            repro_run(options, gm, None)
+
+        mock_autocast.assert_called_once_with(torch.device(device).type, enabled=False)
+
+
+instantiate_device_type_tests(TestAutocastDeviceDetection, globals(), allow_xpu=True)
+
+
 class ReproGenerationTests(torch._dynamo.test_case.TestCase):
     def test_after_dynamo_repro_uses_constructor_for_fake_quant_with_child_repr(self):
         from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
@@ -237,6 +306,23 @@ class ReproGenerationTests(torch._dynamo.test_case.TestCase):
                     self.assertFalse(hasattr(mod.fake_quant, "secret_weight"))
                     self.assertFalse(hasattr(mod.fake_quant, "secret_buffer"))
                     self.assertEqual(mod(torch.randn(2))[0].shape, (2,))
+
+    def test_after_dynamo_repro_preserves_fake_quant_buffer_device(self):
+        from torch._dynamo.debug_utils import NNModuleToString
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_module("fake_quant", (x,))
+        graph.output((y,))
+        fake_quant = torch.ao.quantization.get_default_qat_qconfig(
+            "fbgemm"
+        ).activation()
+        fake_quant.to("meta")
+        gm = torch.fx.GraphModule({"fake_quant": fake_quant}, graph)
+
+        code = NNModuleToString.convert(gm)
+
+        self.assertIn('.to("meta")', code)
 
     def test_after_dynamo_repro_uses_constructor_for_qat_fused_module(self):
         from torch._dynamo.repro.after_dynamo import generate_dynamo_fx_repro_string
@@ -313,6 +399,26 @@ class ReproGenerationTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(AssertionError, "Cannot convert module"):
             generate_dynamo_fx_repro_string(gm, [torch.randn(2, 3, 8, 8)], "eager")
+
+    def test_after_aot_repro_falls_back_for_unconvertible_module_repr(self):
+        from torch._dynamo.repro.after_aot import generate_compiler_repro_string
+
+        class UnsupportedModule(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+            def __repr__(self):
+                return "<lambda>()"
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_module("submod", (x,))
+        graph.output((y,))
+        gm = torch.fx.GraphModule({"submod": UnsupportedModule()}, graph)
+
+        code = generate_compiler_repro_string(gm, [torch.randn(2)], stable_output=True)
+
+        self.assertIn("self.submod = <lambda>()", code)
 
 
 instantiate_device_type_tests(MinifierTests, globals(), allow_xpu=True)

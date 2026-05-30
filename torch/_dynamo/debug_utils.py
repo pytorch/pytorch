@@ -154,6 +154,10 @@ def minifier_dir() -> str:
 MAX_CONSTANT_NUMEL_INLINE = 4
 
 
+class UnsupportedNNModuleError(AssertionError):
+    pass
+
+
 class NNModuleToString:
     fake_quant_modules = {
         "torch.ao.quantization.fake_quantize.FakeQuantize",
@@ -338,13 +342,16 @@ class NNModuleToString:
         module_str = repr(module)
         if NNModuleToString._can_emit_module_constructor(module, module_str):
             return module_str
-        if allow_unsafe_repr:
-            return module_str
-        return (
+        constructor_str = (
             NNModuleToString._fake_quant_constructor(module)
             or NNModuleToString._qat_conv_constructor(module)
             or NNModuleToString._qat_linear_constructor(module)
         )
+        if constructor_str is not None:
+            return constructor_str
+        if allow_unsafe_repr:
+            return module_str
+        return None
 
     @staticmethod
     def convert(gm: torch.fx.GraphModule, *, allow_unsafe_repr: bool = False) -> str:
@@ -366,12 +373,19 @@ class NNModuleToString:
                 module, allow_unsafe_repr=allow_unsafe_repr
             )
             if module_str is None:
-                raise AssertionError(f"Cannot convert module to string: {module!r}")
+                raise UnsupportedNNModuleError(
+                    f"Cannot convert module to string: {module!r}"
+                )
             # module should be a core torch.nn.Module, so all parameters
-            # should be on the same device.
+            # and buffers should be on the same device.
             example_param = next(module.parameters(), None)
-            if example_param is not None and example_param.is_cuda:
-                module_str = f"{module_str}.cuda()"
+            example_tensor = (
+                example_param
+                if example_param is not None
+                else next(module.buffers(), None)
+            )
+            if example_tensor is not None and example_tensor.device.type != "cpu":
+                module_str = f'{module_str}.to("{example_tensor.device}")'
             model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():
@@ -393,8 +407,8 @@ class NNModuleToString:
                 tensor_str = (
                     f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
                 )
-            if buffer.is_cuda:
-                tensor_str = f"{tensor_str}.cuda()"
+            if buffer.device.type != "cpu":
+                tensor_str = f'{tensor_str}.to("{buffer.device}")'
             model_str += (
                 f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
             )
@@ -403,8 +417,8 @@ class NNModuleToString:
             if param is None:
                 continue
             maybe_device = ""
-            if param.is_cuda:
-                maybe_device = ', device="cuda"'
+            if param.device.type != "cpu":
+                maybe_device = f', device="{param.device}"'
             tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
             model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
 
