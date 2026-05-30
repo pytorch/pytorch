@@ -8501,6 +8501,12 @@ def _quack_tensor_args(args):
     )
 
 
+def _quack_mxfp8_expected_swizzle():
+    from torch.nn.functional import SwizzleType
+
+    return SwizzleType.NO_SWIZZLE if torch.version.hip else SwizzleType.SWIZZLE_32_4_4
+
+
 def _validate_quack_scaled_mm(gemm_kwargs, quack_args) -> None:
     if (
         len(quack_args) != 4
@@ -8513,7 +8519,7 @@ def _validate_quack_scaled_mm(gemm_kwargs, quack_args) -> None:
             "QUACK _scaled_mm epilogue currently supports only "
             "(A, B, scale_a, scale_b) with explicit out_dtype"
         )
-    from torch.nn.functional import ScalingType, SwizzleType
+    from torch.nn.functional import ScalingType
 
     scale_a_type, scale_a_swizzle = infer_scale_swizzle_ir(
         quack_args[0], quack_args[2]
@@ -8521,9 +8527,7 @@ def _validate_quack_scaled_mm(gemm_kwargs, quack_args) -> None:
     scale_b_type, scale_b_swizzle = infer_scale_swizzle_ir(
         quack_args[1], quack_args[3], transpose=True
     )
-    expected_swizzle = (
-        SwizzleType.NO_SWIZZLE if torch.version.hip else SwizzleType.SWIZZLE_32_4_4
-    )
+    expected_swizzle = _quack_mxfp8_expected_swizzle()
     if (
         scale_a_type != ScalingType.BlockWise1x32
         or scale_b_type != ScalingType.BlockWise1x32
@@ -8533,6 +8537,37 @@ def _validate_quack_scaled_mm(gemm_kwargs, quack_args) -> None:
         raise NotImplementedError(
             "QUACK _scaled_mm epilogue currently supports only MXFP8-like "
             "BlockWise1x32 float8_e8m0fnu scales"
+        )
+
+
+def _validate_quack_scaled_mm_v2(kernel_options, quack_args) -> None:
+    from torch.nn.functional import ScalingType
+
+    metadata = kernel_options.get("_scaled_mm_v2", {})
+    expected_swizzle = _quack_mxfp8_expected_swizzle().value
+    if (
+        len(quack_args) != 4
+        or metadata.get("scale_a_len") != 1
+        or metadata.get("scale_b_len") != 1
+        or metadata.get("out_dtype") is None
+        or metadata.get("has_bias", False)
+        or metadata.get("contraction_dim")
+        or metadata.get("use_fast_accum", False)
+        or metadata.get("scale_recipe_a") != [ScalingType.BlockWise1x32.value]
+        or metadata.get("scale_recipe_b") != [ScalingType.BlockWise1x32.value]
+        or metadata.get("swizzle_a") != [expected_swizzle]
+        or metadata.get("swizzle_b") != [expected_swizzle]
+    ):
+        raise NotImplementedError(
+            "QUACK _scaled_mm_v2 epilogue currently supports only MXFP8-like "
+            "BlockWise1x32 scales without bias/contraction_dim/use_fast_accum"
+        )
+    if (
+        quack_args[2].get_dtype() != torch.float8_e8m0fnu
+        or quack_args[3].get_dtype() != torch.float8_e8m0fnu
+    ):
+        raise NotImplementedError(
+            "QUACK _scaled_mm_v2 epilogue requires float8_e8m0fnu scale tensors"
         )
 
 
@@ -8801,10 +8836,10 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
     split_k = kernel_options.get("SPLIT_K", False)
     tuned = kernel_options.get("tuned", False)
     fast_math = kernel_options.get("fast_math", False)
-    if gemm_op == torch.ops.aten._scaled_mm_v2.default:
+    if gemm_op == torch.ops.aten._scaled_mm_v2.default and backend != "QUACK":
         if backend != "TRITON" or split_k:
             raise NotImplementedError(
-                "_scaled_mm_v2 epilogue lowering currently supports only the default TRITON fallback path"
+                "_scaled_mm_v2 epilogue lowering currently supports only TRITON or the MXFP8 QUACK path"
             )
         return process_subgraph_nodes(subgraph.graph_module, list(args))
     split_k_gemm_ops = (torch.ops.aten.mm.default, torch.ops.aten.addmm.default)
@@ -8900,6 +8935,8 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         quack_args = _quack_tensor_args(args)
         if gemm_op == torch.ops.aten._scaled_mm.default:
             _validate_quack_scaled_mm(gemm_kwargs, quack_args)
+        if gemm_op == torch.ops.aten._scaled_mm_v2.default:
+            _validate_quack_scaled_mm_v2(kernel_options, quack_args)
         if gemm_op == torch.ops.aten._grouped_mm.default:
             _validate_quack_grouped_mm(kernel_options, quack_args)
         (

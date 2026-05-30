@@ -36,9 +36,7 @@ GEMM_EPILOGUE_OPS = {
         "baddbmm", 1, 2, is_batched=True
     ),
     torch.ops.aten._scaled_mm.default: GemmEpilogueOpInfo("scaled_mm", 0, 1),
-    torch.ops.aten._scaled_mm_v2.default: GemmEpilogueOpInfo(
-        "scaled_mm_v2", 0, 1, supports_quack=False
-    ),
+    torch.ops.aten._scaled_mm_v2.default: GemmEpilogueOpInfo("scaled_mm", 0, 1),
     torch.ops.aten._grouped_mm.default: GemmEpilogueOpInfo("grouped_mm", 0, 1),
 }
 _GEMM_EPILOGUE_OP_ALIASES = {
@@ -393,6 +391,21 @@ def gemm_epilogue_fusion(
                 )
             )
 
+        kernel_options = {
+            **kernel_options,
+            "_scaled_mm_v2": {
+                "scale_a_len": scale_a_len,
+                "scale_b_len": len(scale_b_args),
+                "scale_recipe_a": recipe_a,
+                "scale_recipe_b": recipe_b,
+                "swizzle_a": swizzle_a,
+                "swizzle_b": swizzle_b,
+                "has_bias": bias is not None,
+                "out_dtype": out_dtype,
+                "contraction_dim": contraction_dim,
+                "use_fast_accum": use_fast_accum,
+            },
+        }
         return _gemm_epilogue_fusion(
             gemm_op,
             body_fn,
