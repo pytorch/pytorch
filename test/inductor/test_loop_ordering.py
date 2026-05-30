@@ -573,6 +573,82 @@ class LoopOrderingTest(TestCase):
         x = torch.randn(M, N * 2, device=GPU_TYPE)
         self.do_acc_test(f, x)
 
+    def test_floordiv_broadcast_vertical_fusion(self):
+        """
+        Block-wise quantization pattern: a reduction produces per-block
+        values (e.g., amax) and a following pointwise broadcasts them
+        back to element granularity via unsqueeze, creating a FloorDiv
+        index pattern.
+
+        The reduction writes buf[G*p0 + p1] (p1 in [0, G)) and the
+        pointwise reads buf[G*p0 + (p1 // block_size)] (p1 in [0, N)).
+        Without reindexing in can_fuse_vertical, this FloorDiv mismatch
+        causes "memory deps did not match" rejection, producing an
+        extra kernel.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/183542
+        """
+        BLOCK_SIZE = 32
+
+        def f(x):
+            M, N = x.shape
+            x_blocked = x.unflatten(-1, (N // BLOCK_SIZE, BLOCK_SIZE))
+            # Per-block reduction (like amax in MXFP8)
+            block_max = x_blocked.abs().amax(dim=-1)
+            scale = block_max.clamp(min=1e-6)
+            # Broadcast scale back to elements via unsqueeze (FloorDiv pattern)
+            x_scaled = x_blocked / scale.unsqueeze(-1)
+            return x_scaled.flatten(-2)
+
+        M, N = 8, 8192
+        x = torch.randn(M, N, dtype=torch.float32)
+        self.do_acc_test(f, x)
+        # Block reduction + broadcast pointwise should fuse into 1 kernel
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+    def test_floordiv_broadcast_with_preceding_reduction(self):
+        """
+        RMSNorm followed by block-wise quantization: two reductions
+        with different rnumel (variance over K, then amax over
+        block_size=32) separated by pointwise ops.
+
+        Expected: 2 kernels (variance reduction fused with norm,
+        block reduction fused with broadcast pointwise).
+        The FloorDiv broadcast between block reduction and the final
+        pointwise must not cause a third kernel.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/183542
+        """
+        BLOCK_SIZE = 32
+
+        def f(x, weight):
+            # RMSNorm
+            x_fp32 = x.to(torch.float32)
+            variance = x_fp32.pow(2).mean(dim=-1, keepdim=True)
+            normed = x_fp32 * torch.rsqrt(variance + 1e-5)
+            normed = normed.to(torch.bfloat16) * weight
+
+            # Block-wise quantization (simplified, no FP8 cast)
+            M, N = normed.shape
+            normed_fp32 = normed.to(torch.float32)
+            blocked = normed_fp32.unflatten(-1, (N // BLOCK_SIZE, BLOCK_SIZE))
+            block_max = blocked.abs().amax(dim=-1)
+            scale = block_max.clamp(min=1e-6)
+            x_scaled = blocked / scale.unsqueeze(-1)
+            return x_scaled.flatten(-2)
+
+        M, K = 8, 8192
+        x = torch.randn(M, K, dtype=torch.bfloat16)
+        weight = torch.randn(K, dtype=torch.bfloat16)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        expect = f(x, weight)
+        actual = torch.compile(f)(x, weight)
+        self.assertTrue(same(expect, actual, tol=1e-2))
+        # variance reduction + block reduction = 2 kernels
+        self.assertEqual(2, metrics.generated_kernel_count)
+
     def test_reshape_reindexing_fused_pointwise(self):
         """
         Redecomposition where the pointwise side is a FusedSchedulerNode.
