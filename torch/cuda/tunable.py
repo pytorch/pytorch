@@ -71,7 +71,7 @@ debugging purposes. This will produce a lot of diagnostic messages but may be
 useful to see if TunableOp is being used at all. Otherwise, TunableOp is
 completely silent, besides file output, unless there is a warning or error
 during its use. The verbose option is only available by setting the environment
-variable PYTORCH_TUNABLEOP_VEROBSE=1.
+variable PYTORCH_TUNABLEOP_VERBOSE=1.
 
 A Note on Tuning Behavior, Warmup, and Cache Effects
 ====================================================
@@ -239,7 +239,7 @@ def tuning_is_enabled() -> bool:
 
 
 def record_untuned_enable(val: bool = True) -> None:
-    r"""Enable recording untuned of TunableOp perations for offline tuning.
+    r"""Enable recording untuned TunableOp operations for offline tuning.
 
     When enabled, if a tuned entry isn't found, write it to the untuned file.
     """

@@ -156,7 +156,7 @@ class _CPUinfo:
             # Sample output of: `lscpu --parse=CPU,Core,Socket,Node`
             #
             # # The following is the parsable format, which can be fed to other
-            # # programs. Each different item in every column has an unique ID
+            # # programs. Each different item in every column has a unique ID
             # # starting from zero.
             # # CPU,Core,Socket,Node
             # 0,0,0,0

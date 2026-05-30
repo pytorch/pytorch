@@ -47,7 +47,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     depending on the datatype. It is also referred to as 2:4 sparsity or fine-grained
     structured sparsity.
 
-    There are two backends available for semi_structred sparsity, either cuSPARSELt or CUTLASS.
+    There are two backends available for semi_structured sparsity, either cuSPARSELt or CUTLASS.
     This class is meant to serve as a base class for both implementations. SparseSemiStructuredCUTLASS
     and SparseSemiStructuredCUSPARSELT both inherit from this class and define three backend-specific items.
     Note that as such, this class cannot be instantiated directly.
@@ -107,7 +107,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                                          participate in the computation. Used for pointwise ops.
             fuse_transpose_cusparselt: When running with cuSPARSELt, we have the option to fuse a transposition
                                        with a matmul, which is useful in the case of 2:4 sparse training.
-            alg_id_cusparselt: The algorithm id to use when using cuSPARSELT, will have effect on performance
+            alg_id_cusparselt: The algorithm id to use when using cuSPARSELT, will have an effect on performance
 
         Returns:
             torch.Tensor: A torch.Tensor wrapper subclass.
