@@ -73,11 +73,11 @@ jobs:
         env:
           PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
         run: |
-          aws s3 sync docs-preview-staging/content/ "s3://doc-previews/pytorch/pytorch/${PR_NUMBER}" --quiet
+          aws s3 sync docs-preview-staging/content/ "s3://doc-previews/pytorch/pytorch/${PR_NUMBER}" --delete --quiet
 
       - name: Upload C++ docs preview
         if: ${{ steps.download.outcome == 'success' && matrix.docs_type == 'cpp' }}
         env:
           PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
         run: |
-          aws s3 sync docs-preview-staging/content/ "s3://doc-previews/pytorch/pytorch/${PR_NUMBER}/cppdocs" --quiet
+          aws s3 sync docs-preview-staging/content/ "s3://doc-previews/pytorch/pytorch/${PR_NUMBER}/cppdocs" --delete --quiet
