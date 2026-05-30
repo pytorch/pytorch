@@ -22,13 +22,11 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyNativeDeviceTypes,
     ops,
-)
-from torch.testing._internal.common_methods_invocations import (
-    op_db,
     skip,
     skipOps,
     xfail,
 )
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -269,6 +267,8 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
             1e-3,
         ),
         (torch.float64, torch.ops.aten.native_layer_norm.default): (1e-6, 1e-6),
+        # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
+        (torch.float32, torch.ops.aten.native_group_norm.default): (1e-4, 5e-6),
         # This exceeds default tolerances only on CPU, on CUDA it's fine
         (torch.float32, torch.ops.aten.grid_sampler_2d.default): (7e-6, 3e-5),
         # Exceeds tolerances on CUDA, likely due to fma
@@ -575,7 +575,7 @@ class TestDecomp(TestCase):
     def test_quick(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=False)
 
-    @skipOps("TestDecomp", "test_quick_core_backward", core_backward_failures)
+    @skipOps(core_backward_failures)
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     @suppress_warnings
@@ -605,7 +605,7 @@ class TestDecomp(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
-    @skipOps("TestDecomp", "test_comprehensive", comprehensive_failures)
+    @skipOps(comprehensive_failures)
     @suppress_warnings
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
@@ -1232,14 +1232,12 @@ class DecompOneOffTests(TestCase):
     @onlyCPU
     @skipIfCrossRef
     @skipOps(
-        "DecompOneOffTests",
-        "test_sdpa",
         [
             xfail(
                 "nn.functional.scaled_dot_product_attention",
                 dtypes=[torch.half],
             ),
-        ],
+        ]
     )
     @ops(_sdpa_op_info)
     def test_sdpa(self, device, dtype, op):
