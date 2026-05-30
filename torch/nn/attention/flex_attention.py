@@ -2016,6 +2016,11 @@ def _apply_kernel_options(
         or key.device.type == "cpu"
         or value.device.type == "cpu"
     )
+    any_inputs_on_mps_device = (
+        query.device.type == "mps"
+        or key.device.type == "mps"
+        or value.device.type == "mps"
+    )
 
     # Determine what auxiliary outputs are needed
     output_lse = return_lse
@@ -2034,9 +2039,12 @@ def _apply_kernel_options(
         # We used to check if q,k,v required grads but since captured buffers can require grad
         # we always write unless in no_grad
         kernel_options["OUTPUT_LOGSUMEXP"] = torch.is_grad_enabled()
-        if any_inputs_on_cpu_device:
-            # CPU with torch.compile now supports inference, and will not return lse
+        if any_inputs_on_cpu_device or any_inputs_on_mps_device:
+            # CPU/MPS support inference only, no LSE/backward yet.
             # TODO: support CPU for training and return lse
+            kernel_options["OUTPUT_LOGSUMEXP"] = False
+        if any_inputs_on_mps_device:
+            # MPS supports inference only; backward / LSE not yet implemented
             kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     # If forward kernel needs to return max is decided by this rule internally.
@@ -2048,11 +2056,10 @@ def _apply_kernel_options(
             "Use return_aux=AuxRequest(lse=True) or omit max_scores."
         )
     kernel_options["OUTPUT_MAX"] = output_max
-    if any_inputs_on_cpu_device and output_max:
-        # CPU doesn't support returning max yet
-        # TODO: support CPU for returning max
-        raise NotImplementedError("Returning max scores is not supported on CPU.")
-        kernel_options["OUTPUT_MAX"] = False
+    if (any_inputs_on_cpu_device or any_inputs_on_mps_device) and output_max:
+        # CPU/MPS don't support returning max yet
+        # TODO: support CPU/MPS for returning max
+        raise NotImplementedError("Returning max scores is not supported on CPU/MPS.")
 
     return kernel_options
 
@@ -2075,10 +2082,16 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
         raise NotImplementedError(
             "FlexAttention does not support backward on CPU. Please set the input requires_grad to False or use another device."
         )
-    supported_devices = {"cuda", "cpu", "xpu", "hpu"}
+    if query.device.type == "mps" and (
+        query.requires_grad or key.requires_grad or value.requires_grad
+    ):
+        raise NotImplementedError(
+            "FlexAttention does not support backward on MPS. Please set the input requires_grad to False or use another device."
+        )
+    supported_devices = {"cuda", "cpu", "xpu", "hpu", "mps"}
     if query.device.type not in supported_devices:
         raise ValueError(
-            "FlexAttention is only supported on CUDA, CPU or HPU devices. "
+            "FlexAttention is only supported on CUDA, CPU, HPU, or MPS devices. "
             f"Found input tensors on {query.device.type} device."
         )
 

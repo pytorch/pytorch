@@ -52,7 +52,6 @@ from ..bytecode_transformation import create_call_function, create_rot_n, is_gen
 from ..exc import (
     format_frame_info,
     get_dynamo_observed_exception,
-    handle_observed_exception,
     InfiniteGeneratorError,
     ObservedException,
     ObservedGeneratorExit,
@@ -86,6 +85,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    unpack_iterable,
 )
 from .base import (
     AsPythonConstantNotImplementedError,
@@ -1162,7 +1162,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         with save, disallow, temp:
             tracer = self.inline_tracer
             if not tracer.generator_exhausted:
-                self.remaining_items = self.force_unpack_var_sequence(tx)
+                self.remaining_items = unpack_iterable(tx, self)  # type: ignore[bad-argument-type]
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
 
     def get_globals(self) -> dict[str, Any]:
@@ -1225,26 +1225,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
         return False
-
-    def has_force_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return True
-
-    def force_unpack_var_sequence(
-        self, tx: "InstructionTranslatorBase"
-    ) -> list[VariableTracker]:
-        result: list[VariableTracker] = []
-        self.force_apply_to_var_sequence(tx, result.append)
-        return result
-
-    def force_apply_to_var_sequence(
-        self, tx: "InstructionTranslatorBase", fn: Callable[[VariableTracker], Any]
-    ) -> None:
-        while True:
-            try:
-                fn(self.tp_iternext_impl(tx))
-            except ObservedUserStopIteration:
-                handle_observed_exception(tx)
-                break
 
     # no nested graph breaks in generators
     def should_allow_nested_graph_breaks(self) -> Literal[False]:
