@@ -290,7 +290,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             choose_qparams_node = graph.create_node(
                 "call_function", choose_qparams_op, tuple(choose_qparams_op_inputs), {}
             )
-            # choose_qparms returns (scale, zero_point)
+            # choose_qparams returns (scale, zero_point)
             scale_node = graph.create_node(
                 "call_function", operator.getitem, (choose_qparams_node, 0), {}
             )
@@ -333,7 +333,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             # use the same qparams from quantize op
             dq_inputs = [quantized_node] + quantize_op_inputs[1:]
             # need to use the tensor variant of this op, since scale and zero_point
-            # from choose_qparam are Tensors, instead of float/int, this is to
+            # from choose_qparams are Tensors, instead of float/int, this is to
             # prevent these nodes being traced away by downstream systems
             dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
             dequantized_node = graph.call_function(
@@ -531,7 +531,7 @@ def _replace_observer_or_dequant_stub_with_dequantize_node(
     call_custom_module_node = node.args[0]
     if not isinstance(call_custom_module_node, Node):
         raise AssertionError(
-            f"Expecting the for call custom module node to be a Node, but got {call_custom_module_node}"
+            f"Expecting the call custom module node to be a Node, but got {call_custom_module_node}"
         )
     node.replace_all_uses_with(call_custom_module_node)
     graph.erase_node(node)
@@ -614,7 +614,7 @@ def _get_module_path_and_prefix(
     node_name_to_scope: dict[str, tuple[str, type]],
     node_name_to_qconfig: dict[str, QConfigAny],
 ) -> tuple[str, str]:
-    """Given and observer node, get the `Scope` or the fully qualified name for
+    """Given an observer node, get the `Scope` or the fully qualified name for
     the submodule containing the observed node, also return a prefix of "_input"
     when the observed node is an input of a F.linear op, and not the output of another
     quantized op.

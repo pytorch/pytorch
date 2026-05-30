@@ -227,7 +227,7 @@ class _RemoteModule(nn.Module):
         kwargs = kwargs if kwargs is not None else {}
 
         if _module_interface_cls is not None:
-            # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
+            # Users rely on this field to know if this generated RemoteModule is TorchScript-able.
             self.is_scriptable = True
 
             # Instantiate template on remote side.
@@ -583,7 +583,7 @@ class _RemoteModule(nn.Module):
         enable_moving_cpu_tensors_to_cuda = remote_module._prepare_init(remote_device)
 
         if _module_interface_cls is not None:
-            # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
+            # Users rely on this field to know if this generated RemoteModule is TorchScript-able.
             remote_module.is_scriptable = True
 
             remote_module._init_template(

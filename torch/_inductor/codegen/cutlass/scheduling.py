@@ -205,7 +205,7 @@ class CUTLASSScheduling(BaseScheduling):
         support fusion with Pointwise operations, wrapped in (named) ComputedBuffer nodes.
 
         Args:
-            cutlass_template_buffer : A CUTLASSTemplateBuffer object representing the CUTLASS template and it's result buffer
+            cutlass_template_buffer : A CUTLASSTemplateBuffer object representing the CUTLASS template and its result buffer
             existing_epilogue_nodes : List[SchedulerNode]: The list of already fused epilogue nodes.
             node_to_fuse: The SchedulerNode node to be checked if it can be fused with the epilogue.
         Returns:

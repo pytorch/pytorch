@@ -295,7 +295,7 @@ def _validate_loaded_sparse_tensors():
     try:
         # We disable pinning check (see check_pinning=False below) to
         # avoid gh-153143. In fact, pinning check is unnecessary
-        # anywhy when loading sparse data from external sources.
+        # anyway when loading sparse data from external sources.
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
@@ -993,7 +993,7 @@ def _functionalize_sync(t):
         # Why?
         # (1) If there are input mutations in the graph, then they will be re-applied during
         #     AOTAutograd when we call _sync() from inside of our functionalization kernels.
-        # (2) _sync() causes us to regenerate our updated the tensor from the updated base,
+        # (2) _sync() causes us to regenerate the updated tensor from the updated base,
         #     which dispatches to a bunch of view ops
         # (3) The input to these view ops is our inner FunctionalTensorWrapper
         #     (since the sync was called from C++), not the python FunctionalTensor

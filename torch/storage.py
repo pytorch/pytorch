@@ -357,7 +357,7 @@ class _StorageBase:
 
         Args:
             device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
-                This argument is discouraged and subject to deprecated.
+                This argument is discouraged and subject to deprecation.
 
         Returns:
             A boolean variable.
@@ -373,7 +373,7 @@ class _StorageBase:
 
         Args:
             device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
-                This argument is discouraged and subject to deprecated.
+                This argument is discouraged and subject to deprecation.
 
         Returns:
             A pinned CPU storage.
@@ -1169,7 +1169,7 @@ class TypedStorage:
 
         Args:
             device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
-                This argument is discouraged and subject to deprecated.
+                This argument is discouraged and subject to deprecation.
 
         Returns:
             A boolean variable.
@@ -1182,7 +1182,7 @@ class TypedStorage:
 
         Args:
             device (str or torch.device): The device to pin memory on (default: ``'cuda'``).
-                This argument is discouraged and subject to deprecated.
+                This argument is discouraged and subject to deprecation.
 
         Returns:
             A pinned CPU storage.

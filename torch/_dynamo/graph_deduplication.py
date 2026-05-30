@@ -279,7 +279,7 @@ def _create_subgraph(
             flattened_node_indices = _get_flattened_node_indices(node, region)
             for ind in flattened_node_indices:
                 placeholder = subgraph.placeholder(
-                    f"supgraph_input_{node.name}_flattened_{ind}"
+                    f"subgraph_input_{node.name}_flattened_{ind}"
                 )
                 region_to_subgraph_node[region[ind]] = placeholder
                 flattened_getitem_nodes.add(region[ind])

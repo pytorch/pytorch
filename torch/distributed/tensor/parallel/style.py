@@ -132,7 +132,7 @@ class ColwiseParallel(ParallelStyle):
             module.register_parameter(name, dist_param)
 
     def _partition_embedding_fn(self, name, module, device_mesh):
-        # colwise shard embedding.weight is straight forward as Shard(1)
+        # colwise shard embedding.weight is straightforward as Shard(1)
         for name, param in module.named_parameters():
             dist_param = nn.Parameter(
                 distribute_tensor(
