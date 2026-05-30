@@ -81,7 +81,7 @@ def scatter(tensors, src=0, group=group.WORLD):
 
     Arguments:
         tensors (list[Tensor]): List of tensors to scatter on the source rank.
-            Receivers must pass ``None`.
+            Receivers must pass ``None``.
         src (int, optional): Source rank (default is 0).
         group (ProcessGroup, optional): The process group to work on.
 

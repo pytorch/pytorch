@@ -157,7 +157,7 @@ class ParameterAlias:
         ],
     )
 
-    Chains of alias' are allowed, but may not contain cycles.
+    Chains of aliases are allowed, but may not contain cycles.
     """
     def __init__(self, alias_to) -> None:
         self.alias_to = alias_to

@@ -579,7 +579,7 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
         )
     else:
         raise NotImplementedError(
-            "Computing Jacobian using forward-AD or forward-over-reverse Hessian is"
+            "Computing Jacobian using forward-AD or forward-over-reverse Hessian is "
             "only implemented for `vectorize=True`."
         )
 

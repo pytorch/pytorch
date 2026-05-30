@@ -945,7 +945,7 @@ def _materialize_meta_module(
     except BaseException as e:
         warnings.warn(
             "Unable to call `reset_parameters()` for module on meta "
-            f"device with error {str(e)}. Please ensure that your module of"
+            f"device with error {str(e)}. Please ensure that your module of "
             f"type {type(module)} implements a `reset_parameters()` method.",
             stacklevel=2,  # type: ignore[possibly-undefined]
         )

@@ -175,7 +175,7 @@ class OpsHandler(Generic[T]):
 
     def floor_to_int(self, x: T, dtype: torch.dtype) -> T:
         """
-        Convert x to dtype with ceiling semantics.  See also trunc_to_int.
+        Convert x to dtype with floor semantics.  See also trunc_to_int.
         """
         raise NotImplementedError
 

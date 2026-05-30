@@ -19,7 +19,7 @@ def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node | None:
     """
     Get the grad function or grad accumulator for a tensor.
 
-    Accumulate grad nodes are lazily created, so we need to a
+    Accumulate grad nodes are lazily created, so we need to create a
     dummy view in order to trigger its creation.
     """
     if t.requires_grad and t.grad_fn is None:
@@ -30,7 +30,7 @@ def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node | None:
             return grad_fn.next_functions[0][0]
         else:
             raise RuntimeError(
-                "Attempted to get grad_fn, but got None."
+                "Attempted to get grad_fn, but got None. "
                 "Is this being created in a no-grad context?"
             )
     else:

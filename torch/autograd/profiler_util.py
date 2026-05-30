@@ -178,7 +178,7 @@ class EventList(list):
         # First we sort the intervals by their start time. Then we iterate over them.
         # Every time we see a new interval we remove several parents from
         # the top until we restore the invariant. Then parent child relationship
-        # if recorded if the stack is not empty.
+        # is recorded if the stack is not empty.
         # Finally we add new interval to the list
         #
         # Algorithm has O(N * log(N)) complexity where N is number of
@@ -1410,7 +1410,7 @@ def _build_table(
         append(header)
     if top_level_events_only:
         append("=" * line_length)
-        append("This report only display top-level ops statistics")
+        append("This report only displays top-level ops statistics")
     append(header_sep)
     append(row_format.format(*headers))
 

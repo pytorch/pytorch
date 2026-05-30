@@ -51,7 +51,7 @@ def _unwrap_dtensor_for_comparison(actual, expected):
 
 
 class ErrorMeta(Exception):
-    """Internal testing exception that makes that carries error metadata."""
+    """Internal testing exception that carries error metadata."""
 
     def __init__(
         self, type: type[Exception], msg: str, *, id: tuple[Any, ...] = ()
@@ -422,7 +422,7 @@ class Pair(abc.ABC):
 
     @abc.abstractmethod
     def compare(self) -> None:
-        """Compares the inputs and raises an :class`ErrorMeta` in case they mismatch."""
+        """Compares the inputs and raises an :class:`ErrorMeta` in case they mismatch."""
 
     def extra_repr(self) -> Sequence[str | tuple[str, Any]]:
         """Returns extra information that will be included in the representation.
@@ -679,15 +679,15 @@ class TensorLikePair(Pair):
     Kwargs:
         allow_subclasses (bool):
         rtol (Optional[float]): Relative tolerance. If specified ``atol`` must also be specified. If omitted, default
-            values based on the type are selected. See :func:assert_close: for details.
+            values based on the type are selected. See :func:`assert_close` for details.
         atol (Optional[float]): Absolute tolerance. If specified ``rtol`` must also be specified. If omitted, default
-            values based on the type are selected. See :func:assert_close: for details.
+            values based on the type are selected. See :func:`assert_close` for details.
         equal_nan (bool): If ``True``, two ``NaN`` values are considered equal. Defaults to ``False``.
         check_device (bool): If ``True`` (default), asserts that corresponding tensors are on the same
             :attr:`~torch.Tensor.device`. If this check is disabled, tensors on different
             :attr:`~torch.Tensor.device`'s are moved to the CPU before being compared.
         check_dtype (bool): If ``True`` (default), asserts that corresponding tensors have the same ``dtype``. If this
-            check is disabled, tensors with different ``dtype``'s are promoted  to a common ``dtype`` (according to
+            check is disabled, tensors with different ``dtype``'s are promoted to a common ``dtype`` (according to
             :func:`torch.promote_types`) before being compared.
         check_layout (bool): If ``True`` (default), asserts that corresponding tensors have the same ``layout``. If this
             check is disabled, tensors with different ``layout``'s are converted to strided tensors before being
@@ -839,8 +839,8 @@ class TensorLikePair(Pair):
 
         If ``actual`` and ``expected`` are ...
 
-        - ... not on the same :attr:`~torch.Tensor.device`, they are moved CPU memory.
-        - ... not of the same ``dtype``, they are promoted  to a common ``dtype`` (according to
+        - ... not on the same :attr:`~torch.Tensor.device`, they are moved to CPU memory.
+        - ... not of the same ``dtype``, they are promoted to a common ``dtype`` (according to
             :func:`torch.promote_types`).
         - ... not of the same ``layout``, they are converted to strided tensors.
 
@@ -1169,11 +1169,11 @@ def originate_pairs(
         **options (Any): Options passed to each pair during construction.
 
     Raises:
-        ErrorMeta: With :class`AssertionError`, if the inputs are :class:`~collections.abc.Sequence`'s, but their
+        ErrorMeta: With :class:`AssertionError`, if the inputs are :class:`~collections.abc.Sequence`'s, but their
             length does not match.
-        ErrorMeta: With :class`AssertionError`, if the inputs are :class:`~collections.abc.Mapping`'s, but their set of
+        ErrorMeta: With :class:`AssertionError`, if the inputs are :class:`~collections.abc.Mapping`'s, but their set of
             keys do not match.
-        ErrorMeta: With :class`TypeError`, if no pair is able to handle the inputs.
+        ErrorMeta: With :class:`TypeError`, if no pair is able to handle the inputs.
         ErrorMeta: With any expected exception that happens during the construction of a pair.
 
     Returns:
@@ -1423,7 +1423,7 @@ def assert_close(
             :attr:`~torch.Tensor.device`. If this check is disabled, tensors on different
             :attr:`~torch.Tensor.device`'s are moved to the CPU before being compared.
         check_dtype (bool): If ``True`` (default), asserts that corresponding tensors have the same ``dtype``. If this
-            check is disabled, tensors with different ``dtype``'s are promoted  to a common ``dtype`` (according to
+            check is disabled, tensors with different ``dtype``'s are promoted to a common ``dtype`` (according to
             :func:`torch.promote_types`) before being compared.
         check_layout (bool): If ``True`` (default), asserts that corresponding tensors have the same ``layout``. If this
             check is disabled, tensors with different ``layout``'s are converted to strided tensors before being

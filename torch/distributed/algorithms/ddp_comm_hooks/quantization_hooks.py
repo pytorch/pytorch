@@ -123,7 +123,7 @@ def quantization_perchannel_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket, bucket_size=512
 ) -> torch.futures.Future[torch.Tensor]:
     """
-    Apply``torch.quantize_per_channel`` logic to DDP using ``allgather`` protocol.
+    Apply ``torch.quantize_per_channel`` logic to DDP using ``allgather`` protocol.
 
     Compared to per-tensor, the main motivation of per-channel is
     for considerably large tensors such as a tensor that contains 6 million

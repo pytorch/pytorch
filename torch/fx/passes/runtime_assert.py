@@ -34,7 +34,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose"
 def _get_example_value(node: fx.Node) -> str | None:
     """
     Get the example value key for a node, since dynamo uses "example_value"
-    while non-strict export uses "val.
+    while non-strict export uses "val".
     """
     if "example_value" in node.meta:
         return node.meta["example_value"]

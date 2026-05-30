@@ -59,8 +59,8 @@ c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType);
 // function will round to even number. We use round(x/2)*2 to handle the
 // special halfway case. For positive 'x', round(x/2)*2 =
 // round((x_e + x_r)/2)*2 = x_e + round(x_r/2)*2, where x_e is an even integer,
-// x_r is either 0.5 of 1.5, round(x_r/2)*2 results a 0 or 2, so the final
-// result will always be a even number. Due to symmetricity, it also applies to
+// x_r is either 0.5 or 1.5, round(x_r/2)*2 results a 0 or 2, so the final
+// result will always be an even number. Due to symmetry, it also applies to
 // negative cases.
 inline double round_to_even(double a) {
   return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
@@ -79,7 +79,7 @@ void checkImplicitTensorToNum(const at::Tensor& t, bool toInt);
     // simple case, both have same sign
     return a / b;
   } else {
-    // in python division rounds down, it doesn't not truncate like in c++
+    // in python division rounds down, it does not truncate like in c++
     auto r = lldiv(a, b);
     return (r.rem) ? r.quot - 1 : r.quot;
   }
@@ -116,7 +116,7 @@ static const double radToDeg = 180.0 / std::acos(-1.0);
 double degrees(double x);
 double radians(double x);
 
-// Convert an python index (which may be negative) into an index usable for a
+// Convert a python index (which may be negative) into an index usable for a
 // C++ container
 
 // Equivalent to list.at(idx)

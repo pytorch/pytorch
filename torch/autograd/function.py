@@ -503,7 +503,7 @@ class _SingleLevelFunction(
         gradient for that input.
 
         You can use the :attr:`ctx` object to pass any value from the forward to this
-        functions.
+        function.
         """
         raise NotImplementedError(
             "You must implement the jvp function for custom "
