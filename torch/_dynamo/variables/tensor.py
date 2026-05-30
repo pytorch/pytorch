@@ -2692,7 +2692,7 @@ class SymNodeVariable(VariableTracker):
 
     def nb_floor_divide_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
