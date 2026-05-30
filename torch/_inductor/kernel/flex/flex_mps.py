@@ -48,6 +48,10 @@ def lower_mps(
         _,  # q_indices
         _,  # full_q_num_blocks
         _,  # full_q_indices
+        _,  # dq_write_order (backward-only)
+        _,  # dq_write_order_full (backward-only)
+        _,  # dq_kv_order (backward-only)
+        _,  # dq_kv_order_spt (backward-only)
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,

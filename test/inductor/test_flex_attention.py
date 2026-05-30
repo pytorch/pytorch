@@ -2908,6 +2908,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @expected_not_implemented_on_mps  # captured buffers in score_mod/mask_mod unsupported
     def test_mask_mod_handles_derived_symint_closure(self, device):
         dtype = torch.float16
 
