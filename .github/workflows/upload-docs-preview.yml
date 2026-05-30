@@ -23,8 +23,7 @@ jobs:
   upload-docs-preview:
     if: >-
       github.repository_owner == 'pytorch' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success'
+      github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
