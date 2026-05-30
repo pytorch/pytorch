@@ -53,6 +53,7 @@
         {% if MASK_MOD_PACKED_INTERVALS is not none %}
         {% set tensor_buffers = add_tensor_inputs(MASK_MOD_OTHER_BUFFERS) %}
         {% if tensor_buffers %}
+        {# Packed interval expressions are rendered against mask_mod aux buffers only. #}
         aux_tensors = [{{ tensor_buffers | join(", ") }}]
         {% endif %}
         mask_mod_packed = cute.make_rmem_tensor(1, dtype=cutlass.Uint32)

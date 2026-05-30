@@ -12,10 +12,11 @@ from torch.utils._sympy.functions import FloorDiv, Max, Min
 
 from ...codegen.cutedsl.lane_analysis import decompose_affine_lane_expr
 from ...virtualized import NullHandler, V
-from .aux_vectorization import fx_aux_index_to_sympy, make_fx_index_symbols
+from .aux_vectorization import fx_aux_index_to_sympy
 
 
-MAX_PACKED_MASK_INTERVALS = 8
+# Fall back to scalar mask lowering before interval expansion makes generated CuTe too large.
+MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE = 8
 LANE_UNIFORM_BINARY_OPS: Mapping[object, str] = {
     torch.ops.aten.add.Tensor: "+",
     torch.ops.aten.add.Scalar: "+",
@@ -30,8 +31,10 @@ LANE_UNIFORM_BINARY_OPS: Mapping[object, str] = {
 
 @dataclasses.dataclass(frozen=True)
 class PackedMaskInterval:
-    lower: sympy.Expr
-    upper: sympy.Expr
+    """Half-open keep interval [lower_lane, upper_lane_exclusive) for a 32-lane packed mask."""
+
+    lower_lane: sympy.Expr
+    upper_lane_exclusive: sympy.Expr
     symbol_codes: Mapping[sympy.Symbol, str] = dataclasses.field(
         default_factory=dict, compare=False, repr=False
     )
@@ -41,7 +44,7 @@ class PackedMaskInterval:
         return cls(sympy.Integer(0), sympy.Integer(32))
 
     def is_full(self) -> bool:
-        return self.lower == 0 and self.upper == 32
+        return self.lower_lane == 0 and self.upper_lane_exclusive == 32
 
     def with_symbol_codes(
         self, symbol_codes: Mapping[sympy.Symbol, str]
@@ -49,10 +52,10 @@ class PackedMaskInterval:
         return dataclasses.replace(self, symbol_codes=dict(symbol_codes))
 
     def render_lower(self) -> str:
-        return self._render(self.lower)
+        return self._render(self.lower_lane)
 
     def render_upper(self) -> str:
-        return self._render(self.upper)
+        return self._render(self.upper_lane_exclusive)
 
     def keep_mask_expr(self) -> str:
         lower = self.render_lower()
@@ -70,17 +73,6 @@ class PackedMaskInterval:
         rendered = sympy_to_cute_index(expr, self.symbol_codes)
         assert rendered is not None
         return rendered
-
-
-@dataclasses.dataclass(frozen=True)
-class LaneIndexAnalysis:
-    q_idx: sympy.Symbol
-    kv_idx: sympy.Symbol
-    lane: sympy.Symbol
-
-    @property
-    def kv_lane(self) -> sympy.Expr:
-        return self.kv_idx + self.lane
 
 
 def is_bool_full_node(node: torch.fx.Node, value: bool) -> bool:
@@ -180,14 +172,24 @@ class PackedMaskAnalyzer:
     placeholders: Sequence[torch.fx.Node]
     q_idx: torch.fx.Node
     kv_idx: torch.fx.Node
-    lane_analysis: LaneIndexAnalysis
+    q_symbol: sympy.Symbol = dataclasses.field(
+        default_factory=lambda: sympy.Symbol("q_idx", integer=True, nonnegative=True)
+    )
+    kv_symbol: sympy.Symbol = dataclasses.field(
+        default_factory=lambda: sympy.Symbol("kv_idx", integer=True, nonnegative=True)
+    )
+    lane_symbol: sympy.Symbol = dataclasses.field(
+        default_factory=lambda: sympy.Symbol(
+            "mask_lane", integer=True, nonnegative=True
+        )
+    )
     symbol_codes: dict[sympy.Symbol, str] = dataclasses.field(default_factory=dict)
     aux_load_symbols: dict[torch.fx.Node, sympy.Symbol] = dataclasses.field(
         default_factory=dict
     )
     next_symbol_id: int = 0
 
-    def lane_uniform_cute_expr(
+    def render_lane_uniform_scalar_expr(
         self,
         expr: object,
         *,
@@ -214,8 +216,8 @@ class PackedMaskAnalyzer:
             return f"aux_tensors[{self.placeholders[4:].index(expr)}]"
 
         if is_aten_index_node(expr):
-            return self._lane_uniform_index_cute_expr(expr, for_index=for_index)
-        return self._lane_uniform_binary_cute_expr(expr)
+            return self._render_lane_uniform_index_expr(expr, for_index=for_index)
+        return self._render_lane_uniform_binary_expr(expr)
 
     def _literal_cute_expr(
         self,
@@ -230,14 +232,14 @@ class PackedMaskAnalyzer:
             index = V.graph.sizevars.guard_int(index + index_dim_size)
         return f"cutlass.Int32({index})"
 
-    def _lane_uniform_binary_cute_expr(self, expr: torch.fx.Node) -> str | None:
+    def _render_lane_uniform_binary_expr(self, expr: torch.fx.Node) -> str | None:
         if expr.op != "call_function":
             return None
         args = expr.args
         if len(args) < 2:
             return None
-        lhs = self.lane_uniform_cute_expr(args[0])
-        rhs = self.lane_uniform_cute_expr(args[1])
+        lhs = self.render_lane_uniform_scalar_expr(args[0])
+        rhs = self.render_lane_uniform_scalar_expr(args[1])
         if lhs is None or rhs is None:
             return None
         if expr.target is torch.ops.aten.div.Tensor_mode:
@@ -249,7 +251,7 @@ class PackedMaskAnalyzer:
             return None
         return f"({lhs} {op} {rhs})"
 
-    def _lane_uniform_index_cute_expr(
+    def _render_lane_uniform_index_expr(
         self,
         expr: torch.fx.Node,
         *,
@@ -267,7 +269,7 @@ class PackedMaskAnalyzer:
         if result_shape is not None and len(result_shape) != 0:
             return None
         base, indices = expr.args
-        base_code = self.lane_uniform_cute_expr(base)
+        base_code = self.render_lane_uniform_scalar_expr(base)
         base_shape = fx_node_shape(base) if isinstance(base, torch.fx.Node) else None
         if base_code is None or not isinstance(indices, (list, tuple)):
             return None
@@ -276,7 +278,7 @@ class PackedMaskAnalyzer:
         index_codes = []
         for dim, index in enumerate(indices):
             dim_size = base_shape[dim]
-            index_code = self.lane_uniform_cute_expr(
+            index_code = self.render_lane_uniform_scalar_expr(
                 index, for_index=True, index_dim_size=dim_size
             )
             if index_code is None:
@@ -304,17 +306,21 @@ class PackedMaskAnalyzer:
         return f"cutlass.Int32({load})"
 
     def fx_mask_expr_to_sympy(self, expr: object) -> sympy.Expr | None:
-        _, _, index_symbols = make_fx_index_symbols(
-            self.q_idx, self.kv_idx, kv_expr=self.lane_analysis.kv_lane
+        return fx_aux_index_to_sympy(
+            expr,
+            {
+                self.q_idx: self.q_symbol,
+                self.kv_idx: self.kv_symbol + self.lane_symbol,
+            },
+            self.mask_aux_load_to_symbol,
         )
-        return fx_aux_index_to_sympy(expr, index_symbols, self.mask_aux_load_to_symbol)
 
     def mask_aux_load_to_symbol(self, node: torch.fx.Node) -> sympy.Expr | None:
         if not is_aten_index_node(node):
             return None
         if node in self.aux_load_symbols:
             return self.aux_load_symbols[node]
-        lane_uniform_code = self.lane_uniform_cute_expr(node)
+        lane_uniform_code = self.render_lane_uniform_scalar_expr(node)
         if lane_uniform_code is None:
             return None
         symbol = sympy.Symbol(f"mask_bound_{self.next_symbol_id}", integer=True)
@@ -328,15 +334,20 @@ class PackedMaskAnalyzer:
         intervals: tuple[PackedMaskInterval, ...],
         new_intervals: tuple[PackedMaskInterval, ...],
     ) -> tuple[PackedMaskInterval, ...] | None:
-        if len(intervals) * len(new_intervals) > MAX_PACKED_MASK_INTERVALS:
+        if (
+            len(intervals) * len(new_intervals)
+            > MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE
+        ):
             return None
         merged = []
         for lhs in intervals:
             for rhs in new_intervals:
                 merged.append(
                     PackedMaskInterval(
-                        V.graph.sizevars.simplify(Max(lhs.lower, rhs.lower)),
-                        V.graph.sizevars.simplify(Min(lhs.upper, rhs.upper)),
+                        V.graph.sizevars.simplify(Max(lhs.lower_lane, rhs.lower_lane)),
+                        V.graph.sizevars.simplify(
+                            Min(lhs.upper_lane_exclusive, rhs.upper_lane_exclusive)
+                        ),
                     )
                 )
         return tuple(merged)
@@ -349,7 +360,7 @@ class PackedMaskAnalyzer:
         strict: bool,
     ) -> tuple[PackedMaskInterval, ...] | None:
         diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
-        affine = decompose_affine_lane_expr(diff, self.lane_analysis.lane)
+        affine = decompose_affine_lane_expr(diff, self.lane_symbol)
         if affine is None:
             return None
         lane_coeff, rest = affine
@@ -373,7 +384,7 @@ class PackedMaskAnalyzer:
             if intervals is not None:
                 return intervals
         diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
-        affine = decompose_affine_lane_expr(diff, self.lane_analysis.lane)
+        affine = decompose_affine_lane_expr(diff, self.lane_symbol)
         if affine is None:
             return None
         lane_coeff, rest = affine
@@ -397,19 +408,15 @@ class PackedMaskAnalyzer:
         if lhs_divisor != rhs_divisor:
             return None
         block_start = None
-        if (
-            lhs_base == self.lane_analysis.q_idx
-            and rhs_base == self.lane_analysis.kv_lane
-        ):
+        if lhs_base == self.q_symbol and rhs_base == self.kv_symbol + self.lane_symbol:
             block_start = V.graph.sizevars.simplify(
-                lhs_expr * lhs_divisor - self.lane_analysis.kv_idx
+                lhs_expr * lhs_divisor - self.kv_symbol
             )
         elif (
-            rhs_base == self.lane_analysis.q_idx
-            and lhs_base == self.lane_analysis.kv_lane
+            rhs_base == self.q_symbol and lhs_base == self.kv_symbol + self.lane_symbol
         ):
             block_start = V.graph.sizevars.simplify(
-                rhs_expr * rhs_divisor - self.lane_analysis.kv_idx
+                rhs_expr * rhs_divisor - self.kv_symbol
             )
         if block_start is None:
             return None
@@ -491,7 +498,10 @@ class PackedMaskAnalyzer:
             return None
         if intersect:
             return self.merge_intersection(lhs_intervals, rhs_intervals)
-        if len(lhs_intervals) + len(rhs_intervals) > MAX_PACKED_MASK_INTERVALS:
+        if (
+            len(lhs_intervals) + len(rhs_intervals)
+            > MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE
+        ):
             return None
         return lhs_intervals + rhs_intervals
 
@@ -511,16 +521,10 @@ def select_packed_mask_intervals(
     if not isinstance(output_val, torch.fx.Node):
         return None
 
-    lane_analysis = LaneIndexAnalysis(
-        q_idx=sympy.Symbol("q_idx", integer=True, nonnegative=True),
-        kv_idx=sympy.Symbol("kv_idx", integer=True, nonnegative=True),
-        lane=sympy.Symbol("mask_lane", integer=True, nonnegative=True),
-    )
     analyzer = PackedMaskAnalyzer(
         placeholders=placeholders,
         q_idx=q_idx,
         kv_idx=kv_idx,
-        lane_analysis=lane_analysis,
     )
     intervals = analyzer.node_to_intervals(output_val)
     if intervals is None:
