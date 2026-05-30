@@ -24,6 +24,8 @@ from pathlib import Path
 # Directory containing this script (.ci/pytorch/windows). Scratch downloads
 # land here so they don't pollute PYTORCH_ROOT.
 WIN_CI_DIR = Path(__file__).resolve().parent
+# Repo root contains pyproject.toml; spin needs to run from there.
+PYTORCH_ROOT = WIN_CI_DIR.parent.parent.parent
 
 
 # Pin numpy by Python version. Matches the legacy table in setup_build.bat.
@@ -142,7 +144,9 @@ def main() -> None:
     pip_install("-q", *PIP_PACKAGES)
 
     if not os.environ.get("SKIP_SETUP_CLEAN"):
-        subprocess.run([sys.executable, "-m", "spin", "clean"], check=True)
+        subprocess.run(
+            [sys.executable, "-m", "spin", "clean"], cwd=PYTORCH_ROOT, check=True
+        )
 
     libuv_root = install_libuv(WIN_CI_DIR, Path(sys.prefix))
 
