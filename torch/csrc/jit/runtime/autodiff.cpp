@@ -299,7 +299,7 @@ class GradientHelper {
 // are linear and can use this property to do more aggressive optimizations
 // later. It is ok to replace any backward function with known-zero inputs with
 // something that produces known-zero outputs. This function encloses each
-// know-linear backward function in a 'GradOf' sub-block so that we can perform
+// known-linear backward function in a 'GradOf' sub-block so that we can perform
 // optimizations using this information. In particular, specializeAutogradZero
 // will observe if all the inputs to the linear block are AutogradZeroTensor,
 // which the autograd uses to represent zeros, and then propagate the zeros to
