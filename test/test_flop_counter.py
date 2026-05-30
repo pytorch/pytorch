@@ -1458,11 +1458,8 @@ class TestFlexAttentionEstimation(TestCase):
         self.assertEqual(sparse_flops, dense_flops // 2)
 
 
-instantiate_device_type_tests(TestFlopCounter, globals(), only_for=("cpu",))
-instantiate_device_type_tests(TestFlopCounterDeviceType, globals(), only_for=("cuda",))
-instantiate_device_type_tests(
-    TestFlexAttentionEstimation, globals(), only_for=("cpu", "cuda")
-)
+instantiate_device_type_tests(TestFlopCounterDeviceType, globals(), except_for=("cpu",))
+instantiate_device_type_tests(TestFlexAttentionEstimation, globals())
 
 
 if __name__ == "__main__":
