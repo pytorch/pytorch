@@ -211,8 +211,8 @@ class NNModuleToString:
             # module should be a core torch.nn.Module, so all parameters
             # should be on the same device.
             example_param = next(module.parameters(), None)
-            if example_param is not None and example_param.is_cuda:
-                module_str = f"{module_str}.cuda()"
+            if example_param is not None and example_param.device.type != "cpu":
+                module_str = f'{module_str}.to("{example_param.device}")'
             model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():
@@ -234,8 +234,8 @@ class NNModuleToString:
                 tensor_str = (
                     f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
                 )
-            if buffer.is_cuda:
-                tensor_str = f"{tensor_str}.cuda()"
+            if buffer.device.type != "cpu":
+                tensor_str = f'{tensor_str}.to("{buffer.device}")'
             model_str += (
                 f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
             )
@@ -244,8 +244,8 @@ class NNModuleToString:
             if param is None:
                 continue
             maybe_device = ""
-            if param.is_cuda:
-                maybe_device = ', device="cuda"'
+            if param.device.type != "cpu":
+                maybe_device = f', device="{param.device}"'
             tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
             model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
 
@@ -297,15 +297,22 @@ def generate_env_vars_string(*, stable_output: bool = False) -> str:
 
     allow_list = ["TORCH", "DYNAMO", "INDUCTOR", "TRITON"]
     skip_list = ["TRITON_LIBDEVICE_PATH", "TRITON_PTXAS_PATH", "TRITON_LIBCUDA_PATH"]
+    repro_env_vars = ["TORCHDYNAMO_REPRO_AFTER", "TORCHDYNAMO_REPRO_LEVEL"]
 
     def filter(key: str) -> bool:
-        return any(string in key for string in allow_list) and key not in skip_list
+        return (
+            any(string in key for string in allow_list)
+            and key not in skip_list
+            and key not in repro_env_vars
+        )
 
     config_lines = [
         f"""os.environ['{key}'] = '{value.replace("'", '"')}'"""
         for key, value in os.environ.items()
         if filter(key)
     ]
+    # Repro scripts should not recursively generate more repro scripts when run.
+    config_lines.extend(f"os.environ.pop('{key}', None)" for key in repro_env_vars)
     config_string = "\n".join(config_lines)
     return normalize_path_separator(f"""\
 import os
