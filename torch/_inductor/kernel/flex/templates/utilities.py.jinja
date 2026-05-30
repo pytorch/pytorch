@@ -43,11 +43,10 @@ def load_checked_2d(
     IS_DIVISIBLE_N: tl.constexpr,
     M_LEN: tl.constexpr,
     N_LEN: tl.constexpr,
-    INDEX_DTYPE: tl.constexpr,
 ):
     # Calculate final pointer if strides are provided
     if stride_m is not None and stride_n is not None:
-        ptr = ptr + offs_m[:, None].to(INDEX_DTYPE) * stride_m + offs_n[None, :].to(INDEX_DTYPE) * stride_n
+        ptr = ptr + offs_m[:, None] * stride_m + offs_n[None, :] * stride_n
 
     # Handle all masking cases
     if not IS_DIVISIBLE_M and not IS_DIVISIBLE_N:
