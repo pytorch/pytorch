@@ -2314,9 +2314,16 @@ class CUDAGraphTreeManager:
             # now that we know the new function can't be run as a child of the
             # current node, if it is a root, try to end the current execution.
             # as noted above, we want to do this lazily to avoid having to
-            # check all existing outputs
+            # check all existing outputs. Starting a new path can overwrite the
+            # current path's live cached outputs, so poison them before
+            # replaying the root. Normal replay of the same root should keep
+            # cached outputs intact.
             if self.current_node is not None and function_id in self.roots:
-                self.try_end_curr_execution()
+                same_root_replay = (
+                    self.current_node.parent is None
+                    and self.current_node.wrapped_function.id == function_id
+                )
+                self.try_end_curr_execution(dealloc_live_outputs=not same_root_replay)
 
                 # run again to hit the root matching case which must succeed
                 if self.current_node is None:

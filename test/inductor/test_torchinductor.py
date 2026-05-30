@@ -12061,9 +12061,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(fw_code.count("halide_helpers.rand"), 1)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
         elif self.device == GPU_TYPE and not torch._inductor.config.align_random_eager:
-            self.assertEqual(fw_code.count("triton_helpers.rand4x"), 1)
-            self.assertEqual(fw_code.count("tl.rand"), 0)
-            self.assertEqual(bw_code.count("triton_helpers.rand4x"), 0)
+            self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
         check(r2, g2)
@@ -12114,9 +12112,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # the triton signature specializes on 1 vs non-1, you might get 1
             # or 2 kernels. In newer versions of triton, there's no specialization
             # so we get only 1 kernel.
-            self.assertEqual(fw_code.count("triton_helpers.rand4x"), 2)
-            self.assertEqual(fw_code.count("tl.rand"), 0)
-            self.assertEqual(bw_code.count("triton_helpers.rand4x"), 0)
+            self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
             self.assertEqual(
                 torch._inductor.metrics.generated_kernel_count,
@@ -12127,52 +12123,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch._inductor.metrics.generated_kernel_count,
                 4,
             )
-
-    @xfail_if_mps  # Only works for triton
-    def test_randn_uses_randn4x(self):
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("Only valid for GPU!")
-
-        @torch.compile
-        def fn():
-            return torch.randn([1024], device=self.device)
-
-        torch.manual_seed(1234)
-        result, (code,) = run_and_get_code(fn)
-        self.assertEqual(result.shape, (1024,))
-        self.assertEqual(code.count("triton_helpers.randn4x"), 1)
-        self.assertEqual(code.count("tl.randn"), 0)
-
-    @xfail_if_mps  # Only works for Triton on CUDA
-    def test_rand4x_falls_back_in_reduction(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("Only valid for CUDA!")
-
-        @torch.compile
-        def fn(x):
-            return (torch.rand_like(x) * x).sum(dim=1)
-
-        result, (code,) = run_and_get_code(fn, torch.ones([8, 32], device=self.device))
-        self.assertEqual(result.shape, (8,))
-        self.assertEqual(code.count("triton_helpers.rand4x"), 0)
-        self.assertEqual(code.count("tl.rand("), 1)
-
-    @xfail_if_mps  # Only works for Triton on CUDA
-    @config.patch(align_random_eager=True)
-    def test_align_random_eager_skips_rand4x(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("Only valid for CUDA!")
-
-        @torch.compile
-        def fn():
-            return torch.rand([1024], device=self.device)
-
-        torch.manual_seed(1234)
-        result, (code,) = run_and_get_code(fn)
-        self.assertEqual(result.shape, (1024,))
-        self.assertEqual(code.count("triton_helpers.rand4x"), 0)
-        self.assertEqual(code.count("triton_helpers.rand_eager_kernel"), 1)
-        self.assertEqual(code.count("tl.rand("), 0)
 
     @xfail_if_mps  # Only works for triton
     def test_randint_kernel_count(self):
@@ -16939,6 +16889,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         profile_output = str(p.key_averages())
         print(profile_output)
         self.assertFalse("Pageable" in profile_output)
+
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "event sync only emitted for Python wrapper",
+    )
+    @skip_if_halide
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_non_blocking_d2h_event_sync(self):
+        def f(x):
+            s = x.abs().sum().to("cpu", non_blocking=True).item()
+            return torch.clamp(x, 0.0, s)
+
+        x = torch.randn(10, device=GPU_TYPE)
+        compiled_fn = torch.compile(f, dynamic=True)
+        result, code = run_and_get_code(compiled_fn, x)
+        expected = f(x)
+        self.assertEqual(result, expected)
+        wrapper_code = code[0]
+        self.assertIn("torch.Event()", wrapper_code)
+        self.assertIn(".record()", wrapper_code)
+        self.assertIn(".synchronize()", wrapper_code)
 
     @unittest.skipIf(
         config.cpp_wrapper,

@@ -2429,6 +2429,34 @@ if HAS_CUDA_AND_TRITON:
 
             del stale, new
 
+        def test_error_on_dealloc_use_after_cached_root_switch(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            @torch.compile(mode="reduce-overhead")
+            def bar(x):
+                return x + 2
+
+            def run_to_cached_replay(fn):
+                for _ in range(3):
+                    out = fn(torch.rand([4], device="cuda"))
+                del out
+
+            run_to_cached_replay(foo)
+            run_to_cached_replay(bar)
+
+            stale = foo(torch.rand([4], device="cuda"))
+            self.assertIs(stale, self.curr_node().cached_tensor_outputs[0])
+
+            new = bar(torch.rand([4], device="cuda"))
+            self.assertIs(new, self.curr_node().cached_tensor_outputs[0])
+
+            with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                stale.cpu()
+
+            del stale, new
+
         def test_grad_accumulation_dealloc_error_message(self):
             model = torch.nn.Linear(10, 1, device="cuda")
             compiled_model = torch.compile(
