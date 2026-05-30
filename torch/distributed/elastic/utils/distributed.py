@@ -52,7 +52,7 @@ def create_c10d_store(
         )
 
     if server_port != -1:
-        logger.info("sever_port: %s, specified, ignoring retries", server_port)
+        logger.info("server_port: %s, specified, ignoring retries", server_port)
 
     # only retry when server_port is NOT static
     attempt = retries if server_port == -1 else 1

@@ -1216,15 +1216,15 @@ def _schedule_for_comm(
     Args:
         snodes: the nodes to be scheduled.
         raise_comms: whether to greedily schedule collectives as early as possible
-        sink_wait: whether to greedily schedule waits as late as possible
-        reorder_compute_for_overlap: whether to reorder compute nodes to
+        sink_waits: whether to greedily schedule waits as late as possible
+        reorder_for_overlap: whether to reorder compute nodes to
             optimize for compute/communication overlapping.
 
     Returns:
         The new schedule order.
 
     Some notes on the synergy between different options:
-        - `raise_comms` provides more overlapping oppurtunies for `reorder_compute_for_overlap`.
+        - `raise_comms` provides more overlapping opportunities for `reorder_compute_for_overlap`.
         - When both `raise_comms` and `sink_waits` is `True`, `raise_comms` is prioritized.
     """
     # We assign each node a tuple of scores (score_0, score_1, score_2),
@@ -1953,7 +1953,7 @@ def _sink_waits_iterative_internal(
                 # Check if candidate has sync runtime
                 if not contains_async_collective(candidate):
                     # If candidate has sync runtime,
-                    # Waits of gorup_colls are on the right from group.
+                    # Waits of group_colls are on the right from group.
                     # Swap can increase their exposed time.
                     c_runtime = runtimes[candidate]
 

@@ -247,9 +247,9 @@ inline variable_list CppNode_apply_functional(
           outputs[i].defined() == false,
           "function ",
           name,
-          " returned a gradient different that is defined at position ",
+          " returned a gradient that is defined at position ",
           i + 1,
-          ", std the corresponding forward input was not a Variable");
+          ", but the corresponding forward input was not a Variable");
       continue;
     }
     results.emplace_back(outputs[i]);

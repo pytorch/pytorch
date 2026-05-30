@@ -94,7 +94,7 @@ same host, we need to make sure that each instance (job) is
 setup on different ports to avoid port conflicts (or worse, two jobs being merged
 as a single job). To do this you have to run with ``--rdzv-backend=c10d``
 and specify a different port by setting ``--rdzv-endpoint=localhost:$PORT_k``.
-For ``--nodes=1``, its often convenient to let ``torchrun`` pick a free random
+For ``--nodes=1``, it's often convenient to let ``torchrun`` pick a free random
 port automatically instead of manually assigning different ports for each run.
 
 ::
@@ -586,7 +586,7 @@ def get_args_parser() -> ArgumentParser:
         type=str,
         default="",
         help="Only show logs from specified ranks in console (e.g. [--local_ranks_filter=0,1,2] will "
-        "only show logs from rank 0, 1 and 2). This will only apply to stdout and stderr, not to"
+        "only show logs from rank 0, 1 and 2). This will only apply to stdout and stderr, not to "
         "log files saved via --redirect or --tee",
     )
 
@@ -652,7 +652,7 @@ def get_args_parser() -> ArgumentParser:
         type=str,
         action=env,
         help="Address of the local node. If specified, will use the given address for connection. "
-        "Else, will look up the local node address instead. Else, it will be default to local "
+        "Else, will look up the local node address instead. Else, it will default to local "
         "machine's FQDN.",
     )
 

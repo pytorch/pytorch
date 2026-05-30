@@ -231,11 +231,11 @@ class CallgrindStats:
     ) -> FunctionCounts:
         """Diff two sets of counts.
 
-        One common reason to collect instruction counts is to determine the
+        One common reason to collect instruction counts is to determine
         the effect that a particular change will have on the number of instructions
         needed to perform some unit of work. If a change increases that number, the
         next logical question is "why". This generally involves looking at what part
-        if the code increased in instruction count. This function automates that
+        of the code increased in instruction count. This function automates that
         process so that one can easily diff counts on both an inclusive and
         exclusive basis.
         """
@@ -244,7 +244,7 @@ class CallgrindStats:
     def as_standardized(self) -> CallgrindStats:
         """Strip library names and some prefixes from function strings.
 
-        When comparing two different sets of instruction counts, on stumbling
+        When comparing two different sets of instruction counts, one stumbling
         block can be path prefixes. Callgrind includes the full filepath
         when reporting a function (as it should). However, this can cause
         issues when diffing profiles. If a key component such as Python

@@ -304,7 +304,7 @@ def _copy_attr(
         setattr(to_module, field, orig)
 
 
-# Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
+# Assign attribute 'from_obj' to the qualified name 'target' on 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
 def _assign_attr(from_obj: object, to_module: torch.nn.Module, target: str) -> None:
     *prefix, field = target.split(".")
@@ -510,7 +510,7 @@ class _WrappedCall:
 @compatibility(is_backward_compatible=True)
 class GraphModule(torch.nn.Module):
     """
-    GraphModule is an nn.Module generated from an fx.Graph. Graphmodule has a
+    GraphModule is an nn.Module generated from an fx.Graph. GraphModule has a
     ``graph`` attribute, as well as ``code`` and ``forward`` attributes generated
     from that ``graph``.
 

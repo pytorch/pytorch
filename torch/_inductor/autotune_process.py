@@ -778,7 +778,7 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
 
     def benchmark(self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None):
         if out is not None and out.numel() == 0:
-            # no need to run the kernel of do benchmarking
+            # no need to run the kernel or do benchmarking
             return 0.0
         if self.has_out_variant or len(input_tensors) == 0:
             return super().benchmark(*input_tensors, out=out)

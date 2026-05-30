@@ -864,7 +864,7 @@ def _namedtuple_serialize(context: Context) -> DumpableContext:
     if context not in SUPPORTED_SERIALIZED_TYPES:
         raise NotImplementedError(
             f"Can't serialize TreeSpec of namedtuple class {context} because we "
-            "didn't register a serializated_type_name. Please register using "
+            "didn't register a serialized_type_name. Please register using "
             "`_register_namedtuple`."
         )
 
@@ -874,7 +874,7 @@ def _namedtuple_serialize(context: Context) -> DumpableContext:
     if serialized_type_name == NO_SERIALIZED_TYPE_NAME_FOUND:
         raise NotImplementedError(
             f"Can't serialize TreeSpec of namedtuple class {context} because we "
-            "couldn't find a serializated_type_name. Please register using "
+            "couldn't find a serialized_type_name. Please register using "
             "`_register_namedtuple`."
         )
     return serialized_type_name
@@ -884,7 +884,7 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
     if dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
         raise NotImplementedError(
             f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
-            "because we couldn't find a serializated name."
+            "because we couldn't find a serialized name."
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
