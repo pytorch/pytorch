@@ -81,34 +81,27 @@ extern "C" void __avx_chk_kernel() {
 }
 """
 
-    # The probe makes libtorch_cpu loadable for the test .so's transitive
-    # deps without paying the cost of `import torch` where it can be avoided:
-    # the full import costs multiple seconds of startup per spawn and has
-    # hung under load in CI (the motivation for this rework).
-    #   - Linux: the parent prepends torch's lib dir to LD_LIBRARY_PATH and
-    #     the dynamic linker resolves libtorch_cpu automatically; nothing to
-    #     do in the child.
-    #   - Windows: ctypes.cdll.LoadLibrary does not consult PATH/loader env
-    #     vars, so the child locates torch via importlib.util.find_spec
-    #     (which does not execute torch/__init__.py) and registers the lib
-    #     dir with os.add_dll_directory.
-    #   - macOS: SIP strips DYLD_LIBRARY_PATH from spawned children, and the
-    #     test .so's @rpath dependency on libtorch_cpu.dylib cannot be
-    #     resolved from the parent env (nor by merely preloading the dylib by
-    #     path). Fall back to `import torch`, which pulls the whole dependency
-    #     closure into the process; macOS only ever probes VecNEON, so this is
-    #     at most one import per process and is still bounded by the 60s
-    #     subprocess timeout in _probe_load.
+    # Skipping `import torch` in the child avoids multiple seconds of startup
+    # per spawn and the hangs under load seen in CI (the motivation for this
+    # rework), but only Linux can do so safely today: the parent prepends
+    # torch's lib dir to LD_LIBRARY_PATH and the dynamic linker resolves
+    # libtorch_cpu for the test .so automatically.
+    #
+    # macOS and Windows fall back to `import torch`, which pulls torch's whole
+    # dependency closure into the process the way the probe did before this
+    # rework. On macOS the env-based approach does not work at all (SIP strips
+    # DYLD_LIBRARY_PATH from spawned children and the test .so's @rpath dep on
+    # libtorch_cpu.dylib cannot be resolved from the parent env). On Windows a
+    # find_spec + os.add_dll_directory scheme is plausible, but the Windows CI
+    # build is currently red on an unrelated infra flake, so that path cannot
+    # be validated; rather than ship an untested loader change (which is how
+    # the macOS breakage slipped in), keep Windows on the proven import until
+    # it can actually be exercised. Each probed ISA imports torch at most once
+    # per process and is still bounded by the 60s timeout in _probe_load.
     _avx_py_load = """
-import os
 import sys
-if sys.platform == "darwin":
+if sys.platform != "linux":
     import torch  # noqa: F401
-elif hasattr(os, "add_dll_directory"):
-    import importlib.util
-    spec = importlib.util.find_spec("torch")
-    if spec is not None and spec.origin:
-        os.add_dll_directory(os.path.join(os.path.dirname(spec.origin), "lib"))
 from ctypes import cdll
 cdll.LoadLibrary("__lib_path__")
 """
@@ -132,21 +125,20 @@ cdll.LoadLibrary("__lib_path__")
     def _build_probe_env() -> dict[str, str]:
         """Construct the child env for the dlopen probe.
 
-        On Linux, make libtorch_cpu (and other torch shlibs) findable by the
+        Make libtorch_cpu (and other torch shlibs) findable by the Linux
         dynamic linker via LD_LIBRARY_PATH so the probe child does not need to
         ``import torch`` to bring them into its address space. Prepend rather
         than append so a successful probe is guaranteed to bind against the
         torch we are currently running, not an older install on the user's
-        loader path. DYLD_LIBRARY_PATH is set too for non-SIP setups, but
-        macOS SIP strips it from spawned children, so the child falls back to
-        ``import torch`` there; Windows registers the lib dir via
-        ``os.add_dll_directory`` (both in ``_avx_py_load``).
+        loader path. macOS and Windows do not use this fast path; they
+        ``import torch`` in the child instead (see ``_avx_py_load``).
         """
         lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
         env = python_subprocess_env()
-        for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
-            existing = env.get(var, "")
-            env[var] = os.pathsep.join([lib_dir, existing]) if existing else lib_dir
+        existing = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = (
+            os.pathsep.join([lib_dir, existing]) if existing else lib_dir
+        )
         return env
 
     def _probe_load(self, output_path: str) -> bool:
