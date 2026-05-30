@@ -29,6 +29,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import operator
 import random
 import sys
 import threading
@@ -2027,6 +2028,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         # CPython: slot_nb_invert calls __invert__() via vectorcall_method.
         # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9426
+
+        # Constant-fold to avoid inlining CPython's __invert__, which may
+        # mutate immutable-self (e.g. enum.Flag.__invert__ caches the value).
+        from .builder import SourcelessBuilder
+
+        if self.is_python_constant():
+            result = operator.invert(
+                self.as_python_constant()  # pyrefly: ignore[bad-argument-type]
+            )
+            return SourcelessBuilder.create(tx, result)
+
         type_attr = self.lookup_class_mro_attr("__invert__")
         if type_attr is NO_SUCH_SUBOBJ:
             raise_type_error(

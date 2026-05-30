@@ -517,6 +517,34 @@ class NbUnaryTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, -5)
 
+    # --- UserDefinedObjectVariable wrapping a Python constant (enum) ---
+
+    def test_invert_flag_enum_constant_fold(self):
+        import enum
+
+        class Flags(enum.Flag):
+            A = 1
+            B = 2
+
+        def fn(x):
+            return ~Flags.A is Flags.B
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertTrue(result)
+
+    @parametrize("op,dunder", ALL_UNARY_OPS)
+    def test_enum_constant(self, op, dunder):
+        import enum
+
+        class MyEnum(enum.IntEnum):
+            X = 42
+
+        def fn(x):
+            return op(MyEnum.X)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertEqual(result, op(MyEnum.X))
+
     # --- nn.Module ---
 
     @parametrize("op,dunder", ALL_UNARY_OPS)
