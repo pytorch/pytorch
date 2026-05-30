@@ -426,11 +426,11 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                             return curr_mode.__torch_dispatch__(self, [], args, kwargs)
                     else:
                         raise NotImplementedError(
-                            f"There was no rule registered for HigherOrderOperator {self._name} and mode {curr_mode}."
+                            f"There was no rule registered for HigherOrderOperator {self._name} and mode {curr_mode}. "
                             f"Hint: set {curr_mode}'s supports_higher_order_operators to True."
                             f" This causes all higher order operators to pass through {curr_mode}'s __torch_dispatch__,"
                             f" so handle them accordingly by"
-                            f" adding support for HigerOrderOperators (in this case, {self._name}) in"
+                            f" adding support for HigherOrderOperators (in this case, {self._name}) in"
                             f" {curr_mode}.__torch_dispatch__ or"
                             f" returning NotImplemented when not supported."
                         )
@@ -506,7 +506,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
         final_key = resolve_key(self, dispatch_key)
 
-        # This can current fail due to backend fallbacks.  You just have to
+        # This can currently fail due to backend fallbacks.  You just have to
         # register them by hand for HigherOrderOperator.
         if final_key not in self.py_kernels:
             raise NotImplementedError(

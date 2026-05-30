@@ -887,7 +887,7 @@ class MappingProxyVariable(VariableTracker):
         if self.source and tx.output.side_effects.has_existing_dict_mutation():
             msg = (
                 "A dict has been modified while we have an existing mappingproxy object. "
-                "A mapping proxy object, as the name suggest, proxies a mapping "
+                "A mapping proxy object, as the name suggests, proxies a mapping "
                 "object (usually a dict). If the original dict object mutates, it "
                 "is reflected in the proxy object as well. For an existing proxy "
                 "object, we do not know the original dict it points to. Therefore, "

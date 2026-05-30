@@ -565,7 +565,7 @@ class MetalKernel(SIMDKernel):
         if dtype in [torch.float16, torch.bfloat16]:
             # TODO(NS): Figure out the right balance between optype casts
             # op_math_t for half-precision floats should be float32
-            # Otherwise it can lead to a correctness issues with eager
+            # Otherwise it can lead to a correctness issue with eager
             line = f"static_cast<float>({line})"
             dtype = torch.float32
         return self.cse.generate(self.loads, line, dtype=dtype)
@@ -648,12 +648,12 @@ class MetalKernel(SIMDKernel):
         value: CSEVariable | tuple[CSEVariable, ...],
     ) -> CSEVariable | tuple[CSEVariable, ...]:
         """Codegen a reduction operation.
-        Only sum and prod operations are somewhat reasonable optimized"""
+        Only sum and prod operations are somewhat reasonably optimized"""
         assert self.inside_reduction
         assert not self._load_mask
 
         def _unwrap_helper(res3: CSEVariable) -> tuple[CSEVariable, ...]:
-            # Uwraps vec3 dtype into individual components
+            # Unwraps vec3 dtype into individual components
             return OpsWrapper._unwrap(
                 [CSEVariable(f"{res3}.{t}", res3.bounds, res3.dtype) for t in "xyz"]
             )

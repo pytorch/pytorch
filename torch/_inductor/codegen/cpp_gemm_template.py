@@ -1034,7 +1034,7 @@ class CppGemmTemplate(CppTemplate):
                     view_stride[:] = V.graph.sizevars.guarding_hints_or_throw(
                         view_stride
                     )
-                # With the assumptation that W is the storage of unwrap view
+                # With the assumption that W is the storage of unwrap view
                 # thus view it back here
                 new_inputs[1] = new_inputs[1].as_strided(
                     view_size, view_stride, view_offset

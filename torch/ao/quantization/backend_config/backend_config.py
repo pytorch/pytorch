@@ -237,7 +237,7 @@ scale_min_lower_bound=None, scale_max_upper_bound=None)
             "input_dtype": torch.dtype or ``DTypeWithConstraints``
             "output_dtype": torch.dtype or ``DTypeWithConstraints``
             "weight_dtype": torch.dtype or ``DTypeWithConstraints``
-            "bias_type": torch.dtype
+            "bias_dtype": torch.dtype
             "is_dynamic": bool
         """
         input_dtype = dtype_config_dict.get(INPUT_DTYPE_DICT_KEY)

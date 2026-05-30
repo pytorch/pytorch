@@ -100,8 +100,8 @@ class PT2ArchiveWriter:
             archive_path_or_buffer = normalize_path_separator(archive_path_or_buffer)
         self.archive_file = torch._C.PyTorchFileWriter(archive_path_or_buffer)  # type: ignore[arg-type]
         # NOTICE: version here is different from the archive_version
-        # this is the version of zip file format, which is used by PyTorchFileWriter, which write to /.data/version
-        # archive_version is the version of the PT2 archive spec, which write to /archive_version
+        # this is the version of zip file format, which is used by PyTorchFileWriter, which writes to /.data/version
+        # archive_version is the version of the PT2 archive spec, which writes to /archive_version
         self.archive_file.set_min_version(6)
 
     def __enter__(self) -> "PT2ArchiveWriter":
@@ -350,7 +350,7 @@ def _get_raw_tensor_bytes(value: torch.Tensor) -> bytes:
     elif value.data_ptr():
         cpu_tensor = value.cpu()
         value_untyped_storage = cpu_tensor.untyped_storage()
-        # we store the raw bytes the untyped storage. Tensor metadata is stored separately
+        # we store the raw bytes of the untyped storage. Tensor metadata is stored separately
         value_bytes = bytes(
             ctypes.cast(
                 value_untyped_storage.data_ptr(),

@@ -238,7 +238,7 @@ def _check_input_constraints_pre_hook(self, args, kwargs):
     if not self.validate_inputs:
         return
 
-    # when a guards function exists, assume that the graph does calls it!
+    # when a guards function exists, assume that the graph does call it!
     # so we do not need to check input constraints...but we still want
     # to check inputs match, otherwise we'd get obscure pytree errors
     if hasattr(self, "_guards_fn"):

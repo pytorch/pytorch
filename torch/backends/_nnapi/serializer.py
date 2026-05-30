@@ -1253,7 +1253,7 @@ class _NnapiSerializer:
         )
         inputs[4] = self.add_immediate_int_scalar(0)  # begin mask
         inputs[5] = self.add_immediate_int_scalar(end_mask)
-        inputs[6] = self.add_immediate_int_scalar(0)  # shrink axis mas
+        inputs[6] = self.add_immediate_int_scalar(0)  # shrink axis mask
 
         outputs = [None] * 1
         outputs[0] = out_id
