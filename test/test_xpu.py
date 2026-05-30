@@ -141,6 +141,7 @@ class TestXpu(TestCase):
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
         self.assertTrue(device_capability["local_mem_size"] > 0)
+        self.assertTrue(device_capability["last_level_cache_size"] > 0)
         self.assertTrue(device_capability["memory_clock_rate"] > 0)
         self.assertTrue(device_capability["memory_bus_width"] > 0)
         self.assertEqual(
@@ -176,6 +177,11 @@ class TestXpu(TestCase):
             len(str(device_properties.uuid)), 36
         )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         self.assertEqual(len(device_properties.uuid.bytes), 16)
+        if int(torch.version.xpu) >= 20260000:
+            self.assertEqual(
+                device_properties.is_integrated_gpu,
+                device_capability["is_integrated_gpu"],
+            )
 
     def test_get_device_capability(self):
         device_capability = torch.xpu.get_device_capability()
