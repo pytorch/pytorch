@@ -32,7 +32,7 @@ class BasePruningMethod(ABC):
 
     @abstractmethod
     def compute_mask(self, t, default_mask):
-        r"""Compute and returns a mask for the input tensor ``t``.
+        r"""Compute and return a mask for the input tensor ``t``.
 
         Starting from a base ``default_mask`` (which should be a mask of ones
         if the tensor has not been pruned yet), generate a random mask to
@@ -166,7 +166,7 @@ class BasePruningMethod(ABC):
 
         # If this is the first time pruning is applied, take care of moving
         # the original tensor to a new parameter called name + '_orig' and
-        # and deleting the original parameter
+        # deleting the original parameter
         if not isinstance(method, PruningContainer):
             # copy `module[name]` to `module[name + '_orig']`
             module.register_parameter(name + "_orig", orig)
@@ -206,7 +206,7 @@ class BasePruningMethod(ABC):
         return method
 
     def prune(self, t, default_mask=None, importance_scores=None):
-        r"""Compute and returns a pruned version of input tensor ``t``.
+        r"""Compute and return a pruned version of input tensor ``t``.
 
         According to the pruning rule specified in :meth:`compute_mask`.
 
@@ -347,7 +347,7 @@ class PruningContainer(BasePruningMethod):
         """
 
         def _combine_masks(method, t, mask):
-            r"""Combine the masks from all pruning methods and returns a new mask.
+            r"""Combine the masks from all pruning methods and return a new mask.
 
             Args:
                 method (a BasePruningMethod subclass): pruning method
@@ -390,7 +390,7 @@ class PruningContainer(BasePruningMethod):
                     raise IndexError(
                         f"Index is out of bounds for tensor with dimensions {n_dims}"
                     )
-                # find channels along dim = dim that aren't already tots 0ed out
+                # find channels along dim = dim that aren't already zeroed out
                 keep_channel = mask.sum(dim=[d for d in range(n_dims) if d != dim]) != 0
                 # create slice to identify what to prune
                 slc = [slice(None)] * n_dims
@@ -587,7 +587,7 @@ class RandomStructured(BasePruningMethod):
         self.dim = dim
 
     def compute_mask(self, t, default_mask):
-        r"""Compute and returns a mask for the input tensor ``t``.
+        r"""Compute and return a mask for the input tensor ``t``.
 
         Starting from a base ``default_mask`` (which should be a mask of ones
         if the tensor has not been pruned yet), generate a random mask to
@@ -696,7 +696,7 @@ class LnStructured(BasePruningMethod):
         self.dim = dim
 
     def compute_mask(self, t, default_mask):
-        r"""Compute and returns a mask for the input tensor ``t``.
+        r"""Compute and return a mask for the input tensor ``t``.
 
         Starting from a base ``default_mask`` (which should be a mask of ones
         if the tensor has not been pruned yet), generate a mask to apply on

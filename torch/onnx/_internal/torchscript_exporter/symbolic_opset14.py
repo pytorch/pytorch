@@ -199,7 +199,7 @@ def scaled_dot_product_attention(
         attn_weight = g.op("Softmax", mul_qk_add, axis_i=-1)
         # When using scaled dot product attention with a boolean mask, the softmax operation might return NaN values
         # due to the presence of -inf in an entire row (padding tokens), resulting in 0/0 (NaN) in the softmax output.
-        # This is because there's no safe softmax imp in ONNX, so we need to handle NaN values explicitly to match
+        # This is because there's no safe softmax impl in ONNX, so we need to handle NaN values explicitly to match
         # the behavior of PyTorch with boolean masks.
         attn_weight = g.op("Where", g.op("IsNaN", attn_weight), const_zero, attn_weight)
     elif _type_utils.JitScalarType.from_value(attn_mask) in (

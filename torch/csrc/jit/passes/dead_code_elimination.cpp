@@ -398,13 +398,13 @@ class DeadCodeEliminator {
     GRAPH_UPDATE(
         "\tDead block input ",
         loop_body->inputs().at(loop_body_offset + i)->debugName(),
-        "at offset ",
+        " at offset ",
         loop_body_offset + i,
         " will be removed");
     GRAPH_UPDATE(
         "\tDead block output ",
         loop_body->outputs().at(loop_body_offset + i)->debugName(),
-        "at offset ",
+        " at offset ",
         loop_body_offset + i,
         " will be removed");
   }

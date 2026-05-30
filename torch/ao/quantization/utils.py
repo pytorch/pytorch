@@ -629,7 +629,7 @@ def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
     # The variable names are prefixed with "initial" because their values (qmin and qmax) might be adjusted
     # based on whether quantization range is reduced and the datatype (signed/unsigned) used by the observer.
     if not (quant_min <= 0 <= quant_max):
-        raise AssertionError("Used-specified quantization range must include 0.")
+        raise AssertionError("User-specified quantization range must include 0.")
     if quant_min >= quant_max:
         raise AssertionError(
             "qmin must be strictly less than qmax for user-specified quantization range."

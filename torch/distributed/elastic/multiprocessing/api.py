@@ -385,7 +385,7 @@ class DefaultLogsSpecs(LogsSpecs):
                 # pyrefly: ignore [unsupported-operation]
                 error_files[local_rank] = error_file
                 logger.info(
-                    "Setting worker%s reply file to: %s", local_rank, error_file
+                    "Setting worker%s error file to: %s", local_rank, error_file
                 )
                 envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 

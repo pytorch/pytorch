@@ -1067,7 +1067,7 @@ class ShapePropagator : public PropertyPropBase {
         }};
 
     // aten::where is special in that its return type is the second argument's
-    // (self) type rather than the that of condition
+    // (self) type rather than that of condition
     static const register_formula_for where_op{
         {
             "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",

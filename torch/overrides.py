@@ -1738,7 +1738,7 @@ def handle_torch_function(
         Iterable of arguments to check for __torch_function__ methods.
     args : tuple
         Arbitrary positional arguments originally passed into ``public_api``.
-    kwargs : tuple
+    kwargs : dict
         Arbitrary keyword arguments originally passed into ``public_api``.
 
     Returns
@@ -1783,7 +1783,7 @@ def handle_torch_function(
             and torch_func_method is not torch._C._disabled_torch_function_impl
         ):
             warnings.warn(
-                "Defining your `__torch_function__ as a plain method is deprecated and "
+                "Defining your `__torch_function__` as a plain method is deprecated and "
                 "will be an error in future, please define it as a classmethod.",
                 DeprecationWarning,
                 stacklevel=2,
@@ -2069,7 +2069,7 @@ class TorchFunctionMode:
     modes can be pushed onto a stack using ``with MyMode():``.
     When you call functions in the PyTorch API inside your
     ``__torch_function__`` implementation, by default, they will forward on to
-    the next mode on the mode stack.  If you want recursively call back into
+    the next mode on the mode stack.  If you want to recursively call back into
     your current ``__torch_function__`` implementation, either explicitly
     invoke ``self.__torch_function__(...)``, or use the context manager
     ``enable_torch_function_mode(self, replace=self.inner)`` to make PyTorch

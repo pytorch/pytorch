@@ -96,7 +96,7 @@ class WithEffects(HigherOrderOperator):
                 f"op must be HigherOrderOperator or OpOverload, got {type(op)}"
             )
         if has_aliasing(op):
-            raise AssertionError("Ops with aliasing is not supported")
+            raise AssertionError("Ops with aliasing are not supported")
         if not isinstance(kwargs, dict):
             raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
         # pyrefly: ignore [missing-attribute]
@@ -182,7 +182,7 @@ def with_effects_proxy(
 
     from torch.fx.node import has_side_effect
 
-    # To avoid the being DCEed by graph.eliminate_dead_code if they.
+    # To avoid being DCEed by graph.eliminate_dead_code if they
     # don't have output or their outputs are not used.
     has_side_effect(op)
 

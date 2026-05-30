@@ -2246,7 +2246,7 @@ class FlatParamHandle:
 
         Iterates over the original parameters and writes back any parameters
         that changed storages (due to a non-inplace operator) to the handle's
-        ``FlatParameter``. This method preserves the ``FlatParameter` 's
+        ``FlatParameter``. This method preserves the ``FlatParameter``'s
         device even if an original parameter's device changes.
 
         Raises:

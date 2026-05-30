@@ -1,6 +1,6 @@
 # NOTE: We allow Dynamo to see this file (via torch/_dynamo/trace_rules.py) so that it can
 #       trace through functorch transforms.
-#       Currently, we can't allow Dynamo to see `eager_transforms.py`/`vmap.py` as that break a lot of thing
+#       Currently, we can't allow Dynamo to see `eager_transforms.py`/`vmap.py` as that breaks a lot of things
 #       and there isn't a mechanism to selectively expose only some functions (eg. grad) from a file
 #       to Dynamo.
 
@@ -88,7 +88,7 @@ def vmap(
     Returns:
         Returns a new "batched" function. It takes the same inputs as
         ``func``, except each input has an extra dimension at the index
-        specified by ``in_dims``. It takes returns the same outputs as
+        specified by ``in_dims``. It returns the same outputs as
         ``func``, except each output has an extra dimension at the index
         specified by ``out_dims``.
 
@@ -156,7 +156,7 @@ def vmap(
         >>> batched_dot(x, y)  # tensor of size [2, 3]
 
     If the inputs are not batched along the first dimension, ``in_dims`` specifies
-    the dimension that each inputs are batched along as
+    the dimension that each input is batched along as
 
         >>> torch.dot  # [N], [N] -> []
         >>> batched_dot = torch.vmap(torch.dot, in_dims=1)  # [N, D], [N, D] -> [D]
@@ -273,7 +273,7 @@ def chunk_vmap(
     Returns:
         Returns a new "batched" function. It takes the same inputs as
         ``func``, except each input has an extra dimension at the index
-        specified by ``in_dims``. It takes returns the same outputs as
+        specified by ``in_dims``. It returns the same outputs as
         ``func``, except each output has an extra dimension at the index
         specified by ``out_dims``.
     """

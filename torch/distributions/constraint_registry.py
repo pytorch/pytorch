@@ -45,7 +45,7 @@ invariant.::
     coordinate-wise operation appropriate for algorithms like SVI. In
     contrast, ``biject_to(constraints.simplex)`` returns a
     :class:`~torch.distributions.transforms.StickBreakingTransform` that
-    bijects its input down to a one-fewer-dimensional space; this a more
+    bijects its input down to a one-fewer-dimensional space; this is a more
     expensive less numerically stable transform but is needed for algorithms
     like HMC.
 
@@ -101,7 +101,7 @@ class ConstraintRegistry:
                 A subclass of :class:`~torch.distributions.constraints.Constraint`, or
                 a singleton object of the desired class.
             factory (Callable): A callable that inputs a constraint object and returns
-                a  :class:`~torch.distributions.transforms.Transform` object.
+                a :class:`~torch.distributions.transforms.Transform` object.
         """
         # Support use as decorator.
         if factory is None:

@@ -1422,7 +1422,7 @@ def histc_strategy(op_schema: OpSchema) -> OpStrategy:
 @register_op_strategy(
     [aten.logsumexp.default],
     schema_info=RuntimeSchemaInfo(
-        # static_argnum is the position where non-Tensor args beings.
+        # static_argnum is the position where non-Tensor args begin.
         static_argnum=1,
         # static_kwargkey is the name of kwargs to hash (which determines
         # whether sharding prop can be cached).

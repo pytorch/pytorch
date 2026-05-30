@@ -63,7 +63,7 @@ class Access:
     r"""Stores information about a single access to a tensor by a kernel.
 
     Args:
-        type: either AccessType.READ or AccessType.Write.
+        type: either AccessType.READ or AccessType.WRITE.
         seq_num: the sequential number of the kernel performing the access.
         stream: the stream id of the stream executing the kernel.
         operator: the schema of the launched kernel, which lists the

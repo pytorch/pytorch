@@ -681,7 +681,7 @@ class KeyErrorMsg:
 
 
 def augment_exc_message_with_hop_name(exc: Exception, msg: str) -> str:
-    # Add HOP context right after before the explanation if present;
+    # Add HOP context right before the explanation if present;
     # otherwise after the message
     if hasattr(exc, "_hop_name"):
         lines = msg.partition("\n  Explanation:")

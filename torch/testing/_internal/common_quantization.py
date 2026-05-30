@@ -884,7 +884,7 @@ class QuantizationTestCase(TestCase):
 
         buffer.seek(0)
         loaded_mod = torch.jit.load(buffer)
-        # Pending __get_state_ and __set_state__ support
+        # Pending __getstate__ and __setstate__ support
         # See tracking task https://github.com/pytorch/pytorch/issues/23984
         if check_save_load:
             self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)

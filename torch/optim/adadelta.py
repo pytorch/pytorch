@@ -221,7 +221,7 @@ Adadelta.__doc__ = (
     + rf"""
     Args:
         {_params_doc}
-        lr (float, Tensor, optional): coefficient that scale delta before it is applied
+        lr (float, Tensor, optional): coefficient that scales delta before it is applied
             to the parameters (default: 1.0)
         rho (float, optional): coefficient used for computing a running average
             of squared gradients (default: 0.9). A higher value of `rho` will

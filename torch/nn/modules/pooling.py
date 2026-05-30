@@ -331,7 +331,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
     in which all non-maximal values are set to zero.
 
     Note:
-        This operation may behave nondeterministically when the input indices has repeat values.
+        This operation may behave nondeterministically when the input indices have repeat values.
         See https://github.com/pytorch/pytorch/issues/80827 and :doc:`/notes/randomness` for more information.
 
     .. note:: :class:`MaxPool1d` can map several input sizes to the same output
@@ -414,7 +414,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
     in which all non-maximal values are set to zero.
 
     Note:
-        This operation may behave nondeterministically when the input indices has repeat values.
+        This operation may behave nondeterministically when the input indices have repeat values.
         See https://github.com/pytorch/pytorch/issues/80827 and :doc:`/notes/randomness` for more information.
 
     .. note:: :class:`MaxPool2d` can map several input sizes to the same output
@@ -509,7 +509,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
     in which all non-maximal values are set to zero.
 
     Note:
-        This operation may behave nondeterministically when the input indices has repeat values.
+        This operation may behave nondeterministically when the input indices have repeat values.
         See https://github.com/pytorch/pytorch/issues/80827 and :doc:`/notes/randomness` for more information.
 
     .. note:: :class:`MaxPool3d` can map several input sizes to the same output

@@ -2818,7 +2818,7 @@ def cross_entropy_loss_indices_target_reference(input, target, weight=None, igno
 
     if reduction == 'mean':
         if weight is not None:
-            # TODO: This code can path can be removed if #61309 is resolved
+            # TODO: This code path can be removed if #61309 is resolved
             # loss is normalized by the weights to be consistent with nll_loss_nd
             ret = torch.sum(smooth_loss) / weight.gather(0, target.masked_select(ignore_mask.logical_not()).flatten()).sum()
         else:

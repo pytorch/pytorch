@@ -128,7 +128,7 @@ class BackwardHook:
         def hook(grad_input, _):
             if self.grad_outputs is None:
                 # This happens because the gradient in your nn.Module flows to
-                # the Module's input without " passing through the Module's
+                # the Module's input without passing through the Module's
                 # output, e.g. when you're doing double backward.
                 return
             res = self._pack_with_none(self.input_tensors_index, grad_input, self.n_inputs)

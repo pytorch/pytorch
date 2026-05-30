@@ -185,7 +185,7 @@ def calculate_gain(
     Sigmoid           :math:`1`
     Tanh              :math:`\frac{5}{3}`
     ReLU              :math:`\sqrt{2}`
-    Leaky Relu        :math:`\sqrt{\frac{2}{1 + \text{negative\_slope}^2}}`
+    Leaky ReLU        :math:`\sqrt{\frac{2}{1 + \text{negative\_slope}^2}}`
     SELU              :math:`\frac{3}{4}`
     ================= ====================================================
 
@@ -459,7 +459,7 @@ def _calculate_fan_in_and_fan_out(tensor: Tensor) -> tuple[int, int]:
     dimensions = tensor.dim()
     if dimensions < 2:
         raise ValueError(
-            "Fan in and fan out can not be computed for tensor with fewer than 2 dimensions"
+            "Fan in and fan out cannot be computed for tensor with fewer than 2 dimensions"
         )
 
     num_input_fmaps = tensor.size(1)
