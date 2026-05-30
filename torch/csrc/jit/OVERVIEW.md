@@ -213,7 +213,7 @@ When `Nodes` are inserted into a `Graph`, they are inserted at a special "insert
 Each `Block` has two dummy nodes that are not included in the list of nodes in the `Block`. The `prim::Param` node represents the inputs to the `Block` and does not have a `prev()` or `next()` `Node`. The `prim::Return` `Node` represents the outputs of a `Block`.
 The list of `Nodes` in a `Block` is implemented as a circular linked list with the `prim::Return` `Node` serving as the beginning/end sentinel. Inserting and deleting at arbitrary places is efficient. Developers may also encounter implementations inside of IR objects that use this fact (e.g. appending to a `Block` is equivalent to putting the node before the `prim::Return` Node).
 
-Iterators for the `Block::nodes()` list are invalided when the current `Node` they point to is moved or deleted. Otherwise iterators remain valid.
+Iterators for the `Block::nodes()` list are invalidated when the current `Node` they point to is moved or deleted. Otherwise iterators remain valid.
 
 Blocks also contain a list of input and output values. The meaning of these values depends on where the `Block` is used. For the Graph's top-level `Block`, these are inputs and outputs to the `Graph`, and line up with the FunctionSchema associated with the Method that owns the `Graph`.
 
@@ -776,10 +776,9 @@ using Operation = std::function<void(Stack*)>;
 
 // schema: example_add(Tensor a, Tensor b) -> Tensor
 void example_add(Stack* stack) {
-    Tensor a, b;
     // stack before: ? ? ? a b <- back
-    pop(stack, a, b); // Templated helper function
-                      // that pops a, b and converts them to Tensor
+    auto [a, b] = pop<Tensor, Tensor>(stack); // Templated helper function
+                                              // that pops and converts to Tensor
     push(stack, a + b);
     // stack after:
     // ? ? ? c <- back

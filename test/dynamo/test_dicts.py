@@ -2041,7 +2041,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2066,7 +2066,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2403,16 +2403,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         if self.thetype is not OrderedDict:
             # OrderedDict accepts a keyword arg
             self.assertRaises(TypeError, d.popitem, 1)
-
-    @make_dynamo_test
-    def test_popitem_plain_dict_subclass(self):
-        """popitem on an OrderedDict subclass whose internal items storage is
-        a plain dict must not pass last= (plain dict rejects keyword args)."""
-        d = self.thetype()
-        d["a"] = 1
-        d["b"] = 2
-        key, value = d.popitem()
-        self.assertNotIn(key, d)
 
     @make_dynamo_test
     def test_setdefault(self):
