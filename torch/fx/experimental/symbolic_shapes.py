@@ -1894,7 +1894,25 @@ def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
 # in the unlikely branch.)  (I think expect is a good name; in recent
 # versions of C++, this is replaced with [[likely]], which is weaker
 # and not accurate for this function!)
-def expect_true(a: BoolLikeType, skip: int = 0) -> bool:
+RuntimeAssertErrorMessageInput: TypeAlias = str | Callable[[], object] | None
+RuntimeAssertErrorMessage: TypeAlias = str | None
+
+
+def _render_runtime_assert_error_message(
+    message: RuntimeAssertErrorMessageInput,
+) -> RuntimeAssertErrorMessage:
+    if message is None:
+        return None
+    if callable(message):
+        return str(message())
+    return str(message)
+
+
+def expect_true(
+    a: BoolLikeType,
+    skip: int = 0,
+    message: RuntimeAssertErrorMessageInput = None,
+) -> bool:
     if isinstance(a, SymBool):
         # TODO: check perf implications of this
         frame = inspect.currentframe()
@@ -1902,9 +1920,15 @@ def expect_true(a: BoolLikeType, skip: int = 0) -> bool:
             if frame is None:
                 break
             frame = frame.f_back
-        return a.node.expect_true(
-            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0
-        )
+        file = frame.f_code.co_filename if frame else ""
+        line = frame.f_lineno if frame else 0
+        if message is None:
+            return a.node.expect_true(file, line)
+        if isinstance(a.node, SymNode):
+            return a.node.expect_true(file, line, message)
+        if callable(message):
+            return a.node.expect_true(file, line)
+        return a.node.expect_true(file, line, str(message))
     if type(a) is not bool:
         raise AssertionError(f"Expected bool, got {a}")
     return a
@@ -2783,6 +2807,7 @@ class RuntimeAssert:
     expr: SympyBoolean
     msg: str = field(repr=False)
     stack: CapturedTraceback = field(repr=False)
+    error_message: RuntimeAssertErrorMessage = field(default=None, repr=False)
 
 
 # Used for printing SymExprs in compile_fx
@@ -4028,6 +4053,7 @@ class ShapeEnv:
         # part of the cache key); otherwise we'd have to iterate through
         # deferred_runtime_asserts to compute its length
         self.num_deferred_runtime_asserts = 0
+        self._runtime_assert_error_message: RuntimeAssertErrorMessageInput = None
         self.log = log
         self.log.info("create_env")
         self.frozen = False
@@ -8563,10 +8589,32 @@ class ShapeEnv:
                 return True
         return False
 
-    @lru_cache(256)
-    @record_shapeenv_event(save_tracked_fakes=True)
     def guard_or_defer_runtime_assert(
-        self, orig_expr: SympyBoolean, msg: str, fx_node: torch.fx.Node | None = None
+        self,
+        orig_expr: SympyBoolean,
+        msg: str,
+        fx_node: torch.fx.Node | None = None,
+        *,
+        error_message: RuntimeAssertErrorMessageInput = None,
+    ) -> bool:
+        prior_error_message = self._runtime_assert_error_message
+        self._runtime_assert_error_message = error_message
+        try:
+            return self._guard_or_defer_runtime_assert(orig_expr, msg, fx_node)
+        finally:
+            self._runtime_assert_error_message = prior_error_message
+
+    @lru_cache(256)
+    @record_shapeenv_event(
+        save_tracked_fakes=True, name="guard_or_defer_runtime_assert"
+    )
+    def _guard_or_defer_runtime_assert(
+        self,
+        orig_expr: SympyBoolean,
+        msg: str,
+        fx_node: torch.fx.Node | None = None,
+        *,
+        error_message: RuntimeAssertErrorMessage = None,
     ) -> bool:
         """
         Adds a guard that orig_expr is True if we can or fall back to adding an assert
@@ -8636,7 +8684,21 @@ class ShapeEnv:
             orig_expr = expr
             expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
-            ra = RuntimeAssert(expr, msg, stack)
+            if error_message is None:
+                error_message = _render_runtime_assert_error_message(
+                    self._runtime_assert_error_message
+                )
+                if (
+                    self.is_recording
+                    and self.events
+                    and self.events[-1].is_defer_runtime_assert()
+                ):
+                    event = self.events[self._last_event_index()]
+                    event.kwargs = {
+                        **(event.kwargs or {}),
+                        "error_message": error_message,
+                    }
+            ra = RuntimeAssert(expr, msg, stack, error_message)
 
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted(

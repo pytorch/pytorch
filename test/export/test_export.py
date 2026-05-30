@@ -7093,7 +7093,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         em.module()(torch.randn(4, 3))
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, s77 \- 1\), 0\)",
+            r"shape .* is invalid for input of size .*",
         ):
             em.module()(torch.randn(4, 5))
 
@@ -14324,6 +14324,38 @@ def forward(self, x, b_t, y):
         ):
             ep.module()(*inputs)
 
+    def test_torch_check_deferred_runtime_assert_preserves_message(self):
+        class Msg:
+            def __call__(self):
+                return "custom original check message"
+
+            def __eq__(self, other):
+                return self is other
+
+        class BadMsg:
+            def __call__(self):
+                raise RuntimeError("message evaluated")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                u = x.item()
+                torch._check(u > 0, Msg())
+                return x + 1
+
+        ep = torch.export.export(Model(), (torch.tensor(1),))
+        self.assertIn("custom original check message", ep.graph_module.code)
+        with self.assertRaisesRegex(RuntimeError, "custom original check message"):
+            ep.module()(torch.tensor(0))
+
+        class DuplicateCheckModel(torch.nn.Module):
+            def forward(self, x):
+                u = x.item()
+                torch._check(u > 0, Msg())
+                torch._check(u > 0, BadMsg())
+                return x + 1
+
+        torch.export.export(DuplicateCheckModel(), (torch.tensor(1),))
+
     def test_predispatch_grad_wrappers(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -16936,7 +16968,7 @@ def forward(self, x):
                 self.assertEqual(num_asserts, 6)
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, s77 - 1\), 0\)",
+                    r"shape .* is invalid for input of size .*",
                 ):
                     ep.module()(torch.randn(4, 2))
             else:
