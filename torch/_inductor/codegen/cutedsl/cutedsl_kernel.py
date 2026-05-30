@@ -34,6 +34,7 @@ from torch._inductor.virtualized import V
 
 from ...utils import sympy_index_symbol
 from .cutedsl_op_overrides import CuteDSLCSEVariable, CuteDSLOpOverrides
+from .lane_analysis import classify_lane_expr
 
 
 # TODO setting the 'main' kernel w/ this suffix. We have 3 should probably just auto generate this
@@ -66,6 +67,50 @@ class CuteDSLKernelWrapper:
             Result of the kernel execution
         """
         return self.kernel_fn(*args, stream=stream, **kwargs)
+
+
+@dataclasses.dataclass(frozen=True)
+class CuteDSLVectorLoadConfig:
+    vec_size: int
+    index: sympy.Symbol
+    dim: int
+
+    @staticmethod
+    def from_fixed_inputs(
+        fixed_inputs: dict[str, Any],
+    ) -> "CuteDSLVectorLoadConfig | None":
+        vec_size = fixed_inputs.pop("vector_load_vec_size", None)
+        index = fixed_inputs.pop("vector_load_index", None)
+        dim = fixed_inputs.pop("vector_load_dim", None)
+        if vec_size is None or index is None or dim is None:
+            return None
+        return CuteDSLVectorLoadConfig(
+            vec_size=int(vec_size),
+            index=sympy_index_symbol(str(index)),
+            dim=int(dim),
+        )
+
+    def normalized_dim(self, ndim: int) -> int:
+        return self.dim + ndim if self.dim < 0 else self.dim
+
+
+@dataclasses.dataclass(frozen=True)
+class CuteDSLIndexFragment:
+    """Generated index expression metadata for CuteDSL tensor loads.
+
+    Attributes:
+        code: Python source expression for the index or index fragment.
+        is_static_int: True when code is an inline integer index, not a fragment.
+        is_lane_uniform: True when every vector lane has the same index.
+        is_contiguous: True when code is aligned and contiguous for the full
+            requested vector width.
+    """
+
+    code: str
+    is_static_int: bool
+    is_lane_uniform: bool = False
+    is_contiguous: bool = False
+    contiguous_width: int | None = None
 
 
 @dataclasses.dataclass
@@ -176,7 +221,7 @@ class CuteDSLTemplateKernel(Kernel):
             import cuda.bindings.driver as cuda
             from cutlass._mlir.dialects import math as mlir_math
             import operator
-            from torch._inductor.codegen.cutedsl._cutedsl_utils import ssa_to_indexable, result_to_ssa
+            from torch._inductor.codegen.cutedsl._cutedsl_utils import result_to_ssa, ssa_to_fragment, ssa_to_indexable
             """
         )
         return imports.getvalue()
@@ -192,12 +237,15 @@ class CuteDSLTemplateKernel(Kernel):
         from torch._inductor.select_algorithm import PartialRender
 
         """Render the kernel using the template, returning PartialRender object with hooks."""
+        self._template_kwargs = dict(kwargs)
+
         # Available {{}} hooks for jinja rendering
         template_env = {
             "def_kernel": self.def_kernel,
             "gen_defines": lambda: self.gen_defines(**kwargs),
             "get_output": self.get_output,
             "get_tensor_buffers": self.get_tensor_buffers,
+            "add_tensor_inputs": self.add_tensor_inputs,
             "unpack_buffers": self.unpack_buffers,
             "modification": self.modification,
             "set_cute_hash": self.set_cute_hash,
@@ -364,6 +412,19 @@ class CuteDSLTemplateKernel(Kernel):
         """Get list of tensor buffer names that were collected during modifications."""
         return self.collected_tensor_buffers
 
+    def add_tensor_inputs(self, buffers):
+        """Register extra tensor buffers and return their rendered input names."""
+        buffer_names = []
+        for buffer in buffers:
+            if isinstance(buffer, sympy.Expr):
+                # Symbolic size/index expressions are not kernel tensor inputs yet.
+                continue
+            remapped_name = self.args.input(buffer.get_name())
+            if remapped_name not in self.collected_tensor_buffers:
+                self.collected_tensor_buffers.append(remapped_name)
+            buffer_names.append(remapped_name)
+        return buffer_names
+
     def unpack_buffers(self, buffer_list_name: str, *, indent_width: int = 4):
         """Generate buffer unpacking code via render hook."""
 
@@ -516,10 +577,16 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         super().__init__(cutedsl_ops)
         self.name = f"CuteDSLPlaceholderSubstitution_{subgraph_number}"
         self.kernel = kernel
-        self.fixed_inputs = fixed_inputs
+        self.fixed_inputs = dict(fixed_inputs)
+        self.vector_load_config = CuteDSLVectorLoadConfig.from_fixed_inputs(
+            self.fixed_inputs
+        )
         self.mask = mask
         # Track tensor buffers that get added during modification processing
         self.tensor_buffers: list[str] = []
+        # Maps generated CSE names back to their original index expressions so
+        # vector-load analysis can reason about the source indexing semantics.
+        self._semantic_index_replacements: dict[sympy.Symbol, sympy.Expr] = {}
 
     def _get_input_dtype(self, name: str) -> torch.dtype:
         """Get the dtype for an input from the kernel's named_input_nodes."""
@@ -542,25 +609,22 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
                 var_dtype, "cutlass.Float32"
             )
+            dim_indices = (
+                index.args if isinstance(index, HierarchicalIndex) else (index,)
+            )
+            dim_sizes = buffer.get_size()
+            if len(dim_sizes) == 0:
+                dim_indices = ()
             idx_vars = [
-                self._emit_scalar_fragment(
-                    self.kernel.kexpr(self.kernel.rename_indexing(dim_index)),
-                    "cutlass.Int32",
-                    torch.int32,
+                self._emit_index_fragment(
+                    dim_index, dim_size, "cutlass.Int32", torch.int32
                 )
-                for dim_index in (
-                    index.args if isinstance(index, HierarchicalIndex) else (index,)
-                )
+                for dim_index, dim_size in zip(dim_indices, dim_sizes, strict=True)
             ]
 
-            val_frag = self.kernel.cse.newvar(dtype=var_dtype)
-            self.kernel.body.writeline(
-                f"{val_frag} = cute.make_rmem_tensor(1, {cute_dtype})"
+            val_frag = self._emit_tensor_load_fragment(
+                var, idx_vars, cute_dtype, var_dtype, buffer
             )
-            self.kernel.body.writeline(
-                f"{val_frag}[0] = ({var}[{', '.join(idx_vars)}])"
-            )
-
             final_expr = f"{val_frag}.load()"
 
             if (
@@ -582,36 +646,352 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         value = self.fixed_inputs[name]
         dtype = self._get_input_dtype(name)
 
-        return self.kernel.cse.generate(
+        result = self.kernel.cse.generate(
             self.kernel.body, value, bounds=ValueRanges.unknown(), dtype=dtype
         )
+        if (
+            isinstance(result, CuteDSLCSEVariable)
+            and isinstance(value, str)
+            and dtype in (torch.int32, torch.int64)
+        ):
+            result.index_expr = sympy_index_symbol(value)
+        return result
 
-    def _emit_scalar_fragment(
-        self, expr_str: str, cute_dtype: str, torch_dtype: torch.dtype
+    def _emit_tensor_load_fragment(
+        self,
+        var: str,
+        idx_vars: list[CuteDSLIndexFragment],
+        cute_dtype: str,
+        var_dtype: torch.dtype,
+        buffer: Any,
     ) -> str:
         """
-        Convert expression to indexable scalar for tensor loads.
+        Emit a register fragment load from a captured tensor.
 
-        Workaround for lack of gather support: SSA values cannot be used directly
-        as indices in tensor loads. This generates code to convert SSA → indexable
-        scalar. Compile-time integer constants are already indexable and are
-        returned directly without the SSA round-trip.
+        Static integer indices can be emitted directly as scalar tensor indices.
+        Dynamic indices are SSA vectors, which must first be materialized into
+        register fragments so each lane can be used for scalar gather loads.  If
+        all indices are static, emit a single-element fragment; otherwise size
+        the value fragment to match the dynamic index lanes.
         """
-        # Constant integer expressions (e.g. sympy-folded offsets like "0")
-        # are already valid indices — skip the ssa_to_indexable round-trip
-        # which only accepts TensorSSA, not bare Python ints.
-        if expr_str.lstrip("-").isdigit():
-            return expr_str
+        dynamic_index_fragment = next(
+            (idx for idx in idx_vars if not idx.is_static_int), None
+        )
+        # Dynamic index fragments all carry the same vector width, so one
+        # representative fragment is enough to size the loaded value fragment.
+        val_frag = self.kernel.cse.newvar(dtype=var_dtype)
+        if len(buffer.get_size()) == 0:
+            self.kernel.body.writeline(
+                f"{val_frag} = cute.make_rmem_tensor(1, {cute_dtype})"
+            )
+            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[()])")
+            return str(val_frag)
+        if dynamic_index_fragment is None:
+            self.kernel.body.writeline(
+                f"{val_frag} = cute.make_rmem_tensor(1, {cute_dtype})"
+            )
+            self.kernel.body.writeline(
+                f"{val_frag}[0] = ({var}[{', '.join(idx.code for idx in idx_vars)}])"
+            )
+            return str(val_frag)
 
+        self.kernel.body.writeline(
+            f"{val_frag} = cute.make_rmem_tensor("
+            f"cute.size({dynamic_index_fragment.code}.shape), {cute_dtype})"
+        )
+        if self.vector_load_config is None:
+            vector_dim = len(idx_vars) - 1
+        else:
+            vector_dim = self.vector_load_config.normalized_dim(len(idx_vars))
+        if self._can_emit_contiguous_dim_load(idx_vars, buffer, var_dtype, vector_dim):
+            self._emit_contiguous_dim_load(
+                var, idx_vars, val_frag, cute_dtype, var_dtype, vector_dim
+            )
+        elif self._can_emit_uniform_load(idx_vars):
+            self._emit_uniform_load(var, idx_vars, val_frag)
+        else:
+            self._emit_per_lane_gather_load(var, idx_vars, val_frag)
+        return str(val_frag)
+
+    def _can_emit_contiguous_dim_load(
+        self,
+        idx_vars: list[CuteDSLIndexFragment],
+        buffer: Any,
+        var_dtype: torch.dtype,
+        vector_dim: int,
+    ) -> bool:
+        """Return true when vector lanes form a safe contiguous tensor tile.
+
+        This is stricter than lane-contiguity analysis: CuTe autovec also needs
+        a real byte-addressable copy type, uniform non-vector dimensions, unit
+        vector stride, and a statically aligned full-width tile.
+        """
+        if var_dtype is torch.bool:
+            return False
+        if not idx_vars or not idx_vars[vector_dim].is_contiguous:
+            return False
+        if any(
+            not (idx.is_static_int or idx.is_lane_uniform)
+            for dim, idx in enumerate(idx_vars)
+            if dim != vector_dim
+        ):
+            return False
+        sizes = buffer.get_size()
+        strides = buffer.get_stride()
+        vector_size = (
+            1 if self.vector_load_config is None else self.vector_load_config.vec_size
+        )
+        contiguous_width = idx_vars[vector_dim].contiguous_width
+        has_vector_width = vector_size > 1
+        has_unit_stride = V.graph.sizevars.statically_known_equals(
+            strides[vector_dim], 1
+        )
+        has_full_width_contiguity = (
+            contiguous_width is not None and contiguous_width >= vector_size
+        )
+        is_size_aligned = V.graph.sizevars.statically_known_multiple_of(
+            sizes[vector_dim], vector_size
+        )
+        is_offset_aligned = V.graph.sizevars.statically_known_multiple_of(
+            buffer.get_layout().offset, vector_size
+        )
+        are_non_vector_strides_aligned = all(
+            V.graph.sizevars.statically_known_multiple_of(stride, vector_size)
+            for dim, stride in enumerate(strides)
+            if dim != vector_dim
+        )
+        return (
+            has_vector_width
+            and has_unit_stride
+            and has_full_width_contiguity
+            and is_size_aligned
+            and is_offset_aligned
+            and are_non_vector_strides_aligned
+        )
+
+    def _emit_contiguous_dim_load(
+        self,
+        var: str,
+        idx_vars: list[CuteDSLIndexFragment],
+        val_frag: str,
+        cute_dtype: str,
+        var_dtype: torch.dtype,
+        vector_dim: int,
+    ) -> None:
+        """Emit an autovec load for lanes contiguous in one tensor dimension."""
+        scalar_indices = [
+            idx.code if idx.is_static_int else f"{idx.code}[0]" for idx in idx_vars
+        ]
+        vec_size = f"cute.size({val_frag}.shape)"
+        aligned_idx = self.kernel.cse.newvar(dtype=torch.int32)
+        source_tile = self.kernel.cse.newvar(dtype=var_dtype)
+        aligned_ptr = self.kernel.cse.newvar(dtype=var_dtype)
+        aligned_source = self.kernel.cse.newvar(dtype=var_dtype)
+
+        vector_idx = idx_vars[vector_dim].code
+        tiler_items = ["1"] * len(idx_vars)
+        tiler_items[vector_dim] = vec_size
+        coord_items = scalar_indices
+        coord_items[vector_dim] = f"{aligned_idx} // {vec_size}"
+        source_view_items = ["0"] * len(idx_vars)
+        source_view_items[vector_dim] = "None"
+        source_view = (
+            str(aligned_source)
+            if len(idx_vars) == 1
+            else f"{aligned_source}[{', '.join(source_view_items)}]"
+        )
+        tiler = (
+            f"({tiler_items[0]},)"
+            if len(tiler_items) == 1
+            else f"({', '.join(tiler_items)})"
+        )
+        coord = (
+            f"({coord_items[0]},)"
+            if len(coord_items) == 1
+            else f"({', '.join(coord_items)})"
+        )
+        self.kernel.body.splice(
+            f"""
+            {aligned_idx} = cute.assume({vector_idx}[0], divby={vec_size})
+            {source_tile} = cute.local_tile({var}, {tiler}, {coord})
+            {aligned_ptr} = cute.make_ptr({cute_dtype}, {source_tile}.iterator.toint(), {source_tile}.iterator.memspace, assumed_align=min(16, {vec_size} * {var_dtype.itemsize}))
+            {aligned_source} = cute.make_tensor({aligned_ptr}, {source_tile}.layout)
+            cute.autovec_copy({source_view}, {val_frag})
+            """
+        )
+
+    @staticmethod
+    def _can_emit_uniform_load(idx_vars: list[CuteDSLIndexFragment]) -> bool:
+        """Return true when every vector lane reads the same tensor element."""
+        return all(idx.is_static_int or idx.is_lane_uniform for idx in idx_vars)
+
+    def _emit_uniform_load(
+        self, var: str, idx_vars: list[CuteDSLIndexFragment], val_frag: str
+    ) -> None:
+        """Emit one scalar load and broadcast it across the value fragment."""
+        scalar_value = self.kernel.cse.newvar(dtype=None)
+        scalar_indices = [
+            idx.code if idx.is_static_int else f"{idx.code}[0]" for idx in idx_vars
+        ]
+        self.kernel.body.writeline(
+            f"{scalar_value} = ({var}[{', '.join(scalar_indices)}])"
+        )
+        self.kernel.body.writeline(
+            f"for load_idx in cutlass.range(cute.size({val_frag}.shape), unroll_full=True):"
+        )
+        with self.kernel.body.indent():
+            self.kernel.body.writeline(f"{val_frag}[load_idx] = {scalar_value}")
+
+    def _emit_per_lane_gather_load(
+        self, var: str, idx_vars: list[CuteDSLIndexFragment], val_frag: str
+    ) -> None:
+        """Emit scalar per-lane loads for non-contiguous gather indices."""
+        self.kernel.body.writeline(
+            f"for load_idx in cutlass.range(cute.size({val_frag}.shape), unroll_full=True):"
+        )
+        with self.kernel.body.indent():
+            load_indices = [
+                idx.code if idx.is_static_int else f"{idx.code}[load_idx]"
+                for idx in idx_vars
+            ]
+            self.kernel.body.writeline(
+                f"{val_frag}[load_idx] = ({var}[{', '.join(load_indices)}])"
+            )
+
+    def _emit_index_fragment(
+        self,
+        expr: sympy.Expr,
+        dim_size: sympy.Expr,
+        cute_dtype: str,
+        torch_dtype: torch.dtype,
+    ) -> CuteDSLIndexFragment:
+        """Materialize an index and preserve enough metadata for load selection."""
+        static_expr = self._static_integer_expr(expr)
+        if static_expr is not None:
+            return CuteDSLIndexFragment(
+                self.kernel.kexpr(self._wrap_static_index(static_expr, dim_size)),
+                is_static_int=True,
+            )
+
+        expr = self.kernel.rename_indexing(expr)
+        static_expr = self._static_integer_expr(expr)
+        if static_expr is not None:
+            return CuteDSLIndexFragment(
+                self.kernel.kexpr(self._wrap_static_index(static_expr, dim_size)),
+                is_static_int=True,
+            )
+
+        is_lane_uniform, is_contiguous, contiguous_width = self._analyze_index_fragment(
+            self._semantic_index_expr(expr)
+        )
         result = self.kernel.cse.newvar(dtype=torch_dtype)
         self.kernel.body.writeline(
-            f"{result} = ssa_to_indexable({expr_str}, {cute_dtype})"
+            f"{result} = ssa_to_fragment({self.kernel.kexpr(expr)}, {cute_dtype})"
         )
-        return str(result)
+        return CuteDSLIndexFragment(
+            str(result),
+            is_static_int=False,
+            is_lane_uniform=is_lane_uniform,
+            is_contiguous=is_contiguous,
+            contiguous_width=contiguous_width,
+        )
+
+    def _analyze_index_fragment(
+        self, semantic_expr: sympy.Expr
+    ) -> tuple[bool, bool, int | None]:
+        if self.vector_load_config is None:
+            return False, False, None
+        if self.vector_load_config.vec_size <= 1:
+            return True, False, None
+
+        lane_info = classify_lane_expr(
+            semantic_expr,
+            self.vector_load_config.index,
+            max_width=self.vector_load_config.vec_size,
+            uniform_symbols=self._lane_uniform_symbols(),
+        )
+        return (
+            lane_info.is_uniform,
+            lane_info.is_contiguous,
+            lane_info.contiguous_width,
+        )
+
+    @staticmethod
+    def _static_integer_expr(expr: object) -> int | sympy.Integer | None:
+        if isinstance(expr, int | sympy.Integer):
+            return expr
+        if isinstance(expr, sympy.Symbol) and expr.name.lstrip("-").isdigit():
+            return int(expr.name)
+        if isinstance(expr, sympy.Expr):
+            expr = V.graph.sizevars.simplify(expr)
+            if expr.is_Integer:
+                return expr
+        return None
+
+    @staticmethod
+    def _wrap_static_index(
+        index: int | sympy.Integer, dim_size: sympy.Expr
+    ) -> int | sympy.Expr:
+        if int(index) < 0:
+            return V.graph.sizevars.simplify(sympy.Integer(index) + dim_size)
+        return index
+
+    def _semantic_index_expr(self, expr: sympy.Expr) -> sympy.Expr:
+        """Recover the original index meaning from generated CSE names."""
+        replacements: dict[sympy.Symbol, sympy.Expr] = dict(
+            self._semantic_index_replacements
+        )
+        for var in self.kernel.cse._cache.values():
+            if isinstance(var, CuteDSLCSEVariable) and var.index_expr is not None:
+                replacements[sympy_index_symbol(var.name)] = var.index_expr
+        return V.graph.sizevars.simplify(expr.xreplace(replacements))
+
+    def _lane_uniform_symbols(self) -> OrderedSet[sympy.Symbol]:
+        """Return generated CSE source symbols that are uniform across lanes."""
+        vector_index_name = (
+            None
+            if self.vector_load_config is None
+            else self.vector_load_config.index.name
+        )
+        return OrderedSet(
+            [
+                sympy_index_symbol(source_expr)
+                for source_expr in self.kernel.cse._cache
+                if isinstance(source_expr, str) and source_expr != vector_index_name
+            ]
+        )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
-        return sympy_index_symbol(str(index_var))
+        if isinstance(index_var, int | sympy.Integer):
+            if wrap_neg and index_var < 0:
+                return V.graph.sizevars.simplify(sympy.Integer(index_var) + size)
+            return sympy.Integer(index_var)
+        if (
+            wrap_neg
+            and isinstance(index_var, CuteDSLCSEVariable)
+            and index_var.index_expr is not None
+            and not V.graph.sizevars.statically_known_geq(index_var.index_expr, 0)
+        ):
+            wrapped = self.kernel.cse.newvar(dtype=index_var.dtype)
+            size_expr = self.kernel.kexpr(size)
+            self.kernel.body.writeline(
+                f"{wrapped} = cute.where("
+                f"{index_var} < 0, {index_var} + {size_expr}, {index_var})"
+            )
+            return sympy_index_symbol(str(wrapped))
+        source_name = None
+        for expr, var in self.kernel.cse._cache.items():
+            if var is index_var:
+                source_name = expr if isinstance(expr, str) else None
+                break
+        symbol = sympy_index_symbol(source_name or str(index_var))
+        if (
+            isinstance(index_var, CuteDSLCSEVariable)
+            and index_var.index_expr is not None
+        ):
+            self._semantic_index_replacements[symbol] = index_var.index_expr
+        return symbol
 
     # pyrefly: ignore [bad-override]
     def store(

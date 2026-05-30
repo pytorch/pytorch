@@ -23,7 +23,6 @@ from .builtin import (
     DictBuiltinVariable,
     GetAttrBuiltinVariable,
     HasAttrBuiltinVariable,
-    IsInstanceBuiltinVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
     SetAttrBuiltinVariable,
@@ -60,6 +59,7 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
+    DictViewVariable,
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
@@ -118,6 +118,7 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
@@ -231,7 +232,6 @@ __all__ = [
     "GetAttrVariable",
     "GradModeVariable",
     "HasAttrBuiltinVariable",
-    "IsInstanceBuiltinVariable",
     "InspectSignatureVariable",
     "InspectVariable",
     "IterBuiltinVariable",
