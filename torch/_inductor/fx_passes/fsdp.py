@@ -157,7 +157,7 @@ def _get_dedup_rs_pass() -> PatternMatcherPass:
             return c10d.wait_tensor.default(rs)
 
         # pyrefly: ignore[bad-argument-type]
-        match.replace_by_example(repl, [input_a, input_b])
+        match.replace_by_example(repl, [input_a, input_b], run_functional_passes=False)
 
     _dedup_rs_pass = dedup_rs_pass
     return dedup_rs_pass

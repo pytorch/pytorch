@@ -8,7 +8,6 @@ from torch.nn import _reduction as _Reduction, functional as F
 
 from .distance import PairwiseDistance
 from .linear import Linear
-from .linear_cross_entropy_options import LinearCrossEntropyOptions
 from .module import Module
 
 
@@ -1446,27 +1445,6 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             Computer Vision
             <https://arxiv.org/abs/1512.00567>`__.
             Default: :math:`0.0`.
-        options (LinearCrossEntropyOptions, optional): Specify
-            chunking strategy options, see
-            :class:`~torch.nn.LinearCrossEntropyOptions`
-            for more details. To enable reference implementation of
-            linear_cross_entropy with chunking disabled, use
-            `options=None`. Note: passing a non-``None`` ``options``
-            makes the module incompatible with
-            :func:`torch.jit.script`; see the note below.
-
-    .. warning::
-        With non-``None`` ``options``, the chunked path consumes its
-        precomputed gradients in-place, so any second :meth:`backward`
-        call raises (even with ``retain_graph=True``). Use
-        ``LinearCrossEntropyOptions(allow_retain_graph=True)`` to allow
-        repeated backward (one extra gradient-sized allocation per call).
-
-    .. note::
-        ``options=None`` is scriptable; an ``options`` instance is not.
-        The chunked path does not support higher-order AD, forward-mode
-        AD, ``torch.func.grad`` / ``vmap(grad(...))``, or Inductor
-        lowering; see :func:`torch.nn.functional.linear_cross_entropy`.
 
     Shape:
         - Input: Shape :math:`(in_features)`, :math:`(N, in_features)`.
@@ -1505,7 +1483,6 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         >>> output.backward()
     """
 
-    # options is intentionally not in __constants__ (not scriptable).
     __constants__ = [
         "num_classes",
         "out_features",
@@ -1518,7 +1495,6 @@ class LinearCrossEntropyLoss(_WeightedLoss):
     reduction: str
     ignore_index: int | None
     label_smoothing: float
-    options: LinearCrossEntropyOptions | None
 
     def __init__(
         self,
@@ -1532,7 +1508,6 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         weight: Tensor | None = None,
         ignore_index: int | None = None,
         label_smoothing: float = 0.0,
-        options: LinearCrossEntropyOptions | None = None,
     ) -> None:
         if weight is not None and weight.shape != (num_classes,):
             raise RuntimeError(
@@ -1561,14 +1536,13 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             device=device,
             dtype=dtype,
         )
-        self.options = options
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
         linear_weight = self.linear.weight.reshape(
             (self.num_classes, *self.out_features, self.linear.in_features)
         )
-        return F.linear_cross_entropy(
+        return F.linear_cross_entropy(  # pyrefly: ignore [missing-attribute]
             input,
             linear_weight,
             target,
@@ -1576,7 +1550,6 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             reduction=self.reduction,
             ignore_index=self.ignore_index,
             label_smoothing=self.label_smoothing,
-            options=self.options,
         )
 
     def extra_repr(self) -> str:
@@ -1586,8 +1559,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             f" out_features={self.out_features},"
             f" reduction={self.reduction},"
             f" ignore_index={self.ignore_index},"
-            f" label_smoothing={self.label_smoothing},"
-            f" options={self.options}"
+            f" label_smoothing={self.label_smoothing}"
         )
 
 
@@ -1724,7 +1696,7 @@ class MarginRankingLoss(_Loss):
     inputs :math:`x1`, :math:`x2`, two 1D mini-batch or 0D `Tensors`,
     and a label 1D mini-batch or 0D `Tensor` :math:`y` (containing 1 or -1).
 
-    If :math:`y = 1` then it assumed the first input should be ranked higher
+    If :math:`y = 1` then it is assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for :math:`y = -1`.
 
     The loss function for each pair of samples in the mini-batch is:
