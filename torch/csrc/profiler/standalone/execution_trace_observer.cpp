@@ -171,7 +171,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // RecordFunction callback in sync with the state.
   RunState state_{RunState::uninitialized};
 
-  // All tensors and operators have an unique id assigned. Increment id for each
+  // All tensors and operators have a unique id assigned. Increment id for each
   // new tensor or operator node.
   // 0 -> uninitialized
   // 1 -> root ID
