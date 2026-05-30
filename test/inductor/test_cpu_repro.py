@@ -3625,6 +3625,23 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_softmax_with_unbacked_zero_dim(self):
+        def softmax_fn(x, n):
+            return torch.softmax(x[:, : n.item()], -1)
+
+        def log_softmax_fn(x, n):
+            return torch.log_softmax(x[:, : n.item()], -1)
+
+        x = torch.randn(3, 5)
+        for fn in (softmax_fn, log_softmax_fn):
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            for length in (0, 2, 5):
+                n = torch.tensor(length)
+                actual = compiled_fn(x, n)
+                expected = fn(x, n)
+                torch.testing.assert_close(actual, expected, equal_nan=True)
+
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_local_buffer_in_outer_loop_fusion(self):
         def fn(x):
