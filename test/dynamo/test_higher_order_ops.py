@@ -5304,6 +5304,26 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_jacfwd_vmap_module_param(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = nn.Parameter(torch.randn(1))
+
+            def forward(self, t, x):
+                return self.param * t[:, None, None, None] * x
+
+        net = Net()
+        t = torch.rand(4)
+        x = torch.randn(4, 3, 4, 4)
+
+        def f_single(t_i, x_i):
+            return net(t_i[None, ...], x_i[None, ...]).squeeze(0)
+
+        wrapper_fn = torch.func.vmap(torch.func.jacfwd(f_single, argnums=0))
+        compiled_fn = torch.compile(wrapper_fn, backend="eager")
+        self.assertEqual(wrapper_fn(t, x), compiled_fn(t, x))
+
     def test_jacfwd_two_tensors_argnums(self):
         counters.clear()
 
