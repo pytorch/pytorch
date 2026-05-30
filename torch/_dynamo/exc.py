@@ -28,9 +28,11 @@ Error Formatting:
 
 import json
 import logging
+import pickle
 import re
 import sys
 import textwrap
+import types
 import typing
 from enum import auto, Enum
 from functools import lru_cache
@@ -46,8 +48,6 @@ from .utils import counters
 
 
 if TYPE_CHECKING:
-    import types
-
     from torch._dynamo.variables import VariableTracker
     from torch._guards import CompileId
 
@@ -68,6 +68,38 @@ log = logging.getLogger(__name__)
 graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
+def _is_pickleable(obj: Any) -> bool:
+    try:
+        pickle.dumps(obj)
+    except Exception:
+        return False
+    return True
+
+
+def _safe_exception_args(args: tuple[Any, ...]) -> tuple[Any, ...]:
+    return tuple(arg if _is_pickleable(arg) else repr(arg) for arg in args)
+
+
+def _safe_exception_state(state: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for name, value in state.items():
+        if isinstance(value, types.FrameType):
+            result[name] = None
+        elif _is_pickleable(value):
+            result[name] = value
+        else:
+            result[name] = None
+    return result
+
+
+def _reconstruct_torch_dynamo_exception(
+    exc_type: type[TorchDynamoException], args: tuple[Any, ...]
+) -> TorchDynamoException:
+    exc = exc_type.__new__(exc_type)
+    BaseException.__init__(exc, *args)
+    return exc
+
+
 class TorchDynamoException(RuntimeError):
     """Base exception class for all TorchDynamo-specific exceptions.
 
@@ -84,6 +116,20 @@ class TorchDynamoException(RuntimeError):
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: DynamoTracerOutput | None = None
         self.frame_exec_strategy: FrameExecStrategy | None = None
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _reconstruct_torch_dynamo_exception,
+            (type(self), _safe_exception_args(self.args)),
+            self.__getstate__(),
+        )
+
+    def __getstate__(self) -> dict[str, Any]:
+        return _safe_exception_state(self.__dict__)
+
+    def __setstate__(self, state: dict[str, Any] | None, /) -> None:
+        if state is not None:
+            self.__dict__.update(state)
 
 
 class InternalTorchDynamoError(TorchDynamoException):
