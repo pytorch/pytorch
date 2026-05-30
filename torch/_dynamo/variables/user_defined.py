@@ -2570,7 +2570,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def nb_divmod_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
