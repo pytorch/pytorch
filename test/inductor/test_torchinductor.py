@@ -12011,12 +12011,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
 
-    @xfail_if_mps
     def test_dropout2(self):
-        if is_mps_backend(self.device) and torch._inductor.config.align_random_eager:
-            raise AssertionError(
-                "MPS + align_random_eager: will pass but force failure for xfail_if_mps"
-            )
         n = 100000
         weight = torch.ones(
             n, device=self.device, dtype=torch.float32, requires_grad=True
@@ -12079,13 +12074,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(same(r2, r3))
         self.assertTrue(same(g2, g3))
 
-    @xfail_if_mps
     @config.patch(search_autotune_cache=False)
     def test_dropout3(self):
-        if is_mps_backend(self.device) and torch._inductor.config.align_random_eager:
-            raise AssertionError(
-                "MPS + align_random_eager + dynamic shapes: will pass but force failure for xfail_if_mps"
-            )
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
             torch.nn.Dropout(),
@@ -16939,6 +16929,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         profile_output = str(p.key_averages())
         print(profile_output)
         self.assertFalse("Pageable" in profile_output)
+
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "event sync only emitted for Python wrapper",
+    )
+    @skip_if_halide
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_non_blocking_d2h_event_sync(self):
+        def f(x):
+            s = x.abs().sum().to("cpu", non_blocking=True).item()
+            return torch.clamp(x, 0.0, s)
+
+        x = torch.randn(10, device=GPU_TYPE)
+        compiled_fn = torch.compile(f, dynamic=True)
+        result, code = run_and_get_code(compiled_fn, x)
+        expected = f(x)
+        self.assertEqual(result, expected)
+        wrapper_code = code[0]
+        self.assertIn("torch.Event()", wrapper_code)
+        self.assertIn(".record()", wrapper_code)
+        self.assertIn(".synchronize()", wrapper_code)
 
     @unittest.skipIf(
         config.cpp_wrapper,
