@@ -235,6 +235,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
             fake_script_obj,
             (constant_args, constant_kwargs),
             ctor_arg_sources=ctor_arg_sources,
+            tx=tx,
         )
 
 
@@ -255,6 +256,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         value: Any,
         ctor_args_kwargs: Any = None,
         ctor_arg_sources: tuple[Source | None, ...] | None = None,
+        *,
+        tx: "InstructionTranslatorBase | None" = None,
         **options: Any,
     ) -> "TorchScriptObjectVariable":
         if isinstance(value, enum.Enum):
@@ -265,9 +268,11 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
         )
         if isinstance(proxy, torch.fx.Proxy) and proxy.node.op != "placeholder":
-            from torch._dynamo.symbolic_convert import InstructionTranslator
-
-            tx = InstructionTranslator.current_tx()
+            if tx is None:
+                raise AssertionError(
+                    "tx must be provided to TorchScriptObjectVariable.create "
+                    "when proxy is a real Proxy"
+                )
             tx.output.current_tracer.record_proxyable_vt(out)
         return out
 
