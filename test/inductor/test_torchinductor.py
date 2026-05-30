@@ -12076,6 +12076,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(search_autotune_cache=False)
     def test_dropout3(self):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("MPS Inductor does not lower aten.linear_backward")
+
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
             torch.nn.Dropout(),
