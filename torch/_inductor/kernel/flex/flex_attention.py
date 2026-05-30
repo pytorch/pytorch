@@ -45,6 +45,7 @@ from .flex_flash_attention import (
     _use_flex_flash_attention_backward,
     create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
+    has_unsupported_captured_scalars,
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
@@ -186,9 +187,7 @@ def flex_attention(
     # Early check for FLASH backend: detect unsupported captured scalars before
     # building subgraph buffers (which can trigger unbacked_bindings errors)
     if backend == "FLASH":
-        from .flex_flash_attention import _has_unsupported_captured_scalars
-
-        if _has_unsupported_captured_scalars(
+        if has_unsupported_captured_scalars(
             score_mod_other_buffers, mask_mod_other_buffers
         ):
             raise RuntimeError(

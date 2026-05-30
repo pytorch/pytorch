@@ -69,7 +69,7 @@ class CuteDSLKernelWrapper:
         return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class CuteDSLVectorLoadConfig:
     vec_size: int
     index: sympy.Symbol
@@ -94,7 +94,7 @@ class CuteDSLVectorLoadConfig:
         return self.dim + ndim if self.dim < 0 else self.dim
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class CuteDSLIndexFragment:
     """Generated index expression metadata for CuteDSL tensor loads.
 
