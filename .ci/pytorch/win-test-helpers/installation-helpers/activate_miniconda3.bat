@@ -27,6 +27,4 @@ call %CONDA_ROOT_DIR%\Scripts\activate.bat %CONDA_ROOT_DIR%
 :: Activate conda so that we can use its commands, i.e. conda, python, pip
 call conda activate py_tmp
 
-:: Use `python -m pip` so that pip can upgrade itself (the pip.exe wrapper is
-:: locked while running, so `pip install` fails when requirements-ci.txt pins pip).
-call python -m pip install -r .ci/docker/requirements-ci.txt
+call pip install -r .ci/docker/requirements-ci.txt

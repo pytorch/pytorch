@@ -16,7 +16,6 @@
 #include <c10/util/irange.h>
 #include <c10/macros/Macros.h>
 #include <algorithm>
-#include <atomic>
 #include <limits>
 #include <utility>
 
@@ -93,7 +92,7 @@ constexpr int MIOPEN_DIM_MAX = 5;
 namespace at::native {
 
 
-static constinit std::atomic<bool> conv_benchmark_empty_cache{true};
+static bool conv_benchmark_empty_cache = true;
 
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
 template <typename T>
@@ -2338,11 +2337,11 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 }
 
 void _cudnn_set_conv_benchmark_empty_cache(bool enable) {
-  conv_benchmark_empty_cache.store(enable, std::memory_order_relaxed);
+  conv_benchmark_empty_cache = enable;
 }
 
 bool _cudnn_get_conv_benchmark_empty_cache() {
-  return conv_benchmark_empty_cache.load(std::memory_order_relaxed);
+  return conv_benchmark_empty_cache;
 }
 
 

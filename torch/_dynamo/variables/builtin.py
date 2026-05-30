@@ -143,7 +143,7 @@ from .user_defined import (
 if TYPE_CHECKING:
     # Cyclic dependency...
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 log = logging.getLogger(__name__)
 
@@ -174,7 +174,7 @@ if sys.version_info >= (3, 14):
 
 
 _HandlerCallback = Callable[
-    ["InstructionTranslatorBase", typing.Any, typing.Any], VariableTracker | None
+    ["InstructionTranslator", typing.Any, typing.Any], VariableTracker | None
 ]
 _TrackersType = type[VariableTracker] | tuple[type[VariableTracker], ...]
 _OPERATOR_TO_DUNDER: dict[Callable[..., Any], str] = {
@@ -356,9 +356,7 @@ class BaseBuiltinVariable(VariableTracker):
             raise AssertionError("shadowed global")
         codegen.append_output(codegen.create_load_global(name, add=True))
 
-    def var_getattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         source = self.source and AttrSource(self.source, name)
         attr = getattr(self._fn, name, None)
         return variables.GetAttrVariable(
@@ -366,17 +364,17 @@ class BaseBuiltinVariable(VariableTracker):
         )
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
+        self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         return VariableTracker.build(tx, hasattr(self.as_python_constant(), name))  # type: ignore[return-value]
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def hash_impl(self, tx: "InstructionTranslator") -> tuple[int, bool]:
         # CPython meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         return hash(self.as_python_constant()), False
 
     def richcompare_impl(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         other: VariableTracker,
         op: str,
     ) -> VariableTracker:
@@ -391,7 +389,7 @@ class BaseBuiltinVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -624,7 +622,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
             # User-defined args (highest precedence)
             def user_defined_handler(
-                tx: "InstructionTranslatorBase",
+                tx: "InstructionTranslator",
                 a: VariableTracker,
                 b: VariableTracker,
                 *,
@@ -658,7 +656,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
 
             def user_defined_inplace_handler(
-                tx: "InstructionTranslatorBase",
+                tx: "InstructionTranslator",
                 a: VariableTracker,
                 b: VariableTracker,
                 *,
@@ -675,7 +673,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
             # Dynamic shape args
             def dynamic_handler(
-                tx: "InstructionTranslatorBase",
+                tx: "InstructionTranslator",
                 a: VariableTracker,
                 b: VariableTracker,
                 *,
@@ -709,12 +707,12 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         # List-like addition (e.g. [1, 2] + [3, 4])
         def tuple_add_handler(
-            tx: "InstructionTranslatorBase", a: BaseListVariable, b: VariableTracker
+            tx: "InstructionTranslator", a: BaseListVariable, b: VariableTracker
         ) -> VariableTracker:
             return TupleVariable([*a.items, *b.unpack_var_sequence(tx)])
 
         def size_add_handler(
-            tx: "InstructionTranslatorBase", a: BaseListVariable, b: VariableTracker
+            tx: "InstructionTranslator", a: BaseListVariable, b: VariableTracker
         ) -> VariableTracker:
             return SizeVariable([*a.items, *b.unpack_var_sequence(tx)])
 
@@ -722,7 +720,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             op: Callable[..., Any],
         ) -> list[tuple[tuple[_TrackersType, _TrackersType], _HandlerCallback]]:
             def compare_by_value(
-                tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+                tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
             ) -> VariableTracker:
                 try:
                     return VariableTracker.build(tx, op(a.value, b.value))  # type: ignore[attr-defined]
@@ -772,7 +770,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 dunder = _OPERATOR_TO_DUNDER[op]
 
                 def handler(
-                    tx: "InstructionTranslatorBase",
+                    tx: "InstructionTranslator",
                     a: VariableTracker,
                     b: VariableTracker,
                 ) -> VariableTracker:
@@ -792,9 +790,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 none_result = op(object(), None)
 
                 def never(
-                    tx: "InstructionTranslatorBase",
-                    a: VariableTracker,
-                    b: VariableTracker,
+                    tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
                 ) -> VariableTracker:
                     return VariableTracker.build(tx, none_result)
 
@@ -847,7 +843,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 )
 
                 def handle_is(
-                    tx: "InstructionTranslatorBase",
+                    tx: "InstructionTranslator",
                     left: VariableTracker,
                     right: VariableTracker,
                 ) -> VariableTracker | None:
@@ -920,7 +916,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def nb_or_impl(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1013,7 +1009,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         fn: Callable[..., Any], arg_types: list[type], has_kwargs: bool
     ) -> Callable[
         [
-            "InstructionTranslatorBase",
+            "InstructionTranslator",
             list[VariableTracker],
             dict[str, VariableTracker],
         ],
@@ -1058,7 +1054,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
 
             def lazy_constant_handler(
-                tx: "InstructionTranslatorBase",
+                tx: "InstructionTranslator",
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker | None:
@@ -1088,7 +1084,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         ):
 
             def create_exception_class_object(
-                tx: "InstructionTranslatorBase",
+                tx: "InstructionTranslator",
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
@@ -1130,7 +1126,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             else:
 
                 def call_binop_handlers(
-                    tx: "InstructionTranslatorBase", args: Any, _: Any
+                    tx: "InstructionTranslator", args: Any, _: Any
                 ) -> Any:
                     # pyrefly: ignore [not-iterable]
                     for fn in binop_handlers:
@@ -1145,7 +1141,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         if self_handler:
 
             def call_self_handler(
-                tx: "InstructionTranslatorBase",
+                tx: "InstructionTranslator",
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker | None:
@@ -1191,7 +1187,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             ):
 
                 def constant_fold_handler(
-                    tx: "InstructionTranslatorBase",
+                    tx: "InstructionTranslator",
                     args: list[VariableTracker],
                     kwargs: dict[str, VariableTracker],
                 ) -> VariableTracker | None:
@@ -1219,7 +1215,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             else:
 
                 def constant_fold_handler(
-                    tx: "InstructionTranslatorBase",
+                    tx: "InstructionTranslator",
                     args: list[VariableTracker],
                     kwargs: dict[str, VariableTracker],
                 ) -> VariableTracker | None:
@@ -1273,7 +1269,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             (handler,) = handlers
 
             def builtin_dispatch(
-                tx: "InstructionTranslatorBase",
+                tx: "InstructionTranslator",
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker | None:
@@ -1286,7 +1282,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         else:
 
             def builtin_dispatch(
-                tx: "InstructionTranslatorBase",
+                tx: "InstructionTranslator",
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker | None:
@@ -1331,7 +1327,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     @staticmethod
     def _constant_eval_result(
-        tx: "InstructionTranslatorBase", tree: ast.Expression, filename: str
+        tx: "InstructionTranslator", tree: ast.Expression, filename: str
     ) -> VariableTracker | None:
         if any(isinstance(child, ast.Call) for child in ast.walk(tree)):
             return None
@@ -1353,7 +1349,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_eval(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         source: VariableTracker,
         *args: VariableTracker,
         **kwargs: VariableTracker,
@@ -1373,7 +1369,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         return self._constant_eval_result(tx, tree, "<torch._dynamo.eval>")
 
-    def call_vars(self, tx: "InstructionTranslatorBase", *args: Any) -> VariableTracker:
+    def call_vars(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         if len(args) == 0:
             return self._call_frame_locals_snapshot(tx)
         if len(args) != 1:
@@ -1385,14 +1381,14 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise_observed_exception(TypeError, tx)
 
     def call_locals(
-        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker:
         if len(args) != 0:
             raise_observed_exception(TypeError, tx)
         return self._call_frame_locals_snapshot(tx)
 
     @staticmethod
-    def _call_frame_locals_snapshot(tx: "InstructionTranslatorBase") -> VariableTracker:
+    def _call_frame_locals_snapshot(tx: "InstructionTranslator") -> VariableTracker:
         frame_local_names = set(tx.f_code.co_varnames) | set(tx.cell_and_freevars())
         cell_and_freevars = set(tx.cell_and_freevars())
         frame_locals = {}
@@ -1414,7 +1410,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def _handle_insert_op_in_graph(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
@@ -1564,7 +1560,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         tuple[object, ...],
         Callable[
             [
-                "InstructionTranslatorBase",
+                "InstructionTranslator",
                 list[VariableTracker],
                 dict[str, VariableTracker],
             ],
@@ -1574,7 +1570,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -1598,7 +1594,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1629,10 +1625,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                         f"object.__new__ expects no kwargs, got {len(kwargs)}"
                     )
                 return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    args[1:],
-                    tx=tx,
+                    self, args[0], args[1:]
                 )
 
             if (
@@ -1651,7 +1644,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                     self,
                     args[0],
                     args[1:],
-                    tx=tx,
                 )
 
         if name in _BUILTIN_CONSTANT_FOLDABLE_METHODS.get(self.fn, ()):
@@ -1732,35 +1724,35 @@ class BuiltinVariable(BaseBuiltinVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def call_int(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
         return generic_int(tx, arg)
 
     def call_float(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
         return generic_float(tx, arg)
 
     def call_bool(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
         # Emulate PyBool_Type.tp_vectorcall which boils down to PyObject_IsTrue.
         return generic_bool(tx, arg)
 
     def call_hash(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
         from .object_protocol import generic_hash
 
         return generic_hash(tx, arg)
 
     def call_repr(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
         return generic_repr(tx, arg)
 
     def call_str(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
         if isinstance(
             arg,
@@ -1851,7 +1843,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
     def _call_min_max(
-        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker | None:
         if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
             items = args[0].force_unpack_var_sequence(tx)
@@ -1863,7 +1855,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return None
 
     def _call_min_max_seq(
-        self, tx: "InstructionTranslatorBase", items: list[VariableTracker]
+        self, tx: "InstructionTranslator", items: list[VariableTracker]
     ) -> VariableTracker:
         if len(items) <= 0:
             raise AssertionError("_call_min_max_seq requires at least one item")
@@ -1874,7 +1866,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def _call_min_max_binary(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         a: VariableTracker | None,
         b: VariableTracker | None,
     ) -> VariableTracker | None:
@@ -1987,17 +1979,17 @@ class BuiltinVariable(BaseBuiltinVariable):
     call_max = _call_min_max
 
     def call_abs(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
         return generic_abs(tx, arg)
 
     def call_pos(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
         return generic_pos(tx, arg)
 
     def call_index(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
         # Specialize SymNodeVariable to a constant first, matching CPython's
         # PyNumber_Index which forces a concrete int.
@@ -2006,7 +1998,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_round(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         arg: VariableTracker,
         *args: VariableTracker,
         **kwargs: VariableTracker,
@@ -2020,7 +2012,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return round_method.call_function(tx, list(args), kwargs)
 
     def call_range(
-        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker | None:
         if check_unspec_or_constant_args(args, {}):
             return variables.RangeVariable(list(args))
@@ -2036,14 +2028,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         )
 
     def call_slice(
-        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker:
         if not 1 <= len(args) < 4:
             raise_type_error(tx, f"slice expected at least 1 argument, got {len(args)}")
         return variables.SliceVariable(list(args), tx)
 
     def _dyn_proxy(
-        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
+        self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
@@ -2057,7 +2049,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     # NOTE must handle IteratorVariable separately!
     def _call_iter_tuple_list(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         obj: VariableTracker | None = None,
         *args: VariableTracker,
         **kwargs: VariableTracker,
@@ -2115,7 +2107,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def _call_iter_tuple_generator(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         obj: VariableTracker,
         *args: VariableTracker,
         **kwargs: VariableTracker,
@@ -2128,7 +2120,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_tuple(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
@@ -2150,7 +2142,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return TupleVariable(items, mutation_type=ValueMutationNew())
 
     def call_callable(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
         from .functions import BaseUserFunctionVariable, FunctoolsPartialVariable
         from .nn_module import NNModuleVariable
@@ -2197,7 +2189,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         )
 
     def call_dir(
-        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+        self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
         if isinstance(arg, variables.UserDefinedClassVariable):
             return VariableTracker.build(tx, dir(arg.value))
@@ -2210,7 +2202,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_set(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
@@ -2234,7 +2226,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_frozenset(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
@@ -2261,7 +2253,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_zip(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
@@ -2287,7 +2279,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_len(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
@@ -2295,7 +2287,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_getitem(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
@@ -2303,7 +2295,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_isinstance(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         arg: VariableTracker,
         isinstance_type_var: VariableTracker,
     ) -> VariableTracker:
@@ -2409,7 +2401,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_issubclass(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         left_ty: VariableTracker,
         right_ty: VariableTracker,
     ) -> VariableTracker:
@@ -2419,12 +2411,12 @@ class BuiltinVariable(BaseBuiltinVariable):
         return generic_issubclass(tx, left_ty, right_ty)
 
     def call_super(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
         return variables.SuperVariable(a, b)
 
     def call_next(
-        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker:
         arg = args[0]
         try:
@@ -2441,7 +2433,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_map(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         fn: VariableTracker,
         *seqs: VariableTracker,
         **kwargs: VariableTracker,
@@ -2482,7 +2474,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         )
 
     def call_filter(
-        self, tx: "InstructionTranslatorBase", fn: VariableTracker, seq: VariableTracker
+        self, tx: "InstructionTranslator", fn: VariableTracker, seq: VariableTracker
     ) -> VariableTracker:
         return variables.FilterVariable(
             fn,
@@ -2490,9 +2482,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             mutation_type=ValueMutationNew(),
         )
 
-    def var_getattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         source = self.source and AttrSource(self.source, name)
         if name == "__name__":
             return VariableTracker.build(tx, self.fn.__name__, source)
@@ -2511,14 +2501,14 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_delattr(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         obj: VariableTracker,
         name_var: VariableTracker,
     ) -> VariableTracker:
         return obj.call_method(tx, "__delattr__", [name_var], {})
 
     def call_type(
-        self, tx: "InstructionTranslatorBase", obj: VariableTracker
+        self, tx: "InstructionTranslator", obj: VariableTracker
     ) -> VariableTracker:
         try:
             py_type = obj.python_type()
@@ -2544,7 +2534,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return VariableTracker.build(tx, py_type, source)
 
     def call_reversed(
-        self, tx: "InstructionTranslatorBase", obj: VariableTracker
+        self, tx: "InstructionTranslator", obj: VariableTracker
     ) -> VariableTracker | None:
         if obj.has_unpack_var_sequence(tx):
             items = list(reversed(obj.unpack_var_sequence(tx)))
@@ -2553,7 +2543,7 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_sorted(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         obj: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
@@ -2569,13 +2559,13 @@ class BuiltinVariable(BaseBuiltinVariable):
         return None
 
     def call_neg(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker
     ) -> VariableTracker:
         return generic_neg(tx, a)
 
     def call_format(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         _format_string: VariableTracker,
         *args: VariableTracker,
         **kwargs: VariableTracker,
@@ -2585,7 +2575,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return StringFormatVariable.create(format_string, list(args), kwargs)
 
     def call_id(
-        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker:
         if len(args) != 1:
             raise_observed_exception(
@@ -2606,7 +2596,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return FakeIdVariable(id(arg))
 
     def call_deepcopy(
-        self, tx: "InstructionTranslatorBase", x: VariableTracker
+        self, tx: "InstructionTranslator", x: VariableTracker
     ) -> VariableTracker:
         unimplemented(
             gb_type="copy.deepcopy()",
@@ -2619,10 +2609,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         )
 
     def _comparison_with_tensor(
-        self,
-        tx: "InstructionTranslatorBase",
-        left: VariableTracker,
-        right: VariableTracker,
+        self, tx: "InstructionTranslator", left: VariableTracker, right: VariableTracker
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy_cls
         from .tensor import supported_tensor_comparison_op_values
@@ -2677,10 +2664,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         )
 
     def _comparison_with_symnode(
-        self,
-        tx: "InstructionTranslatorBase",
-        left: VariableTracker,
-        right: VariableTracker,
+        self, tx: "InstructionTranslator", left: VariableTracker, right: VariableTracker
     ) -> VariableTracker:
         from .tensor import supported_tensor_comparison_op_values
 
@@ -2716,7 +2700,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         )
 
     def call_xor(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
@@ -2735,44 +2719,44 @@ class BuiltinVariable(BaseBuiltinVariable):
         return None
 
     def call_ixor(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         if isinstance(a, _SET_LIKE_OP_SUPPORT):
             return a.call_method(tx, "__ixor__", [b], {})
         return None
 
     def call_mul(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return generic_multiply(tx, a, b)
 
     def call_imul(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return generic_inplace_multiply(tx, a, b)
 
     def call_sub(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_op(tx, a, b, "nb_subtract", "-")
 
     def call_isub(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_iop(tx, a, b, "nb_inplace_subtract", "nb_subtract", "-=")
 
     def call_add(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return vt_add(tx, a, b)
 
     def call_iadd(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return vt_inplace_add(tx, a, b)
 
     def call_and_(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
@@ -2791,7 +2775,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return None
 
     def call_iand(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
@@ -2811,37 +2795,37 @@ class BuiltinVariable(BaseBuiltinVariable):
         return None
 
     def call_or_(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_op(tx, a, b, "nb_or", "|")
 
     def call_ior(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_iop(tx, a, b, "nb_inplace_or", "nb_or", "|=")
 
     def call_lshift(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_op(tx, a, b, "nb_lshift", "<<")
 
     def call_ilshift(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_iop(tx, a, b, "nb_inplace_lshift", "nb_lshift", "<<=")
 
     def call_rshift(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_op(tx, a, b, "nb_rshift", ">>")
 
     def call_irshift(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_iop(tx, a, b, "nb_inplace_rshift", "nb_rshift", ">>=")
 
     def call_not_(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker
     ) -> VariableTracker | None:
         if isinstance(a, SymNodeVariable):
             return SymNodeVariable.create(
@@ -2864,7 +2848,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return None
 
     def call_contains(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
         from .object_protocol import generic_contains
 
@@ -2889,7 +2873,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -2897,7 +2881,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -2912,10 +2896,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 if isinstance(args[0], DictBuiltinVariable):
                     return dict_vt
                 return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    [],
-                    tx=tx,
+                    self, args[0], []
                 )
 
         if name == "fromkeys":
@@ -2938,7 +2919,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
     @staticmethod
     def call_custom_dict(
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         user_cls: type,
         /,
         *args: VariableTracker,
@@ -2953,7 +2934,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
     @staticmethod
     def call_custom_dict_fromkeys(
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         user_cls: type,
         /,
         *args: VariableTracker,
@@ -3014,7 +2995,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     SourcelessBuilder.create(tx, dict),
                     SourcelessBuilder.create(tx, OrderedDict),
                     [],
-                    tx=tx,
                 )
                 if not isinstance(result, OrderedDictVariable):
                     raise AssertionError(
@@ -3034,7 +3014,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     SourcelessBuilder.create(tx, dict),
                     SourcelessBuilder.create(tx, defaultdict),
                     [],
-                    tx=tx,
                 )
                 if not isinstance(result, DefaultDictVariable):
                     raise AssertionError(
@@ -3083,7 +3062,7 @@ class IterBuiltinVariable(BaseBuiltinVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -3121,7 +3100,7 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -3153,7 +3132,7 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
 
     def _call_getattr(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -3348,7 +3327,7 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -3391,7 +3370,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -3416,7 +3395,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
 
     def _call_setattr(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         obj: VariableTracker,
         name_var: VariableTracker,
         val: VariableTracker,
@@ -3596,7 +3575,7 @@ class ListBuiltinVariable(BaseBuiltinVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -3644,7 +3623,7 @@ class ListBuiltinVariable(BaseBuiltinVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslatorBase",
+        tx: "InstructionTranslator",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -3655,10 +3634,7 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                 if isinstance(args[0], ListBuiltinVariable):
                     return list_vt
                 return tx.output.side_effects.track_new_user_defined_object(
-                    self,
-                    args[0],
-                    args[1:],
-                    tx=tx,
+                    self, args[0], args[1:]
                 )
 
         return super().call_method(tx, name, args, kwargs)
@@ -3666,7 +3642,7 @@ class ListBuiltinVariable(BaseBuiltinVariable):
 
 # pyrefly: ignore [deprecated]
 @contextlib.contextmanager
-def dynamo_disable_grad(tx: "InstructionTranslatorBase") -> typing.Iterator[None]:
+def dynamo_disable_grad(tx: "InstructionTranslator") -> typing.Iterator[None]:
     from . import GradModeVariable
 
     gmv = GradModeVariable.create(tx, False)

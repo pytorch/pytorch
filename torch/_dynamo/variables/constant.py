@@ -29,7 +29,7 @@ from .base import ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
     from .functions import UserFunctionVariable
 
@@ -143,7 +143,7 @@ class ConstantVariable(VariableTracker):
     def is_python_constant(self) -> Literal[True]:
         return True
 
-    def repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def repr_impl(self, tx: InstructionTranslator) -> VariableTracker:
         return ConstantVariable.create(repr(self.value))
 
     def is_symnode_like(self) -> bool:
@@ -164,7 +164,7 @@ class ConstantVariable(VariableTracker):
         return self.unpack_var_sequence(tx=None)
 
     def getitem_const(
-        self, tx: InstructionTranslatorBase, arg: VariableTracker
+        self, tx: InstructionTranslator, arg: VariableTracker
     ) -> VariableTracker:
         if isinstance(self.value, (str, bytes)):
             from .object_protocol import validate_sequence_index
@@ -176,7 +176,7 @@ class ConstantVariable(VariableTracker):
         )
 
     def sq_item_impl(
-        self, tx: InstructionTranslatorBase, key: VariableTracker
+        self, tx: InstructionTranslator, key: VariableTracker
     ) -> VariableTracker:
         # unicode_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/unicodeobject.c#L13777
         # bytes_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/bytesobject.c#L319
@@ -205,42 +205,40 @@ class ConstantVariable(VariableTracker):
         return ConstantVariable.is_base_literal(obj)
 
     def unpack_var_sequence(
-        self, tx: InstructionTranslatorBase | None
+        self, tx: InstructionTranslator | None
     ) -> list[VariableTracker]:
         try:
             return [ConstantVariable.create(x) for x in self.as_python_constant()]
         except TypeError as e:
             raise NotImplementedError from e
 
-    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
+    def hash_impl(self, tx: InstructionTranslator) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
         return hash(self.value), False
 
     def richcompare_impl(
-        self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
+        self, tx: InstructionTranslator, other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
-    def len_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def len_impl(self, tx: InstructionTranslator) -> VariableTracker:
         """Generic len for any constant value (sequence or mapping)."""
         try:
             return ConstantVariable.create(len(self.value))
         except TypeError as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
-    def sq_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def sq_length(self, tx: InstructionTranslator) -> VariableTracker:
         """Sequence length - delegates to len_impl for constants."""
         return self.len_impl(tx)
 
-    def mp_length(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def mp_length(self, tx: InstructionTranslator) -> VariableTracker:
         """Mapping length - delegates to len_impl for constants."""
         return self.len_impl(tx)
 
-    def const_getattr(
-        self, tx: InstructionTranslatorBase, name: str
-    ) -> VariableTracker:
+    def const_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
         if not hasattr(self.value, name):
             raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
@@ -248,7 +246,7 @@ class ConstantVariable(VariableTracker):
             raise NotImplementedError
         return member
 
-    def sq_contains(self, tx: InstructionTranslatorBase, item: VariableTracker):
+    def sq_contains(self, tx: InstructionTranslator, item: VariableTracker):
         """Sequence contains for constants."""
         if item.is_python_constant():
             search = item.as_python_constant()
@@ -263,7 +261,7 @@ class ConstantVariable(VariableTracker):
                 )
         return super().sq_contains(tx, item)
 
-    def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
+    def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
         from .lists import ListIteratorVariable
 
         try:
@@ -274,7 +272,7 @@ class ConstantVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: InstructionTranslatorBase,
+        tx: InstructionTranslator,
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -283,9 +281,7 @@ class ConstantVariable(VariableTracker):
 
         if name == "format" and istype(self.value, str):
             return variables.BuiltinVariable(str.format).call_function(
-                tx,
-                [self, *args],
-                kwargs,
+                tx, [self, *args], kwargs
             )
         elif name == "join" and istype(self.value, str):
             if kwargs or len(args) != 1:
@@ -374,7 +370,7 @@ class ConstantVariable(VariableTracker):
 
     def call_tree_map(
         self,
-        tx: InstructionTranslatorBase,
+        tx: InstructionTranslator,
         tree_map_fn: UserFunctionVariable,
         map_fn: VariableTracker,
         rest: list[VariableTracker],
@@ -429,7 +425,7 @@ class ConstantVariable(VariableTracker):
 
     @override
     def call_obj_hasattr(
-        self, tx: InstructionTranslatorBase, name: str
+        self, tx: InstructionTranslator, name: str
     ) -> ConstantVariable:
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
@@ -444,7 +440,7 @@ class ConstantVariable(VariableTracker):
             and self.as_python_constant() == other.as_python_constant()
         )
 
-    def get_id(self, tx: InstructionTranslatorBase) -> int | None:
+    def get_id(self, tx: InstructionTranslator) -> int | None:
         # Singletons have guaranteed stable identity across the process lifetime.
         if self.value is None or self.value is True or self.value is False:
             return id(self.value)
@@ -568,7 +564,7 @@ class ConstantVariable(VariableTracker):
 
     def nb_multiply_impl(
         self,
-        tx: InstructionTranslatorBase,
+        tx: InstructionTranslator,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -597,7 +593,7 @@ class ConstantVariable(VariableTracker):
 
     def sq_repeat_impl(
         self,
-        tx: InstructionTranslatorBase,
+        tx: InstructionTranslator,
         count: VariableTracker,
     ) -> VariableTracker:
         # Only str / bytes are reachable via ConstantVariable since list, tuple,
