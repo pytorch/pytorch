@@ -18051,14 +18051,14 @@ if RUN_GPU:
         def test_value_expr_int_to_fp8_cast_uses_float32_intermediate(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 idx = torch.arange(x.numel(), device=x.device, dtype=torch.int64)
-                return (idx * 1000).to(torch.float8_e4m3fn)
+                return (idx * 1000).to(torch.float8_e5m2)
 
             fn_opt = torch.compile(fn, backend="inductor")
             inps = [torch.empty(4, device=GPU_TYPE)]
             self.assertEqual(fn_opt(*inps).float(), fn(*inps).float())
             code = run_and_get_triton_code(fn_opt, *inps)
             FileCheck().check_regex(
-                r"tmp\d+ = tmp\d+\.to\(tl\.float32\)\.to\(tl\.float8e4nv\)"
+                r"tmp\d+ = tmp\d+\.to\(tl\.float32\)\.to\(tl\.float8e5\)"
             ).run(code)
 
         def test_value_expr_dynamic_shape_bounds(self):
