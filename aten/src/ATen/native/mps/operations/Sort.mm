@@ -557,7 +557,8 @@ Tensor randperm_argsort_lowbits_metal(const Tensor& keys, int n_passes, Tensor& 
   // sort_radix always writes int64 permutation indices via its final scatter;
   // any narrower index width is internal staging chosen by sort_radix itself.
   Tensor indices = at::empty({sort_size}, at::TensorOptions().dtype(at::kLong).device(keys.device()));
-  sort_radix(keys, sorted_keys, indices, /*dim=*/0, /*descending=*/false, sort_size, /*sel=*/{}, /*max_passes=*/n_passes);
+  sort_radix(
+      keys, sorted_keys, indices, /*dim=*/0, /*descending=*/false, sort_size, /*sel=*/{}, /*max_passes=*/n_passes);
   return indices;
 }
 } // namespace mps
