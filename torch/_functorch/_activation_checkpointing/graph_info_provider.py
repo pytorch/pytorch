@@ -276,7 +276,7 @@ class GraphInfoProvider:
             vmin=min(self.get_knapsack_memory_input()),
             vmax=max(self.get_knapsack_memory_input()),
         )
-        cmap = cm.viridis
+        cmap = cm.viridis  # type: ignore[attr-defined]
 
         # Assign colors based on memory
         node_colors = [

@@ -503,13 +503,13 @@ namespace {
         // encourage larger block_y & block_z for better cache hit while maintain
         // reasonable block_x for coalesced memory access;
         int block_x = std::min<int>(
-            maxThreadsDim[0], std::min<int>(lastPow2(sizeC), at::cuda::warp_size()));
+            {maxThreadsDim[0], lastPow2(sizeC), at::cuda::warp_size()});
         int block_y = std::min<int>(
-            maxThreadsDim[1], std::min<int>(lastPow2(osizeW), max_threads / block_x));
+            {maxThreadsDim[1], lastPow2(osizeW), max_threads / block_x});
         int block_z = std::min<int>(
-            maxThreadsDim[2], std::min<int>(lastPow2(osizeH), max_threads / block_x / block_y));
+            {maxThreadsDim[2], lastPow2(osizeH), max_threads / block_x / block_y});
         block_x = std::min<int>(
-            maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z));
+            {maxThreadsDim[0], lastPow2(sizeC), max_threads / block_y / block_z});
         const dim3 block(block_x, block_y, block_z);
         int kernel_stride_C = ceil_div(sizeC, block_x * 4);
         int kernel_size_C = ceil_div(sizeC, block_x * kernel_stride_C);
@@ -659,13 +659,13 @@ namespace {
         bool done = false;
         do {
           int block_x = std::max<int>(std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(sizeC), at::cuda::warp_size())), 1);
+              {maxThreadsDim[0], lastPow2(sizeC), at::cuda::warp_size()}), 1);
           int block_y = std::max<int>(std::min<int>(
-              maxThreadsDim[1], std::min<int>(lastPow2(isizeW), max_threads / block_x)), 1);
+              {maxThreadsDim[1], lastPow2(isizeW), max_threads / block_x}), 1);
           int block_z = std::max<int>(std::min<int>(
-              maxThreadsDim[2], std::min<int>(lastPow2(isizeH), max_threads / block_x / block_y)), 1);
+              {maxThreadsDim[2], lastPow2(isizeH), max_threads / block_x / block_y}), 1);
           block_x = std::max<int>(std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z)), 1);
+              {maxThreadsDim[0], lastPow2(sizeC), max_threads / block_y / block_z}), 1);
           const dim3 block(block_x, block_y, block_z);
           int kernel_stride_C = ceil_div(sizeC, block_x * 4);
           int kernel_size_C = ceil_div(sizeC, block_x * kernel_stride_C);
