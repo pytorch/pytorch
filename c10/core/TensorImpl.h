@@ -2511,11 +2511,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // handle both ArrayRefs of different types (there are some uses of
   // Resize in Caffe2 which pass in int, not int64_t.)
 
-  template <
-      typename T,
-      typename = typename std::enable_if_t< // NOLINT(modernize-use-constraints)
-          std::is_integral_v<T>>>
-  bool SetDimsTemplate(ArrayRef<T> src) {
+  template <typename T>
+  requires std::is_integral_v<T> bool SetDimsTemplate(ArrayRef<T> src) {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
         "SetDims() called on tensor with symbolic shape")
