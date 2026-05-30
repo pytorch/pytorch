@@ -294,7 +294,6 @@ dtensor_compiled_fails = {
     skip("norm", "nuc"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/176973
     skip("histc"),
-    xfail("nn.functional.linear_cross_entropy"),
 }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
@@ -309,6 +308,7 @@ dtensor_numeric_only_fails = {
     xfail("linspace"),
     xfail("logspace"),
     xfail("nn.functional.huber_loss"),
+    xfail("nn.functional.linear_cross_entropy"),
     xfail("nn.functional.max_unpool3d", "grad"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.softshrink"),
