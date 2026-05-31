@@ -1678,9 +1678,8 @@ def speculate_subgraph_with_auto_output_flattening(
     # because this case is rare. This is not a regression because side effects were
     # never supported for invoke_subgraph anyway.
     filter_aliased_intermediates: bool = False,
-    # TODO - supports input_mutation and aliasing should be False by default for strictness
-    supports_input_mutation: bool = True,
-    supports_aliasing: bool = True,
+    supports_input_mutation: bool = False,
+    supports_aliasing: bool = False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer: Optional["SubgraphTracer"] = None,
@@ -2012,9 +2011,8 @@ def speculate_subgraph(
     # if should_flatten_outputs is True, `remove_consts_from_outputs` remove the
     # const outputs from the subgraph output.
     remove_consts_from_outputs: bool = True,
-    # TODO - supports input_mutation and aliasing should be False by default for strictness
-    supports_input_mutation: bool = True,
-    supports_aliasing: bool = True,
+    supports_input_mutation: bool = False,
+    supports_aliasing: bool = False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer: Optional["SubgraphTracer"] = None,
@@ -3605,6 +3603,8 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
     """
 
     _HOP_NAME = "torch.ops.higher_order.wrap_with_set_grad_enabled"
+    supports_input_mutation = True
+    supports_aliasing = True
 
     def call_function(
         self,
@@ -3654,6 +3654,8 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
                 source_target=self.value,
                 set_subgraph_inputs="manual",
                 should_flatten_outputs=True,
+                supports_input_mutation=self.supports_input_mutation,
+                supports_aliasing=self.supports_aliasing,
             )
 
         if len(body_lifted_freevars) > 0:
@@ -3696,6 +3698,8 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
     """
 
     _HOP_NAME = "torch.ops.higher_order.wrap_with_autocast"
+    supports_input_mutation = True
+    supports_aliasing = True
 
     def call_function(
         self,
@@ -3752,6 +3756,8 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 source_target=self.value,
                 set_subgraph_inputs="manual",
                 should_flatten_outputs=True,
+                supports_input_mutation=self.supports_input_mutation,
+                supports_aliasing=self.supports_aliasing,
             )
 
         if len(body_lifted_freevars) > 0:
@@ -3791,6 +3797,8 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.hints_wrapper"
     _ALLOW_FALLBACK_TO_EAGER = False
+    supports_input_mutation = False
+    supports_aliasing = False
 
     def install_subgraph_in_output_graph(
         self,
@@ -4231,6 +4239,8 @@ class AutoFunctionalizeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_attention_backward"
+    supports_input_mutation = False
+    supports_aliasing = False
 
     @staticmethod
     def _uses_pretraced_graphs(
@@ -4309,6 +4319,8 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
                 description=f"{self._HOP_NAME}: {fn_name}",
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
+                supports_input_mutation=self.supports_input_mutation,
+                supports_aliasing=(fn_name == "score_mod"),
             )
 
         gm = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
@@ -4533,6 +4545,8 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
 
 class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_attention"
+    supports_input_mutation = False
+    supports_aliasing = False
 
     @staticmethod
     def normalize_to_args(
@@ -4599,6 +4613,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 description=f"{self._HOP_NAME}: {fn_name}",
                 source_target=self.value,
                 set_subgraph_inputs="flatten_manual",
+                supports_input_mutation=self.supports_input_mutation,
+                supports_aliasing=(fn_name == "score_mod"),
             )
 
         body_name = tx.output.install_subgraph(
@@ -4987,6 +5003,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 set_subgraph_inputs="automatic",
                 allow_side_effects=True,
                 filter_aliased_intermediates=True,
+                supports_input_mutation=True,
+                supports_aliasing=True,
                 tracer=fwd_tracer,
             )
         )
@@ -5089,6 +5107,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         enable_grad=False,
                         set_subgraph_inputs="automatic_with_forced_inputs",
                         allow_side_effects=False,
+                        supports_input_mutation=True,
+                        supports_aliasing=True,
                         tracer=bwd_tracer,
                     )
                 )
@@ -5140,6 +5160,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
                             enable_grad=False,
                             set_subgraph_inputs="automatic_with_forced_inputs",
                             allow_side_effects=False,
+                            supports_input_mutation=True,
+                            supports_aliasing=True,
                             tracer=bwd_tracer,
                         )
                     )
