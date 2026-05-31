@@ -137,7 +137,6 @@ importlib.import_module("filelock")
 
 from torch._inductor import config, cpu_vec_isa, test_operators
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner, FxCompileMode
-from torch._inductor.exc import InductorError
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (  # noqa: F401
@@ -7290,9 +7289,7 @@ class CommonTemplate:
 
         self.assertEqual(o1, o2)
 
-    @requires_cuda_and_triton
-    @skipCPUIf(True, "Triton signature repro requires CUDA")
-    def test_view_as_complex_non_contiguous_unsupported_dtype_error(self):
+    def test_view_as_complex_non_contiguous(self):
         def fn(x):
             y = x.transpose(1, 2)
             z = y.reshape(2, 8, 4, -1, 2)
@@ -7300,11 +7297,7 @@ class CommonTemplate:
 
         x = torch.randn([2, 4, 8, 8], device=self.device, dtype=torch.float32)
 
-        with self.assertRaisesRegex(
-            InductorError,
-            "Unsupported dtype torch.complex64 in Triton codegen signature",
-        ):
-            torch.compile(fn, backend="inductor")(x)
+        self.common(fn, (x,), exact_stride=True)
 
     def test_view_as_real(self):
         def fn(x):

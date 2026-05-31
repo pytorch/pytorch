@@ -7235,6 +7235,16 @@ class ExternKernel(InputsKernel):
             for dim in expanded_dims:
                 x = torch._inductor.lowering.slice_(x, dim, 0, 1)
 
+        if exact_strides is not None and x.get_dtype().is_complex:
+            dst = torch._inductor.lowering.empty_strided(
+                x.get_size(),
+                exact_strides,
+                dtype=x.get_dtype(),
+                device=x.get_device(),
+            )
+            InplaceCopyFallback.create(dst, x)
+            return dst
+
         # Although this is a clone, inductor is good about fusing clones into previous
         # operations if they weren't realized and their layouts were flexible.
         x = cls.copy_input(x)

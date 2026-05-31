@@ -579,10 +579,6 @@ def _type_of(key: torch.dtype | None) -> str:
     }
     # reinterpret can create triton type
     tys.update({v: v for v in list(tys.values())})
-    if dtype_str not in tys:
-        raise NotImplementedError(
-            f"Unsupported dtype {key} in Triton codegen signature"
-        )
     return key if isinstance(key, str) else f"*{tys[dtype_str]}"
 
 
