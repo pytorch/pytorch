@@ -506,6 +506,9 @@ void initPythonBindings(PyObject* module) {
                 t.size() > 12 ? t[12].cast<bool>() : false,
                 t.size() > 13 ? t[13].cast<bool>() : false);
           }))
+      .def_readwrite(
+          "custom_profiler_config",
+          &ExperimentalConfig::custom_profiler_config)
       .def_readwrite("trace_only", &ExperimentalConfig::trace_only);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
