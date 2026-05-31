@@ -43,12 +43,13 @@ _CHUNK_MAGIC = b"CUPMREC1"
 _CHUNK_VERSION = 4
 _CHUNK_HEADER = struct.Struct("<8sIIQQQ")
 _RAW_CHUNK_MAGIC = b"CUPMRBUF"
-_RAW_CHUNK_VERSION = 1
-_RAW_CHUNK_HEADER = struct.Struct("<8sIIIQ")
+_RAW_CHUNK_VERSION = 2
+_RAW_CHUNK_HEADER = struct.Struct("<8sIIIIQQQ")
 _RECORD_STRUCT = struct.Struct("<IIIIIQQQQQIIII")
 _ANNOTATION_HEADER = struct.Struct("<QI")
 _META_MAGIC = b"CUPMMETA"
-_META_HEADER = struct.Struct("<8sIIII")
+_META_VERSION = 2
+_META_HEADER = struct.Struct("<8sII")
 
 _RECORD_KIND_KERNEL = 1
 _RECORD_KIND_MEMCPY = 2
@@ -166,6 +167,13 @@ def _has_active_cuda_context() -> bool:
     if rc == cuda_driver.CUresult.CUDA_ERROR_NOT_INITIALIZED:
         return False
     raise RuntimeError(f"cuCtxGetCurrent failed with rc={rc}")
+
+def _cuda_version_string() -> str:
+    return torch.version.cuda or ""
+
+
+def _safe_json_dumps(payload: dict[str, Any]) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 class _CuptiError(RuntimeError):
     pass
 
@@ -276,6 +284,9 @@ class CuptiMonitor:
         self._processing_inflight = 0
         self._time_converter = None
         self._timestamp_callback = None
+        self._session_start_unix_ns = 0
+        self._session_start_approx_ns = 0
+        self._session_start_calibrated_unix_ns = 0
 
         self._records_fp = None
         self._annotations_fp = None
@@ -341,6 +352,8 @@ class CuptiMonitor:
         self._complete_cb = complete_cb
 
     def _setup_prototypes(self) -> None:
+        self._lib.cuptiGetVersion.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
+        self._lib.cuptiGetVersion.restype = ctypes.c_int
         self._lib.cuptiActivityRegisterCallbacks.argtypes = [
             ctypes.c_void_p,
             ctypes.c_void_p,
@@ -398,6 +411,14 @@ class CuptiMonitor:
         ]
         self._lib.cuptiGetResultString.restype = ctypes.c_int
 
+    def _cupti_version(self) -> int:
+        version = ctypes.c_uint32()
+        self._check(
+            self._lib.cuptiGetVersion(ctypes.byref(version)),
+            "cuptiGetVersion",
+        )
+        return int(version.value)
+
     def _result_string(self, rc: int) -> str:
         result = ctypes.c_char_p()
         rc2 = self._lib.cuptiGetResultString(rc, ctypes.byref(result))
@@ -437,6 +458,11 @@ class CuptiMonitor:
         self.register_callbacks()
         self._time_converter = _PY_PROFILER._ApproximateClockToUnixTimeConverter()
         self.register_timestamp_callback()
+        self._session_start_unix_ns = time.time_ns()
+        self._session_start_approx_ns = int(_PY_PROFILER._get_approximate_time())
+        self._session_start_calibrated_unix_ns = self._convert_time(
+            self._session_start_approx_ns
+        )
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._open_outputs()
         self._write_meta_file()
@@ -690,23 +716,25 @@ class CuptiMonitor:
             self._raw_buffers_fp = None
 
     def _write_meta_file(self) -> None:
-        lib_path = _find_cupti_library().encode()
-        activities = list(self.activities)
+        meta = {
+            "meta_version": _META_VERSION,
+            "cupti_version": self._cupti_version(),
+            "cuda_version": _cuda_version_string(),
+            "hes_enabled": bool(_hes_enabled),
+            "timestamp_mode": "approximate_clock",
+            "session_start_unix_ns": self._session_start_unix_ns,
+            "session_start_approx_ns": self._session_start_approx_ns,
+            "session_start_calibrated_unix_ns": self._session_start_calibrated_unix_ns,
+            "buffer_size": self.buffer_size,
+            "flush_period_ns": int(self.flush_period_s * 1e9),
+            "raw_buffer_dump": self.raw_buffer_dump,
+            "activities": list(self.activities),
+            "libcupti_path": _find_cupti_library(),
+        }
+        payload = _safe_json_dumps(meta)
         with open(self.output_dir / _META_FILE, "wb") as fp:
-            fp.write(
-                _META_HEADER.pack(
-                    _META_MAGIC,
-                    _CHUNK_VERSION,
-                    len(activities),
-                    self.buffer_size,
-                    int(self.flush_period_s * 1e9),
-                )
-            )
-            for activity in activities:
-                fp.write(struct.pack("<I", activity))
-            fp.write(struct.pack("<Q", time.time_ns()))
-            fp.write(struct.pack("<I", len(lib_path)))
-            fp.write(lib_path)
+            fp.write(_META_HEADER.pack(_META_MAGIC, _META_VERSION, len(payload)))
+            fp.write(payload)
 
     def _flush_loop(self) -> None:
         try:
@@ -1152,12 +1180,17 @@ class CuptiMonitor:
     def _write_raw_buffer(self, ctx: int, stream_id: int, buffer_ptr: int, valid_size: int) -> None:
         if self._raw_buffers_fp is None:
             raise RuntimeError("raw buffer file is not open")
+        approx_ns = int(_PY_PROFILER._get_approximate_time())
+        unix_ns = self._convert_time(approx_ns)
         header = _RAW_CHUNK_HEADER.pack(
             _RAW_CHUNK_MAGIC,
             _RAW_CHUNK_VERSION,
+            self._raw_chunk_count,
             int(stream_id),
             int(valid_size),
             int(ctx),
+            approx_ns,
+            unix_ns,
         )
         self._raw_buffers_fp.write(header)
         self._raw_buffers_fp.write(ctypes.string_at(buffer_ptr, valid_size))
