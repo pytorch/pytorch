@@ -3563,9 +3563,6 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
 
-# Needs dimname support
-make_fallback(aten.zeros.names)
-
 # 6) Pattern-matched
 make_fallback(
     aten._scaled_dot_product_efficient_attention.default,
@@ -3846,6 +3843,9 @@ def _unwrap(x):
 
 @register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
+    # Match eager/meta scalar_tensor behavior; NJT handles scalar broadcasting.
+    if layout == torch.jagged:
+        layout = torch.strided
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
@@ -4017,14 +4017,12 @@ def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(
         *size,
-        names=None,
         dtype=None,
         device=None,
         layout=None,
         pin_memory=False,
         memory_format=None,
     ):
-        assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
@@ -4051,14 +4049,12 @@ def tensor_constructor(fill_value):
 @register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
-    names=None,
     dtype=None,
     layout=None,
     device=None,
     pin_memory=None,
     memory_format=None,
 ):
-    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
