@@ -838,7 +838,6 @@ class TestMkldnn(TestCase):
                 self.assertEqual(y1, y2.to_dense())
 
     # https://github.com/pytorch/pytorch/issues/127111
-    @xfailIfTorchDynamo
     def test_max_pool_unsupported(self):
         # OneDNN not support dilation max_pooling, will be avilabled in v2.0.
         N = torch.randint(3, 10, (1,)).item()
