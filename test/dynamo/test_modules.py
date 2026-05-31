@@ -1892,7 +1892,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(TypeError, "not subscriptable"):
             opt_mod["a"]
 
-        with self.assertRaisesRegex(TypeError, "not iterable"):
+        with self.assertRaisesRegex(TypeError, r"not (?:a container or )?iterable"):
             self.assertIn("a", opt_mod)
 
     @torch._dynamo.config.patch(guard_nn_modules=True)
