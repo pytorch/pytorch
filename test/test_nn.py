@@ -9572,6 +9572,19 @@ class TestNNDeviceType(NNTestCase):
             out.fill_(4)
             self.assertTrue(torch.all(torch.abs(inputs) < 2))
 
+        # non-constant modes: unsupported (ndim, pad_size) combos raise ValueError
+        err = "is not supported for"
+        for mode in ('reflect', 'replicate', 'circular'):
+            # pad_size=2 only valid for 2D/3D input
+            self.assertRaisesRegex(ValueError, err,
+                                   lambda: F.pad(torch.randn(1, 1, 4, 4, device=device, dtype=dtype), (0, 1), mode=mode))
+            # pad_size=4 only valid for 3D/4D input
+            self.assertRaisesRegex(ValueError, err,
+                                   lambda: F.pad(torch.randn(1, 1, 2, 3, 4, device=device, dtype=dtype), (0, 1, 0, 1), mode=mode))
+            # pad_size=6 only valid for 4D/5D input
+            self.assertRaisesRegex(ValueError, err,
+                                   lambda: F.pad(torch.randn(1, 1, 4, device=device, dtype=dtype), (0, 1, 0, 1, 0, 1), mode=mode))
+
     @expectedFailureMPS  # Unsupported float64/complex128
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)

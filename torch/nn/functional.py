@@ -5600,6 +5600,21 @@ def pad(
         return handle_torch_function(
             torch.nn.functional.pad, (input,), input, pad, mode=mode, value=value
         )
+    if mode != "constant":
+        ndim = input.dim()
+        pad_size = len(pad)
+        if not (
+            (pad_size == 2 and (ndim == 2 or ndim == 3))
+            or (pad_size == 4 and (ndim == 3 or ndim == 4))
+            or (pad_size == 6 and (ndim == 4 or ndim == 5))
+        ):
+            raise ValueError(
+                f"Padding size {pad_size} is not supported for {ndim}D input tensor in "
+                f"mode='{mode}'. Supported combinations for non-constant padding:\n"
+                "  - 2D or 3D input: padding size = 2 (pads last dimension)\n"
+                "  - 3D or 4D input: padding size = 4 (pads last 2 dimensions)\n"
+                "  - 4D or 5D input: padding size = 6 (pads last 3 dimensions)"
+            )
     if not torch.jit.is_scripting():
         if torch.are_deterministic_algorithms_enabled() and (
             input.is_cuda or input.is_xpu
