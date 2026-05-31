@@ -343,13 +343,27 @@ jobs:
           pip install $(echo dist/*.whl)[opt-einsum]
           ./.ci/pytorch/${DOCS_TYPE}_doc_push_script.sh
 
-      # The OSDC pod cannot upload to s3://doc-previews directly: fork PRs cannot
-      # authenticate via OIDC, and we don't want to grant the pod's IAM role
-      # write access. Stage the built docs as a GHA artifact and let the
-      # upload-docs-preview workflow (running via workflow_run in the base repo
-      # context) do the actual S3 upload.
+      # When the arc role authenticated successfully (same-repo PRs), upload the
+      # preview to S3 directly from the pod, just like the EC2 path. Fork PRs
+      # cannot authenticate via OIDC, so for those we fall back to staging the
+      # docs as a GHA artifact and let the upload-docs-preview workflow (running
+      # via workflow_run in the base-repo context) do the S3 upload.
+      - name: Upload Python Docs Preview
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' && steps.aws-creds.outcome == 'success' }}
+        shell: bash
+        run: |
+          aws s3 sync pytorch_docs/main/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }} --quiet
+
+      - name: Upload C++ Docs Preview
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' && steps.aws-creds.outcome == 'success' }}
+        shell: bash
+        run: |
+          aws s3 sync cppdocs/ s3://doc-previews/pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs --quiet
+
+      # Fallback for fork PRs where the pod could not authenticate to S3: stage
+      # the built docs as a GHA artifact for the upload-docs-preview workflow.
       - name: Stage docs preview artifact (PR)
-        if: ${{ github.event_name == 'pull_request' && steps.build-docs.outcome == 'success' }}
+        if: ${{ github.event_name == 'pull_request' && steps.build-docs.outcome == 'success' && steps.aws-creds.outcome != 'success' }}
         shell: bash
         run: |
           set -ex
@@ -367,7 +381,7 @@ jobs:
           EOF
 
       - name: Upload docs preview artifact (PR)
-        if: ${{ github.event_name == 'pull_request' && steps.build-docs.outcome == 'success' }}
+        if: ${{ github.event_name == 'pull_request' && steps.build-docs.outcome == 'success' && steps.aws-creds.outcome != 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: docs-preview-osdc-${{ matrix.docs_type }}

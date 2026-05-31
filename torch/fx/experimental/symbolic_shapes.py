@@ -4153,6 +4153,25 @@ class ShapeEnv:
         # all dims with the same shape_id are treated as the same symbol.
         self._shape_id_to_unbacked_symbol: dict[str, sympy.Expr] = {}
 
+        # Spec-wiring state, used by `_wire_spec_slot` /
+        # `_drain_shape_spec_pending_assumptions` /
+        # `_finalize_spec_wiring` in `torch/_dynamo/variables/builder.py`
+        # when wiring a `ShapesSpec` into this ShapeEnv during compile.
+        #
+        # `_spec_symbol_to_compile_symbol` maps each spec sympy.Symbol (from a spec
+        # `IntVar`) to the real unbacked sympy.Symbol allocated for the
+        # input that binds it.
+        self._spec_symbol_to_compile_symbol: dict[sympy.Symbol, sympy.Expr] = {}
+
+        # `_shape_spec_pending_assumptions` entries are
+        # `(free_spec_symbols, bool_expr)`: a deferred boolean waiting for
+        # its free spec symbols to be bound in `_spec_symbol_to_compile_symbol`.
+        # Substituted and emitted as a runtime assert once all deps are
+        # bound.
+        self._shape_spec_pending_assumptions: list[
+            tuple[set[sympy.Symbol], sympy.Expr]
+        ] = []
+
     @property
     def allow_scalar_outputs(self) -> bool:
         return self.settings.allow_scalar_outputs
@@ -8233,13 +8252,19 @@ class ShapeEnv:
             return None
 
         for arg in expr.args:
-            result = self.evaluate_expr(
-                arg,
-                size_oblivious=size_oblivious,
-                fallback_value=fallback,
-                forcing_spec=forcing_spec,
-            )
+            with self.suppress_guards():
+                result = self.evaluate_expr(
+                    arg,
+                    size_oblivious=size_oblivious,
+                    fallback_value=fallback,
+                    forcing_spec=forcing_spec,
+                )
             if result is target or result is target_bool:
+                self.evaluate_expr(
+                    arg,
+                    size_oblivious=size_oblivious,
+                    forcing_spec=forcing_spec,
+                )
                 return target
 
         return None
@@ -8407,20 +8432,20 @@ class ShapeEnv:
 
             concrete_val = None
             if not (expr.free_symbols <= self.backed_var_to_val.keys()):
+                short_circuit_result = self._maybe_evaluate_bool_short_circuit(
+                    expr,
+                    size_oblivious=size_oblivious,
+                    forcing_spec=forcing_spec,
+                )
+                if short_circuit_result is not None:
+                    return short_circuit_result
+
                 # TODO: dedupe this with _maybe_evaluate_static
                 # Attempt to eliminate the unbacked SymInt
                 new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if new_expr is None:
                     raise AssertionError("new_expr must not be None")
                 if not (new_expr.free_symbols <= self.backed_var_to_val.keys()):
-                    short_circuit_result = self._maybe_evaluate_bool_short_circuit(
-                        new_expr,
-                        size_oblivious=size_oblivious,
-                        forcing_spec=forcing_spec,
-                    )
-                    if short_circuit_result is not None:
-                        return short_circuit_result
-
                     ok = False
 
                     # fallback_value is set when guard_or_true or guard_or_false are used.
