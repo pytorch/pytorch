@@ -981,27 +981,37 @@ class CppGemmTemplate(CppTemplate):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
 
+        deduped_input_indices = []
+        deduped_name_to_idx: dict[str, int] = {}
+        for input_node in input_nodes:
+            input_name = input_node.get_name()
+            if input_name not in deduped_name_to_idx:
+                deduped_name_to_idx[input_name] = len(deduped_name_to_idx)
+            deduped_input_indices.append(deduped_name_to_idx[input_name])
+
+        def indices_for_inputs(inputs):
+            if len(inputs) == len(input_nodes):
+                return input_indices
+            assert len(inputs) == len(deduped_name_to_idx)
+            return [deduped_input_indices[idx] for idx in input_indices]
+
         def reorder_and_filter(inputs, layout_or_out):
+            current_input_indices = indices_for_inputs(inputs)
             if has_bias:
-                assert len(input_indices) >= 3
+                assert len(current_input_indices) >= 3
                 # Assume the input order is [inp, x, w] and we reorder it to [x, w, inp]
-                inp_idx = input_indices[0]
-                x_idx = input_indices[1]
-                w_idx = input_indices[2]
+                inp_idx = current_input_indices[0]
+                x_idx = current_input_indices[1]
+                w_idx = current_input_indices[2]
                 return [
                     inputs[x_idx],
                     inputs[w_idx],
                     inputs[inp_idx],
-                    *[inputs[idx] for idx in input_indices[3:]],
+                    *[inputs[idx] for idx in current_input_indices[3:]],
                 ], layout_or_out
-            elif len(inputs) >= len(input_indices):
-                assert len(input_indices) >= 2
-                return [inputs[idx] for idx in input_indices], layout_or_out
             else:
-                # For when input is used for x and w, i.e. X@X.T or similar
-                # Assumes the first input is the only input
-                assert len(inputs) == 1
-                return [inputs[0]] * len(input_indices), layout_or_out
+                assert len(current_input_indices) >= 2
+                return [inputs[idx] for idx in current_input_indices], layout_or_out
 
         new_inputs, new_layout = reorder_and_filter(input_nodes, layout)
         is_mkldnn_wgt = (
@@ -1081,17 +1091,27 @@ class CppGemmTemplate(CppTemplate):
         assert micro_gemm is not None
         pre_block_weights = cls.check_if_block_weight(new_inputs[1], micro_gemm)
         micro_gemm.use_local_vnni_blocking(not pre_block_weights)
-        only_one_input = (
-            input_nodes[0] == input_nodes[1] if len(input_nodes) > 1 else False
-        ) and not pre_block_weights  # If weights are blocked, use the second input
+        cpp_arg_indices: list[int] | None = None
+
+        def dedupe_runtime_inputs(inputs):
+            nonlocal cpp_arg_indices
+            if not isinstance(inputs[0], torch.Tensor):
+                cpp_arg_indices = []
+                seen_names: OrderedSet[str] = OrderedSet()
+                for idx, input_node in enumerate(inputs):
+                    input_name = input_node.get_name()
+                    if input_name not in seen_names:
+                        seen_names.add(input_name)
+                        cpp_arg_indices.append(idx)
+                return inputs
+            assert cpp_arg_indices is not None
+            return [inputs[idx] for idx in cpp_arg_indices]
 
         def preprocessor(inputs, layout):
             new_inputs, new_layout = normalize_shapes(
                 *maybe_to_dense(*reorder_and_filter(inputs, layout))
             )
-            if only_one_input and isinstance(new_inputs[0], torch.Tensor):
-                return new_inputs[1:], new_layout
-            return cls.prep_weight(
+            new_inputs, new_layout = cls.prep_weight(
                 new_inputs,
                 new_layout,
                 # pyrefly: ignore [bad-argument-type]
@@ -1099,6 +1119,7 @@ class CppGemmTemplate(CppTemplate):
                 pre_block_weights,
                 use_int8_fast_compensation_path,
             )
+            return dedupe_runtime_inputs(new_inputs), new_layout
 
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
