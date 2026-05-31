@@ -916,6 +916,8 @@ class _TorchDynamoContext:
         def get_compiler_config() -> Any:
             return self.compiler_config
 
+        fn = utils.materialize_lazy_graph_module(innermost_fn(fn))
+
         from .package import DynamoCache
 
         # If self._package is lazily initialized, we should check the dynamo cache now
@@ -939,8 +941,6 @@ class _TorchDynamoContext:
                         self._package.initialize(
                             fn_key, None, ignore_inlined_sources=False
                         )
-
-        fn = innermost_fn(fn)
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph

@@ -112,10 +112,7 @@ if typing.TYPE_CHECKING:
 
     from torch._dynamo.bytecode_transformation import Instruction
     from torch._dynamo.replay_record import ExecutionRecord
-    from torch._dynamo.symbolic_convert import (
-        InstructionTranslator,
-        InstructionTranslatorBase,
-    )
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
     from torch._subclasses import FakeTensorMode
@@ -1439,6 +1436,18 @@ def is_wrapper_or_member_descriptor(
     )
 
 
+def tracked_repr(tx: InstructionTranslatorBase, vt: VariableTracker) -> str:
+    from .variables.object_protocol import generic_repr
+
+    return generic_repr(tx, vt).as_python_constant()
+
+
+def _item_debug_repr(vt: VariableTracker) -> str:
+    if vt.is_python_constant():
+        return repr(vt.as_python_constant())
+    return vt.debug_repr()
+
+
 def unwrap_if_wrapper(fn: Any) -> Any:
     return unwrap_with_attr_name_if_wrapper(fn)[0]
 
@@ -1474,6 +1483,36 @@ def istensor(obj: Any) -> bool:
 
 def is_lazy_module(mod: Any) -> bool:
     return isinstance(mod, LazyModuleMixin)
+
+
+def force_lazy_graph_module_recompile(gm: Any) -> None:
+    from torch.fx._lazy_graph_module import _LazyGraphModule
+
+    _LazyGraphModule.force_recompile(gm)
+
+
+def is_lazy_graph_module_forward(fn: Any) -> bool:
+    from torch.fx._lazy_graph_module import _LazyGraphModule
+
+    return (
+        isinstance(fn, types.MethodType)
+        and isinstance(fn.__self__, _LazyGraphModule)
+        and fn.__name__ == "_lazy_forward"
+    )
+
+
+def materialize_lazy_graph_module(fn: Any) -> Any:
+    from torch.fx._lazy_graph_module import _LazyGraphModule
+
+    if isinstance(fn, _LazyGraphModule):
+        _LazyGraphModule.force_recompile(fn)
+        return fn
+
+    if is_lazy_graph_module_forward(fn):
+        _LazyGraphModule.force_recompile(fn.__self__)
+        return fn.__self__
+
+    return fn
 
 
 @functools.lru_cache(4096)
@@ -2769,8 +2808,8 @@ def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
 def timed(
     model: Any, example_inputs: Iterable[Any], times: int = 1
 ) -> tuple[Any, float]:
-    if torch.cuda.is_available():
-        synchronize = torch.cuda.synchronize
+    if torch.accelerator.is_available():
+        synchronize = torch.accelerator.synchronize
     else:
         synchronize = nothing
 
@@ -3218,7 +3257,7 @@ def raise_args_mismatch(
 def iter_contains(
     items: Iterable[Any],
     search: Any,
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     check_tensor_identity: bool = False,
 ) -> Any:
     from .variables import ConstantVariable
@@ -5675,23 +5714,27 @@ def get_traced_code() -> list[CodeType] | None:
 
 
 def is_pybind11_enum_member(value: Any) -> bool:
-    """Check if value is a pybind11 enum member (singleton with stable hash).
+    """Check if value is a pybind11 enum member (with stable hash and eq).
 
-    Pybind11 enums have __members__ on their type and each member is a singleton.
-    Unlike Python's enum.Enum, pybind11 injects __hash__ and __eq__ directly
-    into the type's __dict__, which trips raise_on_overridden_hash. But these
-    are safe: members are singletons with hash == value, same as Python enums.
+    Pybind11 enums have __members__ on their type. Unlike Python's enum.Enum,
+    pybind11 injects __hash__ and __eq__ directly into the type's __dict__,
+    which trips raise_on_overridden_hash. But these are safe: members have
+    deterministic hash and equality, same as Python enums.
+
+    Note: pybind11 doesn't always return the singleton for enum values (e.g.
+    a C++ function returning an enum may construct a new Python wrapper), so
+    we check by name membership rather than identity.
     """
     t = type(value)
     members = getattr(t, "__members__", None)
     if members is None:
         return False
     name = getattr(value, "name", None)
-    return name is not None and members.get(name) is value
+    return name is not None and name in members
 
 
 def _make_inlined(
-    tx: InstructionTranslator, f: Callable[..., Any]
+    tx: InstructionTranslatorBase, f: Callable[..., Any]
 ) -> Callable[..., VariableTracker]:
     if not callable(f):
         raise AssertionError("Expect f to be a python callable.")

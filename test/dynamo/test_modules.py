@@ -1632,6 +1632,38 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         check_fullgraph(fn_forward, lazy_gm, x)
         lazy_gm = make_lazy_graph_module()
         check_fullgraph(lazy_gm, lazy_gm, x)
+        lazy_gm = make_lazy_graph_module()
+        check_fullgraph(lazy_gm.forward, lazy_gm, x)
+        lazy_gm = make_lazy_graph_module()
+        lazy_forward = lazy_gm.forward
+
+        def fn_captured_forward(x):
+            return lazy_forward(x)
+
+        check_fullgraph(fn_captured_forward, lazy_gm, x)
+
+        lazy_gm = make_lazy_graph_module()
+        lazy_forward = lazy_gm.forward
+        lazy_gm.register_forward_hook(lambda mod, inp, out: out + 100)
+
+        def fn_captured_forward_with_hook(x):
+            return lazy_forward(x)
+
+        self.assertTrue(lazy_gm._needs_recompile())
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(
+            fn_captured_forward_with_hook, backend=cnt, fullgraph=True
+        )
+        self.assertEqual(opt_fn(x), graph(x) + 100)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertFalse(lazy_gm._needs_recompile())
+
+        for get_fn in (lambda gm: gm, lambda gm: gm.forward):
+            lazy_gm = make_lazy_graph_module()
+            with torch._dynamo.config.patch(caching_precompile=True):
+                opt_fn = torch.compile(get_fn(lazy_gm), backend="eager", fullgraph=True)
+                self.assertEqual(opt_fn(x), graph(x))
+            self.assertFalse(lazy_gm._needs_recompile())
 
         mod = LazyGraphModuleCall()
         check_fullgraph(mod, mod.lazy_gm, x)
