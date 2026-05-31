@@ -95,7 +95,7 @@ template <int N> struct alignas(N) OpaqueType { char data[N]; };
 // essentially rewritten related to legacy::launch_kernel parts
 template <int nt, int vt, typename func_t>
 C10_LAUNCH_BOUNDS_2(nt, vt)
-__global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {
+static __global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {
   constexpr int nv = nt * vt;
   int idx = nv * blockIdx.x + threadIdx.x;
 
@@ -555,13 +555,13 @@ struct cuda_scatter_fill_base_kernel {
   }
 }; // struct cuda_scatter_fill_base_kernel
 
-void gather_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
+static void gather_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
     result, dim, index, self,
     "gather_out_cuda", tensor_assign);
 }
 
-void scatter_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+static void scatter_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   // When indices are not unique, the behavior is non-deterministic
   globalContext().alertNotDeterministic("scatter_cuda_");
   cuda_scatter_gather_base_kernel<>()(
@@ -569,19 +569,19 @@ void scatter_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, c
     "scatter_cuda_", tensor_assign);
 }
 
-void scatter_fill_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& src) {
+static void scatter_fill_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& src) {
   cuda_scatter_fill_base_kernel<>()(
     self, dim, index, src,
     "scatter_fill_cuda_", tensor_assign);
 }
 
-void scatter_add_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+static void scatter_add_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
     self, dim, index, src,
     "scatter_add_cuda_", reduce_add);
 }
 
-void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
+static void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                const Tensor& src, const ReductionType& reduce) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd/AtomicMul usage
@@ -600,7 +600,7 @@ void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Ten
   }
 }
 
-void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
+static void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                     const Tensor& src, const ReductionType& reduce) {
   switch (reduce) {
   case ReductionType::SUM :
@@ -627,7 +627,7 @@ void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const
   }
 }
 
-void scatter_scalar_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
+static void scatter_scalar_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
                                const Scalar& value, const ReductionType& reduce) {
   switch (reduce) {
   case ReductionType::SUM :

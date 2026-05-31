@@ -130,7 +130,7 @@ __global__ void triu_tril_kernel(
 // MSVC's traditional preprocessor does not accept #if/#else/#endif inside a
 // macro argument and the Windows build would otherwise fail.
 template <bool upper, typename scalar_t>
-void launch_triu_tril_kernel(const Tensor& result, const Tensor& self, int64_t k) {
+static void launch_triu_tril_kernel(const Tensor& result, const Tensor& self, int64_t k) {
 #if !defined(USE_ROCM)
   constexpr int elements_per_thread = sizeof(scalar_t) < 8 ? 8 / sizeof(scalar_t) : 1;
 #else
@@ -180,7 +180,7 @@ void launch_triu_tril_kernel(const Tensor& result, const Tensor& self, int64_t k
 }
 
 template <bool upper>
-void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k, const char* name) {
+static void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k, const char* name) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::ComplexHalf,
       at::ScalarType::Half,

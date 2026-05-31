@@ -403,7 +403,7 @@ Tensor max_unpooling3d_forward_cuda(
   return output;
 }
 
-at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
+static at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
     const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
@@ -493,7 +493,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
       }));
   return grad_input;
 }
-at::Tensor max_unpooling2d_backward_cuda(
+static at::Tensor max_unpooling2d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& indices,

@@ -52,7 +52,7 @@ void compare_scalar_kernel(TensorIteratorBase &iter, OpType op, scalar_t rhs) {
 }
 
 template <typename scalar_t>
-void compare_kernel_impl(TensorIteratorBase &iter, OpType op) {
+static void compare_kernel_impl(TensorIteratorBase &iter, OpType op) {
   // If either input is a cpu scalar, perform the equivalent comparison
   // where the scalar is on the right hand side. This saves us from
   // generating two otherwise identical kernels with mirrored
@@ -72,26 +72,26 @@ void compare_kernel_impl(TensorIteratorBase &iter, OpType op) {
   }
 }
 
-C10_NOINLINE void compare_kernel_with_scalars(TensorIteratorBase &iter, OpType op) {
+static C10_NOINLINE void compare_kernel_with_scalars(TensorIteratorBase &iter, OpType op) {
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "compare_cuda", [&]() {
     compare_kernel_impl<scalar_t>(iter, op);
   });
 }
 
 
-void ge_kernel_cuda(TensorIteratorBase& iter) {
+static void ge_kernel_cuda(TensorIteratorBase& iter) {
   compare_kernel_with_scalars(iter, OpType::GE);
 }
 
-void gt_kernel_cuda(TensorIteratorBase& iter) {
+static void gt_kernel_cuda(TensorIteratorBase& iter) {
   compare_kernel_with_scalars(iter, OpType::GT);
 }
 
-void le_kernel_cuda(TensorIteratorBase& iter) {
+static void le_kernel_cuda(TensorIteratorBase& iter) {
   compare_kernel_with_scalars(iter, OpType::LE);
 }
 
-void lt_kernel_cuda(TensorIteratorBase& iter) {
+static void lt_kernel_cuda(TensorIteratorBase& iter) {
   compare_kernel_with_scalars(iter, OpType::LT);
 }
 

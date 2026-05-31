@@ -49,7 +49,7 @@
 namespace at::native {
 
 template <typename scalar_t, template <class> class Op>
-std::vector<Tensor> foreach_unary_op(TensorList tensors) {
+static std::vector<Tensor> foreach_unary_op(TensorList tensors) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors.size());
@@ -74,7 +74,7 @@ std::vector<Tensor> foreach_unary_op(TensorList tensors) {
 }
 
 template <typename scalar_t, template <class> class Op>
-void foreach_unary_op_(TensorList tensors) {
+static void foreach_unary_op_(TensorList tensors) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
   tensor_lists.emplace_back(tensors.vec());
   using opmath_t = typename at::opmath_type<scalar_t>;
@@ -90,7 +90,7 @@ void foreach_unary_op_(TensorList tensors) {
 }
 
 template <template <class> class Op>
-std::vector<Tensor> floating_complex_half(TensorList tensors) {
+static std::vector<Tensor> floating_complex_half(TensorList tensors) {
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       ScalarType::Half,
       tensors[0].scalar_type(),
@@ -99,7 +99,7 @@ std::vector<Tensor> floating_complex_half(TensorList tensors) {
 }
 
 template <template <class> class Op>
-void floating_complex_half_(TensorList tensors) {
+static void floating_complex_half_(TensorList tensors) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       ScalarType::Half,
       tensors[0].scalar_type(),
@@ -108,7 +108,8 @@ void floating_complex_half_(TensorList tensors) {
 }
 
 template <template <class> class Op>
-std::vector<Tensor> all_types_complex_bfloat16_half_bool(TensorList tensors) {
+static std::vector<Tensor> all_types_complex_bfloat16_half_bool(
+    TensorList tensors) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Half,
       ScalarType::BFloat16,
@@ -119,7 +120,7 @@ std::vector<Tensor> all_types_complex_bfloat16_half_bool(TensorList tensors) {
 }
 
 template <template <class> class Op>
-void all_types_complex_bfloat16_half_bool_(TensorList tensors) {
+static void all_types_complex_bfloat16_half_bool_(TensorList tensors) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Half,
       ScalarType::BFloat16,
@@ -130,7 +131,7 @@ void all_types_complex_bfloat16_half_bool_(TensorList tensors) {
 }
 
 template <template <class> class Op>
-std::vector<Tensor> floating_complex_half_bfloat16(TensorList tensors) {
+static std::vector<Tensor> floating_complex_half_bfloat16(TensorList tensors) {
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,
@@ -140,7 +141,7 @@ std::vector<Tensor> floating_complex_half_bfloat16(TensorList tensors) {
 }
 
 template <template <class> class Op>
-void floating_complex_half_bfloat16_(TensorList tensors) {
+static void floating_complex_half_bfloat16_(TensorList tensors) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,
@@ -150,7 +151,7 @@ void floating_complex_half_bfloat16_(TensorList tensors) {
 }
 
 template <template <class> class Op>
-std::vector<Tensor> all_types_half_complex_bfloat16(TensorList tensors) {
+static std::vector<Tensor> all_types_half_complex_bfloat16(TensorList tensors) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Half,
       at::ScalarType::BFloat16,
@@ -160,7 +161,7 @@ std::vector<Tensor> all_types_half_complex_bfloat16(TensorList tensors) {
 }
 
 template <template <class> class Op>
-void all_types_half_complex_bfloat16_(TensorList tensors) {
+static void all_types_half_complex_bfloat16_(TensorList tensors) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Half,
       at::ScalarType::BFloat16,
@@ -170,7 +171,7 @@ void all_types_half_complex_bfloat16_(TensorList tensors) {
 }
 
 template <template <class> class Op>
-std::vector<Tensor> floating_half(TensorList tensors) {
+static std::vector<Tensor> floating_half(TensorList tensors) {
   return AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::Half,
       tensors[0].scalar_type(),
@@ -179,7 +180,7 @@ std::vector<Tensor> floating_half(TensorList tensors) {
 }
 
 template <template <class> class Op>
-void floating_half_(TensorList tensors) {
+static void floating_half_(TensorList tensors) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
         foreach_unary_op_<scalar_t, Op>(tensors);
@@ -187,7 +188,7 @@ void floating_half_(TensorList tensors) {
 }
 
 template <template <class> class Op>
-std::vector<Tensor> floating_half_bfloat16(TensorList tensors) {
+static std::vector<Tensor> floating_half_bfloat16(TensorList tensors) {
   return AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,
@@ -197,7 +198,7 @@ std::vector<Tensor> floating_half_bfloat16(TensorList tensors) {
 }
 
 template <template <class> class Op>
-void floating_half_bfloat16_(TensorList tensors) {
+static void floating_half_bfloat16_(TensorList tensors) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,

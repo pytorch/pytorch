@@ -1120,7 +1120,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 //   "elementInSlice-major order".  For example, each thread can process element
 //   #0 of every slice, and then element #1 of every slice, and so on.
 template <typename scalar_t>
-bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
+static bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
                                     int sliceDim)
 {
   // The stride between adjacent slices (e.g., between element #0 of slice #100
@@ -1136,7 +1136,7 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
   return false;
 }
 
-void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
+static void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
   if (!result.is_same(self)) {
     result.copy_(self);
   }

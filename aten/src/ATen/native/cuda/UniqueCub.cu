@@ -191,7 +191,7 @@ struct MapNumberOfTrueValues {
 };
 
 C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
-__global__ void unique_bool_write_inverse_indices(
+static __global__ void unique_bool_write_inverse_indices(
     const int numel,
     const int *num_true_p,
     const bool *self,
@@ -208,7 +208,7 @@ __global__ void unique_bool_write_inverse_indices(
 }
 
 C10_LAUNCH_BOUNDS_1(1)
-__global__ void unique_bool_write_output(
+static __global__ void unique_bool_write_output(
     const int numel,
     const int *num_true_p,
     bool *values_out,

@@ -537,7 +537,7 @@ std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_cuda(
   return std::make_tuple(std::move(hy), std::move(cy), std::move(workspace));
 }
 
-void checkLSTMBackwardSizes(const TensorArg& grad_hy, const TensorArg& grad_cy,
+static void checkLSTMBackwardSizes(const TensorArg& grad_hy, const TensorArg& grad_cy,
                             const TensorArg& cx, const TensorArg& cy,
                             const TensorArg& workspace) {
   CheckedFrom c = "fused_lstm_cell_backward";
@@ -622,7 +622,7 @@ std::tuple<Tensor, Tensor> _thnn_fused_gru_cell_cuda(
   return std::make_tuple(std::move(hy), std::move(workspace));
 }
 
-void checkGRUBackwardSizes(const TensorArg& grad_hy, const TensorArg& workspace) {
+static void checkGRUBackwardSizes(const TensorArg& grad_hy, const TensorArg& workspace) {
   CheckedFrom c = "fused_gru_cell_backward";
   checkDim(c, grad_hy, 2);
   checkSize(c, workspace, {grad_hy->size(0), grad_hy->size(1) * GRU_WORKSPACE_MULTIPLIER});

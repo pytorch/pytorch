@@ -28,7 +28,7 @@ static int minimum_grid_for_occupancy(T kernel, int max_block_size) {
 }
 
 template <typename T>
-constexpr bool has_nan() {
+static constexpr bool has_nan() {
   if constexpr (std::numeric_limits<T>::is_specialized) {
     return std::numeric_limits<T>::has_quiet_NaN;
   } else if constexpr (
@@ -283,7 +283,7 @@ struct MediumRadixSort {
 };
 
 template <typename Sorter>
-void sortCommon(Sorter sorter, const TensorBase &key, const TensorBase &value,
+static void sortCommon(Sorter sorter, const TensorBase &key, const TensorBase &value,
                 int dim, bool descending) {
   TORCH_CHECK(key.sizes() == value.sizes(),
               "Key tensor must have same size as value tensor");

@@ -440,7 +440,7 @@ fused_dropout_cuda(const Tensor& self, double p, std::optional<Generator> gen_){
 }
 
 template <typename mask_t>
-Tensor dropout_backward_cuda(const Tensor& grad, const Tensor& mask, double scale){
+static Tensor dropout_backward_cuda(const Tensor& grad, const Tensor& mask, double scale){
    Tensor ret = at::empty_like(grad, grad.suggest_memory_format());
    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "masked_scale", [&] {
       using accscalar_t = acc_type<scalar_t, true>;

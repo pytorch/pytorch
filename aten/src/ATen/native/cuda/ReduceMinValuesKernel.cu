@@ -23,13 +23,13 @@ struct MinNanFunctor {
 };
 
 template <typename scalar_t, typename acc_t=scalar_t>
-void min_values_kernel_cuda_impl(TensorIterator& iter) {
+static void min_values_kernel_cuda_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, scalar_t>(
     iter, func_wrapper<acc_t> (MinNanFunctor<acc_t>()),
     at::numeric_limits<acc_t>::upper_bound());
 }
 
-void min_values_kernel_cuda(TensorIterator& iter) {
+static void min_values_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "min_values_cuda", [&]() {
     min_values_kernel_cuda_impl<scalar_t>(iter);
   });
