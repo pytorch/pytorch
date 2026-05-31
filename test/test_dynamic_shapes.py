@@ -1636,6 +1636,63 @@ class f(torch.nn.Module):
             A = torch.empty((m, n), device="meta")
             Q, R = torch.linalg.qr(A)
 
+    def _make_unbacked_size(self, shape_env):
+        return shape_env.create_unbacked_symint()
+
+    def test_avg_pool2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.avg_pool2d(x, [2, 2], [2, 2], [0, 0])
+
+    def test_max_pool2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.max_pool2d_with_indices(x, [2, 2], [2, 2])
+
+    def test_avg_pool3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.avg_pool3d(x, [2, 2, 2], [2, 2, 2])
+
+    def test_max_pool3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.max_pool3d_with_indices(x, [2, 2, 2], [2, 2, 2])
+
+    def test_avg_pool1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.avg_pool1d(x, [2], [2])
+
 
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
@@ -3324,6 +3381,103 @@ class TestGuardsExpressions(TestCase):
 
             self.assertEqual(func3(a, b), b * 20)
             self.assertEqual(compiled(a, b), b * 10)
+
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_guard_or_none(self):
+        from torch.fx.experimental.symbolic_shapes import guard_or_none
+
+        def func(a, b):
+            x = a.item()
+            result = guard_or_none(x == 1)
+            if result is None:
+                return b * 30
+            elif result:
+                return b * 10
+            else:
+                return b * 20
+
+        # eager.
+        self.assertEqual(func(torch.tensor([1]), torch.tensor([1])), torch.tensor([10]))
+        self.assertEqual(func(torch.tensor([2]), torch.tensor([1])), torch.tensor([20]))
+
+        # compile with unbacked.
+        unbacked_func = torch.compile(func, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func(a, b)
+
+        # unknown unbacked expressions return None
+        self.assertEqual(
+            unbacked_func(torch.tensor([1]), torch.tensor([1])), torch.tensor([30])
+        )
+        self.assertEqual(
+            unbacked_func(torch.tensor([2]), torch.tensor([1])), torch.tensor([30])
+        )
+
+        # Test that statically known true/false works.
+        def func2(a, b):
+            x = a.item()
+            result = guard_or_none(x == x)
+            if result is None:
+                return b * 30
+            elif result:
+                return b * 10
+            else:
+                return b * 20
+
+        unbacked_func2 = torch.compile(func2, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func2(a, b)
+        # always return b*10
+        self.assertEqual(
+            unbacked_func2(torch.tensor([1]), torch.tensor([1])), torch.tensor([10])
+        )
+        self.assertEqual(
+            unbacked_func2(torch.tensor([2]), torch.tensor([1])), torch.tensor([10])
+        )
+
+        def func3(a, b):
+            x = a.item()
+            result = guard_or_none(x != x)
+            if result is None:
+                return b * 30
+            elif result:
+                return b * 10
+            else:
+                return b * 20
+
+        unbacked_func3 = torch.compile(func3, dynamic=True, fullgraph=True)
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        unbacked_func3(a, b)
+        # always return b*20
+        self.assertEqual(
+            unbacked_func3(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
+        )
+        self.assertEqual(
+            unbacked_func3(torch.tensor([2]), torch.tensor([1])), torch.tensor([20])
+        )
+
+        # Test backed_size_oblivious
+        with torch.fx.experimental._config.patch("backed_size_oblivious", True):
+
+            def func4(a, b):
+                result = guard_or_none(a.size()[0] == 9)
+                if result is None:
+                    return b * 30
+                elif result:
+                    return b * 10
+                else:
+                    return b * 20
+
+            compiled = torch.compile(func4, dynamic=True, fullgraph=True)
+            a = torch.rand(9, 2)
+            b = torch.rand(3, 4)
+
+            self.assertEqual(func4(a, b), b * 10)
+            self.assertEqual(compiled(a, b), b * 30)
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
