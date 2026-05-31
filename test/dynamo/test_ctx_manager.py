@@ -836,6 +836,38 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_retrace_inference_mode(self):
+        # Recompile trick doesn't work with dynamic shapes
+        if check_dynamic_shape_capture():
+            return
+
+        def f(x):
+            with torch.inference_mode():
+                y = x + 1
+            return y
+
+        x = torch.randn(2, 2)
+        eager = EagerAndRecordGraphs()
+        opt_f = torch.compile(f, backend=eager, fullgraph=True)
+        out = f(x)
+        opt_out = opt_f(x)
+        self.assertEqual(out, opt_out)
+        self.assertFalse(torch.is_inference_mode_enabled())
+
+        first_graph = normalize_gm(eager.graphs[0].print_readable(False))
+        self.assertIn(
+            "torch.autograd.grad_mode._enter_inference_mode(True)", first_graph
+        )
+        self.assertIn("torch.autograd.grad_mode._exit_inference_mode", first_graph)
+
+        d = {}
+        exec(first_graph, globals(), d)
+        eager = EagerAndRecordGraphs()
+        retraced = torch.compile(d["GraphModule"], backend=eager, fullgraph=True)
+        retraced_out = retraced()(x)[0]
+        self.assertEqual(out, retraced_out)
+        self.assertFalse(torch.is_inference_mode_enabled())
+
     @parametrize(
         "Ctx",
         [CustomizedCtxManagerWithGraphBreak, customized_ctx_manager_with_graph_break],
