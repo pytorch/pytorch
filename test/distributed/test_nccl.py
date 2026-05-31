@@ -384,6 +384,56 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
     )
     @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_collective_cuda_graph(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        # Need this all_reduce to initialize NCCL communicator. Otherwise, the
+        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
+        # initialize NCCL communicator.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        symm_mem.rendezvous(out, group=group_name)
+        graph_all_reduce = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph_all_reduce):
+            c10d.all_reduce(out)
+        graph_all_reduce.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(
+            out, torch.full_like(out, (self.world_size - 1) * self.world_size / 2)
+        )
+
+        inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        symm_mem.rendezvous(inp, group=group_name)
+        graph_one_shot_all_reduce = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph_one_shot_all_reduce):
+            res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
+        graph_one_shot_all_reduce.replay()
+        self.assertEqual(out, res)
+
+        for repeat in range(3):
+            offset = 13 + repeat
+            inp.fill_(self.rank + offset)
+            out.fill_(self.rank + offset)
+            res.fill_(0.0)
+            expected_sum = float(
+                self.world_size * offset + self.world_size * (self.world_size - 1) / 2
+            )
+            graph_all_reduce.replay()
+            graph_one_shot_all_reduce.replay()
+            self.assertEqual(out, torch.full_like(out, expected_sum))
+            self.assertEqual(res, out)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
+    @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_put(self):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
@@ -638,6 +688,152 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
                 out[j],
                 torch.full_like(out[j], expected),
                 msg=f"rank {self.rank}: out[{j}] should contain the reduced sum",
+            )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "nccl_all_to_all_vdev requires the NCCL device API (>=2.28)"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_vdev(self):
+        """all_to_all_vdev: device-side split sizes drive a one-sided pull
+        AllToAllV over NCCL symmetric memory. Mirrors the NVSHMEM test of the
+        same name in test/distributed/test_nvshmem.py."""
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        # Initialise the NCCL communicator before any rendezvous.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        # Random per-peer send count in [0, k). Different on every rank.
+        torch.manual_seed(42 + self.rank)
+        k = 10
+        inp_splits = torch.randint(k, (self.world_size,), device=self.device)
+        inp_numel = inp_splits.sum().item()
+
+        # Out-of-band exchange of split sizes (used to size out + as oracle).
+        out_splits = torch.zeros_like(inp_splits)
+        c10d.all_to_all_single(out_splits, inp_splits)
+        out_numel = out_splits.sum().item()
+
+        # Symmetric tensors must have the same shape on every rank, so size
+        # them by the worst case.
+        max_inp_numel = k * self.world_size
+        # Worst case: a single rank receives every other rank's data.
+        max_out_numel = max_inp_numel * self.world_size
+
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).copy_(
+            torch.randn(max_inp_numel, dtype=dtype, device=self.device)
+        )
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, self.world_size), dtype=torch.int64, device=self.device
+        )
+        in_splits.copy_(inp_splits)
+
+        # Rendezvous everything before launching the kernel; needed because
+        # NCCLSymmetricMemory is lazily initialised on first rendezvous.
+        symm_mem.rendezvous(inp, group=group_name)
+        symm_mem.rendezvous(out, group=group_name)
+        symm_mem.rendezvous(in_splits, group=group_name)
+        symm_mem.rendezvous(out_splits_offsets, group=group_name)
+        c10d.barrier()
+
+        symm_mem.all_to_all_vdev(inp, out, in_splits, out_splits_offsets, group_name)
+
+        # in_splits must be unchanged.
+        torch.testing.assert_close(in_splits, inp_splits)
+
+        # Row 0 of out_splits_offsets is the output splits (= what every peer
+        # sent us), which the oracle all_to_all_single also computed.
+        torch.testing.assert_close(out_splits_offsets[0], out_splits)
+
+        # Row 1 is the per-peer write offset in `out` (exclusive scan of row 0).
+        out_offsets = torch.cumsum(out_splits, dim=0)  # inclusive
+        self.assertEqual(out_splits_offsets[1][0].item(), 0)
+        torch.testing.assert_close(out_splits_offsets[1][1:], out_offsets[:-1])
+
+        # Data oracle: classic NCCL all_to_all_single over the prefix of `inp`
+        # actually used.
+        expected = torch.empty(out_numel, dtype=dtype, device=self.device)
+        c10d.all_to_all_single(
+            expected, inp[:inp_numel], out_splits.tolist(), inp_splits.tolist()
+        )
+        torch.testing.assert_close(out[:out_numel], expected)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "nccl_all_to_all_vdev requires the NCCL device API (>=2.28)"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_vdev_with_zero_splits(self):
+        """Corner case: some peers receive 0 elements. Exercises the
+        `peer_split == 0` early-out in nccl_a2av_data_kernel and confirms that
+        a 0-byte chunk does not break the divisibility assertion."""
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        # Rank r sends `r` elements to peer 0 and 0 to everyone else.
+        # So peer 0 receives `0+1+2+...+(W-1)`, every other peer receives 0.
+        inp_splits = torch.zeros(self.world_size, dtype=torch.int64, device=self.device)
+        inp_splits[0] = self.rank
+
+        out_splits = torch.zeros_like(inp_splits)
+        c10d.all_to_all_single(out_splits, inp_splits)
+        out_numel = out_splits.sum().item()
+        inp_numel = inp_splits.sum().item()
+
+        max_inp_numel = self.world_size  # rank ≤ W-1 ≤ W
+        max_out_numel = self.world_size * self.world_size
+
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device).copy_(
+            torch.arange(max_inp_numel, dtype=dtype, device=self.device)
+            + 100 * self.rank
+        )
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, self.world_size), dtype=torch.int64, device=self.device
+        )
+        in_splits.copy_(inp_splits)
+
+        symm_mem.rendezvous(inp, group=group_name)
+        symm_mem.rendezvous(out, group=group_name)
+        symm_mem.rendezvous(in_splits, group=group_name)
+        symm_mem.rendezvous(out_splits_offsets, group=group_name)
+        c10d.barrier()
+
+        symm_mem.all_to_all_vdev(inp, out, in_splits, out_splits_offsets, group_name)
+
+        torch.testing.assert_close(out_splits_offsets[0], out_splits)
+
+        # Build the same oracle via classic alltoall.
+        expected = torch.empty(out_numel, dtype=dtype, device=self.device)
+        c10d.all_to_all_single(
+            expected,
+            inp[:inp_numel],
+            out_splits.tolist(),
+            inp_splits.tolist(),
+        )
+        if out_numel > 0:
+            torch.testing.assert_close(out[:out_numel], expected)
+        # Ranks other than 0 receive nothing; their output prefix should be
+        # untouched (still -1).
+        if self.rank != 0:
+            self.assertEqual(out_numel, 0)
+            torch.testing.assert_close(
+                out[:1], torch.full((1,), -1.0, dtype=dtype, device=self.device)
             )
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
