@@ -1362,6 +1362,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     )
 
     @onlyAccelerator
+    @skipMPS
     def test_Conv2d_inconsistent_types_on_accelerator_without_cudnn(self, device):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float, device=device)
         weights = torch.randn(1, 1, 3, 3, dtype=torch.double, device=device)
@@ -1713,6 +1714,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @dtypes(torch.double)
+    @skipMPS
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
     def test_conv_double_backward(self, device, dtype):
@@ -3584,6 +3586,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         )
 
     @onlyAccelerator
+    @skipMPS
     def test_ConvTranspose3d_size_1_kernel(self, device):
         with set_default_dtype(torch.double):
             x_cpu = torch.randn(2, 3, 3, 5, 5)
