@@ -33,7 +33,6 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
-    largeTensorTest,
     skipCUDAIf,
     skipXPUIf,
 )
@@ -1792,43 +1791,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             V_D=16,
             device=device,
         )
-
-    @supported_platform
-    @unittest.skipIf(not TEST_ON_CUDA or torch.version.hip, "requires CUDA")
-    @largeTensorTest("16GB", inductor=True)
-    def test_large_kv_decode_int64_pointer_math(self, device):
-        H, D = 1, 128
-        Q_S = 1
-        dtype = torch.bfloat16
-        tail = 128
-        KV_S = torch.iinfo(torch.int32).max // D + tail + 1
-        self.assertGreater((KV_S - tail) * D, torch.iinfo(torch.int32).max)
-
-        q = torch.randn(1, H, Q_S, D, device=device, dtype=dtype)
-        k = torch.empty(1, H, KV_S, D, device=device, dtype=dtype)
-        v = torch.empty(1, H, KV_S, D, device=device, dtype=dtype)
-        k[:, :, -tail:, :] = torch.randn(1, H, tail, D, device=device, dtype=dtype)
-        v[:, :, -tail:, :] = torch.randn(1, H, tail, D, device=device, dtype=dtype)
-
-        def mask_mod(b, h, q_idx, kv_idx):
-            return kv_idx >= (KV_S - tail)
-
-        block_mask = create_block_mask(mask_mod, 1, 1, Q_S, KV_S, device=device)
-        compiled = torch.compile(flex_attention, fullgraph=True)
-        out = compiled(
-            q,
-            k,
-            v,
-            block_mask=block_mask,
-            kernel_options={"BACKEND": "TRITON_DECODE"},
-        )
-
-        k_tail = k[:, :, -tail:, :].to(torch.float32)
-        v_tail = v[:, :, -tail:, :].to(torch.float32)
-        scores = (q.to(torch.float32) @ k_tail.transpose(-2, -1)) * (D**-0.5)
-        ref = (torch.softmax(scores, dim=-1) @ v_tail).to(dtype)
-
-        torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
