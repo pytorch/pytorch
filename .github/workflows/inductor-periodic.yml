@@ -46,21 +46,6 @@ jobs:
       cuda-arch-list: '8.0;8.6'
       test-matrix: |
         { include: [
-          { config: "dynamo_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
@@ -92,7 +77,6 @@ jobs:
       build-environment: ${{ needs.periodic-dynamo-benchmarks-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -108,21 +92,6 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
-          { config: "dynamo_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamo_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamo_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamo_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamo_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
           { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
           { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
           { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
@@ -179,7 +148,6 @@ jobs:
       build-environment: ${{ needs.inductor-smoke-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-smoke-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-smoke-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.inductor-smoke-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -252,7 +220,6 @@ jobs:
       build-environment: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-default-label-prefix.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
