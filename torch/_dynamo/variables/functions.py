@@ -2403,8 +2403,8 @@ class SkipFunctionVariable(VariableTracker):
                         "If it is a third-party C/C++ Python extension, please "
                         "either wrap it into a PyTorch-understood custom operator "
                         "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
-                        "for more details) or, if it is traceable, use "
-                        "`torch.compiler.allow_in_graph`.",
+                        "for more details) or, if it is traceable, wrap it with "
+                        "`torch._dynamo.nonstrict_trace`.",
                     ]
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))

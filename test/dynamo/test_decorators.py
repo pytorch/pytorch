@@ -5,6 +5,7 @@ import os
 import re
 import unittest
 import unittest.mock as mock
+import warnings
 from unittest.mock import patch
 
 import torch
@@ -2499,6 +2500,20 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             "allow_in_graph",
         ):
             compiled(torch.randn(4))
+
+    def test_untraceable_builtin_recommends_nonstrict_trace(self):
+        def forward(x):
+            return x + os.getpid()
+
+        compiled = torch.compile(forward, fullgraph=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            with self.assertRaises(Unsupported) as cm:
+                compiled(torch.ones(()))
+
+        msg = str(cm.exception)
+        self.assertIn("torch._dynamo.nonstrict_trace", msg)
+        self.assertNotIn("torch.compiler.allow_in_graph", msg)
 
 
 instantiate_parametrized_tests(DecoratorTests)
