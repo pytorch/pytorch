@@ -409,10 +409,14 @@ def wrap_compiler_debug(
                     # Call the compiled function with real inputs
                     out = inner_compiled_fn(real_inputs)  # type: ignore[operator]
                     # sync cuda kernels to ensure IMA detection
-                    for arg in example_inputs:
-                        if isinstance(arg, torch.Tensor) and arg.is_cuda:
-                            torch.cuda.synchronize()
-                            break
+                    if (
+                        any(
+                            isinstance(arg, torch.Tensor) and arg.device.type != "cpu"
+                            for arg in example_inputs
+                        )
+                        and torch.accelerator.is_available()
+                    ):
+                        torch.accelerator.synchronize()
                     return out
                 except Exception:
                     if config.repro_level == 1:
@@ -970,16 +974,14 @@ def isolate_fails(
 def inductor_fails(
     fx_g: torch.fx.GraphModule, args: Sequence[Any], check_str: str | None = None
 ) -> bool:
-    has_cuda = False
-    for arg in args:
-        if isinstance(arg, torch.Tensor) and arg.is_cuda:
-            has_cuda = True
-            break
+    has_gpu = any(
+        isinstance(arg, torch.Tensor) and arg.device.type != "cpu" for arg in args
+    )
 
     def sync() -> None:
-        if has_cuda:
+        if has_gpu and torch.accelerator.is_available():
             # Ensures that segfaults are surfaced
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
 
     from torch._inductor.compile_fx import compile_fx_inner
 
@@ -1433,8 +1435,6 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
 
     mod, args = repro_common(options, mod, load_args)
 
-    from torch.cuda import synchronize
-
     compile_args = _get_compile_args(mod, args)
     compiled = compile_fx_inner(mod, compile_args)
     if isinstance(compiled, str):
@@ -1452,17 +1452,15 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
         ):
             raise AccuracyError("Bad accuracy detected")
     else:
-        need_sync = False
-
-        for arg in args:
-            if isinstance(arg, torch.Tensor) and arg.is_cuda:
-                need_sync = True
-                break
-
         compiled(list(args))
-
-        if need_sync:
-            synchronize()  # ensure segfaults are surfaced
+        if (
+            any(
+                isinstance(arg, torch.Tensor) and arg.device.type != "cpu"
+                for arg in args
+            )
+            and torch.accelerator.is_available()
+        ):
+            torch.accelerator.synchronize()  # ensure segfaults are surfaced
 
 
 # TODO: lazily load the inputs or something, rather than cloning them
