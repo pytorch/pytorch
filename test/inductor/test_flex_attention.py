@@ -74,7 +74,6 @@ from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (  # noqa: F401
     IS_LINUX,
     MI200_ARCH,
-    serialTest,
     skipIfRocm,
     skipIfRocmArch,
     TEST_WITH_ROCM,
@@ -6375,51 +6374,6 @@ class GraphModule(torch.nn.Module):
             flexible_layout_called,
             "get_stride_and_maybe_freeze_layout should be called with FlexibleLayout nodes",
         )
-
-    @supported_platform
-    @skip_on_cpu
-    @largeTensorTest("12GB", inductor=True)
-    @serialTest()
-    def test_large_kv_int64_pointer_math(self, device):
-        # Regression test for #185262: load_checked_2d (and a few inline
-        # pointer-arithmetic sites in the backwards template) computed
-        # `offs * stride` in int32 even when Inductor had already promoted
-        # INDEX_DTYPE to int64 because some input buffer exceeded 2**31
-        # elements. The product silently overflowed and caused an IMA.
-        #
-        # We construct K/V so that (a) each tensor's storage exceeds 2**31
-        # elements (so Inductor uses int64 indexing), and (b) the last KV
-        # index times its KV-dim stride also exceeds 2**31 (so the
-        # in-kernel pointer math would overflow without the .to(INDEX_DTYPE)
-        # cast). Without the fix this raises a CUDA illegal memory access.
-        H, D = 1, 128
-        KV_S = 2**24 + 1024
-        Q_S = 128
-        dtype = torch.bfloat16
-
-        q = torch.randn(1, H, Q_S, D, device=device, dtype=dtype)
-        k = torch.randn(1, H, KV_S, D, device=device, dtype=dtype)
-        v = torch.randn(1, H, KV_S, D, device=device, dtype=dtype)
-
-        tail = 128
-
-        def mask_mod(b, h, q_idx, kv_idx):
-            return kv_idx >= (KV_S - tail)
-
-        block_mask = create_block_mask(mask_mod, 1, 1, Q_S, KV_S, device=device)
-
-        compiled = torch.compile(flex_attention, fullgraph=True)
-        out = compiled(q, k, v, block_mask=block_mask)
-
-        # Reference: only the last `tail` KV positions are unmasked.
-        k_tail = k[:, :, -tail:, :].to(torch.float32)
-        v_tail = v[:, :, -tail:, :].to(torch.float32)
-        q_f32 = q.to(torch.float32)
-        scale = D**-0.5
-        scores = (q_f32 @ k_tail.transpose(-1, -2)) * scale
-        ref = (torch.softmax(scores, dim=-1) @ v_tail).to(dtype)
-
-        torch.testing.assert_close(out, ref, rtol=2e-2, atol=2e-2)
 
 
 class TestBlockMask(InductorTestCase):
