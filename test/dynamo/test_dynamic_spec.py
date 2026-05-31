@@ -1809,81 +1809,95 @@ class TestVarargsCompile(TestCase):
 
 
 class TestWalkSpecRaises(TestCase):
-    """Unit-style tests for ``_walk_spec`` raising on type-mismatched
-    access paths (vs. silently returning None)."""
+    """Tests for spec/source type-mismatch errors raised during compilation
+    (vs. silently returning None)."""
 
     def setUp(self):
         super().setUp()
         _reset_uid_counter()
 
-    def test_walk_object_spec_with_subscript_raises(self):
-        """``ObjectSpec`` paired with a subscript token must raise."""
-        from torch._dynamo.variables.builder import (
-            _AttrToken,
-            _SubscriptToken,
-            _walk_spec,
-        )
+    def test_object_spec_with_dict_input_raises(self):
+        """Spec is ``ObjectSpec``, but the user passes a dict. Dynamo records
+        a subscript source (``cfg["x"]``); the spec expects attribute access."""
 
-        root = ObjectSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
-        with self.assertRaises(RuntimeError) as ctx:
-            _walk_spec(root, [_SubscriptToken("x")])
+        def fn(cfg):
+            return cfg["x"] + 1
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            shapes_spec={"cfg": ObjectSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})},
+        )
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
+            compiled({"x": torch.randn(4, 3)})
         self.assertEqual(
             str(ctx.exception),
-            "shapes_spec walk: ObjectSpec at \"['x']\" expects an attribute "
-            "access (.name), got \"['x']\"",
-        )
-        # sanity: the matching ``.x`` (AttrToken) form still resolves.
-        ts = _walk_spec(root, [_AttrToken("x")])
-        self.assertIsInstance(ts, TensorSpec)
-
-    def test_walk_dict_spec_with_attr_raises(self):
-        """``DictSpec`` paired with an attribute token must raise."""
-        from torch._dynamo.variables.builder import (
-            _AttrToken,
-            _SubscriptToken,
-            _walk_spec,
+            "RuntimeError: shapes_spec walk: ObjectSpec at \"cfg['x']\" "
+            "expects an attribute access (e.g. .field)",
         )
 
-        root = DictSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})
-        with self.assertRaises(RuntimeError) as ctx:
-            _walk_spec(root, [_AttrToken("x")])
+    def test_dict_spec_with_object_input_raises(self):
+        """Spec is ``DictSpec``, but the user passes an object accessed by
+        attribute (``obj.x``); the spec expects a subscript."""
+
+        class Container:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(obj):
+            return obj.x + 1
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            shapes_spec={"obj": DictSpec({"x": TensorSpec([ShapeVar("h"), STATIC])})},
+        )
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
+            compiled(Container(torch.randn(4, 3)))
         self.assertEqual(
             str(ctx.exception),
-            "shapes_spec walk: DictSpec at '.x' expects a subscript "
-            "(['key']), got '.x'",
+            "RuntimeError: shapes_spec walk: DictSpec at 'obj.x' expects "
+            "a subscript (e.g. ['key'])",
         )
-        # sanity: the matching ``["x"]`` (SubscriptToken) form still resolves.
-        ts = _walk_spec(root, [_SubscriptToken("x")])
-        self.assertIsInstance(ts, TensorSpec)
 
-    def test_walk_seq_spec_with_non_int_subscript_raises(self):
-        """``SeqSpec`` paired with a non-int subscript token must raise."""
-        from torch._dynamo.variables.builder import _SubscriptToken, _walk_spec
+    def test_seq_spec_with_dict_input_raises(self):
+        """Spec is ``SeqSpec``, but the user passes a dict keyed by str.
+        Dynamo records ``cfg["x"]``; ``SeqSpec`` requires an int subscript."""
 
-        root = SeqSpec([TensorSpec([ShapeVar("h"), STATIC])])
-        with self.assertRaises(RuntimeError) as ctx:
-            _walk_spec(root, [_SubscriptToken("x")])
+        def fn(cfg):
+            return cfg["x"] + 1
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            shapes_spec={"cfg": SeqSpec([TensorSpec([ShapeVar("h"), STATIC])])},
+        )
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
+            compiled({"x": torch.randn(4, 3)})
         self.assertEqual(
             str(ctx.exception),
-            "shapes_spec walk: SeqSpec at \"['x']\" expects an int subscript "
-            "([i]), got \"['x']\"",
+            "RuntimeError: shapes_spec walk: SeqSpec at \"cfg['x']\" "
+            "expects an int subscript (e.g. [0])",
         )
-        # sanity: an int subscript still resolves.
-        ts = _walk_spec(root, [_SubscriptToken(0)])
-        self.assertIsInstance(ts, TensorSpec)
 
-    def test_walk_leaf_with_remaining_token_raises(self):
-        """A leaf spec with remaining tokens in the path must raise."""
-        from torch._dynamo.variables.builder import _AttrToken, _walk_spec
+    def test_leaf_spec_with_container_input_raises(self):
+        """Spec is a ``TensorSpec`` leaf, but the user passes a dict and the
+        function indexes into it; the walk reaches a leaf with tokens left."""
 
-        root = TensorSpec([ShapeVar("h"), STATIC])
-        with self.assertRaises(RuntimeError) as ctx:
-            _walk_spec(root, [_AttrToken("something")])
+        def fn(cfg):
+            return cfg["x"] + 1
+
+        compiled = torch.compile(
+            fn,
+            backend="eager",
+            shapes_spec={"cfg": TensorSpec([ShapeVar("h"), STATIC])},
+        )
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
+            compiled({"x": torch.randn(4, 3)})
         self.assertEqual(
             str(ctx.exception),
-            "shapes_spec walk: reached leaf spec (TensorSpec) at "
-            "'.something', but the input is not a leaf — remaining access "
-            "'.something' cannot be consumed by a leaf spec",
+            "RuntimeError: shapes_spec walk: expected \"cfg['x']\" to be a "
+            "leaf spec (TensorSpec), but it's not",
         )
 
 

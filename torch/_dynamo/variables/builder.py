@@ -472,12 +472,21 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
 def _walk_spec(
     current_spec: IntermediateSpec,
     remaining_tokens: _AccessPath,
+    full_path: _AccessPath | None = None,
 ) -> LeafSpec:
     """Walk down a spec tree starting at ``current_spec``, consuming each
     token in order. Returns the leaf spec at the end of the walk, or
     ``None`` if a key/field along the way wasn't specified by the user.
     Raises on type-mismatch (the existing tight invariants).
+
+    ``full_path`` is the original access path (including any prefix already
+    consumed by the caller before reaching ``current_spec``); it is used only
+    for error messages so users see the full source location, not just the
+    slice handed to this function.
     """
+    location = _format_access_path(
+        full_path if full_path is not None else remaining_tokens
+    )
     for token in remaining_tokens:
         if current_spec is None:
             # Under-specified: a previous descent (DictSpec key lookup or
@@ -488,17 +497,15 @@ def _walk_spec(
             case ObjectSpec():
                 if not isinstance(token, _AttrToken):
                     raise RuntimeError(
-                        f"shapes_spec walk: ObjectSpec at {_format_access_path(remaining_tokens)!r} "
-                        f"expects an attribute access (.name), got "
-                        f"{_format_access_path([token])!r}"
+                        f"shapes_spec walk: ObjectSpec at {location!r} "
+                        f"expects an attribute access (e.g. .field)"
                     )
                 current_spec = current_spec._fields.get(token.name)
             case DictSpec():
                 if not isinstance(token, _SubscriptToken):
                     raise RuntimeError(
-                        f"shapes_spec walk: DictSpec at {_format_access_path(remaining_tokens)!r} "
-                        f"expects a subscript (['key']), got "
-                        f"{_format_access_path([token])!r}"
+                        f"shapes_spec walk: DictSpec at {location!r} "
+                        f"expects a subscript (e.g. ['key'])"
                     )
                 current_spec = current_spec._entries.get(token.key)
             case SeqSpec():
@@ -506,9 +513,8 @@ def _walk_spec(
                     token.key, int
                 ):
                     raise RuntimeError(
-                        f"shapes_spec walk: SeqSpec at {_format_access_path(remaining_tokens)!r} "
-                        f"expects an int subscript ([i]), got "
-                        f"{_format_access_path([token])!r}"
+                        f"shapes_spec walk: SeqSpec at {location!r} "
+                        f"expects an int subscript (e.g. [0])"
                     )
                 # Out-of-range index: unspecified -> treat as static (None),
                 if 0 <= token.key < len(current_spec):
@@ -520,16 +526,13 @@ def _walk_spec(
                 # has tokens → the user spec is too shallow: it claims a leaf,
                 # but the runtime value is a container being further accessed.
                 raise RuntimeError(
-                    f"shapes_spec walk: reached leaf spec "
-                    f"({type(current_spec).__name__}) at "
-                    f"{_format_access_path(remaining_tokens)!r}, but the input "
-                    f"is not a leaf — remaining access {_format_access_path([token])!r} "
-                    f"cannot be consumed by a leaf spec"
+                    f"shapes_spec walk: expected {location!r} to be a leaf "
+                    f"spec ({type(current_spec).__name__}), but it's not"
                 )
     if not isinstance(current_spec, LeafSpec):
         raise RuntimeError(
             f"shapes_spec walk ended on a container ({type(current_spec).__name__}) "
-            f"for access path {_format_access_path(remaining_tokens)!r}; expected a leaf spec"
+            f"for access path {location!r}; expected a leaf spec"
         )
     return current_spec
 
@@ -565,7 +568,7 @@ def lookup_spec_from_dynamo_source(
             )
         if params._varargs is None or not (0 <= key < len(params._varargs)):
             return None
-        return _walk_spec(params._varargs[key], path[2:])
+        return _walk_spec(params._varargs[key], path[2:], full_path=path)
     if root.is_varkw:
         # ``**kwargs`` element access: root is the varkw local, next token must
         # be a str subscript. A varkw local is always followed by a subscript
@@ -585,11 +588,11 @@ def lookup_spec_from_dynamo_source(
         if params._varkw is None or key not in params._varkw:
             return None
 
-        return _walk_spec(params._varkw[key], path[2:])
+        return _walk_spec(params._varkw[key], path[2:], full_path=path)
     # Regular named arg: seed at the named-arg root and descend the rest.
 
     current_spec: IntermediateSpec = params._named_args.get(root.name)
-    return _walk_spec(current_spec, path[1:])
+    return _walk_spec(current_spec, path[1:], full_path=path)
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
