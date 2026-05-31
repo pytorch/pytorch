@@ -147,6 +147,37 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             user_defined._get_datetime_now_attrs = original_get_attrs
             torch._dynamo.reset()
 
+    def test_datetime_now_attr_runtime_value_preserves_call_order(self):
+        import torch._dynamo.variables.user_defined as user_defined
+
+        original_get_attrs = user_defined._get_datetime_now_attrs
+        calls = []
+
+        def fake_get_attrs():
+            calls.append(None)
+            return tuple(len(calls) for _ in user_defined._DATETIME_NOW_ATTRS)
+
+        user_defined._get_datetime_now_attrs = fake_get_attrs
+        try:
+
+            def fn(x):
+                current_time1 = datetime.datetime.now()
+                current_time2 = datetime.datetime.now()
+                return x + current_time2.microsecond - current_time1.microsecond
+
+            x = torch.zeros(())
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+            res1 = opt_fn(x)
+            res2 = opt_fn(x)
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(res1.item(), 1)
+            self.assertEqual(res2.item(), 1)
+            self.assertEqual(len(calls), 6)
+        finally:
+            user_defined._get_datetime_now_attrs = original_get_attrs
+            torch._dynamo.reset()
+
     def test_datetime_now_reconstruct_across_graph_break(self):
         def fn(x):
             current_time = datetime.datetime.now()
@@ -606,6 +637,26 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         )
         sample_input = torch.tensor([4, 4, 16, 32], dtype=torch.uint8)
         opt_fn(sample_input)
+
+    def test_lshift_scalar_dynamic(self):
+        def shift_left(x: int) -> int:
+            return 1 << x
+
+        opt_fn = torch.compile(
+            shift_left, fullgraph=True, dynamic=True, backend="eager"
+        )
+        self.assertEqual(opt_fn(1), 2)
+        self.assertEqual(opt_fn(5), 32)
+
+    def test_rshift_scalar_dynamic(self):
+        def shift_right(x: int) -> int:
+            return 64 >> x
+
+        opt_fn = torch.compile(
+            shift_right, fullgraph=True, dynamic=True, backend="eager"
+        )
+        self.assertEqual(opt_fn(2), 16)
+        self.assertEqual(opt_fn(4), 4)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_symfloat_to_tensor(self):
