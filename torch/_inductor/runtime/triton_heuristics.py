@@ -1665,34 +1665,60 @@ class CachingAutotuner(KernelInterface):
         return launcher
 
     def save_gpu_kernel(self, stream, launcher):
+        """Save compiled GPU kernel metadata to the CudaKernelParamCache."""
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
-        params = {
-            "mangled_name": (
-                launcher.bin.metadata.name
-                if hasattr(launcher.bin.metadata, "name")
-                else launcher.bin.metadata["name"]
-            ),
-            "num_warps": (
-                launcher.bin.num_warps
-                if hasattr(launcher.bin, "num_warps")
-                else launcher.bin.metadata.num_warps
-            ),
-            "shared_mem": (
-                launcher.bin.shared
-                if hasattr(launcher.bin, "shared")
-                else launcher.bin.metadata.shared
-            ),
-            "stream": stream,
-            # User defined triton kernels will have arbitrary kwarg names
-            "config": config_to_dict(launcher.config),
-            "inductor_meta": self.inductor_meta,
-            "triton_meta": self.triton_meta,
-            "def_args": launcher.def_args,
-            "call_args": launcher.call_args,
-            "global_scratch": launcher.global_scratch,
-            "profile_scratch": launcher.profile_scratch,
-        }
+
+        from torch._inductor import config as inductor_config
+
+        # Prefer Level 0 launch metadata schema (versioned, stable contract)
+        # over hasattr probing of CompiledKernel internals.
+        # TODO: When the AOTI C++ launch path gains cuLaunchKernelEx support for
+        # CTA clusters, add num_ctas/cluster_dims here from the schema.
+        # Currently num_ctas is already captured via config_to_dict(launcher.config)
+        # for scratch space scaling, but is not used in the actual kernel launch.
+        schema = getattr(launcher.bin, "launch_metadata_schema", None)
+        if schema is not None and inductor_config.use_launch_metadata_schema:
+            params = {
+                "mangled_name": schema["entry_name"],
+                "num_warps": schema["num_warps"],
+                "shared_mem": schema["shared_mem"],
+                "stream": stream,
+                "config": config_to_dict(launcher.config),
+                "inductor_meta": self.inductor_meta,
+                "triton_meta": self.triton_meta,
+                "def_args": launcher.def_args,
+                "call_args": launcher.call_args,
+                "global_scratch": launcher.global_scratch,
+                "profile_scratch": launcher.profile_scratch,
+            }
+        else:
+            # Fallback: hasattr probing for older Triton versions
+            params = {
+                "mangled_name": (
+                    launcher.bin.metadata.name
+                    if hasattr(launcher.bin.metadata, "name")
+                    else launcher.bin.metadata["name"]
+                ),
+                "num_warps": (
+                    launcher.bin.num_warps
+                    if hasattr(launcher.bin, "num_warps")
+                    else launcher.bin.metadata.num_warps
+                ),
+                "shared_mem": (
+                    launcher.bin.shared
+                    if hasattr(launcher.bin, "shared")
+                    else launcher.bin.metadata.shared
+                ),
+                "stream": stream,
+                "config": config_to_dict(launcher.config),
+                "inductor_meta": self.inductor_meta,
+                "triton_meta": self.triton_meta,
+                "def_args": launcher.def_args,
+                "call_args": launcher.call_args,
+                "global_scratch": launcher.global_scratch,
+                "profile_scratch": launcher.profile_scratch,
+            }
 
         from torch._inductor import config
         from torch._inductor.codecache import CudaKernelParamCache
