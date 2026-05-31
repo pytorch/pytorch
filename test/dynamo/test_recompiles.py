@@ -8,6 +8,7 @@ from torch._dynamo import config as dc
 
 
 _GLOBAL_SPLIT_SIZE = 0
+_MISSING = object()
 
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
@@ -187,6 +188,30 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             _GLOBAL_SPLIT_SIZE = old_split_size
 
         self.assertEqual(counter.frame_count, 2)
+
+    def test_automatic_dynamic_keeps_torch_module_int_attrs_static(self):
+        attr_name = "_dynamo_test_int"
+        old_value = getattr(torch, attr_name, _MISSING)
+
+        def foo(x):
+            import torch
+
+            return x * torch._dynamo_test_int
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(foo, backend=counter, fullgraph=True)
+
+        try:
+            for value in [2, 3, 4]:
+                setattr(torch, attr_name, value)
+                opt(torch.randn(2))
+        finally:
+            if old_value is _MISSING:
+                delattr(torch, attr_name)
+            else:
+                setattr(torch, attr_name, old_value)
+
+        self.assertEqual(counter.frame_count, 3)
 
     def test_aliasing_guard_failures(self):
         def foo(a, b, c):

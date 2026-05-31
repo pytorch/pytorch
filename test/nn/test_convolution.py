@@ -598,6 +598,35 @@ class TestConvolutionNN(NNTestCase):
                         (inputs.cpu(), weight.cpu(), bias.cpu()),
                     )
 
+                # Non-batched must match batched-then-squeezed.
+                inputs_nb = inputs[0]
+                with torch.backends.cudnn.flags(enabled=False):
+                    res_nb = convfn(inputs_nb, weight, bias, **kwargs)
+                    res_via_batched = convfn(
+                        inputs_nb.unsqueeze(0), weight, bias, **kwargs
+                    ).squeeze(0)
+                self.assertEqual(res_nb, res_via_batched)
+
+    def test_slow_conv_dilated3d_unbatched(self):
+        # Direct op call to guarantee the slow path.
+        for device in ["cpu"] + (["cuda"] if TEST_CUDA else []):
+            input = torch.randn(2, 5, 5, 5, dtype=torch.double, device=device)
+            weight = torch.randn(3, 2, 3, 3, 3, dtype=torch.double, device=device)
+            bias = torch.randn(3, dtype=torch.double, device=device)
+            kwargs = dict(
+                kernel_size=[3, 3, 3],
+                stride=[1, 1, 1],
+                padding=[0, 0, 0],
+                dilation=[2, 2, 2],
+            )
+            out_nb = torch.ops.aten.slow_conv_dilated3d(
+                input, weight, bias=bias, **kwargs
+            )
+            out_batched = torch.ops.aten.slow_conv_dilated3d(
+                input.unsqueeze(0), weight, bias=bias, **kwargs
+            ).squeeze(0)
+            self.assertEqual(out_nb, out_batched)
+
     def test_Conv2d_inconsistent_types(self):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float)
         weights = torch.randn(1, 1, 3, 3, dtype=torch.double)

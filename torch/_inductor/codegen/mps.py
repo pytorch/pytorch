@@ -431,17 +431,9 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::rand({seed}, {offset})"
 
     @staticmethod
-    def rand4x(seed: CSEVariable, offset: CSEVariable) -> str:
-        return MetalOverrides.rand(seed, offset)
-
-    @staticmethod
     def randn(seed: CSEVariable, offset: CSEVariable) -> str:
         V.kernel.headers.add("random")
         return f"c10::metal::randn({seed}, {offset})"
-
-    @staticmethod
-    def randn4x(seed: CSEVariable, offset: CSEVariable) -> str:
-        return MetalOverrides.randn(seed, offset)
 
     @staticmethod
     def randint64(

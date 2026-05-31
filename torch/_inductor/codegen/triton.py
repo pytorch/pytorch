@@ -2053,14 +2053,6 @@ class TritonOverrides(OpOverrides):
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
-    def rand4x(seed, offset):
-        if not isinstance(V.kernel, TritonKernel) or V.kernel.triton_tensor_ndim() != 1:
-            return TritonOverrides.rand(seed, offset)
-        offset = f"({offset}).to(tl.uint32)"
-        (block,) = V.kernel.dense_size_list()
-        return f"triton_helpers.rand4x({seed}, {offset}, {block})"
-
-    @staticmethod
     def rand_eager(seed, base_offset, threads_per_round, tid, vec):
         # vec: 4 for fp32, 8 for fp16/bf16
         tid_u32 = f"({tid}).to(tl.uint32)"
@@ -2074,14 +2066,6 @@ class TritonOverrides(OpOverrides):
     def randn(seed, offset):
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
-
-    @staticmethod
-    def randn4x(seed, offset):
-        if not isinstance(V.kernel, TritonKernel) or V.kernel.triton_tensor_ndim() != 1:
-            return TritonOverrides.randn(seed, offset)
-        offset = f"({offset}).to(tl.uint32)"
-        (block,) = V.kernel.dense_size_list()
-        return f"triton_helpers.randn4x({seed}, {offset}, {block})"
 
     @staticmethod
     def randint64(seed, offset, low, high):

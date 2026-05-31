@@ -34,7 +34,7 @@ from torch._inductor.fx_passes.bucketing import (
     reduce_scatter_merge_fn_to_trace_custom_ops,
 )
 from torch._inductor.scheduler import (
-    _get_mm_like_fn,
+    _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     get_estimate_runtime_cache,
     get_estimate_runtime_cache_key_from_snode,
@@ -2212,7 +2212,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             if torch._inductor.config.runtime_estimations_mms_benchmark:
                 cache = get_estimate_runtime_cache()
                 for snode in snodes:
-                    if _get_mm_like_fn(snode) is None:
+                    if _get_benchmarkable_extern_fn(snode) is None:
                         continue
                     cache_key = get_estimate_runtime_cache_key_from_snode(snode)
                     if cache.lookup(cache_key) is None:
