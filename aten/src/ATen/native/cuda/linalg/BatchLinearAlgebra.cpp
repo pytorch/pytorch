@@ -898,7 +898,7 @@ namespace {
   // that cuSOLVER overtakes cuBLAS at smaller N for complex128.
   //
   // NOTE: additionally validated on Blackwell CUDA 13.2 with FP64 emulation
-  // on/off for both cuBLAS/cuSOLVER (i.e. 4 combinations).
+  // on/off for cuSOLVER (on by default for cuBLAS).
   // No severe mispredictions observed.
   inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype) {
     // cuBLAS does not support rectangular inputs.
