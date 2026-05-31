@@ -1030,13 +1030,20 @@ static Tensor send_to_meta(const Tensor& self, const Device& device) {
   auto options = self.options().device(device);
   // These tensors are only used by meta kernels to compute result metadata.
   // Calling to(meta) here can redispatch efficient ZeroTensors through AD.
-  if (self.layout() == kStrided) {
+  const auto is_wrapped_number =
+      self.unsafeGetTensorImpl()->is_wrapped_number();
+  if (is_wrapped_number && !self._is_zerotensor()) {
+    return self;
+  }
+  if (self._is_zerotensor() && is_wrapped_number) {
+    out_meta = at::_efficientzerotensor_symint(self.sym_sizes(), options);
+  } else if (self.layout() == kStrided) {
     out_meta = at::empty_strided_symint(
         self.sym_sizes(), self.sym_strides(), options);
   } else {
     out_meta = at::empty_symint(self.sym_sizes(), options);
   }
-  if (self.unsafeGetTensorImpl()->is_wrapped_number()) {
+  if (is_wrapped_number) {
     out_meta.unsafeGetTensorImpl()->set_wrapped_number(true);
   }
   return out_meta;
