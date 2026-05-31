@@ -16,6 +16,7 @@ import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from torch._dynamo import config as dynamo_config
 from torch._higher_order_ops.triton_kernel_wrap import (
+    clone_preserve_strides_for_triton_kernel_wrapper,
     generate_ttir,
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
@@ -483,8 +484,8 @@ def forward(self, x_1, output_1):
 
             output_code = log_stream.getvalue()
 
-        FileCheck().check("del buf3").check(
-            "dual_output_kernel_with_inline_asm_0.run(x_1, buf0,"
+        FileCheck().check_regex(r"del buf[0-9]*").check_regex(
+            r"dual_output_kernel_with_inline_asm_0\.run\(x_1, buf[0-9]*, buf[0-9]*,"
         ).run(output_code)
 
         eager_result = f(t.clone())[0]
@@ -1348,6 +1349,52 @@ def forward(self, x_1, output_1):
         eager_out = f(inp)
         compiled_out = torch.compile(f)(inp)
         self.assertEqual(compiled_out, eager_out)
+
+    @requires_gpu
+    def test_triton_kernel_mutates_strided_intermediate(self):
+        @triton.jit
+        def add_one_strided_kernel(
+            in_ptr,
+            out_ptr,
+            n_cols: tl.constexpr,
+            stride_b: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            row = tl.program_id(0)
+            offsets = tl.arange(0, BLOCK_N)
+            mask = offsets < n_cols
+            values = tl.load(in_ptr + row * stride_b + offsets, mask=mask, other=0.0)
+            tl.store(out_ptr + row * stride_b + offsets, values + 1.0, mask=mask)
+
+        def triton_update(x):
+            out = x
+            add_one_strided_kernel[(x.size(0),)](
+                x,
+                out,
+                x.size(1),
+                x.stride(0),
+                BLOCK_N=4096,
+            )
+            return out
+
+        def f(base):
+            x = (base + 1)[:, :4096]
+            return triton_update(x)
+
+        base = torch.randn(64, 8192, device=GPU_TYPE)
+        eager_out = f(base.clone())
+        compiled_out = torch.compile(f, fullgraph=True)(base.clone())
+
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(compiled_out.stride(), eager_out.stride())
+
+    def test_triton_kernel_clone_preserves_overlapping_arg_behavior(self):
+        inp = torch.randn(1).expand(4)
+
+        cloned = clone_preserve_strides_for_triton_kernel_wrapper(inp)
+
+        self.assertEqual(cloned, inp)
+        self.assertEqual(cloned.stride(), inp.stride())
 
     @inductor_config.patch(
         triton_kernel_default_layout_constraint="needs_fixed_stride_order"
