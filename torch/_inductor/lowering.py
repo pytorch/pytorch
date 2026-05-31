@@ -3201,9 +3201,14 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
 
 
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
+    def get_fake_val(fx_arg):
+        if isinstance(fx_arg, torch.fx.Node):
+            return fx_arg.meta.get("val")
+        return fx_arg
+
     def apply_constraint(arg, fx_arg):
+        fake_val = get_fake_val(fx_arg)
         if _is_tensor_irnode(arg):
-            fake_val = fx_arg.meta.get("val")
             if not isinstance(fake_val, torch.Tensor):
                 return arg
             stride_order = ir.get_stride_order(
@@ -3211,7 +3216,15 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
-            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg}
+            if not isinstance(fake_val, dict):
+                return arg
+            return {key: apply_constraint(arg[key], fake_val[key]) for key in arg}
+        if isinstance(arg, (tuple, list)):
+            if not isinstance(fake_val, (tuple, list)):
+                return arg
+            return type(arg)(
+                apply_constraint(a, fx_a) for a, fx_a in zip(arg, fake_val)
+            )
         return arg
 
     args = tuple(
