@@ -482,6 +482,13 @@ def main() -> None:
 
     env_out: dict[str, str] = {**COMMON_BUILD_ENV}
 
+    # Point CMake at the running Python's Library/ tree so it can find
+    # MKL (installed by build_install_deps.py via pip mkl-include/mkl-static).
+    # Without this, BLAS_LIBRARIES is unset and the MSVC TH_BINARY_BUILD
+    # branch in aten/src/ATen/CMakeLists.txt appends a literal NOTFOUND to
+    # ATen_CUDA_DEPENDENCY_LIBS, which breaks linking torch_cuda.dll.
+    env_out["CMAKE_PREFIX_PATH"] = str(Path(sys.prefix) / "Library")
+
     # Locate vcvarsall.bat up front so XPU can hand the VS install root to
     # oneAPI's vars.bat. vcvarsall lives at
     # <VS_INSTALL>/VC/Auxiliary/Build/vcvarsall.bat.
