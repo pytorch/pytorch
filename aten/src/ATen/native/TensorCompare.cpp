@@ -131,6 +131,24 @@ TORCH_META_FUNC(clamp)
   }
   // make sure scalars weren't complex
   check_for_unsupported_clamp_dtypes(result_type);
+  // For reduced-precision floating types, verify scalar bounds are
+  // representable. CPU kernels convert via .to<scalar_t>() which checks
+  // overflow, but CUDA kernels promote to opmath_t (float) first, silently
+  // bypassing the check. Checking here ensures consistent device behavior.
+  if (isReducedFloatingType(result_type)) {
+    if (min) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(
+          result_type, "clamp_scalar_bounds_check", [&] {
+            (void)min.get().to<scalar_t>();
+          });
+    }
+    if (max) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(
+          result_type, "clamp_scalar_bounds_check", [&] {
+            (void)max.get().to<scalar_t>();
+          });
+    }
+  }
   build_unary_op(maybe_get_output(), self.to(result_type));
 }
 
