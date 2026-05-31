@@ -5259,8 +5259,11 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         torch._dynamo.decorators.mark_unbacked(x2, 0, shape_id="batch")
         torch._dynamo.decorators.mark_unbacked(y2, 0, shape_id="batch")
 
-        # Should raise an AssertionError during guard building because batch sizes don't match
-        with self.assertRaises(AssertionError):
+        # Should fail during guard building because batch sizes don't match.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Guard failed on the same frame it was created",
+        ):
             compiled_func(x2, y2)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
