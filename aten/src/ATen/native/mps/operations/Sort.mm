@@ -97,13 +97,19 @@ static bool should_use_radix(int sort_size, size_t elem_size, int elems_per_tg, 
   return radix_dispatches <= 2 * merge_dispatches + 2;
 }
 
+// `max_passes`, when > 0, caps the number of LSD passes so only the low
+// `max_passes * radix_bits` bits of each key are sorted. The result is then a
+// partial sort (correct ordering by those low bits only); callers that just
+// need a permutation of random keys (e.g. randperm) use this to trade unsorted
+// high bits for fewer passes. Default (-1) sorts all bits.
 static void sort_radix(const Tensor& input,
                        const Tensor& values,
                        const Tensor& indices,
                        int64_t dim,
                        bool descending,
                        int sort_size,
-                       TopKParams sel = {}) {
+                       TopKParams sel = {},
+                       int max_passes = -1) {
   const bool sel_mode = sel.count > 0;
   bool need_permute = (dim != input.ndimension() - 1);
   Tensor work_in = input;
@@ -120,7 +126,10 @@ static void sort_radix(const Tensor& input,
   const size_t elem_size = values.element_size();
   const int radix_bits = (elem_size == 1) ? 4 : 8;
   const int radix_size = 1 << radix_bits;
-  const int n_passes = (8 * static_cast<int>(elem_size)) / radix_bits;
+  int n_passes = (8 * static_cast<int>(elem_size)) / radix_bits;
+  if (max_passes > 0) {
+    n_passes = std::min(n_passes, max_passes);
+  }
   // 2-byte many-row: drop RTPTG 1024->512 to halve per-TG tgmem -> 2 TGs/core.
   const bool small_tg = (elem_size == 2 && n_rows >= 32);
   const int RADIX_TPTG = (elem_size == 2 && !small_tg) ? 1024 : 512;
@@ -538,6 +547,21 @@ void kthvalue_out_mps_impl(const Tensor& self, int64_t k, int64_t dim, Tensor& v
 }
 
 } // namespace
+
+namespace mps {
+Tensor randperm_argsort_lowbits_metal(const Tensor& keys, int n_passes, Tensor& sorted_keys) {
+  const int sort_size = static_cast<int>(keys.numel());
+  // `sorted_keys` (keys reordered by the sort) lets the caller find equal-key
+  // islands for the dedup pass that restores exact uniformity.
+  sorted_keys = at::empty_like(keys);
+  // sort_radix always writes int64 permutation indices via its final scatter;
+  // any narrower index width is internal staging chosen by sort_radix itself.
+  Tensor indices = at::empty({sort_size}, at::TensorOptions().dtype(at::kLong).device(keys.device()));
+  sort_radix(
+      keys, sorted_keys, indices, /*dim=*/0, /*descending=*/false, sort_size, /*sel=*/{}, /*max_passes=*/n_passes);
+  return indices;
+}
+} // namespace mps
 
 TORCH_IMPL_FUNC(sort_stable_out_mps)(const Tensor& self,
                                      std::optional<bool> stable,
