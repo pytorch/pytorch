@@ -2877,7 +2877,7 @@ class TritonTemplate(KernelTemplate):
         )
 
         extra_args = tuple(
-            V.graph.sizevars.optimization_hint_with_override(
+            V.graph.sizevars.upper_bound_or_hint_with_override(
                 sympy.expand(e),
                 hint_override=hint_override,
             )
@@ -2892,7 +2892,10 @@ class TritonTemplate(KernelTemplate):
         workspace_zero_fill = False
         workspace_args = []
         if workspace_arg is not None:
-            ws_count = V.graph.sizevars.optimization_hint(workspace_arg.count)
+            ws_count = V.graph.sizevars.upper_bound_or_hint_with_override(
+                workspace_arg.count,
+                hint_override=hint_override,
+            )
             workspace_size_bytes = ws_count * get_dtype_size(workspace_arg.dtype)
             workspace_zero_fill = (
                 workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED
@@ -2939,7 +2942,7 @@ class TritonTemplate(KernelTemplate):
         assert result.mod.__file__ is not None
 
         grid = self.grid(
-            *V.graph.sizevars.optimization_hints_with_override(
+            *V.graph.sizevars.upper_bounds_or_hints_with_override(
                 call_sizes,
                 hint_override=hint_override,
             ),
@@ -2964,8 +2967,13 @@ class TritonTemplate(KernelTemplate):
             kpack=kwargs.get("kpack", 2),
             workspace_size=workspace_size_bytes,
             workspace_zero_fill=workspace_zero_fill,
-            input_tensor_meta=TensorMeta.from_irnodes(kernel_input_nodes),  # type: ignore[arg-type]
-            output_tensor_meta=TensorMeta.from_irnodes(layout),
+            input_tensor_meta=TensorMeta.from_irnodes(
+                kernel_input_nodes,  # type: ignore[arg-type]
+                hint_override=hint_override,
+            ),
+            output_tensor_meta=TensorMeta.from_irnodes(
+                layout, hint_override=hint_override
+            ),
         )
 
         # Convolution-specific parameters to include in logging
@@ -4168,7 +4176,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "x".join(
                     map(
                         str,
-                        sizevars.optimization_hints_with_override(
+                        sizevars.upper_bounds_or_hints_with_override(
                             node.get_size(),
                             hint_override=hint_override,
                         ),
@@ -4641,16 +4649,16 @@ class AlgorithmSelectorCache(PersistentCache):
                     strides = tuple(input_tensor.stride())
                     storage_offset = input_tensor.storage_offset()
                 else:
-                    # Use IR node's shape resolved via size hints
-                    sizes = V.graph.sizevars.optimization_hints_with_override(
+                    # Use the autotune benchmark shape represented by the IR node.
+                    sizes = V.graph.sizevars.upper_bounds_or_hints_with_override(
                         input_node.get_size(),
                         hint_override=hint_override,
                     )
-                    strides = V.graph.sizevars.optimization_hints_with_override(
+                    strides = V.graph.sizevars.upper_bounds_or_hints_with_override(
                         get_strides_with_layout_constraints(input_node),
                         hint_override=hint_override,
                     )
-                    storage_offset = V.graph.sizevars.optimization_hint_with_override(
+                    storage_offset = V.graph.sizevars.upper_bound_or_hint_with_override(
                         input_node.get_layout().offset,
                         hint_override=hint_override,
                     )
@@ -4691,7 +4699,11 @@ class AlgorithmSelectorCache(PersistentCache):
         out_base = out if out._base is None else out._base
         # Only used for benchmarking tensor setup, not correctness.
         # Offset is almost always 0; use that as fallback.
-        out_offset = V.graph.sizevars.optimization_hint(layout.offset, fallback=0)
+        out_offset = V.graph.sizevars.upper_bound_or_hint_with_override(
+            layout.offset,
+            hint_override=hint_override,
+            fallback=0,
+        )
         needed_out_size = torch._prims_common.compute_required_storage_length(
             out.size(), out.stride(), out_offset
         )
@@ -5532,7 +5544,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "x".join(
                     map(
                         str,
-                        V.graph.sizevars.optimization_hints_with_override(
+                        V.graph.sizevars.upper_bounds_or_hints_with_override(
                             n.get_size(),
                             hint_override=hint_override,
                         ),
@@ -5614,21 +5626,21 @@ class AlgorithmSelectorCache(PersistentCache):
         # So we need call as_strided in the end to 'view' the tensor with the correct
         # sizes/strides
         result = AlgorithmSelectorCache.generate_example_value(
-            V.graph.sizevars.optimization_hints_with_override(
+            V.graph.sizevars.upper_bounds_or_hints_with_override(
                 node.get_size(),
                 hint_override=hint_override,
             ),
-            V.graph.sizevars.optimization_hints_with_override(
+            V.graph.sizevars.upper_bounds_or_hints_with_override(
                 get_strides_with_layout_constraints(node),
                 hint_override=hint_override,
             ),
             node.get_device(),
             node.get_dtype(),
-            V.graph.sizevars.optimization_hint_with_override(
+            V.graph.sizevars.upper_bound_or_hint_with_override(
                 node.layout.offset,
                 hint_override=hint_override,
             ),
-            V.graph.sizevars.optimization_hints_with_override(
+            V.graph.sizevars.upper_bounds_or_hints_with_override(
                 V.graph.get_allocation_size(node),
                 hint_override=hint_override,
             ),
@@ -5672,11 +5684,11 @@ class AlgorithmSelectorCache(PersistentCache):
         return (
             node.get_device().type,
             str(node.get_dtype()),
-            *sizevars.optimization_hints(node.get_size()),
-            *V.graph.sizevars.optimization_hints(
+            *sizevars.upper_bounds_or_hints(node.get_size()),
+            *V.graph.sizevars.upper_bounds_or_hints(
                 get_strides_with_layout_constraints(node)
             ),
-            sizevars.optimization_hint(node.get_layout().offset),
+            sizevars.upper_bound_or_hint(node.get_layout().offset),
         )
 
     def add_feedback_saver(self, fn: FeedbackFunction):

@@ -1106,6 +1106,64 @@ class SizeVarAllocator:
             fallback = config.unbacked_symint_fallback
         return tuple(self.optimization_hint(x, fallback=fallback) for x in exprs)
 
+    @staticmethod
+    def _finite_upper_bound_to_int(upper: Any) -> int | None:
+        if upper in (int_oo, -int_oo, sympy.oo, -sympy.oo):
+            return None
+        if isinstance(upper, sympy.Basic):
+            if upper.has(sympy.nan) or upper.free_symbols:
+                return None
+            upper = sympy.ceiling(upper)
+        try:
+            return int(upper)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def upper_bound_or_hint(
+        self,
+        expr: Expr | int,
+        fallback: int | None = None,
+    ) -> int:
+        """
+        Return the finite upper bound for a symbolic size expression when known.
+
+        This is for non-guarding optimization decisions such as autotuning
+        example tensor shapes.  If the expression is static, return it directly.
+        If the dynamic range has a finite upper bound, use that bound.  Otherwise
+        fall back to :meth:`optimization_hint`.
+        """
+        if isinstance(expr, int):
+            return expr
+
+        simplified = self.simplify(expr)
+        realized = _maybe_realize_expr(simplified, fallback)
+        if realized is not None:
+            return int(realized)
+
+        if isinstance(simplified, Expr):
+            bounded_expr = self.remove_precomputed_replacements(simplified)
+            try:
+                upper = self.shape_env.bound_sympy(bounded_expr).upper
+                upper_int = self._finite_upper_bound_to_int(upper)
+                if upper_int is not None:
+                    return upper_int
+            except Exception:
+                log.debug("Could not compute upper bound for %s", expr, exc_info=True)
+
+        return self.optimization_hint(expr, fallback=fallback)
+
+    def upper_bounds_or_hints(
+        self,
+        exprs: Iterable[Expr | int],
+        fallback: int | None = None,
+    ) -> tuple[int, ...]:
+        """
+        Like :meth:`upper_bound_or_hint` but for a sequence of expressions.
+        """
+        if fallback is None:
+            fallback = config.unbacked_symint_fallback
+        return tuple(self.upper_bound_or_hint(x, fallback=fallback) for x in exprs)
+
     def all_unbacked_explicitly_hinted(self, exprs: IterateExprs) -> bool:
         """
         Return True if every unbacked symbol in *exprs* has an explicit
@@ -1161,6 +1219,37 @@ class SizeVarAllocator:
         """
         return tuple(
             self.optimization_hint_with_override(e, hint_override) for e in exprs
+        )
+
+    def upper_bound_or_hint_with_override(
+        self,
+        expr: Expr | int,
+        hint_override: int | None,
+        fallback: int | None = None,
+    ) -> int:
+        if isinstance(expr, int):
+            return expr
+
+        simplified = _maybe_realize_expr(self.simplify(expr), None)
+        if simplified is not None:
+            return int(simplified)
+
+        if hint_override is not None:
+            return hint_override
+
+        return self.upper_bound_or_hint(expr, fallback=fallback)
+
+    def upper_bounds_or_hints_with_override(
+        self,
+        exprs: Iterable[Expr | int],
+        hint_override: int | None,
+        fallback: int | None = None,
+    ) -> tuple[int, ...]:
+        if fallback is None:
+            fallback = config.unbacked_symint_fallback
+        return tuple(
+            self.upper_bound_or_hint_with_override(e, hint_override, fallback=fallback)
+            for e in exprs
         )
 
     def guarding_hints_or_throw(
