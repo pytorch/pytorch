@@ -67,19 +67,6 @@ TORCH_API void ambiguous_autogradother_kernel(
     DispatchKeySet /*unused*/,
     Stack* /*unused*/);
 
-// Note [named_not_supported_kernel]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// This kernel implements reporting an error message saying that named tensor is
-// not supported.  This kernel doesn't rely on the Stack, and so it is special
-// cased in the dispatcher to be triggered before we attempt boxing (so we can
-// give a good error message in cases when boxing is not supported).  When
-// boxing is universally supported this can be removed.
-[[noreturn]] TORCH_API void named_not_supported_kernel(
-    OperatorKernel* /*unused*/,
-    const OperatorHandle& /*op*/,
-    DispatchKeySet /*unused*/,
-    Stack* /*unused*/);
-
 /**
  * BoxedKernel is similar to a std::function storing a boxed kernel.
  */
@@ -178,7 +165,6 @@ class TORCH_API BoxedKernel final {
 
   static BoxedKernel makeFallthrough();
   static BoxedKernel makeAmbiguousAutogradOther();
-  static BoxedKernel makeNamedNotSupported();
 
  private:
   friend class KernelFunction;
