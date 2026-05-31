@@ -261,6 +261,7 @@ class TimmRunner(BenchmarkRunner):
             and self.args.backend == "inductor"
             and self.args.ci
             and self.args.accuracy
+            and self.args.training
         ):
             ci_accuracy_batch_sizes = self._batch_size.get("ci_accuracy", {})
             batch_size = ci_accuracy_batch_sizes.get(model_name, batch_size)

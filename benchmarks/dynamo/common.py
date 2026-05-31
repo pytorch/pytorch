@@ -203,9 +203,9 @@ BENCHMARK_USE_SGD = {
 }
 
 # These CUDA Inductor TIMM models fail fp16 training accuracy with the default
-# eager Adam reference, but this has not been validated for non-Inductor or ROCm
-# periodic baselines.
-CUDA_INDUCTOR_BENCHMARK_USE_SGD = {
+# eager Adam reference, but this has not been validated for non-accuracy runs,
+# non-Inductor, or ROCm periodic baselines.
+CUDA_INDUCTOR_ACCURACY_USE_SGD = {
     "convnextv2_nano.fcmae_ft_in22k_in1k",
     "vit_base_patch14_dinov2.lvd142m",
 }
@@ -1869,7 +1869,8 @@ class BenchmarkRunner:
                 or (
                     torch.version.hip is None
                     and self.args.backend == "inductor"
-                    and name in CUDA_INDUCTOR_BENCHMARK_USE_SGD
+                    and self.args.accuracy
+                    and name in CUDA_INDUCTOR_ACCURACY_USE_SGD
                 )
             )
             if use_sgd:
