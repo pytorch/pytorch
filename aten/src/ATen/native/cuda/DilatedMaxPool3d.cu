@@ -3,7 +3,6 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/Atomic.cuh>
@@ -45,9 +44,9 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
   int offsetZ,
   bool channels_last)
 {
-  int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  int oRow = blockIdx.y * blockDim.y + threadIdx.y;
-  int oFrame = 0;
+  int64_t oColumn = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t oRow = blockIdx.y * blockDim.y + threadIdx.y;
+  int64_t oFrame = 0;
   // used only for channels-first indexing
   int64_t slice = 0;
   // used only for channels-last indexing
@@ -86,7 +85,7 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
     int64_t maxIndex = tStart * iheight * iwidth + hStart * iwidth + wStart;
 
     if (!channels_last) {
-        inputData += (int64_t) slice * itime * iheight * iwidth;
+        inputData += slice * itime * iheight * iwidth;
     } else {
         inputData += ((int64_t) batch * itime * iheight * iwidth * features) + channel;
     }
@@ -119,7 +118,7 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
 
     int64_t out_index;
     if (!channels_last) {
-      out_index = (int64_t) slice*otime*oheight*owidth + oFrame*oheight*owidth + oRow*owidth + oColumn;
+      out_index = slice*otime*oheight*owidth + oFrame*oheight*owidth + oRow*owidth + oColumn;
     } else {
       out_index = ((int64_t) batch*otime*oheight*owidth + oFrame*oheight*owidth + oRow*owidth + oColumn)*features + channel;
     }
@@ -193,10 +192,10 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   int offsetZ,
   bool channels_last)
 {
-  int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  int oRow = blockIdx.y * blockDim.y + threadIdx.y;
+  int64_t oColumn = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t oRow = blockIdx.y * blockDim.y + threadIdx.y;
 
-  int oFrame = 0;
+  int64_t oFrame = 0;
   // used only for channels-first indexing
   int64_t slice = 0;
   // used only for channels-last indexing
@@ -218,14 +217,14 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   {
     int64_t out_index;
     if (!channels_last) {
-      out_index = (int64_t) slice*otime*oheight*owidth + oFrame*oheight*owidth + oRow*owidth + oColumn;
+      out_index = slice*otime*oheight*owidth + oFrame*oheight*owidth + oRow*owidth + oColumn;
     } else {
       out_index = ((int64_t) batch*otime*oheight*owidth + oFrame*oheight*owidth + oRow*owidth + oColumn)*features + channel;
     }
     int64_t maxIndex = indicesData[out_index];
     if (maxIndex != -1) {
       if (!channels_last) {
-        gpuAtomicAddNoReturn(&gradInputData[(int64_t) slice * itime  * iheight * iwidth + maxIndex],
+        gpuAtomicAddNoReturn(&gradInputData[slice * itime  * iheight * iwidth + maxIndex],
           gradOutputData[out_index]);
       } else {
         gpuAtomicAddNoReturn(&gradInputData[((int64_t) batch * itime * iheight * iwidth + maxIndex) * features + channel],
@@ -304,7 +303,7 @@ void max_pool3d_with_indices_out_cuda_template(
   const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
   const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
 
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 3,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
   const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
   const int dH = stride.empty() ? kH :
@@ -434,7 +433,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
   const int kH = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[1], "int");
   const int kW = kernel_size.size() == 1 ? kT : c10::checked_convert<int>(kernel_size[2], "int");
 
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 3,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
   const int dT = stride.empty() ? kT : c10::checked_convert<int>(stride[0], "int");
   const int dH = stride.empty() ? kH :
@@ -575,7 +574,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cuda(
   IntArrayRef dilation,
   bool ceil_mode)
 {
-  NoNamesGuard guard;
 
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
@@ -588,10 +586,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cuda(
     padding,
     dilation,
     ceil_mode);
-
-  guard.reset();
-  namedinference::propagate_names(output, input);
-  namedinference::propagate_names(indices, input);
 
   return std::tuple<Tensor, Tensor>(output, indices);
 }

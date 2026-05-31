@@ -28,9 +28,17 @@ inline T exp_(const T x) {
 
 template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
 inline T exp_(const T x) {
+  auto ex = precise::exp(x.x);
+  // y == 0: avoid inf*0 / nan*0 = NaN in imag (matches C99 cexp).
+  if (x.y == 0) {
+    return T(ex, 0);
+  }
+  // Metal lacks a half sincos; do it in float (free for float complex, more
+  // accurate for half complex).
+  float c;
+  float s = precise::sincos(static_cast<float>(x.y), c);
   return T(
-      precise::exp(x.x) * precise::cos(x.y),
-      precise::exp(x.x) * precise::sin(x.y));
+      ex * static_cast<decltype(ex)>(c), ex * static_cast<decltype(ex)>(s));
 }
 
 struct exp_functor {
@@ -59,10 +67,17 @@ struct expm1_functor {
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
+    // y == 0: same rationale as exp_ short-circuit above.
+    if (x.y == 0) {
+      return T(c10::metal::expm1f(x.x), 0);
+    }
     if (::precise::sqrt(dot(x, x)) < 1e-2) {
+      float c;
+      float s = precise::sincos(static_cast<float>(x.y), c);
+      using elem_t = decltype(x.x + x.x); // unwrapped value type
       return T(
-          c10::metal::expm1f(x.x + ::precise::log(precise::cos(x.y))),
-          exp_(x.x) * precise::sin(x.y));
+          c10::metal::expm1f(x.x + ::precise::log(static_cast<elem_t>(c))),
+          exp_(x.x) * static_cast<elem_t>(s));
     } else {
       return exp_(x) - T(1.0f, 0.0f);
     }
@@ -107,12 +122,13 @@ struct sin_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // sin(x+yi)=sin(x)cosh(y)+icos(x)sinh(y);
-    auto sin_x = precise::sin(x.x);
-    auto cosh_y = precise::cosh(x.y);
-    auto cos_x = precise::cos(x.x);
-    auto sinh_y = precise::sinh(x.y);
-    return T(sin_x * cosh_y, cos_x * sinh_y);
+    // sin(x+yi)=sin(x)cosh(y)+icos(x)sinh(y); float sincos covers half too.
+    float cos_x;
+    float sin_x = precise::sincos(static_cast<float>(x.x), cos_x);
+    using elem_t = decltype(x.x + x.x);
+    return T(
+        static_cast<elem_t>(sin_x) * precise::cosh(x.y),
+        static_cast<elem_t>(cos_x) * precise::sinh(x.y));
   }
 };
 
@@ -127,12 +143,13 @@ struct cos_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // cos(x+yi)=cos(x)cosh(y)-isin(x)sinh(y);
-    auto sin_x = precise::sin(x.x);
-    auto cosh_y = precise::cosh(x.y);
-    auto cos_x = precise::cos(x.x);
-    auto sinh_y = precise::sinh(x.y);
-    return T(cos_x * cosh_y, -1 * sin_x * sinh_y);
+    // cos(x+yi)=cos(x)cosh(y)-isin(x)sinh(y); float sincos covers half too.
+    float cos_x;
+    float sin_x = precise::sincos(static_cast<float>(x.x), cos_x);
+    using elem_t = decltype(x.x + x.x);
+    return T(
+        static_cast<elem_t>(cos_x) * precise::cosh(x.y),
+        -static_cast<elem_t>(sin_x) * precise::sinh(x.y));
   }
 };
 
@@ -165,14 +182,8 @@ struct sinh_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // sinh(x) = (e^x - e^(-x)) / 2
-    auto exp_1 =
-        T(precise::exp(x.x) * precise::cos(x.y),
-          precise::exp(x.x) * precise::sin(x.y));
-    auto exp_2 =
-        T(precise::exp(-x.x) * precise::cos(-x.y),
-          precise::exp(-x.x) * precise::sin(-x.y));
-    return div(exp_1 - exp_2, T(2, 0));
+    // sinh(x) = (e^x - e^(-x)) / 2; delegate to exp_ to inherit y==0 fix.
+    return div(exp_(x) - exp_(T(-x.x, -x.y)), T(2, 0));
   }
 };
 
@@ -187,14 +198,8 @@ struct cosh_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // cosh(x+iy)=(e^x + e^(-x)) / 2
-    auto exp_1 =
-        T(precise::exp(x.x) * precise::cos(x.y),
-          precise::exp(x.x) * precise::sin(x.y));
-    auto exp_2 =
-        T(precise::exp(-x.x) * precise::cos(-x.y),
-          precise::exp(-x.x) * precise::sin(-x.y));
-    return div(exp_1 + exp_2, T(2, 0));
+    // cosh(x+iy) = (e^x + e^(-x)) / 2; delegate to exp_ to inherit y==0 fix.
+    return div(exp_(x) + exp_(T(-x.x, -x.y)), T(2, 0));
   }
 };
 
@@ -368,9 +373,10 @@ struct log10_functor {
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // Base 10 complex log = ln(x+yi)/ln(10)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return div(T(real, imag), T(::precise::log(10), 0));
+    auto real = ::precise::log10(magnitude);
+    auto imag =
+        (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG10E_F;
+    return T(real, imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -395,7 +401,7 @@ struct log1p_functor {
     return T(real, imag);
   }
   inline float operator()(const bool x) {
-    return x ? ::precise::log(2.0) : 0;
+    return x ? M_LN2_F : 0;
   }
 };
 
@@ -410,11 +416,12 @@ struct log2_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // Base 10 complex log = ln(x+yi)/ln(2)
+    // Base 2 complex log = ln(x+yi)/ln(2)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return div(T(real, imag), T(::precise::log(2), 0));
+    auto real = ::precise::log2(magnitude);
+    auto imag =
+        (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG2E_F;
+    return T(real, imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -493,11 +500,16 @@ struct exp2_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // based on https://mathworld.wolfram.com/ComplexExponentiation.html
-    auto coef = ::precise::pow(4, x.x / 2);
-    auto ln = ::precise::log(4);
-    auto real = ::precise::cos(0.5 * x.y * ln);
-    auto imag = ::precise::sin(0.5 * x.y * ln);
-    return T(coef * real, coef * imag);
+    auto coef = ::precise::pow(2, x.x);
+    // y == 0: same rationale as exp_ short-circuit (avoid coef*0 = NaN).
+    if (x.y == 0) {
+      return T(coef, 0);
+    }
+    float real;
+    float imag = ::precise::sincos(static_cast<float>(x.y) * M_LN2_F, real);
+    using elem_t = decltype(x.x + x.x);
+    return T(
+        coef * static_cast<elem_t>(real), coef * static_cast<elem_t>(imag));
   }
 };
 
