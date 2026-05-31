@@ -242,30 +242,47 @@ def create_hop_fw_bw(
         keep_inference_input_mutations=False,
     )
 
-    from torch._higher_order_ops.triton_kernel_wrap import (
-        triton_kernel_wrapper_mutation,
+    def is_mutating_hop(target: Any) -> bool:
+        return (
+            isinstance(target, HigherOrderOperator)
+            and target.__name__.endswith("_mutation")
+            and target.has_kernel_for_dispatch_key(DispatchKey.Functionalize)
+        )
+
+    needs_functionalization = any(
+        node.op == "call_function"
+        and (
+            (
+                isinstance(node.target, torch._ops.OpOverload)
+                and node.target._schema.is_mutable
+            )
+            or is_mutating_hop(node.target)
+        )
+        for node in fw_gm.graph.nodes
     )
 
-    needs_triton_functionalization = any(
-        node.op == "call_function" and node.target is triton_kernel_wrapper_mutation
+    has_mutating_hop = any(
+        node.op == "call_function" and is_mutating_hop(node.target)
         for node in fw_gm.graph.nodes
     )
 
     def run_fw_gm(*args: Any) -> Any:
         # The deferred local_map path builds a joint graph from the already
-        # captured local body. Functionalize Triton mutation wrappers while
-        # tracing the joint so they are preserved as functional HOPs instead of
-        # disappearing under FakeTensorMode.
+        # captured local body while functionalization is suspended. If the
+        # body mutates tensors, functionalize it here so mutations become
+        # dataflow before FakeTensor execution can treat mutation HOPs as
+        # side-effect-only.
         fw_callable: Callable[..., Any] = torch.fx.Interpreter(fw_gm).run
-        if needs_triton_functionalization:
+        if needs_functionalization:
             fw_callable = torch.func.functionalize(fw_callable, remove="mutations")
         return fw_callable(*args)
 
     def trace_joint_f(fake_mode: FakeTensorMode, *args: Any) -> GraphModule:
         trace = make_fx(joint_f)
-        if needs_triton_functionalization:
-            # Triton wrapper HOPs put tensors inside kwargs; keeping the active
-            # FakeTensorMode lets their fake/proxy rules see those nested tensors.
+        if has_mutating_hop:
+            # Some HOP functionalization rules put tensors inside kwargs;
+            # keeping the active FakeTensorMode lets fake/proxy rules see
+            # those nested tensors.
             with fake_mode:
                 return trace(*args)
         return trace(*args)

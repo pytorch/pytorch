@@ -18,6 +18,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.variables.higher_order_ops import LocalMapWrappedHigherOrderVariable
+from torch._functorch._aot_autograd.functional_utils import _is_functional_graph
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -778,6 +779,39 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(fw_returns[0].target, operator.getitem)
         self.assertIs(fw_returns[0].args[0], functional_nodes[0])
         self.assertEqual(fw_returns[0].args[1], "Y_ptr")
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_mutations_index_put_deferred_inlining(self):
+        @local_map(
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def replicate_routing(w, x):
+            y = torch.matmul(x, w.t())
+            idx = torch.argsort(x[:, 0])
+            out = torch.empty_like(y)
+            out[idx] = y
+            return out
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Linear(80, 80)
+
+            def forward(self, x):
+                return replicate_routing(self.w.weight, x)
+
+        joint = ap_style_initial_capture(
+            MyModule(), lambda: (torch.randn(80, 80, requires_grad=True),)
+        )
+        error, _ = _is_functional_graph(joint.graph)
+        self.assertIsNone(error)
 
     @unittest.skipIf(*get_skip_reasons())
     def test_none_placements(self):
