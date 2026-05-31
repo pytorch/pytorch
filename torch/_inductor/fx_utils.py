@@ -2,7 +2,14 @@
 import contextlib
 import operator
 from collections import defaultdict
-from collections.abc import Callable, Container, Generator, Iterable, Mapping
+from collections.abc import (
+    Callable,
+    Collection,
+    Container,
+    Generator,
+    Iterable,
+    Mapping,
+)
 from dataclasses import dataclass
 from functools import partial
 from itertools import chain
@@ -61,6 +68,173 @@ def matches_module_function_pattern(
     if len(node.args[0].users) > 1:
         return False
     return True
+
+
+def _is_fake_tensor_same(
+    new: Any,
+    old: Any,
+    existing_storages: Mapping[int | None, int] | None = None,
+    *,
+    check_dtype: bool = True,
+    check_strides: bool = True,
+    check_storage: bool = True,
+    node: torch.fx.Node | None = None,
+    recursive_ids: OrderedSet[tuple[int, int]] | None = None,
+) -> bool:
+    """Validate that two FakeTensors or collections thereof are the same."""
+
+    def is_intlist_same(new, old):
+        return statically_known_true(sym_eq(new, old))
+
+    if type(new) is not type(old):
+        return False
+
+    if not isinstance(new, torch.Tensor):
+        if new is None:
+            return old is None
+
+        if isinstance(new, Mapping):
+            if new.keys() != old.keys():
+                return False
+            return all(
+                _is_fake_tensor_same(
+                    new[key],
+                    old[key],
+                    existing_storages,
+                    check_dtype=check_dtype,
+                    check_strides=check_strides,
+                    check_storage=check_storage,
+                    node=node,
+                    recursive_ids=recursive_ids,
+                )
+                for key in new
+            )
+
+        if isinstance(new, Collection) and not isinstance(new, (str, bytes)):
+            if recursive_ids is None:
+                recursive_ids = OrderedSet()
+
+            id_pair = (id(new), id(old))
+            visited = id_pair in recursive_ids
+            recursive_ids.add(id_pair)
+
+            # If we've visited this exact check before while recursing, all elements in
+            # this collection have already been validated (or will be validated in the
+            # future) by a call at a different layer of recursion.
+            return visited or (
+                len(new) == len(old)
+                and all(
+                    _is_fake_tensor_same(
+                        new_i,
+                        old_i,
+                        existing_storages,
+                        check_dtype=check_dtype,
+                        check_strides=check_strides,
+                        check_storage=check_storage,
+                        node=node,
+                        recursive_ids=recursive_ids,
+                    )
+                    for new_i, old_i in zip(new, old)
+                )
+            )
+
+        if isinstance(new, torch.types.py_sym_types):
+            return (
+                new.node.shape_env._maybe_evaluate_static(
+                    sympy.Eq(new.node.expr, old.node.expr)
+                )
+                == sympy.true
+            )
+
+        # If this is not a collection, a sym-type, or a Tensor, then check Python
+        # equality. This is conservative for objects without custom __eq__ methods.
+        return new == old
+
+    if new.layout != old.layout or not is_intlist_same(new.shape, old.shape):
+        return False
+
+    if new.device != old.device:
+        return False
+
+    if check_dtype and new.dtype != old.dtype:
+        return False
+
+    if (
+        check_strides
+        and new.layout == torch.strided
+        and not is_intlist_same(new.stride(), old.stride())
+    ):
+        return False
+
+    if not check_storage:
+        return True
+
+    if not statically_known_true(new.storage_offset() == old.storage_offset()):
+        return False
+
+    if get_storage(new) == get_storage(old):
+        return True
+
+    if node is None or existing_storages is None:
+        return False
+
+    def any_user_may_alias(node):
+        if not isinstance(node.meta["val"], torch.Tensor):
+            # analysis too complicated on lists, can support in the future
+            return True
+
+        for user in node.users:
+            if not (
+                isinstance(user.target, torch._ops.OperatorBase)
+                or user.target
+                is torch._inductor.fx_passes.reinplace._generalized_scatter
+            ):
+                return True
+
+            if isinstance(user.target, torch._ops.HigherOrderOperator):
+                # HOPs that survive until inductor are all non-aliasing HOPs.
+                # We will likely never support HOPs that are aliasing.
+                continue
+
+            # Strategy: do a FakeTensor prop, see if the storage aliases.
+            # If Inductor ever gets tighter invariants on OpOverloads
+            # (that is, we ban things like torch.ops.aten.reshape calls in the graph),
+            # Then this could just be a fast schema lookup.
+            is_valid, args, kwargs = get_fake_args_kwargs(user)
+            if not is_valid:
+                return True
+
+            with (
+                V.fake_mode,
+                enable_python_dispatcher(),
+                contextlib.ExitStack() as stack,
+            ):
+                # Ignore unbacked symbols (if they exist): we're making
+                # this FakeTensor and then throwing it away.
+                if (shape_env := V.fake_mode.shape_env) is not None:
+                    stack.enter_context(shape_env.ignore_fresh_unbacked_symbols())
+                new_fake_tensor = user.target(*args, **kwargs)
+
+            if not isinstance(new_fake_tensor, torch.Tensor):
+                # analysis too complicated on lists, can support in the future
+                return True
+
+            if get_storage(new_fake_tensor) == get_storage(node.meta["val"]):
+                return True
+
+        return False
+
+    # This is the case where it returns a completely fresh storage that's used nowhere
+    # else. If the FakeTensor's storage is fresh and none of the node's users can alias
+    # it, then we don't need to update this node.
+    if (
+        existing_storages.get(get_storage(old), 0) == 1
+        and get_storage(new) not in existing_storages
+        and not any_user_may_alias(node)
+    ):
+        return True
+
+    return False
 
 
 def _extract_subgraphs_and_args(
@@ -176,6 +350,14 @@ def _extract_subgraphs_and_args(
         torch.ops.higher_order.invoke_quant,
     ):
         yield args[0], tuple(args[1:])
+    elif node.target is torch.ops.higher_order.with_effects:
+        if args[1] is torch.ops.higher_order.invoke_subgraph:
+            yield args[2], tuple(args[4:])
+        else:
+            raise AssertionError(
+                "Please add FakeTensorUpdater subgraph arg support for "
+                f"with_effects wrapping {args[1]}!"
+            )
     elif node.target is torch.ops.higher_order.invoke_subgraph:
         yield args[0], tuple(args[2:])
     elif node.target is torch.ops.higher_order.run_const_graph:
@@ -252,7 +434,9 @@ class FakeTensorUpdater:
         }
 
         for node in self.gm.graph.nodes:
-            self.processed_hashes.add(self.hash_node(node))
+            is_valid, _, _ = get_fake_args_kwargs(node, self.gm)
+            if is_valid:
+                self.processed_hashes.add(self.hash_node(node))
 
     def hash_node(self, node: torch.fx.Node) -> _FxNodeHash:
         def get_hash_or_ids(n_iter: Iterable[Any]) -> tuple[int, ...]:
@@ -285,160 +469,6 @@ class FakeTensorUpdater:
         existing_storages: defaultdict[int | None, int] = defaultdict(int)
         for node in self.gm.graph.nodes:
             existing_storages[get_node_storage(node)] += 1
-
-        def is_intlist_same(new, old):
-            return statically_known_true(sym_eq(new, old))
-
-        def is_fake_tensor_same(
-            new,
-            old,
-            *,
-            check_dtype: bool = True,
-            check_strides: bool = True,
-            check_storage: bool = True,
-            node: torch.fx.Node | None = None,
-        ) -> bool:
-            """Validate that two FakeTensors (or iterables thereof) are the same,
-            including storage locations if enabled.
-
-            check_strides: disabling this flag will remove checks for striding.
-            check_dtype: disabling this flag will remove checks for dtype.
-            check_storage: disabling this flag will remove checks for storage offset and
-            location.  This is useful for subgraph argument and output updating, where
-            storage location can change without invalidating the subgraph."""
-
-            if type(new) is not type(old):
-                return False
-
-            if not isinstance(new, torch.Tensor):
-                if new is None:
-                    return old is None
-
-                if isinstance(new, (list, tuple)):
-                    return len(new) == len(old) and all(
-                        is_fake_tensor_same(
-                            new_i,
-                            old_i,
-                            check_dtype=check_dtype,
-                            check_strides=check_strides,
-                            check_storage=check_storage,
-                            node=node,
-                        )
-                        for new_i, old_i in zip(new, old)
-                    )
-
-                if isinstance(new, Mapping):
-                    if new.keys() != old.keys():
-                        return False
-                    return all(
-                        is_fake_tensor_same(
-                            new[key],
-                            old[key],
-                            check_dtype=check_dtype,
-                            check_strides=check_strides,
-                            check_storage=check_storage,
-                            node=node,
-                        )
-                        for key in new
-                    )
-
-                if isinstance(new, torch.types.py_sym_types):
-                    return (
-                        new.node.shape_env._maybe_evaluate_static(
-                            sympy.Eq(new.node.expr, old.node.expr)
-                        )
-                        == sympy.true
-                    )
-
-                # If this is not a Collection, a sym-type, or a Tensor, then check for
-                # Python equality.  This should be fairly conservative, since an object
-                # with no implemented __eq__ method will compare IDs.
-                return new == old
-
-            if new.layout != old.layout or not is_intlist_same(new.shape, old.shape):
-                return False
-
-            if new.device != old.device:
-                return False
-
-            if check_dtype and new.dtype != old.dtype:
-                return False
-
-            if (
-                check_strides
-                and new.layout == torch.strided
-                and not is_intlist_same(new.stride(), old.stride())
-            ):
-                return False
-
-            if not check_storage:
-                return True
-
-            if not statically_known_true(new.storage_offset() == old.storage_offset()):
-                return False
-
-            if get_storage(new) == get_storage(old):
-                return True
-
-            def any_user_may_alias(node):
-                if not isinstance(node.meta["val"], torch.Tensor):
-                    # analysis too complicated on lists, can support in the future
-                    return True
-
-                for user in node.users:
-                    if not (
-                        isinstance(user.target, torch._ops.OperatorBase)
-                        or user.target
-                        is torch._inductor.fx_passes.reinplace._generalized_scatter
-                    ):
-                        return True
-
-                    if isinstance(user.target, torch._ops.HigherOrderOperator):
-                        # HOPs that survive until inductor are all non-aliasing HOPs.
-                        # We will likely never support HOPs that are aliasing.
-                        continue
-
-                    # Strategy: do a FakeTensor prop, see if the storage aliases.
-                    # If Inductor ever gets tighter invariants on OpOverloads
-                    # (that is, we ban things like torch.ops.aten.reshape calls in the graph),
-                    # Then this could just be a fast schema lookup.
-                    is_valid, args, kwargs = get_fake_args_kwargs(user)
-                    if not is_valid:
-                        return True
-
-                    with (
-                        V.fake_mode,
-                        enable_python_dispatcher(),
-                        contextlib.ExitStack() as stack,
-                    ):
-                        # Ignore unbacked symbols (if they exist): we're making
-                        # this FakeTensor and then throwing it away.
-                        if (shape_env := V.fake_mode.shape_env) is not None:
-                            stack.enter_context(
-                                shape_env.ignore_fresh_unbacked_symbols()
-                            )
-                        new_fake_tensor = user.target(*args, **kwargs)
-
-                    if not isinstance(new_fake_tensor, torch.Tensor):
-                        # analysis too complicated on lists, can support in the future
-                        return True
-
-                    if get_storage(new_fake_tensor) == get_storage(node.meta["val"]):
-                        return True
-
-                return False
-
-            # This is the case where it returns a completely fresh storage that's used nowhere else.
-            # If the FakeTensor's storage is fresh and none of the node's users can alias it, then
-            # we don't need to update this node.
-            if (
-                existing_storages[get_storage(old)] == 1
-                and get_storage(new) not in existing_storages
-                and not any_user_may_alias(node)
-            ):
-                return True
-
-            return False
 
         def should_process_node(node: torch.fx.Node) -> bool:
             if node.op != "call_function":
@@ -489,10 +519,11 @@ class FakeTensorUpdater:
             torch.fx.GraphModule, OrderedSet[torch.fx.Node]
         ] = {}
         for node in self.gm.graph.nodes:
-            current_graph_hashes.add(hash := self.hash_node(node))
+            hash = self.hash_node(node)
             is_valid, args, kwargs = get_fake_args_kwargs(node, self.gm)
             if not is_valid:
                 continue
+            current_graph_hashes.add(hash)
             node_needs_update = (
                 hash not in self.processed_hashes or id(node) in to_process
             )
@@ -535,17 +566,21 @@ class FakeTensorUpdater:
                             # since every invocation of the subgraph will use different
                             # storages.  This implies potentially incorrect arg
                             # aliasing relationships.
-                            if not is_fake_tensor_same(
-                                a, p_fake := get_fake(p, subgraph), check_storage=False
+                            if not _is_fake_tensor_same(
+                                a,
+                                p_fake := get_fake(p, subgraph),
+                                existing_storages,
+                                check_storage=False,
                             ):
                                 assert update_subgraph, (
                                     "subgraph args must have consistent values!"
                                 )
                                 # Check that only dtype or stride has changed.  Other
                                 # changes cannot be handled without manual intervention.
-                                assert is_fake_tensor_same(
+                                assert _is_fake_tensor_same(
                                     a,
                                     p_fake,
+                                    existing_storages,
                                     check_dtype=False,
                                     check_strides=False,
                                     check_storage=False,
@@ -574,9 +609,10 @@ class FakeTensorUpdater:
                             subgraph.graph.output_node(), subgraph
                         )
 
-                        if not is_fake_tensor_same(
+                        if not _is_fake_tensor_same(
                             new_output_args,
                             orig_output_args,
+                            existing_storages,
                         ):
                             subgraph_updatings[subgraph] = True
 
@@ -599,8 +635,11 @@ class FakeTensorUpdater:
             with V.fake_mode, enable_python_dispatcher():
                 new_fake_tensor = node.target(*args, **kwargs)
 
-            if "val" in node.meta and is_fake_tensor_same(
-                new_fake_tensor, node.meta["val"], node=node
+            if "val" in node.meta and _is_fake_tensor_same(
+                new_fake_tensor,
+                node.meta["val"],
+                existing_storages,
+                node=node,
             ):
                 continue
 
