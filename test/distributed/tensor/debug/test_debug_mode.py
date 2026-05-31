@@ -1200,9 +1200,62 @@ class TestDebugModeUtils(TestCase):
         with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as f:
             debug_mode.dump_tensor_hashes(f.name)
             f.seek(0)
-            file_entries = [json.loads(line) for line in f if line.strip()]
 
-        self.assertEqual(file_entries, expected_entries)
+            self.assertExpectedInline(
+                f.read(),
+                """\
+Total captured tensor hash ops: 3
+================================================================================
+
+[<none>/op_0_aten::arange]
+  Call type: torch op
+  Call index: 0
+  Call depth: 1
+  Output hashes: <root>=6.0
+
+[<none>/op_1_aten::add.Tensor]
+  Call type: torch op
+  Call index: 1
+  Call depth: 1
+  Input hashes: [0][0]=6.0
+  Output hashes: <root>=10.0
+
+[<none>/op_2_aten::sum]
+  Call type: torch op
+  Call index: 2
+  Call depth: 1
+  Input hashes: [0][0]=10.0
+  Output hashes: <root>=10.0
+
+""",
+            )
+
+    def test_dump_tensor_hashes_uses_module_context_in_keys(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.l1(x).relu()
+
+        mod = Foo()
+        x = torch.ones(1, 2)
+
+        with (
+            DebugMode(record_nn_module=True) as debug_mode,
+            DebugMode.log_tensor_hashes(hash_inputs=True),
+        ):
+            mod(x)
+
+        with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as f:
+            debug_mode.dump_tensor_hashes(f.name)
+            f.seek(0)
+            content = f.read()
+
+        self.assertIn("[Foo.l1/op_0_aten::t]", content)
+        self.assertIn("[Foo.l1/op_1_aten::addmm]", content)
+        self.assertIn("[Foo/op_0_aten::relu]", content)
 
     def test_tensor_hashes_keep_tuple_hashes_as_leaves(self):
         def tuple_hash(t):
@@ -1248,20 +1301,18 @@ class TestDebugModeUtils(TestCase):
         with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as f:
             debug_mode.dump_tensor_hashes(f.name)
             f.seek(0)
-            file_entries = [json.loads(line) for line in f if line.strip()]
+            content = f.read()
 
-        file_add_entries = [
-            entry for entry in file_entries if entry["call"] == "aten::add.Tensor"
-        ]
-        self.assertEqual(
-            [
-                (entry["hash_type"], entry["pytree_path"], entry["hash"])
-                for entry in file_add_entries
-            ],
-            [
-                ("input", "[0][0]", [6.0, 4]),
-                ("output", "", [10.0, 4]),
-            ],
+        self.assertIn(
+            """\
+[<none>/op_1_aten::add.Tensor]
+  Call type: torch op
+  Call index: 1
+  Call depth: 1
+  Input hashes: [0][0]=[6.0, 4]
+  Output hashes: <root>=[10.0, 4]
+""",
+            content,
         )
 
     def test_dump_tensor_hashes_writes_strict_json_for_nonfinite_hashes(self):
@@ -1282,13 +1333,16 @@ class TestDebugModeUtils(TestCase):
                 raise AssertionError(f"non-finite JSON constant found: {value}")
 
             file_entries = [
-                json.loads(line, parse_constant=fail_on_nonfinite_constant)
+                json.loads(
+                    line.split("=", 1)[1].strip(),
+                    parse_constant=fail_on_nonfinite_constant,
+                )
                 for line in f
-                if line.strip()
+                if line.startswith("  Output hashes: ")
             ]
 
         self.assertEqual(
-            {tuple(entry["hash"]) for entry in file_entries},
+            {tuple(entry) for entry in file_entries},
             {("NaN", "Infinity", "-Infinity")},
         )
 

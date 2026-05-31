@@ -957,12 +957,14 @@ class DebugMode(TorchDispatchMode):
 
     def dump_tensor_hashes(self, file_name, include_inputs: bool = True) -> None:
         """
-        Write tensor hashes collected by log_tensor_hashes() to a JSONL file.
+        Write tensor hashes collected by log_tensor_hashes() to a text file.
 
-        The output has one JSON object per hash record, matching tensor_hashes().
-        JSONL keeps each tensor hash on its own line for external tools and
-        unified diffs. Non-finite float values are encoded as strings ("NaN",
-        "Infinity", "-Infinity") so every line is valid JSON.
+        The output mirrors the block-oriented format used by
+        torchtitan.tools.activation_tracer.dump_captures_to_file: a summary
+        header followed by one bracketed block per operation. Input and output
+        hash leaves are grouped under that operation. Hash values are rendered
+        as JSON values, and non-finite floats are encoded as strings ("NaN",
+        "Infinity", "-Infinity") so each hash payload remains valid JSON.
         """
 
         def json_safe(obj):
@@ -985,11 +987,76 @@ class DebugMode(TorchDispatchMode):
                 return {k: json_safe(v) for k, v in obj.items()}
             return obj
 
+        def leaf_name(entry) -> str:
+            if entry["arg_name"] is not None:
+                return entry["arg_name"]
+            if entry["pytree_path"]:
+                return entry["pytree_path"]
+            return "<root>"
+
+        def format_hashes(hash_entries) -> str:
+            return ", ".join(
+                f"{leaf_name(entry)}="
+                + json.dumps(json_safe(entry["hash"]), allow_nan=False, sort_keys=True)
+                for entry in hash_entries
+            )
+
+        module_context_by_index: dict[int, str] = {}
+        module_stack: list[tuple[int, str]] = []
+        for i, call in enumerate(self.operators):
+            while module_stack and module_stack[-1][0] >= call.call_depth:
+                module_stack.pop()
+            module_context_by_index[i] = (
+                module_stack[-1][1] if module_stack else "<none>"
+            )
+            if (
+                isinstance(call, _AnnotateCall)
+                and isinstance(call.header, str)
+                and call.header.startswith("nn.Mod")
+            ):
+                module_stack.append((call.call_depth, str(call.tag)))
+
+        entries = self.tensor_hashes(include_inputs=include_inputs)
+        groups: dict[tuple[int, str, str, int], dict[str, Any]] = {}
+        for entry in entries:
+            key = (
+                entry["index"],
+                entry["call_type"],
+                entry["call"],
+                entry["call_depth"],
+            )
+            if key not in groups:
+                groups[key] = {
+                    "index": entry["index"],
+                    "call_type": entry["call_type"],
+                    "call": entry["call"],
+                    "call_depth": entry["call_depth"],
+                    "input": [],
+                    "output": [],
+                }
+            groups[key][entry["hash_type"]].append(entry)
+
+        module_counters: dict[str, int] = {}
         with open(file_name, "w", encoding="utf-8") as hash_file:
-            for entry in self.tensor_hashes(include_inputs=include_inputs):
-                hash_file.write(
-                    json.dumps(json_safe(entry), allow_nan=False, sort_keys=True)
-                )
+            hash_file.write(f"Total captured tensor hash ops: {len(groups)}\n")
+            hash_file.write("=" * 80 + "\n\n")
+            for group in groups.values():
+                module_name = module_context_by_index.get(group["index"], "<none>")
+                op_counter = module_counters.get(module_name, 0)
+                module_counters[module_name] = op_counter + 1
+
+                hash_file.write(f"[{module_name}/op_{op_counter}_{group['call']}]\n")
+                hash_file.write(f"  Call type: {group['call_type']}\n")
+                hash_file.write(f"  Call index: {group['index']}\n")
+                hash_file.write(f"  Call depth: {group['call_depth']}\n")
+                if group["input"]:
+                    hash_file.write(
+                        f"  Input hashes: {format_hashes(group['input'])}\n"
+                    )
+                if group["output"]:
+                    hash_file.write(
+                        f"  Output hashes: {format_hashes(group['output'])}\n"
+                    )
                 hash_file.write("\n")
 
     def _handle_annotate(self, tag):

@@ -86,7 +86,6 @@ ops_dde_xfail = {
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
     xfail("linalg.pinv", "singular"),
-    xfail("linalg.qr"),
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
     xfail("linalg.solve_triangular"),
@@ -97,7 +96,6 @@ ops_dde_xfail = {
     xfail("logdet"),
     xfail("logsumexp"),
     xfail("lu_solve"),
-    xfail("lu_unpack"),
     xfail("masked.amax"),
     xfail("masked.amin"),
     xfail("masked.argmax"),
@@ -189,7 +187,6 @@ ops_dde_xfail = {
     xfail("ormqr"),
     xfail("pca_lowrank"),
     xfail("pinverse"),
-    xfail("qr"),
     xfail("rand_like"),
     xfail("randint_like"),
     xfail("randn_like"),
@@ -250,4 +247,6 @@ ops_unbacked_skip = {
     skip("zeros"),
     # Sparse ops that can't be deepcopied
     skip("sparse.sampled_addmm"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/179881
+    skip("norm", "nuc"),
 }
