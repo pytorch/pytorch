@@ -402,15 +402,16 @@ class ContinueExecutionCache:
             meta.instructions = copy.deepcopy(instructions)
 
             target = next(i for i in instructions if i.offset == resume_offset)
-            if target.offset is None:
-                raise AssertionError("target.offset must not be None")
             # A resume function that may execute DELETE_FAST must not receive
             # its frame values as normal positional args: CPython keeps those
             # arg references alive for the duration of the call.
+            frame_value_names = set(argnames)
+            frame_value_names.update(f"___stack{i}" for i in range(nstack))
             meta.boxed_call = any(
                 inst.opname == "DELETE_FAST"
+                and inst.argval in frame_value_names
                 and inst.offset is not None
-                and inst.offset >= target.offset
+                and inst.offset >= resume_offset
                 for inst in instructions
             )
 

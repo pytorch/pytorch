@@ -348,6 +348,26 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(3)
         self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
+    def test_resume_del_post_break_local_uses_positional_call(self):
+        def fn(x):
+            torch._dynamo.graph_break()
+            y = x + 1
+            del y
+            return x + 2
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager")(torch.ones(3)),
+            torch.full((3,), 3.0),
+        )
+
+        from torch._dynamo.resume_execution import ContinueExecutionCache
+
+        resume_codes = list(ContinueExecutionCache.cache[fn.__code__].values())
+        self.assertGreater(len(resume_codes), 0)
+        self.assertFalse(
+            any(ContinueExecutionCache.uses_boxed_call(code) for code in resume_codes)
+        )
+
     def test_start1(self):
         def fn(a, b):
             print(a)
