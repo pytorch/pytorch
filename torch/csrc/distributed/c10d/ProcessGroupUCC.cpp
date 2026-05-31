@@ -1330,7 +1330,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::gather(
           TORCH_UCC_COLL_POST, "requires empty output on non-root");
     }
     outputs = {};
-    // append a empty tensor to the list to be used by future mark
+    // append an empty tensor to the list to be used by future mark
     outputs.emplace_back();
   }
 

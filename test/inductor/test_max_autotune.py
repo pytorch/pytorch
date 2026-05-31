@@ -1220,6 +1220,7 @@ class TestMaxAutotune(TestCase):
             FileCheck().check_not("extern_kernels.convolution").run(code[0])
             self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
 
+    @unittest.skipIf(config.cpp_wrapper, "Python wrapper code check")
     def test_autotune_conv1x1_uses_convolution_without_gemm_templates(self):
         conv1x1 = (
             nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
@@ -1251,6 +1252,7 @@ class TestMaxAutotune(TestCase):
         ).run(generated_code)
         self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
 
+    @unittest.skipIf(config.cpp_wrapper, "Python wrapper code check")
     def test_autotune_conv1x1_uses_convolution_without_addmm_template(self):
         conv1x1 = (
             nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
@@ -1316,6 +1318,7 @@ class TestMaxAutotune(TestCase):
             ):
                 check_uses_convolution()
 
+    @unittest.skipIf(config.cpp_wrapper, "Python wrapper code check")
     def test_autotune_conv1x1_layout_ineligible_still_peels_bias(self):
         conv1x1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1).to(GPU_TYPE)
         input_tensor = torch.randn(4, 3, 32, 32, device=GPU_TYPE)
