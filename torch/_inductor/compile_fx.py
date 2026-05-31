@@ -759,6 +759,14 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
         yield
 
 
+def _graph_has_kernel_invocations(graph: GraphLowering) -> bool:
+    from .scheduler import NopKernelSchedulerNode
+
+    return any(
+        not isinstance(node, NopKernelSchedulerNode) for node in graph.scheduler.nodes
+    )
+
+
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
     static_input_idxs: Sequence[int]
@@ -1740,6 +1748,13 @@ class _InProcessFxCompile(FxCompile):
                                 V.graph.device_node_mapping
                             )
                         )
+
+                    if (
+                        cudagraphs
+                        and not V.graph.disable_cudagraphs_reason
+                        and not _graph_has_kernel_invocations(graph)
+                    ):
+                        V.graph.disable_cudagraphs_reason = "no CUDA kernel invocations"
 
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
