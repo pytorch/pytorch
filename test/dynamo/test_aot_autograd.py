@@ -46,23 +46,28 @@ lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
 
 
+AUTOGRAD_VERSION_ERROR = (
+    "one of the variables needed for gradient computation has been modified"
+)
+
+
+def _copy_relu_output_model():
+    class Model(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.layer0 = torch.nn.Linear(1, 1)
+            self.layer1 = torch.nn.ReLU()
+
+        def forward(self, x):
+            y = self.layer0(x)
+            z = self.layer1(y)
+            z.copy_(y)
+            return z
+
+    return Model()
+
+
 class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
-    @staticmethod
-    def _copy_relu_output_model():
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.layer0 = torch.nn.Linear(1, 1)
-                self.layer1 = torch.nn.ReLU()
-
-            def forward(self, x):
-                y = self.layer0(x)
-                z = self.layer1(y)
-                z.copy_(y)
-                return z
-
-        return Model()
-
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
@@ -172,18 +177,18 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
     def test_forward_only_copy_relu_output_with_trainable_params(self):
         # https://github.com/pytorch/pytorch/issues/158561
         x = torch.randn(1, 1)
-        model = self._copy_relu_output_model()
+        model = _copy_relu_output_model()
 
         eager_out = copy.deepcopy(model)(x)
         self.assertIsNotNone(eager_out.grad_fn)
-        with self.assertRaisesRegex(RuntimeError, "ReluBackward0"):
+        with self.assertRaisesRegex(RuntimeError, AUTOGRAD_VERSION_ERROR):
             eager_out.sum().backward()
 
         compiled_model = torch.compile(copy.deepcopy(model), backend="aot_eager")
         compiled_out = compiled_model(x)
         self.assertEqual(eager_out.detach(), compiled_out.detach())
         self.assertIsNotNone(compiled_out.grad_fn)
-        with self.assertRaisesRegex(RuntimeError, "ReluBackward0"):
+        with self.assertRaisesRegex(RuntimeError, AUTOGRAD_VERSION_ERROR):
             compiled_out.sum().backward()
 
     def test_parameter_grad_with_non_grad_input(self):
@@ -234,7 +239,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
     def test_copy_relu_output_inference_controls(self):
         x = torch.randn(1, 1)
 
-        model = self._copy_relu_output_model()
+        model = _copy_relu_output_model()
         eager_model = copy.deepcopy(model)
         compiled_model = torch.compile(copy.deepcopy(model), backend="aot_eager")
         with torch.no_grad():
@@ -243,7 +248,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
             self.assertEqual(eager_out, compiled_out)
             self.assertIsNone(compiled_out.grad_fn)
 
-        model = self._copy_relu_output_model()
+        model = _copy_relu_output_model()
         eager_model = copy.deepcopy(model)
         compiled_model = torch.compile(copy.deepcopy(model), backend="aot_eager")
         with torch.inference_mode():
@@ -252,7 +257,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
             self.assertEqual(eager_out, compiled_out)
             self.assertIsNone(compiled_out.grad_fn)
 
-        model = self._copy_relu_output_model().requires_grad_(False)
+        model = _copy_relu_output_model().requires_grad_(False)
         eager_model = copy.deepcopy(model)
         compiled_model = torch.compile(copy.deepcopy(model), backend="aot_eager")
         eager_out = eager_model(x)

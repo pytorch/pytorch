@@ -195,8 +195,7 @@ def _is_lazy_backward_error_candidate(exc: BaseException) -> bool:
         return False
     msg = str(exc)
     return (
-        "one of the variables needed for gradient computation has been modified"
-        in msg
+        "one of the variables needed for gradient computation has been modified" in msg
         and "inplace operation" in msg
         and any(
             frame.name == "grad" and "autograd" in frame.filename
@@ -240,9 +239,7 @@ def _can_defer_autograd_version_error(
         fw_metadata.subclass_fw_graph_out_meta,
         fw_metadata.subclass_tangent_meta,
     )
-    return not any(
-        isinstance(meta, SubclassCreationMeta) for meta in subclass_metas
-    )
+    return not any(isinstance(meta, SubclassCreationMeta) for meta in subclass_metas)
 
 
 def aot_stage1_graph_capture(
@@ -290,9 +287,7 @@ def aot_stage1_graph_capture(
         # after we get the joint graph. See [Note: Selective Decomposition] for details.
         if aot_state.needs_autograd and not aot_config.pre_dispatch:
             try:
-                with dynamo_timed(
-                    "aot_trace_joint_graph", log_pt2_compile_event=True
-                ):
+                with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
                     (
                         graph,
                         updated_flat_args,
@@ -2548,9 +2543,7 @@ def aot_stage2_lazy_backward_error(
         )
     _set_empty_backward_metadata(fw_metadata)
 
-    CompileEventLogger.try_add_pt2_compile(
-        "backend_compile", dispatch_mode="autograd"
-    )
+    CompileEventLogger.try_add_pt2_compile("backend_compile", dispatch_mode="autograd")
     _apply_tensorify_python_scalars(fw_module)
 
     _, compiled_fw_func = _aot_stage2b_compile_forward_or_inference(
