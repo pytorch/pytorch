@@ -112,10 +112,7 @@ if typing.TYPE_CHECKING:
 
     from torch._dynamo.bytecode_transformation import Instruction
     from torch._dynamo.replay_record import ExecutionRecord
-    from torch._dynamo.symbolic_convert import (
-        InstructionTranslator,
-        InstructionTranslatorBase,
-    )
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
     from torch._subclasses import FakeTensorMode
@@ -1439,7 +1436,7 @@ def is_wrapper_or_member_descriptor(
     )
 
 
-def tracked_repr(tx: InstructionTranslator, vt: VariableTracker) -> str:
+def tracked_repr(tx: InstructionTranslatorBase, vt: VariableTracker) -> str:
     from .variables.object_protocol import generic_repr
 
     return generic_repr(tx, vt).as_python_constant()
@@ -3230,7 +3227,7 @@ def raise_args_mismatch(
 def iter_contains(
     items: Iterable[Any],
     search: Any,
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     check_tensor_identity: bool = False,
 ) -> Any:
     from .variables import ConstantVariable
@@ -5707,7 +5704,7 @@ def is_pybind11_enum_member(value: Any) -> bool:
 
 
 def _make_inlined(
-    tx: InstructionTranslator, f: Callable[..., Any]
+    tx: InstructionTranslatorBase, f: Callable[..., Any]
 ) -> Callable[..., VariableTracker]:
     if not callable(f):
         raise AssertionError("Expect f to be a python callable.")
