@@ -1430,6 +1430,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfMPS(torch.float, torch.half)
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
@@ -1495,6 +1496,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfMPS(torch.float, torch.half)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
     @tf32_on_and_off(0.01)
