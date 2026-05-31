@@ -19,6 +19,8 @@ from typing import Any
 
 import torch
 
+_PY_PROFILER = torch._C._profiler
+
 
 _LIBCUPTI_PATH_ENV = "TORCH_CUPTI_MONITOR_LIBCUPTI_PATH"
 
@@ -36,6 +38,17 @@ _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION = 38
 _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION = 39
 
 _CUPTI_ACTIVITY_FLAG_FLUSH_FORCED = 1
+
+_CUPTI_RUNTIME_TRACE_CBID_cudaGetLastError_v3020 = 10
+_CUPTI_RUNTIME_TRACE_CBID_cudaSetDevice_v3020 = 16
+_CUPTI_RUNTIME_TRACE_CBID_cudaGetDevice_v3020 = 17
+_CUPTI_RUNTIME_TRACE_CBID_cudaEventCreate_v3020 = 133
+_CUPTI_RUNTIME_TRACE_CBID_cudaEventCreateWithFlags_v3020 = 134
+_CUPTI_RUNTIME_TRACE_CBID_cudaEventDestroy_v3020 = 136
+
+_CUPTI_DRIVER_TRACE_CBID_cuCtxGetCurrent = 304
+_CUPTI_DRIVER_TRACE_CBID_cuDevicePrimaryCtxGetState = 392
+_CUPTI_DRIVER_TRACE_CBID_cuKernelGetAttribute = 686
 
 _DEFAULT_BUFFER_SIZE = 4 * 1024 * 1024
 _DEFAULT_FLUSH_PERIOD_S = 1.0
@@ -87,6 +100,19 @@ _OVERHEAD_KIND_NAMES = {
     8 << 16: "UVM Activity Init",
 }
 _DEMANGLE_CACHE: dict[str, str] = {}
+_DISABLED_RUNTIME_CBIDS = (
+    _CUPTI_RUNTIME_TRACE_CBID_cudaGetDevice_v3020,
+    _CUPTI_RUNTIME_TRACE_CBID_cudaSetDevice_v3020,
+    _CUPTI_RUNTIME_TRACE_CBID_cudaGetLastError_v3020,
+    _CUPTI_RUNTIME_TRACE_CBID_cudaEventCreate_v3020,
+    _CUPTI_RUNTIME_TRACE_CBID_cudaEventCreateWithFlags_v3020,
+    _CUPTI_RUNTIME_TRACE_CBID_cudaEventDestroy_v3020,
+)
+_DISABLED_DRIVER_CBIDS = (
+    _CUPTI_DRIVER_TRACE_CBID_cuKernelGetAttribute,
+    _CUPTI_DRIVER_TRACE_CBID_cuDevicePrimaryCtxGetState,
+    _CUPTI_DRIVER_TRACE_CBID_cuCtxGetCurrent,
+)
 
 
 def _find_cupti_library() -> str:
@@ -378,6 +404,8 @@ class CuptiMonitor:
         self._trace_window_active = False
         self._trace_window_events: list[dict[str, Any]] = []
         self._trace_window_extra_activities: tuple[int, ...] = ()
+        self._time_converter = None
+        self._timestamp_callback = None
 
         self._records_fp = None
         self._annotations_fp = None
@@ -450,6 +478,18 @@ class CuptiMonitor:
         self._lib.cuptiActivityEnable.restype = ctypes.c_int
         self._lib.cuptiActivityDisable.argtypes = [ctypes.c_int]
         self._lib.cuptiActivityDisable.restype = ctypes.c_int
+        if hasattr(self._lib, "cuptiActivityEnableRuntimeApi"):
+            self._lib.cuptiActivityEnableRuntimeApi.argtypes = [
+                ctypes.c_uint32,
+                ctypes.c_uint8,
+            ]
+            self._lib.cuptiActivityEnableRuntimeApi.restype = ctypes.c_int
+        if hasattr(self._lib, "cuptiActivityEnableDriverApi"):
+            self._lib.cuptiActivityEnableDriverApi.argtypes = [
+                ctypes.c_uint32,
+                ctypes.c_uint8,
+            ]
+            self._lib.cuptiActivityEnableDriverApi.restype = ctypes.c_int
         self._lib.cuptiActivityFlushAll.argtypes = [ctypes.c_uint32]
         self._lib.cuptiActivityFlushAll.restype = ctypes.c_int
         self._lib.cuptiActivityGetNextRecord.argtypes = [
@@ -466,6 +506,10 @@ class CuptiMonitor:
         self._lib.cuptiActivityGetNumDroppedRecords.restype = ctypes.c_int
         self._lib.cuptiActivityEnableHWTrace.argtypes = [ctypes.c_uint8]
         self._lib.cuptiActivityEnableHWTrace.restype = ctypes.c_int
+        self._lib.cuptiActivityRegisterTimestampCallback.argtypes = [
+            ctypes.c_void_p
+        ]
+        self._lib.cuptiActivityRegisterTimestampCallback.restype = ctypes.c_int
         self._lib.cuptiGetResultString.argtypes = [
             ctypes.c_int,
             ctypes.POINTER(ctypes.c_char_p),
@@ -495,10 +539,22 @@ class CuptiMonitor:
         )
         self._callbacks_registered = True
 
+    def register_timestamp_callback(self) -> None:
+        callback_addr = _PY_PROFILER._cupti_approximate_time_callback_address()
+        self._check(
+            self._lib.cuptiActivityRegisterTimestampCallback(
+                ctypes.c_void_p(callback_addr)
+            ),
+            "cuptiActivityRegisterTimestampCallback",
+        )
+        self._timestamp_callback = callback_addr
+
     def start(self) -> None:
         if self._started:
             raise RuntimeError("CUPTI monitor is already started")
         self.register_callbacks()
+        self._time_converter = _PY_PROFILER._ApproximateClockToUnixTimeConverter()
+        self.register_timestamp_callback()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._open_outputs()
         self._write_meta_file()
@@ -518,9 +574,7 @@ class CuptiMonitor:
                 daemon=True,
             )
             self._flush_thread.start()
-        for activity in self.activities:
-            self._check(self._lib.cuptiActivityEnable(activity), "cuptiActivityEnable")
-            self._enabled_activities.add(activity)
+        self.enable_activities(self.activities)
         self._started = True
 
     def stop(self) -> None:
@@ -548,10 +602,19 @@ class CuptiMonitor:
         if self._worker_error is not None:
             raise RuntimeError("CUPTI monitor worker failed") from self._worker_error
         self._close_outputs()
+        self._time_converter = None
+        self._timestamp_callback = None
 
     def flush(self, *, forced: bool = False) -> None:
         flag = _CUPTI_ACTIVITY_FLAG_FLUSH_FORCED if forced else 0
         self._check(self._lib.cuptiActivityFlushAll(flag), "cuptiActivityFlushAll")
+
+    def _convert_time(self, value: int) -> int:
+        if value == 0:
+            return 0
+        if self._time_converter is None:
+            return value
+        return int(self._time_converter.to_unix_ns(int(value)))
 
     def enable_activities(self, activities: Iterable[int]) -> tuple[int, ...]:
         newly_enabled = []
@@ -559,6 +622,7 @@ class CuptiMonitor:
             if activity in self._enabled_activities:
                 continue
             self._check(self._lib.cuptiActivityEnable(activity), "cuptiActivityEnable")
+            self._apply_activity_filters(activity)
             self._enabled_activities.add(activity)
             newly_enabled.append(activity)
         return tuple(newly_enabled)
@@ -572,6 +636,26 @@ class CuptiMonitor:
                 "cuptiActivityDisable",
             )
             self._enabled_activities.remove(activity)
+
+    def _apply_activity_filters(self, activity: int) -> None:
+        if (
+            activity == _CUPTI_ACTIVITY_KIND_RUNTIME
+            and hasattr(self._lib, "cuptiActivityEnableRuntimeApi")
+        ):
+            for cbid in _DISABLED_RUNTIME_CBIDS:
+                self._check(
+                    self._lib.cuptiActivityEnableRuntimeApi(cbid, 0),
+                    "cuptiActivityEnableRuntimeApi",
+                )
+        if (
+            activity == _CUPTI_ACTIVITY_KIND_DRIVER
+            and hasattr(self._lib, "cuptiActivityEnableDriverApi")
+        ):
+            for cbid in _DISABLED_DRIVER_CBIDS:
+                self._check(
+                    self._lib.cuptiActivityEnableDriverApi(cbid, 0),
+                    "cuptiActivityEnableDriverApi",
+                )
 
     def begin_trace_window(
         self, activities: Iterable[int] | None = None
@@ -783,14 +867,16 @@ class CuptiMonitor:
                 int(record.correlationId),
                 annotation_id,
                 int(record.graphNodeId),
-                int(record.start),
-                int(record.end),
+                self._convert_time(int(record.start)),
+                self._convert_time(int(record.end)),
                 0,
                 0,
                 0,
                 int(record.graphId),
                 0,
             )
+            start_ns = self._convert_time(int(record.start))
+            end_ns = self._convert_time(int(record.end))
             trace_event = {
                 "kind": "kernel",
                 "device_id": int(record.deviceId),
@@ -799,13 +885,13 @@ class CuptiMonitor:
                 "correlation_id": int(record.correlationId),
                 "graph_node_id": int(record.graphNodeId),
                 "graph_id": int(record.graphId),
-                "start_ns": int(record.start),
-                "end_ns": int(record.end),
+                "start_ns": start_ns,
+                "end_ns": end_ns,
                 "annotation_id": annotation_id,
                 "annotation": annotation,
                 "name": kernel_name,
             }
-            return payload, int(record.start), int(record.end), trace_event
+            return payload, start_ns, end_ns, trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_MEMCPY:
             record = ctypes.cast(
@@ -835,14 +921,16 @@ class CuptiMonitor:
                 int(record.correlationId),
                 annotation_id,
                 int(record.graphNodeId),
-                int(record.start),
-                int(record.end),
+                self._convert_time(int(record.start)),
+                self._convert_time(int(record.end)),
                 int(record.bytes),
                 int(record.runtimeCorrelationId),
                 aux,
                 0,
                 int(record.graphId),
             )
+            start_ns = self._convert_time(int(record.start))
+            end_ns = self._convert_time(int(record.end))
             trace_event = {
                 "kind": "gpu_memcpy",
                 "device_id": int(record.deviceId),
@@ -852,8 +940,8 @@ class CuptiMonitor:
                 "runtime_correlation_id": int(record.runtimeCorrelationId),
                 "graph_node_id": int(record.graphNodeId),
                 "graph_id": int(record.graphId),
-                "start_ns": int(record.start),
-                "end_ns": int(record.end),
+                "start_ns": start_ns,
+                "end_ns": end_ns,
                 "bytes": int(record.bytes),
                 "copy_kind": int(record.copyKind),
                 "src_kind": int(record.srcKind),
@@ -863,7 +951,7 @@ class CuptiMonitor:
                 "annotation": annotation,
                 "name": "Memcpy",
             }
-            return payload, int(record.start), int(record.end), trace_event
+            return payload, start_ns, end_ns, trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_MEMSET:
             record = ctypes.cast(
@@ -889,14 +977,16 @@ class CuptiMonitor:
                 int(record.correlationId),
                 annotation_id,
                 int(record.graphNodeId),
-                int(record.start),
-                int(record.end),
+                self._convert_time(int(record.start)),
+                self._convert_time(int(record.end)),
                 int(record.bytes),
                 0,
                 aux,
                 aux2,
                 int(record.graphId),
             )
+            start_ns = self._convert_time(int(record.start))
+            end_ns = self._convert_time(int(record.end))
             trace_event = {
                 "kind": "gpu_memset",
                 "device_id": int(record.deviceId),
@@ -905,8 +995,8 @@ class CuptiMonitor:
                 "correlation_id": int(record.correlationId),
                 "graph_node_id": int(record.graphNodeId),
                 "graph_id": int(record.graphId),
-                "start_ns": int(record.start),
-                "end_ns": int(record.end),
+                "start_ns": start_ns,
+                "end_ns": end_ns,
                 "bytes": int(record.bytes),
                 "value": int(record.value),
                 "memory_kind": int(record.memoryKind),
@@ -915,22 +1005,24 @@ class CuptiMonitor:
                 "annotation": annotation,
                 "name": "Memset",
             }
-            return payload, int(record.start), int(record.end), trace_event
+            return payload, start_ns, end_ns, trace_event
 
         if kind in (_CUPTI_ACTIVITY_KIND_RUNTIME, _CUPTI_ACTIVITY_KIND_DRIVER):
             record = ctypes.cast(record_addr, ctypes.POINTER(_CuptiActivityAPI)).contents
+            start_ns = self._convert_time(int(record.start))
+            end_ns = self._convert_time(int(record.end))
             trace_event = {
                 "kind": "cuda_runtime" if kind == _CUPTI_ACTIVITY_KIND_RUNTIME else "cuda_driver",
                 "cbid": int(record.cbid),
-                "start_ns": int(record.start),
-                "end_ns": int(record.end),
+                "start_ns": start_ns,
+                "end_ns": end_ns,
                 "process_id": int(record.processId),
                 "thread_id": int(record.threadId),
                 "correlation_id": int(record.correlationId),
                 "return_value": int(record.returnValue),
                 "name": f"cbid_{int(record.cbid)}",
             }
-            return None, int(record.start), int(record.end), trace_event
+            return None, start_ns, end_ns, trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION:
             record = ctypes.cast(
@@ -949,25 +1041,28 @@ class CuptiMonitor:
             record = ctypes.cast(
                 record_addr, ctypes.POINTER(_CuptiActivityOverhead)
             ).contents
+            start_ns = self._convert_time(int(record.start))
+            end_ns = self._convert_time(int(record.end))
             trace_event = {
                 "kind": "overhead",
                 "overhead_kind": int(record.overheadKind),
                 "object_kind": int(record.objectKind),
                 "object_id": int(record.objectId),
-                "start_ns": int(record.start),
-                "end_ns": int(record.end),
+                "start_ns": start_ns,
+                "end_ns": end_ns,
                 "correlation_id": int(record.correlationId),
                 "name": _OVERHEAD_KIND_NAMES.get(
                     int(record.overheadKind),
                     f"overhead_{int(record.overheadKind)}",
                 ),
             }
-            return None, int(record.start), int(record.end), trace_event
+            return None, start_ns, end_ns, trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_CUDA_EVENT:
             record = ctypes.cast(
                 record_addr, ctypes.POINTER(_CuptiActivityCudaEvent)
             ).contents
+            event_ts = self._convert_time(int(record.deviceTimestamp))
             trace_event = {
                 "kind": "cuda_event",
                 "device_id": int(record.deviceId),
@@ -975,21 +1070,23 @@ class CuptiMonitor:
                 "stream_id": int(record.streamId),
                 "event_id": int(record.eventId),
                 "correlation_id": int(record.correlationId),
-                "device_timestamp_ns": int(record.deviceTimestamp),
+                "device_timestamp_ns": event_ts,
                 "cuda_event_sync_id": int(record.cudaEventSyncId),
                 "name": "cuda_event",
             }
-            return None, int(record.deviceTimestamp), int(record.deviceTimestamp), trace_event
+            return None, event_ts, event_ts, trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION:
             record = ctypes.cast(
                 record_addr, ctypes.POINTER(_CuptiActivitySynchronization)
             ).contents
+            start_ns = self._convert_time(int(record.start))
+            end_ns = self._convert_time(int(record.end))
             trace_event = {
                 "kind": "cuda_sync",
                 "sync_type": int(record.type),
-                "start_ns": int(record.start),
-                "end_ns": int(record.end),
+                "start_ns": start_ns,
+                "end_ns": end_ns,
                 "correlation_id": int(record.correlationId),
                 "context_id": int(record.contextId),
                 "stream_id": int(record.streamId),
@@ -998,7 +1095,7 @@ class CuptiMonitor:
                 "return_value": int(record.returnValue),
                 "name": f"sync_{int(record.type)}",
             }
-            return None, int(record.start), int(record.end), trace_event
+            return None, start_ns, end_ns, trace_event
 
         return None, 0, 0, None
 
