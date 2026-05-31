@@ -1858,6 +1858,45 @@ class TestSDPAFailureModes(NNTestCase):
                 )
 
     @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "CUTLASS kernel names are CUDA-only")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem efficient attention")
+    def test_mem_efficient_attention_fp32_long_kv_uses_gmem_kernel_sm80_or_later(
+            self, device):
+        if torch.cuda.get_device_capability(device)[0] < 8:
+            self.skipTest("sm80 or newer requires aligned mem efficient attention kernels")
+        if (torch.profiler.ProfilerActivity.CUDA
+                not in torch.profiler.supported_activities()):
+            self.skipTest("CUDA profiler activity is not available")
+
+        def fwd_kernel_name(seqlen_q, seqlen_k):
+            q = torch.randn((1, 2, seqlen_q, 64), device=device)
+            k = torch.randn((1, 2, seqlen_k, 64), device=device)
+            v = torch.randn((1, 2, seqlen_k, 64), device=device)
+            with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+                torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                torch.cuda.synchronize()
+                with torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CUDA]
+                ) as prof:
+                    torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                torch.cuda.synchronize()
+            names = [
+                event.key for event in prof.key_averages()
+                if "fmha_cutlassF_f32" in event.key
+            ]
+            self.assertEqual(len(names), 1, names)
+            return names[0]
+
+        self.assertIn(
+            "fmha_cutlassF_f32_aligned_64x64_rf_sm80",
+            fwd_kernel_name(128, 128))
+        self.assertIn(
+            "fmha_cutlassF_f32_aligned_32x128_gmem_sm80",
+            fwd_kernel_name(128, 1024))
+
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
     def test_flash_fail_fp32(self, device):
         dtype = torch.float

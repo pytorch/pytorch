@@ -1711,6 +1711,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     if (smem_bytes > maxShmem) {
       return;
     }
+    // Long fp32 cross-attention is dominated by QK tiles. The 32x128 gmem
+    // kernel halves the key-tile loop count, while RF kernels still win for
+    // short and self-attention shapes by avoiding the output accumulator.
+    if constexpr (
+        std::is_same_v<scalar_t, float> && Kernel::kKeepOutputInRF &&
+        Kernel::kMaxK <= 128) {
+      if (computeCapability >= 80 && max_seqlen_q > 0 &&
+          max_seqlen_k >= 1024 &&
+          max_seqlen_k >= 4 * max_seqlen_q) {
+        return;
+      }
+    }
     kernel_launched = true;
 
     res = at::empty(
