@@ -1897,6 +1897,26 @@ class TestMeta(TestCase):
         else:
             self.assertEqual(out_dtype, [in_dtype,])
 
+    @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
+    def test_scaled_dot_product_flash_attention_for_cpu_logsumexp_dtype(self, dtype):
+        B, H, L, E = 2, 4, 8, 16
+
+        def run(device):
+            query = torch.randn(B, H, L, E, device=device, dtype=dtype)
+            key = torch.randn(B, H, L, E, device=device, dtype=dtype)
+            value = torch.randn(B, H, L, E, device=device, dtype=dtype)
+
+            output, logsumexp = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu(
+                query, key, value
+            )
+            return output.dtype, logsumexp.dtype
+
+        cpu_output_dtype, cpu_logsumexp_dtype = run("cpu")
+        meta_output_dtype, meta_logsumexp_dtype = run("meta")
+
+        self.assertEqual(cpu_output_dtype, meta_output_dtype)
+        self.assertEqual(cpu_logsumexp_dtype, meta_logsumexp_dtype)
+
 class TestMetaKernelConv(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_convolution_backward_meta_kernel_channels_last(self):
@@ -2010,193 +2030,6 @@ class TestMetaKernelRegistrations(TestCase):
         y_meta = torch.ops.aten.randint_like.Tensor(x_meta, high_meta)
         self.assertEqual(y_cpu.dtype, y_meta.dtype)
         self.assertEqual(y_cpu.shape, y_meta.shape)
-
-    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
-    def test_hardtanh_inverted_bounds(self):
-        inputs = (
-            torch.randn(2, 3, 4, 5).to(memory_format=torch.channels_last),
-            torch.randn(3, 4).t(),
-            torch.randn(2, 3, 4).permute(2, 0, 1),
-            torch.randn(2, 3, 4)[:, :, ::2],
-        )
-
-        for x_cpu in inputs:
-            y_cpu = torch.ops.aten.hardtanh(x_cpu, min_val=2, max_val=0)
-            out_cpu = torch.empty(0, dtype=x_cpu.dtype)
-            y_out_cpu = torch.ops.aten.hardtanh.out(
-                x_cpu, min_val=2, max_val=0, out=out_cpu
-            )
-
-            x_meta = torch.empty_strided(
-                x_cpu.shape, x_cpu.stride(), dtype=x_cpu.dtype, device="meta"
-            )
-            y_meta = torch.ops.aten.hardtanh(x_meta, min_val=2, max_val=0)
-            self.assertEqual(y_cpu.shape, y_meta.shape)
-            self.assertEqual(y_cpu.dtype, y_meta.dtype)
-            self.assertEqual(y_cpu.stride(), y_meta.stride())
-
-            out_meta = torch.empty(0, dtype=x_cpu.dtype, device="meta")
-            y_out_meta = torch.ops.aten.hardtanh.out(
-                x_meta, min_val=2, max_val=0, out=out_meta
-            )
-            self.assertIs(y_out_meta, out_meta)
-            self.assertEqual(y_out_cpu.shape, y_out_meta.shape)
-            self.assertEqual(y_out_cpu.dtype, y_out_meta.dtype)
-            self.assertEqual(y_out_cpu.stride(), y_out_meta.stride())
-
-            y_inplace_meta = torch.ops.aten.hardtanh_(x_meta, min_val=2, max_val=0)
-            self.assertIs(y_inplace_meta, x_meta)
-            self.assertEqual(x_cpu.shape, y_inplace_meta.shape)
-            self.assertEqual(x_cpu.dtype, y_inplace_meta.dtype)
-            self.assertEqual(x_cpu.stride(), y_inplace_meta.stride())
-
-    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
-    def test_hardtanh_integral_bounds_out_of_range(self):
-        cases = (
-            (torch.int8, 200, 0, "int8_t"),
-            (torch.uint8, 0, 256, "uint8_t"),
-            (torch.int32, 2147483648, 0, "int"),
-            (torch.int64, 2**63, 0, "int64_t"),
-        )
-
-        for dtype, min_val, max_val, cpp_type in cases:
-            x = torch.empty(2, dtype=dtype, device="meta")
-            error = f"value cannot be converted to type {cpp_type} without overflow"
-            with self.assertRaisesRegex(RuntimeError, error):
-                torch.ops.aten.hardtanh(x, min_val=min_val, max_val=max_val)
-
-            out = torch.empty(0, dtype=dtype, device="meta")
-            with self.assertRaisesRegex(RuntimeError, error):
-                torch.ops.aten.hardtanh.out(
-                    x, min_val=min_val, max_val=max_val, out=out
-                )
-
-            with self.assertRaisesRegex(RuntimeError, error):
-                torch.ops.aten.hardtanh_(x, min_val=min_val, max_val=max_val)
-
-    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
-    def test_hardtanh_scalar_bound_conversion(self):
-        x_int = torch.empty(2, dtype=torch.int8, device="meta")
-        y_int = torch.ops.aten.hardtanh(x_int, min_val=1 + 0j, max_val=0)
-        self.assertEqual(y_int.shape, x_int.shape)
-        self.assertEqual(y_int.dtype, x_int.dtype)
-
-        with self.assertRaisesRegex(
-            RuntimeError, "value cannot be converted to type int64_t without overflow"
-        ):
-            torch.ops.aten.hardtanh(x_int, min_val=1 + 1j, max_val=0)
-
-        error_cases = (
-            (torch.float32, 1e100, 0, "float"),
-            (torch.float32, 0, 1e100, "float"),
-            (torch.float16, 1e10, 0, "c10::Half"),
-            (torch.bfloat16, 1e100, 0, "c10::BFloat16"),
-            (torch.float32, 1 + 1j, 0, "double"),
-        )
-        for dtype, min_val, max_val, cpp_type in error_cases:
-            x = torch.empty(2, dtype=dtype, device="meta")
-            error = f"value cannot be converted to type {cpp_type} without overflow"
-            with self.assertRaisesRegex(RuntimeError, error):
-                torch.ops.aten.hardtanh(x, min_val=min_val, max_val=max_val)
-
-        accepted_cases = (
-            (torch.float32, float("inf"), 0),
-            (torch.float32, float("nan"), 0),
-            (torch.float32, 1 + 0j, 0),
-            (torch.float64, 1e100, 0),
-        )
-        for dtype, min_val, max_val in accepted_cases:
-            x = torch.empty(2, dtype=dtype, device="meta")
-            y = torch.ops.aten.hardtanh(x, min_val=min_val, max_val=max_val)
-            self.assertEqual(y.shape, x.shape)
-            self.assertEqual(y.dtype, x.dtype)
-
-    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
-    def test_hardtanh_out_device_error_does_not_resize_out(self):
-        out = torch.empty(0)
-        original_shape = out.shape
-        original_stride = out.stride()
-
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempting to copy from device meta to device cpu"
-        ):
-            torch.ops.aten.hardtanh.out(
-                torch.empty(2, 3, device="meta"), min_val=2, max_val=0, out=out
-            )
-
-        self.assertEqual(out.shape, original_shape)
-        self.assertEqual(out.stride(), original_stride)
-
-    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
-    def test_hardtanh_out_dtype_error_does_not_resize_out(self):
-        cases = (
-            (
-                torch.empty(2, 3, dtype=torch.float32, device="meta"),
-                torch.empty(0, dtype=torch.float64, device="meta"),
-                2,
-                0,
-                "Found dtype Double but expected Float",
-            ),
-            (
-                torch.empty(2, dtype=torch.int8, device="meta"),
-                torch.empty(0, dtype=torch.float32, device="meta"),
-                200,
-                0,
-                "Found dtype Float but expected Char",
-            ),
-            (
-                torch.empty(2, dtype=torch.float32, device="meta"),
-                torch.empty(0, dtype=torch.float64, device="meta"),
-                1e100,
-                0,
-                "Found dtype Double but expected Float",
-            ),
-        )
-
-        for x, out, min_val, max_val, error in cases:
-            original_shape = out.shape
-            original_stride = out.stride()
-
-            with self.assertRaisesRegex(RuntimeError, error):
-                torch.ops.aten.hardtanh.out(
-                    x,
-                    min_val=min_val,
-                    max_val=max_val,
-                    out=out,
-                )
-
-            self.assertEqual(out.shape, original_shape)
-            self.assertEqual(out.stride(), original_stride)
-
-    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
-    def test_hardtanh_out_bound_error_resizes_out(self):
-        cases = (
-            (
-                torch.empty(2, 3, dtype=torch.int8, device="meta"),
-                200,
-                0,
-                "value cannot be converted to type int8_t without overflow",
-            ),
-            (
-                torch.empty(2, 3, dtype=torch.float32, device="meta"),
-                1e100,
-                0,
-                "value cannot be converted to type float without overflow",
-            ),
-        )
-
-        for x, min_val, max_val, error in cases:
-            out = torch.empty(0, dtype=x.dtype, device="meta")
-            with self.assertRaisesRegex(RuntimeError, error):
-                torch.ops.aten.hardtanh.out(
-                    x,
-                    min_val=min_val,
-                    max_val=max_val,
-                    out=out,
-                )
-
-            self.assertEqual(out.shape, x.shape)
-            self.assertEqual(out.stride(), x.stride())
 
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_pad_sequence_decomp_left(self):

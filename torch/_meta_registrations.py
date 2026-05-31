@@ -37,8 +37,6 @@ from torch._prims_common.wrappers import (
     _maybe_resize_out,
     _resize_output_check,
     _safe_copy_out,
-    check_copy_devices,
-    is_cpu_scalar,
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
@@ -4687,159 +4685,6 @@ def meta_zero(self):
     return self.new_empty(self.shape)
 
 
-def _check_hardtanh_args(self, min_val, max_val):
-    min_val, max_val = _check_hardtanh_initial_args(self, min_val, max_val)
-    _check_hardtanh_late_args(self, min_val, max_val)
-
-
-def _check_hardtanh_initial_args(self, min_val, max_val):
-    if utils.is_boolean_dtype(self.dtype):
-        raise RuntimeError("Bool inputs not supported for hardtanh")
-
-    if utils.is_complex_dtype(self.dtype):
-        raise NotImplementedError("clamp is not supported for complex types")
-
-    if utils.is_integer_dtype(self.dtype):
-        # Preserve native hardtanh behavior: integral bounds are converted to
-        # int64, but min_val > max_val is allowed and handled by clamp.
-        min_val = _hardtanh_scalar_to_int64(min_val)
-        max_val = _hardtanh_scalar_to_int64(max_val)
-        if self.dtype == torch.uint8 and (min_val < 0 or max_val < 0):
-            raise RuntimeError(
-                "cannot do hardtanh on an unsigned type with negative limits"
-            )
-    return min_val, max_val
-
-
-def _check_hardtanh_late_args(self, min_val, max_val):
-    if utils.is_integer_dtype(self.dtype):
-        _check_hardtanh_bound_in_dtype_range(min_val, self.dtype)
-        _check_hardtanh_bound_in_dtype_range(max_val, self.dtype)
-    elif utils.is_float_dtype(self.dtype):
-        _check_hardtanh_float_bound(min_val, self.dtype)
-        _check_hardtanh_float_bound(max_val, self.dtype)
-
-
-def _hardtanh_scalar_to_int64(value):
-    if isinstance(value, complex):
-        if value.imag != 0:
-            raise RuntimeError(
-                "value cannot be converted to type int64_t without overflow"
-            )
-        value = value.real
-
-    try:
-        value = int(value)
-    except (OverflowError, TypeError, ValueError):
-        raise RuntimeError(
-            "value cannot be converted to type int64_t without overflow"
-        ) from None
-
-    if value < -(1 << 63) or value > (1 << 63) - 1:
-        raise RuntimeError("value cannot be converted to type int64_t without overflow")
-    return value
-
-
-_HARDTANH_DTYPE_TO_CPP_TYPE = {
-    torch.int8: "int8_t",
-    torch.uint8: "uint8_t",
-    torch.int16: "int16_t",
-    torch.uint16: "uint16_t",
-    torch.int32: "int",
-    torch.uint32: "uint32_t",
-    torch.int64: "int64_t",
-    torch.uint64: "uint64_t",
-}
-
-
-def _check_hardtanh_bound_in_dtype_range(value, dtype):
-    info = torch.iinfo(dtype)
-    if value < info.min or value > info.max:
-        cpp_type = _HARDTANH_DTYPE_TO_CPP_TYPE.get(dtype, str(dtype))
-        raise RuntimeError(
-            f"value cannot be converted to type {cpp_type} without overflow"
-        )
-
-
-_HARDTANH_FLOAT_DTYPE_TO_CPP_TYPE = {
-    torch.float16: "c10::Half",
-    torch.bfloat16: "c10::BFloat16",
-    torch.float32: "float",
-    torch.float64: "double",
-}
-
-
-def _hardtanh_scalar_to_double(value):
-    if isinstance(value, complex):
-        if value.imag != 0:
-            raise RuntimeError(
-                "value cannot be converted to type double without overflow"
-            )
-        value = value.real
-
-    try:
-        return float(value)
-    except (OverflowError, TypeError, ValueError):
-        raise RuntimeError(
-            "value cannot be converted to type double without overflow"
-        ) from None
-
-
-def _check_hardtanh_float_bound(value, dtype):
-    value = _hardtanh_scalar_to_double(value)
-    if math.isnan(value) or math.isinf(value):
-        return
-
-    info = torch.finfo(dtype)
-    if value < info.min or value > info.max:
-        cpp_type = _HARDTANH_FLOAT_DTYPE_TO_CPP_TYPE.get(dtype, str(dtype))
-        raise RuntimeError(
-            f"value cannot be converted to type {cpp_type} without overflow"
-        )
-
-
-_HARDTANH_DTYPE_TO_SCALAR_TYPE_NAME = {
-    torch.bool: "Bool",
-    torch.uint8: "Byte",
-    torch.int8: "Char",
-    torch.int16: "Short",
-    torch.int32: "Int",
-    torch.int64: "Long",
-    torch.float16: "Half",
-    torch.bfloat16: "BFloat16",
-    torch.float32: "Float",
-    torch.float64: "Double",
-}
-
-
-def _hardtanh_dtype_name(dtype):
-    return _HARDTANH_DTYPE_TO_SCALAR_TYPE_NAME.get(dtype, str(dtype))
-
-
-@register_meta([aten.hardtanh.default, aten.hardtanh.out])
-def meta_hardtanh(self, min_val=-1, max_val=1, *, out: Tensor | None = None):
-    min_val, max_val = _check_hardtanh_initial_args(self, min_val, max_val)
-    result = torch.empty_like(self)
-    if out is None:
-        _check_hardtanh_late_args(self, min_val, max_val)
-        return result
-
-    if not is_cpu_scalar(result):
-        check_copy_devices(copy_from=result, copy_to=out)
-    torch._check(
-        result.dtype == out.dtype,
-        lambda: f"Found dtype {_hardtanh_dtype_name(out.dtype)} "
-        f"but expected {_hardtanh_dtype_name(result.dtype)}",
-    )
-    if _resize_output_check(out, result.shape):
-        out.resize_(result.shape)
-        # Native TensorIterator gives resized outputs the default hardtanh strides.
-        out.as_strided_(result.shape, result.stride())
-    _check_hardtanh_late_args(self, min_val, max_val)
-    _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=True)
-    return out
-
-
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
 def meta_fill_(self, val):
     if isinstance(val, torch.Tensor):
@@ -4862,12 +4707,6 @@ def meta_fill(self, val):
 
 @register_meta(aten.relu_.default)
 def meta_relu_(self):
-    return self
-
-
-@register_meta(aten.hardtanh_.default)
-def meta_hardtanh_(self, min_val=-1, max_val=1):
-    _check_hardtanh_args(self, min_val, max_val)
     return self
 
 
@@ -6508,7 +6347,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
             max_seqlen_batch_q,
             num_heads,
         ),
-        dtype=torch.float,
+        dtype=utils.get_computation_dtype(query.dtype),
         device=query.device,
     ).transpose(1, 2)
     return (

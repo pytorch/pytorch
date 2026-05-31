@@ -1029,7 +1029,53 @@ def _triplet_margin_with_distance_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
-@register_decomposition(aten.hardtanh)
+def _hardtanh(
+    a: TensorLikeType,
+    min_val: NumberType = -1,
+    max_val: NumberType = 1,
+    inplace: bool = False,
+    *,
+    check_bounds: bool,
+) -> TensorLikeType:
+    if inplace:
+        raise NotImplementedError
+    if utils.is_boolean_dtype(a.dtype):
+        raise RuntimeError("Bool inputs not supported for hardtanh")
+
+    # preserve legacy behavior of boundaries not causing type promotion
+    if utils.is_integer_dtype(a.dtype):
+        min_val = int(min_val)  # type: ignore[arg-type]
+        max_val = int(max_val)  # type: ignore[arg-type]
+        if not (a.dtype != torch.uint8 or (min_val >= 0 and max_val >= 0)):
+            raise RuntimeError(
+                "Cannot do hardtanh on an unsigned type with negative limits"
+            )
+
+    if check_bounds and min_val > max_val:  # type: ignore[operator]
+        raise ValueError("min_val cannot be greater than max_val")
+
+    return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
+
+
+@register_decomposition([aten.hardtanh.default, aten.hardtanh.out])
+@_inplace_wrapper
+@out_wrapper()
+@elementwise_unary_scalar_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def _aten_hardtanh(
+    a: TensorLikeType,
+    min_val: NumberType = -1,
+    max_val: NumberType = 1,
+    inplace: bool = False,
+) -> TensorLikeType:
+    return _hardtanh(
+        a, min_val=min_val, max_val=max_val, inplace=inplace, check_bounds=False
+    )
+
+
 @_inplace_wrapper
 @out_wrapper()
 @elementwise_unary_scalar_wrapper
@@ -1046,24 +1092,9 @@ def hardtanh(
     """
     Reference implementation of torch.nn.functional.hardtanh
     """
-    if inplace:
-        raise NotImplementedError
-    if utils.is_boolean_dtype(a.dtype):
-        raise RuntimeError("Bool inputs not supported for hardtanh")
-
-    # preserve legacy behavior of boundaries not causing type promotion
-    if utils.is_integer_dtype(a.dtype):
-        min_val = int(min_val)  # type: ignore[arg-type]
-        max_val = int(max_val)  # type: ignore[arg-type]
-        if not (a.dtype != torch.uint8 or (min_val >= 0 and max_val >= 0)):
-            raise RuntimeError(
-                "Cannot do hardtanh on an unsigned type with negative limits"
-            )
-
-    if min_val > max_val:  # type: ignore[operator]
-        raise ValueError("min_val cannot be greater than max_val")
-
-    return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
+    return _hardtanh(
+        a, min_val=min_val, max_val=max_val, inplace=inplace, check_bounds=True
+    )
 
 
 @register_decomposition(aten.gelu)
