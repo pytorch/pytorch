@@ -40,6 +40,7 @@ _DYNAMO_WRAPPER_ATTRS = (
     "_isolate_recompiles_id",
     "get_compiler_config",
     "aot_compile",
+    "_is_torch_compile",
 )
 
 
@@ -458,7 +459,7 @@ def grad(
         return eager_transforms.grad_impl(func, argnums, has_aux, args, kwargs)
 
     if not is_compiling():
-        wrapper = functools.wraps(func)(wrapper)
+        wrapper = _wraps_without_dynamo_attrs(func)(wrapper)
 
     return wrapper
 
@@ -504,6 +505,6 @@ def grad_and_value(
         )
 
     if not is_compiling():
-        wrapper = functools.wraps(func)(wrapper)
+        wrapper = _wraps_without_dynamo_attrs(func)(wrapper)
 
     return wrapper
