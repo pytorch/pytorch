@@ -16,7 +16,7 @@ from typing import Any
 import torch
 import torch._dynamo
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import clone_input, copy_dynamo_tensor_attributes
+from torch._dynamo.utils import clone_input
 from torch._library.custom_ops import CustomOpDef
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch._utils_internal import get_file_path_2
@@ -109,8 +109,9 @@ def safe_aot_autograd_check(
     rtol: float | None = None,
     atol: float | None = None,
 ) -> Any:
-    # NB: copy_inputs does nothing for aot_autograd_check: it always needs to copy
-    # inputs.
+    # NB: the copy_inputs argument to this wrapper is ignored: safe AOT checks
+    # always need to copy inputs because they run func(*args, **kwargs) multiple
+    # times.
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
 
@@ -132,24 +133,12 @@ def safe_aot_autograd_check(
         dynamic,
         check_gradients="auto",
         assert_equals_fn=assert_equals_fn,
-        copy_inputs=deepcopy_tensors_for_aot_autograd,
+        copy_inputs=True,
     )
 
 
 def deepcopy_tensors(inputs: Any) -> Any:
     return pytree.tree_map_only(torch.Tensor, clone_input, inputs)
-
-
-def clone_input_for_aot_autograd(x: torch.Tensor) -> torch.Tensor:
-    result = torch.clone(x)
-    if x.device.type == "cpu" and x.is_pinned():
-        result = result.pin_memory()
-    copy_dynamo_tensor_attributes(x, result)
-    return result
-
-
-def deepcopy_tensors_for_aot_autograd(inputs: Any) -> Any:
-    return pytree.tree_map_only(torch.Tensor, clone_input_for_aot_autograd, inputs)
 
 
 # Test util requirements

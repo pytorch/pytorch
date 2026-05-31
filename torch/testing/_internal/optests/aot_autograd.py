@@ -1,11 +1,28 @@
 # mypy: ignore-errors
 
+import re
+
 import torch
 import torch.utils._pytree as pytree
-from torch.testing._utils import wrapper_set_seed
+from torch._dynamo.utils import copy_dynamo_tensor_attributes
 from functorch.compile import compiled_function, min_cut_rematerialization_partition, default_partition, nop
+from torch.testing._utils import wrapper_set_seed
+
 from .make_fx import randomize
-import re
+
+
+def _clone_input_for_aot_autograd(x):
+    result = torch.clone(x)
+    if x.device.type == "cpu" and x.is_pinned():
+        result = result.pin_memory()
+    copy_dynamo_tensor_attributes(x, result)
+    return result
+
+
+def _maybe_copy_inputs_for_aot_autograd(args, copy_inputs):
+    if copy_inputs:
+        return pytree.tree_map_only(torch.Tensor, _clone_input_for_aot_autograd, args)
+    return args
 
 
 class assert_raises_regex:
@@ -40,7 +57,7 @@ def aot_autograd_check(
         try_check_data_specialization=False,
         skip_correctness_check=False,
         disable_functionalization=False,
-        copy_inputs=None):
+        copy_inputs=False):
     """Compares func(*args, **kwargs) in eager-mode to under AOTAutograd.
 
     Compares outputs and (if check_gradients=True) gradients produced by
@@ -51,11 +68,6 @@ def aot_autograd_check(
     """
     flat_args, args_spec = pytree.tree_flatten((args, kwargs))
     args = [arg for arg in flat_args if isinstance(arg, torch.Tensor)]
-
-    def maybe_copy_inputs(args):
-        if copy_inputs is None:
-            return args
-        return copy_inputs(args)
 
     # We construct a new function that only accepts Tensors as inputs
     def func_no_tensors(args):
@@ -92,13 +104,17 @@ def aot_autograd_check(
             disable_functionalization=False
         )
 
-    out = wrapper_set_seed(func_no_tensors, maybe_copy_inputs(args))
+    out = wrapper_set_seed(
+        func_no_tensors, _maybe_copy_inputs_for_aot_autograd(args, copy_inputs)
+    )
     if check_gradients == "auto":
         any_tensor_requires_grad = pytree.tree_any_only(torch.Tensor, lambda x: x.requires_grad, args)
         any_output_requires_grad = pytree.tree_any_only(torch.Tensor, lambda x: x.requires_grad, out)
         check_gradients = any_tensor_requires_grad and any_output_requires_grad
     if not check_gradients:
-        compiled_out = wrapper_set_seed(compiled_f, maybe_copy_inputs(args))
+        compiled_out = wrapper_set_seed(
+            compiled_f, _maybe_copy_inputs_for_aot_autograd(args, copy_inputs)
+        )
         if not skip_correctness_check:
             assert_equals_fn(compiled_out, out, msg=outputs_msg)
         return
@@ -117,13 +133,8 @@ outputs_msg = (
 def _test_aot_autograd_forwards_backwards_helper(
         f, compiled_f, args, assert_raises_regex_fn, assert_equals_fn,
         try_check_data_specialization, skip_correctness_check=False,
-        copy_inputs=None):
+        copy_inputs=False):
     # Verify grads are equal between compiled and non-compiled versions of f.
-
-    def maybe_copy_inputs(args):
-        if copy_inputs is None:
-            return args
-        return copy_inputs(args)
 
     def call_forwards_backwards(f, args):
         flat_args = pytree.arg_tree_leaves(*args)
@@ -145,7 +156,7 @@ def _test_aot_autograd_forwards_backwards_helper(
 
     def check(args, ignore_failure=False):
         try:
-            orig_args = maybe_copy_inputs(args)
+            orig_args = _maybe_copy_inputs_for_aot_autograd(args, copy_inputs)
             orig_out, orig_grad = call_forwards_backwards(f, orig_args)
         except Exception:
             if ignore_failure:
@@ -157,7 +168,9 @@ def _test_aot_autograd_forwards_backwards_helper(
         any_non_leaves = any(x.grad_fn is not None for x in tensor_args)
         if all(x is None for x in orig_grad) and any_non_leaves:
             with assert_raises_regex_fn(RuntimeError, 'does not require grad and does not have a grad_fn'):
-                call_forwards_backwards(compiled_f, maybe_copy_inputs(args))
+                call_forwards_backwards(
+                    compiled_f, _maybe_copy_inputs_for_aot_autograd(args, copy_inputs)
+                )
             return
 
         msg = (
@@ -168,7 +181,7 @@ def _test_aot_autograd_forwards_backwards_helper(
         )
 
         compiled_out, compiled_grad = call_forwards_backwards(
-            compiled_f, maybe_copy_inputs(args)
+            compiled_f, _maybe_copy_inputs_for_aot_autograd(args, copy_inputs)
         )
         if not skip_correctness_check:
             try:

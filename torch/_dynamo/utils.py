@@ -112,10 +112,7 @@ if typing.TYPE_CHECKING:
 
     from torch._dynamo.bytecode_transformation import Instruction
     from torch._dynamo.replay_record import ExecutionRecord
-    from torch._dynamo.symbolic_convert import (
-        InstructionTranslator,
-        InstructionTranslatorBase,
-    )
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
     from torch._subclasses import FakeTensorMode
@@ -1439,6 +1436,18 @@ def is_wrapper_or_member_descriptor(
     )
 
 
+def tracked_repr(tx: InstructionTranslatorBase, vt: VariableTracker) -> str:
+    from .variables.object_protocol import generic_repr
+
+    return generic_repr(tx, vt).as_python_constant()
+
+
+def _item_debug_repr(vt: VariableTracker) -> str:
+    if vt.is_python_constant():
+        return repr(vt.as_python_constant())
+    return vt.debug_repr()
+
+
 def unwrap_if_wrapper(fn: Any) -> Any:
     return unwrap_with_attr_name_if_wrapper(fn)[0]
 
@@ -1810,7 +1819,13 @@ def _get_dynamo_config_for_logging() -> str | None:
         }
 
         return {
-            key: sorted(value) if isinstance(value, set) else value
+            key: (
+                sorted(value)
+                if isinstance(value, set)
+                else value.to_jsonable()
+                if hasattr(value, "to_jsonable")
+                else value
+            )
             for key, value in d.items()
             if key not in blocklist
         }
@@ -2771,8 +2786,8 @@ def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
 def timed(
     model: Any, example_inputs: Iterable[Any], times: int = 1
 ) -> tuple[Any, float]:
-    if torch.cuda.is_available():
-        synchronize = torch.cuda.synchronize
+    if torch.accelerator.is_available():
+        synchronize = torch.accelerator.synchronize
     else:
         synchronize = nothing
 
@@ -3220,7 +3235,7 @@ def raise_args_mismatch(
 def iter_contains(
     items: Iterable[Any],
     search: Any,
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     check_tensor_identity: bool = False,
 ) -> Any:
     from .variables import ConstantVariable
@@ -4213,6 +4228,12 @@ def run_node(
             )
         except Unsupported:
             raise
+        except IndexError:
+            # Re-raise IndexError from tensor dim validation (e.g. canonicalize_dim,
+            # maybe_wrap_dim) so it reaches the user as IndexError, not RuntimeError.
+            # This is intentionally broad: an internal Dynamo indexing bug would also
+            # propagate this way, but such bugs are rare and the traceback is preserved.
+            raise
         except Exception as e:
             raise RuntimeError(make_error_message(e)).with_traceback(
                 e.__traceback__
@@ -4614,6 +4635,81 @@ class numpy_operator_wrapper(Generic[_P, R]):
         )
         out = self.op(*args)
         return numpy_to_tensor(out)
+
+
+@functools.lru_cache(maxsize=1)
+def _torch_numpy_callable_id_map() -> dict[int, tuple[Callable[..., Any], Any, str]]:
+    result: dict[int, tuple[Callable[..., Any], Any, str]] = {}
+    for np_mod, tnp_mod in NP_TO_TNP_MODULE.items():
+        module = np_mod.__name__
+        for name, tnp_callable in tnp_mod.__dict__.items():
+            if not callable(tnp_callable):
+                continue
+
+            np_callable = getattr(np_mod, name, None)
+            if not callable(np_callable):
+                continue
+
+            result[id(tnp_callable)] = (
+                tnp_callable,
+                np_callable,
+                f"{module}.{name}",
+            )
+    return result
+
+
+@functools.lru_cache(maxsize=1024)
+def _torch_numpy_callable_cache_key_by_id(
+    obj_id: int,
+) -> tuple[Callable[..., Any], str] | None:
+    tnp_callable, np_callable, cache_key = _torch_numpy_callable_id_map()[obj_id]
+
+    module, _, name = cache_key.rpartition(".")
+    # Random functions depend on global RNG state, so they are not safe to
+    # identify only by their canonical NumPy path in an AOTAutograd cache key.
+    if module == "numpy.random" or module.startswith("numpy.random."):
+        return None
+
+    try:
+        if np_callable is not getattr(importlib.import_module(module), name):
+            return None
+    except (AttributeError, ImportError):
+        return None
+
+    return (tnp_callable, cache_key)
+
+
+def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
+    obj_id = id(obj)
+    # Arbitrary Python callables can be short-lived, so do not cache misses by
+    # id; a later object may reuse the same id.
+    if obj_id not in _torch_numpy_callable_id_map():
+        return None
+
+    entry = _torch_numpy_callable_cache_key_by_id(obj_id)
+    if entry is None:
+        return None
+
+    tnp_callable, cache_key = entry
+    if obj is not tnp_callable:
+        return None
+
+    return cache_key
+
+
+def is_safe_numpy_wrapper(obj: Any) -> bool:
+    return numpy_wrapper_cache_key(obj) is not None
+
+
+def numpy_wrapper_cache_key(obj: Any) -> tuple[str, str] | None:
+    if type(obj) is not numpy_to_tensor_wrapper:
+        return None
+
+    key = _torch_numpy_callable_cache_key(obj.f)
+    if key is None:
+        return None
+
+    return (type(obj).__qualname__, key)
 
 
 def defake(x: Any) -> Any:
@@ -5596,23 +5692,27 @@ def get_traced_code() -> list[CodeType] | None:
 
 
 def is_pybind11_enum_member(value: Any) -> bool:
-    """Check if value is a pybind11 enum member (singleton with stable hash).
+    """Check if value is a pybind11 enum member (with stable hash and eq).
 
-    Pybind11 enums have __members__ on their type and each member is a singleton.
-    Unlike Python's enum.Enum, pybind11 injects __hash__ and __eq__ directly
-    into the type's __dict__, which trips raise_on_overridden_hash. But these
-    are safe: members are singletons with hash == value, same as Python enums.
+    Pybind11 enums have __members__ on their type. Unlike Python's enum.Enum,
+    pybind11 injects __hash__ and __eq__ directly into the type's __dict__,
+    which trips raise_on_overridden_hash. But these are safe: members have
+    deterministic hash and equality, same as Python enums.
+
+    Note: pybind11 doesn't always return the singleton for enum values (e.g.
+    a C++ function returning an enum may construct a new Python wrapper), so
+    we check by name membership rather than identity.
     """
     t = type(value)
     members = getattr(t, "__members__", None)
     if members is None:
         return False
     name = getattr(value, "name", None)
-    return name is not None and members.get(name) is value
+    return name is not None and name in members
 
 
 def _make_inlined(
-    tx: InstructionTranslator, f: Callable[..., Any]
+    tx: InstructionTranslatorBase, f: Callable[..., Any]
 ) -> Callable[..., VariableTracker]:
     if not callable(f):
         raise AssertionError("Expect f to be a python callable.")
