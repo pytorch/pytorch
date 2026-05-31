@@ -112,10 +112,7 @@ if typing.TYPE_CHECKING:
 
     from torch._dynamo.bytecode_transformation import Instruction
     from torch._dynamo.replay_record import ExecutionRecord
-    from torch._dynamo.symbolic_convert import (
-        InstructionTranslator,
-        InstructionTranslatorBase,
-    )
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
     from torch._subclasses import FakeTensorMode
@@ -1298,6 +1295,51 @@ def is_numpy_float_type(value: Any) -> bool:
     )
 
 
+def unpack_iterable(
+    tx: InstructionTranslatorBase, iterable: VariableTracker
+) -> list[VariableTracker]:
+    items: list[VariableTracker] = []
+    unpack_and_apply_fn(tx, iterable, items.append)
+    return items
+
+
+def unpack_and_apply_fn(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+    apply_fn,
+) -> None:
+    from . import variables
+    from .exc import handle_observed_exception, ObservedUserStopIteration
+    from .variables.object_protocol import generic_getiter, generic_iternext
+
+    if isinstance(
+        iterable,
+        (
+            variables.ConstDictVariable,
+            variables.DictViewVariable,
+            variables.DequeVariable,
+            variables.ListVariable,
+            variables.ListIteratorVariable,
+            variables.SetVariable,
+            variables.TupleVariable,
+        ),
+    ):
+        # avoid going through the generic iter/getiter/iternext protocol for
+        # common builtin iterables, since it can be a bottleneck for large
+        # iterables (e.g. unpacking a list of 1000 items)
+        [apply_fn(item) for item in iterable.unpack_var_sequence(tx)]  # type: ignore[bad-argument-type]
+        return
+
+    iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
+    while True:
+        try:
+            item = generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
+            apply_fn(item)
+        except ObservedUserStopIteration:
+            handle_observed_exception(tx)
+            break
+
+
 @overload
 def is_lru_cache_wrapped_function(
     value: Callable[..., T],
@@ -1392,6 +1434,18 @@ def is_wrapper_or_member_descriptor(
             types.MethodWrapperType,
         ),
     )
+
+
+def tracked_repr(tx: InstructionTranslatorBase, vt: VariableTracker) -> str:
+    from .variables.object_protocol import generic_repr
+
+    return generic_repr(tx, vt).as_python_constant()
+
+
+def _item_debug_repr(vt: VariableTracker) -> str:
+    if vt.is_python_constant():
+        return repr(vt.as_python_constant())
+    return vt.debug_repr()
 
 
 def unwrap_if_wrapper(fn: Any) -> Any:
@@ -1594,6 +1648,7 @@ class CompilationMetrics:
     inline_inbuilt_nn_modules_candidate: bool | None = False
     pytorch_version: str | None = None
     inductor_provenance: set[str] | None = None
+    functorch_config: str | None = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1851,6 +1906,31 @@ def _scrubbed_inductor_config_for_logging() -> str | None:
     return inductor_conf_str
 
 
+def _functorch_config_for_logging() -> str | None:
+    """Serialize functorch config (AOT autograd settings) for Scuba logging."""
+    if not justknobs_check("pytorch/dynamo:log_functorch_config"):
+        return None
+
+    try:
+        functorch_config_copy = torch._functorch.config.get_config_copy()
+    except (TypeError, AttributeError, RuntimeError, AssertionError):
+        return None
+
+    try:
+        blocklist = {
+            "TYPE_CHECKING",
+            "_save_config_ignore",
+        }
+        clean = {
+            k: (list(v) if isinstance(v, set) else v)
+            for k, v in functorch_config_copy.items()
+            if k not in blocklist and isinstance(k, str)
+        }
+        return json.dumps(clean, sort_keys=True, default=str)
+    except Exception:
+        return "Functorch Config is not JSON serializable"
+
+
 def record_compilation_metrics(
     start_time_ns: int,
     end_time_ns: int,
@@ -1897,6 +1977,7 @@ def record_compilation_metrics(
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
         "pytorch_version": torch.__version__,
+        "functorch_config": _functorch_config_for_logging(),
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
@@ -2697,8 +2778,8 @@ def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
 def timed(
     model: Any, example_inputs: Iterable[Any], times: int = 1
 ) -> tuple[Any, float]:
-    if torch.cuda.is_available():
-        synchronize = torch.cuda.synchronize
+    if torch.accelerator.is_available():
+        synchronize = torch.accelerator.synchronize
     else:
         synchronize = nothing
 
@@ -3146,7 +3227,7 @@ def raise_args_mismatch(
 def iter_contains(
     items: Iterable[Any],
     search: Any,
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     check_tensor_identity: bool = False,
 ) -> Any:
     from .variables import ConstantVariable
@@ -4139,6 +4220,12 @@ def run_node(
             )
         except Unsupported:
             raise
+        except IndexError:
+            # Re-raise IndexError from tensor dim validation (e.g. canonicalize_dim,
+            # maybe_wrap_dim) so it reaches the user as IndexError, not RuntimeError.
+            # This is intentionally broad: an internal Dynamo indexing bug would also
+            # propagate this way, but such bugs are rare and the traceback is preserved.
+            raise
         except Exception as e:
             raise RuntimeError(make_error_message(e)).with_traceback(
                 e.__traceback__
@@ -4540,6 +4627,81 @@ class numpy_operator_wrapper(Generic[_P, R]):
         )
         out = self.op(*args)
         return numpy_to_tensor(out)
+
+
+@functools.lru_cache(maxsize=1)
+def _torch_numpy_callable_id_map() -> dict[int, tuple[Callable[..., Any], Any, str]]:
+    result: dict[int, tuple[Callable[..., Any], Any, str]] = {}
+    for np_mod, tnp_mod in NP_TO_TNP_MODULE.items():
+        module = np_mod.__name__
+        for name, tnp_callable in tnp_mod.__dict__.items():
+            if not callable(tnp_callable):
+                continue
+
+            np_callable = getattr(np_mod, name, None)
+            if not callable(np_callable):
+                continue
+
+            result[id(tnp_callable)] = (
+                tnp_callable,
+                np_callable,
+                f"{module}.{name}",
+            )
+    return result
+
+
+@functools.lru_cache(maxsize=1024)
+def _torch_numpy_callable_cache_key_by_id(
+    obj_id: int,
+) -> tuple[Callable[..., Any], str] | None:
+    tnp_callable, np_callable, cache_key = _torch_numpy_callable_id_map()[obj_id]
+
+    module, _, name = cache_key.rpartition(".")
+    # Random functions depend on global RNG state, so they are not safe to
+    # identify only by their canonical NumPy path in an AOTAutograd cache key.
+    if module == "numpy.random" or module.startswith("numpy.random."):
+        return None
+
+    try:
+        if np_callable is not getattr(importlib.import_module(module), name):
+            return None
+    except (AttributeError, ImportError):
+        return None
+
+    return (tnp_callable, cache_key)
+
+
+def _torch_numpy_callable_cache_key(obj: Callable[..., Any]) -> str | None:
+    obj_id = id(obj)
+    # Arbitrary Python callables can be short-lived, so do not cache misses by
+    # id; a later object may reuse the same id.
+    if obj_id not in _torch_numpy_callable_id_map():
+        return None
+
+    entry = _torch_numpy_callable_cache_key_by_id(obj_id)
+    if entry is None:
+        return None
+
+    tnp_callable, cache_key = entry
+    if obj is not tnp_callable:
+        return None
+
+    return cache_key
+
+
+def is_safe_numpy_wrapper(obj: Any) -> bool:
+    return numpy_wrapper_cache_key(obj) is not None
+
+
+def numpy_wrapper_cache_key(obj: Any) -> tuple[str, str] | None:
+    if type(obj) is not numpy_to_tensor_wrapper:
+        return None
+
+    key = _torch_numpy_callable_cache_key(obj.f)
+    if key is None:
+        return None
+
+    return (type(obj).__qualname__, key)
 
 
 def defake(x: Any) -> Any:
@@ -5490,6 +5652,13 @@ def _set_error_on_graph_break(value: bool) -> None:
     _error_on_graph_break = value
 
 
+@functools.lru_cache(1)
+def _is_tensorify_enabled() -> bool:
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
+        return env not in ("0", "FALSE")
+    return justknobs_check("pytorch/compiler:tensorify_python_scalars")
+
+
 @torch._disable_dynamo
 def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     cm: AbstractContextManager[None] = (
@@ -5515,23 +5684,27 @@ def get_traced_code() -> list[CodeType] | None:
 
 
 def is_pybind11_enum_member(value: Any) -> bool:
-    """Check if value is a pybind11 enum member (singleton with stable hash).
+    """Check if value is a pybind11 enum member (with stable hash and eq).
 
-    Pybind11 enums have __members__ on their type and each member is a singleton.
-    Unlike Python's enum.Enum, pybind11 injects __hash__ and __eq__ directly
-    into the type's __dict__, which trips raise_on_overridden_hash. But these
-    are safe: members are singletons with hash == value, same as Python enums.
+    Pybind11 enums have __members__ on their type. Unlike Python's enum.Enum,
+    pybind11 injects __hash__ and __eq__ directly into the type's __dict__,
+    which trips raise_on_overridden_hash. But these are safe: members have
+    deterministic hash and equality, same as Python enums.
+
+    Note: pybind11 doesn't always return the singleton for enum values (e.g.
+    a C++ function returning an enum may construct a new Python wrapper), so
+    we check by name membership rather than identity.
     """
     t = type(value)
     members = getattr(t, "__members__", None)
     if members is None:
         return False
     name = getattr(value, "name", None)
-    return name is not None and members.get(name) is value
+    return name is not None and name in members
 
 
 def _make_inlined(
-    tx: InstructionTranslator, f: Callable[..., Any]
+    tx: InstructionTranslatorBase, f: Callable[..., Any]
 ) -> Callable[..., VariableTracker]:
     if not callable(f):
         raise AssertionError("Expect f to be a python callable.")

@@ -168,15 +168,6 @@ def _varlen_attn_fake(
         (num_heads, total_q), dtype=torch.float, device=query.device
     )
 
-    if torch.version.hip:
-        preferred = torch._C._get_rocm_fa_preferred_backend()
-        if preferred == torch._C._ROCmFABackend.AOTriton:
-            # AOTriton ROCm path uses batched 3D
-            batch_size = cu_seq_q.size(0) - 1
-            logsumexp = torch.empty(
-                (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
-            )
-
     rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
 
     return output, logsumexp, rng_state
@@ -415,14 +406,6 @@ def _varlen_attn_out_fake(
     logsumexp = torch.empty(
         (num_heads, total_q), dtype=torch.float, device=query.device
     )
-
-    if torch.version.hip:
-        preferred = torch._C._get_rocm_fa_preferred_backend()
-        if preferred == torch._C._ROCmFABackend.AOTriton:
-            batch_size = cu_seq_q.size(0) - 1
-            logsumexp = torch.empty(
-                (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
-            )
 
     return logsumexp
 
