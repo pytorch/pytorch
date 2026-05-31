@@ -718,6 +718,7 @@ class TestFastCudaLauncherCompileResult(TestCase):
             CachingAutotuner, "_build_fast_launcher", tracking_build
         ), results
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181491")
     def test_basic_compile(self):
         """Verify torch.compile uses _FastCudaLauncher and produces correct output."""
         patcher, results = self._patch_build_fast_launcher()
