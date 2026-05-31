@@ -95,7 +95,8 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 :class:`torch.device` as this tensor.
 
 Args:
-    fill_value (scalar): the number to fill the output tensor with.
+    fill_value (Scalar): the scalar value to fill the output tensor with.
+        A scalar can be a Python number or a zero-dimensional tensor.
 
 Keyword args:
     {dtype}
