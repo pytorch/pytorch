@@ -270,19 +270,16 @@ jobs:
           )
           # save container name for later step
           echo "CONTAINER_NAME=${container_name}" >> "$GITHUB_ENV"
-          # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
-          docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
+          WORKSPACE_ORIGINAL_OWNER_ID=$(docker exec -t "${container_name}" stat -c '%u' /var/lib/jenkins/workspace | tr -d '\r')
+          echo "WORKSPACE_ORIGINAL_OWNER_ID=${WORKSPACE_ORIGINAL_OWNER_ID}" >> "$GITHUB_ENV"
+          docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${TEST_COMMAND}"
 
-      - name: Save test results
-        if: always()
+      - name: Restore workspace owner (for gfx1100 only)
+        if: always() && contains(matrix.runner, 'gfx1100')
+        shell: bash
         run: |
-          # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
-          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
-
-      - name: Change permissions (only needed for kubernetes runners for now)
-        if: ${{ always() && steps.test.conclusion && (contains(matrix.runner, 'gfx942') || contains(matrix.runner, 'gfx950') || contains(matrix.runner, 'mi210')) }}
-        run: |
-          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1001:1001 test"
+          docker exec -t "${CONTAINER_NAME}" sh -c \
+            'sudo chown -R '"${WORKSPACE_ORIGINAL_OWNER_ID}"' /var/lib/jenkins/workspace'
 
       - name: Print remaining test logs
         shell: bash
