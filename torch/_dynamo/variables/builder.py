@@ -482,8 +482,7 @@ def _walk_spec(
     """Walk down a spec tree starting at ``current_spec``, consuming each
     token in ``full_path[start_index:]`` in order. Returns the leaf spec at
     the end of the walk, or ``None`` if a key/field along the way wasn't
-    specified by the user. Raises on type-mismatch (the existing tight
-    invariants).
+    specified by the user. Raises on type-mismatch.
 
     ``full_path`` is the original access path (including any prefix already
     consumed by the caller before reaching ``current_spec``); ``start_index``
@@ -533,8 +532,7 @@ def _walk_spec(
                     current_spec = None
             case _:
                 # leaf spec (TensorSpec / IntVar / int / None) but path still
-                # has tokens → the user spec is too shallow: it claims a leaf,
-                # but the runtime value is a container being further accessed.
+                # has tokens.
                 raise _mismatch_error(
                     idx,
                     current_spec,
@@ -542,8 +540,7 @@ def _walk_spec(
                 )
     if not isinstance(current_spec, LeafSpec):
         # The walk consumed all source tokens but landed on a container
-        # spec: the user declared a container at this position, but the
-        # source stopped (typically a single value like a tensor).
+        # in the source.
         raise _mismatch_error(
             len(full_path),
             current_spec,
