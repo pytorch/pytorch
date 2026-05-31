@@ -1053,6 +1053,7 @@ main()
         self.assertNotEqual(grads[1], None)
         self.assertNotEqual(grads[2], None)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180661")
     def test_inputs_aliasing_bytecode_attr_mutations(self):
         # Freeze compiled autograd graph
         compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
@@ -5487,7 +5488,7 @@ test_contexts = {
 }
 
 # These groups of tests aren't supported yet
-xfail_re = re.compile(r"^test_(sparse|profiler|gradcheck|named_tensor)")
+xfail_re = re.compile(r"^test_(sparse|profiler|gradcheck)")
 
 # Tests fail at different stages, we categorize them wrt to their backends
 # We run only the last passing backend in this order:
