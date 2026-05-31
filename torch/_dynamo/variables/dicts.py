@@ -1429,6 +1429,19 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         name = self._maybe_unwrap_key(key)
         if not istype(name, str):
             raise AssertionError(f"Expected str key, got {type(name)}")
+        if istype(self.item, variables.NestedUserFunctionVariable) and name in (
+            "__defaults__",
+            "__kwdefaults__",
+        ):
+            unimplemented(
+                gb_type="function __dict__ write to signature slot",
+                context=f"function.__dict__[{name!r}] = ...",
+                explanation=(
+                    "Dynamo does not support writing function signature slots "
+                    "through __dict__."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         self.side_effects.store_instance_dict_attr(self.item, name, value)
 
     def __delitem__(self, key: kV) -> None:
