@@ -37,10 +37,14 @@ _DEFAULT_FLUSH_PERIOD_S = 1.0
 _RECORD_FILE = "cupti_monitor_records.bin"
 _ANNOTATION_FILE = "cupti_monitor_annotations.bin"
 _META_FILE = "cupti_monitor_meta.bin"
+_RAW_BUFFER_FILE = "cupti_monitor_raw_buffers.bin"
 
 _CHUNK_MAGIC = b"CUPMREC1"
 _CHUNK_VERSION = 4
 _CHUNK_HEADER = struct.Struct("<8sIIQQQ")
+_RAW_CHUNK_MAGIC = b"CUPMRBUF"
+_RAW_CHUNK_VERSION = 1
+_RAW_CHUNK_HEADER = struct.Struct("<8sIIIQ")
 _RECORD_STRUCT = struct.Struct("<IIIIIQQQQQIIII")
 _ANNOTATION_HEADER = struct.Struct("<QI")
 _META_MAGIC = b"CUPMMETA"
@@ -232,12 +236,14 @@ class CuptiMonitor:
         activities: Iterable[int] | None = None,
         buffer_size: int = _DEFAULT_BUFFER_SIZE,
         flush_period_s: float = _DEFAULT_FLUSH_PERIOD_S,
+        raw_buffer_dump: bool = False,
         annotation_resolver: Callable[[int, int, int], Any | None] | None = None,
     ) -> None:
         self.output_dir = Path(output_dir)
         self.activities = tuple(activities or _DEFAULT_ALWAYS_ON_ACTIVITIES)
         self.buffer_size = buffer_size
         self.flush_period_s = flush_period_s
+        self.raw_buffer_dump = raw_buffer_dump
         self.annotation_resolver = (
             annotation_resolver or _default_graph_annotation_resolver
         )
@@ -246,6 +252,7 @@ class CuptiMonitor:
         self._setup_prototypes()
 
         self._lock = threading.Lock()
+        self._processing_done = threading.Condition(self._lock)
         self._free_buffers: list[int] = []
         self._buffer_keepalive: dict[int, Any] = {}
         self._completed_queue: queue.SimpleQueue[tuple[int, int, int, int]] = (
@@ -266,11 +273,13 @@ class CuptiMonitor:
         self._trace_window_start_ns = 0
         self._trace_window_user_annotations: dict[int, str] = {}
         self._next_user_external_id = 1
+        self._processing_inflight = 0
         self._time_converter = None
         self._timestamp_callback = None
 
         self._records_fp = None
         self._annotations_fp = None
+        self._raw_buffers_fp = None
 
         self._buffers_requested = 0
         self._buffers_completed = 0
@@ -278,6 +287,7 @@ class CuptiMonitor:
         self._max_outstanding = 0
         self._dropped_records = 0
         self._chunk_count = 0
+        self._raw_chunk_count = 0
         self._annotation_ids: dict[bytes, int] = {}
         self._next_annotation_id = 1
 
@@ -558,9 +568,13 @@ class CuptiMonitor:
             raise RuntimeError("No prepared trace window")
         if self._trace_window_active:
             raise RuntimeError("A trace window is already active")
+        self.flush(forced=False)
+        self._wait_for_processing_idle(timeout_s=5.0)
         with self._lock:
             self._trace_window_events = []
-            self._trace_window_start_ns = time.time_ns()
+            self._trace_window_start_ns = self._convert_time(
+                int(_PY_PROFILER._get_approximate_time())
+            )
             self._trace_window_active = True
 
     def begin_trace_window(
@@ -573,16 +587,15 @@ class CuptiMonitor:
     def end_trace_window(self) -> dict[str, Any]:
         if not self._trace_window_prepared:
             raise RuntimeError("No prepared trace window")
+        with self._lock:
+            extra = self._trace_window_extra_activities
+            start_ns = self._trace_window_start_ns
+            user_annotations = dict(self._trace_window_user_annotations)
+        self.disable_activities(extra)
         self.flush(forced=True)
-        deadline = time.time() + 5.0
-        while time.time() < deadline:
-            if self._completed_queue.empty():
-                break
-            time.sleep(0.01)
+        self._wait_for_processing_idle(timeout_s=5.0)
         with self._lock:
             events = list(self._trace_window_events)
-            extra = self._trace_window_extra_activities
-            user_annotations = dict(self._trace_window_user_annotations)
             self._trace_window_events = []
             self._trace_window_prepared = False
             self._trace_window_active = False
@@ -591,9 +604,10 @@ class CuptiMonitor:
             self._trace_window_user_annotations = {}
         self.disable_activities(extra)
         return {
-            "events": events,
+            "events": self._filter_trace_window_events(events, start_ns),
             "extra_activities": list(extra),
             "user_annotations": user_annotations,
+            "start_ns": start_ns,
         }
 
     def stats(self) -> dict[str, Any]:
@@ -609,7 +623,9 @@ class CuptiMonitor:
                 "valid_total_mb": self._valid_bytes / (1024 * 1024),
                 "dropped_records": self._dropped_records,
                 "chunks_written": self._chunk_count,
+                "raw_chunks_written": self._raw_chunk_count,
                 "output_dir": str(self.output_dir),
+                "raw_buffer_dump": self.raw_buffer_dump,
                 "trace_window_prepared": self._trace_window_prepared,
                 "trace_window_active": self._trace_window_active,
                 "trace_window_start_ns": self._trace_window_start_ns,
@@ -652,10 +668,15 @@ class CuptiMonitor:
         return int(last_id.value)
 
     def _open_outputs(self) -> None:
-        self._records_fp = open(self.output_dir / _RECORD_FILE, "ab", buffering=0)
-        self._annotations_fp = open(
-            self.output_dir / _ANNOTATION_FILE, "ab", buffering=0
-        )
+        if not self.raw_buffer_dump:
+            self._records_fp = open(self.output_dir / _RECORD_FILE, "ab", buffering=0)
+            self._annotations_fp = open(
+                self.output_dir / _ANNOTATION_FILE, "ab", buffering=0
+            )
+        else:
+            self._raw_buffers_fp = open(
+                self.output_dir / _RAW_BUFFER_FILE, "ab", buffering=0
+            )
 
     def _close_outputs(self) -> None:
         if self._records_fp is not None:
@@ -664,6 +685,9 @@ class CuptiMonitor:
         if self._annotations_fp is not None:
             self._annotations_fp.close()
             self._annotations_fp = None
+        if self._raw_buffers_fp is not None:
+            self._raw_buffers_fp.close()
+            self._raw_buffers_fp = None
 
     def _write_meta_file(self) -> None:
         lib_path = _find_cupti_library().encode()
@@ -707,14 +731,46 @@ class CuptiMonitor:
                     except queue.Empty:
                         continue
                 ctx, stream_id, buffer_ptr, valid_size = item
-                self._process_completed_buffer(ctx, stream_id, buffer_ptr, valid_size)
+                with self._lock:
+                    self._processing_inflight += 1
+                try:
+                    self._process_completed_buffer(
+                        ctx, stream_id, buffer_ptr, valid_size
+                    )
+                finally:
+                    with self._processing_done:
+                        self._processing_inflight -= 1
+                        self._processing_done.notify_all()
         except BaseException as exc:
             self._worker_error = exc
             self._worker_stop.set()
 
+    def _wait_for_processing_idle(self, timeout_s: float) -> None:
+        deadline = time.time() + timeout_s
+        with self._processing_done:
+            while True:
+                if self._completed_queue.empty() and self._processing_inflight == 0:
+                    return
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    return
+                self._processing_done.wait(timeout=min(0.05, remaining))
+
     def _process_completed_buffer(
         self, ctx: int, stream_id: int, buffer_ptr: int, valid_size: int
     ) -> None:
+        if self.raw_buffer_dump and not self._trace_window_prepared:
+            dropped = ctypes.c_size_t()
+            rc = self._lib.cuptiActivityGetNumDroppedRecords(
+                ctypes.c_void_p(ctx), ctypes.c_uint32(stream_id), ctypes.byref(dropped)
+            )
+            if rc == _CUPTI_SUCCESS:
+                self._dropped_records += int(dropped.value)
+            self._write_raw_buffer(ctx, stream_id, buffer_ptr, valid_size)
+            with self._lock:
+                self._free_buffers.append(buffer_ptr)
+            return
+
         record_ptr = ctypes.c_void_p()
         chunk_records: list[bytes] = []
         min_ts = 0
@@ -736,9 +792,7 @@ class CuptiMonitor:
                     max_ts = max(max_ts, end_ns)
                 if trace_event is not None:
                     with self._lock:
-                        if self._trace_window_active and self._event_after_window_start(
-                            trace_event
-                        ):
+                        if self._trace_window_active:
                             self._trace_window_events.append(trace_event)
                 continue
             if rc == _CUPTI_ERROR_MAX_LIMIT_REACHED:
@@ -760,16 +814,54 @@ class CuptiMonitor:
         with self._lock:
             self._free_buffers.append(buffer_ptr)
 
-    def _event_after_window_start(self, trace_event: dict[str, Any]) -> bool:
-        start_cutoff = self._trace_window_start_ns
-        if start_cutoff == 0:
-            return False
-        event_ts = trace_event.get("start_ns")
-        if event_ts is None:
-            event_ts = trace_event.get("device_timestamp_ns")
-        if event_ts is None:
-            return True
-        return int(event_ts) >= start_cutoff
+    def _filter_trace_window_events(
+        self, events: list[dict[str, Any]], start_ns: int
+    ) -> list[dict[str, Any]]:
+        if start_ns == 0:
+            return events
+
+        retained_correlations: set[int] = set()
+        retained_events: list[dict[str, Any]] = []
+        pending_gpu_events: list[dict[str, Any]] = []
+        pending_external_events: list[dict[str, Any]] = []
+
+        for event in events:
+            kind = event.get("kind")
+            if kind in {"cuda_runtime", "cuda_driver"}:
+                event_start_ns = int(event.get("start_ns", 0))
+                if event_start_ns >= start_ns:
+                    retained_events.append(event)
+                    correlation_id = int(event.get("correlation_id", 0))
+                    if correlation_id != 0:
+                        retained_correlations.add(correlation_id)
+                continue
+
+            if kind in {"kernel", "gpu_memcpy", "gpu_memset"}:
+                pending_gpu_events.append(event)
+                continue
+
+            if kind == "external_correlation":
+                pending_external_events.append(event)
+                continue
+
+            event_start_ns = int(event.get("start_ns", 0))
+            if event_start_ns == 0 or event_start_ns >= start_ns:
+                retained_events.append(event)
+
+        for event in pending_external_events:
+            correlation_id = int(event.get("correlation_id", 0))
+            if correlation_id in retained_correlations:
+                retained_events.append(event)
+
+        for event in pending_gpu_events:
+            correlation_id = int(event.get("correlation_id", 0))
+            event_start_ns = int(event.get("start_ns", 0))
+            if correlation_id in retained_correlations or (
+                correlation_id == 0 and event_start_ns >= start_ns
+            ):
+                retained_events.append(event)
+
+        return retained_events
 
     def _annotation_id_for_record(
         self, graph_node_id: int, record_kind: int, correlation_id: int
@@ -1057,6 +1149,20 @@ class CuptiMonitor:
         self._records_fp.write(payload)
         self._chunk_count += 1
 
+    def _write_raw_buffer(self, ctx: int, stream_id: int, buffer_ptr: int, valid_size: int) -> None:
+        if self._raw_buffers_fp is None:
+            raise RuntimeError("raw buffer file is not open")
+        header = _RAW_CHUNK_HEADER.pack(
+            _RAW_CHUNK_MAGIC,
+            _RAW_CHUNK_VERSION,
+            int(stream_id),
+            int(valid_size),
+            int(ctx),
+        )
+        self._raw_buffers_fp.write(header)
+        self._raw_buffers_fp.write(ctypes.string_at(buffer_ptr, valid_size))
+        self._raw_chunk_count += 1
+
 
 _monitor_singleton: CuptiMonitor | None = None
 _hes_enabled = False
@@ -1101,6 +1207,7 @@ def start_collection(
     activities: Iterable[int] | None = None,
     buffer_size: int = _DEFAULT_BUFFER_SIZE,
     flush_period_s: float = _DEFAULT_FLUSH_PERIOD_S,
+    raw_buffer_dump: bool = False,
     annotation_resolver: Callable[[int, int, int], Any | None] | None = None,
 ) -> CuptiMonitor:
     global _monitor_singleton, _atexit_registered
@@ -1111,6 +1218,7 @@ def start_collection(
         activities=activities,
         buffer_size=buffer_size,
         flush_period_s=flush_period_s,
+        raw_buffer_dump=raw_buffer_dump,
         annotation_resolver=annotation_resolver,
     )
     monitor.start()
