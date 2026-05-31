@@ -2596,6 +2596,27 @@ graph():
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
+    def test_non_strict_export_tensor_numpy(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                a = x.numpy()
+                return x + x.numpy().sum()
+
+        f = Foo()
+        args = (torch.randn(10, 10),)
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep.module()(*args), f(*args))
+
+    def test_non_strict_export_tensor_numpy_force(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + x.numpy(force=True).sum()
+
+        f = Foo()
+        args = (torch.randn(10, 10, requires_grad=True),)
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep.module()(*args), f(*args))
+
     def test_where_decomp(self):
         class TestModule(torch.nn.Module):
             def __init__(self):

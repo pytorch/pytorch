@@ -1081,6 +1081,27 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
+        if (
+            func is torch.Tensor.numpy
+            and len(args) == 1
+            and isinstance(args[0], torch.Tensor)
+            and all(k == "force" for k in kwargs)
+            and isinstance(kwargs.get("force", False), bool)
+        ):
+            # Redirect Tensor.numpy to a traceable tensor view, following Dynamo.
+            # This avoids calling TensorBase.numpy on proxy/fake tensor subclasses.
+            def run():
+                t = args[0]
+                if t.layout != torch.strided:
+                    raise TypeError(
+                        f"can't convert {t.layout} layout tensor to numpy. "
+                        "Use Tensor.to_dense() first"
+                    )
+                if kwargs.get("force", False):
+                    t = t.detach().cpu()
+                return t.view_as(t)
+
+            return run, [], {}
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
 
             def rewrite(dim, item):
