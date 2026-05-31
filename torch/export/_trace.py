@@ -1923,11 +1923,13 @@ def _export_to_aten_ir_make_fx(
                 finally:
                     torch._C._set_grad_enabled(old_state)
 
+            tensor_constants = tuple(
+                a for a in constant_attrs if isinstance(a, torch.Tensor)
+            )
+
             with (
                 ctx,
-                override_getattribute_for_subclasses(
-                    (*flat_args, *tuple(constant_attrs))
-                ),
+                override_getattribute_for_subclasses((*flat_args, *tensor_constants)),
                 _maybe_restore_grad_state(),
             ):
                 gm = make_fx(

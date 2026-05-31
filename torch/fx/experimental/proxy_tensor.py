@@ -1101,6 +1101,10 @@ def _track_traceable_wrapper_subclass(
     t: Tensor,
     tracer: _ProxyTracer,
 ) -> None:
+    tracer = typing.cast("PythonKeyTracer", tracer)
+    if get_proxy_slot(t, tracer, None) is not None:
+        return
+
     # Local import avoids a proxy_tensor/flat_apply import cycle during torch startup.
     from torch._higher_order_ops.flat_apply import (
         _ConstantFunction,
@@ -1109,7 +1113,6 @@ def _track_traceable_wrapper_subclass(
     )
 
     attrs, meta = type(t).__tensor_flatten__(t)  # type: ignore[attr-defined]
-    tracer = typing.cast("PythonKeyTracer", tracer)
     for attr in attrs:
         attr_value = getattr(t, attr)
         if (

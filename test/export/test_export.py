@@ -1278,7 +1278,7 @@ def forward(self, x):
     detach_21 = torch.ops.aten.detach.default(view_3);  view_3 = None
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
+    flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, None, None, None, None, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  getitem_1 = None
     getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None
@@ -3901,6 +3901,24 @@ graph():
         ep = torch.export._trace._export(m, (ref_x,), strict=False, pre_dispatch=True)
         self.assertEqual(ep.constants, {})
         FileCheck().check("torch.ops.higher_order.flat_apply").run(str(ep.graph))
+
+        actual = ep.module()(ref_x)
+        self.assertIs(type(actual), torch.Tensor)
+        self.assertTrue(torch.allclose(actual, m(ref_x)))
+
+    def test_subclass_constructed_in_forward_reused_pre_dispatch(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                p1 = CustomTensorPlainOut(torch.ones(3, 4), torch.ones(3, 4) * 2)
+                return x + p1 + p1
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ep = torch.export._trace._export(m, (ref_x,), strict=False, pre_dispatch=True)
+        self.assertEqual(ep.constants, {})
+        FileCheck().check_count(
+            "torch.ops.higher_order.flat_apply", 1, exactly=True
+        ).run(str(ep.graph))
 
         actual = ep.module()(ref_x)
         self.assertIs(type(actual), torch.Tensor)
