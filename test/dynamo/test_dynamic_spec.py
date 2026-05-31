@@ -1914,7 +1914,7 @@ class TestWalkSpecRaises(TestCase):
         self.assertEqual(
             str(ctx.exception),
             "RuntimeError: shapes_spec walk: while processing source "
-            "\"cfg['x']\", at 'cfg' the spec is a leaf (TensorSpec), but "
+            "\"cfg['x']\", at 'cfg' the spec is TensorSpec, but "
             "the source has further access past it",
         )
 

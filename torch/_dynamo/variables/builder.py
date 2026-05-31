@@ -411,6 +411,11 @@ def _format_access_path(tokens: _AccessPath) -> str:
                 parts.append(f".{name}")
             case _SubscriptToken(key=key):
                 parts.append(f"[{key!r}]")
+            case _:
+                raise RuntimeError(
+                    f"_format_access_path: unexpected token {tok!r} "
+                    f"of type {type(tok).__name__}"
+                )
     return "".join(parts) if parts else "<empty path>"
 
 
@@ -471,23 +476,32 @@ def _source_to_access_path(source: Source) -> _AccessPath | None:
 
 def _walk_spec(
     current_spec: IntermediateSpec,
-    remaining_tokens: _AccessPath,
-    full_path: _AccessPath | None = None,
+    full_path: _AccessPath,
+    start_index: int,
 ) -> LeafSpec:
     """Walk down a spec tree starting at ``current_spec``, consuming each
-    token in order. Returns the leaf spec at the end of the walk, or
-    ``None`` if a key/field along the way wasn't specified by the user.
-    Raises on type-mismatch (the existing tight invariants).
+    token in ``full_path[start_index:]`` in order. Returns the leaf spec at
+    the end of the walk, or ``None`` if a key/field along the way wasn't
+    specified by the user. Raises on type-mismatch (the existing tight
+    invariants).
 
     ``full_path`` is the original access path (including any prefix already
-    consumed by the caller before reaching ``current_spec``); it is used only
-    for error messages so users see the full source location, not just the
-    slice handed to this function.
+    consumed by the caller before reaching ``current_spec``); ``start_index``
+    is the offset in ``full_path`` where the walk begins.
     """
-    effective_full = full_path if full_path is not None else remaining_tokens
-    # Offset of remaining_tokens[0] within effective_full.
-    prefix_offset = len(effective_full) - len(remaining_tokens)
-    for idx, token in enumerate(remaining_tokens):
+
+    def _mismatch_error(
+        at_idx: int, spec: IntermediateSpec, suffix: str = ""
+    ) -> RuntimeError:
+        return RuntimeError(
+            f"shapes_spec walk: while processing source "
+            f"{_format_access_path(full_path)!r}, at "
+            f"{_format_access_path(full_path[:at_idx])!r} "
+            f"the spec is {type(spec).__name__}{suffix}"
+        )
+
+    for idx in range(start_index, len(full_path)):
+        token = full_path[idx]
         if current_spec is None:
             # Under-specified: a previous descent (DictSpec key lookup or
             # ObjectSpec field lookup) returned None because the user didn't
@@ -496,34 +510,24 @@ def _walk_spec(
         match current_spec:
             case ObjectSpec():
                 if not isinstance(token, _AttrToken):
-                    raise RuntimeError(
-                        f"shapes_spec walk: while processing source "
-                        f"{_format_access_path(effective_full)!r}, at "
-                        f"{_format_access_path(effective_full[: prefix_offset + idx])!r} "
-                        f"the spec is ObjectSpec"
-                    )
+                    raise _mismatch_error(idx, current_spec)
                 current_spec = current_spec._fields.get(token.name)
             case DictSpec():
                 if not isinstance(token, _SubscriptToken):
-                    raise RuntimeError(
-                        f"shapes_spec walk: while processing source "
-                        f"{_format_access_path(effective_full)!r}, at "
-                        f"{_format_access_path(effective_full[: prefix_offset + idx])!r} "
-                        f"the spec is DictSpec"
-                    )
+                    raise _mismatch_error(idx, current_spec)
                 current_spec = current_spec._entries.get(token.key)
             case SeqSpec():
                 if not isinstance(token, _SubscriptToken) or not isinstance(
                     token.key, int
                 ):
+                    raise _mismatch_error(idx, current_spec)
+
+                if token.key < 0:
                     raise RuntimeError(
-                        f"shapes_spec walk: while processing source "
-                        f"{_format_access_path(effective_full)!r}, at "
-                        f"{_format_access_path(effective_full[: prefix_offset + idx])!r} "
-                        f"the spec is SeqSpec"
+                        "dynamo should have normalized the index to be non-negative"
                     )
                 # Out-of-range index: unspecified -> treat as static (None),
-                if 0 <= token.key < len(current_spec):
+                if token.key < len(current_spec):
                     current_spec = current_spec._entries[token.key]
                 else:
                     current_spec = None
@@ -531,23 +535,19 @@ def _walk_spec(
                 # leaf spec (TensorSpec / IntVar / int / None) but path still
                 # has tokens → the user spec is too shallow: it claims a leaf,
                 # but the runtime value is a container being further accessed.
-                raise RuntimeError(
-                    f"shapes_spec walk: while processing source "
-                    f"{_format_access_path(effective_full)!r}, at "
-                    f"{_format_access_path(effective_full[: prefix_offset + idx])!r} "
-                    f"the spec is a leaf ({type(current_spec).__name__}), "
-                    f"but the source has further access past it"
+                raise _mismatch_error(
+                    idx,
+                    current_spec,
+                    ", but the source has further access past it",
                 )
     if not isinstance(current_spec, LeafSpec):
         # The walk consumed all source tokens but landed on a container
         # spec: the user declared a container at this position, but the
         # source stopped (typically a single value like a tensor).
-        raise RuntimeError(
-            f"shapes_spec walk: while processing source "
-            f"{_format_access_path(effective_full)!r}, at "
-            f"{_format_access_path(effective_full)!r} the spec is "
-            f"{type(current_spec).__name__}, but the source has no "
-            f"further access past it"
+        raise _mismatch_error(
+            len(full_path),
+            current_spec,
+            ", but the source has no further access past it",
         )
     return current_spec
 
@@ -583,7 +583,7 @@ def lookup_spec_from_dynamo_source(
             )
         if params._varargs is None or not (0 <= key < len(params._varargs)):
             return None
-        return _walk_spec(params._varargs[key], path[2:], full_path=path)
+        return _walk_spec(params._varargs[key], full_path=path, start_index=2)
     if root.is_varkw:
         # ``**kwargs`` element access: root is the varkw local, next token must
         # be a str subscript. A varkw local is always followed by a subscript
@@ -603,11 +603,11 @@ def lookup_spec_from_dynamo_source(
         if params._varkw is None or key not in params._varkw:
             return None
 
-        return _walk_spec(params._varkw[key], path[2:], full_path=path)
+        return _walk_spec(params._varkw[key], full_path=path, start_index=2)
     # Regular named arg: seed at the named-arg root and descend the rest.
 
     current_spec: IntermediateSpec = params._named_args.get(root.name)
-    return _walk_spec(current_spec, path[1:], full_path=path)
+    return _walk_spec(current_spec, full_path=path, start_index=1)
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
