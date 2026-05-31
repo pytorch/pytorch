@@ -1419,6 +1419,20 @@ class ForeachTests(TestCase):
         self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
 
     @requires_gpu
+    def test_foreach_sub(self):
+        def fn(a, b):
+            return torch._foreach_sub(a, b, alpha=2.0)
+
+        torch.manual_seed(42)
+        a = [torch.randn(4, device=GPU_TYPE) for _ in range(3)]
+        b = [torch.randn(4, device=GPU_TYPE) for _ in range(3)]
+
+        eager = fn(a, b)
+        compiled = torch.compile(fn, fullgraph=True)(a, b)
+
+        self.assertEqual(eager, compiled)
+
+    @requires_gpu
     def test_foreach_reorder_loops_with_nested_foreach_snodes(self):
         def fn(x0, x1, y0, y1):
             xs, ys = [x0, x1], [y0, y1]
