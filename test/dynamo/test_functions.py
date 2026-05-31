@@ -2809,6 +2809,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
                 lambda keypath, x: x + 1, make_offsets(lengths)
             )
 
+        def fn_repr(lengths):
+            return repr(make_offsets(lengths))
+
         lengths = torch.tensor([0, 33, 33, 33, 33])
         for fn in (
             fn_pop,
@@ -2818,6 +2821,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             fn_eq,
             fn_tree_map,
             fn_tree_map_with_path,
+            fn_repr,
         ):
             with self.assertRaisesRegex(Unsupported, "symbolic length"):
                 torch.compile(fn, fullgraph=True, backend="eager")(lengths)
@@ -2842,8 +2846,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         def fn_eq(lengths):
             return make_range(lengths) == range(1)
 
+        def fn_repr(lengths):
+            return repr(make_range(lengths))
+
         lengths = torch.tensor([0, 33])
-        for fn in (fn_contains, fn_getitem, fn_count, fn_eq):
+        for fn in (fn_contains, fn_getitem, fn_count, fn_eq, fn_repr):
             with self.assertRaisesRegex(Unsupported, "symbolic range"):
                 torch.compile(fn, fullgraph=True, backend="eager")(lengths)
 
