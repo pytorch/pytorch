@@ -30,12 +30,15 @@ class FakeResponse:
     def raise_for_status(self):
         pass
 
+    def close(self):
+        pass
+
 
 class TestUpdateExpected(TestCase):
     def test_query_job_sha_without_clickhouse_credentials_uses_github(self):
         github_results = [{"workflowName": "inductor"}]
         with (
-            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.dict(os.environ, {"CH_KEY_ID": "", "CH_KEY_SECRET": ""}),
             mock.patch.object(
                 update_expected,
                 "query_job_sha_from_github",
@@ -72,6 +75,12 @@ class TestUpdateExpected(TestCase):
         )
         jobs_next_url = f"{jobs_url}?page=2"
         calls = []
+        artifact_url = (
+            f"{update_expected.S3_BASE_URL}/pytorch/pytorch/"  # @lint-ignore
+            "17154115801/3/artifact/"
+            "test-reports-test-inductor_torchbench-1-2-"
+            "linux.8xlarge.amx_48676215560.zip"
+        )
 
         runs_page_1 = {
             "workflow_runs": [
@@ -161,7 +170,10 @@ class TestUpdateExpected(TestCase):
             raise AssertionError(f"unexpected URL: {url}")
 
         with (
-            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.dict(
+                os.environ,
+                {"CH_KEY_ID": "", "CH_KEY_SECRET": "", "GITHUB_TOKEN": ""},
+            ),
             mock.patch.object(update_expected.requests, "get", side_effect=fake_get),
         ):
             results = update_expected.query_job_sha_from_github("pytorch/pytorch", sha)
@@ -189,16 +201,7 @@ class TestUpdateExpected(TestCase):
                 {"inductor_torchbench"},
                 is_rocm=False,
             ),
-            {
-                ("inductor_torchbench", 1): [
-                    (
-                        "https://gha-artifacts.s3.amazonaws.com/pytorch/pytorch/"
-                        "17154115801/3/artifact/"
-                        "test-reports-test-inductor_torchbench-1-2-"
-                        "linux.8xlarge.amx_48676215560.zip"
-                    )
-                ]
-            },
+            {("inductor_torchbench", 1): [artifact_url]},
         )
         self.assertEqual(
             [call["url"] for call in calls],

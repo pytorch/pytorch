@@ -22,6 +22,7 @@ import subprocess
 import sys
 import urllib
 from concurrent.futures import as_completed, ThreadPoolExecutor
+from contextlib import closing
 from io import BytesIO
 from itertools import product
 from pathlib import Path
@@ -111,18 +112,25 @@ def github_request_headers():
 def github_pages(url, params):
     headers = github_request_headers()
     while url:
-        r = requests.get(url, params=params, headers=headers, timeout=30)
-        try:
-            r.raise_for_status()
-        except requests.HTTPError as e:
-            if r.status_code == 403 and r.headers.get("x-ratelimit-remaining") == "0":
-                raise RuntimeError(
-                    "GitHub API rate limit exceeded while querying workflow jobs. "
-                    "Set GITHUB_TOKEN to raise the limit."
-                ) from e
-            raise
-        yield r.json()
-        url = r.links.get("next", {}).get("url")
+        with closing(
+            requests.get(url, params=params, headers=headers, timeout=30)
+        ) as r:
+            try:
+                r.raise_for_status()
+            except requests.HTTPError as e:
+                if (
+                    r.status_code == 403
+                    and r.headers.get("x-ratelimit-remaining") == "0"
+                ):
+                    raise RuntimeError(
+                        "GitHub API rate limit exceeded while querying workflow jobs. "
+                        "Set GITHUB_TOKEN to raise the limit."
+                    ) from e
+                raise
+            page = r.json()
+            next_url = r.links.get("next", {}).get("url")
+        yield page
+        url = next_url
         params = None
 
 
@@ -173,7 +181,7 @@ def query_job_sha(repo, sha):
     if key_id and key_secret:
         try:
             return query_job_sha_from_clickhouse(repo, sha, key_id, key_secret)
-        except (KeyError, ValueError, requests.RequestException) as e:
+        except requests.RequestException as e:
             print(
                 "Warning: ClickHouse query failed; falling back to GitHub "
                 f"Actions API. Error: {e}",
