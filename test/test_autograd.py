@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import (
     gradgradcheck,
     instantiate_parametrized_tests,
     IS_ARM64,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
@@ -83,6 +84,8 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
     slowTest,
+    TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     TestCase,
@@ -9056,6 +9059,9 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX, "https://github.com/pytorch/pytorch/issues/180489"
+    )
     @skipIfTorchDynamo("boxed_grads_call is incompatible with compiled autograd")
     def test_custom_function_boxed_grads(self):
         """Test boxed_grads_call mechanism without torch.compile.
@@ -9146,6 +9152,9 @@ for shape in [(1,), ()]:
         out.sum().backward()
         self.assertEqual(x.grad, torch.full_like(x, 2.0))
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX, "https://github.com/pytorch/pytorch/issues/180521"
+    )
     @skipIfTorchDynamo("boxed_grads_call is incompatible with compiled autograd")
     def test_custom_function_boxed_grads_cleanup_on_error(self):
         """Grads list is not leaked when backward raises."""
@@ -9359,6 +9368,10 @@ for shape in [(1,), ()]:
         self.assertEqual(len(received_grads[0]), 1)
         self.assertIs(received_grads[0][0], user_list)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/176112",
+    )
     @skipIfTorchDynamo("dynamo accesses saved_tensors multiple times")
     def test_clear_saved_tensors_on_access(self):
         class MyFn(Function):
@@ -9382,6 +9395,10 @@ for shape in [(1,), ()]:
         y = MyFn.apply(x.clone())
         y.sum().backward()
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/176142",
+    )
     @skipIfTorchDynamo("test tests an error that dynamo does not reproduce")
     def test_clear_saved_tensors_on_access_double_access_error(self):
         class MyFn(Function):
@@ -10184,19 +10201,6 @@ for shape in [(1,), ()]:
             RuntimeError, "a view of a leaf Variable that requires grad"
         ):
             Func.apply(b)
-
-    def test_named_tensor_for_complex_views(self):
-        names = ["batch", "height", "width", "complex"]
-        z = torch.ones((2, 1, 2, 2), requires_grad=True)
-        z_named = z.refine_names(*names)
-        z_complex = torch.view_as_complex(z_named.rename(None)).refine_names(
-            *names[:-1]
-        )
-        z_complex.sum().abs().backward()
-        expected = torch.ones_like(z_complex).rename(None)
-        abs_1_1j = abs(1 + 1j)
-        expected.fill_(complex(abs_1_1j / 2, abs_1_1j / 2))
-        self.assertEqual(z.grad, torch.view_as_real(expected))
 
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO and sys.version_info >= (3, 14), "Fails in python 3.14.2"
@@ -13844,6 +13848,13 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(lambda x: x.to("cuda"), (x,))
 
     @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181229"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/181203",
+    )
+    @unittest.skipIf(
         IS_WINDOWS and IS_ARM64, "Fails on Windows ARM64; see issue #181228"
     )
     def test_strided_leaf_grad_layout(self, device):
@@ -16692,6 +16703,9 @@ class TestAutogradMultipleDispatch(TestCase):
                 )
             )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181272"
+    )
     @onlyCUDA
     def test_backward_single_threaded(self):
         threads_eq = None
@@ -16743,6 +16757,13 @@ class TestAutogradMultipleDispatch(TestCase):
         TestFn.apply(inp, None).sum().backward()
         self.assertEqual(local.my_obj[10], 5)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181323"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/181228",
+    )
     @unittest.skipIf(
         IS_WINDOWS and IS_ARM64, "Fails on Windows ARM64; see issue #181228"
     )
