@@ -506,6 +506,14 @@ pipeline_max_autotune_gemm = (
     os.environ.get("TORCHINDUCTOR_PIPELINE_GEMM_AUTOTUNING") == "1"
 )
 
+# use torch profiler to benchmark kernels during autotuning
+# when enabled, this takes precedence over use_experimental_benchmarker
+use_torch_profiler_benchmarker: bool = Config(
+    default=False,
+    env_name_force="TORCHINDUCTOR_USE_TORCH_PROFILER_BENCHMARKER",
+    justknob="pytorch/inductor:use_torch_profiler_benchmarker",
+)
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -1658,6 +1666,10 @@ class cpp:
         os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
     )  # type: ignore[assignment]
 
+    # Target CPU architecture for C++ wrapper compilation. When unset, Inductor
+    # uses the platform default. Set to "" to suppress the architecture flag.
+    march: str | None = os.environ.get("TORCHINDUCTOR_CPP_MARCH")
+
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
@@ -1831,6 +1843,11 @@ class triton:
     # reorder nodes to minimize the number of graph partitions while
     # not incurring large memory overhead
     reorder_for_reducing_graph_partitions: bool = True
+
+    # Memory budget multiplier for cudagraph partition reordering.
+    # When reordering nodes to minimize partitions, the reordering is only
+    # applied if the peak memory increase is within this budget.
+    cudagraph_partition_memory_budget: float = 1.1
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
@@ -2158,6 +2175,9 @@ class aot_inductor:
     enable_frame_pointer = (
         os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "1") == "1"
     )
+
+    # Enable lightweight line tables for profiling tools (e.g. strobelight)
+    enable_line_tables = os.environ.get("AOT_INDUCTOR_ENABLE_LINE_TABLES", "1") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
@@ -2656,7 +2676,17 @@ class halide:
 
 
 # create a directory containing lots of debug information
+def _get_debug_graph_format(format_env_name: str, legacy_svg_env_name: str) -> str:
+    if format_env_name in os.environ:
+        return os.environ[format_env_name]
+    if os.environ.get(legacy_svg_env_name, "0") == "1":
+        return "svg"
+    return os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
+
+
 class trace:
+    """Configuration for torch.compile debug trace artifacts."""
+
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
@@ -2688,11 +2718,39 @@ class trace:
     # Copy generated code to trace dir
     output_code = True
 
-    # SVG figure showing post-fusion graph
-    graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+    # Diagram showing post-fusion graph. INDUCTOR_POST_FUSION_SVG is the
+    # legacy spelling for SVG output; INDUCTOR_POST_FUSION_GRAPH enables the
+    # same dump for any graph_diagram_format.
+    graph_diagram = (
+        os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+        or os.environ.get("INDUCTOR_POST_FUSION_GRAPH", "0") == "1"
+    )
 
-    # SVG figure showing fx with fusion
-    draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+    # Output format for post-fusion graph_diagram dumps.  Defaults to svg when
+    # the legacy INDUCTOR_POST_FUSION_SVG flag is used; otherwise defaults to
+    # the shared torch.compile graph format. Set to "dot" to dump raw DOT text
+    # without invoking Graphviz layout.
+    graph_diagram_format = _get_debug_graph_format(
+        "INDUCTOR_POST_FUSION_GRAPH_FORMAT",
+        "INDUCTOR_POST_FUSION_SVG",
+    )
+
+    # Diagram showing FX with fusion. INDUCTOR_ORIG_FX_SVG is the legacy
+    # spelling for SVG output; INDUCTOR_ORIG_FX_GRAPH enables the same dump for
+    # any orig_fx_graph_diagram_format.
+    draw_orig_fx_graph = (
+        os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+        or os.environ.get("INDUCTOR_ORIG_FX_GRAPH", "0") == "1"
+    )
+
+    # Output format for original FX graph dumps.  Defaults to svg when the
+    # legacy INDUCTOR_ORIG_FX_SVG flag is used; otherwise defaults to the
+    # shared torch.compile graph format. Set to "dot" to dump raw DOT text
+    # without invoking Graphviz layout.
+    orig_fx_graph_diagram_format = _get_debug_graph_format(
+        "INDUCTOR_ORIG_FX_GRAPH_FORMAT",
+        "INDUCTOR_ORIG_FX_SVG",
+    )
 
     # We draw our fx graphs with the "record" shape attribute by default.
     # Sometimes, when the graph is very complex, we may hit dot errors like below:
@@ -2888,6 +2946,8 @@ class eager_numerics:
     # (0.5 * x * (1 + erf(x * sqrt(0.5)))) where a 1 ULP change in erf output
     # can flip the result of a subsequent ceil(log2(...)) and produce a
     # different uint8 encoded value (see gh-178045).
+    # This can be enabled directly; Inductor also enables it while
+    # emulate_precision_casts is active.
     use_pytorch_libdevice: bool = False
 
 
