@@ -261,7 +261,7 @@ void neg_conj_kernel_cuda(TensorIteratorBase &iter) {
 using namespace at::cuda;
 
 // device-to-device copy, does type conversion
-void copy_device_to_device(TensorIterator& iter,
+static void copy_device_to_device(TensorIterator& iter,
                            bool non_blocking,
                            bool p2p_enabled) {
   int64_t numel = iter.numel();
