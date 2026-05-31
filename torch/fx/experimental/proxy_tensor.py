@@ -487,13 +487,10 @@ def get_proxy_slot(
                 # pyrefly: ignore [bad-argument-type, no-matching-overload]
                 value = tracker.get(obj)
 
-    if (
-        value is None
-        and isinstance(obj, FakeTensor)
-        and obj.requires_grad
-        and obj.grad_fn is not None
-    ):
-        value = _proxy_tensor_for_autograd_saved_tensor(obj, tracer)
+    if value is None and isinstance(obj, FakeTensor) and obj.requires_grad:
+        grad_fn = _fake_tensor_grad_fn(obj)
+        if grad_fn is not None:
+            value = _proxy_tensor_for_autograd_saved_tensor(obj, tracer, grad_fn)
 
     if value is None and isinstance(obj, FakeScriptObject):
         # A new FakeScriptObject wrapping the same real_obj may have been
@@ -583,20 +580,38 @@ def _hashable_tensor_metadata_sequence(
 
 def _autograd_saved_tensor_alias_key(
     t: FakeTensor,
+    grad_fn: object | None = None,
 ) -> tuple[object, bool, int] | None:
     metadata_key = _fake_tensor_metadata_key(t)
     if metadata_key is None:
         return None
-    return (metadata_key, t.requires_grad, id(t.grad_fn))
+    if grad_fn is None:
+        grad_fn = _fake_tensor_grad_fn(t)
+        if grad_fn is None:
+            return None
+    return (metadata_key, t.requires_grad, id(grad_fn))
+
+
+def _fake_tensor_grad_fn(t: FakeTensor) -> object | None:
+    try:
+        return t.grad_fn
+    except RuntimeError as e:
+        if "new_fn INTERNAL ASSERT FAILED" in str(e):
+            return None
+        raise
 
 
 def _set_autograd_saved_tensor_proxy_index(
     obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor
 ) -> None:
-    if not isinstance(obj, FakeTensor) or not obj.requires_grad or obj.grad_fn is None:
+    if not isinstance(obj, FakeTensor) or not obj.requires_grad:
         return
 
-    key = _autograd_saved_tensor_alias_key(obj)
+    grad_fn = _fake_tensor_grad_fn(obj)
+    if grad_fn is None:
+        return
+
+    key = _autograd_saved_tensor_alias_key(obj, grad_fn)
     if key is None:
         return
 
@@ -613,9 +628,9 @@ def _set_autograd_saved_tensor_proxy_index(
 
 
 def _proxy_tensor_for_autograd_saved_tensor(
-    obj: FakeTensor, tracer: _ProxyTracer
+    obj: FakeTensor, tracer: _ProxyTracer, grad_fn: object
 ) -> _ProxyTensor | None:
-    alias_key = _autograd_saved_tensor_alias_key(obj)
+    alias_key = _autograd_saved_tensor_alias_key(obj, grad_fn)
     if alias_key is None:
         return None
 
