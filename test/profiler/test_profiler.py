@@ -207,6 +207,47 @@ with profile(activities=[ProfilerActivity.CUDA]):
 
         # ^ this will throw an exception if the script fails.
 
+    def test_cupti_monitor_enable_hes_early_guard(self):
+        import subprocess
+
+        subprocess.check_call(
+            [
+                sys.executable,
+                "-c",
+                """
+import torch
+from torch.profiler import _cupti_monitor
+
+_cupti_monitor.enable_hes_early()
+assert _cupti_monitor.is_hes_enabled()
+""",
+            ],
+            universal_newlines=True,
+            timeout=60,
+        )
+
+        p = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                """
+import torch
+from torch.profiler import _cupti_monitor
+
+torch.randn(1, device="cuda")
+_cupti_monitor.enable_hes_early()
+""",
+            ],
+            universal_newlines=True,
+            timeout=60,
+            capture_output=True,
+        )
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn(
+            "enable_hes_early() must be called before CUDA context creation",
+            p.stderr,
+        )
+
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
 class TestProfilerITT(TestCase):
