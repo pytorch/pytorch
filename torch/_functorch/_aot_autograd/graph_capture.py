@@ -329,12 +329,25 @@ def aot_dispatch_base_graph(
     # We track buffer assignments when exporting in non-strict mode.
     # (In contrast, strict mode errors on any attribute assignment.)
     mod_when_exporting_non_strict = root_module_when_exporting_non_strict(flat_fn)
+    named_parameters: dict[str, Any] = {}
+    named_buffers: dict[str, Any] = {}
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
+        named_parameters = dict(
+            mod_when_exporting_non_strict.named_parameters(remove_duplicate=False)
+        )
+        named_buffers = dict(
+            mod_when_exporting_non_strict.named_buffers(remove_duplicate=False)
+        )
+        tracked_buffer_names = {
+            name
+            for name, buffer in mod_when_exporting_non_strict._buffers.items()
+            if buffer is not None
+        }
         # For any buffer that is assigned, we want to associate it to the final proxy node
         # that it is assigned to. This node can then be added as a buffer mutation output.
         assigned_buffers: dict[str, str] = {}
         hook = register_buffer_assignment_hook(
-            mod_when_exporting_non_strict, assigned_buffers
+            mod_when_exporting_non_strict, assigned_buffers, tracked_buffer_names
         )
 
     (
@@ -352,8 +365,8 @@ def aot_dispatch_base_graph(
 
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
         # We update metadata to consider any assigned buffers as buffer mutations.
-        i = len(dict(mod_when_exporting_non_strict.named_parameters()))
-        for name, _ in mod_when_exporting_non_strict.named_buffers():
+        i = len(named_parameters)
+        for name in named_buffers:
             if name in assigned_buffers and not fw_metadata.input_info[i].mutates_data:  # type: ignore[possibly-undefined]
                 fw_metadata.input_info[i] = dataclasses.replace(
                     fw_metadata.input_info[i], mutates_data=True

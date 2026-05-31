@@ -8,7 +8,7 @@ import re
 import sys
 import time
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping
 from contextlib import contextmanager, ExitStack, nullcontext
 from itertools import chain
 from typing import Any, TYPE_CHECKING, TypeAlias
@@ -1383,6 +1383,36 @@ def _get_original_state_dict(mod: torch.nn.Module) -> dict[str, Any]:
     return original_state_dict
 
 
+@contextmanager
+def _preserve_module_buffers(mod: torch.nn.Module):
+    saved_buffers = [
+        (
+            submod,
+            dict(submod._buffers),
+            set(submod._non_persistent_buffers_set),
+        )
+        for submod in mod.modules()
+    ]
+    try:
+        yield
+    finally:
+        for submod, buffers, non_persistent_buffers in saved_buffers:
+            if isinstance(submod._buffers, MutableMapping):
+                submod._buffers.clear()
+                submod._buffers.update(buffers)
+            else:
+                if tuple(submod._buffers.keys()) != tuple(buffers):
+                    raise RuntimeError(
+                        f"Unable to restore buffers for {type(submod).__name__}: "
+                        "module uses a non-mutable buffer mapping whose keys changed "
+                        "during export."
+                    )
+                for name, buffer in buffers.items():
+                    submod._buffers[name] = buffer
+            submod._non_persistent_buffers_set.clear()
+            submod._non_persistent_buffers_set.update(non_persistent_buffers)
+
+
 def _process_export_inputs(
     mod: torch.nn.Module,
     args: tuple[object, ...],
@@ -1800,14 +1830,21 @@ def _export_to_aten_ir_make_fx(
         with enable_python_dispatcher():
             ctx = nullcontext()
             non_strict_root = getattr(mod, "_export_root", None)
+            tracked_buffer_names_in_order: tuple[str, ...] = ()
             if non_strict_root is not None:
                 ctx = _detect_attribute_assignment(non_strict_root)  # type: ignore[assignment]
+                tracked_buffer_names_in_order = tuple(
+                    name
+                    for name, buffer in non_strict_root._buffers.items()
+                    if buffer is not None
+                )
+                tracked_buffer_names = set(tracked_buffer_names_in_order)
 
                 # For any buffer that is assigned, we want to associate it to the final proxy node
                 # that it is assigned to. This node can then be copied into the buffer.
                 assigned_buffers: dict[str, str] = {}
                 hook = register_buffer_assignment_hook(
-                    non_strict_root, assigned_buffers
+                    non_strict_root, assigned_buffers, tracked_buffer_names
                 )
 
             def custom_getattribute(self, attr, *, original_getattr, attrs_to_proxy):
@@ -1921,8 +1958,7 @@ def _export_to_aten_ir_make_fx(
                 input_names = _graph_input_names(gm)
                 buffer_input_names = {
                     name: input_names[param_len + i]
-                    for i, (name, buf) in enumerate(non_strict_root._buffers.items())
-                    if buf is not None
+                    for i, name in enumerate(tracked_buffer_names_in_order)
                 }
                 output_node = list(gm.graph.nodes)[-1]
                 # We copy nodes corresponding to buffer assignments to buffers in the graph.
@@ -2214,6 +2250,7 @@ def _non_strict_export(
         torch._dynamo.config.patch(dynamo_config),
     ):
         with (
+            _preserve_module_buffers(mod),
             _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
                 patched_mod,
                 new_fake_args,
