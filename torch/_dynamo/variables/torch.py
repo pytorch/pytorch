@@ -912,6 +912,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         from . import (
             ConstantVariable,
             GradModeVariable,
+            InferenceModeVariable,
             StreamContextVariable,
             SymNodeVariable,
             TensorVariable,
@@ -1188,6 +1189,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> ConstantVariable:
             install_guard(GradModeVariable._guards_singleton)
             return VariableTracker.build(tx, torch.is_grad_enabled())
+
+        @register(torch.autograd.grad_mode._enter_inference_mode)
+        def handle_enter_inference_mode(
+            self, tx: "InstructionTranslatorBase", mode: VariableTracker
+        ) -> InferenceModeVariable:
+            ctx = InferenceModeVariable.create(tx, mode.as_python_constant())
+            ctx.enter(tx)
+            return ctx
+
+        @register(torch.autograd.grad_mode._exit_inference_mode)
+        def handle_exit_inference_mode(
+            self, tx: "InstructionTranslatorBase", mode: InferenceModeVariable
+        ) -> VariableTracker:
+            return mode.exit(tx)
 
         @register(torch.use_deterministic_algorithms)
         def handle_use_deterministic_algorithms(
