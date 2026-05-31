@@ -63,6 +63,7 @@ _OVERHEAD_KIND_NAMES = {
     8 << 16: "UVM Activity Init",
 }
 _DEMANGLE_CACHE: dict[str, str] = {}
+_USER_EXTERNAL_CORRELATION_KIND = int(_cc.ExternalCorrelationKind.CUSTOM1)
 _CUPTI_ACTIVITY_KIND_MEMCPY = int(_cc.ActivityKind.MEMCPY)
 _CUPTI_ACTIVITY_KIND_MEMSET = int(_cc.ActivityKind.MEMSET)
 _CUPTI_ACTIVITY_KIND_DRIVER = int(_cc.ActivityKind.DRIVER)
@@ -263,6 +264,8 @@ class CuptiMonitor:
         self._trace_window_events: list[dict[str, Any]] = []
         self._trace_window_extra_activities: tuple[int, ...] = ()
         self._trace_window_start_ns = 0
+        self._trace_window_user_annotations: dict[int, str] = {}
+        self._next_user_external_id = 1
         self._time_converter = None
         self._timestamp_callback = None
 
@@ -369,6 +372,16 @@ class CuptiMonitor:
             ctypes.c_void_p
         ]
         self._lib.cuptiActivityRegisterTimestampCallback.restype = ctypes.c_int
+        self._lib.cuptiActivityPushExternalCorrelationId.argtypes = [
+            ctypes.c_int,
+            ctypes.c_uint64,
+        ]
+        self._lib.cuptiActivityPushExternalCorrelationId.restype = ctypes.c_int
+        self._lib.cuptiActivityPopExternalCorrelationId.argtypes = [
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint64),
+        ]
+        self._lib.cuptiActivityPopExternalCorrelationId.restype = ctypes.c_int
         self._lib.cuptiGetResultString.argtypes = [
             ctypes.c_int,
             ctypes.POINTER(ctypes.c_char_p),
@@ -533,6 +546,7 @@ class CuptiMonitor:
             self._trace_window_active = False
             self._trace_window_extra_activities = newly_enabled
             self._trace_window_start_ns = 0
+            self._trace_window_user_annotations = {}
         return newly_enabled
 
     def start_trace_window(self) -> None:
@@ -568,13 +582,19 @@ class CuptiMonitor:
         with self._lock:
             events = list(self._trace_window_events)
             extra = self._trace_window_extra_activities
+            user_annotations = dict(self._trace_window_user_annotations)
             self._trace_window_events = []
             self._trace_window_prepared = False
             self._trace_window_active = False
             self._trace_window_extra_activities = ()
             self._trace_window_start_ns = 0
+            self._trace_window_user_annotations = {}
         self.disable_activities(extra)
-        return {"events": events, "extra_activities": list(extra)}
+        return {
+            "events": events,
+            "extra_activities": list(extra),
+            "user_annotations": user_annotations,
+        }
 
     def stats(self) -> dict[str, Any]:
         with self._lock:
@@ -594,6 +614,42 @@ class CuptiMonitor:
                 "trace_window_active": self._trace_window_active,
                 "trace_window_start_ns": self._trace_window_start_ns,
             }
+
+    def push_user_annotation(self, name: str) -> int | None:
+        with self._lock:
+            if (
+                not self._started
+                or not self._trace_window_prepared
+                or _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION not in self._enabled_activities
+            ):
+                return None
+            external_id = self._next_user_external_id
+            self._next_user_external_id += 1
+            self._trace_window_user_annotations[external_id] = name
+        self._check(
+            self._lib.cuptiActivityPushExternalCorrelationId(
+                _USER_EXTERNAL_CORRELATION_KIND, ctypes.c_uint64(external_id)
+            ),
+            "cuptiActivityPushExternalCorrelationId",
+        )
+        return external_id
+
+    def pop_user_annotation(self) -> int | None:
+        with self._lock:
+            if (
+                not self._started
+                or not self._trace_window_prepared
+                or _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION not in self._enabled_activities
+            ):
+                return None
+        last_id = ctypes.c_uint64()
+        self._check(
+            self._lib.cuptiActivityPopExternalCorrelationId(
+                _USER_EXTERNAL_CORRELATION_KIND, ctypes.byref(last_id)
+            ),
+            "cuptiActivityPopExternalCorrelationId",
+        )
+        return int(last_id.value)
 
     def _open_outputs(self) -> None:
         self._records_fp = open(self.output_dir / _RECORD_FILE, "ab", buffering=0)
@@ -1109,6 +1165,18 @@ def end_trace_window() -> dict[str, Any]:
     if _monitor_singleton is None:
         raise RuntimeError("CUPTI monitor collection is not active")
     return _monitor_singleton.end_trace_window()
+
+
+def push_user_annotation(name: str) -> int | None:
+    if _monitor_singleton is None:
+        return None
+    return _monitor_singleton.push_user_annotation(name)
+
+
+def pop_user_annotation() -> int | None:
+    if _monitor_singleton is None:
+        return None
+    return _monitor_singleton.pop_user_annotation()
 
 
 def _stop_collection_atexit() -> None:
