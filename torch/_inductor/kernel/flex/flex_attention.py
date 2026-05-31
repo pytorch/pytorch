@@ -96,6 +96,83 @@ def get_float32_precision():
         return "'tf32'"
 
 
+_BACKWARD_TILING_OPTIONS = (
+    "BLOCK_M1",
+    "BLOCK_N1",
+    "BLOCK_M2",
+    "BLOCK_N2",
+    "num_stages",
+    "num_warps",
+)
+
+
+def _has_user_backward_tiling(kernel_options: dict[str, Any]) -> bool:
+    return any(
+        name in kernel_options or f"bwd_{name}" in kernel_options
+        for name in _BACKWARD_TILING_OPTIONS
+    )
+
+
+def _has_single_default_float32_backward_config(
+    configs: Sequence[FlexBwDConfig],
+) -> bool:
+    if len(configs) != 1:
+        return False
+
+    conf = configs[0]
+    return (
+        conf.block_m1,
+        conf.block_n1,
+        conf.block_m2,
+        conf.block_n2,
+        conf.num_stages,
+        conf.num_warps,
+    ) == (16, 16, 16, 16, 1, 4)
+
+
+def _maybe_set_float32_backward_default(
+    kernel_options: dict[str, Any],
+    dtype: torch.dtype,
+    device_type: str,
+    seq_len_q: int | Expr,
+    seq_len_kv: int | Expr,
+    qk_head_dim: int | Expr,
+    v_head_dim: int | Expr,
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
+    has_single_default_config: bool,
+) -> None:
+    if (
+        dtype != torch.float32
+        or device_type != "cuda"
+        or torch.version.hip is not None
+        or _has_user_backward_tiling(kernel_options)
+        or not has_single_default_config
+        or sparse_q_block_size % 64 != 0
+        or sparse_kv_block_size % 64 != 0
+    ):
+        return
+
+    sizevars = V.graph.sizevars
+    use_large_tile = sizevars.statically_known_true(
+        sympy.And(
+            sympy.Ge(seq_len_q, 128),
+            sympy.Ge(seq_len_kv, 128),
+            sympy.Le(qk_head_dim, 128),
+            sympy.Le(v_head_dim, 128),
+        )
+    )
+    if not use_large_tile:
+        return
+
+    kernel_options.setdefault("BLOCK_M1", 64)
+    kernel_options.setdefault("BLOCK_N1", 64)
+    kernel_options.setdefault("BLOCK_M2", 64)
+    kernel_options.setdefault("BLOCK_N2", 64)
+    kernel_options.setdefault("num_stages", 3)
+    kernel_options.setdefault("num_warps", 4)
+
+
 flex_attention_template = TritonTemplate(
     name="flex_attention",
     grid=flex_attention_grid,
@@ -936,6 +1013,18 @@ def flex_attention_backward(*args, **kwargs):
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
         head_dim, dtype, query.get_device().type
+    )
+    _maybe_set_float32_backward_default(
+        kernel_options,
+        dtype,
+        device.type,
+        seq_len_q,
+        seq_len_kv,
+        qk_head_dim,
+        v_head_dim,
+        SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
+        has_single_default_config=_has_single_default_float32_backward_config(configs),
     )
 
     # Default config for warp specialization
