@@ -44,6 +44,7 @@ from torch._export.passes.lift_constants_pass import (
     ConstantAttrMap,
 )
 from torch._export.utils import (
+    _bind_signature_to_inputs,
     _collect_param_buffer_metadata,
     _compiling_state_context,
     _fakify_params_buffers,
@@ -84,6 +85,7 @@ from torch.export.dynamic_shapes import (
     _DimHintType,
     _IntWrapper,
     _process_dynamic_shapes,
+    _tree_map_with_path,
 )
 from torch.export.exported_program import OutputKind
 from torch.fx._symbolic_trace import _ConstantAttributeType
@@ -1500,6 +1502,47 @@ def _get_module_call_graph(
     return gm, module_call_graph
 
 
+def _remap_dynamic_shapes_to_trace_order(
+    mod: torch.nn.Module,
+    args,
+    kwargs,
+    dynamic_shapes,
+):
+    combined_args = _bind_signature_to_inputs(mod, args, kwargs)
+    if not dynamic_shapes:
+        return combined_args, dynamic_shapes
+
+    signature_bound_args = _combine_args(mod, args, kwargs)
+    if isinstance(dynamic_shapes, (tuple, list)):
+        dynamic_shapes = dict(zip(signature_bound_args.keys(), dynamic_shapes))
+
+    parameters = inspect.signature(mod.forward).parameters
+    dynamic_shapes_by_path = {}
+
+    def to_trace_path(path):
+        if not path or not isinstance(path[0], pytree.MappingKey):
+            return path
+        parameter = parameters.get(path[0].key)
+        if parameter is not None and parameter.kind == inspect.Parameter.VAR_KEYWORD:
+            return path[1:]
+        return path
+
+    def record_dynamic_shape(path, _arg, shape):
+        dynamic_shapes_by_path[pytree.keystr(to_trace_path(path))] = shape
+
+    _tree_map_with_path(
+        record_dynamic_shape,
+        signature_bound_args,
+        dynamic_shapes,
+        tree_name="inputs",
+    )
+
+    return combined_args, _tree_map_with_path(
+        lambda path, _arg: dynamic_shapes_by_path.get(pytree.keystr(path)),
+        combined_args,
+    )
+
+
 def _get_range_constraints(
     mod: torch.nn.Module,
     export_artifact: ExportArtifact,
@@ -1518,21 +1561,9 @@ def _get_range_constraints(
         ),
         len(export_graph_signature.input_specs),
     )
-    combined_args = _combine_args(mod, args, kwargs)
-
-    # This is because we trace based on the kwargs passed in from user
-    # not based on the signature. I feel it would be better to just enforce
-    # one ordering at the start of tracing to avoid confusions, but that is
-    # bigger refactor, so do this to unblock for now.
-    combined_args_traced_order = {}
-    for arg in combined_args:
-        if arg not in kwargs:
-            combined_args_traced_order[arg] = combined_args[arg]
-
-    for key in kwargs:
-        combined_args_traced_order[key] = kwargs[key]
-
-    combined_args = combined_args_traced_order
+    combined_args, dynamic_shapes = _remap_dynamic_shapes_to_trace_order(
+        mod, args, kwargs, dynamic_shapes
+    )
 
     range_constraints = make_constraints(
         fake_mode,

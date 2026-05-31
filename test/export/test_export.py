@@ -6153,6 +6153,82 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             got = mod(*args)
             self.assertTrue(torch.allclose(expected, got))
 
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceabilityNonStrict
+    def test_dynamic_shapes_with_var_keyword(self):
+        class M(torch.nn.Module):
+            def forward(self, **kwargs):
+                return kwargs["x"] + kwargs["y"]
+
+        x, y = torch.randn(2, 3), torch.randn(2, 3)
+        dynamic_shapes = {
+            "kwargs": {
+                "x": {0: torch.export.Dim("batch")},
+                "y": {0: torch.export.Dim("batch")},
+            }
+        }
+
+        ep = export(
+            M(),
+            (),
+            kwargs={"x": x, "y": y},
+            dynamic_shapes=dynamic_shapes,
+        )
+        self.assertEqual(len(ep.range_constraints), 1)
+
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceabilityNonStrict
+    def test_dynamic_shapes_with_var_args_and_var_keyword(self):
+        class M(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                return args[0] + kwargs["y"]
+
+        x, y = torch.randn(2, 3), torch.randn(2, 3)
+        dynamic_shapes = {
+            "args": ({0: torch.export.Dim("batch")},),
+            "kwargs": {"y": {0: torch.export.Dim("batch")}},
+        }
+
+        ep = export(
+            M(),
+            (x,),
+            kwargs={"y": y},
+            dynamic_shapes=dynamic_shapes,
+        )
+        self.assertEqual(len(ep.range_constraints), 1)
+
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureRetraceabilityNonStrict
+    def test_dynamic_shapes_with_named_and_var_keyword(self):
+        class M(torch.nn.Module):
+            def forward(self, x, **kwargs):
+                return x.sum() + kwargs["y"].sum() + kwargs["z"].sum()
+
+        x = torch.randn(5, 3)
+        y = torch.randn(7, 3)
+        z = torch.randn(2, 3)
+        dynamic_shapes = {
+            "x": {0: torch.export.Dim("dx", min=5, max=6)},
+            "kwargs": {
+                "y": {0: torch.export.Dim("dy", min=7, max=8)},
+                "z": {0: torch.export.Dim("dz", min=2, max=4)},
+            },
+        }
+
+        ep = export(
+            M(),
+            (),
+            kwargs={"z": z, "x": x, "y": y},
+            dynamic_shapes=dynamic_shapes,
+        )
+        mod = ep.module()
+        test_kwargs = {
+            "z": torch.randn(3, 3),
+            "x": torch.randn(6, 3),
+            "y": torch.randn(8, 3),
+        }
+        self.assertEqual(mod(**test_kwargs), M()(**test_kwargs))
+
     def test_dynamic_shapes_builder_basic(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
