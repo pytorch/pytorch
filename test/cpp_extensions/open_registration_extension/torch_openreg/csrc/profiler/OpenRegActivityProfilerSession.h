@@ -14,7 +14,7 @@
 
 namespace openreg::profiler {
 
-class OpenRegActivityProfilerSession
+class OPENREG_EXPORT OpenRegActivityProfilerSession
     : public libkineto::IActivityProfilerSession {
  public:
   explicit OpenRegActivityProfilerSession(int32_t deviceIndex = 0)
@@ -39,6 +39,7 @@ class OpenRegActivityProfilerSession
   void pushCorrelationId(uint64_t id) override;
   void popCorrelationId() override;
 
+ private:
   int64_t startTs_{0};   // µs, set in start()
   int64_t endTs_{0};     // µs, set in stop()
 

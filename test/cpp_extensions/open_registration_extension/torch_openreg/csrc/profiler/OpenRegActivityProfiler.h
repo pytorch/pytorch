@@ -7,12 +7,13 @@
 #include <string>
 
 #include <IActivityProfiler.h>
+#include <include/openreg.h>
 
 namespace openreg::profiler {
 
 // Stateless factory registered with Kineto via REGISTER_PRIVATEUSE1_PROFILER.
 // Kineto calls configure() once per trace to obtain a session handle.
-class OpenRegActivityProfiler : public libkineto::IActivityProfiler {
+class OPENREG_EXPORT OpenRegActivityProfiler : public libkineto::IActivityProfiler {
  public:
   OpenRegActivityProfiler() = default;
   ~OpenRegActivityProfiler() override = default;
