@@ -2546,6 +2546,12 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_device_copy(self, src, dst, non_blocking: bool | str):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
 
+    def sync_d2h_copy(self, buffer_name: str) -> None:
+        event_var = f"_d2h_event_{buffer_name}"
+        self.writeline(f"{event_var} = torch.Event()")
+        self.writeline(f"{event_var}.record()")
+        self.writeline(f"{event_var}.synchronize()")
+
     def codegen_multi_output(self, node: ir.MultiOutput):
         result_name = node.get_name()
         arg_name = node.input_name(0)
@@ -3588,7 +3594,7 @@ class PythonWrapperCodegen(CodeGen):
                 elif raw_key == "" and infer_arg_by_inputs(
                     raw_keys, raw_args, i, reused_args
                 ):
-                    # Empty raw_key means this is a arg that's not native to the triton kernel,
+                    # Empty raw_key means this is an arg that's not native to the triton kernel,
                     # and is being added by inductor.
                     arg_str = reused_args[raw_arg]
                 elif isinstance(arg_type, torch_dtype):

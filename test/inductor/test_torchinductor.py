@@ -16892,6 +16892,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @unittest.skipIf(
         config.cpp_wrapper,
+        "event sync only emitted for Python wrapper",
+    )
+    @skip_if_halide
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_non_blocking_d2h_event_sync(self):
+        def f(x):
+            s = x.abs().sum().to("cpu", non_blocking=True).item()
+            return torch.clamp(x, 0.0, s)
+
+        x = torch.randn(10, device=GPU_TYPE)
+        compiled_fn = torch.compile(f, dynamic=True)
+        result, code = run_and_get_code(compiled_fn, x)
+        expected = f(x)
+        self.assertEqual(result, expected)
+        wrapper_code = code[0]
+        self.assertIn("torch.Event()", wrapper_code)
+        self.assertIn(".record()", wrapper_code)
+        self.assertIn(".synchronize()", wrapper_code)
+
+    @unittest.skipIf(
+        config.cpp_wrapper,
         "cpp_wrapper samples will lead to invalid indexing",
     )
     def test_inductor_triton_bucketize_respects_masking(self):
