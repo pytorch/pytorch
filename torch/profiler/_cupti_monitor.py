@@ -17,7 +17,9 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
+from cupti import cupti as _cc
 
 _PY_PROFILER = torch._C._profiler
 
@@ -27,28 +29,7 @@ _LIBCUPTI_PATH_ENV = "TORCH_CUPTI_MONITOR_LIBCUPTI_PATH"
 _CUPTI_SUCCESS = 0
 _CUPTI_ERROR_MAX_LIMIT_REACHED = 12
 
-_CUPTI_ACTIVITY_KIND_MEMCPY = 1
-_CUPTI_ACTIVITY_KIND_MEMSET = 2
-_CUPTI_ACTIVITY_KIND_DRIVER = 4
-_CUPTI_ACTIVITY_KIND_RUNTIME = 5
-_CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL = 10
-_CUPTI_ACTIVITY_KIND_OVERHEAD = 17
-_CUPTI_ACTIVITY_KIND_CUDA_EVENT = 36
-_CUPTI_ACTIVITY_KIND_SYNCHRONIZATION = 38
-_CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION = 39
-
 _CUPTI_ACTIVITY_FLAG_FLUSH_FORCED = 1
-
-_CUPTI_RUNTIME_TRACE_CBID_cudaGetLastError_v3020 = 10
-_CUPTI_RUNTIME_TRACE_CBID_cudaSetDevice_v3020 = 16
-_CUPTI_RUNTIME_TRACE_CBID_cudaGetDevice_v3020 = 17
-_CUPTI_RUNTIME_TRACE_CBID_cudaEventCreate_v3020 = 133
-_CUPTI_RUNTIME_TRACE_CBID_cudaEventCreateWithFlags_v3020 = 134
-_CUPTI_RUNTIME_TRACE_CBID_cudaEventDestroy_v3020 = 136
-
-_CUPTI_DRIVER_TRACE_CBID_cuCtxGetCurrent = 304
-_CUPTI_DRIVER_TRACE_CBID_cuDevicePrimaryCtxGetState = 392
-_CUPTI_DRIVER_TRACE_CBID_cuKernelGetAttribute = 686
 
 _DEFAULT_BUFFER_SIZE = 4 * 1024 * 1024
 _DEFAULT_FLUSH_PERIOD_S = 1.0
@@ -69,6 +50,58 @@ _RECORD_KIND_KERNEL = 1
 _RECORD_KIND_MEMCPY = 2
 _RECORD_KIND_MEMSET = 3
 
+_OVERHEAD_KIND_NAMES = {
+    0: "Unknown",
+    1: "Driver Compiler",
+    1 << 16: "Buffer Flush",
+    2 << 16: "Instrumentation",
+    3 << 16: "Resource",
+    4 << 16: "Runtime Triggered Module Loading",
+    5 << 16: "Lazy Function Loading",
+    6 << 16: "Command Buffer Full",
+    7 << 16: "Activity Buffer Request",
+    8 << 16: "UVM Activity Init",
+}
+_DEMANGLE_CACHE: dict[str, str] = {}
+_CUPTI_ACTIVITY_KIND_MEMCPY = int(_cc.ActivityKind.MEMCPY)
+_CUPTI_ACTIVITY_KIND_MEMSET = int(_cc.ActivityKind.MEMSET)
+_CUPTI_ACTIVITY_KIND_DRIVER = int(_cc.ActivityKind.DRIVER)
+_CUPTI_ACTIVITY_KIND_RUNTIME = int(_cc.ActivityKind.RUNTIME)
+_CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL = int(_cc.ActivityKind.CONCURRENT_KERNEL)
+_CUPTI_ACTIVITY_KIND_OVERHEAD = int(_cc.ActivityKind.OVERHEAD)
+_CUPTI_ACTIVITY_KIND_CUDA_EVENT = int(_cc.ActivityKind.CUDA_EVENT)
+_CUPTI_ACTIVITY_KIND_SYNCHRONIZATION = int(_cc.ActivityKind.SYNCHRONIZATION)
+_CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION = int(_cc.ActivityKind.EXTERNAL_CORRELATION)
+
+_DISABLED_RUNTIME_CBIDS = tuple(
+    int(cbid)
+    for cbid in (
+        _cc.Runtime_api_trace_cbid.cudaGetDevice_v3020,
+        _cc.Runtime_api_trace_cbid.cudaSetDevice_v3020,
+        _cc.Runtime_api_trace_cbid.cudaGetLastError_v3020,
+        _cc.Runtime_api_trace_cbid.cudaEventCreate_v3020,
+        _cc.Runtime_api_trace_cbid.cudaEventCreateWithFlags_v3020,
+        _cc.Runtime_api_trace_cbid.cudaEventDestroy_v3020,
+    )
+)
+_DISABLED_DRIVER_CBIDS = tuple(
+    int(cbid)
+    for cbid in (
+        _cc.Driver_api_trace_cbid.cuKernelGetAttribute,
+        _cc.Driver_api_trace_cbid.cuDevicePrimaryCtxGetState,
+        _cc.Driver_api_trace_cbid.cuCtxGetCurrent,
+    )
+)
+
+_KERNEL_DTYPE = _cc.activity_kernel11_dtype
+_MEMCPY_DTYPE = _cc.activity_memcpy6_dtype
+_MEMSET_DTYPE = _cc.activity_memset4_dtype
+_API_DTYPE = _cc.activity_api_dtype
+_EXTERNAL_CORRELATION_DTYPE = _cc.activity_external_correlation_dtype
+_OVERHEAD_DTYPE = _cc.activity_overhead3_dtype
+_CUDA_EVENT_DTYPE = _cc.activity_cuda_event2_dtype
+_SYNCHRONIZATION_DTYPE = _cc.activity_synchronization2_dtype
+
 _DEFAULT_ALWAYS_ON_ACTIVITIES = (
     _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL,
     _CUPTI_ACTIVITY_KIND_MEMCPY,
@@ -85,33 +118,6 @@ _DEFAULT_TRACE_WINDOW_ACTIVITIES = (
     _CUPTI_ACTIVITY_KIND_OVERHEAD,
     _CUPTI_ACTIVITY_KIND_CUDA_EVENT,
     _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION,
-)
-
-_OVERHEAD_KIND_NAMES = {
-    0: "Unknown",
-    1: "Driver Compiler",
-    1 << 16: "Buffer Flush",
-    2 << 16: "Instrumentation",
-    3 << 16: "Resource",
-    4 << 16: "Runtime Triggered Module Loading",
-    5 << 16: "Lazy Function Loading",
-    6 << 16: "Command Buffer Full",
-    7 << 16: "Activity Buffer Request",
-    8 << 16: "UVM Activity Init",
-}
-_DEMANGLE_CACHE: dict[str, str] = {}
-_DISABLED_RUNTIME_CBIDS = (
-    _CUPTI_RUNTIME_TRACE_CBID_cudaGetDevice_v3020,
-    _CUPTI_RUNTIME_TRACE_CBID_cudaSetDevice_v3020,
-    _CUPTI_RUNTIME_TRACE_CBID_cudaGetLastError_v3020,
-    _CUPTI_RUNTIME_TRACE_CBID_cudaEventCreate_v3020,
-    _CUPTI_RUNTIME_TRACE_CBID_cudaEventCreateWithFlags_v3020,
-    _CUPTI_RUNTIME_TRACE_CBID_cudaEventDestroy_v3020,
-)
-_DISABLED_DRIVER_CBIDS = (
-    _CUPTI_DRIVER_TRACE_CBID_cuKernelGetAttribute,
-    _CUPTI_DRIVER_TRACE_CBID_cuDevicePrimaryCtxGetState,
-    _CUPTI_DRIVER_TRACE_CBID_cuCtxGetCurrent,
 )
 
 
@@ -159,158 +165,9 @@ class _CuptiError(RuntimeError):
     pass
 
 
-class _CuptiActivity(ctypes.Structure):
-    _fields_ = [("kind", ctypes.c_int)]
-
-
-class _CuptiActivityKernel(ctypes.Structure):
-    _fields_ = [
-        ("kind", ctypes.c_int),
-        ("cacheConfig", ctypes.c_uint8),
-        ("sharedMemoryConfig", ctypes.c_uint8),
-        ("registersPerThread", ctypes.c_uint16),
-        ("partitionedGlobalCacheRequested", ctypes.c_int),
-        ("partitionedGlobalCacheExecuted", ctypes.c_int),
-        ("start", ctypes.c_uint64),
-        ("end", ctypes.c_uint64),
-        ("completed", ctypes.c_uint64),
-        ("deviceId", ctypes.c_uint32),
-        ("contextId", ctypes.c_uint32),
-        ("streamId", ctypes.c_uint32),
-        ("gridX", ctypes.c_int32),
-        ("gridY", ctypes.c_int32),
-        ("gridZ", ctypes.c_int32),
-        ("blockX", ctypes.c_int32),
-        ("blockY", ctypes.c_int32),
-        ("blockZ", ctypes.c_int32),
-        ("staticSharedMemory", ctypes.c_int32),
-        ("dynamicSharedMemory", ctypes.c_int32),
-        ("localMemoryPerThread", ctypes.c_uint32),
-        ("localMemoryTotal", ctypes.c_uint32),
-        ("correlationId", ctypes.c_uint32),
-        ("gridId", ctypes.c_int64),
-        ("name", ctypes.c_void_p),
-        ("reserved0", ctypes.c_void_p),
-        ("queued", ctypes.c_uint64),
-        ("submitted", ctypes.c_uint64),
-        ("launchType", ctypes.c_uint8),
-        ("isSharedMemoryCarveoutRequested", ctypes.c_uint8),
-        ("sharedMemoryCarveoutRequested", ctypes.c_uint8),
-        ("padding", ctypes.c_uint8),
-        ("sharedMemoryExecuted", ctypes.c_uint32),
-        ("graphNodeId", ctypes.c_uint64),
-        ("shmemLimitConfig", ctypes.c_int),
-        ("graphId", ctypes.c_uint32),
-    ]
-
-
-class _CuptiActivityMemcpy(ctypes.Structure):
-    _fields_ = [
-        ("kind", ctypes.c_int),
-        ("copyKind", ctypes.c_uint8),
-        ("srcKind", ctypes.c_uint8),
-        ("dstKind", ctypes.c_uint8),
-        ("flags", ctypes.c_uint8),
-        ("bytes", ctypes.c_uint64),
-        ("start", ctypes.c_uint64),
-        ("end", ctypes.c_uint64),
-        ("deviceId", ctypes.c_uint32),
-        ("contextId", ctypes.c_uint32),
-        ("streamId", ctypes.c_uint32),
-        ("correlationId", ctypes.c_uint32),
-        ("runtimeCorrelationId", ctypes.c_uint32),
-        ("reserved0", ctypes.c_void_p),
-        ("graphNodeId", ctypes.c_uint64),
-        ("graphId", ctypes.c_uint32),
-    ]
-
-
-class _CuptiActivityMemset(ctypes.Structure):
-    _fields_ = [
-        ("kind", ctypes.c_int),
-        ("value", ctypes.c_uint32),
-        ("bytes", ctypes.c_uint64),
-        ("start", ctypes.c_uint64),
-        ("end", ctypes.c_uint64),
-        ("deviceId", ctypes.c_uint32),
-        ("contextId", ctypes.c_uint32),
-        ("streamId", ctypes.c_uint32),
-        ("correlationId", ctypes.c_uint32),
-        ("flags", ctypes.c_uint16),
-        ("memoryKind", ctypes.c_uint16),
-        ("reserved0", ctypes.c_void_p),
-        ("graphNodeId", ctypes.c_uint64),
-        ("graphId", ctypes.c_uint32),
-    ]
-
-
-class _CuptiActivityAPI(ctypes.Structure):
-    _fields_ = [
-        ("kind", ctypes.c_int),
-        ("cbid", ctypes.c_uint32),
-        ("start", ctypes.c_uint64),
-        ("end", ctypes.c_uint64),
-        ("processId", ctypes.c_uint32),
-        ("threadId", ctypes.c_uint32),
-        ("correlationId", ctypes.c_uint32),
-        ("returnValue", ctypes.c_uint32),
-    ]
-
-
-class _CuptiActivityExternalCorrelation(ctypes.Structure):
-    _fields_ = [
-        ("kind", ctypes.c_int),
-        ("externalKind", ctypes.c_int),
-        ("externalId", ctypes.c_uint64),
-        ("correlationId", ctypes.c_uint32),
-        ("reserved", ctypes.c_uint32),
-    ]
-
-
-class _CuptiActivityOverhead(ctypes.Structure):
-    _fields_ = [
-        ("kind", ctypes.c_int),
-        ("overheadKind", ctypes.c_int),
-        ("objectKind", ctypes.c_int),
-        ("objectId", ctypes.c_uint64),
-        ("start", ctypes.c_uint64),
-        ("end", ctypes.c_uint64),
-        ("correlationId", ctypes.c_uint32),
-        ("reserved0", ctypes.c_uint32),
-        ("overheadData", ctypes.c_void_p),
-    ]
-
-
-class _CuptiActivityCudaEvent(ctypes.Structure):
-    _fields_ = [
-        ("kind", ctypes.c_int),
-        ("correlationId", ctypes.c_uint32),
-        ("contextId", ctypes.c_uint32),
-        ("streamId", ctypes.c_uint32),
-        ("eventId", ctypes.c_uint32),
-        ("pad", ctypes.c_uint32),
-        ("deviceId", ctypes.c_uint32),
-        ("pad2", ctypes.c_uint32),
-        ("reserved0", ctypes.c_void_p),
-        ("deviceTimestamp", ctypes.c_uint64),
-        ("cudaEventSyncId", ctypes.c_uint64),
-    ]
-
-
-class _CuptiActivitySynchronization(ctypes.Structure):
-    _fields_ = [
-        ("kind", ctypes.c_int),
-        ("type", ctypes.c_int),
-        ("start", ctypes.c_uint64),
-        ("end", ctypes.c_uint64),
-        ("correlationId", ctypes.c_uint32),
-        ("contextId", ctypes.c_uint32),
-        ("streamId", ctypes.c_uint32),
-        ("cudaEventId", ctypes.c_uint32),
-        ("cudaEventSyncId", ctypes.c_uint64),
-        ("returnValue", ctypes.c_uint32),
-        ("pad", ctypes.c_uint32),
-    ]
+def _dtype_record(record_addr: int, dtype: np.dtype) -> np.void:
+    buf = (ctypes.c_char * dtype.itemsize).from_address(record_addr)
+    return np.frombuffer(buf, dtype=dtype, count=1)[0]
 
 
 def _normalize_annotation(annotation: Any) -> bytes:
@@ -882,53 +739,50 @@ class CuptiMonitor:
     def _decode_record(
         self, record_addr: int
     ) -> tuple[bytes | None, int, int, dict[str, Any] | None]:
-        activity = ctypes.cast(record_addr, ctypes.POINTER(_CuptiActivity)).contents
-        kind = int(activity.kind)
+        kind = int(ctypes.c_int.from_address(record_addr).value)
         if kind == _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL:
-            record = ctypes.cast(
-                record_addr, ctypes.POINTER(_CuptiActivityKernel)
-            ).contents
+            record = _dtype_record(record_addr, _KERNEL_DTYPE)
             annotation = self.annotation_resolver(
-                int(record.graphNodeId),
+                int(record["graph_node_id"]),
                 _RECORD_KIND_KERNEL,
-                int(record.correlationId),
+                int(record["correlation_id"]),
             )
             annotation_id = self._annotation_id_for_record(
-                int(record.graphNodeId),
+                int(record["graph_node_id"]),
                 _RECORD_KIND_KERNEL,
-                int(record.correlationId),
+                int(record["correlation_id"]),
             )
             kernel_name = _decode_c_string(
-                int(record.name) if record.name else 0,
+                int(record["name"]) if int(record["name"]) else 0,
                 "kernel",
             )
             kernel_name = _demangle_symbol(kernel_name)
+            start_ns = self._convert_time(int(record["start"]))
+            end_ns = self._convert_time(int(record["end"]))
             payload = _RECORD_STRUCT.pack(
                 _RECORD_KIND_KERNEL,
-                int(record.deviceId),
-                int(record.contextId),
-                int(record.streamId),
-                int(record.correlationId),
+                int(record["device_id"]),
+                int(record["context_id"]),
+                int(record["stream_id"]),
+                int(record["correlation_id"]),
                 annotation_id,
-                int(record.graphNodeId),
-                self._convert_time(int(record.start)),
-                self._convert_time(int(record.end)),
+                int(record["graph_node_id"]),
+                start_ns,
+                end_ns,
                 0,
                 0,
                 0,
-                int(record.graphId),
+                int(record["graph_id"]),
                 0,
             )
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
             trace_event = {
                 "kind": "kernel",
-                "device_id": int(record.deviceId),
-                "context_id": int(record.contextId),
-                "stream_id": int(record.streamId),
-                "correlation_id": int(record.correlationId),
-                "graph_node_id": int(record.graphNodeId),
-                "graph_id": int(record.graphId),
+                "device_id": int(record["device_id"]),
+                "context_id": int(record["context_id"]),
+                "stream_id": int(record["stream_id"]),
+                "correlation_id": int(record["correlation_id"]),
+                "graph_node_id": int(record["graph_node_id"]),
+                "graph_id": int(record["graph_id"]),
                 "start_ns": start_ns,
                 "end_ns": end_ns,
                 "annotation_id": annotation_id,
@@ -938,59 +792,57 @@ class CuptiMonitor:
             return payload, start_ns, end_ns, trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_MEMCPY:
-            record = ctypes.cast(
-                record_addr, ctypes.POINTER(_CuptiActivityMemcpy)
-            ).contents
+            record = _dtype_record(record_addr, _MEMCPY_DTYPE)
             annotation = self.annotation_resolver(
-                int(record.graphNodeId),
+                int(record["graph_node_id"]),
                 _RECORD_KIND_MEMCPY,
-                int(record.correlationId),
+                int(record["correlation_id"]),
             )
             annotation_id = self._annotation_id_for_record(
-                int(record.graphNodeId),
+                int(record["graph_node_id"]),
                 _RECORD_KIND_MEMCPY,
-                int(record.correlationId),
+                int(record["correlation_id"]),
             )
             aux = (
-                int(record.copyKind)
-                | (int(record.srcKind) << 8)
-                | (int(record.dstKind) << 16)
-                | (int(record.flags) << 24)
+                int(record["copy_kind"])
+                | (int(record["src_kind"]) << 8)
+                | (int(record["dst_kind"]) << 16)
+                | (int(record["flags_"]) << 24)
             )
+            start_ns = self._convert_time(int(record["start"]))
+            end_ns = self._convert_time(int(record["end"]))
             payload = _RECORD_STRUCT.pack(
                 _RECORD_KIND_MEMCPY,
-                int(record.deviceId),
-                int(record.contextId),
-                int(record.streamId),
-                int(record.correlationId),
+                int(record["device_id"]),
+                int(record["context_id"]),
+                int(record["stream_id"]),
+                int(record["correlation_id"]),
                 annotation_id,
-                int(record.graphNodeId),
-                self._convert_time(int(record.start)),
-                self._convert_time(int(record.end)),
-                int(record.bytes),
-                int(record.runtimeCorrelationId),
+                int(record["graph_node_id"]),
+                start_ns,
+                end_ns,
+                int(record["bytes"]),
+                int(record["runtime_correlation_id"]),
                 aux,
                 0,
-                int(record.graphId),
+                int(record["graph_id"]),
             )
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
             trace_event = {
                 "kind": "gpu_memcpy",
-                "device_id": int(record.deviceId),
-                "context_id": int(record.contextId),
-                "stream_id": int(record.streamId),
-                "correlation_id": int(record.correlationId),
-                "runtime_correlation_id": int(record.runtimeCorrelationId),
-                "graph_node_id": int(record.graphNodeId),
-                "graph_id": int(record.graphId),
+                "device_id": int(record["device_id"]),
+                "context_id": int(record["context_id"]),
+                "stream_id": int(record["stream_id"]),
+                "correlation_id": int(record["correlation_id"]),
+                "runtime_correlation_id": int(record["runtime_correlation_id"]),
+                "graph_node_id": int(record["graph_node_id"]),
+                "graph_id": int(record["graph_id"]),
                 "start_ns": start_ns,
                 "end_ns": end_ns,
-                "bytes": int(record.bytes),
-                "copy_kind": int(record.copyKind),
-                "src_kind": int(record.srcKind),
-                "dst_kind": int(record.dstKind),
-                "flags": int(record.flags),
+                "bytes": int(record["bytes"]),
+                "copy_kind": int(record["copy_kind"]),
+                "src_kind": int(record["src_kind"]),
+                "dst_kind": int(record["dst_kind"]),
+                "flags": int(record["flags_"]),
                 "annotation_id": annotation_id,
                 "annotation": annotation,
                 "name": "Memcpy",
@@ -998,53 +850,51 @@ class CuptiMonitor:
             return payload, start_ns, end_ns, trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_MEMSET:
-            record = ctypes.cast(
-                record_addr, ctypes.POINTER(_CuptiActivityMemset)
-            ).contents
+            record = _dtype_record(record_addr, _MEMSET_DTYPE)
             annotation = self.annotation_resolver(
-                int(record.graphNodeId),
+                int(record["graph_node_id"]),
                 _RECORD_KIND_MEMSET,
-                int(record.correlationId),
+                int(record["correlation_id"]),
             )
             annotation_id = self._annotation_id_for_record(
-                int(record.graphNodeId),
+                int(record["graph_node_id"]),
                 _RECORD_KIND_MEMSET,
-                int(record.correlationId),
+                int(record["correlation_id"]),
             )
-            aux = int(record.value)
-            aux2 = int(record.memoryKind) | (int(record.flags) << 16)
+            aux = int(record["value"])
+            aux2 = int(record["memory_kind"]) | (int(record["flags_"]) << 16)
+            start_ns = self._convert_time(int(record["start"]))
+            end_ns = self._convert_time(int(record["end"]))
             payload = _RECORD_STRUCT.pack(
                 _RECORD_KIND_MEMSET,
-                int(record.deviceId),
-                int(record.contextId),
-                int(record.streamId),
-                int(record.correlationId),
+                int(record["device_id"]),
+                int(record["context_id"]),
+                int(record["stream_id"]),
+                int(record["correlation_id"]),
                 annotation_id,
-                int(record.graphNodeId),
-                self._convert_time(int(record.start)),
-                self._convert_time(int(record.end)),
-                int(record.bytes),
+                int(record["graph_node_id"]),
+                start_ns,
+                end_ns,
+                int(record["bytes"]),
                 0,
                 aux,
                 aux2,
-                int(record.graphId),
+                int(record["graph_id"]),
             )
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
             trace_event = {
                 "kind": "gpu_memset",
-                "device_id": int(record.deviceId),
-                "context_id": int(record.contextId),
-                "stream_id": int(record.streamId),
-                "correlation_id": int(record.correlationId),
-                "graph_node_id": int(record.graphNodeId),
-                "graph_id": int(record.graphId),
+                "device_id": int(record["device_id"]),
+                "context_id": int(record["context_id"]),
+                "stream_id": int(record["stream_id"]),
+                "correlation_id": int(record["correlation_id"]),
+                "graph_node_id": int(record["graph_node_id"]),
+                "graph_id": int(record["graph_id"]),
                 "start_ns": start_ns,
                 "end_ns": end_ns,
-                "bytes": int(record.bytes),
-                "value": int(record.value),
-                "memory_kind": int(record.memoryKind),
-                "flags": int(record.flags),
+                "bytes": int(record["bytes"]),
+                "value": int(record["value"]),
+                "memory_kind": int(record["memory_kind"]),
+                "flags": int(record["flags_"]),
                 "annotation_id": annotation_id,
                 "annotation": annotation,
                 "name": "Memset",
@@ -1052,92 +902,84 @@ class CuptiMonitor:
             return payload, start_ns, end_ns, trace_event
 
         if kind in (_CUPTI_ACTIVITY_KIND_RUNTIME, _CUPTI_ACTIVITY_KIND_DRIVER):
-            record = ctypes.cast(record_addr, ctypes.POINTER(_CuptiActivityAPI)).contents
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
+            record = _dtype_record(record_addr, _API_DTYPE)
+            start_ns = self._convert_time(int(record["start"]))
+            end_ns = self._convert_time(int(record["end"]))
             trace_event = {
                 "kind": "cuda_runtime" if kind == _CUPTI_ACTIVITY_KIND_RUNTIME else "cuda_driver",
-                "cbid": int(record.cbid),
+                "cbid": int(record["cbid"]),
                 "start_ns": start_ns,
                 "end_ns": end_ns,
-                "process_id": int(record.processId),
-                "thread_id": int(record.threadId),
-                "correlation_id": int(record.correlationId),
-                "return_value": int(record.returnValue),
-                "name": f"cbid_{int(record.cbid)}",
+                "process_id": int(record["process_id"]),
+                "thread_id": int(record["thread_id"]),
+                "correlation_id": int(record["correlation_id"]),
+                "return_value": int(record["return_value"]),
+                "name": f"cbid_{int(record['cbid'])}",
             }
             return None, start_ns, end_ns, trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION:
-            record = ctypes.cast(
-                record_addr, ctypes.POINTER(_CuptiActivityExternalCorrelation)
-            ).contents
+            record = _dtype_record(record_addr, _EXTERNAL_CORRELATION_DTYPE)
             trace_event = {
                 "kind": "external_correlation",
-                "external_kind": int(record.externalKind),
-                "external_id": int(record.externalId),
-                "correlation_id": int(record.correlationId),
+                "external_kind": int(record["external_kind"]),
+                "external_id": int(record["external_id"]),
+                "correlation_id": int(record["correlation_id"]),
                 "name": "external_correlation",
             }
             return None, 0, 0, trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_OVERHEAD:
-            record = ctypes.cast(
-                record_addr, ctypes.POINTER(_CuptiActivityOverhead)
-            ).contents
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
+            record = _dtype_record(record_addr, _OVERHEAD_DTYPE)
+            start_ns = self._convert_time(int(record["start"]))
+            end_ns = self._convert_time(int(record["end"]))
             trace_event = {
                 "kind": "overhead",
-                "overhead_kind": int(record.overheadKind),
-                "object_kind": int(record.objectKind),
-                "object_id": int(record.objectId),
+                "overhead_kind": int(record["overhead_kind"]),
+                "object_kind": int(record["object_kind"]),
+                "object_id": 0,
                 "start_ns": start_ns,
                 "end_ns": end_ns,
-                "correlation_id": int(record.correlationId),
+                "correlation_id": int(record["correlation_id"]),
                 "name": _OVERHEAD_KIND_NAMES.get(
-                    int(record.overheadKind),
-                    f"overhead_{int(record.overheadKind)}",
+                    int(record["overhead_kind"]),
+                    f"overhead_{int(record['overhead_kind'])}",
                 ),
             }
             return None, start_ns, end_ns, trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_CUDA_EVENT:
-            record = ctypes.cast(
-                record_addr, ctypes.POINTER(_CuptiActivityCudaEvent)
-            ).contents
-            event_ts = self._convert_time(int(record.deviceTimestamp))
+            record = _dtype_record(record_addr, _CUDA_EVENT_DTYPE)
+            event_ts = self._convert_time(int(record["device_timestamp"]))
             trace_event = {
                 "kind": "cuda_event",
-                "device_id": int(record.deviceId),
-                "context_id": int(record.contextId),
-                "stream_id": int(record.streamId),
-                "event_id": int(record.eventId),
-                "correlation_id": int(record.correlationId),
+                "device_id": int(record["device_id"]),
+                "context_id": int(record["context_id"]),
+                "stream_id": int(record["stream_id"]),
+                "event_id": int(record["event_id"]),
+                "correlation_id": int(record["correlation_id"]),
                 "device_timestamp_ns": event_ts,
-                "cuda_event_sync_id": int(record.cudaEventSyncId),
+                "cuda_event_sync_id": int(record["cuda_event_sync_id"]),
                 "name": "cuda_event",
             }
             return None, event_ts, event_ts, trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION:
-            record = ctypes.cast(
-                record_addr, ctypes.POINTER(_CuptiActivitySynchronization)
-            ).contents
-            start_ns = self._convert_time(int(record.start))
-            end_ns = self._convert_time(int(record.end))
+            record = _dtype_record(record_addr, _SYNCHRONIZATION_DTYPE)
+            start_ns = self._convert_time(int(record["start"]))
+            end_ns = self._convert_time(int(record["end"]))
             trace_event = {
                 "kind": "cuda_sync",
-                "sync_type": int(record.type),
+                "sync_type": int(record["type"]),
                 "start_ns": start_ns,
                 "end_ns": end_ns,
-                "correlation_id": int(record.correlationId),
-                "context_id": int(record.contextId),
-                "stream_id": int(record.streamId),
-                "event_id": int(record.cudaEventId),
-                "cuda_event_sync_id": int(record.cudaEventSyncId),
-                "return_value": int(record.returnValue),
-                "name": f"sync_{int(record.type)}",
+                "correlation_id": int(record["correlation_id"]),
+                "context_id": int(record["context_id"]),
+                "stream_id": int(record["stream_id"]),
+                "event_id": int(record["cuda_event_id"]),
+                "cuda_event_sync_id": int(record["cuda_event_sync_id"]),
+                "return_value": int(record["return_value"]),
+                "name": f"sync_{int(record['type'])}",
             }
             return None, start_ns, end_ns, trace_event
 
