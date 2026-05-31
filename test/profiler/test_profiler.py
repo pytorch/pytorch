@@ -1257,6 +1257,7 @@ class TestProfiler(TestCase):
         if use_cuda and ProfilerActivity.CUDA not in supported_activities():
             self.skipTest("CUDA is required")
 
+        device = "cuda" if use_cuda else "cpu"
         activities = [ProfilerActivity.CPU]
         if use_cuda:
             activities.append(ProfilerActivity.CUDA)
@@ -1267,7 +1268,7 @@ class TestProfiler(TestCase):
                 record_shapes=True,
                 experimental_config=_ExperimentalConfig(trace_only=trace_only),
             ) as prof:
-                self.payload(use_cuda=use_cuda)
+                self.payload(device=device)
             with TemporaryFileName(mode="w+") as fname:
                 prof.export_chrome_trace(fname)
                 with open(fname) as f:
