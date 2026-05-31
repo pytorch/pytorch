@@ -1,17 +1,13 @@
 # Owner(s): ["module: inductor"]
-import contextlib
 import importlib
 import os
 import sys
 
 import torch
-from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     IS_LINUX,
-    MI350_ARCH,
-    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -469,26 +465,6 @@ DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
 )
 
 
-class DynamicShapesCodegenTestCase(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls._triton_assert_stack = contextlib.ExitStack()
-        cls._triton_assert_stack.enter_context(
-            config.patch(
-                {
-                    "test_configs.runtime_triton_dtype_assert": True,
-                    "test_configs.runtime_triton_shape_assert": True,
-                }
-            )
-        )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._triton_assert_stack.close()
-        super().tearDownClass()
-
-
 if HAS_CPU:
 
     class DynamicShapesCodegenCpuTests(TestCase):
@@ -515,7 +491,7 @@ if HAS_CPU:
 
 if HAS_GPU and not TEST_WITH_ASAN:
 
-    class DynamicShapesCodegenGPUTests(DynamicShapesCodegenTestCase):
+    class DynamicShapesCodegenGPUTests(TestCase):
         maxDiff = None
         device = GPU_TYPE
 
@@ -535,15 +511,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
         GPU_TYPE,
         test_failures,
     )
-
-    if HAS_GPU and hasattr(
-        DynamicShapesCodegenGPUTests,
-        "test_randint_distribution_dynamic_shapes_cuda",
-    ):
-        # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
-        DynamicShapesCodegenGPUTests.test_randint_distribution_dynamic_shapes_cuda = skipIfRocmArch(
-            MI350_ARCH
-        )(DynamicShapesCodegenGPUTests.test_randint_distribution_dynamic_shapes_cuda)
 
 
 if __name__ == "__main__":
