@@ -1328,9 +1328,7 @@ def arg_parser_unpack_method(
             return "scalartypeWithDefault" if has_default_init else "scalartype"
         elif t.name == BaseTy.Device:
             return "deviceWithDefault" if has_default_init else "device"
-        elif t.name == BaseTy.DeviceIndex:
-            return "toInt64"
-        elif t.name == BaseTy.int:
+        elif t.name in (BaseTy.DeviceIndex, BaseTy.int):
             return "toInt64"
         elif t.name == BaseTy.SymInt:
             return "toSymInt" if symint else "toInt64"

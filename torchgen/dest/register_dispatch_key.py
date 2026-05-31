@@ -729,9 +729,7 @@ resize_out(out, sizes, strides, options);
         elif self.backend_index.dispatch_key == DispatchKey.MPS:
             # TODO: Move to OptionalMPSGuard.
             guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.XPU:
-            guard_field = "c10::OptionalDeviceGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.MTIA:
+        elif self.backend_index.dispatch_key in (DispatchKey.XPU, DispatchKey.MTIA):
             guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""

@@ -1550,9 +1550,7 @@ def emit_body(
                         )
                 expr = f"make_saved_variable_list({name}, {str(is_foreach and is_output).lower()})"
                 name += "_"
-            elif type == BaseCType(intArrayRefT):
-                expr = expr + ".vec()"
-            elif type == BaseCType(symIntArrayRefT):
+            elif type in (BaseCType(intArrayRefT), BaseCType(symIntArrayRefT)):
                 expr = expr + ".vec()"
             elif type == BaseCType(stringT):
                 expr = f"std::string({expr})"

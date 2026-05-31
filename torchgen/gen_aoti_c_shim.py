@@ -474,8 +474,7 @@ def gen_static_dispatch_backend_call(
                 # Method-only functions with symint parameters should use at::symint:: namespace
                 # Remove the _symint suffix since at::symint:: namespace uses the base name
                 # (e.g., new_empty -> at::symint::new_empty<c10::SymInt>)
-                base_name = cpp_sig.name()
-                base_name = base_name.removesuffix("_symint")  # Remove "_symint" suffix
+                base_name = cpp_sig.name().removesuffix("_symint")
                 return f"at::symint::{base_name}<c10::SymInt>"
 
         return f"at::{cpp_sig.name()}"
