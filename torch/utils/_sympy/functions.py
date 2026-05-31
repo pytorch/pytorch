@@ -615,9 +615,9 @@ class LShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        if shift < 0:
+        if shift.is_negative:
             raise ValueError("negative shift count")
-        return base * 2**shift
+        return base * PowByNatural(sympy.Integer(2), shift)
 
 
 class RShift(sympy.Function):
@@ -625,9 +625,9 @@ class RShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        if shift < 0:
+        if shift.is_negative:
             raise ValueError("negative shift count")
-        return FloorDiv(base, 2**shift)
+        return FloorDiv(base, PowByNatural(sympy.Integer(2), shift))
 
 
 class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
