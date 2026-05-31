@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfRocm,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -452,6 +453,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         expected_placements = (Replicate(),)
         self.assertEqual(out.placements, expected_placements)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
     @with_comms
     @skip_unless_torch_gpu
     @unittest.skipIf(

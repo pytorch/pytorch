@@ -142,41 +142,8 @@ namespace torch {
 
 static void processErrorMsgInplace(std::string& str) {
   // Translate Aten types to their respective pytorch ones
-  constexpr std::array<std::pair<std::string_view, std::string_view>, 64>
-      changes{{
-          // TODO: remove torch.(cuda.|)sparse.*Tensor items?
-          {"Variable[SparseCUDAByteType]", "torch.cuda.sparse.ByteTensor"},
-          {"Variable[SparseCUDACharType]", "torch.cuda.sparse.CharTensor"},
-          {"Variable[SparseCUDADoubleType]", "torch.cuda.sparse.DoubleTensor"},
-          {"Variable[SparseCUDAFloatType]", "torch.cuda.sparse.FloatTensor"},
-          {"Variable[SparseCUDAIntType]", "torch.cuda.sparse.IntTensor"},
-          {"Variable[SparseCUDALongType]", "torch.cuda.sparse.LongTensor"},
-          {"Variable[SparseCUDAShortType]", "torch.cuda.sparse.ShortTensor"},
-          {"Variable[SparseCUDAHalfType]", "torch.cuda.sparse.HalfTensor"},
-          {"Variable[SparseCPUByteType]", "torch.sparse.ByteTensor"},
-          {"Variable[SparseCPUCharType]", "torch.sparse.CharTensor"},
-          {"Variable[SparseCPUDoubleType]", "torch.sparse.DoubleTensor"},
-          {"Variable[SparseCPUFloatType]", "torch.sparse.FloatTensor"},
-          {"Variable[SparseCPUIntType]", "torch.sparse.IntTensor"},
-          {"Variable[SparseCPULongType]", "torch.sparse.LongTensor"},
-          {"Variable[SparseCPUShortType]", "torch.sparse.ShortTensor"},
-          {"Variable[SparseCPUHalfType]", "torch.sparse.HalfTensor"},
-          {"Variable[CUDAByteType]", "torch.cuda.ByteTensor"},
-          {"Variable[CUDACharType]", "torch.cuda.CharTensor"},
-          {"Variable[CUDADoubleType]", "torch.cuda.DoubleTensor"},
-          {"Variable[CUDAFloatType]", "torch.cuda.FloatTensor"},
-          {"Variable[CUDAIntType]", "torch.cuda.IntTensor"},
-          {"Variable[CUDALongType]", "torch.cuda.LongTensor"},
-          {"Variable[CUDAShortType]", "torch.cuda.ShortTensor"},
-          {"Variable[CUDAHalfType]", "torch.cuda.HalfTensor"},
-          {"Variable[CPUByteType]", "torch.ByteTensor"},
-          {"Variable[CPUCharType]", "torch.CharTensor"},
-          {"Variable[CPUDoubleType]", "torch.DoubleTensor"},
-          {"Variable[CPUFloatType]", "torch.FloatTensor"},
-          {"Variable[CPUIntType]", "torch.IntTensor"},
-          {"Variable[CPULongType]", "torch.LongTensor"},
-          {"Variable[CPUShortType]", "torch.ShortTensor"},
-          {"Variable[CPUHalfType]", "torch.HalfTensor"},
+  static constexpr auto changes =
+      std::to_array<std::pair<std::string_view, std::string_view>>({
           {"SparseCUDAByteType", "torch.cuda.sparse.ByteTensor"},
           {"SparseCUDACharType", "torch.cuda.sparse.CharTensor"},
           {"SparseCUDADoubleType", "torch.cuda.sparse.DoubleTensor"},
@@ -209,7 +176,7 @@ static void processErrorMsgInplace(std::string& str) {
           {"CPULongType", "torch.LongTensor"},
           {"CPUShortType", "torch.ShortTensor"},
           {"CPUHalfType", "torch.HalfTensor"},
-      }};
+      });
 
   // Avoid doing any work if no types need translated
   if (str.find("Type") == str.npos) {
