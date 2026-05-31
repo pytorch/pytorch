@@ -295,13 +295,14 @@ class MetaTensorDescriber:
         is_legacy_batchedtensor_v = is_legacy_batchedtensor(t)
         is_gradtrackingtensor_v = is_gradtrackingtensor(t)
         is_functional = torch._is_functional_tensor(t)
+        has_storage = torch._C._has_storage(t)
 
         storage = None
         # NB: For compatibility, I default this to zero, as sometimes people
         # still have stuffed zero into storage offset even though the tensor
         # doesn't meaningfully have an offset
         storage_offset = 0
-        if not (
+        if has_storage and not (
             is_sparse
             or is_sparse_compressed_layout(layout)
             or (is_nested and not is_traceable_wrapper_subclass_v)
@@ -1963,7 +1964,7 @@ class MetaConverter(Generic[_TensorT]):
                                 device="meta",
                             )
                         )
-                        if self.copy_data:
+                        if self.copy_data and t.storage is not None:
                             with torch.no_grad(), no_dispatch():
                                 if t.size is None:
                                     raise AssertionError(
@@ -1979,7 +1980,10 @@ class MetaConverter(Generic[_TensorT]):
                                     )
                                 # pyrefly: ignore[bad-assignment]
                                 r.real_tensor = torch.empty_strided(
-                                    t.size, t.stride, dtype=t.dtype, device=t.device
+                                    t.size,
+                                    t.stride,
+                                    dtype=t.dtype,
+                                    device=t.device,
                                 )
                                 _safe_copy(r.real_tensor, t.data)
 
@@ -2003,13 +2007,15 @@ class MetaConverter(Generic[_TensorT]):
                             r = self._backward_error(r)
 
                     s = t.storage
-                    if s is None:
-                        raise AssertionError("t.storage must not be None")
-                    if s.id not in self.storage_memo and (
-                        r.is_nested
-                        or (
-                            r.stride() == strides
-                            and r.storage_offset() == storage_offset
+                    if (
+                        s is not None
+                        and s.id not in self.storage_memo
+                        and (
+                            r.is_nested
+                            or (
+                                r.stride() == strides
+                                and r.storage_offset() == storage_offset
+                            )
                         )
                     ):
                         # You're normal and happy, install the fresh storage into the memo
@@ -2024,7 +2030,7 @@ class MetaConverter(Generic[_TensorT]):
                             _set_real_storage(
                                 r.untyped_storage(), r.real_tensor.untyped_storage()
                             )
-                    else:
+                    elif s is not None:
                         # You're in crazy town; somehow you gave us a tensor
                         # that wasn't a view, but had nonzero storage offset,
                         # nontrivial strides (such that clone() couldn't

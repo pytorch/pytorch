@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     run_tests,
     parametrize,
+    scoped_load_inline,
     xfailIfTorchDynamo,
     skipIfXpu,
 )
@@ -296,6 +297,46 @@ class TestMetaConverter(TestCase):
         meta = torch.empty((), dtype=torch.int64)
         meta.set_(storage, 0, (), ())
         self.assertEqual(storage.size(), ssize)
+
+    @scoped_load_inline
+    def test_opaque_tensor_without_storage(self, load_inline):
+        cpp_source = r"""
+#include <ATen/OpaqueTensorImpl.h>
+#include <torch/extension.h>
+
+torch::Tensor make_opaque_tensor(std::vector<int64_t> sizes) {
+  auto key_set = c10::DispatchKeySet(c10::DispatchKey::PrivateUse1);
+  return at::detail::make_tensor<at::OpaqueTensorImpl<int64_t>>(
+      key_set,
+      c10::scalarTypeToTypeMeta(c10::ScalarType::Float),
+      c10::Device(c10::DeviceType::PrivateUse1, 0),
+      0,
+      sizes);
+}
+"""
+        module = load_inline(
+            name="test_meta_opaque_tensor",
+            cpp_sources=cpp_source,
+            functions="make_opaque_tensor",
+        )
+        x = module.make_opaque_tensor([2, 3])
+
+        self.assertFalse(torch._C._has_storage(x))
+        with self.assertRaisesRegex(
+            NotImplementedError, "Cannot access storage of OpaqueTensorImpl"
+        ):
+            x.untyped_storage()
+
+        meta = MetaConverter()(x)
+        self.assertEqual(meta.size(), x.size())
+        self.assertEqual(meta.stride(), x.stride())
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        fake = FakeTensorMode().from_tensor(x)
+        self.assertEqual(fake.size(), x.size())
+        self.assertEqual(fake.stride(), x.stride())
+        self.assertEqual(fake.device, x.device)
 
     @xfailIfTorchDynamo
     def test_weakref(self):
