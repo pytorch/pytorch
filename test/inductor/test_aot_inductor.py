@@ -275,6 +275,33 @@ class AOTInductorTestsTemplate:
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
 
+    @common_utils.parametrize("embed_kernel_binary", [False, True])
+    def test_loaded_modules_tracking(self, embed_kernel_binary):
+        # Verify that AOTI codegen on CUDA/HIP passes &kernels_.loaded_modules_
+        # to loadKernel so CUmodule handles are tracked and unloaded on
+        # destruction, preventing GPU code object leaks.
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA/HIP")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model().to(self.device)
+        with config.patch({"aot_inductor.embed_kernel_binary": embed_kernel_binary}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            FileCheck().check("&kernels_.loaded_modules_").run(code)
+
     def test_triton_kernel_bool_param(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
@@ -1839,6 +1866,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179958")
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
