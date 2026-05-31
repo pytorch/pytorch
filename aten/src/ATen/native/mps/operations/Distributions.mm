@@ -17,6 +17,7 @@
 #include <ATen/ops/_standard_gamma_grad_native.h>
 #include <ATen/ops/_standard_gamma_native.h>
 #include <ATen/ops/argmax.h>
+#include <ATen/ops/argsort.h>
 #include <ATen/ops/bernoulli_native.h>
 #include <ATen/ops/clamp.h>
 #include <ATen/ops/cumsum.h>
@@ -26,6 +27,7 @@
 #include <ATen/ops/randperm.h>
 #include <ATen/ops/randperm_native.h>
 #include <ATen/ops/searchsorted.h>
+#include <ATen/ops/sort.h>
 #include <ATen/ops/topk.h>
 #endif
 
@@ -36,147 +38,6 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Distributions_metallib.h>
 #endif
-
-struct RandomCachedGraph : public MPSCachedGraph {
-  RandomCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-  // Only relevant for multinomial
-  MPSGraphTensor* probTensor = nil;
-  MPSGraphTensor* resultTensor = nil;
-  MPSGraphTensor* stateTensor = nil;
-  // used for Normal distributions only
-  MPSGraphTensor *meanTensor = nil, *stdTensor = nil;
-};
-
-typedef MPSGraphTensor* (^RandomOpBlock)(RandomCachedGraph*, MPSGraphTensor*);
-#define RandomOpFn(graph, randomTensor) MPSGraphTensor*(mps::RandomCachedGraph * graph, MPSGraphTensor * randomTensor)
-
-// for Uniform distributions with scalar from (val1) and to (val2) intervals
-// for Normal distributions with scalar mean (val1) and std (val2) values
-template <typename scalar_t>
-Tensor& random_mps_impl(Tensor& self,
-                        scalar_t val1,
-                        scalar_t val2,
-                        const std::optional<Tensor>& mean_opt,
-                        const std::optional<Tensor>& std_opt,
-                        MPSGraphRandomDistribution distribution,
-                        std::optional<Generator> gen,
-                        std::string op_name,
-                        RandomOpBlock randomBlock) {
-  if (self.numel() == 0) {
-    return self;
-  }
-  at::assert_no_internal_overlap(self);
-  // MPS random is broken for 5D+ tensors, see https://github.com/pytorch/pytorch/issues/147624
-  const auto need_reshape = self.ndimension() > 4;
-  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
-  auto stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    auto key = op_name + getTensorsStringKey({self, mean_opt.value_or(Tensor()), std_opt.value_or(Tensor())}) + ":" +
-        std::to_string(val1) + ":" + std::to_string(val2);
-    auto cachedGraph = LookUpOrCreateCachedGraph<RandomCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->stateTensor =
-          mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
-
-      // BF16, FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
-      const MPSDataType inputDataType = [&] {
-        // only for random_mps, we pass interval range of type int64_t
-        if constexpr (std::is_same_v<scalar_t, int64_t>) {
-          return MPSDataTypeInt32;
-        }
-        // for bernoully always use float32
-        if constexpr (std::is_same_v<scalar_t, bool>) {
-          return MPSDataTypeFloat32;
-        }
-        switch (self.scalar_type()) {
-          case kHalf:
-            return MPSDataTypeFloat16;
-          case kFloat:
-            return MPSDataTypeFloat32;
-          case kBFloat16: {
-            return MPSDataTypeBFloat16;
-          }
-          default:
-            TORCH_CHECK_TYPE(false, "Unsupported type ", self.scalar_type(), " for operation ", op_name);
-        }
-      }();
-      const MPSDataType outputDataType = std::is_same_v<scalar_t, bool> ? MPSDataTypeBool : inputDataType;
-
-      MPSGraphRandomOpDescriptor* desc = [MPSGraphRandomOpDescriptor descriptorWithDistribution:distribution
-                                                                                       dataType:inputDataType];
-      if (distribution == MPSGraphRandomDistributionUniform) {
-        if (inputDataType == MPSDataTypeInt32) {
-          desc.minInteger = static_cast<NSInteger>(val1);
-          desc.maxInteger = static_cast<NSInteger>(val2);
-        } else {
-          desc.min = static_cast<float>(val1);
-          desc.max = static_cast<float>(val2);
-        }
-      } else if (distribution == MPSGraphRandomDistributionNormal) {
-        desc.mean = static_cast<float>(val1);
-        desc.standardDeviation = static_cast<float>(val2);
-      }
-      // we don't use the output state tensor from the MPSGraph API as it requires reading back from GPU to CPU.
-      // Instead, we keep the Philox state in the MPSGenerator and use the PyTorch's philox_engine to maintain
-      // the counters, and feed them to the graph manually
-      auto self_shape = getMPSShape(self);
-      NSArray<MPSGraphTensor*>* resultTensors =
-          [mpsGraph randomTensorWithShape:need_reshape ? @[ @(self.numel()) ] : self_shape
-                               descriptor:desc
-                              stateTensor:newCachedGraph->stateTensor
-                                     name:nil];
-      newCachedGraph->resultTensor =
-          need_reshape ? [mpsGraph reshapeTensor:resultTensors[0] withShape:self_shape name:nil] : resultTensors[0];
-      if (randomBlock) {
-        newCachedGraph->resultTensor = randomBlock(newCachedGraph, newCachedGraph->resultTensor);
-      }
-      // results will be cast if self's scalar type isn't directly supported by MPS backend.
-      if (getMPSDataType(self) != outputDataType)
-        newCachedGraph->resultTensor = castMPSTensor(mpsGraph, newCachedGraph->resultTensor, self.scalar_type());
-    });
-    // feed the updated state values to the graph
-    MPSNDArrayDescriptor* stateDesc =
-        [MPSNDArrayDescriptor descriptorWithDataType:MPSDataTypeInt32 shape:@[ @(at::mps::detail::PHILOX_STATE_N) ]];
-    MPSNDArray* stateNDArray = [[[MPSNDArray alloc] initWithDevice:stream->device() descriptor:stateDesc] autorelease];
-    {
-      // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
-      // update the Philox state values on each run
-      mps_gen->update_philox_counters();
-      [stateNDArray writeBytes:mps_gen->state_data() strideBytes:nil];
-    }
-    MPSGraphTensorData* stateTensorData = [[[MPSGraphTensorData alloc] initWithMPSNDArray:stateNDArray] autorelease];
-
-    Placeholder meanPlaceholder, stdPlaceholder;
-    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-    feeds[cachedGraph->stateTensor] = stateTensorData;
-
-    if (cachedGraph->stdTensor) {
-      const Tensor& stdTensor = *(at::borrow_from_optional_tensor(std_opt));
-      stdPlaceholder = Placeholder(cachedGraph->stdTensor, stdTensor);
-      feeds[stdPlaceholder.getMPSGraphTensor()] = stdPlaceholder.getMPSGraphTensorData();
-    }
-    if (cachedGraph->meanTensor) {
-      const Tensor& meanTensor = *(at::borrow_from_optional_tensor(mean_opt));
-      meanPlaceholder = Placeholder(cachedGraph->meanTensor, meanTensor);
-      feeds[meanPlaceholder.getMPSGraphTensor()] = meanPlaceholder.getMPSGraphTensorData();
-    }
-
-    // Handle non-contiguous output tensors by creating a contiguous temporary
-    const auto needs_gather = needsGather(self);
-    Tensor self_ = needs_gather ? at::empty_like(self, MemoryFormat::Contiguous) : self;
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, self_);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-
-    // Copy results back to original non-contiguous output
-    if (needs_gather) {
-      self.copy_(self_);
-    }
-  }
-
-  return self;
-}
-
 } // namespace mps
 
 // `randoms_per_thread` is the number of Philox-4x32-10 calls each thread
@@ -598,24 +459,112 @@ Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& 
     return result;
   }
 
-  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    MPSGraphTensor* argsortTensor = [mpsGraph argSortWithTensor:randomTensor axis:0 name:nil];
-    if (result.scalar_type() != kInt) {
-      argsortTensor = [mpsGraph castTensor:argsortTensor toType:mps::getMPSDataType(result) name:@"castOutput"];
-    }
-    return argsortTensor;
-  };
+  using namespace mps;
 
-  return mps::random_mps_impl<int64_t>(result,
-                                       std::numeric_limits<int64_t>::min(),
-                                       std::numeric_limits<int64_t>::max(),
-                                       std::nullopt,
-                                       std::nullopt,
-                                       MPSGraphRandomDistributionUniform,
-                                       generator,
-                                       "ranperm_out_mps:" + mps::getTensorsStringKey({result}),
-                                       random_op_block);
+  // Small-n fast path: single-threadgroup Fisher-Yates kernel writes the
+  // permutation directly into `result`, skipping the keys + argsort + copy
+  // pipeline. Threadgroup memory caps us at 4096 uint indices, but the swap
+  // loop runs serially on thread 0 — measurement (M4 Max) puts the crossover
+  // with the parallel sort path near n = 384 (past that the serial swap loop
+  // costs more than launching the sort).
+  constexpr int64_t kRandpermSmallThreshold = 384;
+  const auto stype = result.scalar_type();
+  const bool small_path_supported = (stype == kInt || stype == kLong) && result.is_contiguous();
+  if (n <= kRandpermSmallThreshold && small_path_supported) {
+    auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(generator, at::mps::detail::getDefaultMPSGenerator());
+    auto stream = getCurrentMPSStream();
+
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("randperm_small_" + scalarToMetalTypeString(result));
+
+      int64_t seed;
+      int64_t base_offset;
+      // n - 1 uniforms consumed by Fisher-Yates; one Philox round emits 4.
+      const int64_t philox_rounds = (n - 1 + 3) / 4;
+      {
+        std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+        seed = static_cast<int64_t>(mps_gen->current_seed());
+        base_offset = static_cast<int64_t>(mps_gen->get_offset());
+        mps_gen->set_offset(base_offset + philox_rounds);
+      }
+
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          auto computeEncoder = stream->commandEncoder();
+          [computeEncoder setComputePipelineState:pso];
+          uint32_t numel = static_cast<uint32_t>(n);
+          mtl_setArgs(computeEncoder, result, std::array<long, 2>{seed, base_offset});
+          mtl_setBytes(computeEncoder, numel, 2);
+          NSUInteger tg = std::min<NSUInteger>(256, static_cast<NSUInteger>(n));
+          [computeEncoder dispatchThreadgroups:MTLSizeMake(1, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+        }
+      });
+    }
+    return result;
+  }
+
+  // Large-n path: sort random integer keys, take the argsort permutation, then
+  // de-bias. A permutation of [0, n) doesn't need a *full* sort - sorting random
+  // keys by only their low bits already orders the distinct keys uniformly; an
+  // exact Fisher-Yates shuffle of each equal-key island (randperm_dedup_islands)
+  // removes the residual tie-bias so the result is uniform over all n!, matching
+  // CPU and CUDA. 24-bit keys keep the sort at 3 radix passes (vs 4 for full
+  // 32-bit keys); the islands they leave (~6% of elements at n = 1M) are cheap
+  // to dedup. Mirrors CUDA's radix_sort_pairs + randperm_handle_duplicate_keys.
+  constexpr int64_t kRandpermRadixThreshold = 1 << 15;
+  constexpr int kRandpermKeyBits = 24;
+  constexpr int kRandpermRadixPasses = 3; // ceil(kRandpermKeyBits / 8-bit radix)
+  if (n >= kRandpermRadixThreshold) {
+    Tensor keys = at::empty({n}, result.options().dtype(kInt));
+    keys.random_(0, int64_t(1) << kRandpermKeyBits, generator);
+    Tensor sorted_keys;
+    Tensor perm = randperm_argsort_lowbits_metal(keys, kRandpermRadixPasses, sorted_keys);
+
+    auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(generator, at::mps::detail::getDefaultMPSGenerator());
+    auto stream = getCurrentMPSStream();
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("randperm_dedup_islands_" + scalarToMetalTypeString(perm));
+      int64_t seed;
+      int64_t base_offset;
+      {
+        std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+        seed = static_cast<int64_t>(mps_gen->current_seed());
+        base_offset = static_cast<int64_t>(mps_gen->get_offset());
+        mps_gen->set_offset(base_offset + n);
+      }
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          auto computeEncoder = stream->commandEncoder();
+          [computeEncoder setComputePipelineState:pso];
+          uint32_t numel = static_cast<uint32_t>(n);
+          mtl_setArgs(computeEncoder, perm, sorted_keys, std::array<long, 2>{seed, base_offset});
+          mtl_setBytes(computeEncoder, numel, 3);
+          mtl_dispatch1DJob(computeEncoder, pso, numel);
+        }
+      });
+    }
+    result.copy_(perm);
+    return result;
+  }
+
+  // Mid-n path: uniform-float keys + argsort. The argsort permutation is a
+  // uniformly-random permutation of [0, n). When `result` is already int64
+  // and contiguous, route the indices straight into `result` via `sort_out`
+  // to avoid an extra cast / copy.
+  Tensor keys = at::empty({n}, result.options().dtype(kFloat));
+  auto keys_iter = at::TensorIterator::borrowing_nullary_op(keys);
+  distribution_kernel_mps_impl(keys_iter, 0.0, 1.0, "uniform_dist", 1, generator);
+  if (stype == kLong && result.is_contiguous()) {
+    Tensor values = at::empty_like(keys);
+    at::sort_out(values, result, keys);
+  } else {
+    Tensor perm = at::argsort(keys);
+    if (perm.scalar_type() != stype) {
+      perm = perm.to(stype);
+    }
+    result.copy_(perm);
+  }
+  return result;
 }
 
 static Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
