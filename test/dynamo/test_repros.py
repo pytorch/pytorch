@@ -78,6 +78,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
     skipIfHpu,
+    skipIfRocm,
     skipIfWindows,
     TEST_WITH_ROCM,
     xfailIfS390X,
@@ -2922,6 +2923,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(a)
         self.assertTrue(same(ref, res))
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/184324")
     def test_tokenization(self):
         from collections import UserDict
 
@@ -7526,6 +7528,32 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(model(*inputs), compiled_model(*inputs))
 
+    # https://github.com/pytorch/pytorch/issues/144080
+    def test_pad_sequence_mixed_dtype_padding_value(self):
+        class RNNPadSequence(torch.nn.Module):
+            def forward(self, sequences, padding_value):
+                return torch.nn.utils.rnn.pad_sequence(
+                    sequences, padding_value=padding_value
+                )
+
+        for first_sequence in (
+            torch.tensor([0, 0.4]),
+            torch.tensor([0, 0.4 + 0j]),
+        ):
+            model = RNNPadSequence()
+            compiled_model = torch.compile(model, backend="inductor", fullgraph=True)
+            inputs = ([first_sequence, torch.tensor([0], dtype=torch.int32)], -0.7)
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    "Torchinductor does not support code generation for complex operators.",
+                    UserWarning,
+                )
+                compiled_result = compiled_model(*inputs)
+
+            self.assertEqual(model(*inputs), compiled_result)
+
     def test_autograd_function_ctx_stash_no_vc_check(self):
         # Test that tensors stashed directly on ctx (e.g., ctx.x = x) in an
         # autograd.Function don't trigger version counter checks, while tensors
@@ -7727,6 +7755,31 @@ SavedForBackwardsAOTOutput(idx=5)""",
         torch._dynamo.reset()
         expected = torch.nn.functional.one_hot(a, 3)
         self.assertEqual(one_hot(a, 3), expected)
+
+    def test_issue183886_istft_length_pads_in_fake_tensor(self):
+        n_fft = 64
+        hop_length = 32
+        length = 352
+
+        def fn(spec, window):
+            return torch.istft(
+                spec,
+                n_fft=n_fft,
+                hop_length=hop_length,
+                window=window,
+                length=length,
+            )
+
+        spec = torch.view_as_complex(torch.randn(3, n_fft // 2 + 1, 10, 2))
+        window = torch.hann_window(n_fft)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            expected = fn(spec, window)
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(spec, window)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.shape, (3, length))
 
     @unittest.expectedFailure
     def test_method_dunder_dict_setitem(self):
