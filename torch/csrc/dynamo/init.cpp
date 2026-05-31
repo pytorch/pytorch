@@ -406,7 +406,7 @@ PyObject* _get_type_slots(
 #define PYC_FN(x) ((PyCFunction)(void (*)()) & x)
 
 void _register_functions(PyObject* mod) {
-  static std::array<PyMethodDef, 4> fns = {
+  static auto fns = std::to_array<PyMethodDef>({
       PyMethodDef{
           "strip_function_call",
           PYC_FN(_strip_function_call),
@@ -420,7 +420,7 @@ void _register_functions(PyObject* mod) {
       PyMethodDef{
           "get_type_slots", PYC_FN(_get_type_slots), METH_FASTCALL, nullptr},
       PyMethodDef{nullptr, nullptr, 0, nullptr},
-  };
+  });
   PyModule_AddFunctions(mod, fns.data());
 }
 
