@@ -101,7 +101,7 @@ bool isSortableTupleType(
         why_not << "Contained elements in " << *tuple_type
                 << " are not sortable. Only Int, Bool, Float, String, Tensor, "
                 << "a User Defined Class with __lt__ method defined or Tuples "
-                << "of aforementionted types can be sorted.";
+                << "of aforementioned types can be sorted.";
         return false;
     }
   }
