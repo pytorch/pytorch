@@ -37,7 +37,7 @@ class InductorWarningTests(TestCase):
                 torch.cuda.synchronize()
 
             self.assertEqual(actual, x)
-            self.assertFalse([str(w.message) for w in caught])
+            self.assertEqual([str(w.message) for w in caught], [])
         finally:
             torch.set_float32_matmul_precision(orig_matmul_precision)
             torch.backends.cuda.matmul.fp32_precision = orig_cuda_precision
@@ -56,7 +56,7 @@ class InductorWarningTests(TestCase):
                 warnings.simplefilter("always", UserWarning)
                 fuse_attention._warn_tf32_disabled()
 
-            self.assertFalse([str(w.message) for w in caught])
+            self.assertEqual([str(w.message) for w in caught], [])
         finally:
             torch.set_float32_matmul_precision(orig_matmul_precision)
             torch.backends.cuda.matmul.fp32_precision = orig_cuda_precision
