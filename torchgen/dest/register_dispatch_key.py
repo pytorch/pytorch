@@ -63,6 +63,7 @@ def gen_registration_headers(
             headers.append("#include <ATen/cuda/EmptyTensor.h>")
     elif backend_index.dispatch_key == DispatchKey.MPS:
         headers.append("#include <ATen/mps/EmptyTensor.h>")
+        headers.append("#include <ATen/mps/MPSGuardImpl.h>")
     elif backend_index.dispatch_key == DispatchKey.XPU:
         # XPU specific, this header resides in third_party/torch-xpu-ops
         headers.append("#include <ATen/xpu/EmptyTensor.h>")
@@ -729,8 +730,7 @@ resize_out(out, sizes, strides, options);
         ):
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.MPS:
-            # TODO: Move to OptionalMPSGuard.
-            guard_field = "c10::OptionalDeviceGuard guard_;"
+            guard_field = "at::mps::OptionalMPSGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.XPU:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.MTIA:
