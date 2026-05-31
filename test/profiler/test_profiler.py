@@ -67,6 +67,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_JETSON,
     IS_LINUX,
+    IS_MACOS,
     IS_WINDOWS,
     IS_X86,
     parametrize,
@@ -2516,6 +2517,9 @@ class TestProfilerDevice(TestCase):
 
         self.assertEqual(KinetoStepTracker.current_step(), initial_step + 2 * niters)
 
+    @unittest.skipIf(
+        IS_MACOS or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/82915"
+    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_tensorboard_trace_handler(self, device):
         device_type = device.split(":")[0]
