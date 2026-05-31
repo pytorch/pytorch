@@ -139,11 +139,8 @@ class TestLinalg(TestCase):
             return 'cpu'
         if torch.accelerator.is_available():
             other = torch.accelerator.current_accelerator().type
-            if dtype is not None:
-                try:
-                    torch.empty(0, device=other, dtype=dtype)
-                except (RuntimeError, TypeError):
-                    return None
+            if dtype is not None and dtype.is_complex and other == 'mps':
+                return None
             return other
         return None
 
