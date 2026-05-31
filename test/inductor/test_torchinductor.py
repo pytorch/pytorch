@@ -17983,6 +17983,84 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 (torch.randn(8, 16, dtype=dtype, device=self.device),),
                 check_lowp=False,
             )
+    
+    def test_minimum_maximum_signed_zero(self):
+        """
+        Tests that Inductor correctly preserves the sign bit for -0.0 vs 0.0.
+        """
+        def fn(a, b):
+            return (
+                torch.minimum(a, b),
+                torch.maximum(a, b),
+                torch.argmin(torch.stack([a, b]), dim=0),
+                torch.argmax(torch.stack([a, b]), dim=0),
+            )
+    
+        # Define types to test
+        fp_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
+    
+        # Add FP8 types if hardware/software support allows
+        # (Requires CUDA 12.1+ and Hopper+ architecture for native execution)
+        if hasattr(torch, "float8_e4m3fn") and torch.cuda.get_device_capability()[0] >= 9:
+            fp_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
+    
+        for dtype in fp_dtypes:
+            # Construct permutations matrix for signed zeros
+            a = torch.tensor([-0.0, 0.0, -0.0, 0.0], device="cuda", dtype=dtype)
+            b = torch.tensor([0.0, -0.0, -0.0, 0.0], device="cuda", dtype=dtype)
+    
+            eager_min, eager_max, eager_argmin, eager_argmax = fn(a, b)
+    
+            compiled_fn = torch.compile(fn)
+            comp_min, comp_max, comp_argmin, comp_argmax = compiled_fn(a, b)
+    
+            # Map to the correct integer bit-width for raw bit comparison
+            view_dtype = {
+                torch.float16: torch.int16,
+                torch.bfloat16: torch.int16,
+                torch.float32: torch.int32,
+                torch.float64: torch.int64,
+            }.get(dtype, torch.int8)  # Fallback to int8 for FP8 types
+    
+            # Assert raw bits match exactly to verify sign-preservation
+            self.assertEqual(
+                comp_min.view(view_dtype),
+                eager_min.view(view_dtype),
+                msg=f"Inductor torch.minimum lost signed zero for {dtype}",
+            )
+            self.assertEqual(
+                comp_max.view(view_dtype),
+                eager_max.view(view_dtype),
+                msg=f"Inductor torch.maximum lost signed zero for {dtype}",
+            )
+            self.assertEqual(
+                comp_argmin,
+                eager_argmin,
+                msg=f"Inductor argmin failed on signed zeros for {dtype}",
+            )
+            self.assertEqual(
+                comp_argmax,
+                eager_argmax,
+                msg=f"Inductor argmax failed on signed zeros for {dtype}",
+            )
+    
+        # Sanity/Regression check for Integer and Boolean types
+        # Since integers can't represent -0.0, we just want to ensure our fallback branch doesn't break them.
+        int_dtypes = [torch.int8, torch.int32, torch.int64, torch.uint8, torch.bool]
+        for dtype in int_dtypes:
+            a = torch.tensor([0, 1, 0, 1], device="cuda", dtype=dtype)
+            b = torch.tensor([1, 0, 0, 1], device="cuda", dtype=dtype)
+    
+            eager_min, eager_max, _, _ = fn(a, b)
+            compiled_fn = torch.compile(fn)
+            comp_min, comp_max, _, _ = compiled_fn(a, b)
+    
+            self.assertEqual(
+                comp_min, eager_min, msg=f"Inductor integer minimum regression on {dtype}"
+            )
+            self.assertEqual(
+                comp_max, eager_max, msg=f"Inductor integer maximum regression on {dtype}"
+            )
 
     def test_jvp_compile_backward(self):
         def jvp_fn(f, x):
