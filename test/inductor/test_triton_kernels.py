@@ -6,6 +6,7 @@ import contextlib
 import functools
 import logging
 import os
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -4442,8 +4443,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     def test_wrap_triton_triton_interpret_eager(self):
-        import subprocess
-
         script = """
 import os
 os.environ["TRITON_INTERPRET"] = "1"
@@ -4516,6 +4515,18 @@ def autotuned_add(x, y):
 x = torch.randn(1024, device="cuda")
 torch.testing.assert_close(add(x, x), x + x)
 torch.testing.assert_close(autotuned_add(x, x), x + x)
+
+
+class Wrapper:
+    fn = add_kernel
+
+
+try:
+    wrap_triton(Wrapper())
+except RuntimeError as exc:
+    assert "wrap_triton only works" in str(exc)
+else:
+    raise AssertionError("wrap_triton accepted an arbitrary .fn wrapper")
 """
 
         subprocess.run([sys.executable, "-c", script], check=True)
