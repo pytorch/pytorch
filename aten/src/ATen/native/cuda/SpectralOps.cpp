@@ -149,7 +149,7 @@ constexpr int64_t cufft_max_ndim = 3;
 // Ref: https://docs.nvidia.com/cuda/cufft/index.html#accuracy-and-performance
 bool has_large_prime_factor(int64_t n) {
   constexpr int64_t first_large_prime = 11;
-  const std::array<int64_t, 4> prime_radices{{2, 3, 5, 7}};
+  const std::initializer_list<int64_t> prime_radices{2, 3, 5, 7};
   for (auto prime : prime_radices) {
     if (n < first_large_prime) {
         return false;
