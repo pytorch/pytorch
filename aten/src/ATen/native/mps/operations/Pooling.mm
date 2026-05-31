@@ -1,6 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -337,6 +336,7 @@ static PoolSizes process_pool_sizes(const Tensor& input,
                                                           : std::vector<int32_t>(pooling_dims, 1);
 
   for (const auto dim : c10::irange(pooling_dims)) {
+    TORCH_CHECK(stride_expanded[dim] > 0, op_name, ": stride should not be zero");
     TORCH_CHECK(padding_expanded[dim] >= 0, op_name, ": pad must be non-negative");
     TORCH_CHECK(padding_expanded[dim] * 2 <= kernel_size_expanded[dim],
                 op_name,
@@ -1067,8 +1067,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(const Tensor& input,
                                                        IntArrayRef padding,
                                                        IntArrayRef dilation,
                                                        bool ceil_mode) {
-  NoNamesGuard guard;
-
   Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
   Tensor indices = at::empty({0}, input.options().dtype(kLong), MemoryFormat::Contiguous);
   mps::max_pool_with_indices_out_mps_template(output,
@@ -1081,10 +1079,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(const Tensor& input,
                                               ceil_mode,
                                               /*pooling_dims=*/3,
                                               "max_pool3d");
-
-  guard.reset();
-  namedinference::propagate_names(output, input);
-  namedinference::propagate_names(indices, input);
 
   return std::tuple<Tensor, Tensor>(output, indices);
 }

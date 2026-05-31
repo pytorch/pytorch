@@ -58,7 +58,7 @@ CUDA_AARCH64_ARCHES = [
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | "
-        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
+        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
@@ -67,7 +67,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "13.0": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "
         "nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux' | "
-        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
+        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
@@ -75,34 +75,34 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     ),
     "13.2": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
-        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
+        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
-        "intel-cmplr-lib-rt==2025.3.2 | "
-        "intel-cmplr-lib-ur==2025.3.2 | "
-        "intel-cmplr-lic-rt==2025.3.2 | "
-        "intel-sycl-rt==2025.3.2 | "
-        "oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "onemkl-license==2025.3.1 | "
-        "onemkl-sycl-blas==2025.3.1 | "
-        "onemkl-sycl-dft==2025.3.1 | "
-        "onemkl-sycl-lapack==2025.3.1 | "
-        "onemkl-sycl-rng==2025.3.1 | "
-        "onemkl-sycl-sparse==2025.3.1 | "
-        "dpcpp-cpp-rt==2025.3.2 | "
-        "intel-opencl-rt==2025.3.2 | "
-        "mkl==2025.3.1 | "
-        "intel-openmp==2025.3.2 | "
-        "tbb==2022.3.1 | "
-        "tcmlib==1.4.1 | "
-        "umf==1.0.3 | "
-        "intel-pti==0.16.0"
+        "intel-cmplr-lib-rt==2026.0.0 | "
+        "intel-cmplr-lib-ur==2026.0.0 | "
+        "intel-cmplr-lic-rt==2026.0.0 | "
+        "intel-sycl-rt==2026.0.0 | "
+        "oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "onemkl-license==2026.0.0 | "
+        "onemkl-sycl-blas==2026.0.0 | "
+        "onemkl-sycl-dft==2026.0.0 | "
+        "onemkl-sycl-lapack==2026.0.0 | "
+        "onemkl-sycl-rng==2026.0.0 | "
+        "onemkl-sycl-sparse==2026.0.0 | "
+        "dpcpp-cpp-rt==2026.0.0 | "
+        "intel-opencl-rt==2026.0.0 | "
+        "mkl==2026.0.0 | "
+        "intel-openmp==2026.0.0 | "
+        "tbb==2023.0.0 | "
+        "tcmlib==1.5.0 | "
+        "umf==1.1.0 | "
+        "intel-pti==0.17.0"
     ),
 }
 
@@ -306,7 +306,16 @@ WHEEL_CONTAINER_IMAGES = {
 RELEASE = "release"
 DEBUG = "debug"
 
-FULL_PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
+FULL_PYTHON_VERSIONS = [
+    "3.10",
+    "3.11",
+    "3.12",
+    "3.13",
+    "3.14",
+    "3.14t",
+    "3.15",
+    "3.15t",
+]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -418,6 +427,20 @@ def generate_wheels_matrix(
                 "macos-arm64",
                 "windows",
             ] and (python_version == "3.14" or python_version == "3.14t"):
+                continue
+
+            # TODO: Enable python 3.15 on non linux OSes
+            if os not in ["linux", "linux-aarch64"] and (
+                python_version == "3.15" or python_version == "3.15t"
+            ):
+                continue
+
+            # TODO: Re-enable XPU for python 3.15 once the triton XPU 3.15
+            # wheel build is fixed (tracked in #184901). Triton XPU is
+            # currently skipped for 3.15/3.15t in build-triton-wheel.yml.
+            if arch_version in XPU_ARCHES and (
+                python_version == "3.15" or python_version == "3.15t"
+            ):
                 continue
 
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
