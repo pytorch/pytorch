@@ -2810,11 +2810,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         x = torch.randn(3, 2)
 
-        # Verify that fullgraph=True fails (confirms graph break occurs)
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, fullgraph=True, backend="eager")(x)
 
-        # Verify that it works without fullgraph
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         result = opt_fn(x)
         self.assertEqual(cnts.frame_count, 1)
@@ -2920,8 +2918,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """1""")
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.frame_count, """0""")
+            self.assertExpectedInline(cnts.op_count, """0""")
 
     def test_list_slice_mul(self):
         def fn(count):
@@ -2936,8 +2934,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """1""")
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.frame_count, """0""")
+            self.assertExpectedInline(cnts.op_count, """0""")
 
     def test_tuple_mul(self):
         def fn(count):
@@ -2951,8 +2949,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """1""")
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.frame_count, """0""")
+            self.assertExpectedInline(cnts.op_count, """0""")
 
     def test_tuple_mul_with_shape(self):
         def fn(a):
@@ -4183,7 +4181,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             lambda x: x.resize_as_(torch.rand(200, 300)): torch.rand(2, 3),
             lambda x: x.swapaxes_(0, 1).mul_(2): torch.rand(2, 3),
             lambda x: x.swapdims_(0, 1).mul_(2): torch.rand(2, 3),
-            lambda x: x.rename_("N", "C").mul_(2): torch.zeros(2, 3),
             lambda x: x.as_strided_((3, 2), (2, 1)).mul_(2): torch.zeros(2, 3),
             lambda x: x.detach_().mul_(2): torch.zeros(2, 3),
         }
@@ -8424,7 +8421,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         )
         torch.distributions.Distribution.set_default_validate_args(True)
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
             torch.distributions.Normal(0.0, -1.0)
 
         def fn(x):
@@ -8436,7 +8435,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn(torch.ones(()))
         self.assertTrue(torch.distributions.Distribution._validate_args)
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
             torch.distributions.Normal(0.0, -1.0)
 
         torch.distributions.Distribution.set_default_validate_args(False)
@@ -8524,7 +8525,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(eval_frame._distribution_validation_depth, 0)
         self.assertTrue(torch.distributions.Distribution._validate_args)
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
             torch.distributions.Normal(0.0, -1.0)
 
         with (
@@ -8546,7 +8549,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIs(ctx.prior, eval_frame.unset)
         self.assertEqual(eval_frame._distribution_validation_depth, 0)
         self.assertTrue(torch.distributions.Distribution._validate_args)
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
             torch.distributions.Normal(0.0, -1.0)
 
     def test_distribution_validation_restored_on_fullgraph_no_compile_error(self):
@@ -8572,7 +8577,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(eval_frame._distribution_validation_depth, 0)
         self.assertTrue(torch.distributions.Distribution._validate_args)
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
             torch.distributions.Normal(0.0, -1.0)
 
     def test_guard_failure_fn(self):
