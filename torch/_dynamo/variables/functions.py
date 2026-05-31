@@ -2266,7 +2266,35 @@ class SkipFunctionVariable(VariableTracker):
             )
             return VariableTracker.build(tx, result)
 
-        if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+        if self.value is torch._dynamo.disable:
+            unimplemented(
+                gb_type="Call to `torch._dynamo.disable()`",
+                context=f"Called `torch._dynamo.disable()` with args `{args}`, kwargs `{kwargs}`",
+                explanation="`torch._dynamo.disable()` was called inside a compiled region. "
+                "This API disables compilation when used as a decorator or wrapper "
+                "outside the compiled region.",
+                hints=[
+                    "Move the `torch._dynamo.disable()` call outside the compiled function "
+                    "and apply it to the function that should run eagerly.",
+                    "Use `torch._dynamo.graph_break()` to intentionally insert a graph break "
+                    "at this point.",
+                ],
+            )
+        elif self.value is torch.compiler.disable:
+            unimplemented(
+                gb_type="Call to `torch.compiler.disable()`",
+                context=f"Called `torch.compiler.disable()` with args `{args}`, kwargs `{kwargs}`",
+                explanation="`torch.compiler.disable()` was called inside a compiled region. "
+                "This API disables compilation when used as a decorator or wrapper "
+                "outside the compiled region.",
+                hints=[
+                    "Move the `torch.compiler.disable()` call outside the compiled function "
+                    "and apply it to the function that should run eagerly.",
+                    "Use `torch._dynamo.graph_break()` to intentionally insert a graph break "
+                    "at this point.",
+                ],
+            )
+        elif inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented(
                 gb_type="Skip calling `torch.compiler.disable()`d function",

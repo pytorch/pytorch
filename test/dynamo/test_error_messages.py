@@ -296,29 +296,44 @@ from user code:
         def fn():
             torch._dynamo.disable()
 
-        def post_munge(s):
-            return re.sub(
-                r"file matches MOD_SKIPLIST \(.*?\)",
-                "file matches MOD_SKIPLIST (<path>)",
-                s,
-            )
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Call to `torch._dynamo.disable()`
+  Explanation: `torch._dynamo.disable()` was called inside a compiled region. This API disables compilation when used as a decorator or wrapper outside the compiled region.
+  Hint: Move the `torch._dynamo.disable()` call outside the compiled function and apply it to the function that should run eagerly.
+  Hint: Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.
+
+  Developer debug context: Called `torch._dynamo.disable()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0375.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    torch._dynamo.disable()""",
+        )
+
+    def test_skipfile_compiler_disable_call(self):
+        def fn():
+            torch.compiler.disable()
 
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
-Attempted to call function marked as skipped
-  Explanation: Dynamo developers have intentionally marked that the function `disable` in file `_dynamo/decorators.py` should not be traced.
-  Hint: Avoid calling the function `disable`.
+Call to `torch.compiler.disable()`
+  Explanation: `torch.compiler.disable()` was called inside a compiled region. This API disables compilation when used as a decorator or wrapper outside the compiled region.
+  Hint: Move the `torch.compiler.disable()` call outside the compiled function and apply it to the function that should run eagerly.
+  Hint: Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.
 
-  Developer debug context: module: torch._dynamo.decorators, qualname: disable, skip reason: file matches MOD_SKIPLIST (<path>)
+  Developer debug context: Called `torch.compiler.disable()` with args `[]`, kwargs `{}`
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0376.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    torch._dynamo.disable()""",
-            post_munge=post_munge,
+    torch.compiler.disable()""",
         )
 
     def test_skipfile_inline(self):
