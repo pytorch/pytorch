@@ -304,9 +304,29 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
     def _stride_compatible(
         self, left: Iterable[sympy.Expr], right: Iterable[sympy.Expr]
     ) -> bool:
+        left_list = list(left)
+        right_list = list(right)
+        # Same length: direct comparison
+        if len(left_list) == len(right_list):
+            return all(
+                sympy.Eq(l, r) or sympy.Eq(l, 0) or sympy.Eq(r, 0)
+                for l, r in zip(left_list, right_list)
+            )
+        # Different lengths: allow compatible reshapes where trailing strides match.
+        # This handles view/reshape between template output and consumer, e.g.,
+        # buffer strides [3072, 1] vs index strides [1572864, 3072, 1]
+        shorter, longer = (
+            (left_list, right_list)
+            if len(left_list) <= len(right_list)
+            else (right_list, left_list)
+        )
+        n = len(shorter)
+        # Check that the trailing strides match
         return all(
-            sympy.Eq(l, r) or sympy.Eq(l, 0) or sympy.Eq(r, 0)
-            for l, r in (zip(left, right))
+            sympy.Eq(shorter[-(i + 1)], longer[-(i + 1)])
+            or sympy.Eq(shorter[-(i + 1)], 0)
+            or sympy.Eq(longer[-(i + 1)], 0)
+            for i in range(n)
         )
 
     def _render_input_signature(self) -> str:
