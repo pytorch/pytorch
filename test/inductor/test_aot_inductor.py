@@ -6272,7 +6272,7 @@ class AOTInductorTestsTemplate:
 
         expected_scalar_args = [
             "triton_poi_fused_zeros_like_0_xnumel",
-            "triton_poi_fused_ones_1_xnumel",
+            "triton_poi_fused_ones_zeros_like_1_xnumel",
             "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
         ]
 
@@ -6435,14 +6435,14 @@ class AOTInductorTestsTemplate:
         expected_scalar_args = [
             "buf3, u0",
             "buf4, u0",
-            "buf4, buf5, buf3, u0",
+            "buf4, buf5, RAIIAtenTensorHandle(tmp_buf3_0), u0",
         ]
         if full_aoti_runtime_assert():
             # we'll have one more assertion
             expected_scalar_args = [
                 "buf4, u0",
                 "buf5, u0",
-                "buf5, buf6, buf4, u0",
+                "buf5, buf6, RAIIAtenTensorHandle(tmp_buf4_0), u0",
             ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(

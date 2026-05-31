@@ -66,7 +66,6 @@ ops_dde_xfail = {
     xfail("histogram"),
     xfail("histogramdd"),
     xfail("hsplit"),
-    xfail("index_fill"),
     xfail("inner"),
     xfail("kron"),
     xfail("linalg.cond"),

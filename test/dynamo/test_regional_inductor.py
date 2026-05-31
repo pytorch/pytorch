@@ -1732,7 +1732,7 @@ def forward(self, primals_0, primals_1, amax, log, tangents_0):
     view_default = torch.ops.aten.view.default(iota_default, [1, 64]);  iota_default = None
     expand_default = torch.ops.aten.expand.default(where_2, [8, 64]);  where_2 = None
     eq_tensor = torch.ops.aten.eq.Tensor(expand_default, view_default);  expand_default = view_default = None
-    scalar_tensor_default = torch.ops.aten.scalar_tensor.default(0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+    scalar_tensor_default = torch.ops.aten.scalar_tensor.default(0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
     scalar_tensor_default_1 = torch.ops.aten.scalar_tensor.default(-1.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
     where_self = torch.ops.aten.where.self(eq_tensor, scalar_tensor_default_1, scalar_tensor_default);  eq_tensor = scalar_tensor_default_1 = scalar_tensor_default = None
     mul = torch.ops.aten.mul.Tensor(where_self, where_3);  where_self = where_3 = None
