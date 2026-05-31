@@ -1104,6 +1104,8 @@ class _TorchDynamoContext:
                         prior_isolated_fullgraph_count = prior_fullgraph_count
                         prior_skip_reasons = dynamo_tls.skip_reasons
                         fullgraph_count_isolated = True
+                        # Deactivate before reactivating because the C++ setter
+                        # intentionally ignores active-to-active transitions.
                         set_fullgraph_compiled_frame_count(-1)
                         set_fullgraph_compiled_frame_count(0)
                         reset_skip_reasons()

@@ -14,7 +14,7 @@ from torch._inductor.runtime.triton_heuristics import SplitScanGrid
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv
 
-from ..utils import sympy_product, upcast_compute_type
+from ..utils import sympy_product
 
 
 class TritonSplitScanKernel(TritonKernel):
@@ -93,7 +93,6 @@ class TritonSplitScanKernel(TritonKernel):
         (dtype,) = dtypes
         (value,) = values
 
-        dtype = upcast_compute_type(dtype)
         compute_type = triton_compute_type(dtype)
         compute_type_triton = getattr(tl, compute_type[3:])
 
@@ -106,6 +105,7 @@ class TritonSplitScanKernel(TritonKernel):
             scratch_type_triton.primitive_bitwidth // 8
         )
 
+        cse_load = functools.partial(self.cse.generate, self.loads, dtype=dtype)
         cse_compute = functools.partial(self.cse.generate, self.compute)
 
         assert len(self.numels) == 2, "Unexpected tiling"
@@ -125,11 +125,16 @@ class TritonSplitScanKernel(TritonKernel):
         scratch_base: str | TritonCSEVariable
         scratch_base, _, offset = self.args.workspace(nelem=nbytes, zero_fill=True)
         if offset != 0:
-            scratch_base = f"({scratch_base} + {self.index_to_str(offset)})"
-        runtime_rblocks = f"tl.num_programs({self.range_trees[-1].index})"
-        scratch_base = (
+            scratch_base = cse_load(
+                f"{scratch_base} + {self.index_to_str(offset)}", shape=()
+            )
+        runtime_rblocks = cse_load(
+            f"tl.num_programs({self.range_trees[-1].index})", shape=()
+        )
+        scratch_base = cse_load(
             f"{scratch_base}.to(tl.pointer_type({scratch_type})) + xoffset * "
-            f"{scratch_elems_per_block} * {runtime_rblocks}"
+            f"{scratch_elems_per_block} * {runtime_rblocks}",
+            shape=(),
         )
 
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
@@ -150,19 +155,17 @@ class TritonSplitScanKernel(TritonKernel):
         combine_helper_fn = self._lift_helper(combine_fn, (value,), (dtype,))
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
-        scan_shape = value.shape
-        assert scan_shape is not None
-        reduced_shape = list(scan_shape)
-        del reduced_shape[dim]
+        shape = list(self.dense_size_list())
+        del shape[dim]
 
         block_sum = cse_compute(
             f"tl.reduce({value}, {dim}, {combine_helper_fn})",
             dtype=dtype,
-            shape=reduced_shape,
+            shape=shape,
         )
         exclusive_prefix = self.cse.newvar(
             dtype=dtype,
-            shape=reduced_shape,
+            shape=shape,
         )
         if element_nbits == 64:
             self.compute.splice(
@@ -198,18 +201,18 @@ class TritonSplitScanKernel(TritonKernel):
         block_scan = cse_compute(
             f"tl.associative_scan({value}, {dim}, {combine_helper_fn})",
             dtype=dtype,
-            shape=scan_shape,
+            shape=shape,
         )
         combined_result = cse_compute(
             f"{combine_helper_fn}({exclusive_prefix}, {block_scan})",
             dtype=dtype,
-            shape=scan_shape,
+            shape=shape,
         )
         return (
             cse_compute(
                 f"tl.where(roffset == 0, {block_scan}, {combined_result})",
                 dtype=dtype,
-                shape=scan_shape,
+                shape=block_scan.shape,
             ),
         )
 

@@ -756,8 +756,8 @@ static int clear_state(PyObject* module) {
 
 bool is_skip_guard_eval_unsafe = false;
 
-// Set the fullgraph compiled frame counter and return the old value.
-// If setting to >= 0 (activating) and already active, no-op.
+// Set the C++ thread-local fullgraph compiled frame counter and return the old
+// value. The C++ setter owns the active-to-active no-op behavior.
 static PyObject* set_fullgraph_compiled_frame_count_py(
     PyObject* dummy,
     PyObject* arg) {
