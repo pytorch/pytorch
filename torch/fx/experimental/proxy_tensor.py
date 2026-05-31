@@ -3063,7 +3063,7 @@ def get_proxy_mode() -> ProxyTorchDispatchMode | None:
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     if not (pre_dispatch_mode is None or mode is None):
         raise AssertionError(f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}")
-    return pre_dispatch_mode or mode  # pyrefly: ignore[bad-return]
+    return typing.cast(ProxyTorchDispatchMode | None, pre_dispatch_mode or mode)
 
 
 def handle_sym_dispatch(

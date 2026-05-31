@@ -439,9 +439,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                 )
             return cast(
                 FunctionalTensorMode | None,
-                torch._C._get_dispatch_mode(
-                    torch._C._TorchDispatchModeKey.FUNCTIONAL
-                ),
+                torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL),
             )
 
         if _get_prev_mode() is None:
@@ -676,10 +674,10 @@ class FunctionalTensorMode(TorchDispatchMode):
         set it when we lazily perform view replay. The globally set metadata will be
         used to populate the fx node created for the replayed operation.
         """
+        from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+
         m = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
         if m is not None:
-            from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
-
             proxy_m = cast(ProxyTorchDispatchMode, m)
             for a in pytree.tree_leaves([args, kwargs]):
                 if not isinstance(a, FunctionalTensor):
