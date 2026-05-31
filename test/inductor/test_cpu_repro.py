@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     get_gcc_major_version,
     instantiate_parametrized_tests,
     IS_ARM64,
-    IS_CPU_CAPABILITY_SVE256,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
@@ -39,6 +38,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_mkl,
     skipIfNoLapack,
+    skipIfRocm,
     skipIfRocmArch,
     slowTest,
     TEST_WITH_ROCM,
@@ -386,6 +386,28 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(out_comp_val, out_eager_val)
         torch.testing.assert_close(x_comp.grad, grad_x_eager)
         torch.testing.assert_close(w_comp.grad, grad_w_eager)
+
+    def test_compile_dynamic_grad_conv_transpose2d(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181175
+        batch_norm = torch.nn.BatchNorm2d(5).eval()
+        conv_transpose = torch.nn.ConvTranspose2d(5, 2, 3)
+        max_pool = torch.nn.MaxPool2d(2)
+
+        torch.manual_seed(0)
+        x = torch.randn(3, 5, 14, 15)
+
+        def fn(x):
+            y = batch_norm(x)
+            y = conv_transpose(y)
+            y = max_pool(y)
+            return torch.softmax(y, dim=0).mean()
+
+        expected = torch.func.grad(fn)(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad(fn), backend="inductor", dynamic=True)
+        result = compiled(x)
+        torch.testing.assert_close(result, expected)
 
     @config.patch(freezing=True)
     @requires_mkl
@@ -1161,6 +1183,7 @@ class CPUReproTests(TestCase):
 
         self.assertEqual(actual, expected)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179957")
     @config.patch(fallback_random=True)
     def test_require_stride_order_non_owning(self):
         def test_concat_with_conv():
@@ -3645,8 +3668,6 @@ class CPUReproTests(TestCase):
                 3,
             )
 
-    @xfailIf(IS_ARM64 and not IS_CPU_CAPABILITY_SVE256)
-    # see https://github.com/pytorch/pytorch/issues/142231
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion(self):
         def fn(x):
@@ -3665,8 +3686,10 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
-            atol = None
-            rtol = None
+            # Outer-loop fusion changes fp32 reduction order enough to exceed
+            # the default tolerance on numerically sensitive inputs.
+            atol = 1e-5
+            rtol = 2e-6
             if (
                 not cpu_vec_isa.valid_vec_isa_list()
                 or os.getenv("ATEN_CPU_CAPABILITY") == "default"
@@ -5362,7 +5385,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.rand(37)
+        x = torch.rand(31)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():

@@ -1494,10 +1494,10 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             return 0
         elif fn(sympy.Ge(index, 0)):
             # If index >= 0, the resolved index is at most min(index, size).
-            return sympy.Min(index, size)
+            return Min(index, size)
         elif fn(sympy.Lt(index, 0)):
             # If index < 0, wrap and clamp: the resolved index is at least 0.
-            return sympy.Max(index + size, 0)
+            return Max(index + size, 0)
         return None
 
     start_index, end_index = None, None
@@ -3563,9 +3563,6 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
 
-# Needs dimname support
-make_fallback(aten.zeros.names)
-
 # 6) Pattern-matched
 make_fallback(
     aten._scaled_dot_product_efficient_attention.default,
@@ -3846,6 +3843,9 @@ def _unwrap(x):
 
 @register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
+    # Match eager/meta scalar_tensor behavior; NJT handles scalar broadcasting.
+    if layout == torch.jagged:
+        layout = torch.strided
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
@@ -4017,14 +4017,12 @@ def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(
         *size,
-        names=None,
         dtype=None,
         device=None,
         layout=None,
         pin_memory=False,
         memory_format=None,
     ):
-        assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
@@ -4051,14 +4049,12 @@ def tensor_constructor(fill_value):
 @register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
-    names=None,
     dtype=None,
     layout=None,
     device=None,
     pin_memory=None,
     memory_format=None,
 ):
-    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
@@ -6888,7 +6884,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
     denom = sympy_product(size[i] for i in axis)
     if correction:
-        denom = sympy.Max(denom - correction, 0)
+        denom = Max(denom - correction, 0)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)

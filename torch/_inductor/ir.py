@@ -70,7 +70,14 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.node import Node
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
+from torch.utils._sympy.functions import (
+    CleanDiv,
+    FloorDiv,
+    Max,
+    Min,
+    Mod,
+    ModularIndexing,
+)
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
@@ -3897,16 +3904,16 @@ class SliceView(View):
         dim_size = x.get_size()[dim]
 
         if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
-            min_func = sympy.Min
-            max_func = sympy.Max
+            min_func = Min
+            max_func = Max
         elif any(
             # Only needed when backed_size_oblivious is on.
-            x.has(sympy.Min, sympy.Max)
+            x.has(sympy.Min, sympy.Max, Min, Max)
             for x in (start, end, dim_size)
             if isinstance(x, Expr)
         ):
-            min_func = sympy.Min
-            max_func = sympy.Max
+            min_func = Min
+            max_func = Max
         else:
             min_func = sizevars.evaluate_min
             max_func = sizevars.evaluate_max
@@ -4057,7 +4064,7 @@ def is_contiguous_strides_for_shape(
         ) and not V.graph.sizevars.statically_known_equals(y, expected_stride_max):
             return False
 
-        expected_stride_max *= sympy.Max(1, x)
+        expected_stride_max *= Max(1, x)
         expected_stride *= x
 
     return True
@@ -8371,6 +8378,8 @@ class DeviceCopy(ExternKernelOut):
             )
         else:
             wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+        if isinstance(self.layout, Layout) and self.layout.is_pinned:
+            wrapper.sync_d2h_copy(self.get_name())
 
 
 class DynamicSelectStorageOffset(ExternKernel):
