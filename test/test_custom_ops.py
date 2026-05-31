@@ -3372,6 +3372,10 @@ class TestCustomOpAPI(TestCase):
         def annotated_scale(x: Tensor, scale: float) -> Tensor:
             return x * scale
 
+        @annotated_scale.register_fake
+        def _(x, scale):
+            return torch.empty_like(x)
+
         scale_op = torch.ops._torch_testing.annotated_scale.default
         self.assertEqual(
             annotated_scale.__call__.__annotations__,
@@ -3385,6 +3389,10 @@ class TestCustomOpAPI(TestCase):
         @torch.library.custom_op("_torch_testing::annotated_shift", mutates_args=())
         def annotated_shift(x: Tensor, shift: int) -> Tensor:
             return x + shift
+
+        @annotated_shift.register_fake
+        def _(x, shift):
+            return torch.empty_like(x)
 
         shift_op = torch.ops._torch_testing.annotated_shift.default
         self.assertEqual(
