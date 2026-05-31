@@ -139,6 +139,35 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 self, fn=fn4, nargs=2, expected_ops=3
             )  # coalesced noop
 
+    def test_auto_dispatch_below_autograd_fullgraph(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            with torch._C._AutoDispatchBelowAutograd():
+                pass
+
+        fn()
+
+    def test_auto_dispatch_below_autograd_runtime_state(self):
+        def fn(x):
+            with torch._C._AutoDispatchBelowAutograd():
+                return x.sin()
+
+        x = torch.randn(3, requires_grad=True)
+        ref = fn(x)
+
+        backend = EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref, res))
+        self.assertFalse(res.requires_grad)
+        self.assertIsNone(res.grad_fn)
+        self.assertTrue(x.sin().requires_grad)
+        self.assertEqual(len(backend.graphs), 1)
+        graph_code = backend.graphs[0].code
+        self.assertIn("enter_autodispatch_below_autograd", graph_code)
+        self.assertIn("exit_autodispatch_below_autograd", graph_code)
+
     def test_grad_mode_guard(self):
         def fn(a, b):
             prev_grad = torch.is_grad_enabled()

@@ -71,6 +71,16 @@ def wrap_inline(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     return inner
 
 
+@torch.fx.has_side_effect
+def enter_autodispatch_below_autograd() -> Any:
+    return torch._C._AutoDispatchBelowAutograd()
+
+
+@torch.fx.has_side_effect
+def exit_autodispatch_below_autograd(cm: Any) -> None:
+    cm.__exit__(None, None, None)
+
+
 def call_hook(
     hook: Callable[..., torch.Tensor | None], *args: Any, **kwargs: Any
 ) -> torch.Tensor:
