@@ -40,11 +40,12 @@ import types
 import unittest
 import warnings
 import weakref
+from collections import OrderedDict
 from collections.abc import Generator, Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, overload, TYPE_CHECKING, TypeVar
 from unittest.mock import patch
 
 import sympy
@@ -427,6 +428,9 @@ def _get_total_cache_entry_count(
     return torch._C._dynamo.eval_frame._get_total_cache_entry_count(code)
 
 
+_StateDictDestination = TypeVar("_StateDictDestination", bound=dict[str, Any])
+
+
 class OptimizedModule(torch.nn.Module):
     """
     Wraps the original nn.Module object and later patches its
@@ -580,6 +584,193 @@ class OptimizedModule(torch.nn.Module):
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__ = state
         self._initialize()
+
+    @overload
+    def state_dict(
+        self,
+        *,
+        destination: _StateDictDestination,
+        prefix: str = ...,
+        keep_vars: bool = ...,
+    ) -> _StateDictDestination: ...
+
+    @overload
+    def state_dict(
+        self,
+        *,
+        prefix: str = ...,
+        keep_vars: bool = ...,
+    ) -> dict[str, Any]: ...
+
+    def state_dict(
+        self,
+        *args: Any,
+        destination: Any = None,
+        prefix: str = "",
+        keep_vars: bool = False,
+    ) -> Any:
+        if len(args) > 0:
+            warnings.warn(
+                "Positional args are being deprecated, use kwargs instead. Refer to "
+                "https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
+                " for details.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            if destination is None:
+                destination = args[0]
+            if len(args) > 1 and prefix == "":
+                prefix = args[1]
+            if len(args) > 2 and keep_vars is False:
+                keep_vars = args[2]
+
+        if destination is None:
+            destination = OrderedDict()
+            # pyrefly: ignore [missing-attribute]
+            destination._metadata = OrderedDict()
+
+        local_metadata = dict(version=self._version)
+        for hook in self._state_dict_pre_hooks.values():
+            hook(self, prefix, keep_vars)
+
+        destination = self._orig_mod.state_dict(
+            destination=destination, prefix=prefix, keep_vars=keep_vars
+        )
+
+        for hook in self._state_dict_hooks.values():
+            hook_result = hook(self, destination, prefix, local_metadata)
+            if not getattr(hook, "_from_public_api", False):
+                if hook_result is not None:
+                    destination = hook_result
+            elif hook_result is not None:
+                raise RuntimeError("state_dict post-hook must return None")
+        return destination
+
+    @staticmethod
+    def _keyspace_score(keys: set[str], expected_keys: set[str]) -> int:
+        return len(expected_keys - keys) + len(keys - expected_keys)
+
+    def _orig_mod_state_dict_keyspace(self) -> set[str]:
+        destination: OrderedDict[str, Any] = OrderedDict()
+        destination_metadata: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        # pyrefly: ignore [missing-attribute]
+        destination._metadata = destination_metadata
+        for module_prefix, module in self._orig_mod.named_modules(
+            remove_duplicate=False
+        ):
+            destination_metadata[module_prefix] = dict(version=module._version)
+            module_prefix = f"{module_prefix}." if module_prefix else ""
+            module._save_to_state_dict(destination, module_prefix, keep_vars=True)
+        return set(destination)
+
+    def _set_load_state_dict_public_prefixes(
+        self, state_dict: Any, prefix: str, internal_prefix: str
+    ) -> None:
+        maybe_public_prefixes = cast(
+            "dict[str, str] | None",
+            getattr(
+                state_dict,
+                torch.nn.modules.module._LOAD_STATE_DICT_PUBLIC_PREFIXES,
+                None,
+            ),
+        )
+        if maybe_public_prefixes is None:
+            public_prefixes: dict[str, str] = {}
+            state_dict._load_state_dict_public_prefixes = public_prefixes
+        else:
+            public_prefixes = maybe_public_prefixes
+
+        public_prefixes[internal_prefix] = prefix
+
+    def _load_from_state_dict(
+        self,
+        state_dict: Any,
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        for hook in self._load_state_dict_pre_hooks.values():
+            hook(
+                state_dict,
+                prefix,
+                local_metadata,
+                strict,
+                missing_keys,
+                unexpected_keys,
+                error_msgs,
+            )
+
+        internal_prefix = prefix + "_orig_mod."
+        self._set_load_state_dict_public_prefixes(state_dict, prefix, internal_prefix)
+        if self._is_legacy_nested_state_dict(state_dict, prefix, internal_prefix):
+            if strict:
+                for key in state_dict:
+                    if (
+                        isinstance(key, str)
+                        and key.startswith(prefix)
+                        and not key.startswith(internal_prefix)
+                        and key not in unexpected_keys
+                    ):
+                        unexpected_keys.append(key)
+            return
+
+        translated_state = {}
+        public_keys = []
+        for key in list(state_dict.keys()):
+            if isinstance(key, str) and key.startswith(prefix):
+                translated_state[internal_prefix + key[len(prefix) :]] = state_dict[key]
+                public_keys.append(key)
+
+        for key in public_keys:
+            del state_dict[key]
+        state_dict.update(translated_state)
+
+        if hasattr(state_dict, "_metadata"):
+            internal_metadata_prefix = internal_prefix[:-1]
+            public_metadata_prefix = prefix[:-1]
+            translated_metadata = state_dict._metadata.copy()
+            for key, value in list(state_dict._metadata.items()):
+                if key == public_metadata_prefix:
+                    translated_metadata[internal_metadata_prefix] = value
+                elif key.startswith(prefix):
+                    translated_metadata[internal_prefix + key[len(prefix) :]] = value
+            state_dict._metadata = translated_metadata
+
+    def _is_legacy_nested_state_dict(
+        self, state_dict: Any, prefix: str, internal_prefix: str
+    ) -> bool:
+        keys = {
+            key for key in state_dict if isinstance(key, str) and key.startswith(prefix)
+        }
+        state_dict_keys = self._orig_mod_state_dict_keyspace()
+        expected_public_keys = {prefix + key for key in state_dict_keys}
+        expected_internal_keys = {internal_prefix + key for key in state_dict_keys}
+        return self._keyspace_score(
+            keys, expected_internal_keys
+        ) < self._keyspace_score(keys, expected_public_keys)
+
+    def _postprocess_load_state_dict_incompatible_keys(
+        self,
+        incompatible_keys: torch.nn.modules.module._IncompatibleKeys,
+        prefix: str,
+        local_state_dict: Any,
+    ) -> None:
+        internal_prefix = prefix + "_orig_mod."
+
+        def translate(key: str) -> str:
+            if key.startswith(internal_prefix):
+                return prefix + key[len(internal_prefix) :]
+            return key
+
+        incompatible_keys.missing_keys[:] = [
+            translate(key) for key in incompatible_keys.missing_keys
+        ]
+        incompatible_keys.unexpected_keys[:] = [
+            translate(key) for key in incompatible_keys.unexpected_keys
+        ]
 
     @property
     # pyrefly: ignore [bad-override]

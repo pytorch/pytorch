@@ -134,6 +134,7 @@ def _has_any_global_hook():
 
 
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
+_LOAD_STATE_DICT_PUBLIC_PREFIXES = "_load_state_dict_public_prefixes"
 
 
 def register_module_buffer_registration_hook(
@@ -2527,6 +2528,59 @@ class Module:
                     elif input_name[0] not in local_state:
                         unexpected_keys.append(key)
 
+    def _postprocess_load_state_dict_incompatible_keys(
+        self,
+        incompatible_keys,
+        prefix,
+        local_state_dict,
+    ):
+        if not self._load_state_dict_post_hooks:
+            return None
+
+        public_prefixes = getattr(
+            local_state_dict, _LOAD_STATE_DICT_PUBLIC_PREFIXES, None
+        )
+        if public_prefixes is None:
+            return None
+
+        public_prefix = None
+        longest_internal_prefix_len = -1
+        for internal_prefix, mapped_public_prefix in public_prefixes.items():
+            if prefix.startswith(internal_prefix) and (
+                len(internal_prefix) > longest_internal_prefix_len
+            ):
+                longest_internal_prefix_len = len(internal_prefix)
+                public_prefix = mapped_public_prefix + prefix[len(internal_prefix) :]
+        if public_prefix is None or public_prefix == prefix:
+            return None
+
+        def translate_to_public(key: str) -> str:
+            if key.startswith(prefix):
+                return public_prefix + key[len(prefix) :]
+            return key
+
+        incompatible_keys.missing_keys[:] = [
+            translate_to_public(key) for key in incompatible_keys.missing_keys
+        ]
+        incompatible_keys.unexpected_keys[:] = [
+            translate_to_public(key) for key in incompatible_keys.unexpected_keys
+        ]
+
+        def restore() -> None:
+            def translate_to_internal(key: str) -> str:
+                if key.startswith(public_prefix):
+                    return prefix + key[len(public_prefix) :]
+                return key
+
+            incompatible_keys.missing_keys[:] = [
+                translate_to_internal(key) for key in incompatible_keys.missing_keys
+            ]
+            incompatible_keys.unexpected_keys[:] = [
+                translate_to_internal(key) for key in incompatible_keys.unexpected_keys
+            ]
+
+        return restore
+
     def load_state_dict(
         self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
     ):
@@ -2578,12 +2632,19 @@ class Module:
         metadata = getattr(state_dict, "_metadata", None)
         state_dict = OrderedDict(state_dict)
         if metadata is not None:
+            metadata = metadata.copy()
             # mypy isn't aware that "_metadata" exists in state_dict
             state_dict._metadata = metadata  # type: ignore[attr-defined]
 
         def load(module, local_state_dict, prefix="") -> None:
-            local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+            local_metadata_source = getattr(local_state_dict, "_metadata", metadata)
+            local_metadata = (
+                {}
+                if local_metadata_source is None
+                else local_metadata_source.get(prefix[:-1], {})
+            )
             if assign:
+                local_metadata = dict(local_metadata)
                 local_metadata["assign_to_params_buffers"] = assign
             module._load_from_state_dict(
                 local_state_dict,
@@ -2594,26 +2655,49 @@ class Module:
                 unexpected_keys,
                 error_msgs,
             )
+            child_metadata_source = getattr(
+                local_state_dict, "_metadata", local_metadata_source
+            )
             for name, child in module._modules.items():
                 if child is not None:
                     child_prefix = prefix + name + "."
-                    child_state_dict = {
-                        k: v
+                    child_state_dict = OrderedDict(
+                        (k, v)
                         for k, v in local_state_dict.items()
                         if k.startswith(child_prefix)
-                    }
+                    )
+                    if child_metadata_source is not None:
+                        # mypy isn't aware that "_metadata" exists in state_dict
+                        child_state_dict._metadata = child_metadata_source  # type: ignore[attr-defined]
+                    public_prefixes = getattr(
+                        local_state_dict, _LOAD_STATE_DICT_PUBLIC_PREFIXES, None
+                    )
+                    if public_prefixes is not None:
+                        # pyrefly: ignore [missing-attribute]
+                        child_state_dict._load_state_dict_public_prefixes = (
+                            public_prefixes
+                        )
                     load(child, child_state_dict, child_prefix)  # noqa: F821
 
             # Note that the hook can modify missing_keys and unexpected_keys.
             incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
+            restore_incompatible_keys = (
+                module._postprocess_load_state_dict_incompatible_keys(
+                    incompatible_keys, prefix, local_state_dict
+                )
+            )
             for hook in module._load_state_dict_post_hooks.values():
                 out = hook(module, incompatible_keys)
                 if out is not None:
+                    if restore_incompatible_keys is not None:
+                        restore_incompatible_keys()
                     raise AssertionError(
                         "Hooks registered with ``register_load_state_dict_post_hook`` are not "
                         "expected to return new values, if incompatible_keys need to be modified, "
                         "it should be done inplace."
                     )
+            if restore_incompatible_keys is not None:
+                restore_incompatible_keys()
 
         load(self, state_dict)
         del load
