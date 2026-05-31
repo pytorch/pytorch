@@ -17,6 +17,16 @@ from torch.testing._internal.common_utils import (
 )
 
 
+def _exhaust_generator(gen):
+    values = []
+    while True:
+        try:
+            values.append(next(gen))
+        except StopIteration as e:
+            values.append(e.value)
+            return values
+
+
 class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
     def setUp(self):
         super().setUp()
@@ -621,6 +631,68 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         gen = fn(t)
         self.assertEqual(list(gen), [t + 2, t + 3])
+
+    def test_generator_return_tensor_value(self):
+        def whoo(t):
+            yield t + 1
+            return t + 2  # noqa: B901
+
+        def fn(t):
+            return _exhaust_generator(whoo(t)), t.sin()
+
+        t = torch.randn(2)
+        values, _ = self._compile_check(fn, args=(t,))
+        self.assertEqual(values, _exhaust_generator(whoo(t)))
+
+    @parametrize("return_value", [None, False, 0])
+    def test_generator_return_constant_value(self, return_value):
+        def whoo(t):
+            yield t + 1
+            return return_value  # noqa: B901
+
+        def fn(t):
+            return _exhaust_generator(whoo(t)), t.sin()
+
+        t = torch.randn(2)
+        values, _ = self._compile_check(fn, args=(t,))
+        self.assertEqual(values, _exhaust_generator(whoo(t)))
+
+    def test_yield_from_generator_return_tensor_value(self):
+        def subgen(t):
+            yield t + 1
+            yield t + 2
+            return t + 3  # noqa: B901
+
+        def whoo(t):
+            value = yield from subgen(t)
+            yield value
+            yield t + 4
+            return t + 5  # noqa: B901
+
+        def fn(t):
+            return _exhaust_generator(whoo(t)), t.sin()
+
+        t = torch.randn(2)
+        values, _ = self._compile_check(fn, args=(t,))
+        self.assertEqual(values, _exhaust_generator(whoo(t)))
+
+    @parametrize("return_value", [None, False, 0])
+    def test_yield_from_generator_return_constant_value(self, return_value):
+        def subgen(t):
+            yield t + 1
+            return return_value  # noqa: B901
+
+        def whoo(t):
+            value = yield from subgen(t)
+            yield value
+            return return_value  # noqa: B901
+
+        def fn(t):
+            return _exhaust_generator(whoo(t)), t.sin()
+
+        t = torch.randn(2)
+        values, _ = self._compile_check(fn, args=(t,))
+        self.assertEqual(values, _exhaust_generator(whoo(t)))
 
     def test_dynamo_disable_generator(self):
         @torch._dynamo.disable
