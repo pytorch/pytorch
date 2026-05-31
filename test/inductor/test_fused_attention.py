@@ -1619,23 +1619,28 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             attn_weight = torch.ops.aten._safe_softmax(attn_weight, -1)
             return attn_weight @ v
 
-        # batch_size > 1
-        tensor_shape = (2, 8, 4, 16)
-        args = [
-            torch.randn(tensor_shape, device=self.device, dtype=torch.half),
-            torch.randn(tensor_shape, device=self.device, dtype=torch.half),
-            torch.randn(tensor_shape, device=self.device, dtype=torch.half),
-        ]
-        self._check_common(dot_prod_attention, args1=args, check_train=False)
+        for dtype in [torch.half, torch.float]:
+            # batch_size > 1 (generates clone nodes), also exercise training.
+            tensor_shape = (2, 8, 4, 16)
+            args = [
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+            ]
+            self._check_common(
+                dot_prod_attention, args1=args, dtype=dtype, check_train=True
+            )
 
-        # batch_size = 1
-        tensor_shape_bs1 = (1, 8, 4, 16)
-        args_bs1 = [
-            torch.randn(tensor_shape_bs1, device=self.device, dtype=torch.half),
-            torch.randn(tensor_shape_bs1, device=self.device, dtype=torch.half),
-            torch.randn(tensor_shape_bs1, device=self.device, dtype=torch.half),
-        ]
-        self._check_common(dot_prod_attention, args1=args_bs1, check_train=False)
+            # batch_size = 1 (no clone)
+            tensor_shape_bs1 = (1, 8, 4, 16)
+            args_bs1 = [
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+            ]
+            self._check_common(
+                dot_prod_attention, args1=args_bs1, dtype=dtype, check_train=False
+            )
 
     def _test_sdpa_rewriter_30(self):
         def dot_prod_attention(
@@ -1652,23 +1657,28 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             attn_weight = torch.ops.aten._safe_softmax(attn_weight, -1)
             return attn_weight @ v
 
-        # batch_size > 1
-        tensor_shape = (2, 8, 4, 16)
-        args = [
-            torch.randn(tensor_shape, device=self.device, dtype=torch.half),
-            torch.randn(tensor_shape, device=self.device, dtype=torch.half),
-            torch.randn(tensor_shape, device=self.device, dtype=torch.half),
-        ]
-        self._check_common(dot_prod_attention, args1=args, check_train=False)
+        for dtype in [torch.half, torch.float]:
+            # batch_size > 1 (generates clone nodes), also exercise training.
+            tensor_shape = (2, 8, 4, 16)
+            args = [
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+            ]
+            self._check_common(
+                dot_prod_attention, args1=args, dtype=dtype, check_train=True
+            )
 
-        # batch_size = 1
-        tensor_shape_bs1 = (1, 8, 4, 16)
-        args_bs1 = [
-            torch.randn(tensor_shape_bs1, device=self.device, dtype=torch.half),
-            torch.randn(tensor_shape_bs1, device=self.device, dtype=torch.half),
-            torch.randn(tensor_shape_bs1, device=self.device, dtype=torch.half),
-        ]
-        self._check_common(dot_prod_attention, args1=args_bs1, check_train=False)
+            # batch_size = 1 (no clone)
+            tensor_shape_bs1 = (1, 8, 4, 16)
+            args_bs1 = [
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape_bs1, device=self.device, dtype=dtype),
+            ]
+            self._check_common(
+                dot_prod_attention, args1=args_bs1, dtype=dtype, check_train=False
+            )
 
     def _test_sdpa_rewriter_28(self):
         def dot_prod_attention(

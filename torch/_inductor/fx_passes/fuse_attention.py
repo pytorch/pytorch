@@ -861,7 +861,7 @@ def _sfdp_replacement_28(query, key, value, scale_factor, dropout_p):
 
 
 def _sfdp_pattern_29(query, key, value, attn_mask, inv_scale):
-    # Matches _scaled_dot_product_attention_math decomposition on XPU for
+    # Matches _scaled_dot_product_attention_math decomposition for
     # BERT-like models calling F.scaled_dot_product_attention with attn_mask.
     # Scale is split as sqrt across Q and K (mul.Scalar in fp16), bmm stays
     # in fp16, and _safe_softmax upcasts to fp32 internally.
@@ -1077,6 +1077,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
     # For patterns with permute([0,2,1,3]) inside (e.g. BERT-like models),
     # input is [B, S, H, D] and after permute becomes [B, H, S, D].
     # S must match the mask dimension (8) so Q@K^T shape [B, H, S, S] matches b().
+    # gp = "generic with permute"; gp_bs1 is the batch_size=1 variant (no clone).
     gp_inp = functools.partial(
         torch.empty, (2, 8, 4, 16), device=device, requires_grad=True
     )
