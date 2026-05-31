@@ -742,6 +742,26 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if (
+            args
+            and isinstance(
+                args[0],
+                (variables.NNModuleVariable, variables.UnspecializedNNModuleVariable),
+            )
+        ):
+            # Local import avoids a module cycle: nn_module.py imports helpers
+            # from this file for other method-call handling.
+            from .nn_module import (
+                is_unsupported_dynamic_module_hook_registration_method,
+                unsupported_dynamic_module_hook_registration,
+            )
+
+            name = getattr(self.fn, "__name__", None)
+            if name and is_unsupported_dynamic_module_hook_registration_method(
+                name, self.fn
+            ):
+                unsupported_dynamic_module_hook_registration(name)
+
         # Handle patch_dynamo_config call
         if self.fn is torch._dynamo.patch_dynamo_config:
             try:
@@ -1661,6 +1681,22 @@ class UserMethodVariable(UserFunctionVariable):
                 self.fn, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
             )
             return var.call_function(tx, call_args, kwargs)
+
+        if isinstance(
+            self.obj,
+            (variables.NNModuleVariable, variables.UnspecializedNNModuleVariable),
+        ):
+            # Local import avoids a module cycle: nn_module.py imports helpers
+            # from this file for other method-call handling.
+            from .nn_module import (
+                is_unsupported_dynamic_module_hook_registration_method,
+                unsupported_dynamic_module_hook_registration,
+            )
+
+            if is_unsupported_dynamic_module_hook_registration_method(
+                self.fn.__name__, self.fn
+            ):
+                unsupported_dynamic_module_hook_registration(self.fn.__name__)
 
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method

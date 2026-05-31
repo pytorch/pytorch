@@ -2306,6 +2306,81 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
         )
 
+    def test_dynamic_module_forward_hook_registration_error(self):
+        class ForwardHookModule(torch.nn.Module):
+            def forward(self, x):
+                self.register_forward_hook(lambda module, inputs, output: None)
+                return x + 1
+
+        class ForwardPreHookModule(torch.nn.Module):
+            def forward(self, x):
+                self.register_forward_pre_hook(lambda module, inputs: None)
+                return x + 1
+
+        class UnboundForwardHookModule(torch.nn.Module):
+            def forward(self, x):
+                torch.nn.Module.register_forward_hook(
+                    self, lambda module, inputs, output: None
+                )
+                return x + 1
+
+        class TypeForwardHookModule(torch.nn.Module):
+            def forward(self, x):
+                type(self).register_forward_hook(
+                    self, lambda module, inputs, output: None
+                )
+                return x + 1
+
+        class BackwardHookModule(torch.nn.Module):
+            def forward(self, x):
+                self.register_backward_hook(
+                    lambda module, grad_input, grad_output: None
+                )
+                return x + 1
+
+        class FullBackwardHookModule(torch.nn.Module):
+            def forward(self, x):
+                self.register_full_backward_hook(
+                    lambda module, grad_input, grad_output: None
+                )
+                return x + 1
+
+        class FullBackwardPreHookModule(torch.nn.Module):
+            def forward(self, x):
+                self.register_full_backward_pre_hook(
+                    lambda module, grad_output: None
+                )
+                return x + 1
+
+        class Base(torch.nn.Module):
+            def forward(self, x):
+                super().register_forward_hook(lambda module, inputs, output: None)
+                return x + 1
+
+        class SuperForwardHookModule(Base):
+            pass
+
+        for module_cls in (
+            ForwardHookModule,
+            ForwardPreHookModule,
+            UnboundForwardHookModule,
+            TypeForwardHookModule,
+            BackwardHookModule,
+            FullBackwardHookModule,
+            FullBackwardPreHookModule,
+            SuperForwardHookModule,
+        ):
+            with self.subTest(module_cls=module_cls):
+                mod = module_cls()
+                opt_fn = torch.compile(
+                    lambda x: mod(x), backend="eager", fullgraph=True
+                )
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "Dynamic nn.Module hook registration",
+                ):
+                    opt_fn(torch.randn(3, 4))
+
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
