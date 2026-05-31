@@ -7,15 +7,22 @@ import sympy
 
 import torch
 import torch._inductor.config as inductor_config
+import torch._inductor.ir as ir
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
 from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
-from torch._inductor.scheduler import BaseSchedulerNode, NestedReduction, Scheduler
+from torch._inductor.scheduler import (
+    _get_benchmarkable_extern_fn,
+    BaseSchedulerNode,
+    ExternKernelSchedulerNode,
+    NestedReduction,
+    Scheduler,
+)
 from torch._inductor.sizevars import SizeVarAllocator
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
@@ -86,6 +93,98 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def _extern_snode_for_op(self, op_overload, python_kernel_name):
+        node = object.__new__(ir.ExternKernel)
+        node.op_overload = op_overload
+        node.python_kernel_name = python_kernel_name
+        snode = object.__new__(ExternKernelSchedulerNode)
+        snode.node = node
+        return snode
+
+    def test_get_benchmarkable_extern_fn_uses_op_overload(self):
+        self.assertIsNone(_get_benchmarkable_extern_fn(Mock(spec=BaseSchedulerNode)))
+        self.assertIs(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(torch.ops.aten.mm.out, "renamed_mm")
+            ),
+            torch.ops.aten.mm,
+        )
+        self.assertIs(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(
+                    torch.ops.aten._scaled_mm.out, "extern_kernels.mm"
+                )
+            ),
+            torch.ops.aten._scaled_mm,
+        )
+        self.assertIsNone(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(None, "extern_kernels.mm")
+            )
+        )
+        self.assertIsNone(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(
+                    torch.ops.aten.relu.out, "extern_kernels.relu"
+                )
+            )
+        )
+
+    def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
+        snode = Mock()
+        snode.node = Mock()
+        snode.node.inputs = [torch.empty(2, 2), torch.empty(2, 2)]
+        snode.node.constant_args = ()
+        snode.node.kwargs = {"out_dtype": torch.float16}
+        snode.node.op_overload = torch.ops.aten.mm.dtype_out
+        snode.node.fill_non_provided_args.side_effect = lambda args, kwargs: [
+            *args,
+            kwargs["out_dtype"],
+        ]
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual(args[2], torch.float16)
+        self.assertEqual(kwargs, {})
+
+    def test_snode_args_kwargs_preserves_keyword_only_kwargs(self):
+        snode = Mock()
+        snode.node = Mock()
+        snode.node.inputs = [
+            torch.empty(2, 2),
+            torch.empty(2, 2),
+            torch.empty(2, 2),
+        ]
+        snode.node.constant_args = ()
+        snode.node.kwargs = {"alpha": 2}
+        snode.node.op_overload = torch.ops.aten.addmm.out
+        snode.node.fill_non_provided_args.side_effect = lambda args, kwargs: args
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual(len(args), 3)
+        self.assertEqual(kwargs, {"alpha": 2})
+
+    def test_snode_args_kwargs_unflattens_fallback_kernel_args(self):
+        node = object.__new__(ir.FallbackKernel)
+        node.inputs = [torch.empty(2, 3), torch.empty(2, 3)]
+        node.constant_args = (1,)
+        node.kwargs = {}
+        node.op_overload = torch.ops.aten.cat.default
+        node.unflatten_args = lambda tensor_args, constant_args: (
+            [list(tensor_args)],
+            {"dim": constant_args[0]},
+        )
+        node.fill_non_provided_args = lambda args, kwargs: [*args, kwargs["dim"]]
+        snode = Mock()
+        snode.node = node
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual([tuple(t.shape) for t in args[0]], [(2, 3), (2, 3)])
+        self.assertEqual(args[1], 1)
+        self.assertEqual(kwargs, {})
+
     def test_fusable_read_and_write_broadcast_requires_index_equivalence(self):
         d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
         w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
@@ -628,77 +727,6 @@ class TestScheduler(TestCase):
             torch.allclose(expected, result),
             msg=f"Fusion bug detected! Expected {expected}, got {result}",
         )
-
-    @xfailIfNoAcceleratorTriton
-    @onlyCUDA
-    def test_expand_reuse_does_not_realize_before_reduction(self):
-        def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
-            input1_selected = torch.index_select(input1, 2, icrd1)
-            input2_selected = torch.index_select(input2, 2, icrd2)
-            weight_selected = torch.index_select(weight, 3, wcrd)
-
-            input1_expanded = input1_selected.view(B, U, 1, 1, -1)
-            input2_expanded = input2_selected.view(B, 1, V, 1, -1)
-            weight_expanded = weight_selected.view(1, U, V, W, -1)
-            meta_expanded = meta.view(1, 1, 1, 1, -1)
-
-            product = (
-                meta_expanded * input1_expanded * input2_expanded * weight_expanded
-            )
-            product = torch.sum(product, dim=(1, 2))
-            output.index_add_(2, ocrd, product)
-            return output
-
-        P = 20
-        M = 10
-        B = 10
-        L = 23
-        U = 4
-        V = 4
-        W = 4
-        device = "cuda"
-
-        torch.manual_seed(0)
-        input1 = torch.rand((B, U, L), dtype=torch.float32, device=device)
-        input2 = torch.rand((B, V, L), dtype=torch.float32, device=device)
-        weight = torch.rand((U, V, W, M), dtype=torch.float32, device=device)
-        output = torch.zeros((B, W, L), dtype=torch.float32, device=device)
-        meta = torch.rand((P,), dtype=torch.float32, device=device)
-        icrd1 = torch.randint(L, (P,), device=device)
-        icrd2 = torch.randint(L, (P,), device=device)
-        wcrd = torch.randint(M, (P,), device=device)
-        ocrd = torch.arange(P, device=device)
-
-        expected = fn(
-            icrd1,
-            icrd2,
-            wcrd,
-            ocrd,
-            meta,
-            input1,
-            input2,
-            weight,
-            output.clone(),
-        )
-
-        torch._dynamo.reset()
-        metrics.reset()
-        with fresh_inductor_cache():
-            actual = torch.compile(fn, backend="inductor", fullgraph=True)(
-                icrd1,
-                icrd2,
-                wcrd,
-                ocrd,
-                meta,
-                input1,
-                input2,
-                weight,
-                output.clone(),
-            )
-
-        self.assertTrue(torch.allclose(expected, actual, atol=1e-4, rtol=1e-4))
-        self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
-        self.assertEqual(metrics.generated_kernel_count, 1)
 
 
 class TestScoreFusionMemory(TestCase):
