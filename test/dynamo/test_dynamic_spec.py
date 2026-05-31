@@ -1546,18 +1546,27 @@ seq_spec:
     def test_compile_out_of_range_element_treated_static(self):
         """Indices beyond the SeqSpec length are unspecified == static."""
         B = ShapeVar("b")
+        cnts = torch._dynamo.testing.CompileCounter()
 
         def fn(xs: list[torch.Tensor]) -> torch.Tensor:
             return xs[0].sum() + xs[1].sum()
 
         compiled = torch.compile(
             fn,
-            backend="eager",
+            backend=cnts,
             fullgraph=True,
             shapes_spec={"xs": SeqSpec([TensorSpec([B, 3])])},
         )
-        out = compiled([torch.ones(4, 3), torch.ones(4, 3)])
-        self.assertTrue(torch.is_tensor(out))
+        compiled([torch.ones(4, 3), torch.ones(4, 3)])
+        self.assertEqual(cnts.frame_count, 1)
+
+        # xs[0] dim 0 changes — covered by ShapeVar B → no recompile.
+        compiled([torch.ones(7, 3), torch.ones(4, 3)])
+        self.assertEqual(cnts.frame_count, 1)
+
+        # xs[1] dim 0 changes — out-of-range entry treated as static → recompile.
+        compiled([torch.ones(4, 3), torch.ones(8, 3)])
+        self.assertEqual(cnts.frame_count, 2)
 
 
 class TestDictSpecCompile(TestCase):
@@ -1639,30 +1648,50 @@ class TestDictSpecCompile(TestCase):
         shape = _tensor_placeholder_shape(backend.graphs[-1])
         self.assertIsInstance(shape[0], torch.SymInt)
 
+    def test_nested_dict_of_list_of_tensors(self):
+        """Nested: ``cfg["xs"][i]`` honors a DictSpec → SeqSpec → TensorSpec
+        chain."""
+        B = ShapeVar("b")
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(cfg):
+            return cfg["xs"][0] + cfg["xs"][1]
+
+        compiled = torch.compile(
+            fn,
+            backend=cnts,
+            fullgraph=True,
+            shapes_spec={
+                "cfg": DictSpec(
+                    {"xs": SeqSpec([TensorSpec([B, 3]), TensorSpec([B, 3])])}
+                )
+            },
+        )
+        compiled({"xs": [torch.ones(4, 3), torch.ones(4, 3)]})
+        compiled({"xs": [torch.ones(7, 3), torch.ones(7, 3)]})
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_walk_terminal_container_raises(self):
         """The spec declares ``x`` as a ``DictSpec`` (a container), but the
-        compiled function is called with a plain tensor for ``x``. Because the
-        spec walk terminates on the container instead of a ``TensorSpec`` leaf,
-        compilation must raise ``RuntimeError`` with ``"shapes_spec walk ended
-        on a container"``."""
+        compiled function is called with a plain tensor for ``x``."""
 
         def fn(x):
             return x + 1
 
-        # Spec says ``x`` is a DictSpec, but the user passes a tensor.
-        # The spec walk terminates on the DictSpec container at the
-        # arg root, which is not a leaf.
         compiled = torch.compile(
             fn,
             backend="eager",
             shapes_spec={"x": DictSpec({"k": TensorSpec([ShapeVar("h"), STATIC])})},
         )
 
-        with self.assertRaisesRegex(
-            (torch._dynamo.exc.InternalTorchDynamoError, RuntimeError),
-            r"shapes_spec walk ended on a container",
-        ):
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
             compiled(torch.randn(4, 3))
+        self.assertEqual(
+            str(ctx.exception),
+            "RuntimeError: shapes_spec walk: while processing source "
+            "'x', at 'x' the spec is DictSpec, but the source has no "
+            "further access past it",
+        )
 
 
 class TestVarargsCompile(TestCase):
@@ -1802,8 +1831,7 @@ class TestVarargsCompile(TestCase):
 
 
 class TestWalkSpecRaises(TestCase):
-    """Tests for spec/source type-mismatch errors raised during compilation
-    (vs. silently returning None)."""
+    """Tests for spec/source type-mismatch errors raised during compilation."""
 
     def setUp(self):
         super().setUp()
@@ -1829,8 +1857,7 @@ class TestWalkSpecRaises(TestCase):
         )
 
     def test_dict_spec_with_object_input_raises(self):
-        """Spec is ``DictSpec``, but the user passes an object accessed by
-        attribute (``obj.x``); the spec expects a subscript."""
+        """Spec is ``DictSpec``, but the user passes an object."""
 
         class Container:
             def __init__(self, x):
@@ -1853,8 +1880,7 @@ class TestWalkSpecRaises(TestCase):
         )
 
     def test_seq_spec_with_dict_input_raises(self):
-        """Spec is ``SeqSpec``, but the user passes a dict keyed by str.
-        Dynamo records ``cfg["x"]``; ``SeqSpec`` requires an int subscript."""
+        """Spec is ``SeqSpec``, but the user passes a dict"""
 
         def fn(cfg):
             return cfg["x"] + 1
@@ -1873,8 +1899,7 @@ class TestWalkSpecRaises(TestCase):
         )
 
     def test_leaf_spec_with_container_input_raises(self):
-        """Spec is a ``TensorSpec`` leaf, but the user passes a dict and the
-        function indexes into it; the walk reaches a leaf with tokens left."""
+        """Spec is a ``TensorSpec`` leaf, but the user passes a dict."""
 
         def fn(cfg):
             return cfg["x"] + 1

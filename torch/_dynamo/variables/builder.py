@@ -484,10 +484,10 @@ def _walk_spec(
     for error messages so users see the full source location, not just the
     slice handed to this function.
     """
-    location = _format_access_path(
-        full_path if full_path is not None else remaining_tokens
-    )
-    for token in remaining_tokens:
+    effective_full = full_path if full_path is not None else remaining_tokens
+    # Offset of remaining_tokens[0] within effective_full.
+    prefix_offset = len(effective_full) - len(remaining_tokens)
+    for idx, token in enumerate(remaining_tokens):
         if current_spec is None:
             # Under-specified: a previous descent (DictSpec key lookup or
             # ObjectSpec field lookup) returned None because the user didn't
@@ -497,15 +497,19 @@ def _walk_spec(
             case ObjectSpec():
                 if not isinstance(token, _AttrToken):
                     raise RuntimeError(
-                        f"shapes_spec walk: ObjectSpec at {location!r} "
-                        f"expects an attribute access (e.g. .field)"
+                        f"shapes_spec walk: while processing source "
+                        f"{_format_access_path(effective_full)!r}, at "
+                        f"{_format_access_path(effective_full[: prefix_offset + idx])!r} "
+                        f"the spec is ObjectSpec"
                     )
                 current_spec = current_spec._fields.get(token.name)
             case DictSpec():
                 if not isinstance(token, _SubscriptToken):
                     raise RuntimeError(
-                        f"shapes_spec walk: DictSpec at {location!r} "
-                        f"expects a subscript (e.g. ['key'])"
+                        f"shapes_spec walk: while processing source "
+                        f"{_format_access_path(effective_full)!r}, at "
+                        f"{_format_access_path(effective_full[: prefix_offset + idx])!r} "
+                        f"the spec is DictSpec"
                     )
                 current_spec = current_spec._entries.get(token.key)
             case SeqSpec():
@@ -513,8 +517,10 @@ def _walk_spec(
                     token.key, int
                 ):
                     raise RuntimeError(
-                        f"shapes_spec walk: SeqSpec at {location!r} "
-                        f"expects an int subscript (e.g. [0])"
+                        f"shapes_spec walk: while processing source "
+                        f"{_format_access_path(effective_full)!r}, at "
+                        f"{_format_access_path(effective_full[: prefix_offset + idx])!r} "
+                        f"the spec is SeqSpec"
                     )
                 # Out-of-range index: unspecified -> treat as static (None),
                 if 0 <= token.key < len(current_spec):
@@ -526,13 +532,22 @@ def _walk_spec(
                 # has tokens → the user spec is too shallow: it claims a leaf,
                 # but the runtime value is a container being further accessed.
                 raise RuntimeError(
-                    f"shapes_spec walk: expected {location!r} to be a leaf "
-                    f"spec ({type(current_spec).__name__}), but it's not"
+                    f"shapes_spec walk: while processing source "
+                    f"{_format_access_path(effective_full)!r}, at "
+                    f"{_format_access_path(effective_full[: prefix_offset + idx])!r} "
+                    f"the spec is a leaf ({type(current_spec).__name__}), "
+                    f"but the source has further access past it"
                 )
     if not isinstance(current_spec, LeafSpec):
+        # The walk consumed all source tokens but landed on a container
+        # spec: the user declared a container at this position, but the
+        # source stopped (typically a single value like a tensor).
         raise RuntimeError(
-            f"shapes_spec walk ended on a container ({type(current_spec).__name__}) "
-            f"for access path {location!r}; expected a leaf spec"
+            f"shapes_spec walk: while processing source "
+            f"{_format_access_path(effective_full)!r}, at "
+            f"{_format_access_path(effective_full)!r} the spec is "
+            f"{type(current_spec).__name__}, but the source has no "
+            f"further access past it"
         )
     return current_spec
 
