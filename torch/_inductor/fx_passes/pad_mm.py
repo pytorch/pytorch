@@ -362,7 +362,7 @@ def should_pad_bench_key(
 
 
 def get_non_view_def(node: torch.fx.Node) -> torch.fx.Node:
-    if node.op is operator.getitem:
+    if node.op == "call_function" and node.target is operator.getitem:
         return get_non_view_def(node.args[0])  # type: ignore[arg-type]
 
     if (

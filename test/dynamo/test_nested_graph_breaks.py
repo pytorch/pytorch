@@ -1,76 +1,26 @@
 # Owner(s): ["module: dynamo"]
 import sys
+import unittest
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo import config
-from torch._dynamo.testing import make_test_cls_with_patches
-
-
-try:
-    # from . import test_ctx_manager
-    pass
-except ImportError:
-    # import test_aot_autograd
-    # import test_ctx_manager
-
-    # import test_export
-    # import test_functions
-    # import test_higher_order_ops
-    # import test_misc
-    # import test_modules
-    # import test_repros
-    # import test_sdpa
-    # import test_subgraphs
-    pass
-
-
-test_classes = {}
-
-
-def make_nested_cls(cls):
-    suffix = "_nested_graph_breaks"
-
-    cls_prefix = "NestedGraphBreaks"
-
-    test_class = make_test_cls_with_patches(
-        cls,
-        cls_prefix,
-        suffix,
-        (config, "debug_force_nested_calls", True),
-        (config, "debug_force_graph_break_on_leaf_return", True),
-        (config, "debug_disable_compile_counter", True),
-        xfail_prop="_expected_failure_nested_graph_breaks",
-    )
-
-    test_classes[test_class.__name__] = test_class
-    # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
-    # globals()[test_class.__name__] = test_class
-    test_class.__module__ = __name__
-    return test_class
-
-
-tests = [
-    # test_ctx_manager.CtxManagerTests,
-    # test_functions.FunctionTests,
-    # test_misc.MiscTests,
-    # test_repros.ReproTests,
-    # test_modules.NNModuleTests,
-    # test_subgraphs.SubGraphTests,
-    # test_higher_order_ops.HigherOrderOpTests,
-    # test_higher_order_ops.FuncTorchHigherOrderOpTests,
-    # test_aot_autograd.AotAutogradFallbackTests,
-    # test_sdpa.TestSDPA,
-]
-test = None
-for test in tests:
-    make_nested_cls(test)
-del test
 
 
 # for use in test_side_effects_globals
 global1, global2, global3, global4 = (torch.zeros(3),) * 4
+
+
+class CustomizedCtxManager:
+    def __init__(self, x):
+        self.x = x
+        torch._dynamo.graph_break()
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
 
 
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
@@ -966,6 +916,52 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 8)
         self.assertEqual(cnts.op_count, 10)
 
+    def test_disable_nested_graph_breaks_context_manager(self):
+        """disable_nested_graph_breaks as a context manager."""
+        global f1, f2, f3
+
+        def f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def f2(x):
+            return f1(x + 4) + 8
+
+        def f3(x):
+            with torch._dynamo.disable_nested_graph_breaks():
+                x = f2(x + 16) + 32
+            return x + 64
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f3)
+        x = torch.zeros(3)
+        res = f3(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 6)
+
+    def test_recursive_compiled_fn_with_graph_break(self):
+        """Recursive compiled functions should not disable NGB on self-calls.
+
+        When a compiled function recursively calls itself, the inner call
+        should NOT be treated as a nested torch.compile (which would disable
+        NGB). Only calls to a *different* torch.compile wrapper should.
+        """
+
+        def fn(x, n):
+            if n <= 0:
+                return x
+            torch._dynamo.graph_break()
+            return fn(x + 1, n - 1)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(fn)
+        x = torch.zeros(3)
+        ref = fn(x, 3)
+        res = opt_fn(x, 3)
+        self.assertEqual(ref, res)
+
     def test_nested_store_attr_graph_break(self):
         class Foo:
             def __setattr__(self, name, value):
@@ -1374,6 +1370,63 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(3)
         self.assertEqual(fn(inp), inp + 6)
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_inlined_function_globals_across_graph_break(self):
+        """Module-level globals in inlined functions survive graph breaks.
+
+        When a function from another module is inlined and hits a graph break,
+        the resume function must use that module's globals (not the caller's).
+        This is handled by install_resume_function_global().
+        """
+        from _test_nested_graph_breaks_helper import fn_with_module_global
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            return fn_with_module_global(x)
+
+        inp = torch.randn(3)
+        self.assertEqual(fn(inp), inp + 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+    @unittest.expectedFailure
+    def test_nested_decorated_function(self):
+        # decorator must call ContextWrappingVariable.cleanup_assert to trigger this test
+        def f(x):
+            @torch.autocast("cpu")
+            def inner(y):
+                y = y + 1
+                torch._dynamo.graph_break()
+                return y + 1
+
+            return inner(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f)
+        x = torch.zeros(3)
+        res = f(x)
+        ref = opt_fn(x)
+        print(ref, res)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 6)
+
+    @unittest.expectedFailure
+    def test_nested_graph_break_in_custom_ctx_manager_init(self):
+        def f(x):
+            with CustomizedCtxManager(x):
+                return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f)
+        x = torch.zeros(3)
+        res = f(x)
+        ref = opt_fn(x)
+        print(ref, res)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
 
 
 if __name__ == "__main__":
