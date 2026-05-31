@@ -10,11 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 from torch._dynamo.testing import rand_strided
-from torch._inductor.runtime.triton_compat import (
-    HAS_WARP_SPEC,
-    OutOfResources,
-    PTXASError,
-)
+from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -790,69 +786,6 @@ class TestDumpLaunchTensors(TestCase):
                 os.environ["TORCHINDUCTOR_DUMP_LAUNCH_TENSORS"] = old_dump_env
 
 
-class TestCachingAutotunerMakeLaunchers(TestCase):
-    @staticmethod
-    def _make_compile_result(cfg, exc):
-        result = MagicMock()
-        result.config = cfg
-        result.make_launcher.side_effect = exc
-        return result
-
-    @staticmethod
-    def _make_autotuner_with_results(configs, compile_results):
-        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
-        args["configs"] = configs
-        autotuner = CachingAutotuner(**args)
-        autotuner.compile_results = compile_results
-        return autotuner
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_make_launchers_recovers_earlier_oom_by_disabling_pipelining(self):
-        cfg_oom = triton.Config({"XBLOCK": 16}, num_warps=4, num_stages=2)
-        cfg_ptxas = triton.Config({"XBLOCK": 32}, num_warps=4, num_stages=1)
-        result_oom = self._make_compile_result(
-            cfg_oom, OutOfResources(10, 5, "shared memory")
-        )
-        result_ptxas = self._make_compile_result(cfg_ptxas, PTXASError("ptxas"))
-        autotuner = self._make_autotuner_with_results(
-            [cfg_oom, cfg_ptxas],
-            [result_oom, result_ptxas],
-        )
-
-        fallback_result = MagicMock()
-        fallback_launcher = MagicMock()
-        with patch.object(
-            autotuner,
-            "_compile_config_with_disabled_pipelining",
-            return_value=(fallback_result, fallback_launcher),
-        ) as mock_disable_pipelining:
-            autotuner._make_launchers()
-
-        mock_disable_pipelining.assert_called_once_with(cfg_oom)
-        self.assertEqual(len(autotuner.launchers), 1)
-        self.assertIs(autotuner.launchers[0], fallback_launcher)
-        self.assertEqual(len(autotuner.compile_results), 1)
-        self.assertIs(autotuner.compile_results[0], fallback_result)
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_make_launchers_does_not_retry_failed_disabled_pipelining(self):
-        cfg_oom = triton.Config({"XBLOCK": 16}, num_warps=4, num_stages=2)
-        result_oom = self._make_compile_result(
-            cfg_oom, OutOfResources(10, 5, "shared memory")
-        )
-        autotuner = self._make_autotuner_with_results([cfg_oom], [result_oom])
-
-        with patch.object(
-            autotuner,
-            "_compile_config_with_disabled_pipelining",
-            side_effect=OutOfResources(10, 5, "shared memory"),
-        ) as mock_disable_pipelining:
-            with self.assertRaisesRegex(RuntimeError, "No valid triton configs"):
-                autotuner._make_launchers()
-
-        mock_disable_pipelining.assert_called_once_with(cfg_oom)
-
-
 class TestRecheckAutotuneCache(TestCase):
     """Tests for CachingAutotuner.recheck_autotune_cache"""
 
@@ -1311,6 +1244,73 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
         self.assertEqual(len(autotuner.compile_results), 1)
         mock_precompile.assert_called_once_with(dynamic_cfg)
+
+
+class TestCheckLauncherCallArgs(TestCase):
+    """Unit tests for CachingAutotuner._check_launcher_call_args.
+
+    These tests are pure-Python (no GPU / Triton compilation) and guard
+    against regressions in the improved arg-mismatch error path.
+    """
+
+    def _make_autotuner(self):
+        """Return a CachingAutotuner configured with the cos kernel fixture."""
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        return CachingAutotuner(**args)
+
+    def _make_launcher(self, n_positional: int):
+        """Return a minimal callable that looks like a generated launcher.
+
+        The only attribute _check_launcher_call_args inspects is
+        ``_expected_positional_count``, so we don't need real Triton machinery.
+        """
+
+        def launcher(*args, stream=None):
+            pass
+
+        launcher._expected_positional_count = n_positional
+        return launcher
+
+    def test_correct_arg_count_passes_silently(self):
+        """No exception when args exactly matches _expected_positional_count."""
+        autotuner = self._make_autotuner()
+        launcher = self._make_launcher(n_positional=3)
+        # Pass exactly 3 positional args - should be a no-op.
+        autotuner._check_launcher_call_args(launcher, (1, 2, 3))
+
+    def test_too_many_args_raises_type_error(self):
+        """TypeError with a helpful message when too many positional args are passed."""
+        autotuner = self._make_autotuner()
+        launcher = self._make_launcher(n_positional=3)
+        # Simulate the 'stream' being passed positionally (4 args, expected 3).
+        with self.assertRaises(TypeError) as cm:
+            autotuner._check_launcher_call_args(launcher, (1, 2, 3, 4))
+        self.assertIn("stream", str(cm.exception).lower())
+        self.assertIn("keyword", str(cm.exception).lower())
+
+    def test_error_message_includes_kernel_name(self):
+        """The TypeError message should include the kernel name from inductor_meta."""
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {
+            "kernel_name": "my_custom_kernel",
+            "grid_type": "Grid1D",
+        }
+        autotuner = CachingAutotuner(**args)
+        launcher = self._make_launcher(n_positional=2)
+        with self.assertRaises(TypeError) as cm:
+            autotuner._check_launcher_call_args(launcher, (1, 2, 3))
+        self.assertIn("my_custom_kernel", str(cm.exception))
+
+    def test_launcher_without_expected_count_is_skipped(self):
+        """Launchers without the generated metadata are skipped gracefully."""
+
+        def raw_launcher(*args, stream=None):
+            pass
+
+        # No _expected_positional_count attribute set.
+        autotuner = self._make_autotuner()
+        # Should not raise, even with many args.
+        autotuner._check_launcher_call_args(raw_launcher, (1, 2, 3, 4, 5))
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import re
 import sys
 import time
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping
 from contextlib import contextmanager, ExitStack, nullcontext
 from itertools import chain
 from typing import Any, TYPE_CHECKING, TypeAlias
@@ -1397,8 +1397,18 @@ def _preserve_module_buffers(mod: torch.nn.Module):
         yield
     finally:
         for submod, buffers, non_persistent_buffers in saved_buffers:
-            submod._buffers.clear()
-            submod._buffers.update(buffers)
+            if isinstance(submod._buffers, MutableMapping):
+                submod._buffers.clear()
+                submod._buffers.update(buffers)
+            else:
+                if tuple(submod._buffers.keys()) != tuple(buffers):
+                    raise RuntimeError(
+                        f"Unable to restore buffers for {type(submod).__name__}: "
+                        "module uses a non-mutable buffer mapping whose keys changed "
+                        "during export."
+                    )
+                for name, buffer in buffers.items():
+                    submod._buffers[name] = buffer
             submod._non_persistent_buffers_set.clear()
             submod._non_persistent_buffers_set.update(non_persistent_buffers)
 
