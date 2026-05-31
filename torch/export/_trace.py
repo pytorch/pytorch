@@ -684,6 +684,10 @@ def _unlift_symbolic_placeholders(
         if source is not None
     }
 
+    def first_non_placeholder_node() -> torch.fx.Node | None:
+        # The placeholder boundary mutates as lifted inputs are unlifted.
+        return next((n for n in gm.graph.nodes if n.op != "placeholder"), None)
+
     removed_placeholders: set[str] = set()
     reintroduced_user_inputs: list[str] = []
     for node_name, source in list(input_name_to_source.items()):
@@ -708,9 +712,7 @@ def _unlift_symbolic_placeholders(
                 raise AssertionError(
                     f"Could not find tensor input for lifted source {source.name}"
                 )
-            first_non_placeholder = next(
-                (node for node in gm.graph.nodes if node.op != "placeholder"), None
-            )
+            first_non_placeholder = first_non_placeholder_node()
             with gm.graph.inserting_before(first_non_placeholder):
                 base_node = gm.graph.placeholder(f"arg{len(placeholders_by_name)}_1")
             base_node.meta["val"] = base_value
@@ -733,9 +735,7 @@ def _unlift_symbolic_placeholders(
             else:
                 raise AssertionError(f"Unsupported tensor property source: {source}")
 
-            first_non_placeholder = next(
-                (node for node in gm.graph.nodes if node.op != "placeholder"), None
-            )
+            first_non_placeholder = first_non_placeholder_node()
             with gm.graph.inserting_before(first_non_placeholder):
                 replacement = gm.graph.call_function(target, args)
                 replacement.meta.update(node.meta)
@@ -774,9 +774,7 @@ def _unlift_symbolic_placeholders(
             remaining_user_inputs = ordered_user_inputs
 
         graph_signature.user_inputs = remaining_user_inputs
-        first_non_placeholder = next(
-            (node for node in gm.graph.nodes if node.op != "placeholder"), None
-        )
+        first_non_placeholder = first_non_placeholder_node()
         if first_non_placeholder is not None:
             for name in graph_signature.user_inputs:
                 if name in placeholders_by_name:

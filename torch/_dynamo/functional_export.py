@@ -514,7 +514,10 @@ def normalize_graph_module(gm: torch.fx.GraphModule) -> None:
             if "example_value" in node.meta:
                 node.meta["val"] = node.meta["example_value"]
             elif "val" not in node.meta:
-                raise KeyError("example_value")
+                raise KeyError(
+                    f"Placeholder node {node.name!r} has neither "
+                    "'example_value' nor 'val' metadata"
+                )
 
 
 def restore_get_attr_targets(graph_module: torch.fx.GraphModule) -> None:
@@ -524,11 +527,13 @@ def restore_get_attr_targets(graph_module: torch.fx.GraphModule) -> None:
     if not flat_name_to_original_fqn:
         return
 
+    matched = False
     changed = False
     for node in graph_module.graph.nodes:
         if node.op != "get_attr" or node.target not in flat_name_to_original_fqn:
             continue
 
+        matched = True
         original_fqn = flat_name_to_original_fqn[node.target]
         try:
             torch.fx.graph_module._get_attr(graph_module, original_fqn)
@@ -539,6 +544,10 @@ def restore_get_attr_targets(graph_module: torch.fx.GraphModule) -> None:
 
     if changed:
         graph_module.recompile()
+    elif not matched:
+        log.debug("No get_attr nodes matched dynamo_flat_name_to_original_fqn metadata")
+    else:
+        log.debug("No get_attr targets could be restored to original FQNs")
 
 
 class InputProcessor:
@@ -732,13 +741,20 @@ def create_fx_graph_from_captured_output(
     dynamo_bytecode_flatten = DynamoBytecodeFlatten(input_processor, out, f_globals)
     dynamo_bytecode_unflatten = DynamoBytecodeUnflatten(input_processor, out, f_globals)
 
-    graph_module.graph._codegen = _DynamoBytecodeCodeGen(
+    dynamo_bytecode_codegen = _DynamoBytecodeCodeGen(
         argument_names(inspect.signature(mod), args, kwargs),
         dynamo_bytecode_flatten,
         dynamo_bytecode_unflatten,
-    )  # type: ignore[attr-defined]
+    )
+    graph_module.graph._codegen = dynamo_bytecode_codegen  # type: ignore[attr-defined]
     normalize_graph_module(graph_module)
     restore_get_attr_targets(graph_module)
+    dynamo_bytecode_codegen.set_flat_placeholder_values(
+        tuple(
+            node.meta.get("val")
+            for node in graph_module.graph.find_nodes(op="placeholder")
+        )
+    )
     if hasattr(graph_module, "_dynamo_bytecode_flatten"):
         raise AssertionError(
             "graph_module already has _dynamo_bytecode_flatten attribute"
@@ -781,9 +797,28 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
         self.dynamo_bytecode_unflatten = dynamo_bytecode_unflatten
         self.wrap_tuple = False
         self._inputs: tuple[Any, ...] | None = None
+        self._flat_placeholder_values: tuple[Any, ...] = ()
+        self._inputs_already_flattened = False
+
+    def set_flat_placeholder_values(self, values: tuple[Any, ...]) -> None:
+        self._flat_placeholder_values = values
 
     def process_inputs(self, *inputs: Any) -> Any:
         self._inputs = inputs
+        self._inputs_already_flattened = len(self._flat_placeholder_values) != len(
+            self.orig_arg_names
+        ) and len(inputs) == len(self._flat_placeholder_values)
+        if self._inputs_already_flattened:
+            # AOTAutograd's FX interpreter calls with graph placeholders,
+            # not the original public pytree signature. Symbolic placeholders
+            # arrive as None, so recover their captured SymInt metadata.
+            return tuple(
+                meta_value
+                if inp is None and isinstance(meta_value, torch.SymInt)
+                else inp
+                for inp, meta_value in zip(inputs, self._flat_placeholder_values)
+            )
+
         results = self.dynamo_bytecode_flatten(*inputs)
         fake_mode = detect_fake_mode()
         if fake_mode is not None and pytree.tree_any(
@@ -800,6 +835,13 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
         return results
 
     def process_outputs(self, outputs: Any) -> Any:
+        if self._inputs_already_flattened:
+            if self.wrap_tuple:
+                outputs = (outputs,)
+            self._inputs = None
+            self._inputs_already_flattened = False
+            return outputs
+
         results = self.dynamo_bytecode_unflatten(outputs, self._inputs)
         if self.wrap_tuple:
             results = (results,)
@@ -817,6 +859,23 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
         has_orig_self = (fn_args[0] == "self") if len(fn_args) > 0 else False
         if has_orig_self:
             free_vars.insert(0, "self")
+        # Rename any non-first `self` in fn_args to a unique name. The base
+        # CodeGen.gen_fn_def prepends `"self"` for the GraphModule's bound-
+        # method receiver whenever fn_args[0] != "self", which collides with
+        # a schema param literally named `self` (e.g. `aten.where.self(Tensor
+        # cond, Tensor self, Tensor other)` -> `def forward(self, cond, self,
+        # other)` -> `SyntaxError: duplicate argument 'self' in function
+        # definition`). Both the function-def arg list (via super().gen_fn_def)
+        # and the body binding (via gen_var_bindings) reference fn_args, so
+        # the rename is consistent end-to-end.
+        fn_args = list(fn_args)
+        first_pos = 1 if has_orig_self else 0
+        for i in range(first_pos, len(fn_args)):
+            if fn_args[i] == "self":
+                new_name = "self_"
+                while new_name in fn_args:
+                    new_name += "_"
+                fn_args[i] = new_name
         fn_definition = super().gen_fn_def(
             fn_args[:], maybe_return_annotation, expanded_def=expanded_def
         )
