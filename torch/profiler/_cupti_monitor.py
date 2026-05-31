@@ -402,8 +402,10 @@ class CuptiMonitor:
         self._flush_thread: threading.Thread | None = None
         self._worker_error: BaseException | None = None
         self._trace_window_active = False
+        self._trace_window_prepared = False
         self._trace_window_events: list[dict[str, Any]] = []
         self._trace_window_extra_activities: tuple[int, ...] = ()
+        self._trace_window_start_ns = 0
         self._time_converter = None
         self._timestamp_callback = None
 
@@ -657,24 +659,49 @@ class CuptiMonitor:
                     "cuptiActivityEnableDriverApi",
                 )
 
-    def begin_trace_window(
+    def prepare_trace_window(
         self, activities: Iterable[int] | None = None
     ) -> tuple[int, ...]:
         if not self._started:
-            raise RuntimeError("CUPTI monitor must be started before begin_trace_window")
-        if self._trace_window_active:
-            raise RuntimeError("A trace window is already active")
+            raise RuntimeError(
+                "CUPTI monitor must be started before prepare_trace_window"
+            )
+        if self._trace_window_prepared:
+            raise RuntimeError("A trace window is already prepared")
         activities = tuple(activities or _DEFAULT_TRACE_WINDOW_ACTIVITIES)
         newly_enabled = self.enable_activities(activities)
         with self._lock:
             self._trace_window_events = []
-            self._trace_window_active = True
+            self._trace_window_prepared = True
+            self._trace_window_active = False
             self._trace_window_extra_activities = newly_enabled
+            self._trace_window_start_ns = 0
+        return newly_enabled
+
+    def start_trace_window(self) -> None:
+        if not self._started:
+            raise RuntimeError(
+                "CUPTI monitor must be started before start_trace_window"
+            )
+        if not self._trace_window_prepared:
+            raise RuntimeError("No prepared trace window")
+        if self._trace_window_active:
+            raise RuntimeError("A trace window is already active")
+        with self._lock:
+            self._trace_window_events = []
+            self._trace_window_start_ns = time.time_ns()
+            self._trace_window_active = True
+
+    def begin_trace_window(
+        self, activities: Iterable[int] | None = None
+    ) -> tuple[int, ...]:
+        newly_enabled = self.prepare_trace_window(activities)
+        self.start_trace_window()
         return newly_enabled
 
     def end_trace_window(self) -> dict[str, Any]:
-        if not self._trace_window_active:
-            raise RuntimeError("No active trace window")
+        if not self._trace_window_prepared:
+            raise RuntimeError("No prepared trace window")
         self.flush(forced=True)
         deadline = time.time() + 5.0
         while time.time() < deadline:
@@ -685,8 +712,10 @@ class CuptiMonitor:
             events = list(self._trace_window_events)
             extra = self._trace_window_extra_activities
             self._trace_window_events = []
+            self._trace_window_prepared = False
             self._trace_window_active = False
             self._trace_window_extra_activities = ()
+            self._trace_window_start_ns = 0
         self.disable_activities(extra)
         return {"events": events, "extra_activities": list(extra)}
 
@@ -704,7 +733,9 @@ class CuptiMonitor:
                 "dropped_records": self._dropped_records,
                 "chunks_written": self._chunk_count,
                 "output_dir": str(self.output_dir),
+                "trace_window_prepared": self._trace_window_prepared,
                 "trace_window_active": self._trace_window_active,
+                "trace_window_start_ns": self._trace_window_start_ns,
             }
 
     def _open_outputs(self) -> None:
@@ -792,7 +823,9 @@ class CuptiMonitor:
                     max_ts = max(max_ts, end_ns)
                 if trace_event is not None:
                     with self._lock:
-                        if self._trace_window_active:
+                        if self._trace_window_active and self._event_after_window_start(
+                            trace_event
+                        ):
                             self._trace_window_events.append(trace_event)
                 continue
             if rc == _CUPTI_ERROR_MAX_LIMIT_REACHED:
@@ -813,6 +846,17 @@ class CuptiMonitor:
 
         with self._lock:
             self._free_buffers.append(buffer_ptr)
+
+    def _event_after_window_start(self, trace_event: dict[str, Any]) -> bool:
+        start_cutoff = self._trace_window_start_ns
+        if start_cutoff == 0:
+            return False
+        event_ts = trace_event.get("start_ns")
+        if event_ts is None:
+            event_ts = trace_event.get("device_timestamp_ns")
+        if event_ts is None:
+            return True
+        return int(event_ts) >= start_cutoff
 
     def _annotation_id_for_record(
         self, graph_node_id: int, record_kind: int, correlation_id: int
@@ -1203,6 +1247,20 @@ def begin_trace_window(
     if _monitor_singleton is None:
         raise RuntimeError("CUPTI monitor collection is not active")
     return _monitor_singleton.begin_trace_window(activities)
+
+
+def prepare_trace_window(
+    activities: Iterable[int] | None = None,
+) -> tuple[int, ...]:
+    if _monitor_singleton is None:
+        raise RuntimeError("CUPTI monitor collection is not active")
+    return _monitor_singleton.prepare_trace_window(activities)
+
+
+def start_trace_window() -> None:
+    if _monitor_singleton is None:
+        raise RuntimeError("CUPTI monitor collection is not active")
+    _monitor_singleton.start_trace_window()
 
 
 def end_trace_window() -> dict[str, Any]:

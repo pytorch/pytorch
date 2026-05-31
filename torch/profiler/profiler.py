@@ -322,6 +322,17 @@ class _KinetoProfile:
                 if self.activity_filters
                 else None,
             )
+        if self._use_cupti_monitor:
+            from torch.profiler import _cupti_monitor as _mon
+
+            if _mon.get_monitor() is None:
+                self._monitor_tempdir = tempfile.TemporaryDirectory(
+                    prefix="torch_cupti_profiler_"
+                )
+                _mon.start_collection(self._monitor_tempdir.name)
+                self._monitor_started_here = True
+            self._monitor_trace_window = None
+            _mon.prepare_trace_window()
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
@@ -333,14 +344,7 @@ class _KinetoProfile:
         if self._use_cupti_monitor:
             from torch.profiler import _cupti_monitor as _mon
 
-            if _mon.get_monitor() is None:
-                self._monitor_tempdir = tempfile.TemporaryDirectory(
-                    prefix="torch_cupti_profiler_"
-                )
-                _mon.start_collection(self._monitor_tempdir.name)
-                self._monitor_started_here = True
-            self._monitor_trace_window = None
-            _mon.begin_trace_window()
+            _mon.start_trace_window()
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")
