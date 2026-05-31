@@ -2041,7 +2041,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2066,7 +2066,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2303,7 +2303,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # Test invalid usage
         self.assertRaises(TypeError, d.copy, 1)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_fromkeys(self):
         d = self.thetype.fromkeys(["a", "b"], 1)
@@ -2633,9 +2632,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
-
-    def test_binop_or(self):
-        super().test_binop_or()
 
 
 class OrderedDictMethodsTests(DictMethodsTests):
