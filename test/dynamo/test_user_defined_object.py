@@ -85,6 +85,103 @@ class SlotsShadowed(SlotsBase):
     x = 42  # class attribute shadows parent's slot descriptor
 
 
+class TestUserDefinedObjectConstruction(TestCase):
+    def test_instantiate_class_with_custom_getattribute(self):
+        class Foo:
+            def __init__(self, a):
+                self.a = a
+
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+        def fn(t):
+            _ = Foo(3)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_custom_getattribute_and_attr_read(self):
+        class Foo:
+            def __init__(self, a):
+                self.a = a
+
+            def __getattribute__(self, name):
+                return super().__getattribute__(name)
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_custom_getattribute_reads_init_state(self):
+        class Foo:
+            def __init__(self, a):
+                object.__setattr__(self, "ready", True)
+                self.a = a
+
+            def __getattribute__(self, name):
+                if super().__getattribute__("ready"):
+                    return super().__getattribute__(name)
+                raise RuntimeError("not ready")
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_custom_getattribute_normal_setattr(self):
+        class Foo:
+            def __init__(self, a):
+                self.ready = True
+                self.a = a
+
+            def __getattribute__(self, name):
+                try:
+                    ready = super().__getattribute__("ready")
+                except AttributeError:
+                    raise RuntimeError("not ready") from None
+                if ready:
+                    return super().__getattribute__(name)
+                raise RuntimeError("not ready")
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_slotted_class_with_custom_getattribute(self):
+        class Foo:
+            __slots__ = ("ready", "a")
+
+            def __init__(self, a):
+                object.__setattr__(self, "ready", True)
+                self.a = a
+
+            def __getattribute__(self, name):
+                if super().__getattribute__("ready"):
+                    return super().__getattribute__(name)
+                raise RuntimeError("not ready")
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+
 class SlotsAndProperty:
     __slots__ = ("_x",)
 

@@ -3180,7 +3180,7 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         ):
             if (
                 isinstance(obj, variables.UserDefinedObjectVariable)
-                and issubclass(obj.value.__class__, unittest.TestCase)
+                and issubclass(type(obj.value), unittest.TestCase)
                 and config.enable_trace_unittest
                 and name
                 in (
