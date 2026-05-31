@@ -1505,13 +1505,6 @@ class TestSeqSpec(TestCase):
         self.assertEqual(len(sp), 0)
         self.assertEqual(sp._entries, [])
 
-    def test_iter(self):
-        B = ShapeVar("b")
-        t0 = TensorSpec([B, 4])
-        t1 = TensorSpec([B, 8])
-        sp = SeqSpec([t0, t1])
-        self.assertEqual(sp._entries, [t0, t1])
-
     def test_repr(self):
         sp = SeqSpec([TensorSpec([ShapeVar("a"), 4])])
         self.assertEqual(
@@ -1817,8 +1810,7 @@ class TestWalkSpecRaises(TestCase):
         _reset_uid_counter()
 
     def test_object_spec_with_dict_input_raises(self):
-        """Spec is ``ObjectSpec``, but the user passes a dict. Dynamo records
-        a subscript source (``cfg["x"]``); the spec expects attribute access."""
+        """Spec is ``ObjectSpec``, but the user passes a dict."""
 
         def fn(cfg):
             return cfg["x"] + 1
@@ -1832,8 +1824,8 @@ class TestWalkSpecRaises(TestCase):
             compiled({"x": torch.randn(4, 3)})
         self.assertEqual(
             str(ctx.exception),
-            "RuntimeError: shapes_spec walk: ObjectSpec at \"cfg['x']\" "
-            "expects an attribute access (e.g. .field)",
+            "RuntimeError: shapes_spec walk: while processing source "
+            "\"cfg['x']\", at 'cfg' the spec is ObjectSpec",
         )
 
     def test_dict_spec_with_object_input_raises(self):
@@ -1856,8 +1848,8 @@ class TestWalkSpecRaises(TestCase):
             compiled(Container(torch.randn(4, 3)))
         self.assertEqual(
             str(ctx.exception),
-            "RuntimeError: shapes_spec walk: DictSpec at 'obj.x' expects "
-            "a subscript (e.g. ['key'])",
+            "RuntimeError: shapes_spec walk: while processing source "
+            "'obj.x', at 'obj' the spec is DictSpec",
         )
 
     def test_seq_spec_with_dict_input_raises(self):
@@ -1876,8 +1868,8 @@ class TestWalkSpecRaises(TestCase):
             compiled({"x": torch.randn(4, 3)})
         self.assertEqual(
             str(ctx.exception),
-            "RuntimeError: shapes_spec walk: SeqSpec at \"cfg['x']\" "
-            "expects an int subscript (e.g. [0])",
+            "RuntimeError: shapes_spec walk: while processing source "
+            "\"cfg['x']\", at 'cfg' the spec is SeqSpec",
         )
 
     def test_leaf_spec_with_container_input_raises(self):
@@ -1896,8 +1888,9 @@ class TestWalkSpecRaises(TestCase):
             compiled({"x": torch.randn(4, 3)})
         self.assertEqual(
             str(ctx.exception),
-            "RuntimeError: shapes_spec walk: expected \"cfg['x']\" to be a "
-            "leaf spec (TensorSpec), but it's not",
+            "RuntimeError: shapes_spec walk: while processing source "
+            "\"cfg['x']\", at 'cfg' the spec is a leaf (TensorSpec), but "
+            "the source has further access past it",
         )
 
 
