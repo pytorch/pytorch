@@ -31,12 +31,23 @@ import inspect
 import logging
 import math
 import re
-from collections.abc import Callable, Iterable
+import types
+from collections.abc import Callable, Container, Iterable
 from contextlib import nullcontext
-from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import (
+    Any,
+    cast,
+    get_args,
+    get_origin,
+    NoReturn,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from typing_extensions import TypeIs
 
 import torch._C
+import torch._jit_internal
 import torch._refs
 import torch.fx
 import torch.nn
@@ -84,7 +95,7 @@ from ..utils import (
     proxy_args_kwargs,
     unwrap_if_wrapper,
 )
-from .base import typestr, VariableTracker
+from .base import AsPythonConstantNotImplementedError, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -492,6 +503,218 @@ def _collect_placeholder_nodes(var: "VariableTracker") -> list[torch.fx.Node]:
             ],
         )
     return result
+
+
+def _jit_isinstance_type_error(target_type: Any, tx: Any) -> None:
+    try:
+        torch._jit_internal.check_args_exist(target_type)
+    except RuntimeError as exc:
+        raise_observed_exception(RuntimeError, tx, args=list(exc.args))
+
+
+def _jit_isinstance_invalid_container_error(tx: Any) -> None:
+    raise_observed_exception(
+        RuntimeError,
+        tx,
+        args=[
+            "The second argument to `torch.jit.isinstance` must be a type "
+            "or a tuple of types"
+        ],
+    )
+
+
+def _jit_isinstance_target_type(target_type: VariableTracker) -> Any | None:
+    try:
+        return target_type.as_python_constant()
+    except AsPythonConstantNotImplementedError:
+        from .user_defined import UserDefinedObjectVariable
+
+        if isinstance(target_type, UserDefinedObjectVariable):
+            return target_type.value
+        return None
+
+
+def _builtin_isinstance_bool(tx: Any, obj: VariableTracker, target_type: Any) -> bool:
+    result = variables.BuiltinVariable(isinstance).call_function(
+        tx, [obj, VariableTracker.build(tx, target_type)], {}
+    )
+    return bool(result.as_python_constant())
+
+
+def _jit_isinstance_list_items(obj: VariableTracker) -> list[VariableTracker] | None:
+    from .lists import BaseListVariable
+    from .user_defined import UserDefinedListVariable
+
+    if isinstance(obj, BaseListVariable):
+        return obj.items
+    if isinstance(obj, UserDefinedListVariable):
+        if obj._base_vt is None:
+            raise AssertionError("_base_vt must not be None for list subclass")
+        return cast(BaseListVariable, obj._base_vt).items
+    return None
+
+
+def _jit_isinstance_dict_vt(obj: VariableTracker) -> Any | None:
+    from .dicts import ConstDictVariable
+    from .user_defined import UserDefinedDictVariable
+
+    if isinstance(obj, ConstDictVariable):
+        return obj
+    if isinstance(obj, UserDefinedDictVariable):
+        if obj._base_vt is None:
+            raise AssertionError("_base_vt must not be None for dict subclass")
+        return obj._base_vt
+    return None
+
+
+def _jit_isinstance_tuple_items(obj: VariableTracker) -> list[VariableTracker] | None:
+    from .lists import BaseListVariable
+    from .user_defined import UserDefinedTupleVariable
+
+    if isinstance(obj, BaseListVariable):
+        return obj.items
+    if isinstance(obj, UserDefinedTupleVariable):
+        if obj._base_vt is None:
+            raise AssertionError("_base_vt must not be None for tuple subclass")
+        return cast(BaseListVariable, obj._base_vt).items
+    return None
+
+
+def _jit_isinstance_python_constant_bool(
+    tx: Any, obj: VariableTracker, target_type: Any
+) -> bool:
+    try:
+        obj_value = obj.as_python_constant()
+    except AsPythonConstantNotImplementedError as exc:
+        unimplemented(
+            gb_type="torch.jit.isinstance() cannot convert object to constant",
+            context=f"torch.jit.isinstance({obj}, {target_type})",
+            explanation=(
+                "Dynamo cannot evaluate torch.jit.isinstance() for this object "
+                "without a Python constant value."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+            from_exc=exc,
+        )
+    return torch._jit_internal._isinstance(obj_value, target_type)
+
+
+def _jit_isinstance_dict_key_bool(tx: Any, key: VariableTracker, key_type: Any) -> bool:
+    try:
+        isinstance(object(), key_type)
+    except TypeError as exc:
+        raise_observed_exception(TypeError, tx, args=list(exc.args))
+
+    try:
+        key_value = key.as_python_constant()
+    except AsPythonConstantNotImplementedError:
+        return _builtin_isinstance_bool(tx, key, key_type)
+    return isinstance(key_value, key_type)
+
+
+def _jit_isinstance_nested_bool(
+    tx: Any, obj: VariableTracker, target_type: Any
+) -> bool:
+    origin_type = get_origin(target_type)
+    if origin_type is None:
+        return _builtin_isinstance_bool(tx, obj, target_type)
+    return _jit_isinstance_container_bool(tx, obj, target_type)
+
+
+def _jit_isinstance_container_bool(
+    tx: Any, obj: VariableTracker, target_type: Any
+) -> bool:
+    origin_type = get_origin(target_type)
+    _jit_isinstance_type_error(target_type, tx)
+
+    if origin_type is list:
+        try:
+            if not issubclass(obj.python_type(), list):
+                return False
+        except NotImplementedError:
+            unimplemented(
+                gb_type="torch.jit.isinstance() cannot determine list object type",
+                context=f"torch.jit.isinstance({obj}, {target_type})",
+                explanation="Dynamo cannot determine whether the object is a list.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        items = _jit_isinstance_list_items(obj)
+        if items is None:
+            return _jit_isinstance_python_constant_bool(tx, obj, target_type)
+        (element_type,) = get_args(target_type)
+        return all(
+            _jit_isinstance_nested_bool(tx, item, element_type) for item in items
+        )
+
+    if origin_type is dict:
+        try:
+            if not issubclass(obj.python_type(), dict):
+                return False
+        except NotImplementedError:
+            unimplemented(
+                gb_type="torch.jit.isinstance() cannot determine dict object type",
+                context=f"torch.jit.isinstance({obj}, {target_type})",
+                explanation="Dynamo cannot determine whether the object is a dict.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        dict_vt = _jit_isinstance_dict_vt(obj)
+        if dict_vt is None:
+            return _jit_isinstance_python_constant_bool(tx, obj, target_type)
+        key_type, value_type = get_args(target_type)
+        return all(
+            _jit_isinstance_dict_key_bool(tx, key.vt, key_type)
+            and _jit_isinstance_nested_bool(tx, value, value_type)
+            for key, value in dict_vt.items.items()
+        )
+
+    if origin_type is tuple:
+        try:
+            if not issubclass(obj.python_type(), tuple):
+                return False
+        except NotImplementedError:
+            unimplemented(
+                gb_type="torch.jit.isinstance() cannot determine tuple object type",
+                context=f"torch.jit.isinstance({obj}, {target_type})",
+                explanation="Dynamo cannot determine whether the object is a tuple.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        items = _jit_isinstance_tuple_items(obj)
+        if items is None:
+            return _jit_isinstance_python_constant_bool(tx, obj, target_type)
+        element_types = get_args(target_type)
+        if len(items) != len(element_types):
+            return False
+        return all(
+            _jit_isinstance_nested_bool(tx, item, typ)
+            for item, typ in zip(items, element_types)
+        )
+
+    if origin_type in (Union, types.UnionType):
+        if obj.is_constant_none():
+            return True
+        for typ in get_args(target_type):
+            if get_origin(typ):
+                return _jit_isinstance_container_bool(tx, obj, typ)
+            if _builtin_isinstance_bool(tx, obj, typ):
+                return True
+        return False
+
+    return False
+
+
+def _jit_isinstance_bool(tx: Any, obj: VariableTracker, target_type: Any) -> bool:
+    if isinstance(target_type, Container):
+        if not isinstance(target_type, tuple):
+            _jit_isinstance_invalid_container_error(tx)
+        target_type_tuple = cast(tuple[Any, ...], target_type)
+        return any(_jit_isinstance_bool(tx, obj, typ) for typ in target_type_tuple)
+
+    origin_type = get_origin(target_type)
+    if origin_type is None:
+        _jit_isinstance_type_error(target_type, tx)
+        return _builtin_isinstance_bool(tx, obj, target_type)
+
+    return _jit_isinstance_container_bool(tx, obj, target_type)
 
 
 @functools.cache
@@ -1520,6 +1743,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self, tx: "InstructionTranslatorBase", the_type: Any, the_value: V
         ) -> V:
             return the_value
+
+        @register(torch.jit.isinstance)
+        def handle_jit_isinstance(
+            self,
+            tx: "InstructionTranslatorBase",
+            obj: VariableTracker,
+            target_type: VariableTracker,
+        ) -> VariableTracker:
+            target_type_value = _jit_isinstance_target_type(target_type)
+            if target_type_value is not None:
+                return VariableTracker.build(
+                    tx, _jit_isinstance_bool(tx, obj, target_type_value)
+                )
+
+            return variables.BuiltinVariable(isinstance).call_function(
+                tx, [obj, target_type], {}
+            )
 
         @register(torch.backends.cudnn.is_acceptable)
         def handle_cudnn_is_acceptable(

@@ -4349,27 +4349,107 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    def test_graph_break_on_jit_isinstance(self):
-        @torch.compile(backend="eager")
+    def test_no_graph_break_on_jit_isinstance_tensor(self):
         def fn(x):
-            if torch.jit.isinstance(x, typing.List[str]):  # noqa: UP006
+            if torch.jit.isinstance(x, torch.Tensor):
                 return x * 2
             return x
 
-        opt_fn = torch.compile(fn, backend="eager")
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.rand(4)
         self.assertTrue(same(fn(x), opt_fn(x)))
+        self.assertEqual(counter.frame_count, 1)
 
-    def test_graph_break_on_jit_isinstance_pep585(self):
-        @torch.compile(backend="eager")
-        def fn(x):
-            if torch.jit.isinstance(x, list[str]):
+    def test_no_graph_break_on_jit_isinstance_python_type(self):
+        def fn(x, normalized):
+            if torch.jit.isinstance(normalized, str):
                 return x * 2
+            elif torch.jit.isinstance(normalized, bool):
+                return x + 1
             return x
 
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.rand(4)
-        self.assertTrue(same(fn(x), opt_fn(x)))
+        self.assertTrue(same(fn(x, "frame_length"), opt_fn(x, "frame_length")))
+        self.assertTrue(same(fn(x, True), opt_fn(x, True)))
+
+    def test_no_graph_break_on_jit_isinstance_parameterized_containers(self):
+        class MyDict(dict):
+            pass
+
+        class MyList(list):
+            pass
+
+        def check(obj, target_type):
+            def fn(x):
+                if torch.jit.isinstance(x, target_type):
+                    return 1
+                return 0
+
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(obj), opt_fn(obj))
+
+        optional_int = typing.Optional[int]  # noqa: UP045
+        cases = (
+            (["a"], typing.List[str]),  # noqa: UP006
+            ([1], typing.List[str]),  # noqa: UP006
+            (["a"], list[str]),
+            ([1], list[str]),
+            (MyList([1]), list[int]),
+            (MyList(["1"]), list[int]),
+            ({"a": 1}, typing.Dict[str, int]),  # noqa: UP006
+            ({"a": "1"}, typing.Dict[str, int]),  # noqa: UP006
+            ({"a": 1}, dict[str, int]),
+            ({"a": "1"}, dict[str, int]),
+            (MyDict({"a": 1}), dict[str, int]),
+            (MyDict({"a": "1"}), dict[str, int]),
+            (("a", 1), typing.Tuple[str, int]),  # noqa: UP006
+            (("a", "1"), typing.Tuple[str, int]),  # noqa: UP006
+            (("a", 1), tuple[str, int]),
+            (("a", "1"), tuple[str, int]),
+            (None, optional_int),
+            (1, optional_int),
+            ("1", optional_int),
+            (None, int | None),
+            (1, int | None),
+            ("1", int | None),
+        )
+        for obj, target_type in cases:
+            with self.subTest(obj=repr(obj), target_type=target_type):
+                torch._dynamo.reset()
+                check(obj, target_type)
+
+    def test_jit_isinstance_dict_key_uses_builtin_isinstance(self):
+        target_type = typing.Dict[typing.Tuple[str], int]  # noqa: UP006
+
+        def fn(x):
+            if torch.jit.isinstance(x, target_type):
+                return 1
+            return 0
+
+        obj = {("a",): 1}
+        with self.assertRaisesRegex(TypeError, "Subscripted generics cannot be used"):
+            fn(obj)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "Subscripted generics cannot be used"):
+            opt_fn(obj)
+
+    def test_jit_isinstance_invalid_container_classinfo(self):
+        def fn(x):
+            if torch.jit.isinstance(x, [torch.Tensor]):
+                return 1
+            return 0
+
+        x = torch.ones(1)
+        msg = "must be a type or a tuple of types"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(RuntimeError, msg):
+            opt_fn(x)
 
     def test_add_sub_alpha_out(self):
         test_cases = (

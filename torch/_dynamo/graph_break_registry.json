@@ -3871,6 +3871,36 @@
       ]
     }
   ],
+  "GB4614": [
+    {
+      "Gb_type": "torch.jit.isinstance() cannot determine list object type",
+      "Context": "torch.jit.isinstance({obj}, {target_type})",
+      "Explanation": "Dynamo cannot determine whether the object is a list.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1958": [
+    {
+      "Gb_type": "torch.jit.isinstance() cannot determine dict object type",
+      "Context": "torch.jit.isinstance({obj}, {target_type})",
+      "Explanation": "Dynamo cannot determine whether the object is a dict.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6748": [
+    {
+      "Gb_type": "torch.jit.isinstance() cannot determine tuple object type",
+      "Context": "torch.jit.isinstance({obj}, {target_type})",
+      "Explanation": "Dynamo cannot determine whether the object is a tuple.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0270": [
     {
       "Gb_type": "unimplemented builtin op vars() with no arguments",
@@ -4200,6 +4230,16 @@
       "Explanation": "Tracing numpy.* functions as methods is not supported.",
       "Hints": [
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB8431": [
+    {
+      "Gb_type": "torch.jit.isinstance() cannot convert object to constant",
+      "Context": "torch.jit.isinstance({obj}, {target_type})",
+      "Explanation": "Dynamo cannot evaluate torch.jit.isinstance() for this object without a Python constant value.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
