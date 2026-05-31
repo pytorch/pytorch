@@ -36,6 +36,7 @@ _VIEW_SCATTER_TO_VIEW = {
     torch.ops.aten.select_scatter.default: torch.ops.aten.select.int,
     torch.ops.aten.slice_scatter.default: torch.ops.aten.slice.Tensor,
 }
+_VIEW_OPS = set(_VIEW_SCATTER_TO_VIEW.values())
 
 
 def _copy_is_non_blocking(node: torch.fx.Node) -> bool:
@@ -87,6 +88,28 @@ def _is_same_view_value(
     )
 
 
+def _copy_default_targeting_view(
+    node: object,
+    dst_view: torch.fx.Node,
+) -> tuple[torch.fx.Node, tuple[Argument, ...], dict[str, Argument]] | None:
+    # Functionalization represents view assignment as copy.default(view, rhs)
+    # before scattering the updated view value back into its base.
+    if not (
+        isinstance(node, torch.fx.Node)
+        and node.op == "call_function"
+        and node.target is torch.ops.aten.copy.default
+        and len(node.args) >= 2
+        and node.args[0] is dst_view
+        and isinstance(node.args[1], torch.fx.Node)
+    ):
+        return None
+    return (
+        node.args[1],
+        cast(tuple[Argument, ...], node.args[2:]),
+        dict(node.kwargs),
+    )
+
+
 def _strip_noop_view_scatters(node: torch.fx.Node) -> torch.fx.Node:
     while (
         node.op == "call_function"
@@ -111,13 +134,22 @@ def _strip_noop_view_scatters(node: torch.fx.Node) -> torch.fx.Node:
     return node
 
 
+def _is_view_scatter_node(node: object) -> bool:
+    return (
+        isinstance(node, torch.fx.Node)
+        and node.op == "call_function"
+        and isinstance(node.target, torch._ops.OpOverload)
+        and node.target in _VIEW_SCATTER_TO_VIEW
+    )
+
+
 def _mutation_target_base(
     node: torch.fx.Node, placeholders: set[torch.fx.Node]
 ) -> torch.fx.Node | None:
     while (
         node.op == "call_function"
         and isinstance(node.target, torch._ops.OpOverload)
-        and node.target in _VIEW_SCATTER_TO_VIEW.values()
+        and node.target in _VIEW_OPS
         and len(node.args) >= 1
         and isinstance(node.args[0], torch.fx.Node)
     ):
@@ -181,52 +213,83 @@ def optimize_input_mutation_view_scatter(g: torch.fx.Graph) -> None:
         aten.copy_(view, add)
         out = x
     """
-    for node in list(g.nodes):
-        if not (
-            node.op == "call_function"
-            and node.target is torch.ops.aten.copy_.default
-            and len(node.args) >= 2
-            and isinstance(node.args[0], torch.fx.Node)
-            and isinstance(node.args[1], torch.fx.Node)
-        ):
-            continue
+    g.eliminate_dead_code()
+    placeholders = {node for node in g.nodes if node.op == "placeholder"}
+    changed = True
+    while changed:
+        changed = False
+        for node in list(g.nodes):
+            if not (
+                node.op == "call_function"
+                and node.target is torch.ops.aten.copy_.default
+                and len(node.args) >= 2
+                and isinstance(node.args[0], torch.fx.Node)
+                and isinstance(node.args[1], torch.fx.Node)
+            ):
+                continue
 
-        dst = node.args[0]
-        src = _strip_noop_view_scatters(node.args[1])
-        if not (
-            dst.op == "placeholder"
-            and src.op == "call_function"
-            and isinstance(src.target, torch._ops.OpOverload)
-            and src.target in _VIEW_SCATTER_TO_VIEW
-            and len(src.args) >= 2
-            and src.args[0] is dst
-            and isinstance(src.args[1], torch.fx.Node)
-        ):
-            continue
+            dst = node.args[0]
+            copy_src_arg = node.args[1]
+            src = _strip_noop_view_scatters(copy_src_arg)
+            if not (
+                _mutation_target_base(dst, placeholders) is not None
+                and _is_view_scatter_node(src)
+                and len(src.args) >= 2
+                and src.args[0] is dst
+                and isinstance(src.args[1], torch.fx.Node)
+            ):
+                continue
 
-        view_target = _VIEW_SCATTER_TO_VIEW[src.target]
-        view_args = src.args[2:]
-        view_kwargs = dict(src.kwargs)
-        copy_src = src.args[1]
-        dst_view = _find_or_create_view_of_input(
-            g,
-            node,
-            dst,
-            view_target,
-            view_args,
-            view_kwargs,
-        )
-        with g.inserting_before(node):
-            new_copy = g.call_function(
-                torch.ops.aten.copy_.default,
-                (dst_view, copy_src, *node.args[2:]),
-                node.kwargs,
+            src_target = cast(torch._ops.OpOverload, src.target)
+            view_target = _VIEW_SCATTER_TO_VIEW[src_target]
+            view_args = src.args[2:]
+            view_kwargs = dict(src.kwargs)
+            dst_view = _find_or_create_view_of_input(
+                g,
+                node,
+                dst,
+                view_target,
+                view_args,
+                view_kwargs,
             )
-        _copy_meta_from_node(new_copy, node)
-        if "val" in dst_view.meta:
-            new_copy.meta["val"] = dst_view.meta["val"]
-        node.replace_all_uses_with(dst)
-        g.erase_node(node)
+            copy_value = src.args[1]
+            copy_args = cast(tuple[Argument, ...], node.args[2:])
+            copy_kwargs = dict(node.kwargs)
+            copy_info = _copy_default_targeting_view(copy_value, dst_view)
+            if copy_info is None:
+                copy_src = copy_value
+            else:
+                copy_src, copy_args, copy_kwargs = copy_info
+            extra_users = [user for user in copy_src_arg.users if user is not node]
+            if extra_users:
+                if _is_view_scatter_node(copy_value):
+                    continue
+                if not all(
+                    _is_matching_view(
+                        user,
+                        copy_src_arg,
+                        view_target,
+                        view_args,
+                        view_kwargs,
+                    )
+                    for user in extra_users
+                ):
+                    continue
+                for user in extra_users:
+                    user.replace_all_uses_with(copy_value)
+            with g.inserting_before(node):
+                new_copy = g.call_function(
+                    torch.ops.aten.copy_.default,
+                    (dst_view, copy_src, *copy_args),
+                    copy_kwargs,
+                )
+            _copy_meta_from_node(new_copy, node)
+            if "val" in dst_view.meta:
+                new_copy.meta["val"] = dst_view.meta["val"]
+            node.replace_all_uses_with(dst)
+            g.erase_node(node)
+            changed = True
+            break
 
 
 def to_fun(t: object) -> Any:
