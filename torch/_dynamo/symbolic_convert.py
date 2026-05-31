@@ -925,6 +925,16 @@ def generic_jump(
                 if push:
                     self.push(value)
                 self.jump(inst)
+        elif isinstance(
+            value, (variables.StringFormatVariable, variables.StringFormatStripVariable)
+        ):
+            result = value.as_bool_constant()
+            if result is None:
+                raise_jump_graph_break(value)
+            if truth_fn(result):
+                if push:
+                    self.push(value)
+                self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
             result = generic_bool(self, value)  # type: ignore[arg-type]
             if result.is_python_constant():

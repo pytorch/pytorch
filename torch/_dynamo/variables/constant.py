@@ -300,6 +300,14 @@ class ConstantVariable(VariableTracker):
                 arg_const = [x.as_python_constant() for x in arg_unpacked]
                 return ConstantVariable.create(self.value.join(arg_const))
             except NotImplementedError:
+                from .misc import StringFormatVariable
+
+                if all(
+                    StringFormatVariable._is_string_variable(x) for x in arg_unpacked
+                ):
+                    return StringFormatVariable.join_string_parts(
+                        tx, self, arg_unpacked
+                    )
                 return super().call_method(tx, name, args, kwargs)
 
         if any(isinstance(x, SymNodeVariable) for x in args):
@@ -653,6 +661,18 @@ class ConstantVariable(VariableTracker):
             return VariableTracker.build(tx, v + w)
         except (TypeError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def sq_concat_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        if isinstance(self.value, str):
+            from .misc import StringFormatVariable
+
+            if StringFormatVariable._is_string_variable(other):
+                return StringFormatVariable.concat(tx, self, other)
+        return super().sq_concat_impl(tx, other)
 
     def nb_absolute_impl(
         self,
