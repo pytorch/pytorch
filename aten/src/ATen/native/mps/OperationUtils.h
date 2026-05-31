@@ -132,6 +132,12 @@ class Placeholder {
 
 void resize_tensor(Tensor* output);
 Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device);
+// Argsort `keys` (1-D contiguous integer tensor) by only its low `n_passes * 8`
+// bits via the radix sorter, returning the permutation indices. Used by
+// randperm: for random keys the unsorted high bits are irrelevant, so fewer
+// passes give a uniform permutation more cheaply. Index dtype is int16 for
+// numel <= 65536, else int32; callers cast as needed.
+Tensor randperm_argsort_lowbits_metal(const Tensor& keys, int n_passes, Tensor& sorted_keys);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph* mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, MPSDataType toType);
@@ -573,7 +579,29 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
   static_assert(sizeof(NSUInteger) == sizeof(uint64_t));
   const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(length, 1, 1);
-  auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
+  auto threadGroupSize = MTLSizeMake(std::clamp(length, 1UL, maxThreadsPerGroup), 1, 1);
+  [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
+}
+
+// Dispatch a 2D grid (x = inner, y = outer). The kernel receives `uint2
+// thread_position_in_grid` and can use `.x` directly as the innermost coord,
+// avoiding one div/mod in the index decomposition. If inner_len is smaller
+// than the kernel's maxThreadsPerGroup, pack multiple outer rows into one TG
+// along y so we keep TG occupancy high and don't pay extra TG-launch overhead
+// vs the 1D dispatch. The kernel reads thread_position_in_grid as uint
+// per-axis, so each dim must fit in uint32; the product can exceed UINT32_MAX
+// (i.e. >4G total threads are fine as long as neither inner nor outer alone
+// overflow). Like mtl_dispatch1DJob, caller is responsible for the per-axis
+// bound; TensorIterator's 32-bit decomposition keeps both within range today.
+static inline void mtl_dispatch2DJob(id<MTLComputeCommandEncoder> encoder,
+                                     id<MTLComputePipelineState> cplState,
+                                     NSUInteger inner_len,
+                                     NSUInteger outer_len) {
+  const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+  auto size = MTLSizeMake(inner_len, outer_len, 1);
+  auto tg_x = std::min(maxThreadsPerGroup, inner_len);
+  auto tg_y = std::clamp(outer_len, 1UL, maxThreadsPerGroup / tg_x);
+  auto threadGroupSize = MTLSizeMake(tg_x, tg_y, 1);
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
@@ -679,7 +707,13 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
             computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), static_cast<uint32_t>(iter.ndim()));
       }
       detail::mtl_setArg(computeEncoder, params, iter.is_contiguous() ? 2 : 6);
-      mtl_dispatch1DJob(computeEncoder, cplState, length);
+      if (!iter.is_contiguous()) {
+        const auto inner = static_cast<NSUInteger>(iter.shape()[0]);
+        const auto outer = static_cast<NSUInteger>(length) / inner;
+        mtl_dispatch2DJob(computeEncoder, cplState, inner, outer);
+      } else {
+        mtl_dispatch1DJob(computeEncoder, cplState, length);
+      }
 
       getMPSProfiler().endProfileKernel(cplState);
     });
