@@ -3484,14 +3484,12 @@ class TMADescriptorStableVariable(VariableTracker):
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(
-                "triton.tools.tensor_descriptor",
-                "TensorDescriptor",
-            )
+        codegen.load_import_from(
+            "triton.tools.tensor_descriptor",
+            "TensorDescriptor",
         )
         codegen.load_method("from_tensor")
-        self.tensor.reconstruct(codegen)
+        codegen(self.tensor)
         codegen(self.block_shape)
         codegen.call_method(2)
 
