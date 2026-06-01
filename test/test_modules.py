@@ -11,7 +11,7 @@ import torch
 from torch._subclasses.meta_utils import assert_metadata_eq
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, onlyAccelerator, toleranceOverride, tol, skipMeta)
+    instantiate_device_type_tests, onlyCPU, onlyAccelerator, toleranceOverride, tol, skipMeta, skipMPS)
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
@@ -144,6 +144,7 @@ class TestModule(TestCase):
                 m.train(training)
                 self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
+    @skipMPS
     @onlyAccelerator
     @modules(module_db)
     def test_multiple_device_transfer(self, device, dtype, module_info, training):
@@ -535,6 +536,7 @@ class TestModule(TestCase):
     def test_gradgrad(self, device, dtype, module_info, training):
         self._test_gradients_helper(device, dtype, module_info, training, gradgradcheck)
 
+    @skipMPS
     @onlyAccelerator
     @with_tf32_off  # Turn off TF32 to compute at full precision https://github.com/pytorch/pytorch/issues/86798
     @toleranceOverride({torch.float32: tol(5e-2, 0),
@@ -878,6 +880,7 @@ class TestModule(TestCase):
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
     # Only run this test for float32 because the test loops over all the dtypes
+    @skipMPS
     @modules([module for module in module_db if not module.is_lazy], allowed_dtypes=[torch.float32])
     @parametrize('swap', [True, False])
     @parametrize('set_grad', [True, False])

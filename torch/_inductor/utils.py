@@ -1951,6 +1951,15 @@ def using_b200() -> bool:
     return device_properties.major == 10
 
 
+def is_nvidia_sm100_or_later() -> bool:
+    """Return true for NVIDIA CUDA devices with compute capability SM100+."""
+    return (
+        torch.cuda.is_available()
+        and torch.version.hip is None
+        and torch.cuda.get_device_capability() >= (10, 0)
+    )
+
+
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
