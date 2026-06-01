@@ -1516,6 +1516,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @dtypes(
         *floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
     )
+    @dtypesIfMPS(torch.float, torch.half)
     def test_noncontig_conv_grad(self, device, dtype):
         # FIXME: remove after adding non-contiguous grad tests for all modules
         module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to(device, dtype)
@@ -3166,6 +3167,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 _test_module_empty_input(self, mod, inp, check_size=False)
 
     @onlyAccelerator
+    @skipMPS
     @largeTensorTest("12GB")
     @serialTest()
     def test_conv_large_nosplit(self, device):
