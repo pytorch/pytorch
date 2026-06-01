@@ -67,7 +67,7 @@ class UnwrapTensorSubclass(torch.nn.Module):
             if type(tensor) is torch.Tensor:
                 plain_tensor_container.append(tensor)
                 return None, idx + 1
-            inner_tensors_attrnames, metadata = tensor.__tensor_flatten__()
+            inner_tensors_attrnames, metadata = tensor.__tensor_flatten__()  # type: ignore[attr-defined]
             new_idx = idx
             attr_to_meta: dict[str, SubclassCreationMeta | OpaqueMeta | None] = {}
             for attr in inner_tensors_attrnames:

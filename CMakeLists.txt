@@ -1,21 +1,6 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
 
-# Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
-# sometimes makes XCode C compiler gets detected as "Clang", even when the C++
-# one is detected as "AppleClang".
-cmake_policy(SET CMP0010 NEW)
-cmake_policy(SET CMP0025 NEW)
 cmake_policy(SET CMP0126 OLD)
-
-# Enables CMake to set LTO on compilers other than Intel.
-cmake_policy(SET CMP0069 NEW)
-# Enable the policy for CMake subprojects. protobuf currently causes issues
-# set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
-
-# Suppress warning flags in default MSVC configuration.  It's not mandatory that
-# we do this (and we don't if cmake is old), but it's nice when it's possible,
-# and it's possible on our Windows configs.
-cmake_policy(SET CMP0092 NEW)
 # Don't remove the FindCUDA module
 cmake_policy(SET CMP0146 OLD)
 
@@ -81,6 +66,18 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11.3)
   )
 endif()
 
+# --- [ Check that minimal clang version is 16+
+# Older clangs (e.g. clang-14) fail to compile C++20 ranges adaptors such as
+# `std::views::filter` over associative containers when paired with libstdc++,
+# see https://github.com/pytorch/pytorch/issues/184630. AppleClang uses its
+# own versioning scheme and is excluded from this check.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+  message(
+    FATAL_ERROR
+      "Clang-16 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
+  )
+endif()
+
 # This define is needed to preserve behavior given anticpated changes to
 # cccl/thrust
 # https://nvidia.github.io/cccl/libcudacxx/standard_api/numerics_library/complex.html
@@ -133,8 +130,6 @@ if(APPLE)
                        CLANG_VERSION_STRING ${clang_full_version_string})
   message(STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING})
 
-  # RPATH stuff
-  set(CMAKE_MACOSX_RPATH ON)
   if(NOT IOS)
     # Determine if we can link against MPSGraph
     set(MPS_FOUND OFF)
@@ -299,7 +294,6 @@ cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_XCCL "Use XCCL" ON
                        "USE_XPU;UNIX;NOT APPLE" OFF)
-cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
@@ -758,13 +752,6 @@ if(ANDROID
   endif()
 endif()
 
-if(USE_KLEIDIAI AND CMAKE_C_COMPILER_VERSION)
-    if(CMAKE_C_COMPILER_VERSION VERSION_LESS 11)
-      set(USE_KLEIDIAI OFF)
-      message(WARNING "Disabling KleidiAI: Requires at least GCC 11 or Clang 11")
-    endif()
-endif()
-
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 set(INTERN_BUILD_ATEN_OPS ON)
 
@@ -986,10 +973,6 @@ cmake_dependent_option(
   "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
-
-# Set USE_MSLK to ON for CUDA build on SM100.
-if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
-endif()
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
@@ -1366,11 +1349,6 @@ if((NOT USE_GLOG)
                   "generate files that are not well tested.")
 endif()
 
-if(USE_CUDA OR USE_ROCM)
-  # TODO: check if we should include other cuda dependency libraries to the
-  # interface as well.
-
-endif()
 
 # Note(jiayq): when building static libraries, all PRIVATE dependencies will
 # also become interface libraries, and as a result if there are any dependency

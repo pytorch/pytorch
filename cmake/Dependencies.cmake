@@ -565,15 +565,6 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       set(XNNPACK_ENABLE_AVX512FP16  OFF CACHE BOOL "")
     ENDIF()
 
-    # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
-    # XNNPACK does conditionally compile this based on GCC version. Once it also does
-    # so based on Clang version, this logic can be removed.
-    IF(CMAKE_C_COMPILER_ID STREQUAL "Clang")
-      IF(CMAKE_C_COMPILER_VERSION VERSION_LESS "11")
-        set(XNNPACK_ENABLE_AVX512AMX OFF CACHE BOOL "")
-      ENDIF()
-    ENDIF()
-
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
     # be PIC to successfully link this static libXNNPACK with pytorch
@@ -1248,6 +1239,40 @@ if(USE_GLOO)
       endif()
       message("Found gloo: ${Gloo_NATIVE_LIBRARY}, cuda lib: ${Gloo_CUDA_LIBRARY}, hip lib: ${Gloo_HIP_LIBRARY}")
       message("Found gloo include directories: ${Gloo_INCLUDE_DIRS}")
+
+      # Validate that the system-installed gloo was built with the GPU flavor
+      # PyTorch is requesting. A mismatch (e.g. a CUDA-only gloo used in a
+      # ROCm build) causes cryptic compile errors deep in the build; catch it
+      # here with a clear message instead.
+      set(_gloo_config_h "${Gloo_INCLUDE_DIRS}/gloo/config.h")
+      if(EXISTS "${_gloo_config_h}")
+        file(READ "${_gloo_config_h}" _gloo_config_contents)
+        if(USE_CUDA)
+          string(REGEX MATCH "#define GLOO_USE_CUDA ([01])" _match "${_gloo_config_contents}")
+          if(NOT "${CMAKE_MATCH_1}" STREQUAL "1")
+            message(FATAL_ERROR
+              "USE_SYSTEM_GLOO: the gloo found at ${Gloo_INCLUDE_DIRS} was not "
+              "built with CUDA support (GLOO_USE_CUDA=${CMAKE_MATCH_1} in "
+              "${_gloo_config_h}). Rebuild gloo with -DUSE_CUDA=ON or point "
+              "CMAKE_PREFIX_PATH at a CUDA-enabled gloo installation.")
+          endif()
+        elseif(USE_ROCM)
+          string(REGEX MATCH "#define GLOO_USE_ROCM ([01])" _match "${_gloo_config_contents}")
+          if(NOT "${CMAKE_MATCH_1}" STREQUAL "1")
+            message(FATAL_ERROR
+              "USE_SYSTEM_GLOO: the gloo found at ${Gloo_INCLUDE_DIRS} was not "
+              "built with ROCm support (GLOO_USE_ROCM=${CMAKE_MATCH_1} in "
+              "${_gloo_config_h}). Rebuild gloo with -DUSE_ROCM=ON or point "
+              "CMAKE_PREFIX_PATH at a ROCm-enabled gloo installation.")
+          endif()
+        endif()
+      else()
+        message(WARNING
+          "USE_SYSTEM_GLOO: could not find ${_gloo_config_h} to verify GPU "
+          "flavor; proceeding, but the build may fail if gloo was compiled "
+          "for a different GPU backend.")
+      endif()
+
       add_library(gloo SHARED IMPORTED)
       set_target_properties(gloo PROPERTIES IMPORTED_LOCATION ${Gloo_NATIVE_LIBRARY})
       if(USE_CUDA)
@@ -1476,9 +1501,6 @@ if(NOT INTERN_BUILD_MOBILE)
       "-DUSE_MAGMA=OFF.")
     caffe2_update_option(USE_MAGMA OFF)
   endif()
-
-  # ARM specific flags
-  find_package(ARM)
 
   find_package(LAPACK)
   if(LAPACK_FOUND)
