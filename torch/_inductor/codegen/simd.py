@@ -492,6 +492,23 @@ class NodeInfo(NamedTuple):
     is_persistent_reduction: bool
 
 
+def _combo_subkernel_config_cap(kernel) -> int:
+    # Size-bucketed cap on autotune configs: 1 for small sub-kernels, 2 otherwise.
+    if kernel.inside_reduction:
+        rnumel = math.prod(
+            int(V.graph.sizevars.optimization_hint(tree.numel))
+            for tree in kernel.range_trees
+            if tree.is_reduction
+        )
+        return 1 if rnumel <= config.combo_kernels_seed_small_rnumel else 2
+    total = math.prod(
+        int(V.graph.sizevars.optimization_hint(tree.numel))
+        for tree in kernel.range_trees
+        if not tree.is_reduction
+    )
+    return 1 if total <= config.combo_kernels_seed_small_pointwise_total else 2
+
+
 class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     """
     Common base class for Triton/Halide codegen which both use flattened indexing rather than loop nests.

@@ -3613,6 +3613,12 @@ def _handle_combo_kernel_per_subkernel_blocks(
         else:
             raise ValueError(f"Unknown heuristic: {subkernel_heuristic}")
 
+        # Size-bucketed cap precomputed in combo_grid_meta: keep at most the
+        # first `cap` configs so small sub-kernels tune deterministically.
+        cap = combo_meta.get(f"config_cap_{i}")
+        if cap is not None:
+            cfgs = cfgs[:cap]
+
         group_coordesc_fields: OrderedSet[str] = OrderedSet()
         cfg = cfgs[0]
         _update_combo_kernel_kwargs(

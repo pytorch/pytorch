@@ -815,6 +815,60 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
 
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_seed_autotune_cap": True,
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_combo_kernel_config_cap_small_reduction(self):
+        # Small reduction (rnumel=32 <= 64) -> cap=1, recorded per-subkernel in
+        # combo_grid_meta.
+        import re
+
+        def fn(a, b):
+            return a.sum(-1), b.sum(-1)
+
+        inps = [
+            torch.randn(128, 32, device=GPU_TYPE),
+            torch.randn(128, 32, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        caps = [int(c) for c in re.findall(r"config_cap_\d+'?\s*:\s*(\d+)", code[0])]
+        self.assertTrue(caps, "no config_cap metadata emitted")
+        self.assertTrue(all(c == 1 for c in caps), f"caps={caps}")
+
+    @requires_gpu_and_triton
+    @parametrize("numel,expected_cap", [(2048, 1), (65536, 2)])
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_seed_autotune_cap": True,
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_combo_kernel_config_cap_pointwise_bucket(self, numel, expected_cap):
+        # Pointwise bucketing: total <= 4096 -> cap=1, else cap=2. The cap is
+        # precomputed into combo_grid_meta per subkernel.
+        import re
+
+        def fn(a, b, c):
+            return a * 2, b + 1, c - 1
+
+        inps = [torch.randn(numel, device=GPU_TYPE) for _ in range(3)]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        caps = [int(c) for c in re.findall(r"config_cap_\d+'?\s*:\s*(\d+)", code[0])]
+        self.assertTrue(caps, "no config_cap metadata emitted")
+        self.assertTrue(all(c == expected_cap for c in caps), f"caps={caps}")
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu
