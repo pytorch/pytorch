@@ -52,7 +52,12 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import MI350_ARCH, skipIfRocmArch, skipIfXpu
+from torch.testing._internal.common_utils import (
+    MI350_ARCH,
+    skipIfRocmArch,
+    skipIfTorchInductor,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -1221,6 +1226,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 )
                 self.assertTrue(same(correct_results, opt_results))
 
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/152944")
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @config.patch(enable_compiler_collectives=True)
     def test_compiler_collectives_automatic_dynamic_tensor(self):

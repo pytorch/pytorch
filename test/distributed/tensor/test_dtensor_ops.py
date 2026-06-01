@@ -5,7 +5,6 @@ import copy
 import random
 import re
 import threading
-import unittest
 import warnings
 
 import torch
@@ -25,8 +24,11 @@ from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
+    skip,
+    skipOps,
+    xfail,
 )
-from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
@@ -55,55 +57,6 @@ common_ops.L = 24
 common_ops.M = 12
 common_ops.S = 4
 common_ops.XS = 2
-
-
-# Copied from functorch
-def xfail(op_name, variant_name="", *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, True)
-
-
-def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, False)
-
-
-def skipOps(op_db, test_case_name, base_test_name, to_skip):
-    all_opinfos = op_db
-    for xfail in to_skip:
-        op_name, variant_name, device_type, dtypes, expected_failure = xfail
-        matching_opinfos = [
-            o
-            for o in all_opinfos
-            if o.name == op_name and o.variant_test_name == variant_name
-        ]
-        if not (len(matching_opinfos) >= 1):
-            raise AssertionError(f"Couldn't find OpInfo for {xfail}")
-        for opinfo in matching_opinfos:
-            decorators = list(opinfo.decorators)
-            if expected_failure:
-                decorator = DecorateInfo(
-                    unittest.expectedFailure,
-                    test_case_name,
-                    base_test_name,
-                    device_type=device_type,
-                    dtypes=dtypes,
-                )
-                decorators.append(decorator)
-            else:
-                decorator = DecorateInfo(
-                    unittest.skip("Skipped!"),
-                    test_case_name,
-                    base_test_name,
-                    device_type=device_type,
-                    dtypes=dtypes,
-                )
-                decorators.append(decorator)
-            opinfo.decorators = tuple(decorators)
-
-    # This decorator doesn't modify fn in any way
-    def wrapped(fn):
-        return fn
-
-    return wrapped
 
 
 def repurpose_ops(op_db, base_test_name, derived_test_name):
@@ -265,6 +218,12 @@ dtensor_multi_threaded_fails = {
     xfail("nn.functional.dropout3d"),
     skip("nn.functional.multi_head_attention_forward"),
     xfail("multinomial"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/167252
+    skip("full_like"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/179779
+    skip("bmm"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/180522
+    skip("baddbmm"),
 }
 
 # Ops that fail to compile with DTensor + torch.compile(fullgraph=True).
@@ -313,9 +272,6 @@ dtensor_compiled_fails = {
     xfail("nn.functional.interpolate", "nearest"),
     xfail("nn.functional.interpolate", "nearest-exact"),
     xfail("nn.functional.interpolate", "trilinear"),
-    xfail("nn.functional.max_unpool1d"),
-    xfail("nn.functional.max_unpool2d"),
-    xfail("nn.functional.max_unpool3d"),
     xfail("nn.functional.upsample_bilinear"),
     xfail("nn.functional.upsample_nearest"),
     # Data-dependent outputs (SymBool, unbacked shapes) that raise
@@ -326,28 +282,18 @@ dtensor_compiled_fails = {
     xfail("nonzero_static"),
     # Decompositions with .is_cuda checks that fail during sharding
     # propagation for aten.is_cuda / prim::device.
-    xfail("nn.functional.binary_cross_entropy"),
     xfail("nn.functional.binary_cross_entropy_with_logits"),
     xfail("nn.functional.gaussian_nll_loss"),
     xfail("nn.functional.logsigmoid"),
-    # Miscellaneous runtime crashes (e.g. index out of bounds).
-    xfail("gather"),
-    xfail("index_fill"),
-    xfail("index_add"),
-    xfail("index_copy"),
-    xfail("index_reduce", "amax"),
-    xfail("index_reduce", "amin"),
-    xfail("index_reduce", "mean"),
-    xfail("index_reduce", "prod"),
-    xfail("index_select"),
-    xfail("lu_unpack"),
     xfail("scatter"),
-    xfail("scatter_add"),
     xfail("take_along_dim"),
-    xfail("nn.functional.max_unpool3d", "grad"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
     xfail("nn.functional.multilabel_soft_margin_loss"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/181204
+    skip("norm", "nuc"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/176973
+    skip("histc"),
 }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
@@ -358,9 +304,12 @@ dtensor_numeric_only_fails = {
     xfail("eye"),
     xfail("full"),
     xfail("full_like"),
+    xfail("index_fill"),
     xfail("linspace"),
     xfail("logspace"),
     xfail("nn.functional.huber_loss"),
+    xfail("nn.functional.linear_cross_entropy"),
+    xfail("nn.functional.max_unpool3d", "grad"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.softshrink"),
     xfail("nn.functional.threshold"),
@@ -743,9 +692,6 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        _op_db,
-        "TestMultiThreadedDTensorOps",
-        "test_dtensor_op_db",
         dtensor_fails | dtensor_multi_threaded_fails | dtensor_fails_no_strategy,
     )
     def test_dtensor_op_db(self, dtype, op):
@@ -781,9 +727,6 @@ class TestLocalDTensorOps(TestDTensorOps):
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        _op_db,
-        "TestLocalDTensorOps",
-        "test_dtensor_op_db",
         dtensor_fails | dtensor_fails_no_strategy,
     )
     def test_dtensor_op_db(self, dtype, op):
@@ -807,6 +750,7 @@ class TestLocalDTensorOps(TestDTensorOps):
 # Ops where DTensor shard prop has DDEs with unbacked (base tensor passes).
 # This list only contains ops NOT in ops_dde_xfail - those are base tensor issues.
 ops_unbacked_dtensor_dde = {
+    xfail("lu_unpack"),
     xfail("__getitem__"),
     xfail("__rmatmul__"),
     xfail("_batch_norm_with_update"),
@@ -831,6 +775,7 @@ ops_unbacked_dtensor_dde = {
     xfail("cartesian_prod"),
     xfail("constant_pad_nd"),
     xfail("cumprod"),
+    xfail("diagonal_scatter"),
     xfail("dist"),
     xfail("fill"),
     xfail("flatten"),
@@ -888,6 +833,7 @@ ops_unbacked_dtensor_dde = {
     xfail("nn.functional.margin_ranking_loss"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
     xfail("nn.functional.pad", "constant"),
+    xfail("nn.functional.pixel_shuffle"),
     xfail("nn.functional.poisson_nll_loss"),
     xfail("nn.functional.soft_margin_loss"),
     xfail("nn.functional.triplet_margin_loss"),
@@ -1025,9 +971,6 @@ class TestUnbackedDTensorOps(TestDTensorOps):
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        _op_db,
-        "TestUnbackedDTensorOps",
-        "test_unbacked_dtensor_op_db",
         ops_dde_xfail
         | ops_unbacked_dtensor_dde
         | dtensor_fails_no_strategy
@@ -1064,9 +1007,6 @@ class TestSingleDimStrategies(DTensorOpTestBase):
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        op_db,
-        "TestSingleDimStrategies",
-        "test_single_dim_strategy",
         {
             # Stochastic: each shard gets independent RNG, so
             # op(full) != cat(op(shard0), op(shard1)).
@@ -1216,6 +1156,14 @@ class TestCompiledDTensorOps(TestDTensorOps):
         """
         to_dtensor = DTensorConverter(self.mesh, args, kwargs)
 
+        def is_accepted_linalg_error(exc):
+            return isinstance(exc, torch._C._LinAlgError) or (
+                # lu_factor intentionally raises a plain RuntimeError from
+                # _linalg_check_errors for singular factors.
+                isinstance(exc, RuntimeError)
+                and str(exc).startswith("torch.linalg.lu_factor:")
+            )
+
         for dtensor_args, dtensor_kwargs in to_dtensor:
             if not to_dtensor.successful():
                 continue
@@ -1226,15 +1174,28 @@ class TestCompiledDTensorOps(TestDTensorOps):
             def compiled_func(*a, **kw):
                 return func(*a, **kw)
 
-            # Just run - if it compiles and runs without error, we pass
-            compiled_func(*dtensor_args, **dtensor_kwargs)
+            try:
+                compiled_func(*dtensor_args, **dtensor_kwargs)
+            except (torch._C._LinAlgError, RuntimeError) as compiled_exc:
+                if not is_accepted_linalg_error(compiled_exc):
+                    raise
+                try:
+                    func(*dtensor_args, **dtensor_kwargs)
+                except (torch._C._LinAlgError, RuntimeError) as eager_exc:
+                    # Some valid OpInfo samples can raise for particular DTensor
+                    # placements. This test is a compile smoke, so accept
+                    # runtime errors that eager DTensor raises in the same way.
+                    if (
+                        is_accepted_linalg_error(eager_exc)
+                        and type(compiled_exc) is type(eager_exc)
+                        and str(compiled_exc) == str(eager_exc)
+                    ):
+                        continue
+                raise
 
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        _op_db,
-        "TestCompiledDTensorOps",
-        "test_compiled_dtensor_op_db",
         (
             dtensor_fails
             | dtensor_fails_no_strategy

@@ -75,9 +75,10 @@ struct TORCH_API PyCompilerInterface {
       size_t hook_input_id) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
-  virtual void call_accumulate_grad(
+  virtual at::Tensor call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
+      const at::Tensor& variable_grad,
       const at::Tensor& grad,
       bool has_post_hooks) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
@@ -1060,7 +1061,7 @@ class SwapSavedVariables {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   TraceState& state;
   // This is a borrowed reference, we do not increment ownership, or lower it,
-  // it's lifecycle is entirely longer than this objects.
+  // its lifecycle is entirely longer than this object's.
   PyObject* py_compiler;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const NodeCall& curr_node_call;

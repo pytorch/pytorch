@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/im2col_shape_check.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -43,7 +44,18 @@ static void im2col_out_mps_template(Tensor& output,
   int64_t stride_height = stride[0];
   int64_t stride_width = stride[1];
 
-  Tensor input = input_.contiguous();
+  im2col_shape_check(input_,
+                     Tensor(),
+                     kernel_height,
+                     kernel_width,
+                     dilation_height,
+                     dilation_width,
+                     pad_height,
+                     pad_width,
+                     stride_height,
+                     stride_width);
+
+  Tensor input = input_;
 
   bool batched_input = true;
 

@@ -394,6 +394,10 @@ class enforce_grad_layout_policy(_DecoratorContextManager):
         torch._C._set_grad_layout_enforcement_enabled(enable)
         self.mode = enable
 
+    def __call__(self, orig_func: F) -> F:
+        torch._C._set_grad_layout_enforcement_enabled(self.prev)
+        return super().__call__(orig_func)
+
     def __enter__(self) -> None:
         pass
 

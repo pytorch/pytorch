@@ -750,7 +750,7 @@ py::object toPyObject(IValue ivalue) {
     }
 
     auto pyCu = get_python_cu();
-    if (obj->name().find("__torch__.torch.classes") == 0) {
+    if (obj->name().starts_with("__torch__.torch.classes")) {
       return py::cast(Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
@@ -996,6 +996,10 @@ py::object _get_operation_for_overload_or_packet(
     const py::kwargs& kwargs,
     bool is_overload,
     std::optional<c10::DispatchKey> dk) {
+  if (consume_should_skip_torch_function()) {
+    return invokeOperatorFromPython(operations, args, kwargs, dk);
+  }
+
   std::string ns = symbol.ns().toUnqualString();
   std::string method_name = symbol.toUnqualString();
   std::string overload_name = operations[0]->schema().overload_name();

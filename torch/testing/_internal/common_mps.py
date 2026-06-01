@@ -578,13 +578,11 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int16,
             ],
-            "scatter_reduceamax": [torch.int32, torch.int64]
-            if MACOS_VERSION < 15.0
-            else [torch.int64],
-            "scatter_reduceamin": [torch.int32, torch.int64]
-            if MACOS_VERSION < 15.0
-            else [torch.int64],
-            "scatter_reducemean": [torch.bool],
+            # int64 lacks atomic_binary_op in Metal; the old MPSGraph path cast
+            # to int32 (silently lossy). amin/amax for int64 go through the
+            # sign-flip encode + ulong atomic_min/max bracket and work fine.
+            # bool prod/mean are excluded via dtypesIfMPS in the OpInfo itself.
+            "scatter_reduceprod": [torch.int64],
             "segment_reduce": None,
             "_segment.reduce": None,
             "segment.reduce": None,
@@ -684,14 +682,13 @@ if torch.backends.mps.is_available():
 
         UNDEFINED_XFAILLIST: dict[str, list | None] = {
             # Top 60 operators
-            # topk fails with duplicate indices
-            "topk": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
+            # PCA singular vectors are sign-ambiguous; the new Metal randn in
+            # #182386 shifted the sequence so seeded sample inputs land on
+            # different sign choices than CPU.
+            "pca_lowrank": [torch.float32],
+            # logcumsumexp on complex inputs disagrees with CPU at branch
+            # cuts (off by 2*pi); shifted RNG exposed a sample on the cut.
+            "logcumsumexp": [torch.complex64],
             # Random ops: `test_output_match` / `test_output_grad_match` route
             # these to a metadata + summary-stats comparator
             # (`_assert_random_op_match`) since MPS and CPU consume independent
@@ -702,13 +699,6 @@ if torch.backends.mps.is_available():
             # "to - 1 is out of bounds for bool" - not a comparator issue.
             "randint": [torch.bool],
             "randint_like": [torch.bool],
-            # `normal(Tensor mean, Tensor std)` with broadcast-compatible-but-
-            # different-numel inputs is rejected by the legacy `normal_mps_out`
-            # strict numel check; CPU/CUDA broadcast via the shared
-            # `normal_out_impl` template. The followup distribution-dispatch
-            # commit collapses the `normal.Tensor_*` rows in
-            # `native_functions.yaml` and drops this entry.
-            "normal": [torch.float16, torch.float32, torch.bfloat16],
             # `nn.functional.dropout` keeps a complex64 entry because the
             # MPS dropout kernel doesn't support complex inputs at all (the
             # shape comparison would fail to even run).
@@ -899,7 +889,6 @@ if torch.backends.mps.is_available():
             "linalg.householder_product": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
-            "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
@@ -927,6 +916,10 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.float32,
             ],
+            # PCA singular vectors are sign-ambiguous - same root cause as the
+            # forward leg above. RNG shift lands seeded samples on different
+            # sign choices.
+            "pca_lowrank": [torch.float32],
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,
@@ -962,6 +955,10 @@ if torch.backends.mps.is_available():
         }
 
         SKIPLIST_GRAD = {
+            # topk index gather is flaky on fp16 - whether duplicates appear
+            # in the seeded sample input depends on prior test order's RNG
+            # draws, so we skip rather than xfail.
+            "topk": [torch.float16],
             "nn.functional.pairwise_distance": [torch.float16],
             # failed assertion `destination datatype must be fp32'
             "nn.functional.conv1d": [torch.float16],

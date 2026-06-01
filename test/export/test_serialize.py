@@ -11,6 +11,7 @@ import tempfile
 import unittest
 import zipfile
 from collections import namedtuple
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
@@ -51,6 +52,7 @@ from torch._export.serde.serialize import (
     SerializeError,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
+from torch._library.opaque_object import get_opaque_type_name, register_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
@@ -66,6 +68,29 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+
+
+@dataclass(frozen=True)
+class _OpaqueConfig(torch._opaque_base.OpaqueBase):
+    scale: int
+
+    def __fx_repr__(self):
+        return (
+            f"_OpaqueConfig(scale={self.scale!r})",
+            {"_OpaqueConfig": _OpaqueConfig},
+        )
+
+
+register_opaque_type(_OpaqueConfig, typ="value")
+
+
+class _OpaqueEngine(torch._opaque_base.OpaqueBase):
+    def __init__(self, multiplier: int):
+        super().__init__()
+        self.multiplier = multiplier
+
+
+register_opaque_type(_OpaqueEngine, typ="reference")
 
 
 def get_filtered_export_db_tests():
@@ -732,18 +757,31 @@ def forward(self, x):
             self.assertIsNotNone(triton_node)
 
             args = []
+            arg_names = []
             kwargs = {}
 
             for arg in triton_node.inputs:
                 if arg.kind == ArgumentKind.POSITIONAL:
                     args.append(arg.arg)
+                    arg_names.append(arg.name)
                 elif arg.kind == ArgumentKind.KEYWORD:
                     kwargs[arg.name] = arg.arg
 
             self.assertEqual(len(args), 6)
-            # Always: name, grid, output_indices and num_warps are
+            # Positional args carry kernel parameter names
+            expected_param_names = [
+                "in_ptr0",
+                "in_ptr1",
+                "out_ptr",
+                "n_elements",
+                "fval",
+                "ival",
+            ]
+            self.assertEqual(arg_names, expected_param_names)
+            # Always: name, grid, output_indices, num_warps,
+            # kernel_param_names, kernel_param_types
             # Triton version dependent: num_cpu_threads, shared_memory_bytes
-            self.assertTrue(len(kwargs) >= 4)
+            self.assertTrue(len(kwargs) >= 6)
 
             for i in range(3):
                 self.assertIsNotNone(args[i].as_tensor)
@@ -764,6 +802,16 @@ def forward(self, x):
                 self.assertEqual(kwargs["num_cpu_threads"].as_int, 0)
             if "shared_memory_bytes" in kwargs:
                 self.assertEqual(kwargs["shared_memory_bytes"].as_int, 0)
+
+            self.assertIn("kernel_param_names", kwargs)
+            self.assertEqual(
+                kwargs["kernel_param_names"].as_strings, expected_param_names
+            )
+            self.assertIn("kernel_param_types", kwargs)
+            self.assertEqual(
+                len(kwargs["kernel_param_types"].as_strings),
+                len(expected_param_names),
+            )
 
             self.assertEqual(len(triton_node.outputs), 1)
             self.assertIsNotNone(triton_node.outputs[0].as_tensors)
@@ -1986,6 +2034,60 @@ def forward(self, x):
                 },
             ),
         )
+
+    def test_opaque_value_type_constant(self):
+        opaque_type_name = get_opaque_type_name(_OpaqueConfig)
+        with torch.library._scoped_library("test_opaque_val", "FRAGMENT") as lib:
+            lib.define(
+                f"scale(Tensor x, {opaque_type_name} config) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+
+            @torch.library.impl(lib, "scale", "CompositeExplicitAutograd")
+            def scale_impl(x, config):
+                return x * config.scale
+
+            @torch.library.register_fake("test_opaque_val::scale")
+            def scale_fake(x, config):
+                return torch.empty_like(x)
+
+            class M(torch.nn.Module):
+                def __init__(self, config):
+                    super().__init__()
+                    self.config = config
+
+                def forward(self, x):
+                    return torch.ops.test_opaque_val.scale(x, self.config)
+
+            self.check_graph(M(_OpaqueConfig(scale=3)), (torch.randn(4),), strict=False)
+
+    def test_opaque_reference_type_constant(self):
+        opaque_type_name = get_opaque_type_name(_OpaqueEngine)
+        with torch.library._scoped_library("test_opaque_ref", "FRAGMENT") as lib:
+            lib.define(
+                f"transform(Tensor x, {opaque_type_name} engine) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+
+            @torch.library.impl(lib, "transform", "CompositeExplicitAutograd")
+            def transform_impl(x, engine):
+                return x * engine.multiplier
+
+            @torch.library.register_fake("test_opaque_ref::transform")
+            def transform_fake(x, engine):
+                return torch.empty_like(x)
+
+            class M(torch.nn.Module):
+                def __init__(self, engine):
+                    super().__init__()
+                    self.engine = engine
+
+                def forward(self, x):
+                    return torch.ops.test_opaque_ref.transform(x, self.engine)
+
+            self.check_graph(
+                M(_OpaqueEngine(multiplier=5)), (torch.randn(4),), strict=False
+            )
 
 
 instantiate_parametrized_tests(TestDeserialize)

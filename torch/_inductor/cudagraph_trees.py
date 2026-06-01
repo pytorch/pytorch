@@ -69,6 +69,7 @@ from torch._higher_order_ops.cudagraph_conditional_nodes import (
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
+    copy_strided_storage_,
     get_expanded_dims,
     get_input_idxs_to_check,
     index_expanded_dims,
@@ -1149,7 +1150,13 @@ class CUDAGraphNode:
             if not isinstance(srcs[idx], torch.Tensor):
                 continue
             expanded_dims = self.expanded_dims[idx]
-            dst_tensors.append(index_expanded_dims(dsts[idx], expanded_dims))  # type: ignore[arg-type]
+            indexed_dst = index_expanded_dims(dsts[idx], expanded_dims)  # type: ignore[arg-type]
+            if torch._debug_has_internal_overlap(indexed_dst) != 0:
+                # rare path: dst still self-overlaps after dropping expanded dims
+                copy_strided_storage_(dsts[idx], srcs[idx])  # type: ignore[arg-type]
+                srcs[idx] = None  # type: ignore[call-overload]
+                continue
+            dst_tensors.append(indexed_dst)
             src_tensors.append(index_expanded_dims(srcs[idx], expanded_dims))  # type: ignore[arg-type]
             srcs[idx] = None  # type: ignore[call-overload]
         # Fails on empty lists
@@ -2212,7 +2219,10 @@ class CUDAGraphTreeManager:
     def exceed_rerecord_limit(
         self, node_id: GraphID | None, function_id: FunctionID
     ) -> bool:
-        return False
+        return (
+            self.num_rerecord[node_id][function_id]
+            > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
+        )
 
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
@@ -2275,11 +2285,15 @@ class CUDAGraphTreeManager:
                 if status == CheckInvariantStatus.SUCCESS:
                     return self.execute_node(child, new_inputs)
 
-                if (
-                    status == CheckInvariantStatus.StaticInputIdxMismatch
-                    or status == CheckInvariantStatus.CudagraphManagedIdxMismatch
-                ):
-                    unexpected_rerecord = True
+                if status != CheckInvariantStatus.SUCCESS:
+                    # StaticInputIdxMismatch fires on non-cudagraph-managed
+                    # static inputs (nn parameters and mark_static_address
+                    # tensors) whose identity can churn under
+                    # inline_inbuilt_nn_modules. We re-record but don't count
+                    # those toward cudagraph_unexpected_rerecord_limit. All
+                    # other mismatch reasons do count.
+                    if status != CheckInvariantStatus.StaticInputIdxMismatch:
+                        unexpected_rerecord = True
                     # Only compute detailed reason when debug logging is enabled
                     if log.isEnabledFor(logging.DEBUG):
                         unexpected_rerecord_reason = status_logger()
@@ -2630,10 +2644,23 @@ class CUDAGraphTreeManager:
         )
 
     @staticmethod
-    def format_dealloc_msg(stack_trace: str | None) -> str:
+    def format_dealloc_msg(
+        stack_trace: str | None, *, is_grad_output: bool = False
+    ) -> str:
         stack_trace = (
             stack_trace.strip() if stack_trace else "[Could not find stack trace]"
         )
+        if is_grad_output:
+            return (
+                "Error: accessing gradient tensor output of CUDAGraphs that has been overwritten "
+                f"by a subsequent run. Stack trace: {stack_trace}. "
+                "This can happen with torch.compile(mode='reduce-overhead') and gradient "
+                "accumulation when a .grad tensor is allocated during CUDAGraph capture. "
+                "If you need gradient accumulation, allocate stable .grad buffers outside "
+                "CUDAGraph capture before the compiled backward runs, for example by running "
+                "an eager warmup iteration or by preallocating zeroed .grad tensors. "
+                "If you do not need gradient accumulation, set .grad to None before each backward."
+            )
         return (
             "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
             f"Stack trace: {stack_trace}. "
@@ -2646,17 +2673,21 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
 
-        stor_stack_trace: dict[int, str | None] = {}
+        stor_dealloc_info: dict[int, tuple[str | None, bool]] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            is_grad_output = (
+                self.id_to_mode[node.wrapped_function.id] == CompilationMode.BACKWARD
+            )
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()
                 if ten is None:
                     continue
 
                 torch._C._set_storage_access_error_msg(
-                    ten, self.format_dealloc_msg(stack_trace)
+                    ten,
+                    self.format_dealloc_msg(stack_trace, is_grad_output=is_grad_output),
                 )
 
             # we would to enable the following assertion, but an internal model failed with a command
@@ -2672,7 +2703,10 @@ class CUDAGraphTreeManager:
                 if not storage_ref:
                     continue
 
-                stor_stack_trace[storage_ref.data_ptr()] = stack_trace
+                stor_dealloc_info[storage_ref.data_ptr()] = (
+                    stack_trace,
+                    is_grad_output,
+                )
 
         deleted = OrderedSet[Any]()
         for storage_ref in self.current_node.path_live_weakrefs():
@@ -2680,8 +2714,11 @@ class CUDAGraphTreeManager:
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
 
+                stack_trace, is_grad_output = stor_dealloc_info.get(
+                    storage_ref.data_ptr(), (None, False)
+                )
                 msg = self.format_dealloc_msg(
-                    stor_stack_trace.get(storage_ref.data_ptr())
+                    stack_trace, is_grad_output=is_grad_output
                 )
                 torch._C._free_And_Remove_DeleterFn(_storage_deref)
 
