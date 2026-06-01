@@ -13,9 +13,11 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Pool.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/SmallVector.h>
@@ -27,7 +29,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/native/IndexKernel.h>
-#include <ATen/ops/embedding_dense_backward_native.h>
 #include <ATen/ops/flip_native.h>
 #include <ATen/ops/index.h>
 #include <ATen/ops/index_add_native.h>
@@ -198,6 +199,13 @@ static void index_put_kernel_mps(TensorIterator& iter,
   @autoreleasepool {
     validateInputData(iter, index_size, index_stride, "index_put_impl");
     if (accumulate) {
+      // Metal atomic-add is non-associative for floating/complex types, so
+      // duplicate indices race on the result. Integer adds are associative
+      // and remain deterministic
+      const auto dtype = iter.tensor_base(0).scalar_type();
+      if (at::isFloatingType(dtype) || at::isComplexType(dtype)) {
+        at::globalContext().alertNotDeterministic("index_put_with_accumulate_mps");
+      }
       dispatch_index_kernel(iter,
                             index_size,
                             index_stride,
@@ -263,28 +271,73 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
               ")");
 
   auto stream = getCurrentMPSStream();
-  auto device = MPSDevice::getInstance()->device();
 
-  const bool is_dense =
-      self.is_contiguous() && source.is_contiguous() && result.is_contiguous() && index.is_contiguous();
+  // Base copy: non-indexed slices come straight from self. Skipped for in-place
+  // index_copy_, where result already aliases self.
+  if (!result.is_same(self)) {
+    result.copy_(self);
+  }
 
+  const auto is_dense = source.is_contiguous() && result.is_contiguous() && index.is_contiguous();
+  const auto indices_numel = index.numel();
+  const auto slice_numel = source.numel() / indices_numel;
+  if (slice_numel == 0) {
+    return;
+  }
+
+  const auto use_32 = canUse32BitIndexMath(result) && canUse32BitIndexMath(source) && canUse32BitIndexMath(index);
   auto dense_or_strided = is_dense ? "dense" : "strided";
   auto long_or_int = (index.scalar_type() == ScalarType::Long) ? "long" : "int";
-  auto indexCopyPSO = lib.getPipelineStateForFunc(
-      fmt::format("index_copy_{}_{}_{}", dense_or_strided, scalarToMetalTypeString(result), long_or_int));
+  auto indexCopyPSO = lib.getPipelineStateForFunc(fmt::format(
+      "index_copy_{}_{}_{}_{}", dense_or_strided, scalarToMetalTypeString(result), long_or_int, use_32 ? "32" : "64"));
+
+  const auto dim_size = result.size(dim);
+  c10::SmallVector<int64_t> slice_sizes, slice_out_strides, slice_source_strides;
+  if (!is_dense) {
+    slice_sizes.reserve(result.dim() - 1);
+    slice_out_strides.reserve(result.dim() - 1);
+    slice_source_strides.reserve(result.dim() - 1);
+    for (int64_t d = 0; d < result.dim(); d++) {
+      if (d != dim) {
+        slice_sizes.push_back(result.size(d));
+        slice_out_strides.push_back(result.stride(d));
+        slice_source_strides.push_back(source.stride(d));
+      }
+    }
+  }
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
-      uint32_t dim_arg = static_cast<uint32_t>(dim);
-      uint32_t ndim = self.dim();
-      uint32_t indices_numel = index.numel();
       [computeEncoder setComputePipelineState:indexCopyPSO];
-      mtl_setArgs(computeEncoder, result, self, source, index, dim_arg, self.sizes(), ndim, indices_numel);
-      if (!is_dense) {
-        mtl_setArgs<8>(computeEncoder, self.strides(), result.strides(), source.strides(), index.strides());
+      mtl_setArgs(computeEncoder, result, source, index);
+      if (is_dense) {
+        const auto inner = result.stride(dim);
+        const auto outer = slice_numel / inner;
+        mtl_setArgs<3>(computeEncoder, dim_size, inner, indices_numel);
+        auto maxTG = [indexCopyPSO maxTotalThreadsPerThreadgroup];
+        auto tgX = std::min<NSUInteger>(inner, maxTG);
+        auto tgY = std::min<NSUInteger>(indices_numel, std::max<NSUInteger>(1, maxTG / tgX));
+        auto tgZ = std::min<NSUInteger>(outer, std::max<NSUInteger>(1, maxTG / (tgX * tgY)));
+        [computeEncoder dispatchThreads:MTLSizeMake(inner, indices_numel, outer)
+                  threadsPerThreadgroup:MTLSizeMake(tgX, tgY, tgZ)];
+      } else {
+        auto dim_out_stride = result.stride(dim);
+        auto dim_source_stride = source.stride(dim);
+        auto indices_stride = index.stride(0);
+        auto slice_ndim = static_cast<uint32_t>(result.dim() - 1);
+        mtl_setArgs<3>(computeEncoder,
+                       dim_size,
+                       dim_out_stride,
+                       dim_source_stride,
+                       slice_sizes,
+                       slice_out_strides,
+                       slice_source_strides,
+                       slice_ndim,
+                       slice_numel,
+                       indices_stride);
+        mtl_dispatch1DJob(computeEncoder, indexCopyPSO, indices_numel * slice_numel);
       }
-      mtl_dispatch1DJob(computeEncoder, indexCopyPSO, result.numel());
     }
   });
 }
@@ -762,6 +815,15 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   TORCH_CHECK(self.scalar_type() != c10::kComplexFloat, "index_reduce for MPS does not support torch.cfloat dtype");
 
   auto reduction_type = index_reduce_type(reduce);
+  // Atomic prod/mean are non-associative for floating-point; alert unless we're
+  // on an order-invariant reduction (amin/amax) or an integer dtype. Mirrors
+  // CUDA's index_reduce_func_cuda_impl alert, narrowed to dtypes/ops that
+  // actually produce non-deterministic output on MPS.
+  const auto dtype = self.scalar_type();
+  if ((reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN) &&
+      (at::isFloatingType(dtype) || at::isComplexType(dtype))) {
+    at::globalContext().alertNotDeterministic("index_reduce_mps");
+  }
 
   if (!result.is_same(self)) {
     result.copy_(self);
@@ -866,81 +928,6 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
 
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
-}
-
-Tensor embedding_dense_backward_mps(const Tensor& grad_,
-                                    const Tensor& indices,
-                                    int64_t num_weights,
-                                    int64_t padding_idx,
-                                    bool scale_grad_by_freq) {
-  // TODO: implement padding_idx & scale_grad_by_freq.
-  using namespace at::native::mps;
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* incomingGradTensor_ = nil;
-    MPSGraphTensor* indicesTensor_ = nil;
-    MPSGraphTensor* outgoingGradTensor_ = nil;
-  };
-
-  IntArrayRef incoming_gradient_shape = grad_.sizes();
-  int64_t num_incoming_gradient_dims = incoming_gradient_shape.size();
-
-  IntArrayRef indices_shape = indices.sizes();
-  int64_t num_indices_dims = indices_shape.size();
-
-  int64_t D = incoming_gradient_shape[num_incoming_gradient_dims - 1];
-  c10::SmallVector<int64_t, 2> outgoing_gradient_shape{num_weights, D};
-  Tensor outgoing_gradient = at::empty(
-      IntArrayRef(outgoing_gradient_shape), grad_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-
-  if (outgoing_gradient.numel() == 0) {
-    return outgoing_gradient;
-  }
-
-  auto stream = at::mps::getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string key = "edb_mps:" + getTensorsStringKey({grad_, indices}) + ":num_weights" +
-        std::to_string(num_weights) + ":padding_idx" + std::to_string(padding_idx) + ":scaled" +
-        std::to_string(scale_grad_by_freq);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* incomingGradTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_));
-
-      MPSGraphTensor* indicesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(indices));
-
-      MPSGraphTensor* reshapedIndicesTensor = indicesTensor;
-
-      MPSGraphTensor* castGradTensor = incomingGradTensor;
-      MPSDataType dataType = mps::getMPSDataType(grad_);
-      // issue 105486100, scatterNDWithUpdatesTensor produces wrong result for float16
-      if (dataType == MPSDataTypeFloat16) {
-        castGradTensor = [mpsGraph castTensor:incomingGradTensor toType:MPSDataTypeFloat32 name:@"castGradTensor"];
-      }
-      if (num_indices_dims != 0) {
-        reshapedIndicesTensor = [mpsGraph expandDimsOfTensor:indicesTensor axes:@[ @-1 ] name:nil];
-      }
-
-      auto outgoingGradTensor = [mpsGraph scatterNDWithUpdatesTensor:castGradTensor
-                                                       indicesTensor:reshapedIndicesTensor
-                                                               shape:getMPSShape(IntArrayRef(outgoing_gradient_shape))
-                                                     batchDimensions:0
-                                                                mode:MPSGraphScatterModeAdd
-                                                                name:@"edb"];
-      if (dataType == MPSDataTypeFloat16) {
-        outgoingGradTensor = [mpsGraph castTensor:outgoingGradTensor toType:MPSDataTypeFloat16 name:@"castGradTensor"];
-      }
-      newCachedGraph->incomingGradTensor_ = incomingGradTensor;
-      newCachedGraph->indicesTensor_ = indicesTensor;
-      newCachedGraph->outgoingGradTensor_ = outgoingGradTensor;
-    });
-    auto incomingGradPlaceholder = Placeholder(cachedGraph->incomingGradTensor_, grad_);
-    auto indicesPlaceholder = Placeholder(cachedGraph->indicesTensor_, indices);
-    auto outgoingGradPlaceholder = Placeholder(cachedGraph->outgoingGradTensor_, outgoing_gradient);
-
-    auto feeds = dictionaryFromPlaceholders(incomingGradPlaceholder, indicesPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outgoingGradPlaceholder);
-  }
-  return outgoing_gradient;
 }
 
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Tensor& value) {
