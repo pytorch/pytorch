@@ -2406,6 +2406,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     f"{self.value.__name__}() missing 1 required positional argument: 'cond'",
                 )
 
+            if predicate_vt.is_tensor():
+                raise_type_error(
+                    tx,
+                    "cond must be a bool, but got a Tensor. "
+                    "For tensor conditions, use torch._check_tensor_all() "
+                    "to assert that all elements are true.",
+                )
+
             message_eager = None
             message_graph_proxy = None
             if message_vt is not None:
