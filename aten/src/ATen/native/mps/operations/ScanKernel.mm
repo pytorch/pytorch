@@ -561,11 +561,14 @@ void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
   const bool float_accum = self.scalar_type() == ScalarType::Float || self.scalar_type() == ScalarType::Half ||
       self.scalar_type() == ScalarType::BFloat16;
 
-  // Float scans on macOS 15+ use the fenced decoupled look-back; macOS 14 (no
-  // device fence) and deterministic mode (timing-dependent carry fold) use the
-  // deterministic multi-block kernels instead.
+  // Float scans use the single-pass decoupled look-back on Apple9+ (M3 and
+  // newer) running macOS 15+. The look-back hands a carry between threadgroups
+  // via device-memory atomics, relying on cross-threadgroup ordering (a device
+  // seq_cst fence) and forward progress that Apple8/M2 and older do not honor
+  // reliably. macOS 14 (no device fence), older GPUs, and deterministic mode (timing-
+  // dependent carry fold) use the deterministic multi-block kernels instead.
   const bool use_lookback = float_accum && is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) &&
-      !globalContext().deterministicAlgorithms();
+      is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS) && !globalContext().deterministicAlgorithms();
 
   if (n_inner == 1) {
     // Contiguous scan over the (effectively) innermost dim.
