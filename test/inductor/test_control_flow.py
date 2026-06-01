@@ -199,6 +199,24 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, [c])
 
+    class BranchTensorConstant(torch.nn.Module):
+        # A branch that materializes a tensor constant (e.g. an index tensor)
+        # which is only referenced from within the subgraph.
+        def forward(self, p, x):
+            def true_fn(t):
+                v = t[:, ::2]
+                index = torch.tensor(
+                    [[0, 0, 1], [1, 1, 2], [2, 2, 0], [0, 0, 2]],
+                    dtype=torch.long,
+                    device=t.device,
+                )
+                return v.scatter_add(1, index, torch.ones(4, 3, device=t.device))
+
+            def false_fn(t):
+                return t[:, 1::2] - 3.0
+
+            return torch.cond(p, true_fn, false_fn, (x,))
+
     class WithNonTensorPredicate(torch.nn.Module):
         def forward(self, a, b):
             def true_fn(x, y):
@@ -629,6 +647,16 @@ class CondTests(TestCase):
             inputs=(torch.randn(10, 20),),
             device=device,
             dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_branch_tensor_constant(self, device):
+        # branch references a tensor constant only used inside the subgraph
+        self._run_test(
+            model=CondModels.BranchTensorConstant(),
+            inputs=(torch.arange(24, dtype=torch.float32).reshape(4, 6),),
+            device=device,
         )
 
     @requires_gpu
