@@ -2904,6 +2904,7 @@ def get_default_op_list() -> OpTypes:
     default_recomputable_ops += [
         prims.div,
         prims.convert_element_type,
+        prims.prepare_softmax_online,
         aten.clone,
         aten._to_copy,
         aten.full_like,
