@@ -5912,9 +5912,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # bubble up the exception to the parent frame.
             raise
         except (Unsupported, UserError) as e:
-            # If this graph break has skip_frame set, unset it
-            # since it refers to the current frame and not the parent.
-            e.skip_frame = False
+            if (
+                getattr(e, "gb_type", None)
+                != "using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`"
+            ):
+                # If this graph break has skip_frame set, unset it
+                # since it refers to the current frame and not the parent.
+                e.skip_frame = False
             raise
         except Exception:
             log.debug("FAILED INLINING %s", code)

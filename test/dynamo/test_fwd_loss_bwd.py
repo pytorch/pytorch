@@ -256,6 +256,44 @@ class <lambda>(torch.nn.Module):
         )
 
     @skipIfCrossRef
+    def test_autograd_grad_kwarg_after_graph_break_resume(self):
+        def fn(w):
+            out = w * 2
+            grads_out = torch.autograd.grad(out.sum(), out, allow_unused=True)[0]
+            (grad_w,) = torch.autograd.grad(out, w, grad_outputs=grads_out)
+            return grad_w
+
+        w = torch.randn(4, requires_grad=True)
+        eager_result = fn(w)
+
+        with torch._dynamo.config.patch(trace_autograd_ops=False):
+            compiled_fn = torch.compile(fn, backend="aot_eager")
+            compiled_result = compiled_fn(w)
+
+        self.assertEqual(eager_result, compiled_result)
+
+    @skipIfCrossRef
+    def test_autograd_grad_after_inlined_graph_break_skips_frame(self):
+        def helper(loss, out, w):
+            grads_out = torch.autograd.grad(loss, out, allow_unused=True)[0]
+            (grad_w,) = torch.autograd.grad(out, w, grad_outputs=grads_out)
+            return grad_w
+
+        def fn(w):
+            out = w * 2
+            loss = out.sum()
+            return helper(loss, out, w)
+
+        w = torch.randn(4, requires_grad=True)
+        eager_result = fn(w)
+
+        with torch._dynamo.config.patch(trace_autograd_ops=False):
+            compiled_fn = torch.compile(fn, backend="aot_eager")
+            compiled_result = compiled_fn(w)
+
+        self.assertEqual(eager_result, compiled_result)
+
+    @skipIfCrossRef
     def test_autograd_grad_single_tensor(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
