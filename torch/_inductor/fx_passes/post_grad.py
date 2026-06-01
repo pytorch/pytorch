@@ -162,7 +162,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             reorder_for_locality
         )
 
-    fake_tensor_updater = FakeTensorUpdater(gm.graph)
+    fake_tensor_updater = FakeTensorUpdater(gm)
 
     for post_grad_custom_pre_pass in get_custom_graph_passes(
         config.post_grad_custom_pre_pass
@@ -1627,37 +1627,12 @@ def view_to_reshape(gm):
     _recursive_view_to_reshape(gm.graph)
 
 
-def _is_bias_like_addmm_input(inp: torch.fx.Node, output: torch.fx.Node) -> bool:
-    inp_val = inp.meta.get("val")
-    output_val = output.meta.get("val")
-    if not (isinstance(inp_val, torch.Tensor) and isinstance(output_val, torch.Tensor)):
-        return False
-
-    if len(inp_val.shape) != len(output_val.shape):
-        return True
-
-    same_shape = statically_known_true(sym_eq(inp_val.shape, output_val.shape))
-    if not same_shape:
-        for inp_dim, output_dim in zip(inp_val.shape, output_val.shape):
-            if statically_known_true(sym_eq(inp_dim, 1)) and not statically_known_true(
-                sym_eq(output_dim, 1)
-            ):
-                return True
-        return False
-
-    return inp_val.layout == torch.strided and any(
-        statically_known_true(sym_eq(stride, 0)) for stride in inp_val.stride()
-    )
-
-
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
     output = match.output_node()
-    if not _is_bias_like_addmm_input(inp, output):
-        return False
     return all(is_pointwise_use(use) for use in output.users)
 
 
@@ -2110,7 +2085,7 @@ class ConstructorMoverPass:
                     cannot_move_to_gpu.update(dependencies)
                     break
 
-                # this node was used on a op which takes in multiple devices and output a gpu
+                # this node was used on an op which takes in multiple devices and output a gpu
                 # tensor. we can convert its cpu input to gpu without making further changes
                 if self.allow_cpu_device(user) and self.is_on_target_device(user):
                     del cpu_indeg[user]
