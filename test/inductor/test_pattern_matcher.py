@@ -868,7 +868,9 @@ class TestPatternMatcher(TestCase):
     @parametrize(
         "input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls",
         [
-            (torch.float32, torch.float16, False, 1),
+            (torch.float32, torch.float16, False, 2),
+            (torch.float32, torch.bfloat16, False, 2),
+            (torch.float32, torch.float64, False, 1),
             (torch.float32, torch.float16, True, 2),
             (torch.float16, torch.float32, True, 1),
         ],
