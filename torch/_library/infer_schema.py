@@ -47,7 +47,7 @@ def infer_schema(
         prototype_function: The function from which to infer a schema for from its type annotations.
         op_name (Optional[str]): The name of the operator in the schema. If ``name`` is None, then the
             name is not included in the inferred schema. Note that the input schema to
-            ``torch.library.Library.define`` requires a operator name.
+            ``torch.library.Library.define`` requires an operator name.
         mutates_args ("unknown" | Iterable[str]): The arguments that are mutated in the function.
         tags (Tag | Sequence[Tag] | None): one or more tags to apply to the
             inferred schema. Use ``torch.Tag.inplace`` or ``torch.Tag.out`` to
