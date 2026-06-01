@@ -3051,11 +3051,13 @@ def adaptive_max_pool2d(
         ndim in (3, 4),
         lambda: f"adaptive_max_pool2d(): Expected 3D or 4D tensor, but got {ndim}D",
     )
-    for d in input.shape[-2:]:
+    for i in range(1, ndim):
         torch._check(
-            d != 0,
-            lambda: "adaptive_max_pool2d(): Expected input to have non-zero size "
-            f"for non-batch dimensions, but input has shape {tuple(input.shape)}",
+            input.size(i) > 0,
+            lambda: (
+                "adaptive_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
         )
 
     h_in = input.shape[-2]
