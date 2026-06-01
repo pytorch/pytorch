@@ -97,13 +97,7 @@ from .dependencies import (
     var_builder,
 )
 from .loop_body import LoopBody
-from .ops_handler import (
-    OpCounterCSE,
-    OpCountLimitExceeded,
-    OpCountResult,
-    ReductionType,
-    StoreMode,
-)
+from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties, ReductionHint
 from .utils import (
@@ -994,8 +988,6 @@ class Operation:
 
 @ir_dataclass
 class Loops(IRNode):
-    """Base IR node for scalar loop bodies over one or more iteration ranges."""
-
     device: torch.device
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
@@ -1057,17 +1049,14 @@ class Loops(IRNode):
             for n, s in enumerate(ranges)
         ]
 
-    @cache_on_self_and_args("Loops")
-    def inner_fn_opcount(self, max_ops: int | None = None) -> OpCountResult:
-        opcounter = OpCounterCSE(V.MockHandler(), max_ops=max_ops)
+    @cache_on_self
+    def inner_fn_opcount(self) -> OpCountResult:
+        opcounter = OpCounterCSE(V.MockHandler())
         with (
             V.set_ops_handler(opcounter),
             patch.object(FlexibleLayout, "allow_indexing", True),
         ):
-            try:
-                self.inner_fn(*self.inner_fn_args())
-            except OpCountLimitExceeded:
-                pass
+            self.inner_fn(*self.inner_fn_args())
             return opcounter.getvalue()
 
     def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
@@ -1083,7 +1072,7 @@ class Loops(IRNode):
         if threshold is None:
             threshold = 0
         threshold = max(threshold, config.realize_opcount_threshold)
-        return self.inner_fn_opcount(max_ops=threshold).num_ops > threshold
+        return self.inner_fn_opcount().num_ops > threshold
 
     def inner_fn_free_symbols(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
@@ -8339,6 +8328,7 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
 
 class SetSourceTensorKernel(ExternKernelAlloc):
     def __init__(self, self_tensor: IRNode, storage_tensor: IRNode) -> None:
+        storage_tensor = self.realize_input(storage_tensor)
         storage_tensor.freeze_layout()
         super().__init__(
             storage_tensor.get_layout(),
@@ -9983,8 +9973,8 @@ class StorageBox(MutableBox):
 
     def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (
-            self.has_large_inner_fn()
-            or self.num_reads() > config.realize_acc_reads_threshold
+            self.num_reads() > config.realize_acc_reads_threshold
+            or self.has_large_inner_fn()
             or (
                 config.realize_acc_reads_size_threshold is not None
                 and self.has_accumulated_enough_reads_by_size(
@@ -9999,15 +9989,23 @@ class StorageBox(MutableBox):
         that is used multiple times.
         """
         if users > 1 and isinstance(self.data, (Pointwise, Reduction)):
-            if self.has_large_inner_fn():
-                return True
             if is_cpu(self.data):
                 # Heuristic for realizing reused result of heavy ops on cpu
                 opcount = self.data.inner_fn_opcount()
-                heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
+                heavy_ops = [
+                    "exp",
+                    "log",
+                    "log10",
+                    "log1p",
+                    "log2",
+                    "sigmoid",
+                ]
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True
-            return self.num_reads() > config.realize_reads_threshold
+            return (
+                self.num_reads() > config.realize_reads_threshold
+                or self.has_large_inner_fn()
+            )
         return False
 
     def mark_reuse(self, users: int) -> None:
