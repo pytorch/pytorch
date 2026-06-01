@@ -34,6 +34,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     in_kernel_invocation_manager,
     run_fallback_kernel,
+    unset_fake_temporarily,
     UnsupportedOperatorException,
 )
 from torch.fx.operator_schemas import _normalize_function_or_error
@@ -218,9 +219,6 @@ def constructors(
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    if "names" in kwargs:
-        # REASON: "torch.compile doesn't support named tensors"
-        raise UnsupportedOperatorException(func)
 
     if func in _like_tensor_constructors:
         default_device = new_kwargs["input"].device
@@ -1747,7 +1745,8 @@ def _packed_sequence_batch_size(
     if real_batch_sizes is None:
         real_batch_sizes = batch_sizes.constant
     if real_batch_sizes is not None:
-        return int(real_batch_sizes[0].item())
+        with unset_fake_temporarily():
+            return int(real_batch_sizes[0].item())
 
     if fake_mode.shape_env is None:
         raise DynamicOutputShapeException(func)
@@ -1760,6 +1759,22 @@ def _packed_sequence_batch_size(
     return batch_size
 
 
+def _pad_packed_sequence_output(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    batch_first: bool,
+    total_length: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    max_batch_size = _packed_sequence_batch_size(fake_mode, func, batch_sizes)
+    max_seq_length = batch_sizes.shape[0] if total_length <= 0 else total_length
+    output = data.new_empty((max_seq_length, max_batch_size, *data.shape[1:]))
+    if batch_first:
+        output = output.transpose(0, 1)
+    return output, batch_sizes.new_empty((max_batch_size,))
+
+
 @register_fast_op_impl(aten._pad_packed_sequence.default)
 def _pad_packed_sequence_fast(
     fake_mode: FakeTensorMode,
@@ -1769,15 +1784,14 @@ def _pad_packed_sequence_fast(
     padding_value: float,
     total_length: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    max_batch_size = _packed_sequence_batch_size(
-        fake_mode, aten._pad_packed_sequence.default, batch_sizes
+    return _pad_packed_sequence_output(
+        fake_mode,
+        aten._pad_packed_sequence.default,
+        data,
+        batch_sizes,
+        batch_first,
+        total_length,
     )
-    output_size = (
-        (max_batch_size, total_length, *data.shape[1:])
-        if batch_first
-        else (total_length, max_batch_size, *data.shape[1:])
-    )
-    return data.new_empty(output_size), batch_sizes.new_empty((max_batch_size,))
 
 
 @register_proxy_metadata_impl(aten._pad_packed_sequence.default)
@@ -1791,13 +1805,14 @@ def _pad_packed_sequence(
     padding_value: float,
     total_length: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    max_batch_size = _packed_sequence_batch_size(fake_mode, func, batch_sizes)
-    output_size = (
-        (max_batch_size, total_length, *data.shape[1:])
-        if batch_first
-        else (total_length, max_batch_size, *data.shape[1:])
+    return _pad_packed_sequence_output(
+        fake_mode,
+        func,
+        data,
+        batch_sizes,
+        batch_first,
+        total_length,
     )
-    return data.new_empty(output_size), batch_sizes.new_empty((max_batch_size,))
 
 
 def _rnn_data_output(

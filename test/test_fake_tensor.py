@@ -64,6 +64,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -72,6 +73,8 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TemporaryFileName,
     TEST_ACCELERATOR,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -272,6 +275,43 @@ class FakeTensorTest(TestCase):
             fake_out = model.forward(x, w, b)
         eager_out = model.forward(x, w, b)
         self.assertEqual(fake_out.stride(), eager_out.stride())
+
+    def test_pad_packed_sequence_proxy_metadata(self):
+        data = torch.randn(6, 10)
+        batch_sizes = torch.tensor([3, 2, 1], dtype=torch.int64)
+
+        for batch_first, total_length, expected_length in (
+            (True, -1, 3),
+            (True, 0, 3),
+            (True, 5, 5),
+            (False, -1, 3),
+            (False, 0, 3),
+            (False, 5, 5),
+        ):
+            with self.subTest(batch_first=batch_first, total_length=total_length):
+                gm = make_fx(
+                    lambda data, batch_sizes: aten._pad_packed_sequence.default(
+                        data, batch_sizes, batch_first, 0.0, total_length
+                    )[0],
+                    tracing_mode="fake",
+                    pre_dispatch=True,
+                )(data, batch_sizes)
+                (pad_node,) = [
+                    node
+                    for node in gm.graph.nodes
+                    if node.target == aten._pad_packed_sequence.default
+                ]
+                padded, lengths = pad_node.meta["val"]
+
+                self.assertEqual(lengths.dim(), 1)
+                if batch_first:
+                    self.assertEqual(padded.shape[1], expected_length)
+                    self.assertEqual(padded.stride()[0], data.shape[1])
+                    self.assertEqual(padded.stride()[-1], 1)
+                else:
+                    self.assertEqual(padded.shape[0], expected_length)
+                    self.assertEqual(padded.stride()[1], data.shape[1])
+                    self.assertEqual(padded.stride()[-1], 1)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
@@ -2227,6 +2267,10 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(mode.count, 0)
 
     # PropagateRealTensors installs weakrefs
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/165387",
+    )
     @expectedFailurePropagateRealTensors
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_module_to(self):
