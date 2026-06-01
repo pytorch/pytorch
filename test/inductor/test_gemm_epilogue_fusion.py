@@ -1516,6 +1516,80 @@ class GemmEpilogueFusionTests(TestCase):
             check_nots=(*check_nots, "extern_kernels._scaled_mm"),
         )
 
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_scaled_mm_v2_fuzzes_main_epilogues(self):
+        if not PLATFORM_SUPPORTS_MX_GEMM:
+            self.skipTest("MX GEMM is not supported")
+
+        swizzle = (
+            F.SwizzleType.NO_SWIZZLE
+            if torch.version.hip
+            else F.SwizzleType.SWIZZLE_32_4_4
+        )
+
+        def fn(a, b, scale_a, scale_b, epilogue):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: epilogue(acc.float()),
+                gemm_kwargs={
+                    "scale_recipe_a": F.ScalingType.BlockWise1x32,
+                    "scale_recipe_b": F.ScalingType.BlockWise1x32,
+                    "swizzle_a": swizzle,
+                    "swizzle_b": swizzle,
+                    "output_dtype": torch.bfloat16,
+                },
+                kernel_options={"backend": "QUACK", "fast_math": True},
+            )
+
+        cases = (
+            ("affine_relu", lambda acc: (acc * 0.25 + 0.1).relu()),
+            ("silu_residual", lambda acc: F.silu(acc) + acc * 0.125),
+            ("gelu_tanh_mix", lambda acc: F.gelu(acc + 0.2) - torch.tanh(acc * 0.5)),
+        )
+
+        for seed, (name, epilogue) in enumerate(cases):
+            with self.subTest(name=name):
+                torch.manual_seed(seed)
+                m, k, n = 128, 32, 128
+                a = (0.5 * torch.randn(m, k, device="cuda", dtype=torch.bfloat16)).to(
+                    torch.float8_e4m3fn
+                )
+                b = (
+                    0.5 * torch.randn(n, k, device="cuda", dtype=torch.bfloat16)
+                ).to(torch.float8_e4m3fn).t()
+                scale_a = torch.full(
+                    (self._block_scaled_numel(m, k, 32),),
+                    1.0,
+                    device="cuda",
+                    dtype=torch.float8_e8m0fnu,
+                )
+                scale_b = torch.full(
+                    (self._block_scaled_numel(n, k, 32),),
+                    1.0,
+                    device="cuda",
+                    dtype=torch.float8_e8m0fnu,
+                )
+
+                checks, check_nots = self._quack_codegen_invariants("scale_a=", "scale_b=")
+                self._assert_compiled_matches(
+                    lambda a, b, scale_a, scale_b: fn(
+                        a,
+                        b,
+                        scale_a,
+                        scale_b,
+                        epilogue,
+                    ),
+                    a,
+                    b,
+                    scale_a,
+                    scale_b,
+                    atol=2e-1,
+                    rtol=5e-2,
+                    checks=checks,
+                    check_nots=(*check_nots, "extern_kernels._scaled_mm"),
+                )
+
     def _mxfp8_scaled_mm_v2_inputs(self, *, m=128, k=32, n=128):
         a = torch.eye(m, k, device="cuda", dtype=torch.bfloat16).to(torch.float8_e4m3fn)
         b = (
