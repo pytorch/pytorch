@@ -75,7 +75,6 @@ from ..utils import (
     get_bounds_index_expr,
     get_fused_kernel_name,
     get_kernel_metadata,
-    is_gpu,
     is_welford_reduction,
     Placeholder,
     prefix_is_pointwise,
@@ -1220,17 +1219,8 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
 
         def wrapped(*args, **kwargs) -> str:
             # Optionally upcast args to float32.
-            def maybe_cast_arg(arg) -> str:
-                if (
-                    func.__name__ == "sqrt"
-                    and (arg_dtype := triton_arg_dtype(arg)) is not None
-                    and (arg_dtype == torch.bool or is_integer_dtype(arg_dtype))
-                ):
-                    return TritonOverrides._cast_libdevice_arg(arg, torch.float32)
-                return maybe_upcast_arg(arg)
-
-            upcast_args = [maybe_cast_arg(arg) for arg in args]
-            upcast_kwargs = {key: maybe_cast_arg(val) for key, val in kwargs.items()}
+            upcast_args = [maybe_upcast_arg(arg) for arg in args]
+            upcast_kwargs = {key: maybe_upcast_arg(val) for key, val in kwargs.items()}
 
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
@@ -7077,17 +7067,6 @@ class TritonScheduling(SIMDScheduling):
         for node in scheduler.nodes:
             if isinstance(node, (SchedulerNode, FusedSchedulerNode)):
                 node.debug_device_str = debug_triton_code
-
-    def should_convert_index_expr_to_value_expr(self, node_schedule, kernel):
-        # Triton index_expr uses the kernel indexing dtype for integer
-        # expressions, so value uses need the value_expr split on every Triton
-        # accelerator backend using this scheduling path.
-        for node in node_schedule:
-            if isinstance(node, BaseSchedulerNode):
-                device = node.get_device()
-                if device is not None and is_gpu(device.type):
-                    return True
-        return False
 
     @classmethod
     def get_backend_features(cls, device: torch.device):

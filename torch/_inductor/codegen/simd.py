@@ -1983,13 +1983,6 @@ class SIMDScheduling(BaseScheduling):
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
-    def should_convert_index_expr_to_value_expr(
-        self,
-        node_schedule: list[NodeScheduleEntry],
-        kernel: SIMDKernel,
-    ) -> bool:
-        return False
-
     def can_fuse(self, node1, node2):
         """
         Hook called by Scheduler to determine if the Triton backend
@@ -3164,10 +3157,6 @@ class SIMDScheduling(BaseScheduling):
 
             kernel.finalize_indexing(all_indexing.keys())
 
-            convert_index_expr = self.should_convert_index_expr_to_value_expr(
-                node_schedule, kernel
-            )
-
             # Second pass to do codegen
             for node in node_schedule:
                 if node is DisableReduction:
@@ -3177,8 +3166,7 @@ class SIMDScheduling(BaseScheduling):
                 else:
                     # TODO - use split ranges ?
                     indexing_dtype_strength_reduction(node._body)
-                    if convert_index_expr:
-                        convert_index_expr_to_value_expr(node._body)
+                    convert_index_expr_to_value_expr(node._body)
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 
