@@ -94,6 +94,7 @@ from .common import (
     ArgName,
     BackendFeature,
     ConstexprArg,
+    TMADescriptorArg,
     CSE,
     CSEVariable,
     DeferredLine,
@@ -3056,6 +3057,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             collections.defaultdict(dict)
         )
         self.tma_min_block_sizes = dict[str, int]()
+        # Maps inner kernel-arg name (e.g. "in_ptr0") to the
+        # TensorDescriptorOptions for host-side TMA descriptor creation.
+        # The per-config launcher calls TensorDescriptor.from_tensor()
+        # before kernel launch instead of every CTA calling
+        # tl.make_tensor_descriptor() (fixes issue #185819).
+        self.host_tma_descriptor_args: dict[str, TensorDescriptorOptions] = {}
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._pdl_load_index = 0
@@ -3778,6 +3785,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # but the default is zero
                 assert other == ", other=0.0"
                 other = ""
+
+            # ── Host-side TMA fast path (issue #185819) ─────────────────
+            # When the stable Triton TMA API is available and this buffer
+            # has no constant offset, skip kernel-side descriptor creation.
+            # The kernel receives a pre-built TensorDescriptor from the
+            # host launcher, eliminating per-CTA construction overhead that
+            # causes a 1.4-1.6x slowdown for simple pointwise ops.
+            #
+            # Template-forced paths (can_lift=True) manage their own
+            # host-side descriptors via ir.TMADescriptor; skip them.
+            if (
+                has_triton_stable_tma_api()
+                and config.triton.use_tensor_descriptor
+                and not indexing.can_lift
+                and indexing.constant_offset == 0
+            ):
+                if var not in self.host_tma_descriptor_args:
+                    self.host_tma_descriptor_args[var] = indexing
+                return var, other  # arg IS the pre-created descriptor
+            # ── end host-side TMA fast path ──────────────────────────────
+
         else:
             if not check:
                 # workaround https://github.com/triton-lang/triton/issues/2813
@@ -6158,6 +6186,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             flops = self.estimate_flops()
             if flops is not None:
                 out["kernel_flop"] = flops
+        if self.host_tma_descriptor_args:
+            # Pass {inner_arg: [block_dim_str, ...]} to the per-config
+            # launcher so it can call TensorDescriptor.from_tensor() with
+            # the actual autotuned XBLOCK / YBLOCK values (issue #185819).
+            out["host_tma_descriptor_args"] = {
+                inner: [str(s) for s in opts.block_shape]
+                for inner, opts in self.host_tma_descriptor_args.items()
+            }
         return out
 
     @functools.cached_property
@@ -6250,6 +6286,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if symbol in V.graph.sizevars.inv_precomputed_replacements:
                     signature[i] = SizeArg(
                         arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
+                    )
+
+        # Upgrade TensorArg -> TMADescriptorArg for host-side TMA buffers
+        # so Triton compiles the kernel with tensordesc<dtype[B0, B1]>
+        # argument types instead of raw pointers (issue #185819).
+        if self.host_tma_descriptor_args:
+            for i, (argname, arg) in enumerate(zip(argdefs, signature)):
+                if (
+                    isinstance(arg, TensorArg)
+                    and argname.name in self.host_tma_descriptor_args
+                ):
+                    tma_opts = self.host_tma_descriptor_args[argname.name]
+                    signature[i] = TMADescriptorArg(
+                        name=argname.name,
+                        api_type="stable",
+                        block_shape=list(tma_opts.block_shape),
+                        dtype=V.graph.get_dtype(arg.buffer),
                     )
 
         mutated_args: OrderedSet[str] = OrderedSet()
