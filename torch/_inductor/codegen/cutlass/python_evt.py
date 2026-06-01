@@ -1,6 +1,8 @@
+import ast
 import itertools
-from collections.abc import Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from os import linesep
 from typing import Any
 
@@ -18,6 +20,198 @@ from ...virtualized import V
 
 
 _ACCUMULATOR_ARG_NAME = "accum"
+
+# 1/sqrt(2) (M_SQRT1_2), the constant Inductor's gelu decomposition multiplies
+# the input by before applying erf.
+_GELU_ERF_INV_SQRT2 = 0.7071067811865476
+
+
+def _is_close_constant(node: ast.expr, value: float, tol: float = 1e-6) -> bool:
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, (int, float))
+        and not isinstance(node.value, bool)
+        and abs(float(node.value) - value) < tol
+    )
+
+
+def _mult_factors(node: ast.expr) -> list[ast.expr]:
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return _mult_factors(node.left) + _mult_factors(node.right)
+    return [node]
+
+
+def _match_call(node: ast.expr, name: str) -> "ast.Call | None":
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == name
+        and len(node.args) == 1
+    ):
+        return node
+    return None
+
+
+def _same(a: ast.expr, b: ast.expr) -> bool:
+    return ast.dump(a) == ast.dump(b)
+
+
+def _match_gelu_erf(node: ast.expr) -> "ast.expr | None":
+    """Match gelu's erf decomposition ``x * 0.5 * (1 + erf(x / sqrt(2)))`` and
+    return the inner argument ``x``. Matching is commutativity-aware for the
+    multiplications and the addition.
+    """
+    factors = _mult_factors(node)
+    if len(factors) != 3:
+        return None
+    half = next((f for f in factors if _is_close_constant(f, 0.5)), None)
+    if half is None:
+        return None
+    rest = [f for f in factors if f is not half]
+
+    def match_one_plus_erf(f: ast.expr) -> "ast.expr | None":
+        # Match ``1 + erf(x / sqrt(2))`` and return ``x``.
+        if not (isinstance(f, ast.BinOp) and isinstance(f.op, ast.Add)):
+            return None
+        operands = [f.left, f.right]
+        if not any(_is_close_constant(o, 1.0) for o in operands):
+            return None
+        erf_call = next(
+            (c for c in (_match_call(o, "erf") for o in operands) if c is not None),
+            None,
+        )
+        if erf_call is None:
+            return None
+        erf_factors = _mult_factors(erf_call.args[0])
+        if len(erf_factors) != 2 or not any(
+            _is_close_constant(g, _GELU_ERF_INV_SQRT2) for g in erf_factors
+        ):
+            return None
+        return next(
+            g for g in erf_factors if not _is_close_constant(g, _GELU_ERF_INV_SQRT2)
+        )
+
+    # ``x`` may itself be an addition (e.g. gelu(accum + bias)), so identify the
+    # ``1 + erf(...)`` factor by structure rather than assuming it is the only Add.
+    for i, f in enumerate(rest):
+        erf_x = match_one_plus_erf(f)
+        if erf_x is not None and _same(erf_x, rest[1 - i]):
+            return rest[1 - i]
+    return None
+
+
+@dataclass(frozen=True)
+class _ActivationPattern:
+    # ``name`` must be a functor the CUTLASS EVT frontend binds natively (see
+    # ``ast_op_to_bindings`` in the cutlass python_ast frontend).
+    name: str
+    # Cheap substring guard so we only parse epilogues that may contain the
+    # decomposition (a primitive that the activation expands into).
+    trigger: str
+    match: Callable[[ast.expr], "ast.expr | None"]
+
+
+# Activations that Inductor decomposes but CUTLASS can emit as a single functor.
+# Add new entries here to re-fuse additional decomposed activations.
+_ACTIVATION_PATTERNS: tuple[_ActivationPattern, ...] = (
+    _ActivationPattern("gelu", "erf", _match_gelu_erf),
+)
+
+
+def _fuse_activations(code: str) -> str:
+    """Re-compose decomposed activations back into single CUTLASS functor calls.
+
+    Inductor lowers activations such as ``aten.gelu`` into
+    primitive ops (``erf``, ``sigmoid``, ``mul``, ...) before reaching CUTLASS
+    codegen. The CUTLASS EVT frontend natively supports a number of activation
+    functors, so we pattern-match each decomposition (``_ACTIVATION_PATTERNS``)
+    and fold it back into a single activation node. This enables fusion for
+    activations whose primitives are unsupported (e.g. the ``erf`` in gelu) and
+    reduces the compute-node count for the rest.
+    """
+    active = [p for p in _ACTIVATION_PATTERNS if p.trigger in code]
+    if not active:
+        return code
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+    if not tree.body or not isinstance(tree.body[0], ast.FunctionDef):
+        return code
+    func = tree.body[0]
+
+    assigns: dict[str, ast.expr] = {}
+    for stmt in func.body:
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Name)
+        ):
+            assigns[stmt.targets[0].id] = stmt.value
+
+    def inline(node: ast.expr) -> ast.expr:
+        # Fully inline temporary assignments so the expression tree only refers
+        # to function parameters (accum / read buffers) and literal constants.
+        if isinstance(node, ast.Name) and node.id in assigns:
+            return inline(assigns[node.id])
+        if isinstance(node, ast.BinOp):
+            return ast.BinOp(
+                left=inline(node.left), op=node.op, right=inline(node.right)
+            )
+        if isinstance(node, ast.UnaryOp):
+            return ast.UnaryOp(op=node.op, operand=inline(node.operand))
+        if isinstance(node, ast.Call):
+            return ast.Call(
+                func=node.func, args=[inline(a) for a in node.args], keywords=[]
+            )
+        return node
+
+    changed = False
+    for stmt in func.body:
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Name)
+        ):
+            inlined = inline(stmt.value)
+            for pattern in active:
+                x = pattern.match(inlined)
+                if x is not None:
+                    stmt.value = ast.Call(
+                        func=ast.Name(id=pattern.name, ctx=ast.Load()),
+                        args=[x],
+                        keywords=[],
+                    )
+                    changed = True
+                    break
+
+    if not changed:
+        return code
+
+    # The folded assignment no longer references the decomposition temporaries,
+    # so drop the now-dead intermediates (the CUTLASS frontend builds a compute
+    # node for every assignment it sees). The frontend emits ``return`` dedented
+    # to module level (a sibling of the function def in Python 3.12), so seed
+    # liveness from every Return in the tree, not only those inside ``func.body``.
+    live: OrderedSet[str] = OrderedSet()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Return) and node.value is not None:
+            live.update(n.id for n in ast.walk(node.value) if isinstance(n, ast.Name))
+
+    kept: list[ast.stmt] = []
+    for stmt in reversed(func.body):
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Name)
+        ):
+            if stmt.targets[0].id not in live:
+                continue
+            live.update(n.id for n in ast.walk(stmt.value) if isinstance(n, ast.Name))
+        kept.append(stmt)
+    func.body = list(reversed(kept))
+
+    return ast.unparse(ast.fix_missing_locations(tree))
 
 
 def scaled_mm_evt(
@@ -64,7 +258,7 @@ class CutlassEVTOpsMixIn:
 
     @staticmethod
     def constant(value: Any, dtype: Any) -> str:
-        raise NotImplementedError
+        return str(float(value))
 
     @staticmethod
     def mul(x0: str, x1: str) -> str:
@@ -101,6 +295,10 @@ class CutlassEVTOpsMixIn:
     @staticmethod
     def exp(x0: str) -> str:
         return CutlassEVTOpsMixIn._prefix_un_op("exp", x0)
+
+    @staticmethod
+    def erf(x0: str) -> str:
+        return CutlassEVTOpsMixIn._prefix_un_op("erf", x0)
 
 
 class MockCutlassHandler(CutlassEVTOpsMixIn, WrapperHandler):
@@ -209,12 +407,14 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         )
 
     def get_value(self) -> str:
-        return linesep.join(
-            [
-                self._render_input_signature(),
-                self.body.getvalue(),
-                self._render_return_statement(),
-            ]
+        return _fuse_activations(
+            linesep.join(
+                [
+                    self._render_input_signature(),
+                    self.body.getvalue(),
+                    self._render_return_statement(),
+                ]
+            )
         )
 
     def finalize(self) -> None:

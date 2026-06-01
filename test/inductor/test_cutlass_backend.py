@@ -2280,6 +2280,32 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
+    def test_evt_gelu(self):
+        # gelu is decomposed by Inductor into x * 0.5 * (1 + erf(x / sqrt(2)));
+        # the EVT codegen re-folds this back into the native CUTLASS GELU
+        # functor (see _fuse_activations in python_evt.py).
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.nn.functional.gelu(a @ b)
+
+        M = 1024
+        N = 512
+        a = torch.ones(M, N).to(GPU_TYPE).half()
+        b = torch.ones(N, N).to(GPU_TYPE).half().t()
+        model = TestModel().to(GPU_TYPE)
+
+        result = torch.compile(model)(a, b)
+        ref_result = model(a, b)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
     @evt_all_ops
     def test_evt_mixed_dtypes(self, op):
         M = 1024
