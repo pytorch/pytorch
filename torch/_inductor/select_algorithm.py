@@ -78,6 +78,7 @@ from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.hints import DeviceProperties
+from .runtime.runtime_utils import next_power_of_2
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
@@ -401,6 +402,32 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         self.fixed_inputs = fixed_inputs
         self.mask = mask
         self.input_shapes = input_shapes or {}
+        self.default_input_shape = self._broadcast_input_shapes(
+            tuple(self.input_shapes.values())
+        )
+        self.trailing_shape: tuple[str, ...] = ()
+        self.trailing_mask: str | None = None
+
+    @staticmethod
+    def _broadcast_input_shapes(
+        shapes: Sequence[tuple[str, ...]],
+    ) -> tuple[str, ...]:
+        if not shapes:
+            return ()
+        rank = max(len(shape) for shape in shapes)
+        result = ["1"] * rank
+        for shape in shapes:
+            padded_shape = ("1",) * (rank - len(shape)) + tuple(shape)
+            for dim, size in enumerate(padded_shape):
+                if size == "1":
+                    continue
+                if result[dim] in ("1", size):
+                    result[dim] = size
+                else:
+                    raise AssertionError(
+                        f"Cannot broadcast input shapes for modification: {shapes}"
+                    )
+        return tuple(result)
 
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed input."""
@@ -423,13 +450,51 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
             )
             return out
 
-        shape = self.input_shapes.get(name, ())
+        base_shape = self.input_shapes.get(name, self.default_input_shape)
+        shape = (*base_shape, *self.trailing_shape)
+        expr = f"({self.fixed_inputs[name]})"
+        expr = self._append_trailing_singleton_dims(expr, base_shape)
+        expr = self._broadcast_to_shape(expr, shape)
         return self.kernel.cse.generate(
             self.kernel.compute,
-            f"({self.fixed_inputs[name]})",
+            expr,
             dtype=torch.float32,
             shape=shape,
         )
+
+    @contextlib.contextmanager
+    def set_trailing_shape(
+        self, trailing_shape: tuple[str, ...], trailing_mask: str | None
+    ):
+        old_trailing_shape = self.trailing_shape
+        old_trailing_mask = self.trailing_mask
+        self.trailing_shape = trailing_shape
+        self.trailing_mask = trailing_mask
+        try:
+            yield
+        finally:
+            self.trailing_shape = old_trailing_shape
+            self.trailing_mask = old_trailing_mask
+
+    def _append_trailing_singleton_dims(
+        self, expr: str, base_shape: tuple[str, ...]
+    ) -> str:
+        if not (
+            self.trailing_shape
+            and base_shape
+            and any(size != "1" for size in base_shape)
+        ):
+            return expr
+        index = ", ".join([":"] * len(base_shape) + ["None"] * len(self.trailing_shape))
+        return f"{expr}[{index}]"
+
+    def _broadcast_to_shape(self, expr: str, shape: tuple[str, ...]) -> str:
+        if not shape:
+            return expr
+        shape_str = ", ".join(shape)
+        if len(shape) == 1:
+            shape_str += ","
+        return f"tl.broadcast_to({expr}, ({shape_str}))"
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""
@@ -450,7 +515,13 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 
         buf_name = self._add_kernel_input(name)
         index_str = self._broadcast_index(index, f"{value}.shape")
-        return f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
+        mask = self._append_trailing_singleton_dims(self.mask, self.default_input_shape)
+        if self.trailing_mask is not None:
+            mask = f"({mask}) & ({self.trailing_mask})"
+        mask = f"tl.broadcast_to({mask}, {value}.shape)"
+        return (
+            f"tl.atomic_add({buf_name} + {index_str}, {value}, {mask}, sem='relaxed')"
+        )
 
     def _add_kernel_input(self, name: str) -> str:
         return self.kernel.args.input(name)
@@ -1042,7 +1113,48 @@ class TritonTemplateKernel(TritonKernel):
         )
         return self.subgraphs[subgraph_number]
 
-    def _handle_scatter_graph(self, scatter_graph):
+    def _create_scatter_index_vars(
+        self, ranges: Sequence[sympy.Expr], leading_rank: int
+    ) -> tuple[list[sympy.Expr], tuple[str, ...], str | None]:
+        scatter_vars: list[sympy.Expr] = []
+        trailing_shape: list[str] = []
+        mask_components: list[str] = []
+        scatter_rank = len(ranges)
+        total_rank = leading_rank + scatter_rank
+        for dim, size in enumerate(ranges):
+            size = V.graph.sizevars.simplify(size)
+            size_int = V.graph.sizevars.guard_int(size)
+            block_size = next_power_of_2(size_int)
+            size_str = texpr(self.rename_indexing(size))
+            block_size_str = str(block_size)
+            trailing_shape.append(block_size_str)
+            expr = f"tl.arange(0, {block_size_str})"
+            shape = ["1"] * total_rank
+            if total_rank:
+                tensor_dim = leading_rank + dim
+                shape[tensor_dim] = block_size_str
+                index = ["None"] * total_rank
+                index[tensor_dim] = ":"
+                expr = f"{expr}[{', '.join(index)}]"
+            var = self.cse.generate(
+                self.compute,
+                expr,
+                dtype=torch.int64,
+                shape=tuple(shape),
+            )
+            if block_size != size_int:
+                mask_components.append(f"({var} < {size_str})")
+                var = self.cse.generate(
+                    self.compute,
+                    f"tl.minimum({var}, {size_str} - 1)",
+                    dtype=torch.int64,
+                    shape=tuple(shape),
+                )
+            scatter_vars.append(sympy_index_symbol(str(var)))
+        trailing_mask = " & ".join(mask_components) if mask_components else None
+        return scatter_vars, tuple(trailing_shape), trailing_mask
+
+    def _handle_scatter_graph(self, scatter_graph, modification_handler):
         """Handle processing for a single scatter graph.
 
         Args:
@@ -1051,6 +1163,9 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(scatter_graph, ir.ComputedBuffer), (
             f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
         )
+        # Scatter graphs may reuse the same fixed-input expressions with different
+        # trailing ranges, so do not let CSEVariable shape metadata leak between them.
+        self.cse.invalidate(OrderedSet())
 
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
@@ -1058,9 +1173,14 @@ class TritonTemplateKernel(TritonKernel):
                 x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())
             )
 
-        return scatter_graph.data.store_output(  # type: ignore[attr-defined]
-            scatter_graph.name, contiguous_strides, []
+        ranges = tuple(getattr(scatter_graph.data, "ranges", ()))
+        scatter_vars, trailing_shape, trailing_mask = self._create_scatter_index_vars(
+            ranges, len(modification_handler.default_input_shape)
         )
+        with modification_handler.set_trailing_shape(trailing_shape, trailing_mask):
+            return scatter_graph.data.store_output(  # type: ignore[attr-defined]
+                scatter_graph.name, contiguous_strides, scatter_vars
+            )
 
     def modification(
         self,
@@ -1098,7 +1218,11 @@ class TritonTemplateKernel(TritonKernel):
                 # Handle scatter stores
                 if isinstance(subgraph, list):
                     for scatter_graph in subgraph:
-                        scatters.append(self._handle_scatter_graph(scatter_graph))
+                        scatters.append(
+                            self._handle_scatter_graph(
+                                scatter_graph, modification_handler
+                            )
+                        )
                 elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
                 else:

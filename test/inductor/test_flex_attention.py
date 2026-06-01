@@ -2091,6 +2091,112 @@ class TestFlexAttention(InductorTestCase):
         self.assertEqual(eager_weight_grad, compiled_weight_grad, atol=1e-1, rtol=1e-1)
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @expected_not_implemented_on_mps
+    @config.patch(unroll_reductions_threshold=65)
+    def test_learnable_rope_score_mod_captured_grads(self, device):
+        B_local, H_local, S_local = 1, 4, 4
+        D_local, rope_dim, head_group = 32, 8, 2
+
+        def make_tensor(*shape):
+            return torch.randn(*shape, device=device, requires_grad=True)
+
+        def make_score_mod(query_rope, key_rope):
+            def score_mod(score, b, h, q_idx, kv_idx):
+                return score + torch.dot(
+                    query_rope[b, h, q_idx],
+                    key_rope[b, h // head_group, kv_idx],
+                )
+
+            return score_mod
+
+        def dense_reference(query, key, value, query_rope, key_rope):
+            scores = torch.matmul(query, key.transpose(-2, -1)) * (D_local**-0.5)
+            head_indices = torch.arange(H_local, device=device) // head_group
+            key_rope_per_head = key_rope[:, head_indices, :, :]
+            rope_scores = torch.einsum("bhqr,bhkr->bhqk", query_rope, key_rope_per_head)
+            return torch.matmul(torch.softmax(scores + rope_scores, dim=-1), value)
+
+        torch.manual_seed(0)
+        query = make_tensor(B_local, H_local, S_local, D_local)
+        key = make_tensor(B_local, H_local, S_local, D_local)
+        value = make_tensor(B_local, H_local, S_local, D_local)
+        query_rope = make_tensor(B_local, H_local, S_local, rope_dim)
+        key_rope = make_tensor(B_local, H_local, S_local, rope_dim)
+
+        ref_inputs = tuple(
+            x.detach().clone().requires_grad_(True)
+            for x in (query, key, value, query_rope, key_rope)
+        )
+
+        with temp_float32_matmul_precision("highest"):
+            compiled_out = torch.compile(flex_attention, fullgraph=True)(
+                query,
+                key,
+                value,
+                score_mod=make_score_mod(query_rope, key_rope),
+            )
+            compiled_out.sum().backward()
+
+            ref_out = dense_reference(*ref_inputs)
+            ref_out.sum().backward()
+
+        torch.testing.assert_close(compiled_out, ref_out, atol=1e-4, rtol=1e-4)
+        for compiled, ref in zip((query, key, value, query_rope, key_rope), ref_inputs):
+            torch.testing.assert_close(compiled.grad, ref.grad, atol=5e-3, rtol=5e-3)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @expected_not_implemented_on_mps
+    def test_captured_vector_grads_different_trailing_extents(self, device):
+        B_local, H_local, S_local, D_local = 1, 4, 4, 32
+
+        def make_tensor(*shape):
+            return torch.randn(*shape, device=device, requires_grad=True)
+
+        def make_score_mod(bias_q, bias_kv):
+            def score_mod(score, b, h, q_idx, kv_idx):
+                return score + bias_q[b, h, q_idx].sum() + bias_kv[b, h, kv_idx].sum()
+
+            return score_mod
+
+        def dense_reference(query, key, value, bias_q, bias_kv):
+            scores = torch.matmul(query, key.transpose(-2, -1)) * (D_local**-0.5)
+            scores = scores + bias_q.sum(-1)[:, :, :, None]
+            scores = scores + bias_kv.sum(-1)[:, :, None, :]
+            return torch.matmul(torch.softmax(scores, dim=-1), value)
+
+        torch.manual_seed(0)
+        query = make_tensor(B_local, H_local, S_local, D_local)
+        key = make_tensor(B_local, H_local, S_local, D_local)
+        value = make_tensor(B_local, H_local, S_local, D_local)
+        bias_q = make_tensor(B_local, H_local, S_local, 3)
+        bias_kv = make_tensor(B_local, H_local, S_local, 5)
+
+        ref_inputs = tuple(
+            x.detach().clone().requires_grad_(True)
+            for x in (query, key, value, bias_q, bias_kv)
+        )
+
+        with temp_float32_matmul_precision("highest"):
+            compiled_out = torch.compile(flex_attention, fullgraph=True)(
+                query,
+                key,
+                value,
+                score_mod=make_score_mod(bias_q, bias_kv),
+            )
+            compiled_out.sum().backward()
+
+            ref_out = dense_reference(*ref_inputs)
+            ref_out.sum().backward()
+
+        torch.testing.assert_close(compiled_out, ref_out, atol=1e-4, rtol=1e-4)
+        for compiled, ref in zip((query, key, value, bias_q, bias_kv), ref_inputs):
+            torch.testing.assert_close(compiled.grad, ref.grad, atol=5e-3, rtol=5e-3)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
