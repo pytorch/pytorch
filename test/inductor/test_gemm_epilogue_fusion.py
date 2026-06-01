@@ -1665,7 +1665,7 @@ class GemmEpilogueFusionTests(TestCase):
             )
 
     @requires_cuda_and_triton
-    def test_cuda_inductor_quack_backend_rejects_scaled_mm_v2_nvfp4(self):
+    def test_cuda_inductor_quack_backend_routes_scaled_mm_v2_nvfp4_to_quack(self):
         if not PLATFORM_SUPPORTS_MX_GEMM or torch.version.hip:
             self.skipTest("NVFP4 GEMM is not supported")
 
@@ -1696,7 +1696,7 @@ class GemmEpilogueFusionTests(TestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        m, k, n = 128, 32, 128
+        m, k, n = 128, 256, 192
         a = _bfloat16_to_float4_e2m1fn_x2(
             torch.eye(m, k, device="cuda", dtype=torch.bfloat16)
         )
@@ -1717,10 +1717,11 @@ class GemmEpilogueFusionTests(TestCase):
         )
         global_scale = torch.ones((1,), device="cuda", dtype=torch.float32)
 
-        with self.assertRaisesRegex(Exception, "MXFP8-like.*BlockWise1x32"):
-            torch.compile(fn, backend="inductor", fullgraph=True)(
-                a, b, scale_a, global_scale, scale_b
-            )
+        result = torch.compile(fn, backend="inductor", fullgraph=True)(
+            a, b, scale_a, global_scale, scale_b
+        )
+        expected = torch.eye(m, n, device="cuda", dtype=torch.bfloat16).relu()
+        self.assertEqual(result, expected)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_scaled_mm_v2_fast_accum(self):

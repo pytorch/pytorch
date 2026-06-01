@@ -8546,33 +8546,48 @@ def _validate_quack_scaled_mm(gemm_kwargs, quack_args) -> None:
 
 
 def _validate_quack_scaled_mm_v2(kernel_options, quack_args) -> None:
-    from torch.nn.functional import ScalingType
+    from torch.nn.functional import ScalingType, SwizzleType
 
     metadata = kernel_options.get("_scaled_mm_v2", {})
-    expected_swizzle = _quack_mxfp8_expected_swizzle().value
-    if (
-        len(quack_args) < 4
-        or metadata.get("scale_a_len") != 1
-        or metadata.get("scale_b_len") != 1
-        or metadata.get("out_dtype") is None
+    expected_mxfp8_swizzle = _quack_mxfp8_expected_swizzle().value
+    common_unsupported = (
+        metadata.get("out_dtype") is None
         or metadata.get("has_bias", False)
         or metadata.get("contraction_dim")
         or metadata.get("use_fast_accum", False)
-        or metadata.get("scale_recipe_a") != [ScalingType.BlockWise1x32.value]
-        or metadata.get("scale_recipe_b") != [ScalingType.BlockWise1x32.value]
-        or metadata.get("swizzle_a") != [expected_swizzle]
-        or metadata.get("swizzle_b") != [expected_swizzle]
-    ):
+    )
+    is_mxfp8 = (
+        len(quack_args) >= 4
+        and metadata.get("scale_a_len") == 1
+        and metadata.get("scale_b_len") == 1
+        and metadata.get("scale_recipe_a") == [ScalingType.BlockWise1x32.value]
+        and metadata.get("scale_recipe_b") == [ScalingType.BlockWise1x32.value]
+        and metadata.get("swizzle_a") == [expected_mxfp8_swizzle]
+        and metadata.get("swizzle_b") == [expected_mxfp8_swizzle]
+        and quack_args[2].get_dtype() == torch.float8_e8m0fnu
+        and quack_args[3].get_dtype() == torch.float8_e8m0fnu
+    )
+    is_nvfp4 = (
+        len(quack_args) >= 5
+        and metadata.get("scale_a_len") == 2
+        and metadata.get("scale_b_len") == 2
+        and metadata.get("scale_recipe_a")
+        == [ScalingType.BlockWise1x16.value, ScalingType.TensorWise.value]
+        and metadata.get("scale_recipe_b")
+        == [ScalingType.BlockWise1x16.value, ScalingType.TensorWise.value]
+        and metadata.get("swizzle_a")
+        == [SwizzleType.SWIZZLE_32_4_4.value, SwizzleType.NO_SWIZZLE.value]
+        and metadata.get("swizzle_b")
+        == [SwizzleType.SWIZZLE_32_4_4.value, SwizzleType.NO_SWIZZLE.value]
+        and quack_args[2].get_dtype() == torch.float8_e4m3fn
+        and quack_args[3].get_dtype() == torch.float32
+        and quack_args[4].get_dtype() == torch.float8_e4m3fn
+    )
+    if common_unsupported or not (is_mxfp8 or is_nvfp4):
         raise NotImplementedError(
-            "QUACK _scaled_mm_v2 epilogue currently supports only MXFP8-like "
-            "BlockWise1x32 scales without bias/contraction_dim/use_fast_accum"
-        )
-    if (
-        quack_args[2].get_dtype() != torch.float8_e8m0fnu
-        or quack_args[3].get_dtype() != torch.float8_e8m0fnu
-    ):
-        raise NotImplementedError(
-            "QUACK _scaled_mm_v2 epilogue requires float8_e8m0fnu scale tensors"
+            "QUACK _scaled_mm_v2 epilogue currently supports MXFP8-like "
+            "BlockWise1x32 or NVFP4 BlockWise1x16+TensorWise unit global scales without "
+            "bias/contraction_dim/use_fast_accum"
         )
 
 
@@ -8793,6 +8808,7 @@ def _build_quack_epilogue_config(
     main_output_transform,
     concat_layout,
     tuned,
+    scaled_mm_scale_a_len=1,
 ):
     return ir.QuackGemmEpilogueConfig(
         epilogue_name=epilogue_key,
@@ -8801,6 +8817,7 @@ def _build_quack_epilogue_config(
         alpha=alpha,
         beta=beta,
         out_dtype=main_output_dtype,
+        scaled_mm_scale_a_len=scaled_mm_scale_a_len,
         epilogue_arg_indices=epilogue_arg_indices,
         epilogue_arg_kinds=epilogue_arg_kinds,
         local_reduce_out_index=local_reduce_out_index,
@@ -9006,6 +9023,9 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 main_output_transform=main_output_transform,
                 concat_layout=concat_layout,
                 tuned=tuned,
+                scaled_mm_scale_a_len=kernel_options.get("_scaled_mm_v2", {}).get(
+                    "scale_a_len", 1
+                ),
             ),
             mutated_inputs=mutated_inputs or None,
         )
