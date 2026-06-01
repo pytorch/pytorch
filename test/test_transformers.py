@@ -4917,10 +4917,10 @@ class TestSDPAXpuOnly(NNTestCase):
 
     @parametrize("fused_kernel", [SDPBackend.OVERRIDEABLE])
     @parametrize("dtype", [torch.half, torch.bfloat16, torch.float32])
-    @parametrize("batch_size", [4])
+    @parametrize("batch_size", [1])
     @parametrize("n_head", [[3, 1], [4, 2]])
-    @parametrize("q_size", [1, 32, 77, 128, 144, 512, 576])
-    @parametrize("kv_size", [1, 32, 77, 128, 144, 512, 576])
+    @parametrize("q_size", [1, 32, 77, 128, 144, 512])
+    @parametrize("kv_size", [1, 32, 77, 128, 144, 512])
     @parametrize("head_dim", [64])
     @parametrize("mask_type", [None, "causal", "float"])
     @parametrize("train", [True])

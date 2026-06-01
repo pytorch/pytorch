@@ -4,7 +4,9 @@
 #include <ATen/native/transformers/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/native/transformers/xpu/sdp_utils.h>
+#include <ATen/xpu/XPUGeneratorImpl.h>
 #include <c10/util/Array.h>
+#include <c10/util/env.h>
 #include <torch/library.h>
 #include <utility>
 
@@ -13,6 +15,19 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
+  if (query_size_last == 0 || key_size_last == 0 || value_size_last == 0) {
+    if (debug) {
+      TORCH_WARN(
+          "OneDNN attention does not support zero head dimension.",
+          " Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          key_size_last,
+          ", Value.size(-1): ",
+          value_size_last);
+    }
+    return false;
+  }
   if (query_size_last != key_size_last) {
     if (debug) {
       TORCH_WARN(
@@ -188,19 +203,35 @@ bool can_use_mem_efficient_attention(
   return true;
 }
 
+bool check_prefer_flash_attention() {
+  static const bool prefer_flash =
+      c10::utils::check_env("TORCH_XPU_PREFER_FLASH_ATTENTION") == true;
+  return prefer_flash;
+}
+
 bool priority_order_init = false;
 
 std::array<sdp::SDPBackend, sdp::num_backends> priority_order(
     sdp::sdp_params const& params) {
   if (!priority_order_init) {
     priority_order_init = true;
-    const std::vector<int64_t> priority_order = {
-        static_cast<int64_t>(at::SDPBackend::overrideable),
-        static_cast<int64_t>(at::SDPBackend::flash_attention),
-        static_cast<int64_t>(at::SDPBackend::math),
-        static_cast<int64_t>(at::SDPBackend::efficient_attention),
-        static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
-    at::globalContext().setSDPPriorityOrder(priority_order);
+    if (check_prefer_flash_attention()) {
+      const std::vector<int64_t> flash_order = {
+          static_cast<int64_t>(at::SDPBackend::flash_attention),
+          static_cast<int64_t>(at::SDPBackend::overrideable),
+          static_cast<int64_t>(at::SDPBackend::math),
+          static_cast<int64_t>(at::SDPBackend::efficient_attention),
+          static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
+      at::globalContext().setSDPPriorityOrder(flash_order);
+    } else {
+      const std::vector<int64_t> priority_order = {
+          static_cast<int64_t>(at::SDPBackend::overrideable),
+          static_cast<int64_t>(at::SDPBackend::flash_attention),
+          static_cast<int64_t>(at::SDPBackend::math),
+          static_cast<int64_t>(at::SDPBackend::efficient_attention),
+          static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
+      at::globalContext().setSDPPriorityOrder(priority_order);
+    }
   }
   return at::globalContext().sDPPriorityOrder();
 }
@@ -361,6 +392,24 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   at::Tensor logsumexp =
       at::empty({batch_size, num_head_q, seq_len_q}, opts.dtype(at::kFloat));
 
+  at::Tensor philox_seed, philox_offset;
+  if (dropout_p != 0.0) {
+    auto gen = at::get_generator_or_default<at::XPUGeneratorImpl>(
+        std::nullopt, at::xpu::detail::getDefaultXPUGenerator());
+    // number of times random will be generated per thread, to offset philox
+    // counter in thc random state
+    int64_t counter_offset = batch_size * num_head_q * seq_len_q * seq_len_kv;
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    at::PhiloxXpuState philox_state = gen->philox_xpu_state(counter_offset);
+    std::tuple<uint64_t, uint64_t> unpack_state =
+        xpu::philox::unpack(philox_state);
+    philox_seed = at::full(
+        {}, std::get<0>(unpack_state), at::dtype(at::kLong).device(at::kCPU));
+    philox_offset = at::full(
+        {}, std::get<1>(unpack_state), at::dtype(at::kLong).device(at::kCPU));
+  }
+
   at::native::onednn::sdpa(
       batch_size,
       seq_len_q,
@@ -377,11 +426,11 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       scale.has_value() ? scale.value() : (1.0 / std::sqrt(head_dim_qk)),
       attention,
       true,
-      logsumexp);
+      logsumexp,
+      dropout_p,
+      philox_seed,
+      philox_offset);
 
-  // rng not used
-  auto philox_seed = at::empty({}, at::dtype(at::kLong));
-  auto philox_offset = at::empty({}, at::dtype(at::kLong));
   return std::make_tuple(
       std::move(attention),
       std::move(logsumexp),
@@ -482,7 +531,10 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
       scale.has_value() ? scale.value() : (1.0 / std::sqrt(query.size(3))),
       grad_q,
       grad_k,
-      grad_v);
+      grad_v,
+      dropout_p,
+      philox_seed,
+      philox_offset);
   return std::make_tuple(
       std::move(grad_q),
       std::move(grad_k),
