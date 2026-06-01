@@ -25,7 +25,9 @@ from torch.utils._sympy.functions import (
     Identity,
     Max as TorchSymMax,
     Min as TorchSymMin,
+    LShift,
     OpaqueUnaryFn_cos,
+    RShift,
     BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
 )
@@ -983,6 +985,15 @@ class TestSympySolve(TestCase):
 
 
 class TestSympyFunctions(TestCase):
+    def test_shift_edges(self):
+        x = sympy.Symbol("x", integer=True)
+        self.assertEqual(LShift(x, 0), x)
+        self.assertEqual(RShift(x, 0), x)
+        with self.assertRaisesRegex(ValueError, "negative shift count"):
+            LShift(x, -1)
+        with self.assertRaisesRegex(ValueError, "negative shift count"):
+            RShift(x, -1)
+
     def test_pickle(self):
         x = OpaqueUnaryFn_cos(sympy.Symbol("a"))
         r = pickle.loads(pickle.dumps(x))
