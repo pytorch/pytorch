@@ -153,6 +153,7 @@ class CppCSEVariable(CSEVariable):
         super().__init__(name, bounds, dtype, shape=shape)
         self.is_vec = False
         self.dependent_itervars = OrderedSet[sympy.Symbol]()
+        self.lowp_fp_from: CppCSEVariable | None = None
 
     def __repr__(self) -> str:
         return (
