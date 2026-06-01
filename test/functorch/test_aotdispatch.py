@@ -7013,6 +7013,35 @@ def forward(self, primals_1, tangents_1):
         x = torch.randn(4, requires_grad=True)
         fn(x).sum().backward()
 
+    def test_disable_functionalization_ignores_effect_token_metadata(self):
+        def fn(args):
+            (x,) = args
+            return torch.linalg.inv(x)
+
+        compiled_fn = compiled_function(
+            fn,
+            nop,
+            nop,
+            partition_fn=default_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=True,
+        )
+
+        x = torch.tensor(
+            [[2.0, 0.1, -0.2], [0.3, 1.7, 0.4], [-0.1, 0.2, 2.1]]
+        ).requires_grad_()
+        eager_x = x.detach().clone().requires_grad_()
+        compiled_x = x.detach().clone().requires_grad_()
+
+        eager_out = fn([eager_x])
+        (eager_grad,) = torch.autograd.grad(eager_out.sum(), eager_x)
+
+        compiled_out = compiled_fn([compiled_x])
+        (compiled_grad,) = torch.autograd.grad(compiled_out.sum(), compiled_x)
+
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(compiled_grad, eager_grad)
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_force_save_effectful_ops(self):
         """Test that effectful op outputs are saved, not recomputed.
@@ -7664,7 +7693,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("def _backward_prologue(", source)
-        self.assertIn("_raise_if_functorch_active_", source)
+        self.assertIn("torch._C._functorch.peek_interpreter_stack()", source)
 
     def test_backward_prologue_no_codegen_for_inference(self):
         with capture_codegen_source("backward_prologue") as captured:
@@ -7951,7 +7980,8 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("def _compiled_forward(", source)
-        self.assertIn("_normalize_as_list_", source)
+        self.assertIn("if isinstance(fw_outs, tuple):", source)
+        self.assertIn("elif not isinstance(fw_outs, list):", source)
 
     def test_compiled_forward_elides_backward_state(self):
         with capture_codegen_source("compiled_function_forward") as captured:
@@ -10734,6 +10764,32 @@ Expected a .* tangent but got a plain Tensor.""",
         _test_fn(fn_functional)
         _test_fn(fn_mutation)
         _test_fn(fn_inplace, check_backward=False)
+
+    @parametrize("case", ["sum_expand", "computed_view_expand"])
+    @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
+    def test_backward_with_expanded_computed_output(self, case):
+        def fn(x):
+            if case == "sum_expand":
+                return x.sum(dim=0, keepdim=True).expand_as(x)
+            elif case == "computed_view_expand":
+                return x[:1].sin().expand_as(x)
+            raise AssertionError(f"unexpected case: {case}")
+
+        ref_x = torch.randn(4, 8, requires_grad=True)
+        x = ref_x.detach().clone().requires_grad_(True)
+        ref_grad = torch.randn(4, 8)
+        grad = ref_grad.detach().clone()
+
+        ref_y = fn(ref_x)
+        y = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref_y, y)
+        self.assertEqual(ref_y.stride(), y.stride())
+        self.assertTrue(0 in y.stride())
+
+        ref_y.backward(ref_grad)
+        y.backward(grad)
+        self.assertEqual(ref_x.grad, x.grad)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @parametrize("dynamic_shapes", [True, False])

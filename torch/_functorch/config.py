@@ -94,9 +94,12 @@ autograd_cache_normalize_inputs = not is_fbcode()
 #
 # Deprecated: Custom ops returning aliased outputs is deprecated and will
 # become an error in a future version of PyTorch. Currently error_on_custom_op_aliasing
-# is False by default and may be explicitly enabled.
+# is True in CI unless explicitly overridden.
 check_custom_op_aliasing = True
-error_on_custom_op_aliasing = False
+error_on_custom_op_aliasing: bool = Config(
+    env_name_force="TORCHINDUCTOR_ERROR_ON_CUSTOM_OP_ALIASING",
+    default=bool(os.getenv("CI")),
+)
 
 
 def remote_autograd_cache_default() -> bool | None:
@@ -333,8 +336,9 @@ backward_pass_autocast = "same_as_forward"
 # False if a user wants to retain_graph=True for backward.
 donated_buffer = not is_fbcode()
 
-# Controls the default graph output format used by draw_graph
-# Supported formats are defined here https://graphviz.org/docs/outputs/
+# Controls the default graph output format used by draw_graph.
+# Most supported formats are defined here https://graphviz.org/docs/outputs/.
+# The "dot" and "raw" formats write raw DOT text without invoking Graphviz.
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 
 # Valid only if fake_tensor_propagate_real_tensors = True; if a fake-real
