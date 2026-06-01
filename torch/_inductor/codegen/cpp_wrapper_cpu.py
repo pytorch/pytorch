@@ -42,6 +42,18 @@ from .wrapper import (
 )
 
 
+def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
+    """
+    Convert rational divisions in a solved integer symbol expression to exact
+    integer division before C++ printing.
+    """
+    expr = sympy.together(sympy.sympify(expr))
+    numerator, denominator = sympy.fraction(expr)
+    if denominator == 1:
+        return numerator
+    return CleanDiv(numerator, denominator)
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
@@ -621,7 +633,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 code.writeline(f"int64_t {size_symbol} = {base_name}[{dim}];")
                 solution = try_solve(sympy.Eq(sym_or_exp, size_symbol), free_symbol)
                 if solution is not None:
-                    code.writeline(f"int64_t {free_symbol} = {cexpr(solution[1])};")
+                    expr = _rewrite_symbol_solution_for_int_codegen(solution[1])
+                    code.writeline(f"int64_t {free_symbol} = {cexpr(expr)};")
                     bound_vars.add(free_symbol)
                 else:
                     raise AssertionError(
