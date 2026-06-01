@@ -113,7 +113,17 @@ def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
 
 
 class VecISA:
-    """Base vector ISA descriptor and dry-run validation helper."""
+    """Describes a CPU SIMD ISA (AVX2, AVX512, NEON, SVE, VSX, ZVECTOR) for
+    inductor's CPU vectorization.
+
+    Carries the bit width, ``CPU_CAPABILITY_*`` build macros, compiler arch
+    flags, and the per-dtype lane count used by the codegen. Subclasses (one
+    per ISA) override the class-level fields; instances are hashable by their
+    string representation and usable as a dict key. ``bool(vec_isa)`` runs the
+    dry-compile + dlopen probe described in
+    `Note [Checking for Vectorized Support in Inductor]`_ to verify the host
+    toolchain actually produces a working ``.so`` for this ISA.
+    """
 
     _bit_width: int
     _macro: list[str]
@@ -208,7 +218,57 @@ except OSError as _load_error:
     def __hash__(self) -> int:
         return hash(str(self))
 
+    def _probe_load(self, output_path: str, output_dir: str) -> bool:
+        """Spawn a child Python that ``dlopen``s ``output_path``.
+
+        Bound the dlopen probe so a stuck child cannot hang the parent for
+        the whole 30-minute outer timeout (observed in CI). ``subprocess.run``
+        kills the child on ``TimeoutExpired`` (``check_call`` leaks it).
+        Returns ``False`` on timeout or load failure, ``True`` on success.
+        """
+        if _use_linux_lightweight_isa_check():
+            torch_lib_path = _isa_dry_run_torch_lib_path()
+            cuda_dependency_paths, cuda_dependency_names = (
+                _isa_dry_run_cuda_dependency_paths()
+            )
+            load_script = VecISA._linux_dry_run_load_script(
+                output_path,
+                cuda_dependency_paths,
+                cuda_dependency_names,
+            )
+            subprocess_env = _isa_dry_run_env(torch_lib_path)
+        else:
+            load_script = VecISA._import_torch_dry_run_load_script(output_path)
+            subprocess_env = python_subprocess_env()
+
+        try:
+            subprocess.run(
+                [sys.executable, "-c", load_script],
+                cwd=output_dir,
+                stderr=subprocess.DEVNULL,
+                env=subprocess_env,
+                timeout=60,
+                check=True,
+            )
+        except subprocess.TimeoutExpired:
+            warnings.warn(
+                f"VecISA dlopen probe for {self} hung after 60s",
+                stacklevel=2,
+            )
+            return False
+        except subprocess.CalledProcessError:
+            return False
+        return True
+
     def check_build(self, code: str) -> bool:
+        """Dry-compile ``code`` with this ISA's flags and verify the resulting
+        shared library can be loaded.
+
+        Compiles into the inductor codecache, then spawns a short-lived
+        subprocess to ``dlopen`` the ``.so``. Returns ``True`` if both build
+        and load succeed, ``False`` on compile error, load failure, or dlopen
+        probe timeout.
+        """
         from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, write
         from torch._inductor.cpp_builder import (
             CppBuilder,
@@ -249,33 +309,10 @@ except OSError as _load_error:
                 )
                 if not os.path.isfile(output_path):
                     x86_isa_help_builder.build()
-
-                # Check build result
-                if _use_linux_lightweight_isa_check():
-                    torch_lib_path = _isa_dry_run_torch_lib_path()
-                    cuda_dependency_paths, cuda_dependency_names = (
-                        _isa_dry_run_cuda_dependency_paths()
-                    )
-                    load_script = VecISA._linux_dry_run_load_script(
-                        output_path,
-                        cuda_dependency_paths,
-                        cuda_dependency_names,
-                    )
-                    subprocess_env = _isa_dry_run_env(torch_lib_path)
-                else:
-                    load_script = VecISA._import_torch_dry_run_load_script(output_path)
-                    subprocess_env = python_subprocess_env()
-
-                subprocess.check_call(
-                    [sys.executable, "-c", load_script],
-                    cwd=output_dir,
-                    stderr=subprocess.DEVNULL,
-                    env=subprocess_env,
-                )
             except Exception:
                 return False
 
-            return True
+            return self._probe_load(output_path, output_dir)
 
     def __bool__(self) -> bool:
         return self.__bool__impl(config.cpp.vec_isa_ok)
