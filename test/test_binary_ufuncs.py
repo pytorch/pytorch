@@ -89,7 +89,7 @@ _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
 
 @instantiate_parametrized_tests
 class TestBinaryUfuncs(TestCase):
-    def _test_cop(self, torchfn, mathfn, dtype, device):
+    def _test_cop(self, torchfn, mathfn, dtype):
         def reference_implementation(res2):
             for i, j in iter_indices(sm1):
                 idx1d = i * sm1.size(0) + j
@@ -97,8 +97,8 @@ class TestBinaryUfuncs(TestCase):
             return res2
 
         # contiguous
-        m1 = torch.randn(10, 10, 10, dtype=dtype, device=device)
-        m2 = torch.randn(10, 10 * 10, dtype=dtype, device=device)
+        m1 = torch.randn(10, 10, 10, dtype=dtype)
+        m2 = torch.randn(10, 10 * 10, dtype=dtype)
         sm1 = m1[4]
         sm2 = m2[4]
 
@@ -107,8 +107,8 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(res1, res2)
 
         # non-contiguous
-        m1 = torch.randn(10, 10, 10, dtype=dtype, device=device)
-        m2 = torch.randn(10 * 10, 10 * 10, dtype=dtype, device=device)
+        m1 = torch.randn(10, 10, 10, dtype=dtype)
+        m2 = torch.randn(10 * 10, 10 * 10, dtype=dtype)
         sm1 = m1[:, 4]
         sm2 = m2[:, 4]
         # view as sm1.size()
@@ -186,21 +186,19 @@ class TestBinaryUfuncs(TestCase):
 
     @parametrize("dtype", [torch.float])
     def test_cdiv(self, dtype):
-        self._test_cop(torch.div, operator.truediv, dtype, "cpu")
+        self._test_cop(torch.div, operator.truediv, dtype)
 
     @parametrize("dtype", [torch.float])
     def test_cremainder(self, dtype):
-        self._test_cop(torch.remainder, operator.mod, dtype, "cpu")
+        self._test_cop(torch.remainder, operator.mod, dtype)
 
     @parametrize("dtype", [torch.float])
     def test_cmul(self, dtype):
-        self._test_cop(torch.mul, operator.mul, dtype, "cpu")
+        self._test_cop(torch.mul, operator.mul, dtype)
 
     @parametrize("dtype", [torch.float])
     def test_cpow(self, dtype):
-        self._test_cop(
-            torch.pow, lambda x, y: nan if x < 0 else math.pow(x, y), dtype, "cpu"
-        )
+        self._test_cop(torch.pow, lambda x, y: nan if x < 0 else math.pow(x, y), dtype)
 
     @parametrize(
         "dtype", [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]

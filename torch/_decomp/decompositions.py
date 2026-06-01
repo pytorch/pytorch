@@ -298,7 +298,7 @@ def silu(self: Tensor) -> Tensor:
 @out_wrapper("grad_input")
 @pw_cast_for_opmath
 def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
-    sigmoid = 1 / (1 + torch.exp(-self))
+    sigmoid = torch.sigmoid(self)
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 
@@ -1307,12 +1307,32 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
     if guard_or_false(x.numel() == 0):
         unnormalized = torch.exp(x)
     else:
-        x_max = torch.amax(x, dim, keepdim=True)
+        x_max = _softmax_unbacked_safe_amax(x, dim)
         unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
     return result
+
+
+def _softmax_unbacked_safe_amax(x: Tensor, dim: int) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if x.ndim == 0:
+        return torch.amax(x, dim, keepdim=True)
+
+    dim = utils.canonicalize_dim(x.ndim, dim)
+    if guard_or_false(x.shape[dim] > 0):
+        return torch.amax(x, dim, keepdim=True)
+
+    # Plain amax has no identity, so it cannot reduce over an empty dim.
+    # With unbacked sizes this becomes a deferred runtime assert, but eager
+    # softmax handles empty inputs. Pad a single -inf, the identity for max:
+    # it never wins for non-empty input and makes empty input well-defined.
+    pad_shape = list(x.shape)
+    pad_shape[dim] = 1
+    x = torch.cat((x, x.new_full(pad_shape, float("-inf"))), dim=dim)
+    return torch.amax(x, dim, keepdim=True)
 
 
 @register_decomposition(aten._log_softmax)
@@ -1335,7 +1355,7 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     if guard_or_false(x.numel() == 0):
         shifted = x
     else:
-        x_max = torch.amax(x, dim, keepdim=True)
+        x_max = _softmax_unbacked_safe_amax(x, dim)
         shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     result = shifted - shifted_logsumexp
@@ -1380,21 +1400,25 @@ def embedding_dense_backward(
     )
     grad_output = grad_output.to(computation_dtype)
     indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
+    valid_indices = (indices >= 0) & (indices < num_weights)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
-        counts = aten._unsafe_index_put(counts, [indices], ones, accumulate=True)
-        grad_weights_scale = counts[indices]
+        counts = aten._unsafe_masked_index_put_accumulate(
+            counts, valid_indices, [indices], ones
+        )
+        grad_weights_scale = aten._unsafe_masked_index(
+            counts, valid_indices, [indices], 1
+        )
         grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
-    mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
-    grad = grad_output.masked_fill(mask, 0)
+    mask = _unsqueeze_to_dim(valid_indices & (indices != padding_idx), grad_output.ndim)
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return aten._unsafe_index_put(grad_weight, [indices], grad, accumulate=True).to(
-        result_dtype
-    )
+    return aten._unsafe_masked_index_put_accumulate(
+        grad_weight, mask, [indices], grad_output
+    ).to(result_dtype)
 
 
 def prod(x: list[int]):
