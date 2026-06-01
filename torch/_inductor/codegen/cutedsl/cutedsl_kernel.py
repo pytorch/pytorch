@@ -69,7 +69,7 @@ class CuteDSLKernelWrapper:
         return self.kernel_fn(*args, stream=stream, **kwargs)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class CuteDSLVectorLoadConfig:
     vec_size: int
     index: sympy.Symbol
@@ -94,7 +94,7 @@ class CuteDSLVectorLoadConfig:
         return self.dim + ndim if self.dim < 0 else self.dim
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class CuteDSLIndexFragment:
     """Generated index expression metadata for CuteDSL tensor loads.
 
@@ -237,6 +237,8 @@ class CuteDSLTemplateKernel(Kernel):
         from torch._inductor.select_algorithm import PartialRender
 
         """Render the kernel using the template, returning PartialRender object with hooks."""
+        self._template_kwargs = dict(kwargs)
+
         # Available {{}} hooks for jinja rendering
         template_env = {
             "def_kernel": self.def_kernel,

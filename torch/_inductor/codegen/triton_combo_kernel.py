@@ -479,7 +479,6 @@ class ComboKernel(Kernel):
         self.num_warps = 8
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
-        self.standalone_autotune_seed_infos: list[tuple[str, list[Any], list[Any]]] = []
         # (src_code, kernel, node_schedule) for each subkernel, populated by
         # SIMDScheduling.generate_combo_kernel_code BEFORE process_kernel so the
         # seed signature matches the combo subkernel's (incl. in_out_ptr0).
@@ -832,10 +831,12 @@ class ComboKernel(Kernel):
                 )
                 @triton.jit
             """
-        elif self.per_subkernel_blocks:
-            # Combo with per-subkernel tuning: use its own decorator.
-            # Each subkernel is tuned individually by a standalone seed
-            # kernel; the combo only needs a placeholder config + metadata.
+        elif self.per_subkernel_blocks and (
+            config.combo_seed_autotune_at_compile_time or V.graph.cpp_wrapper
+        ):
+            # Compile-time seed flow: each subkernel was tuned by a standalone
+            # seed kernel and the stitched config baked into combo_grid_meta, so
+            # the combo only needs a placeholder config + metadata.
             heuristics_line = f"""
                 @triton_heuristics.combo_kernel(
                     filename=__file__,
@@ -1200,67 +1201,6 @@ class ComboKernel(Kernel):
         if self.dynamic_shape_args:
             self.add_numel_to_call_args(name, call_args, arg_types)
 
-        triton_autotune_seed_infos = self.standalone_autotune_seed_infos
-        if self.standalone_autotune_seed_infos:
-            inplaced_call_arg_replacements: dict[str, str] = {}
-            seen_inplaced_args: OrderedSet[str] = OrderedSet()
-            for inplaced in self.args.inplace_buffers.values():
-                if isinstance(inplaced, RemovedArg):
-                    continue
-                if inplaced.inner_name in seen_inplaced_args:
-                    continue
-                seen_inplaced_args.add(inplaced.inner_name)
-                live_name = inplaced.other_names[-1]
-                for other_name in inplaced.other_names[:-1]:
-                    inplaced_call_arg_replacements[other_name] = live_name
-
-            seed_specs = []
-            triton_autotune_seed_infos = []
-            for (
-                seed_name,
-                seed_call_args,
-                seed_arg_types,
-            ) in self.standalone_autotune_seed_infos:
-                seed_call_args = [
-                    inplaced_call_arg_replacements.get(arg, arg)
-                    if isinstance(arg, str)
-                    else arg
-                    for arg in seed_call_args
-                ]
-                stale_args = [
-                    arg
-                    for arg in seed_call_args
-                    if isinstance(arg, str) and arg in V.graph.removed_buffers
-                ]
-                assert not stale_args, (
-                    f"Combo standalone autotune seed {seed_name} references "
-                    f"removed buffers {stale_args}"
-                )
-                triton_autotune_seed_infos.append(
-                    (seed_name, seed_call_args, seed_arg_types)
-                )
-                seed_args = wrapper.prepare_triton_kernel_call(seed_call_args)
-                if len(seed_args) == 1:
-                    seed_args_str = f"({seed_args[0]},)"
-                else:
-                    seed_args_str = f"({', '.join(seed_args)})"
-                seed_specs.append(f"({seed_name}, {seed_args_str})")
-            if seed_specs:
-                if len(seed_specs) == 1:
-                    seed_specs_str = f"({seed_specs[0]},)"
-                else:
-                    seed_specs_str = f"({', '.join(seed_specs)})"
-                # Runtime seed-bench path: only when compile-time bench is
-                # off. cpp_wrapper can't call Python helpers at runtime.
-                if (
-                    not config.combo_seed_autotune_at_compile_time
-                    and not V.graph.cpp_wrapper
-                ):
-                    wrapper.writeline(f"if combo_seeds_need_tuning({name}):")
-                    wrapper.writeline(
-                        f"    start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
-                    )
-
         wrapper.generate_kernel_call(
             name,
             call_args,
@@ -1268,8 +1208,24 @@ class ComboKernel(Kernel):
             arg_types=arg_types,
             triton_meta=self.triton_meta,
             inductor_meta=self.inductor_meta,
-            triton_autotune_seed_infos=triton_autotune_seed_infos,
         )
+
+    def _subkernel_config_cap(self, sub_kernel: TritonKernel) -> int:
+        """Size-bucketed cap on autotune configs for a sub-kernel: 1 for small
+        sub-kernels, 2 for larger. Precomputed into combo_grid_meta and consumed
+        by _handle_combo_kernel_per_subkernel_blocks (and, later, the seed path).
+        """
+        if sub_kernel.inside_reduction:
+            rnumel = 1
+            for tree in sub_kernel.range_trees:
+                if tree.is_reduction:
+                    rnumel *= int(V.graph.sizevars.optimization_hint(tree.numel))
+            return 1 if rnumel <= config.combo_kernels_seed_small_rnumel else 2
+        total = 1
+        for tree in sub_kernel.range_trees:
+            if not tree.is_reduction:
+                total *= int(V.graph.sizevars.optimization_hint(tree.numel))
+        return 1 if total <= config.combo_kernels_seed_small_pointwise_total else 2
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:
         """
@@ -1285,6 +1241,11 @@ class ComboKernel(Kernel):
             "num_kernels": num_kernels,
             "min_blocks": min_blocks,
         }
+        if self.per_subkernel_blocks:
+            # Used by the runtime _handle_combo_kernel_per_subkernel_blocks path
+            # (combo_seed_autotune_at_compile_time=False) to group sub-kernels
+            # with identical heuristic inputs.
+            meta["autotune_grouping"] = config.combo_kernel_autotune_grouping
 
         if not self.enable_autotune:
             default_config: dict[str, int] = {}
@@ -1340,6 +1301,9 @@ class ComboKernel(Kernel):
                             sub_kernel.tiling_scores
                         ).name
                     )
+
+                if config.combo_kernels_seed_autotune_cap:
+                    meta[f"config_cap_{num}"] = self._subkernel_config_cap(sub_kernel)
 
             for tree in sub_kernel.range_trees:
                 if not tree.is_reduction:
