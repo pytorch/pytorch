@@ -1431,7 +1431,7 @@ class DisableContext(_TorchDynamoContext):
                     # internal implementation details, not user-facing.
                     # TODO: Ideally we shouldn't need this check because nested
                     # annotate() calls shouldn't override existing keys.
-                    fn_module = getattr(fn, "__module__", "")
+                    fn_module = getattr(fn, "__module__", "") or ""
                     is_torch_internal = fn_module == "torch" or fn_module.startswith(
                         "torch."
                     )
