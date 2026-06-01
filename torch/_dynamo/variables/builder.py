@@ -937,7 +937,7 @@ class VariableBuilder:
             source_key = k
 
             source_value = GetItemSource(self.get_source(), source_key)
-            res_value = LazyVariableTracker.create(v, source_value)
+            res_value = LazyVariableTracker.create(v, source_value, tx=self.tx)
 
             return key, res_value
 
@@ -1068,6 +1068,7 @@ class VariableBuilder:
                 LazyVariableTracker.create(
                     getattr(value, name),
                     source=AttrSource(self.source, name),
+                    tx=self.tx,
                 )
                 for name in namedtuple_fields(type(value))
             ]
@@ -1121,9 +1122,9 @@ class VariableBuilder:
                     source_key = k
                 else:
                     source_key = ConstDictKeySource(base, i)
-                    key = LazyVariableTracker.create(k, source_key)
+                    key = LazyVariableTracker.create(k, source_key, tx=self.tx)
                 source_value = DictGetItemSource(base, source_key)
-                res_value = LazyVariableTracker.create(v, source_value)
+                res_value = LazyVariableTracker.create(v, source_value, tx=self.tx)
 
                 return key, res_value
 
@@ -1208,7 +1209,9 @@ class VariableBuilder:
             L = list(value)
             items = [
                 LazyVariableTracker.create(
-                    v, source=NonSerializableSetGetItemSource(self.source, i)
+                    v,
+                    source=NonSerializableSetGetItemSource(self.source, i),
+                    tx=self.tx,
                 )
                 for i, v in enumerate(L)
             ]
@@ -1888,6 +1891,7 @@ class VariableBuilder:
                     proxy,
                     value,
                     source=self.source,
+                    tx=self.tx,
                 )
 
             if is_opaque_value_type(type(value)):
@@ -1963,6 +1967,7 @@ class VariableBuilder:
                 proxy,  # pyrefly: ignore[bad-argument-type]
                 fake_script_obj,
                 source=self.source,
+                tx=self.tx,
             )
         elif (
             isinstance(value, (dict, collections.OrderedDict))
@@ -1982,10 +1987,10 @@ class VariableBuilder:
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
-                key = LazyVariableTracker.create(k, source_key)
+                key = LazyVariableTracker.create(k, source_key, tx=self.tx)
 
                 source_value = DictSubclassGetItemSource(base, source_key)
-                res_value = LazyVariableTracker.create(v, source_value)
+                res_value = LazyVariableTracker.create(v, source_value, tx=self.tx)
 
                 return key, res_value
 
@@ -2022,6 +2027,7 @@ class VariableBuilder:
                 LazyVariableTracker.create(
                     tuple.__getitem__(value, i),
                     source=GetItemSource(self.get_source(), i),
+                    tx=self.tx,
                 )
                 for i in range(tuple.__len__(value))
             ]
@@ -2045,6 +2051,7 @@ class VariableBuilder:
                 LazyVariableTracker.create(
                     list.__getitem__(value, i),
                     source=ListGetItemSource(self.get_source(), i),
+                    tx=self.tx,
                 )
                 for i in range(list.__len__(value))
             ]
@@ -2064,6 +2071,7 @@ class VariableBuilder:
                 LazyVariableTracker.create(
                     list.__getitem__(L, i),
                     source=NonSerializableSetGetItemSource(self.get_source(), i),
+                    tx=self.tx,
                 )
                 for i in range(list.__len__(L))
             ]
@@ -2191,6 +2199,7 @@ class VariableBuilder:
             LazyVariableTracker.create(
                 item,
                 source=GetItemSource(self.get_source(), i),
+                tx=self.tx,
             )
             for i, item in enumerate(value)
         ]
@@ -3964,6 +3973,7 @@ def handle_traced_output(
         return TorchScriptObjectVariable.create(
             proxy,
             example_value,
+            tx=tx,
         )
     elif is_opaque_type(type(example_value)):
         # This is for handling opaque objects in custom ops
@@ -3971,6 +3981,7 @@ def handle_traced_output(
             return TorchScriptObjectVariable.create(
                 example_value,  # pyrefly: ignore[bad-argument-type]
                 example_value,
+                tx=tx,
             )
         fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
             tx.output.fake_mode, example_value
@@ -3978,6 +3989,7 @@ def handle_traced_output(
         return TorchScriptObjectVariable.create(
             proxy,
             fake_script_obj,
+            tx=tx,
         )
     else:
         unimplemented(
@@ -4979,7 +4991,7 @@ class SourcelessBuilder:
             and not isinstance(value, enum.Enum)
             and not is_pybind11_enum_member(value)
         ):
-            return TorchScriptObjectVariable.create(value, value)
+            return TorchScriptObjectVariable.create(value, value, tx=tx)
         elif is_opaque_reference_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
@@ -4988,6 +5000,7 @@ class SourcelessBuilder:
             return TorchScriptObjectVariable.create(
                 value,  # pyrefly: ignore[bad-argument-type]
                 fake_script_obj,
+                tx=tx,
             )
         # type: ignore[attr-defined]
         elif isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):

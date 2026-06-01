@@ -646,38 +646,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
         raise NotImplementedError
 
-    def force_unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
-        # like unpack_var_sequence, but should only be used when it is
-        # safe to eagerly (vs. lazily) unpack this variable.
-        # e.g. map(f, x) is normally evaluated lazily but sometimes
-        # we want to force eager unpacking, e.g. when converting to a list.
-        # NOTE: this method is allowed to mutate the VariableTracker, so
-        # it should only be called once.
-        return self.unpack_var_sequence(tx)
-
     def has_unpack_var_sequence(self, tx: Any) -> bool:
         try:
             self.unpack_var_sequence(tx)
             return True
         except NotImplementedError:
             return False
-
-    # NB: don't call force_unpack_var_sequence, especially if it mutates!
-    def has_force_unpack_var_sequence(self, tx: Any) -> bool:
-        return self.has_unpack_var_sequence(tx)
-
-    # Forces unpacking the var sequence while also applying a function to each element.
-    # Only use when it is safe to eagerly unpack this variable (like force_unpack_var_sequence).
-    # INVARIANT: variable must satisfy has_force_unpack_var_sequence() == True!
-    def force_apply_to_var_sequence(
-        self, tx: Any, fn: Callable[[VariableTracker], Any]
-    ) -> None:
-        if not self.has_force_unpack_var_sequence(tx):
-            raise AssertionError(
-                "force_apply_to_var_sequence requires has_force_unpack_var_sequence(tx) == True"
-            )
-        for v in self.unpack_var_sequence(tx):
-            fn(v)
 
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
@@ -1254,7 +1228,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # won't cause recompilation when their values change.
             return variables.LazyConstantVariable.create(value, source)
         else:
-            return variables.LazyVariableTracker.create(value, source)
+            return variables.LazyVariableTracker.create(value, source, tx=tx)
 
     def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         """Return id() of the underlying Python object, or None if unavailable.

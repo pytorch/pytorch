@@ -52,7 +52,6 @@ from ..bytecode_transformation import create_call_function, create_rot_n, is_gen
 from ..exc import (
     format_frame_info,
     get_dynamo_observed_exception,
-    handle_observed_exception,
     InfiniteGeneratorError,
     ObservedException,
     ObservedGeneratorExit,
@@ -86,6 +85,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    unpack_iterable,
 )
 from .base import (
     AsPythonConstantNotImplementedError,
@@ -284,7 +284,7 @@ def wrap_bound_arg(
     else:
         # Create a lazy variable to avoid guarding on __defaults__ unless really
         # needed.
-        return variables.LazyVariableTracker.create(val, source)
+        return variables.LazyVariableTracker.create(val, source, tx=tx)
 
 
 def wrap_args_kwargs(tx: "InstructionTranslatorBase", result: dict[str, Any]) -> None:
@@ -383,7 +383,7 @@ def fn_var_getattr(
     if name in fn_known_dunder_attrs:
         subobj = getattr(fn, name)
     if source:
-        return variables.LazyVariableTracker.create(subobj, source)
+        return variables.LazyVariableTracker.create(subobj, source, tx=tx)
     return VariableTracker.build(tx, subobj)
 
 
@@ -1162,7 +1162,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         with save, disallow, temp:
             tracer = self.inline_tracer
             if not tracer.generator_exhausted:
-                self.remaining_items = self.force_unpack_var_sequence(tx)
+                self.remaining_items = unpack_iterable(tx, self)  # type: ignore[bad-argument-type]
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
 
     def get_globals(self) -> dict[str, Any]:
@@ -1171,8 +1171,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L832
+    def gen_send_ex2(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        # https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Objects/genobject.c#L259
         tracer = self.inline_tracer
 
         if self._is_generator_exhausted():
@@ -1182,6 +1184,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Hierarchically, tx can be seen as the parent of the inline tracer
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
+            tracer.push(arg)
             return tracer.inline_call_()
         except ObservedException as e:
             tracer.generator_exhausted = True
@@ -1205,6 +1208,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 e.msg += "\n\nSkipping frame due to graph break in a generator's next() call."
             raise
 
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L832
+        return self.gen_send_ex2(tx, ConstantVariable.create(None))
+
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
@@ -1218,26 +1225,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
         return False
-
-    def has_force_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return True
-
-    def force_unpack_var_sequence(
-        self, tx: "InstructionTranslatorBase"
-    ) -> list[VariableTracker]:
-        result: list[VariableTracker] = []
-        self.force_apply_to_var_sequence(tx, result.append)
-        return result
-
-    def force_apply_to_var_sequence(
-        self, tx: "InstructionTranslatorBase", fn: Callable[[VariableTracker], Any]
-    ) -> None:
-        while True:
-            try:
-                fn(self.tp_iternext_impl(tx))
-            except ObservedUserStopIteration:
-                handle_observed_exception(tx)
-                break
 
     # no nested graph breaks in generators
     def should_allow_nested_graph_breaks(self) -> Literal[False]:
@@ -1255,7 +1242,14 @@ class LocalGeneratorObjectVariable(VariableTracker):
             tracer.exception_handler(e)
 
     def _is_generator_just_started(self) -> bool:
-        return self.inline_tracer is None or self.inline_tracer.instruction_pointer == 0
+        if sys.version_info < (3, 11):
+            first_inst = 0
+        else:
+            first_inst = 1
+        return (
+            self.inline_tracer is None
+            or self.inline_tracer.instruction_pointer == first_inst
+        )
 
     def _is_generator_exhausted(self) -> bool:
         return getattr(self.inline_tracer, "generator_exhausted", False)
@@ -1276,9 +1270,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 # Test: GeneratorCPythonTests.test_send_non_none_to_new_gen
                 if not all(arg.is_constant_none() for arg in args):
                     raise_observed_exception(TypeError, tx)
-            tracer = self.inline_tracer
-            tracer.push_many(args)
-            return self.tp_iternext_impl(tx)
+            return self.gen_send_ex2(tx, args[0])
         elif name == "close":
             # * Raises a GeneratorExit at the point where the generator function was paused.
             # * If the generator function catches the exception and returns a
@@ -1333,7 +1325,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
             try:
                 # Raise RuntimeError if the generator yields any other value
-                if self.tp_iternext_impl(tx):
+                # TODO seems like this should send None
+                if tracer.inline_call_():
                     raise_observed_exception(RuntimeError, tx)
             except ObservedGeneratorExit:
                 tracer.generator_exhausted = True
@@ -1367,7 +1360,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 # propagate the exception back to the parent caller
                 raise
 
-            retval = self.tp_iternext_impl(tx)
+            retval = tracer.inline_call_()
 
             # The exception raised before is still active. We need to check the exception
             # table one more time to find the next target. But why? Let's walk
@@ -1433,7 +1426,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
             try:
                 self._setup_exception(tx, variables.ExceptionVariable(exc_type, []))
-                self.next_variable(tx)
+                tracer.inline_call_()
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
                 pass
@@ -1531,6 +1524,8 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         code = self.vt.get_code()
         f_globals = self.vt.get_globals()
 
+        if sys.version_info >= (3, 11):
+            inline_tracer.inline_call_()
         # calling a generator returns a generator object
         return self.generator_cls(
             code,
