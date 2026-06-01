@@ -18,3 +18,4 @@ using namespace metal;
 
 #include <ATen/native/mps/kernels/SortMerge.h>
 #include <ATen/native/mps/kernels/SortRadix.h>
+#include <ATen/native/mps/kernels/SortTopK.h>
