@@ -160,20 +160,6 @@ def _is_tensor_constructor(func: OpOverload) -> bool:
     )
 
 
-@functools.cache
-def _has_device_arg(func: OpOverload) -> bool:
-    device_type = torch._C.DeviceObjType.get()
-    optional_device_type = torch._C.OptionalType(device_type)
-    return any(
-        arg.name == "device"
-        and (
-            arg.type.isSubtypeOf(device_type)
-            or arg.type.isSubtypeOf(optional_device_type)
-        )
-        for arg in func._schema.arguments
-    )
-
-
 def register_op_impl(
     run_impl_check: Callable[[OpOverload], bool]
     | OpOverload
@@ -243,20 +229,14 @@ def constructors(
         # cpu is default device if none is specified
         default_device = torch.device("cpu")
         args = ()
-    has_device_arg = _has_device_arg(func)
-    out_device = new_kwargs.pop("device", None) if has_device_arg else None
+    out_device = new_kwargs.pop("device", None)
     out_device = out_device if out_device is not None else default_device
-    if has_device_arg:
-        new_kwargs["device"] = torch.device("meta")
+    new_kwargs["device"] = torch.device("meta")
     # _like constructors have fake tensor inputs (maybe this causes the non-like
     # to fail? hmmm)
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
-    if r.device.type == "meta":
-        return fake_mode.fake_tensor_converter.from_meta_and_device(
-            fake_mode, r, out_device
-        )
-    return fake_mode.fake_tensor_converter.from_real_tensor(fake_mode, r)
+    return FakeTensor(fake_mode, r, out_device)
 
 
 @register_op_impl(aten.is_pinned.default)
