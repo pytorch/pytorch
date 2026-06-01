@@ -182,6 +182,51 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         self.assertIn("DTensor", str(ctx.exception))
 
     @_requires_multi_gpu
+    def test_tensor_meta_non_float_requires_grad_guard(self):
+        """Test that to_tensor/to_dtensor don't set requires_grad on non-float dtypes."""
+        self.init_pg()
+        mesh = self._make_mesh()
+    
+        # _TensorMeta: non-float with requires_grad=True in metadata should not crash
+        for dtype in [torch.long, torch.int32, torch.bool]:
+            meta = _TensorMeta(
+                shape=torch.Size([4, 8]),
+                stride=(8, 1),
+                dtype=dtype,
+                requires_grad=True,  # would crash without the guard
+            )
+            t = meta.to_tensor(self.device)
+            self.assertEqual(t.dtype, dtype)
+            self.assertFalse(t.requires_grad)
+    
+        # _TensorMeta: float with requires_grad=True should still work
+        float_meta = _TensorMeta(
+            shape=torch.Size([4, 8]),
+            stride=(8, 1),
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        t = float_meta.to_tensor(self.device)
+        self.assertTrue(t.requires_grad)
+    
+        # _DTensorMeta: non-float with requires_grad=True should not crash
+        for dtype in [torch.long, torch.int32]:
+            dt_meta = _DTensorMeta(
+                shape=torch.Size([4, 8]),
+                stride=(8, 1),
+                dtype=dtype,
+                requires_grad=True,
+                global_shape=torch.Size([8, 8]),
+                global_stride=(8, 1),
+                placements=(Shard(0),),
+                mesh_dim_names=("tp",),
+                mesh_layout=mesh._layout,
+            )
+            dt = dt_meta.to_dtensor(self.device, mesh)
+            self.assertEqual(dt.dtype, dtype)
+            self.assertFalse(dt.requires_grad)
+
+    @_requires_multi_gpu
     def test_dtensor_meta_extraction_and_roundtrip(self):
         """Test _DTensorMeta: extraction and roundtrip for Shard/Replicate."""
         self.init_pg()
