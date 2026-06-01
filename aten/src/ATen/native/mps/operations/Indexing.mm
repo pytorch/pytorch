@@ -292,6 +292,9 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
   const auto dim_size = result.size(dim);
   c10::SmallVector<int64_t> slice_sizes, slice_out_strides, slice_source_strides;
   if (!is_dense) {
+    slice_sizes.reserve(result.dim() - 1);
+    slice_out_strides.reserve(result.dim() - 1);
+    slice_source_strides.reserve(result.dim() - 1);
     for (int64_t d = 0; d < result.dim(); d++) {
       if (d != dim) {
         slice_sizes.push_back(result.size(d));
