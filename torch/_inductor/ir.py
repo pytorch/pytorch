@@ -4025,6 +4025,28 @@ class SliceView(View):
     """
 
     @classmethod
+    def create_with_size(
+        cls,
+        x: IRNode,
+        dim: int,
+        start: Expr,
+        size: Expr,
+        step: Expr,
+    ) -> IRNode:
+        new_size = list(x.get_size())
+        new_size[dim] = size
+
+        def reindex(
+            index: Sequence[Expr],
+        ) -> Sequence[Expr]:
+            assert len(index) == len(new_size), f"wrong ndim {index} {new_size}"
+            index = list(index)
+            index[dim] = index[dim] * step + start
+            return index
+
+        return cls(data=x, size=new_size, reindex=reindex)
+
+    @classmethod
     def normalize_start_end(
         cls, x: IRNode, dim: int, start: int, end: int
     ) -> tuple[int, int]:
@@ -4117,16 +4139,8 @@ class SliceView(View):
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
-        def reindex(
-            index: Sequence[Expr],
-        ) -> Sequence[Expr]:
-            assert len(index) == len(new_size), f"wrong ndim {index} {new_size}"
-            index = list(index)
-            index[dim] = index[dim] * step + start
-            return index
-
         # redirect to a generic view
-        return SliceView(data=x, size=new_size, reindex=reindex)
+        return cls.create_with_size(x, dim, start, new_size[dim], step)
 
 
 @ir_dataclass
