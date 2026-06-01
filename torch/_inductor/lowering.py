@@ -2121,6 +2121,21 @@ def cat(inputs, dim=0):
     if len(inputs) == 1:
         return clone(inputs[0])
 
+    # ATen's cat skips 1-D empty tensors (cat_should_skip_tensor) during
+    # dimension validation and concatenation. Replicate that here.
+    def _cat_should_skip(t):
+        size = t.get_size()
+        return len(size) == 1 and V.graph.sizevars.statically_known_equals(size[0], 0)
+
+    skip_mask = [_cat_should_skip(t) for t in inputs]
+    if any(skip_mask):
+        valid_inputs = [t for t, skip in zip(inputs, skip_mask) if not skip]
+        if not valid_inputs:
+            return clone(inputs[0])
+        if len(valid_inputs) == 1:
+            return clone(valid_inputs[0])
+        inputs = valid_inputs
+
     dim = _validate_dim(inputs[0], dim, 0)
     dtype = get_promoted_dtype(
         *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -2239,6 +2254,9 @@ def cat(inputs, dim=0):
                 input_nodes = [fx_args]
             else:
                 return False
+
+            if any(skip_mask):
+                input_nodes = [n for n, skip in zip(input_nodes, skip_mask) if not skip]
 
             def is_unrealized_pointwise(x):
                 if isinstance(x, (TensorBox, ir.StorageBox)):
