@@ -10,9 +10,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     run_tests, TestCase, IS_WINDOWS, IS_FBCODE, IS_REMOTE_GPU, TEST_CUDA
 )
-from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, _get_torch_cuda_version
+from torch.testing._internal.subclasses import WrapperSubclass
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -106,6 +106,27 @@ class TestOutDtypeOp(TestCase):
         compiled = torch.compile(f, backend="eager", fullgraph=True)
         self.assertTrue(torch.allclose(f(*inp), compiled(*inp)))
 
+    def test_out_dtype_wrapper_subclass_aot_eager(self):
+        class M(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            def forward(self, x):
+                return out_dtype(
+                    torch.ops.aten.mm.default, torch.int32, x, self.weight
+                )
+
+        weight = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
+        mod = M(weight)
+        x = WrapperSubclass(torch.randint(-128, 127, (5, 5), dtype=torch.int8))
+
+        out_ref = mod(x)
+        out_test = torch.compile(mod, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertIsInstance(out_test, WrapperSubclass)
+        self.assertEqual(out_ref.a, out_test.a)
+
     def test_out_dtype_mul_scalar_numerical(self):
         def f(x, y):
             return out_dtype(
@@ -167,7 +188,6 @@ class TestOutDtypeOp(TestCase):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(_get_torch_cuda_version() >= (11, 7), "_int_mm unavailable")
     @unittest.skipIf(not TEST_CUDA, "_int_mm unavailable")
-    @skipIfNoDynamoSupport
     def test_out_dtype_inductor_decomp(self) -> None:
         def func(x, w):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)

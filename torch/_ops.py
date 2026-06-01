@@ -459,6 +459,14 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
                 if subclass_type in self.python_key_table:
                     handler = self.python_key_table[subclass_type]
+                else:
+                    handler = None
+                    for base in subclass_type.__mro__[1:]:
+                        if base in self.python_key_table:
+                            handler = self.python_key_table[base]
+                            break
+
+                if handler is not None:
                     # "natural" calling convention: (*args, **kwargs)
                     # TODO(rzou): we should support torch_dispatch calling convention too.
                     result = handler(*args, **kwargs)
