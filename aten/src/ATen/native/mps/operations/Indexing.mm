@@ -271,28 +271,73 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
               ")");
 
   auto stream = getCurrentMPSStream();
-  auto device = MPSDevice::getInstance()->device();
 
-  const bool is_dense =
-      self.is_contiguous() && source.is_contiguous() && result.is_contiguous() && index.is_contiguous();
+  // Base copy: non-indexed slices come straight from self. Skipped for in-place
+  // index_copy_, where result already aliases self.
+  if (!result.is_same(self)) {
+    result.copy_(self);
+  }
 
+  const auto is_dense = source.is_contiguous() && result.is_contiguous() && index.is_contiguous();
+  const auto indices_numel = index.numel();
+  const auto slice_numel = source.numel() / indices_numel;
+  if (slice_numel == 0) {
+    return;
+  }
+
+  const auto use_32 = canUse32BitIndexMath(result) && canUse32BitIndexMath(source) && canUse32BitIndexMath(index);
   auto dense_or_strided = is_dense ? "dense" : "strided";
   auto long_or_int = (index.scalar_type() == ScalarType::Long) ? "long" : "int";
-  auto indexCopyPSO = lib.getPipelineStateForFunc(
-      fmt::format("index_copy_{}_{}_{}", dense_or_strided, scalarToMetalTypeString(result), long_or_int));
+  auto indexCopyPSO = lib.getPipelineStateForFunc(fmt::format(
+      "index_copy_{}_{}_{}_{}", dense_or_strided, scalarToMetalTypeString(result), long_or_int, use_32 ? "32" : "64"));
+
+  const auto dim_size = result.size(dim);
+  c10::SmallVector<int64_t> slice_sizes, slice_out_strides, slice_source_strides;
+  if (!is_dense) {
+    slice_sizes.reserve(result.dim() - 1);
+    slice_out_strides.reserve(result.dim() - 1);
+    slice_source_strides.reserve(result.dim() - 1);
+    for (int64_t d = 0; d < result.dim(); d++) {
+      if (d != dim) {
+        slice_sizes.push_back(result.size(d));
+        slice_out_strides.push_back(result.stride(d));
+        slice_source_strides.push_back(source.stride(d));
+      }
+    }
+  }
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
-      uint32_t dim_arg = static_cast<uint32_t>(dim);
-      uint32_t ndim = self.dim();
-      uint32_t indices_numel = index.numel();
       [computeEncoder setComputePipelineState:indexCopyPSO];
-      mtl_setArgs(computeEncoder, result, self, source, index, dim_arg, self.sizes(), ndim, indices_numel);
-      if (!is_dense) {
-        mtl_setArgs<8>(computeEncoder, self.strides(), result.strides(), source.strides(), index.strides());
+      mtl_setArgs(computeEncoder, result, source, index);
+      if (is_dense) {
+        const auto inner = result.stride(dim);
+        const auto outer = slice_numel / inner;
+        mtl_setArgs<3>(computeEncoder, dim_size, inner, indices_numel);
+        auto maxTG = [indexCopyPSO maxTotalThreadsPerThreadgroup];
+        auto tgX = std::min<NSUInteger>(inner, maxTG);
+        auto tgY = std::min<NSUInteger>(indices_numel, std::max<NSUInteger>(1, maxTG / tgX));
+        auto tgZ = std::min<NSUInteger>(outer, std::max<NSUInteger>(1, maxTG / (tgX * tgY)));
+        [computeEncoder dispatchThreads:MTLSizeMake(inner, indices_numel, outer)
+                  threadsPerThreadgroup:MTLSizeMake(tgX, tgY, tgZ)];
+      } else {
+        auto dim_out_stride = result.stride(dim);
+        auto dim_source_stride = source.stride(dim);
+        auto indices_stride = index.stride(0);
+        auto slice_ndim = static_cast<uint32_t>(result.dim() - 1);
+        mtl_setArgs<3>(computeEncoder,
+                       dim_size,
+                       dim_out_stride,
+                       dim_source_stride,
+                       slice_sizes,
+                       slice_out_strides,
+                       slice_source_strides,
+                       slice_ndim,
+                       slice_numel,
+                       indices_stride);
+        mtl_dispatch1DJob(computeEncoder, indexCopyPSO, indices_numel * slice_numel);
       }
-      mtl_dispatch1DJob(computeEncoder, indexCopyPSO, result.numel());
     }
   });
 }
