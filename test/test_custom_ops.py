@@ -6045,6 +6045,45 @@ class TestCustomOpFastPath(TestCase):
         )
         self.assertIsNone(result)
 
+    def test_fast_path_double_backward(self):
+        @torch.library.custom_op("_torch_testing::fp_cube", mutates_args=())
+        def fp_cube(x: Tensor) -> Tensor:
+            return x**3
+
+        @fp_cube.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def _setup_context(ctx, inputs, output):
+            ctx.save_for_backward(*inputs)
+
+        def _backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * 3 * x**2
+
+        fp_cube.register_autograd(_backward, setup_context=_setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        with self._assert_fast_path_taken(fp_cube):
+            y = fp_cube(x)
+        (grad,) = torch.autograd.grad(y.sum(), x, create_graph=True)
+        self.assertEqual(grad, 3 * x**2)
+        grad.sum().backward()
+        self.assertIsNotNone(x.grad)
+
+    def test_fast_path_disabled_by_flag(self):
+        import torch._library.custom_ops as co
+
+        with unittest.mock.patch.object(co, "_FAST_CUSTOM_OPS_ENABLED", False):
+            @torch.library.custom_op("_torch_testing::fp_disabled", mutates_args=())
+            def fp_disabled(x: Tensor) -> Tensor:
+                return x.clone()
+
+        self.assertIsNone(fp_disabled._fast_path)
+        x = torch.randn(3)
+        with self._assert_fast_path_not_taken(fp_disabled):
+            self.assertEqual(fp_disabled(x), x)
+
 
 class TestLibrarySourceLocation(TestCase):
     def test_library_source_location(self):
