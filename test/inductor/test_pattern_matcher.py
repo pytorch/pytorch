@@ -1527,6 +1527,7 @@ class TestPatternMatcher(TestCase):
             "keep_addmm_fused_for_half_dtypes": True,
         }
     )
+    @unittest.skipIf(GPU_TYPE != "xpu", "narrowing-cast unfuse is XPU-only; CUDA/ROCm keep addmm fused")
     def test_unfuse_bias_addmm_half_dtypes_narrowing_cast(self, dtype):
         # When bias is fp32 and cast to a half dtype (e.g. AMP), unfusing
         # lets the Triton pointwise kernel load the fp32 bias directly,
