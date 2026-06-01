@@ -5387,6 +5387,9 @@ Please use `add.register_fake` to add an fake impl.""",
                 torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
 
 
+@skipIfTorchDynamo(
+    "inline register_fake is not executed under dynamo tracing"
+)
 class TestCustomOpFastPath(TestCase):
     """Tests for the fast dispatch path in custom_op."""
 
