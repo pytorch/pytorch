@@ -23,7 +23,7 @@ class TORCH_API TypeParser {
   TypePtr parseTorchbindClassType();
   TypePtr parseNonSimple(const std::string& token);
 
-  void expect(const char* s);
+  void expect(std::string_view s);
   void expectChar(char c);
   template <typename T>
   TypePtr parseSingleElementType();
