@@ -83,6 +83,8 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
 CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE = {
     OperatorName.parse("cumsum.out"),
     OperatorName.parse("cumprod.out"),
+    OperatorName.parse("cumsum.dimname_out"),
+    OperatorName.parse("cumprod.dimname_out"),
 }
 
 # This file contains codegen that relates to the functionalization pass.

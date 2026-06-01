@@ -49,7 +49,8 @@ Tensor global_average_pool(const Tensor& input) {
           1,
       },
       input_padded_contig_nhwc.options().dtype(),
-      MemoryFormat::ChannelsLast);
+      MemoryFormat::ChannelsLast,
+      input_padded_contig_nhwc.opt_names());
 
   // Create XNNPACK Subgraph
   xnn_subgraph_t subgraph_ptr = nullptr;

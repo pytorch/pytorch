@@ -5488,7 +5488,7 @@ test_contexts = {
 }
 
 # These groups of tests aren't supported yet
-xfail_re = re.compile(r"^test_(sparse|profiler|gradcheck)")
+xfail_re = re.compile(r"^test_(sparse|profiler|gradcheck|named_tensor)")
 
 # Tests fail at different stages, we categorize them wrt to their backends
 # We run only the last passing backend in this order:

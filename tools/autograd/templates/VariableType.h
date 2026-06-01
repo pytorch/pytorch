@@ -25,6 +25,8 @@ namespace torch { namespace autograd {
 using Variable = at::Tensor;
 using at::Context;
 using at::Device;
+using at::Dimname;
+using at::DimnameList;
 using at::Generator;
 using at::IntArrayRef;
 using at::MemoryFormat;
