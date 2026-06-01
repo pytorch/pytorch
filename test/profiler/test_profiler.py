@@ -61,17 +61,20 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_JETSON,
     IS_LINUX,
+    IS_MACOS,
     IS_WINDOWS,
     IS_X86,
     parametrize,
     run_tests,
     serialTest,
+    skipIfRocm,
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
     TEST_CUDA,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TEST_XPU,
     TestCase,
     xfailIfNoAcceleratorTriton,
@@ -108,6 +111,7 @@ except ModuleNotFoundError:
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/78457")
     def test_mem_leak(self):
         """Checks that there's no memory leak when using profiler with CUDA"""
         t = torch.rand(1, 1).cuda()
@@ -1252,6 +1256,107 @@ class TestProfiler(TestCase):
             copied = copy.deepcopy(config)
             self.assertIsInstance(copied, _ExperimentalConfig)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @parametrize("use_cuda", [False, True])
+    def test_trace_only_export_matches_default(self, use_cuda):
+        """trace_only=True must produce the same chrome trace metadata as the default path."""
+        if use_cuda and ProfilerActivity.CUDA not in supported_activities():
+            self.skipTest("CUDA is required")
+
+        activities = [ProfilerActivity.CPU]
+        if use_cuda:
+            activities.append(ProfilerActivity.CUDA)
+
+        def profile_and_export(trace_only):
+            with profile(
+                activities=activities,
+                record_shapes=True,
+                experimental_config=_ExperimentalConfig(trace_only=trace_only),
+            ) as prof:
+                self.payload(use_cuda=use_cuda)
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    return json.load(f)
+
+        # Warmup: ensures dynamo compilation and CUDA init don't skew comparison
+        profile_and_export(trace_only=False)
+
+        default_trace = profile_and_export(trace_only=False)
+        trace_only_trace = profile_and_export(trace_only=True)
+
+        def get_cpu_op_metadata(trace_data):
+            result = {}
+            for ev in trace_data.get("traceEvents", []):
+                if ev.get("cat") == "cpu_op":
+                    name = ev.get("name", "")
+                    args = ev.get("args", {})
+                    if name not in result:
+                        result[name] = set(args.keys())
+                    else:
+                        result[name] |= set(args.keys())
+            return result
+
+        default_meta = get_cpu_op_metadata(default_trace)
+        trace_only_meta = get_cpu_op_metadata(trace_only_trace)
+
+        self.assertEqual(
+            sorted(default_meta.keys()),
+            sorted(trace_only_meta.keys()),
+            "cpu_op event names should match",
+        )
+        for op in default_meta:
+            missing = default_meta[op] - trace_only_meta.get(op, set()) - {"Call stack"}
+            self.assertEqual(
+                missing,
+                set(),
+                f"{op}: metadata keys missing in trace_only: {missing}",
+            )
+
+        if use_cuda:
+
+            def count_by_cat(trace_data):
+                return collections.Counter(
+                    ev.get("cat", "") for ev in trace_data.get("traceEvents", [])
+                )
+
+            default_counts = count_by_cat(default_trace)
+            trace_only_counts = count_by_cat(trace_only_trace)
+            for cat in ("kernel", "ac2g"):
+                self.assertGreater(
+                    default_counts[cat], 0, f"expected {cat} events in default trace"
+                )
+                self.assertEqual(
+                    default_counts[cat],
+                    trace_only_counts[cat],
+                    f"{cat} event count mismatch",
+                )
+
+        # events() must raise in trace_only mode
+        with profile(
+            activities=[ProfilerActivity.CPU],
+            experimental_config=_ExperimentalConfig(trace_only=True),
+        ) as prof:
+            self.payload()
+        with self.assertRaises(RuntimeError):
+            prof.events()
+
+        # trace_only + with_stack should warn and disable trace_only
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            with profile(
+                activities=[ProfilerActivity.CPU],
+                with_stack=True,
+                experimental_config=_ExperimentalConfig(trace_only=True),
+            ) as prof:
+                self.payload()
+            self.assertTrue(any("trace_only" in str(x.message) for x in w))
+            # Should fall back to normal path
+            prof.events()
+
+    @unittest.skipIf(
+        IS_MACOS or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/82915"
+    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_tensorboard_trace_handler(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -2825,6 +2930,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             y = torch.mm(x, x)
         self.assertEqual(len(p.events()), 0)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180072")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_kineto_kernel_metadata_in_trace(self):
@@ -3346,6 +3452,7 @@ aten::mm""",
         shapes_factor_map = pattern.benchmark(pattern.matched_events())
         self.assertEqual(len(shapes_factor_map), 2)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/165949")
     def test_profiler_optimizer_single_tensor_pattern(self):
         x = torch.ones((100, 100))
         cases = (
@@ -3677,6 +3784,10 @@ aten::mm""",
 
         check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/158727",
+    )
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_profiler_debug_autotuner(self):
@@ -4603,6 +4714,7 @@ class TestProfilerEventsParity(TestCase):
                     f"activity_type mismatch for {e.name}",
                 )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
     def test_structured_metadata_matches_chrome_trace(self):
         # Compare metadata fields between events() and Chrome trace JSON to make sure they stay in parity
         # 1. Run a dummy workload with profiling enabled and collect the json/events() outputs
@@ -4752,6 +4864,218 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
                 expected_meta,
                 f"{key}: structured metadata differs between events() and Chrome trace JSON",
             )
+
+
+@unittest.skipIf(not kineto_available(), "Kineto is required")
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+class TestPythonChromeTraceExport(TestCase):
+    """Verify that the Python streaming exporter produces traces equivalent
+    to the C++ Kineto save() path."""
+
+    def _profile_workload(self):
+        x = torch.randn(64, 64, device="cuda")
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            for _ in range(20):
+                torch.mm(x, x)
+                torch.add(x, x)
+            torch.cuda.synchronize()
+        return prof
+
+    def test_python_export_matches_kineto(self):
+        prof = self._profile_workload()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            kineto_path = os.path.join(tmpdir, "kineto.json")
+            prof.profiler.kineto_results.save(kineto_path)
+
+            py_path = os.path.join(tmpdir, "python.json")
+            from torch.profiler._chrome_trace_export import (
+                export_chrome_trace as _export,
+            )
+
+            _export(prof.profiler.kineto_results, py_path)
+
+            with open(kineto_path) as f:
+                kineto_trace = json.load(f)
+            with open(py_path) as f:
+                py_trace = json.load(f)
+
+        kineto_events = kineto_trace["traceEvents"]
+        py_events = py_trace["traceEvents"]
+
+        def _activity_events(events):
+            return [
+                e
+                for e in events
+                if e.get("ph") == "X" and e.get("cat") not in ("Trace",)
+            ]
+
+        kineto_acts = _activity_events(kineto_events)
+        py_acts = _activity_events(py_events)
+        self.assertEqual(
+            len(kineto_acts),
+            len(py_acts),
+            f"Activity event count mismatch: kineto={len(kineto_acts)}, python={len(py_acts)}",
+        )
+
+        from collections import Counter
+
+        kineto_names = Counter((e["cat"], e["name"]) for e in kineto_acts)
+        py_names = Counter((e["cat"], e["name"]) for e in py_acts)
+        self.assertEqual(
+            kineto_names, py_names, "Event (cat, name) distribution differs"
+        )
+
+        def _strip_ev_idx(event):
+            """Return a copy with the internal 'Ev Idx' arg removed."""
+            e = dict(event)
+            args = dict(e.get("args", {}))
+            args.pop("Ev Idx", None)
+            e["args"] = args
+            return e
+
+        kineto_sorted = sorted(
+            [_strip_ev_idx(e) for e in kineto_acts],
+            key=lambda e: (e["cat"], e["name"], e["ts"]),
+        )
+        py_sorted = sorted(
+            [_strip_ev_idx(e) for e in py_acts],
+            key=lambda e: (e["cat"], e["name"], e["ts"]),
+        )
+        # Compare every key of every activity event.
+        for ke, pe in zip(kineto_sorted, py_sorted):
+            self.assertEqual(
+                ke,
+                pe,
+                f"Event mismatch for {ke['cat']}::{ke['name']} at ts={ke['ts']}",
+            )
+
+        # Flow event parity (ph, id, cat).
+        kineto_flow = sorted(
+            [
+                (e["ph"], e["id"], e.get("cat", ""))
+                for e in kineto_events
+                if e.get("ph") in ("s", "f")
+            ],
+        )
+        py_flow = sorted(
+            [
+                (e["ph"], e["id"], e.get("cat", ""))
+                for e in py_events
+                if e.get("ph") in ("s", "f")
+            ],
+        )
+        self.assertEqual(kineto_flow, py_flow, "Flow events differ")
+
+    def test_python_export_gzip(self):
+        import gzip as gzip_mod
+
+        prof = self._profile_workload()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gz_path = os.path.join(tmpdir, "trace.json.gz")
+            prof.export_chrome_trace(gz_path, use_python_export=True)
+
+            with gzip_mod.open(gz_path, "rt") as f:
+                trace = json.load(f)
+
+        self.assertIn("traceEvents", trace)
+        x_events = [e for e in trace["traceEvents"] if e.get("ph") == "X"]
+        self.assertGreater(len(x_events), 0)
+
+    def test_python_export_plain_json(self):
+        prof = self._profile_workload()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            json_path = os.path.join(tmpdir, "trace.json")
+            prof.export_chrome_trace(json_path, use_python_export=True)
+
+            with open(json_path) as f:
+                trace = json.load(f)
+
+        self.assertIn("traceEvents", trace)
+        x_events = [e for e in trace["traceEvents"] if e.get("ph") == "X"]
+        self.assertGreater(len(x_events), 0)
+
+
+@unittest.skipIf(not kineto_available(), "Kineto is required")
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+class TestMetadataJsonFormat(TestCase):
+    """Guard the format of ITraceActivity.metadataJson() for kernel events.
+
+    The Python-side chrome trace exporter splices metadataJson() verbatim
+    into the output JSON and extracts specific fields (like graph node id)
+    via string matching. These tests ensure the format stays stable so that
+    downstream consumers don't silently break.
+    """
+
+    def _get_kernel_metadata(self):
+        x = torch.randn(64, 64, device="cuda")
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            torch.mm(x, x)
+            torch.cuda.synchronize()
+
+        activities = prof.profiler.kineto_results.trace_activities()
+        for act in activities:
+            if act.type() == "kernel":
+                return act.metadata_json()
+        self.fail("No kernel activity found in trace")
+
+    def test_metadata_json_is_valid_json_fragment(self):
+        md = self._get_kernel_metadata()
+        parsed = json.loads("{" + md + "}")
+        self.assertIsInstance(parsed, dict)
+        self.assertGreater(len(parsed), 0)
+
+    def test_kernel_metadata_has_expected_fields(self):
+        md = self._get_kernel_metadata()
+        parsed = json.loads("{" + md + "}")
+        common_keys = ["device", "stream", "correlation", "grid", "block"]
+        cuda_only_keys = [
+            "queued",
+            "context",
+            "registers per thread",
+            "shared memory",
+            "blocks per SM",
+            "warps per SM",
+            "graph node id",
+        ]
+        expected = common_keys if TEST_WITH_ROCM else common_keys + cuda_only_keys
+        for key in expected:
+            self.assertIn(key, parsed, f"Missing field '{key}' in kernel metadataJson")
+
+    def test_kernel_metadata_field_types(self):
+        md = self._get_kernel_metadata()
+        parsed = json.loads("{" + md + "}")
+        common_int_keys = ["device", "stream", "correlation"]
+        cuda_only_int_keys = [
+            "queued",
+            "context",
+            "registers per thread",
+            "shared memory",
+            "graph node id",
+        ]
+        int_keys = (
+            common_int_keys if TEST_WITH_ROCM else common_int_keys + cuda_only_int_keys
+        )
+        for key in int_keys:
+            self.assertIsInstance(
+                parsed[key],
+                int,
+                f"Expected int for '{key}', got {type(parsed[key]).__name__}",
+            )
+        for key in ["grid", "block"]:
+            self.assertIsInstance(parsed[key], list)
+            self.assertEqual(len(parsed[key]), 3)
+
+    def test_metadata_json_key_value_format(self):
+        md = self._get_kernel_metadata()
+        # Verify the ": " (colon-space) separator convention that string
+        # splicing in the export path relies on for field extraction.
+        if not TEST_WITH_ROCM:
+            self.assertIn('"graph node id": ', md)
+        self.assertIn('"correlation": ', md)
+        self.assertIn('"stream": ', md)
 
 
 if __name__ == "__main__":
