@@ -704,7 +704,7 @@ class CUDATestBase(DeviceTypeTestBase):
 
     @classmethod
     def get_available_memory(cls) -> int:
-        device = torch.device(cls.device_type, 0)
+        device = torch.cuda.current_device()
         return int(
             torch.cuda.memory.mem_get_info(device)[0]
             * torch.cuda.memory.get_per_process_memory_fraction(device)
@@ -800,7 +800,7 @@ class XPUTestBase(DeviceTypeTestBase):
 
     @classmethod
     def get_available_memory(cls) -> int:
-        device = torch.device(cls.device_type, 0)
+        device = torch.xpu.current_device()
         return torch.xpu.memory.mem_get_info(device)[0]
 
     @classmethod
@@ -1546,7 +1546,7 @@ class skipPRIVATEUSE1If(skipIf):
         super().__init__(dep, reason, device_type=device_type)
 
 
-def _has_sufficient_memory(device, size, self=None):
+def _has_sufficient_memory(device, size, test_instance=None):
     # Some callers use _has_sufficient_memory() directly, while others go
     # through largeTensorTest. Not all tests run as device-specific test
     # classes, so some test instances may not expose get_available_memory().
@@ -1556,14 +1556,14 @@ def _has_sufficient_memory(device, size, self=None):
     device_ = torch.device(device)
     device_type = device_.type
 
-    self_device_type = (
-        torch.device(self.device_type).type
-        if self is not None and hasattr(self, "device_type")
+    instance_device_type = (
+        torch.device(test_instance.device_type).type
+        if test_instance is not None and hasattr(test_instance, "device_type")
         else None
     )
 
-    get_available_memory = getattr(self, "get_available_memory", None)
-    if callable(get_available_memory) and self_device_type == device_type:
+    get_available_memory = getattr(test_instance, "get_available_memory", None)
+    if callable(get_available_memory) and instance_device_type == device_type:
         try:
             required_size = size
             if device_type in ["cpu", "mps"]:
