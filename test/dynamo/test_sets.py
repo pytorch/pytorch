@@ -770,6 +770,21 @@ class OrderedSetTests(_SetBase, _BaseSetTests):
         result = s1 ^ s2
         self.assertIsInstance(result, self.thetype)
 
+    @make_dynamo_test
+    def test_construct_from_generator(self):
+        s = self.thetype(x.upper() for x in ["a", "b", "c"])
+        self.assertEqual(list(s), ["A", "B", "C"])
+
+    @make_dynamo_test
+    def test_construct_from_map(self):
+        s = self.thetype(map(str, [1, 2, 3]))
+        self.assertEqual(list(s), ["1", "2", "3"])
+
+    @make_dynamo_test
+    def test_construct_from_range(self):
+        s = self.thetype(range(4))
+        self.assertEqual(list(s), [0, 1, 2, 3])
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
