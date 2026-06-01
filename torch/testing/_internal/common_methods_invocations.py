@@ -21719,11 +21719,7 @@ op_db: list[OpInfo] = [
            supports_inplace_autograd=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_kron,
-           decorators=(
-               # RuntimeError: view size is not compatible with input tensor's size and stride
-               DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-           )),
+           sample_inputs_func=sample_inputs_kron),
     OpInfo('inner',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
