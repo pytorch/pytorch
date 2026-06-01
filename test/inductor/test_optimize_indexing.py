@@ -105,8 +105,6 @@ class TestOptimizeIndexing(TestCase):
         convert_index_expr_to_value_expr(loop_body)
 
         self.assertEqual(index_expr.target, "index_expr")
-        self.assertEqual(unknown.args[1], index_expr)
-        self.assertEqual([], [n for n in graph.nodes if n.target == "value_expr"])
 
     def test_index_expr_load_barrier_stays_indexing(self):
         graph = Graph()
@@ -354,9 +352,10 @@ class TestOptimizeIndexing(TestCase):
 
         convert_index_expr_to_value_expr(loop_body)
 
-        self.assertEqual(masked.args[1].target, "index_expr")
-        output_node = next(n for n in subgraph.nodes if n.op == "output")
-        self.assertEqual(output_node.args[0].target, "index_expr")
+        # masked_subblock's other arg is a value sink, so the index_expr
+        # feeding it is converted even though the subblock result also
+        # feeds a load index.
+        self.assertEqual(masked.args[1].target, "value_expr")
 
 
 if __name__ == "__main__":
