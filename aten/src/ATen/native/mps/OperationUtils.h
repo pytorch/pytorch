@@ -132,12 +132,6 @@ class Placeholder {
 
 void resize_tensor(Tensor* output);
 Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device);
-// Argsort `keys` (1-D contiguous integer tensor) by only its low `n_passes * 8`
-// bits via the radix sorter, returning the permutation indices. Used by
-// randperm: for random keys the unsorted high bits are irrelevant, so fewer
-// passes give a uniform permutation more cheaply. Index dtype is int16 for
-// numel <= 65536, else int32; callers cast as needed.
-Tensor randperm_argsort_lowbits_metal(const Tensor& keys, int n_passes, Tensor& sorted_keys);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph* mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
 MPSGraphTensor* castMPSTensor(MPSGraph* mpsGraph, MPSGraphTensor* tensor, MPSDataType toType);

@@ -566,8 +566,8 @@ auto build_opgraph_fused(
               y, 'y', key.pod.y_alignment, key.pod.params.memory_format))
           .setpwDesc(actDesc)
           .build();
-  auto ops = std::to_array<cudnn_frontend::Operation const*>(
-      {&conv_op, &add_op, &add_bias_op, &act_op});
+  std::array<cudnn_frontend::Operation const*, 4> ops = {
+      &conv_op, &add_op, &add_bias_op, &act_op};
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
                      .setHandle(handle)
                      .setOperationGraph(ops.size(), ops.data())

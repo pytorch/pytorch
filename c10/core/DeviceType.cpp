@@ -5,7 +5,6 @@
 #include <array>
 #include <atomic>
 #include <mutex>
-#include <string_view>
 
 namespace c10 {
 
@@ -133,7 +132,8 @@ std::string get_privateuse1_backend(bool lower_case) {
   auto backend_name =
       name_registered ? privateuse1_backend_name : "privateuseone";
   auto op_case = lower_case ? ::tolower : ::toupper;
-  std::ranges::transform(backend_name, backend_name.begin(), op_case);
+  std::transform(
+      backend_name.begin(), backend_name.end(), backend_name.begin(), op_case);
   return backend_name;
 }
 
@@ -145,10 +145,10 @@ void register_privateuse1_backend(const std::string& backend_name) {
       "torch.register_privateuse1_backend() has already been set! Current backend: ",
       privateuse1_backend_name);
 
-  static constexpr auto types = std::to_array<std::string_view>(
-      {"cpu", "cuda", "hip", "mps", "xpu", "mtia"});
+  static const std::array<std::string, 6> types = {
+      "cpu", "cuda", "hip", "mps", "xpu", "mtia"};
   TORCH_CHECK(
-      std::ranges::find(types, backend_name) == types.end(),
+      std::find(types.begin(), types.end(), backend_name) == types.end(),
       "Cannot register privateuse1 backend with in-tree device name: ",
       backend_name);
 
