@@ -469,8 +469,12 @@ def can_auto_functionalize(
             pass
         else:
             # The returns of OpOverload must not alias anything
+            # except donated optional output buffers, whose aliasing is
+            # explicitly modeled in the schema.
             for ret in schema.returns:
                 if ret.alias_info is None and type(ret.type) is torch.TensorType:
+                    continue
+                if library_utils.is_donated_buffer_return(schema, ret):
                     continue
                 # Not yet supported: List[Tensor] return.
                 return False
@@ -942,16 +946,35 @@ def _do_auto_functionalize_v2_for_generic_mutable_operator(
                 f"unsupported type for auto-functionalization: {unwrapped_out}"
             )
 
-    def wrap_actual_out(out):
+    def mutable_base_indices_for_return(ret):
+        result = []
+        for schema_arg in schema.arguments:
+            if not library_utils.is_donated_buffer_schema_return(schema_arg, ret):
+                continue
+            base_index = arg_to_base_index.get(schema_arg.name)
+            if isinstance(base_index, int):
+                result.append(base_index)
+        return result
+
+    def wrap_actual_out(idx, out):
         if isinstance(out, torch.Tensor):
-            for orig_arg, mutable_out in zip(all_bases, unwrapped_mutable_out):
+            mutable_base_indices = (
+                mutable_base_indices_for_return(schema.returns[idx])
+                if idx < len(schema.returns)
+                else []
+            )
+            for base_idx in mutable_base_indices:
+                orig_arg = all_bases[base_idx]
+                mutable_out = unwrapped_mutable_out[base_idx]
                 if out is mutable_out:
                     return orig_arg
         return ctx.wrap_tensors(out)
 
     if isinstance(unwrapped_actual_out, tuple):
-        return tuple(wrap_actual_out(out) for out in unwrapped_actual_out)
-    return wrap_actual_out(unwrapped_actual_out)
+        return tuple(
+            wrap_actual_out(idx, out) for idx, out in enumerate(unwrapped_actual_out)
+        )
+    return wrap_actual_out(0, unwrapped_actual_out)
 
 
 # auto_functionalize functions

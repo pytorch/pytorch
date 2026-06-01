@@ -301,6 +301,9 @@ def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
     if is_out(op):
         # Tag.out ops have a trivial fake impl: return the out= args in order.
         return True
+    if is_inplace(op):
+        # Tag.inplace ops have a trivial fake impl: return the mutated first arg.
+        return True
     # It's suspicious if the op is not mutable but returns nothing, so we return False out of an abundance of caution
     if not schema.is_mutable:
         return False
@@ -315,6 +318,7 @@ def generate_trivial_fake_impl(op: OpOverload, *args, **kwargs):
 
     For ops with no returns: returns None.
     For Tag.out ops: returns the out= kwargs in declaration order.
+    For Tag.inplace ops: returns the first positional arg.
     """
     if is_out(op):
         schema = op._schema
@@ -323,6 +327,8 @@ def generate_trivial_fake_impl(op: OpOverload, *args, **kwargs):
         if len(out_args) == 1:
             return out_args[0]
         return out_args
+    if is_inplace(op):
+        return args[0]
     return None
 
 
@@ -441,9 +447,33 @@ def _is_maybe_out_arg(arg: _C.Argument) -> bool:
     )
 
 
-def is_maybe_out_schema_alias(arg: _C.Argument, argument: Any, output: Any) -> bool:
+def _return_aliases_arg(ret: _C.Argument, arg: _C.Argument) -> bool:
     return (
-        _is_maybe_out_arg(arg)
+        arg.alias_info is not None
+        and ret.alias_info is not None
+        and ret.alias_info.is_write
+        and ret.type == _C.TensorType.get()
+        and arg.alias_info.before_set == ret.alias_info.before_set
+    )
+
+
+def is_donated_buffer_schema_return(arg: _C.Argument, ret: _C.Argument) -> bool:
+    return _is_maybe_out_arg(arg) and _return_aliases_arg(ret, arg)
+
+
+def is_donated_buffer_arg(schema: _C.FunctionSchema, arg: _C.Argument) -> bool:
+    return any(is_donated_buffer_schema_return(arg, ret) for ret in schema.returns)
+
+
+def is_donated_buffer_return(schema: _C.FunctionSchema, ret: _C.Argument) -> bool:
+    return any(is_donated_buffer_schema_return(arg, ret) for arg in schema.arguments)
+
+
+def is_donated_buffer_schema_alias(
+    arg: _C.Argument, ret: _C.Argument, argument: Any, output: Any
+) -> bool:
+    return (
+        is_donated_buffer_schema_return(arg, ret)
         and isinstance(output, torch.Tensor)
         and output is argument
     )
@@ -486,9 +516,9 @@ def _check_maybe_out_aliasing_constraint(
     name, schema, args, kwargs, result, get_module
 ):
     maybe_out_args = [
-        arg
+        (schema_arg, arg)
         for schema_arg, arg in _schema_args(schema, args, kwargs)
-        if _is_maybe_out_arg(schema_arg)
+        if is_donated_buffer_arg(schema, schema_arg)
     ]
     if not maybe_out_args:
         return
@@ -496,15 +526,17 @@ def _check_maybe_out_aliasing_constraint(
     tuple_result = result
     if not isinstance(result, tuple):
         tuple_result = (result,)
-    top_level_maybe_out_ids = {
-        id(output)
-        for output in tuple_result
-        if isinstance(output, torch.Tensor)
-        for arg in maybe_out_args
-        if output is arg
-    }
+    top_level_maybe_out_ids = set()
+    for idx, output in enumerate(tuple_result):
+        if idx >= len(schema.returns) or not isinstance(output, torch.Tensor):
+            continue
+        ret = schema.returns[idx]
+        for schema_arg, arg in maybe_out_args:
+            if is_donated_buffer_schema_alias(schema_arg, ret, arg, output):
+                top_level_maybe_out_ids.add(id(output))
+
     for output in iter_tensors(tuple_result, {}):
-        for arg in maybe_out_args:
+        for _, arg in maybe_out_args:
             if arg is None:
                 continue
             if output is arg and id(output) in top_level_maybe_out_ids:
@@ -516,14 +548,16 @@ def _check_maybe_out_aliasing_constraint(
 def _inputs_for_aliasing_check(schema, args, kwargs):
     checked_args = []
     for idx, arg in enumerate(args):
-        if idx >= len(schema.arguments) or not _is_maybe_out_arg(schema.arguments[idx]):
+        if idx >= len(schema.arguments) or not is_donated_buffer_arg(
+            schema, schema.arguments[idx]
+        ):
             checked_args.append(arg)
 
     arguments_by_name = {arg.name: arg for arg in schema.arguments}
     checked_kwargs = {}
     for name, arg in kwargs.items():
         schema_arg = arguments_by_name.get(name)
-        if schema_arg is None or not _is_maybe_out_arg(schema_arg):
+        if schema_arg is None or not is_donated_buffer_arg(schema, schema_arg):
             checked_kwargs[name] = arg
 
     return tuple(checked_args), checked_kwargs

@@ -5,7 +5,6 @@ from itertools import combinations
 from typing import Any, NamedTuple, TYPE_CHECKING
 
 import torch
-from torch._library import utils as library_utils
 from torch.fx.operator_schemas import _normalize_function_or_error
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -208,16 +207,10 @@ class SchemaCheckMode(TorchDispatchMode):
                         has_aliased(tuple_out[j], after)
                         and func._schema.name not in unsafe_ops
                     ):
-                        may_alias_maybe_out = library_utils.is_maybe_out_schema_alias(
-                            arg, after, tuple_out[j]
-                        )
                         # pyrefly: ignore [missing-attribute]
-                        if (
-                            not schema_info.may_contain_alias(
-                                SchemaArgument(SchemaArgType.output, j),
-                                SchemaArgument(SchemaArgType.input, i),
-                            )
-                            and not may_alias_maybe_out
+                        if not schema_info.may_contain_alias(
+                            SchemaArgument(SchemaArgType.output, j),
+                            SchemaArgument(SchemaArgType.input, i),
                         ):
                             raise RuntimeError(
                                 f"Argument {name} is not defined to alias output but was aliasing"
