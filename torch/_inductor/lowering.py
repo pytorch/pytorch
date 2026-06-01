@@ -612,7 +612,7 @@ def promote_constants(
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     tensor_dtype = ex.get_dtype()
 
-    # Round scalar to tensor's dtype for comparison ops to match eager
+    # Round scalar to tensor's dtype to match eager
     if (
         override_return_dtype == torch.bool or round_scalar_constants
     ) and tensor_dtype in (
