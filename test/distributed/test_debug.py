@@ -31,6 +31,8 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 try:
+    import aiohttp  # noqa: F401  # type: ignore[import]
+
     from torch.distributed.debug._frontend import fetch_aiohttp
 
     HAS_AIOHTTP = True
