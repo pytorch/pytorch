@@ -57,9 +57,12 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     skipIfWindows,
     subtest,
+    TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
@@ -3140,6 +3143,10 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 self.assertEqual(c3.get("autograd_cache_miss", 0), 0)
                 self.assertEqual(c3.get("autograd_cache_hit", 0), 1)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/179689",
+    )
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -4657,6 +4664,9 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
             if dynamic_shapes == "from_tracing_context"
             else nullcontext()
         )
+        standalone_fake_mode = (
+            fake_mode if dynamic_shapes == "from_example_inputs" else None
+        )
 
         # Run standalone_compile and capture the real cache key.
         real_cache_key_fn = autograd_cache.autograd_cache_key
@@ -4678,6 +4688,7 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                     dynamic_shapes=dynamic_shapes,
                     options={},
                     aot=aot,
+                    fake_mode=standalone_fake_mode,
                 )
 
             self.assertIsNotNone(captured_key)
@@ -4687,6 +4698,7 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                 example_inputs,
                 dynamic_shapes=dynamic_shapes,
                 aot=aot,
+                fake_mode=standalone_fake_mode,
             )
             self.assertEqual(captured_key, sc_key)
 
