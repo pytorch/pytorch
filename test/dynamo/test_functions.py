@@ -4988,7 +4988,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             return data.value.sum()
 
         x = torch.randn(3)
-        expected_msg = "property 'edges' of .*Data' object has no setter"
+        expected_msg = (
+            r"(property 'edges' of .*Data' object has no setter"
+            r"|can't set attribute(?: 'edges')?)"
+        )
         self.assertRaisesRegex(AttributeError, expected_msg, fn, x)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
