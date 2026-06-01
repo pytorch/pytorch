@@ -411,6 +411,13 @@ void CUDAGraph::begin_capture_to_conditional_node(
     const at::Tensor& scalar_cuda_pred_tensor,
     ConditionalNodeType conditional_node_type) {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
+  static_assert(
+      static_cast<int>(ConditionalNodeType::If) ==
+      static_cast<int>(cudaGraphCondTypeIf));
+  static_assert(
+      static_cast<int>(ConditionalNodeType::While) ==
+      static_cast<int>(cudaGraphCondTypeWhile));
+
   TORCH_CHECK(
       !has_graph_exec_,
       "This CUDAGraph instance already owns a captured graph.");
