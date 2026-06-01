@@ -224,11 +224,27 @@ If full precision reductions are needed, users can disable reduced precision red
 torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 ```
 
+Assigning a boolean is equivalent to assigning
+`(allow_reduced_precision, True)` and sets `allow_splitk` to `True`. To
+disable both reduced precision reductions and split-k reductions, assign
+`(allow_reduced_precision, allow_splitk)` explicitly:
+
+```python
+torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (False, False)
+```
+
+The current split-k setting can be queried with
+`torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k`.
+The combination `(True, False)` is not supported because reduced precision
+reductions require split-k.
+
 To toggle the reduced precision reduction flags in C++, one can do
 
 ```cpp
-at::globalContext().setAllowFP16ReductionCuBLAS(false);
+at::globalContext().setAllowFP16ReductionCuBLAS(false, false);
 ```
+
+The second argument is `allow_splitk` and defaults to `true` when omitted.
 
 (bf16reducedprecision)=
 
@@ -245,11 +261,27 @@ precision reductions in bf16 GEMMs with:
 torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
 ```
 
+Assigning a boolean is equivalent to assigning
+`(allow_reduced_precision, True)` and sets `allow_splitk` to `True`. To
+disable both reduced precision reductions and split-k reductions, assign
+`(allow_reduced_precision, allow_splitk)` explicitly:
+
+```python
+torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, False)
+```
+
+The current split-K setting can be queried with
+`torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k`.
+The combination `(True, False)` is not supported because reduced precision
+reductions require split-K.
+
 To toggle the reduced precision reduction flags in C++, one can do
 
 ```cpp
-at::globalContext().setAllowBF16ReductionCuBLAS(true);
+at::globalContext().setAllowBF16ReductionCuBLAS(false, false);
 ```
+
+The second argument is `allow_splitk` and defaults to `true` when omitted.
 
 (fp16accumulation)=
 
