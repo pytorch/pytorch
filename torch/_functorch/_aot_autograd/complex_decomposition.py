@@ -116,39 +116,15 @@ def _assert_no_incorrect_aliasing_mutation(gm: fx.GraphModule) -> None:
 
     In all three cases, we raise an error if possible incorrectness is detected.
     """
-    from torch._subclasses.complex_tensor._ops.common import INCORRECT_ALIASING_OPS
-
-    mutated: set[fx.Node] = set()
-    complex_inputs: set[fx.Node] = set()
     for n in gm.graph.nodes:
-        if n.op == "placeholder" and n.meta["val"].dtype.is_complex:
-            complex_inputs.add(n)
         if (
             isinstance(n.target, torch._ops.OpOverload)
             and n.target.overloadpacket == torch.ops.aten.copy_
+            and n.args[0].meta["val"].dtype.is_complex
         ):
-            mutated.add(n.args[0])
-
-    poisoned: set[fx.Node] = set()
-    for n in gm.graph.nodes:
-        if isinstance(n.target, torch._ops.OpOverload) and (
-            n.target.overloadpacket in INCORRECT_ALIASING_OPS
-            or n.target in INCORRECT_ALIASING_OPS
-        ):
-            poisoned.update(_collect_storage_aliases(n))
-    if not mutated.isdisjoint(poisoned):
-        raise RuntimeError(
-            "torch.view_as_real or torch.view_as_complex was called on a complex tensor, and its storage is also mutated in this compiled region. Please clone the tensor before mutating, move the mutation outside the compiled region, or avoid these ops."
-        )
-
-    complex_input_aliases: set[fx.Node] = set()
-    for n in complex_inputs:
-        complex_input_aliases.update(_collect_storage_aliases(n))
-
-    if not mutated.isdisjoint(complex_input_aliases):
-        raise RuntimeError(
-            "Complex input nodes are mutated in this compiled region. Please clone the tensor before mutating, move the mutation outside the compiled region, or avoid these ops."
-        )
+            raise RuntimeError(
+                "Mutating a complex tensor in place is not allowed in a `torch.compile` region."
+            )
 
 
 def decompose_complex_in_graph(

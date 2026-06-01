@@ -17,7 +17,6 @@ from .common import (
     register_complex,
     register_error,
     register_force_test,
-    register_incorrect_aliasing,
     register_simple,
     split_complex_arg,
     split_complex_tensor,
@@ -725,12 +724,12 @@ def logical_not_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> torch.Te
     return torch.logical_not(elemwise_nonzero(self), *args, **kwargs)
 
 
-@register_incorrect_aliasing(aten.view_as_real)
+@register_complex(aten.view_as_real)
 def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
     return torch.stack([self.re, self.im], dim=-1)
 
 
-@register_incorrect_aliasing(aten.view_as_complex)
+@register_complex(aten.view_as_complex)
 def view_as_complex_impl(self: ComplexTensor) -> torch.Tensor:
     if len(self.shape) < 1 or self.shape[-1] != 2:
         raise RuntimeError("Tensor must have a last dimension of size 2")
@@ -807,21 +806,25 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
 
 @register_complex(aten._conj)
 def _conj_impl(self: ComplexTensor) -> ComplexTensor:
+    # See "NOTE conj/neg (hameerabbasi)"
     return ComplexTensor(aten.alias(self.re), -self.im)
 
 
 @register_complex(aten._neg_view)
 def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
+    # See "NOTE conj/neg (hameerabbasi)"
     return ComplexTensor(-self.re, -self.im)
 
 
 @register_complex(aten.resolve_conj)
 def resolve_conj_impl(self: ComplexTensor) -> ComplexTensor:
+    # See "NOTE conj/neg (hameerabbasi)"
     return self
 
 
 @register_complex(aten.resolve_neg)
 def resolve_neg_impl(self: ComplexTensor) -> ComplexTensor:
+    # See "NOTE conj/neg (hameerabbasi)"
     return self
 
 
