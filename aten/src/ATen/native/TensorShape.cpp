@@ -3818,6 +3818,8 @@ std::tuple<SymDimVector, SymDimVector> static inferSqueezeGeometry(
     const Tensor& tensor) {
   SymDimVector sizes;
   SymDimVector strides;
+  sizes.reserve(tensor.dim());
+  strides.reserve(tensor.dim());
 
   for (const auto d : c10::irange(tensor.dim())) {
     if (tensor.sym_sizes()[d] != 1) {
@@ -3834,6 +3836,8 @@ std::tuple<SymDimVector, SymDimVector> static inferSqueezeGeometry(
     int64_t dim) {
   SymDimVector sizes;
   SymDimVector strides;
+  sizes.reserve(tensor.dim());
+  strides.reserve(tensor.dim());
 
   for (const auto d : c10::irange(tensor.dim())) {
     if (d != dim || tensor.sym_sizes()[dim] != 1) {
@@ -3852,6 +3856,8 @@ std::tuple<SymDimVector, SymDimVector> static inferSqueezeGeometry(
   const auto sym_strides = tensor.sym_strides();
 
   SymDimVector out_sizes, out_strides;
+  out_sizes.reserve(ndim);
+  out_strides.reserve(ndim);
   for (const auto d : c10::irange(ndim)) {
     if (!dim_mask.test(d) || sym_sizes[d] != 1) {
       out_sizes.push_back(sym_sizes[d]);
@@ -4328,6 +4334,7 @@ Tensor numpy_T(const Tensor& self) {
         "Tensor.T is deprecated on 0-D tensors. This function is the identity in these cases.");
   }
   DimVector transpose_dims;
+  transpose_dims.reserve(n);
   for (int64_t i = n - 1; i >= 0; --i) {
     transpose_dims.push_back(i);
   }

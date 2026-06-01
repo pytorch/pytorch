@@ -116,6 +116,8 @@ static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, t
   // For each BatchedTensor, also record what position of `arguments` they came from.
   at::SmallVector<Tensor,kVmapTransformStaticInputSize> batched_tensor_inputs;
   VmapDimVector batched_tensor_inputs_position;
+  batched_tensor_inputs.reserve(arguments.size());
+  batched_tensor_inputs_position.reserve(arguments.size());
   for (const auto idx : c10::irange(0, arguments.size())) {
     const auto& ivalue = arguments[idx];
     if (!ivalue.isTensor()) {
@@ -291,6 +293,8 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   // For each BatchedTensor, also record what position of `arguments` they came from.
   at::SmallVector<Tensor,kVmapTransformStaticInputSize> batched_tensor_inputs;
   VmapDimVector batched_tensor_inputs_position;
+  batched_tensor_inputs.reserve(arguments.size());
+  batched_tensor_inputs_position.reserve(arguments.size());
   for (const auto idx : c10::irange(0, arguments.size())) {
     const auto& ivalue = arguments[idx];
     if (!ivalue.isTensor()) {
@@ -430,6 +434,8 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
   // For each BatchedTensor, also record what position of `arguments` they came from.
   at::SmallVector<Tensor,kVmapTransformStaticInputSize> batched_tensor_inputs;
   VmapDimVector batched_tensor_inputs_position;
+  batched_tensor_inputs.reserve(arguments.size());
+  batched_tensor_inputs_position.reserve(arguments.size());
   for (const auto idx : c10::irange(0, arguments.size())) {
     const auto& ivalue = arguments[idx];
     if (!ivalue.isTensor()) {
