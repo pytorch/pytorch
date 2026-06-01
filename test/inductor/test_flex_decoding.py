@@ -1794,6 +1794,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @unittest.skip("OOMs in CI")
     @unittest.skipIf(not TEST_ON_CUDA or torch.version.hip, "requires CUDA")
     @largeTensorTest("16GB", inductor=True)
     def test_large_kv_decode_int64_pointer_math(self, device):
