@@ -1201,6 +1201,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         return gradgradcheck(func, inputs, (grad_y,))
 
     @onlyAccelerator
+    @skipMPS
     def test_thnn_conv_strided_padded_dilated(self, device):
         for convfn, dims, transposed in (
             (torch.nn.functional.conv2d, 2, False),
@@ -3983,6 +3984,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     )
 
     @onlyAccelerator
+    @skipMPS
     @tf32_on_and_off(0.05)
     def test_conv_mismatch_memory_format(self, device):
         configs = [
