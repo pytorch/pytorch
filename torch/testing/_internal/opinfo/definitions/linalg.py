@@ -1586,7 +1586,6 @@ op_db: list[OpInfo] = [
         skips=(
             # we skip gradient checks for this suite as they are tested in
             # variant_test_name='grad_oriented'
-            DecorateInfo(unittest.skip("Skipped!"), "TestFwdGradients"),
             # The values for attribute 'shape' do not match
             DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
             DecorateInfo(
@@ -1829,13 +1828,6 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # [NEW] Skips specifically for sample inputs at zero
-            DecorateInfo(
-                unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"
-            ),
             # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
             DecorateInfo(
                 unittest.expectedFailure,
