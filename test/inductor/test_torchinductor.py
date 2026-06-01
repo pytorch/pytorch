@@ -8193,6 +8193,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn([64]),),
         )
 
+    def test_hardtanh_backward_low_precision_boundary(self):
+        # hardtanh_backward must compare in opmath (fp32) like the eager kernel.
+        # bf16(0.7) rounds to 0.69921875, so an input at that value is inside
+        # (-0.7, 0.7) in fp32 (grad 1) but at the bound in bf16 (grad 0).
+        # Regression test for issue #185472.
+        def fn(x):
+            return F.hardtanh(x, min_val=-0.7, max_val=0.7)
+
+        x = torch.tensor(
+            [0.69921875], dtype=torch.bfloat16, device=self.device, requires_grad=True
+        )
+        x_c = x.detach().clone().requires_grad_(True)
+        fn(x).sum().backward()
+        torch.compile(fn, fullgraph=True)(x_c).sum().backward()
+        self.assertEqual(x.grad, x_c.grad)
+
     def test_hardsigmoid(self):
         def fn(x):
             return F.hardsigmoid(x), F.hardsigmoid(x + 3), F.hardsigmoid(x - 3)
