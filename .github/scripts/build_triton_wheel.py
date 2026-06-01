@@ -66,6 +66,9 @@ def build_triton(
         max_jobs = os.cpu_count() or 1
         env["MAX_JOBS"] = str(max_jobs)
 
+    if device == "xpu" and "TRITON_PARALLEL_LINK_JOBS" not in env:
+        env["TRITON_PARALLEL_LINK_JOBS"] = str(max_jobs // 2 or 1)
+
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
