@@ -23,7 +23,7 @@ tags_t: TypeAlias = _C.Tag | Sequence[_C.Tag] | None  # noqa: PYI042
 log = logging.getLogger(__name__)
 
 
-_FAST_CUSTOM_OPS_ENABLED = os.environ.get("TORCH_DISABLE_FAST_CUSTOM_OPS") != "1"
+_FAST_CUSTOM_OPS_ENABLED = os.environ.get("TORCH_ENABLE_FAST_CUSTOM_OPS", "1") == "1"
 
 
 def _normalize_tags(tags: tags_t) -> tuple[_C.Tag, ...]:
