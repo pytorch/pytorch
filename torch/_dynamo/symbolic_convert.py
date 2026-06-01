@@ -100,6 +100,7 @@ from .exc import (
     collapse_resume_frames,
     format_frame_info,
     get_stack_above_dynamo,
+    raise_value_error,
     ResumePrologueTracingError,
     StepUnsupported,
     unimplemented,
@@ -147,6 +148,7 @@ from .utils import (
     istype,
     LazyString,
     proxy_args_kwargs,
+    unpack_iterable,
 )
 from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
@@ -161,6 +163,8 @@ from .variables.ctx_manager import (
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
+    CO_VARARGS,
+    CO_VARKEYWORDS,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -186,7 +190,7 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-from .variables.object_protocol import generic_bool, generic_contains
+from .variables.object_protocol import generic_bool, generic_contains, generic_getiter
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
@@ -2962,6 +2966,10 @@ class InstructionTranslatorBase(
         if not self.check_if_exc_matches():
             self.jump(inst)
 
+    @break_graph_if_unsupported(
+        push=True,
+        msg_prefix="Encountered graph break when attempting to trace COMPARE_OP: a comparison operation, e.g. a == b",
+    )
     def COMPARE_OP(self, inst: Instruction) -> None:
         if inst.argval == "exception match":
             self.CHECK_EXC_MATCH(inst)
@@ -3023,8 +3031,8 @@ class InstructionTranslatorBase(
         if not isinstance(
             argsvars,
             BaseListVariable,
-        ) and argsvars.has_force_unpack_var_sequence(self):
-            argsvars = TupleVariable(argsvars.force_unpack_var_sequence(self))
+        ):
+            argsvars = TupleVariable(unpack_iterable(self, argsvars))
 
         # Unpack for cases like fn(**obj) where obj is a map
         if isinstance(kwargsvars, UserDefinedObjectVariable):
@@ -3814,7 +3822,7 @@ class InstructionTranslatorBase(
         items = []
         for seq in seqs:
             try:
-                items.extend(seq.force_unpack_var_sequence(self))
+                items.extend(unpack_iterable(self, seq))
             except NotImplementedError:
                 unimplemented(
                     gb_type="Failed to unpack object for BUILD_LIST_UNPACK",
@@ -3869,7 +3877,7 @@ class InstructionTranslatorBase(
         if not keys.is_python_constant():
             raise AssertionError("expected keys.is_python_constant() to be true")
 
-        keys = keys.force_unpack_var_sequence(self)
+        keys = unpack_iterable(self, keys)
         if len(keys) != len(values):
             raise AssertionError("expected len(keys) == len(values) to be true")
 
@@ -3996,23 +4004,17 @@ class InstructionTranslatorBase(
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
-        elif seq.has_force_unpack_var_sequence(self):
-            val = seq.force_unpack_var_sequence(self)
         else:
-            unimplemented(
-                gb_type="Failed to unpack object for UNPACK_SEQUENCE",
-                context=str(seq),
-                explanation=f"{seq} cannot be unpacked into a list for the UNPACK_SEQUENCE bytecode "
-                "(i.e. `a, b, c = d`).",
-                hints=[*graph_break_hints.USER_ERROR],
+            val = unpack_iterable(self, seq)
+        if len(val) < inst.argval:
+            raise_value_error(
+                self,
+                f"not enough values to unpack (expected {inst.argval}, got {len(val)})",
             )
-        if len(val) != inst.argval:
-            unimplemented(
-                gb_type="Length mismatch when unpacking object for UNPACK_SEQUENCE",
-                context=f"expected length: {inst.argval}, actual: {len(val)}",
-                explanation=f"{seq} unpacked to a list for the UNPACK_SEQUENCE bytecode "
-                "(i.e. `a, b, c = d`) with unexpected length.",
-                hints=[*graph_break_hints.DYNAMO_BUG],
+        if len(val) > inst.argval:
+            raise_value_error(
+                self,
+                f"too many values to unpack (expected {inst.argval})",
             )
         for i in reversed(val):
             self.push(i)
@@ -4023,16 +4025,19 @@ class InstructionTranslatorBase(
         prefix = inst.argval & 0xFF  # low byte
         suffix = inst.argval >> 8  # high byte
         seq = self.pop()
-        if seq.has_force_unpack_var_sequence(self):
-            vals = list(seq.force_unpack_var_sequence(self))
-            if not (len(vals) >= prefix + suffix):
-                raise AssertionError("expected len(vals) >= prefix + suffix to be true")
+        if iterator := generic_getiter(self, seq):  # type: ignore[bad-argument-type]
+            vals = unpack_iterable(self, iterator)
+            if len(vals) < prefix + suffix:
+                raise_value_error(
+                    self,
+                    f"not enough values to unpack (expected at least {prefix + suffix}, got {len(vals)})",
+                )
             vals_prefix = vals[:prefix]
             vals_list = vals[prefix : len(vals) - suffix]
             vals_suffix = vals[len(vals) - suffix :]
             for item in reversed(vals_suffix):
                 self.push(item)
-            self.push(TupleVariable(vals_list))
+            self.push(ListVariable(vals_list, mutation_type=ValueMutationNew()))
             for item in reversed(vals_prefix):
                 self.push(item)
         else:
@@ -4121,7 +4126,7 @@ class InstructionTranslatorBase(
             )
 
             value = LazyVariableTracker.create(
-                LazySymNodeFormatString(value, fmt_spec), source=value.source
+                LazySymNodeFormatString(value, fmt_spec), source=value.source, tx=self
             )
             self.push(value)
             return
@@ -4183,12 +4188,8 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval == 0 or inst.argval == 1 to be true"
             )
-        if inst.argval == 0:
-            new_argval = "is"
-        else:
-            new_argval = "is not"
-        new_inst = create_instruction("COMPARE_OP", argval=new_argval)
-        self.COMPARE_OP(new_inst)
+        argval = "is" if inst.argval == 0 else "is not"
+        self.push(compare_op_handlers[argval](self, self.popn(2), {}))
 
     def CONTAINS_OP(self, inst: Instruction) -> None:
         if not (inst.argval == 0 or inst.argval == 1):
@@ -4651,7 +4652,8 @@ class InstructionTranslatorBase(
             self.UNARY_POSITIVE(inst)
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
-            self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
+            items = unpack_iterable(self, self.pop())
+            self.push(TupleVariable(items))
         elif inst.argval == 7:
             # INTRINSIC_TYPEVAR
             v = self.pop().as_python_constant()
@@ -5222,9 +5224,13 @@ class InstructionTranslatorBase(
             CO_ITERABLE_COROUTINE,
         )
 
-        if f_code.co_flags & (
-            CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
-        ):
+        # This isn't really the right place to push None.  But since we treat RETURN_GENERATOR as a no-op for
+        # non-generator frames, there needs to be something on the stack since the first instruction will be POP_TOP,
+        # which would error out with an empty stack
+        push_types = CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
+        if sys.version_info < (3, 11):
+            push_types |= CO_GENERATOR
+        if f_code.co_flags & (push_types):
             self.push(BuiltinVariable(None))
 
         self.inline_depth = inline_depth
@@ -5335,6 +5341,19 @@ class InstructionTranslator(InstructionTranslatorBase):
             # Populate `symbolic_locals` with non-cell variables.
             cell_and_freevars: set[str] = set(self.cell_and_freevars())
 
+            # Identify the names of `*args` / `**kwargs` parameters (if any)
+            # via the function's `co_flags`. The varargs param (if present)
+            # comes immediately after `co_argcount + co_kwonlyargcount`
+            # entries in `co_varnames`; the varkw param comes right after.
+            varargs_name: str | None = None
+            varkw_name: str | None = None
+            _vararg_idx = f_code.co_argcount + f_code.co_kwonlyargcount
+            if f_code.co_flags & CO_VARARGS:
+                varargs_name = f_code.co_varnames[_vararg_idx]
+                _vararg_idx += 1
+            if f_code.co_flags & CO_VARKEYWORDS:
+                varkw_name = f_code.co_varnames[_vararg_idx]
+
             dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
@@ -5347,7 +5366,10 @@ class InstructionTranslator(InstructionTranslatorBase):
                             name,
                             is_input=True,
                             dynamism=local_dynamism,
+                            is_varargs=(name == varargs_name),
+                            is_varkw=(name == varkw_name),
                         ),
+                        tx=self,
                     )
                     self.symbolic_locals[name] = var
 
@@ -5384,7 +5406,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                         is_derefed_cell_contents=True,
                     )
                     contents_var: VariableTracker = LazyVariableTracker.create(
-                        value, contents_source
+                        value, contents_source, tx=self
                     )
                     cell_var = side_effects.track_cell_new()
                     side_effects.store_cell(cell_var, contents_var)
@@ -5402,7 +5424,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 contents_source = LocalSource(name, is_derefed_cell_contents=True)
                 try:
                     contents_var = LazyVariableTracker.create(
-                        cell.cell_contents, contents_source
+                        cell.cell_contents, contents_source, tx=self
                     )
                 except ValueError:
                     # Cell has not yet been assigned
@@ -5480,7 +5502,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and isinstance(tos, LocalGeneratorObjectVariable)
         ):
             self.stack[-1] = ListIteratorVariable(
-                tos.force_unpack_var_sequence(self),
+                unpack_iterable(self, tos),
                 mutation_type=ValueMutationNew(),
             )
 
@@ -6095,7 +6117,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 )  # type: ignore[assignment]
             else:
                 fglobals_value = _import_module(module_name)
-            # Dont use lazy vt because we will do a setattr afterwards
+            # Don't use lazy vt because we will do a setattr afterwards
             # TODO: fix InstructionTranslator -> InstructionTranslatorBase
             # pyrefly: ignore[bad-argument-type]
             fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
@@ -6106,7 +6128,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
-            # Dont use lazy vt because we will do a setattr afterwards
+            # Don't use lazy vt because we will do a setattr afterwards
             # pyrefly: ignore[bad-argument-type]
             fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
             global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
@@ -6177,7 +6199,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
-        self.push(ConstantVariable.create(None))
         if (
             config.enable_faithful_generator_behavior
             or self.is_generator_from_ctx_manager
@@ -6192,6 +6213,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
+
+    def RETURN_GENERATOR(self, inst: Instruction) -> None:
+        self.symbolic_result = self.funcvar
+        raise ReturnValueOp
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
         self.generator_exhausted = True

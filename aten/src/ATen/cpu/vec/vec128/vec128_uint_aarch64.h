@@ -255,10 +255,7 @@ Vectorized<uint8_t> Vectorized<uint8_t>::blend(
     if (count == size()) {                                                     \
       return vld1q_u##bit(reinterpret_cast<const uint##bit##_t*>(ptr));        \
     } else {                                                                   \
-      __at_align__ uint##bit##_t tmp_values[size()];                           \
-      for (const auto i : c10::irange(size())) {                               \
-        tmp_values[i] = 0;                                                     \
-      }                                                                        \
+      __at_align__ uint##bit##_t tmp_values[size()] = {};                      \
       std::memcpy(                                                             \
           tmp_values,                                                          \
           reinterpret_cast<const uint##bit##_t*>(ptr),                         \
