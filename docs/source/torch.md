@@ -888,7 +888,6 @@ False
     addr
     baddbmm
     bmm
-    chain_matmul
     cholesky_inverse
     cholesky_solve
     dot
