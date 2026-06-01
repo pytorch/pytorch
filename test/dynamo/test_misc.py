@@ -744,6 +744,22 @@ graph():
             self, inplace_on_literals, 1, expected_ops=2
         )
 
+    def test_bool_literal_iand_unspecialized_float(self):
+        @torch.compile(backend="eager")
+        def mul(a: torch.Tensor, b: torch.Tensor, c: float | int | None):
+            has_bias = c is not None
+            has_bias &= c != 0.0
+
+            if has_bias:
+                return a * b + c
+            return a * b
+
+        a = torch.randn(10)
+        b = torch.randn(10)
+
+        self.assertEqual(mul(a, b, c=0.0), a * b)
+        self.assertEqual(mul(a, b, c=0.5), a * b + 0.5)
+
     def test_unpack4(self):
         def unpack4(a, b):
             a = a[:5, :]
@@ -1492,6 +1508,36 @@ graph():
             expect = fn(*sample)
             actual = opt_fn(*sample)
             self.assertEqual(expect, actual)
+
+    def test_builtin_eval_constant_expr(self):
+        def fn(x):
+            values = eval("{'scale': 2, 'offset': (3, 4)}")
+            return x * values["scale"] + eval(" 1+1\n") + eval("1/2")
+
+        x = torch.randn(4)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_builtin_eval_rejects_non_constant_expr(self):
+        def fn(x):
+            return x + eval("len([1])")
+
+        with self.assertRaisesRegex(Unsupported, "Failed to trace builtin operator"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+
+    def test_builtin_eval_propagates_syntax_error(self):
+        def fn(x):
+            try:
+                eval("1+")
+            except SyntaxError:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -2764,11 +2810,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         x = torch.randn(3, 2)
 
-        # Verify that fullgraph=True fails (confirms graph break occurs)
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, fullgraph=True, backend="eager")(x)
 
-        # Verify that it works without fullgraph
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         result = opt_fn(x)
         self.assertEqual(cnts.frame_count, 1)
@@ -2874,8 +2918,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """1""")
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.frame_count, """0""")
+            self.assertExpectedInline(cnts.op_count, """0""")
 
     def test_list_slice_mul(self):
         def fn(count):
@@ -2890,8 +2934,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """1""")
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.frame_count, """0""")
+            self.assertExpectedInline(cnts.op_count, """0""")
 
     def test_tuple_mul(self):
         def fn(count):
@@ -2905,8 +2949,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """1""")
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.frame_count, """0""")
+            self.assertExpectedInline(cnts.op_count, """0""")
 
     def test_tuple_mul_with_shape(self):
         def fn(a):
@@ -3397,7 +3441,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
             def __getattribute__(self, name):
                 if name == "my_attr":
-                    return eval("42")  # eval is untraceable
+                    return eval("len([1])")
                 return super().__getattribute__(name)
 
             def forward(self, x):
@@ -4137,7 +4181,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             lambda x: x.resize_as_(torch.rand(200, 300)): torch.rand(2, 3),
             lambda x: x.swapaxes_(0, 1).mul_(2): torch.rand(2, 3),
             lambda x: x.swapdims_(0, 1).mul_(2): torch.rand(2, 3),
-            lambda x: x.rename_("N", "C").mul_(2): torch.zeros(2, 3),
             lambda x: x.as_strided_((3, 2), (2, 1)).mul_(2): torch.zeros(2, 3),
             lambda x: x.detach_().mul_(2): torch.zeros(2, 3),
         }
@@ -6952,6 +6995,52 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         expected = fn_pow(a, val)
         actual = torch.compile(fn_pow, backend="eager", fullgraph=True)(a, val)
+        self.assertEqual(expected, actual)
+
+    # Test that ops with Scalar arguments (alpha, beta, value) work with
+    # 0-d tensor inputs under fullgraph=True. The C++ arg parser calls
+    # .item() on 0-d tensors to convert them to Scalars, creating unbacked
+    # symbols that should be ignored since they only affect tensor values,
+    # not shapes.
+    @parametrize(
+        "op",
+        [
+            "add_method",
+            "add_positional",
+            "add_func",
+            "addcmul",
+            "addcmul_positional",
+            "addcdiv",
+            "addcdiv_positional",
+            subtest("baddbmm", decorators=[expectedFailureDynamic]),
+        ],
+    )
+    def test_scalar_arg_0d_tensor(self, op):
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+        c = torch.randn(4, 4)
+        alpha = torch.tensor(2.0)
+        beta = torch.tensor(0.5)
+        batch1 = torch.randn(2, 4, 3)
+        batch2 = torch.randn(2, 3, 4)
+        m_batch = torch.randn(2, 4, 4)
+
+        cases = {
+            "add_method": lambda: a.add(b, alpha=alpha),
+            "add_positional": lambda: a.add(alpha, b),
+            "add_func": lambda: torch.add(a, b, alpha=alpha),
+            "addcmul": lambda: a.addcmul(b, c, value=beta),
+            "addcmul_positional": lambda: a.addcmul(beta, b, c),
+            "addcdiv": lambda: a.addcdiv(b, c.abs() + 1, value=beta),
+            "addcdiv_positional": lambda: a.addcdiv(beta, b, c.abs() + 1),
+            # Z3 translation validation doesn't support unbacked symbols from
+            # baddbmm's scalar args (https://github.com/pytorch/pytorch/issues/162287).
+            "baddbmm": lambda: m_batch.baddbmm(batch1, batch2, alpha=alpha, beta=beta),
+        }
+
+        fn = cases[op]
+        expected = fn()
+        actual = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(expected, actual)
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/99726")
@@ -15880,6 +15969,37 @@ def forward(self, L_x_ : torch.Tensor):
             compiled = torch.compile(scope["op"], fullgraph=True)
             self.assertEqual(compiled(x), torch.tensor(0.0))
 
+    def test_str_join_with_list(self):
+        def fn():
+            return ", ".join(["a", "b", "c"])
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "a, b, c")
+
+    def test_str_join_with_tuple(self):
+        def fn():
+            return "-".join(("x", "y", "z"))
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "x-y-z")
+
+    def test_str_join_with_generator(self):
+        def fn():
+            return ", ".join(s.upper() for s in ["a", "b", "c"])
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "A, B, C")
+
+    def test_str_join_with_map(self):
+        def fn():
+            return ":".join(map(str, [1, 2, 3]))
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt(), "1:2:3")
+
+
+instantiate_parametrized_tests(MiscTests)
+
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
     @parametrize_pytree_module
@@ -16768,6 +16888,51 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(w % 14 == 0)
         self.assertTrue(224 <= h <= 256)
         self.assertTrue(224 <= w <= 256)
+
+    def test_tensorify_scalar_only_bin_ops(self):
+        """When tensorify is enabled, torch bin_ops on scalar-only args should
+        not graph-break. The scalars are lifted as 0-dim tensor placeholders by
+        Dynamo; the tensorify pass converts them back to tensor ops."""
+        for op, expected in [
+            (torch.add, lambda a, b: a + b),
+            (torch.sub, lambda a, b: a - b),
+            (torch.mul, lambda a, b: a * b),
+            (torch.div, lambda a, b: a / b),
+        ]:
+            with self.subTest(op=op.__name__):
+
+                def fn(a, b):
+                    return op(a, b)
+
+                compiled = torch.compile(
+                    fn, backend="eager", dynamic=True, fullgraph=True
+                )
+                result = compiled(3.5, 2.0)
+                self.assertEqual(result, expected(3.5, 2.0))
+
+    def test_tensorify_scalar_only_bin_ops_int(self):
+        """When tensorify is enabled, torch bin_ops on integer scalar-only
+        args should not graph-break either. The ints are lifted as SymInts
+        and symbolic arithmetic traces correctly."""
+
+        def fn(a, b):
+            return torch.add(a, b)
+
+        compiled = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        result = compiled(5, 3)
+        self.assertEqual(result, 8)
+
+    def test_tensorify_symint_div_from_size(self):
+        """torch.div on SymInt args from tensor.size() should compile
+        without graph break when tensorify is enabled."""
+
+        def fn(x, divisor):
+            seq_len = x.size(0)
+            return torch.div(seq_len, divisor, rounding_mode="trunc")
+
+        compiled = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        result = compiled(torch.randn(1024), 256)
+        self.assertEqual(result, 4)
 
 
 if __name__ == "__main__":

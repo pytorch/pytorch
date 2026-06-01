@@ -261,9 +261,20 @@ struct FromImpl<std::optional<T>> {
     if (!val.has_value()) {
       return torch::stable::detail::from(std::nullopt);
     }
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
+    const StableIValue value = detail::FromImpl<T>::call(
+        val.value(), extension_build_version, is_internal);
+
+    StableIValue* ivalue_ptr = nullptr;
+    TORCH_ERROR_CODE_CHECK(torch_new_stable_ivalue(&ivalue_ptr));
+    *ivalue_ptr = value;
+    return torch::stable::detail::from(ivalue_ptr);
+#else
     return torch::stable::detail::from(
         new StableIValue(detail::FromImpl<T>::call(
             val.value(), extension_build_version, is_internal)));
+#endif
   }
 };
 
@@ -614,8 +625,12 @@ struct ToImpl<std::optional<T>> {
     auto inner_val =
         detail::ToImpl<T>::call(*sivp, extension_build_version, is_internal);
 
-    // free the memory associated with StableIValue* sivp
+// free the memory associated with StableIValue* sivp
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+    TORCH_ERROR_CODE_CHECK(torch_delete_stable_ivalue(sivp));
+#else
     delete sivp;
+#endif
 
     return std::make_optional(inner_val);
   }

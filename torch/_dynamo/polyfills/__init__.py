@@ -10,7 +10,7 @@ import types
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
-from operator import eq, ne
+from operator import eq, ge, gt, le, lt, ne
 from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import TypeIs
 
@@ -194,18 +194,50 @@ def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     raise TypeError(f"argument of type {type(b)} is not iterable")
 
 
-def accumulate_grad(x: torch.Tensor, new_grad: torch.Tensor | None) -> None:
+def accumulate_grad(
+    x: torch.Tensor,
+    variable_grad: torch.Tensor | None,
+    new_grad: torch.Tensor | None,
+) -> torch.Tensor | None:
     # polyfills according to the Gradient Layout Contract
     if new_grad is None:
-        return
+        return variable_grad
     new_grad_strided = torch.empty_like(x)
     new_grad_strided.copy_(new_grad)
-    if x.grad is None:
-        x.grad = new_grad_strided
+    if variable_grad is None:
+        return new_grad_strided
+    elif variable_grad.is_sparse and not new_grad_strided.is_sparse:
+        return new_grad_strided + variable_grad
     elif torch.is_grad_enabled():
-        x.grad = x.grad + new_grad_strided
+        return variable_grad + new_grad_strided
     else:
-        x.grad.add_(new_grad_strided)
+        variable_grad.add_(new_grad_strided)
+        return variable_grad
+
+
+def accumulate_grad_no_alias(
+    x: torch.Tensor,
+    variable_grad: torch.Tensor | None,
+    new_grad: torch.Tensor | None,
+) -> torch.Tensor | None:
+    # Mirrors inductor::accumulate_grad_: same gradient layout logic as
+    # accumulate_grad, but the returned grad must not alias any input.
+    if new_grad is None:
+        if variable_grad is None:
+            return None
+        return variable_grad.clone()
+    new_grad_strided = torch.empty_like(x)
+    new_grad_strided.copy_(new_grad)
+    if variable_grad is None:
+        return new_grad_strided
+    elif variable_grad.is_sparse and not new_grad_strided.is_sparse:
+        return new_grad_strided + variable_grad
+    elif torch.is_grad_enabled():
+        return variable_grad + new_grad_strided
+    else:
+        result = variable_grad.clone()
+        result.add_(new_grad_strided)
+        return result
 
 
 # This mirrors
@@ -246,6 +278,43 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
             return False
 
     return True
+
+
+def dictview_richcompare(
+    op: Callable[[Any, Any], bool], self: Iterable[T], other: Iterable[T]
+) -> bool:
+    """Mirrors dictview_richcompare for dict_keys/dict_items vs set/frozenset.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L5952-L6010
+    Uses len() and ``in`` so that Dynamo traces through sq_length/sq_contains.
+    """
+    len_self = len(self)  # type: ignore[arg-type]
+    len_other = len(other)  # type: ignore[arg-type]
+
+    if op is eq:
+        if len_self != len_other:
+            return False
+        return all(item in other for item in self)
+    if op is ne:
+        if len_self != len_other:
+            return True
+        return not all(item in other for item in self)
+    if op is lt:
+        if len_self >= len_other:
+            return False
+        return all(item in other for item in self)
+    if op is le:
+        if len_self > len_other:
+            return False
+        return all(item in other for item in self)
+    if op is gt:
+        if len_self <= len_other:
+            return False
+        return all(item in self for item in other)
+    # ge
+    if len_self < len_other:
+        return False
+    return all(item in self for item in other)
 
 
 def set_symmetric_difference(
@@ -414,6 +483,11 @@ def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
     return fn(*args[2:], **kwargs)
 
 
+def getattr_and_trace_no_nested_graph_breaks(*args: Any, **kwargs: Any) -> Any:
+    with torch._dynamo.disable_nested_graph_breaks():
+        return getattr_and_trace(*args, **kwargs)
+
+
 def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | None:
     try:
         return obj.__getitem__(key)
@@ -564,91 +638,6 @@ def predicate(obj: object) -> bool:
     if obj:
         return True
     return False
-
-
-def cmp_eq(a: object, b: object) -> bool:
-    # Note that the commented `is` check should ideally be removed. This is a
-    # CPython optimization that skips the __eq__ checks if the obj id's are
-    # same. But, these lines adds many `is` nodes in the Fx graph for
-    # SymNodeVariable. For now, we can just skip this check. This is STILL
-    # correct because one of the __eq__ checks will pass later, just could be
-    # slow in some corner cases.
-    # if a is b:
-    #     return True
-    if isinstance(a, type):
-        # Default metaclass equality is identity-based. Preserve the reflected
-        # operand fallback without tracing through type.__eq__.
-        if type(a).__eq__ is type.__eq__:
-            result = True if a is b else NotImplemented
-        else:
-            result = type(a).__eq__(a, b)
-    else:
-        result = a.__eq__(b)
-    if result is NotImplemented:
-        if isinstance(b, type):
-            if type(b).__eq__ is type.__eq__:
-                result = True if a is b else NotImplemented
-            else:
-                result = type(b).__eq__(b, a)
-        else:
-            result = b.__eq__(a)
-    return result is not NotImplemented and result
-
-
-def cmp_ne(a: object, b: object) -> bool:
-    if isinstance(a, type):
-        if type(a).__ne__ is type.__ne__:
-            result = False if a is b else NotImplemented
-        else:
-            result = type(a).__ne__(a, b)
-        if result is not NotImplemented:
-            return result
-    elif isinstance(type(a).__ne__, types.FunctionType):
-        result = a.__ne__(b)
-        if result is not NotImplemented:
-            return result
-        # Fall through to try b.__ne__(a) or cmp_eq
-    if isinstance(b, type):
-        if type(b).__ne__ is type.__ne__:
-            result = False if a is b else NotImplemented
-        else:
-            result = type(b).__ne__(b, a)
-        if result is not NotImplemented:
-            return result
-    elif isinstance(type(b).__ne__, types.FunctionType):
-        result = b.__ne__(a)
-        if result is not NotImplemented:
-            return result
-    return not cmp_eq(a, b)
-
-
-def cmp_lt(a: Any, b: Any) -> bool:
-    result = a.__lt__(b)
-    if result is NotImplemented:
-        raise TypeError(f"{type(a)} does not support the < operator")
-    return result
-
-
-def cmp_le(a: Any, b: Any) -> bool:
-    # Check if __le__ is overridden
-    if isinstance(type(a).__le__, types.FunctionType):
-        return a.__le__(b)
-    return cmp_eq(a, b) or cmp_lt(a, b)
-
-
-def cmp_gt(a: Any, b: Any) -> bool:
-    # Check if __gt__ is overridden
-    if isinstance(type(a).__gt__, types.FunctionType):
-        return a.__gt__(b)
-    # a > b is equivalent to b < a
-    return cmp_lt(b, a)
-
-
-def cmp_ge(a: Any, b: Any) -> bool:
-    # Check if __ge__ is overridden
-    if isinstance(type(a).__ge__, types.FunctionType):
-        return a.__ge__(b)
-    return cmp_eq(a, b) or cmp_gt(a, b)
 
 
 def group_tensors_by_device_and_dtype(

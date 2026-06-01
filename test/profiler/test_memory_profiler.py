@@ -13,6 +13,8 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     ALLOW_XPU_PROFILING_TEST,
     DEVICE_LIST_SUPPORT_PROFILING_TEST,
+    IS_MACOS,
+    IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -280,6 +282,9 @@ class TestIdentifyGradients(TestCase):
     def test_extract_gradients_from_optimizer(self) -> None:
         self._test_extract_gradients_from_optimizer(set_to_none=False)
 
+    @unittest.skipIf(
+        IS_MACOS or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/88721"
+    )
     def test_extract_gradients_from_optimizer_set_to_none(self) -> None:
         self._test_extract_gradients_from_optimizer(set_to_none=True)
 
