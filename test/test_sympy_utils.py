@@ -41,7 +41,7 @@ from torch.utils._sympy.reference import (
 )
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from torch._inductor.bounds import ValueRangeAnalysis
 from torch._inductor.index_propagation import TypedExpr
 
@@ -278,6 +278,13 @@ class TestValueRanges(TestCase):
 
     def test_pow_half(self):
         ValueRangeAnalysis.pow(ValueRanges.unknown(), ValueRanges.wrap(0.5))
+
+    def test_bound_sympy_negative_pow(self):
+        x = sympy.Symbol("x", integer=True, positive=True)
+
+        self.assertEqual(
+            bound_sympy(x**-1, {x: ValueRanges(3, 4)}), ValueRanges.unknown()
+        )
 
     @parametrize("fn", BINARY_OPS)
     @parametrize("dtype", ("int", "float"))

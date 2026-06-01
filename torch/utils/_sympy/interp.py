@@ -155,7 +155,13 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
         log.debug("sym_sum(%s) -> %s", args, r)
         return r
 
-    if hasattr(expr.func, "_torch_handler_name"):
+    if expr.func is sympy.Pow:
+        exp = expr.args[1]
+        if exp.is_integer and exp.is_nonnegative:
+            handler_name = "pow_by_natural"
+        else:
+            handler_name = "pow"
+    elif hasattr(expr.func, "_torch_handler_name"):
         handler_name = expr.func._torch_handler_name
     else:
         handler_name = handlers()[expr.func]
