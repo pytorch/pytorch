@@ -141,6 +141,7 @@ class TestXpu(TestCase):
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
         self.assertTrue(device_capability["local_mem_size"] > 0)
+        self.assertTrue(device_capability["last_level_cache_size"] > 0)
         self.assertTrue(device_capability["memory_clock_rate"] > 0)
         self.assertTrue(device_capability["memory_bus_width"] > 0)
         self.assertEqual(
