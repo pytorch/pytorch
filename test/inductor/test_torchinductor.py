@@ -102,6 +102,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
+    IS_LINUX,
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
@@ -111,11 +112,14 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfTorchInductor,
     skipIfWindows,
     skipIfXpu,
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
+    TEST_WITH_TORCHINDUCTOR,
     xfailIf,
     xfailIfS390X,
 )
@@ -4239,6 +4243,63 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_softmax_reused_expensive_pointwise_cpu(self):
+        if not is_cpp_backend(self.device):
+            raise unittest.SkipTest("C++ CPU codegen regression test")
+
+        def fn(scores, table):
+            n = scores.shape[-1]
+            context_position = torch.arange(n, device=scores.device)[:, None]
+            memory_position = torch.arange(n, device=scores.device)[None, :]
+            relative_position = memory_position - context_position
+
+            num_buckets = 32
+            max_distance = 128
+            relative_buckets = (relative_position > 0).to(torch.long) * (
+                num_buckets // 2
+            )
+            relative_position = torch.abs(relative_position)
+            max_exact = num_buckets // 4
+            is_small = relative_position < max_exact
+            relative_position_if_large = max_exact + (
+                torch.log(
+                    torch.clamp(relative_position, min=max_exact).float() / max_exact
+                )
+                / math.log(max_distance / max_exact)
+                * (num_buckets // 2 - max_exact)
+            ).to(torch.long)
+            relative_position_if_large = torch.minimum(
+                relative_position_if_large,
+                torch.full_like(relative_position_if_large, num_buckets // 2 - 1),
+            )
+            relative_buckets += torch.where(
+                is_small, relative_position, relative_position_if_large
+            )
+            values = F.embedding(relative_buckets, table)
+            values = values.permute(2, 0, 1).unsqueeze(0)
+
+            scores += values
+            return torch.softmax(scores.float(), dim=-1)
+
+        scores = torch.randn(2, 4, 16, 16)
+        table = torch.randn(32, 4)
+        expected_scores = scores.clone()
+
+        actual, code = run_and_get_cpp_code(
+            torch.compile(fn, fullgraph=True), scores, table
+        )
+        expected = fn(expected_scores, table)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(scores, expected_scores)
+        log_count = code.count("std::log(") + code.count(".log()")
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertEqual(log_count, 1)
+        else:
+            # Dynamic-shape clones can emit both vector and scalar tail code
+            # paths for the single realized log kernel.
+            self.assertIn(log_count, (1, 2))
+
     def test_log_softmax(self):
         def fn(a, b):
             return (F.log_softmax(a + b, -1), F.log_softmax(a, 0), F.log_softmax(b, 1))
@@ -6715,6 +6776,10 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHINDUCTOR or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/165879",
+    )
     @parametrize("tile_reduction", (False, True))
     def test_var_mean(self, tile_reduction: bool):
         def fn(x):
@@ -7962,6 +8027,10 @@ class CommonTemplate:
         n2.meta["val"] = t
         self.assertTrue(same_meta(n1, n2))
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/151384",
+    )
     def test_remove_noop_slice(self):
         def f(x):
             x = x + 1
@@ -7989,6 +8058,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ignore_empty_lines=True,
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151381",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/151379",
+    )
     def test_remove_noop_slice1(self):
         def f(x):
             x = x + 1
@@ -8013,6 +8090,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27,
             ignore_empty_lines=True,
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151378",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM,
+        "https://github.com/pytorch/pytorch/issues/151382",
+    )
     def test_remove_noop_slice_scatter(self):
         def f(x):
             x = x + 1
@@ -10116,6 +10201,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     def test_index_put_deterministic_fallback(self):
+        if is_mps_backend(self.device):
+            # MPS has no deterministic implementation for
+            # index_put_(accumulate=True) on floating dtypes
+            raise unittest.SkipTest("no deterministic index_put accumulate on MPS")
         with DeterministicGuard(True):
 
             def fn(a, b, c):
@@ -10394,6 +10483,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     torch.randn((8, 38), dtype=torch.float32),
                 ],
             )
+
+    def test_diagonal_scatter_backward(self):
+        def fn(x, a, offset, dim1, dim2):
+            return torch.diagonal_scatter(x, a, offset, dim1, dim2).sum()
+
+        cases = [
+            ((5, 5), (5,), 0, 0, 1),
+            ((5, 4, 5), (4, 4), 1, 0, 2),
+            ((3, 5, 5), (3, 4), 1, 1, 2),
+            ((5, 5), (4,), -1, 0, 1),
+        ]
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        for x_shape, y_shape, offset, dim1, dim2 in cases:
+            with self.subTest(
+                x_shape=x_shape, y_shape=y_shape, offset=offset, dim1=dim1, dim2=dim2
+            ):
+                x = torch.zeros(*x_shape, device=self.device, requires_grad=True)
+                y = torch.ones(*y_shape, device=self.device, requires_grad=True)
+
+                x_ref = x.detach().clone().requires_grad_(True)
+                y_ref = y.detach().clone().requires_grad_(True)
+
+                out_ref = fn(x_ref, y_ref, offset, dim1, dim2)
+                out_ref.backward()
+
+                out = compiled_fn(x, y, offset, dim1, dim2)
+                out.backward()
+
+                self.assertEqual(out, out_ref)
+                self.assertEqual(x.grad, x_ref.grad)
+                self.assertEqual(y.grad, y_ref.grad)
 
     @skip_if_gpu_halide  # accuracy issue
     def test_slice_scatter(self):
@@ -10717,8 +10839,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp = False
 
         for deterministic in [False, True]:
-            if deterministic and self.device == "xpu":
-                # There is no deterministic implementation for scatter_add on Intel GPU.
+            if deterministic and self.device in ("xpu", "mps"):
+                # There is no deterministic implementation for scatter_add on Intel GPU/Apple MPS.
                 continue
             with DeterministicGuard(deterministic):
                 self.common(
@@ -14914,6 +15036,63 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # But because our custom op needs fixed layout, the assertions in the custom op will pass
             self.common(fn, (inp,), check_lowp=False)
 
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_fixed_layout_tensor_list(self):
+        def make_strided(x):
+            return torch.empty_strided(
+                (x.shape[0], 2), (1, x.shape[0]), dtype=x.dtype, device=x.device
+            )
+
+        def make_strided_meta(x):
+            return torch.empty_strided(
+                (x.shape[0], 2), (1, x.shape[0]), dtype=x.dtype, device=x.device
+            )
+
+        define_custom_op_for_test(
+            "make_strided_fixed_layout_list",
+            make_strided,
+            make_strided_meta,
+        )
+
+        @lowering.register_lowering(
+            torch.ops.test.make_strided_fixed_layout_list.default
+        )
+        def _(x):
+            return lowering.empty_strided(
+                (x.get_size()[0], 2),
+                (2, 1),
+                dtype=x.get_dtype(),
+                device=x.get_device(),
+            )
+
+        def check_strides(xs):
+            expected_stride = (1, xs[0].shape[0])
+            if xs[0].stride() != expected_stride:
+                raise AssertionError(
+                    f"Expected stride {expected_stride}, got {xs[0].stride()}"
+                )
+            return torch.ones_like(xs[0])
+
+        def check_strides_meta(xs):
+            return torch.empty_like(xs[0])
+
+        define_custom_op_3_for_test(
+            "check_fixed_layout_list",
+            check_strides,
+            check_strides_meta,
+            tags=[torch._C.Tag.needs_fixed_stride_order],
+        )
+
+        def fn(x):
+            y = torch.ops.test.make_strided_fixed_layout_list(x)
+            return torch.ops.test.check_fixed_layout_list([y])
+
+        self.common(
+            fn,
+            (torch.randn((2, 2), device=self.device),),
+            check_lowp=False,
+        )
+
     @requires_gpu()
     @config.patch(implicit_fallbacks=True)
     @tf32_on_and_off(0.005)
@@ -16611,6 +16790,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             f"{expected=} {actual=}",
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151511",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151512",
+    )
     def test_remove_noop_view_default(self):
         def f(x):
             batch_size = x.shape[0]
@@ -16649,6 +16836,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.dev
             ignore_empty_lines=True,
         )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151541",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/151540",
+    )
     def test_remove_noop_view_dtype(self):
         def f(x):
             x = x.transpose(1, 2)  # (batch_size, 2, 3)
@@ -16844,6 +17039,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @unittest.skipIf(
         config.cpp_wrapper,
+        "event sync only emitted for Python wrapper",
+    )
+    @skip_if_halide
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_non_blocking_d2h_event_sync(self):
+        def f(x):
+            s = x.abs().sum().to("cpu", non_blocking=True).item()
+            return torch.clamp(x, 0.0, s)
+
+        x = torch.randn(10, device=GPU_TYPE)
+        compiled_fn = torch.compile(f, dynamic=True)
+        result, code = run_and_get_code(compiled_fn, x)
+        expected = f(x)
+        self.assertEqual(result, expected)
+        wrapper_code = code[0]
+        self.assertIn("torch.Event()", wrapper_code)
+        self.assertIn(".record()", wrapper_code)
+        self.assertIn(".synchronize()", wrapper_code)
+
+    @unittest.skipIf(
+        config.cpp_wrapper,
         "cpp_wrapper samples will lead to invalid indexing",
     )
     def test_inductor_triton_bucketize_respects_masking(self):
@@ -16898,6 +17115,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         return code_allowed != code_disallowed
 
     # If matmul is implemented by triton there is more reuse
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/179776")
     @config.patch(
         {
             "max_autotune_gemm_backends": "ATEN",
@@ -16947,6 +17165,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager, compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179970")
     @requires_gpu_and_triton
     @torch._inductor.config.patch(cpp_wrapper=True)
     def test_cpu_scalar_with_gpu_tensor_cpp(self):

@@ -37,6 +37,7 @@ from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
     FakeTensorConverter,
+    FakeTensorDeviceMismatchError,
     FakeTensorMode,
     MetadataMismatchError,
     unset_fake_temporarily,
@@ -64,6 +65,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -72,6 +74,8 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TemporaryFileName,
     TEST_ACCELERATOR,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -295,7 +299,8 @@ class FakeTensorTest(TestCase):
         fake_y = mode.from_tensor(y)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Unhandled FakeTensor Device Propagation for.*"
+            FakeTensorDeviceMismatchError,
+            "Expected all tensors to be on the same device",
         ) as exc:
             torch.nextafter(fake_x, fake_y)
 
@@ -328,7 +333,8 @@ class FakeTensorTest(TestCase):
             y = torch.randn(10, device="cuda")
 
             with self.assertRaisesRegex(
-                RuntimeError, "Unhandled FakeTensor Device Propagation for.*"
+                FakeTensorDeviceMismatchError,
+                "Expected all tensors to be on the same device",
             ) as exc:
                 x + y
 
@@ -2227,6 +2233,10 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(mode.count, 0)
 
     # PropagateRealTensors installs weakrefs
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/165387",
+    )
     @expectedFailurePropagateRealTensors
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_module_to(self):
@@ -3186,7 +3196,8 @@ class FakeTensorPreferDeviceType(TestCase):
 
             # Without the config, this should raise a device mismatch error
             with self.assertRaisesRegex(
-                RuntimeError, "Unhandled FakeTensor Device Propagation"
+                RuntimeError,
+                "Expected all tensors to be on the same device",
             ):
                 mixed_device_op(cuda_tensor, None)
 
@@ -3224,7 +3235,8 @@ class FakeTensorPreferDeviceType(TestCase):
 
             # After exiting the config context, should raise error again
             with self.assertRaisesRegex(
-                RuntimeError, "Unhandled FakeTensor Device Propagation"
+                RuntimeError,
+                "Expected all tensors to be on the same device",
             ):
                 mixed_device_op(cuda_tensor, None)
 

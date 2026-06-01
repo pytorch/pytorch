@@ -88,12 +88,14 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_LINUX,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
     TemporaryFileName,
+    TEST_WITH_ROCM,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
@@ -876,6 +878,7 @@ class DistributedTest:
             )
             self._test_barrier_timeout(dist.group.WORLD, timeout)
 
+        @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/70755")
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo", "Only gloo backend supports timeouts"
@@ -895,6 +898,7 @@ class DistributedTest:
             if group_id is not None:
                 self._test_barrier_timeout(group_id, timeout)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179691")
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo", "Only gloo backend supports timeouts"
         )
@@ -913,6 +917,7 @@ class DistributedTest:
 
             dist.destroy_process_group(pg)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/164195")
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
@@ -987,6 +992,7 @@ class DistributedTest:
             ):
                 dist.new_subgroups(3)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/162584")
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
@@ -2379,6 +2385,7 @@ class DistributedTest:
                 group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1
             )
 
+        @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/75168")
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
@@ -3149,6 +3156,7 @@ class DistributedTest:
                 rank_to_GPU=None,
             )
 
+        @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/70754")
         @skip_if_small_worldsize
         @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_group_min(self):
@@ -4452,6 +4460,10 @@ class DistributedTest:
                     all(param.requires_grad for param in ddp_model.parameters())
                 )
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/76428",
+        )
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
@@ -5471,6 +5483,7 @@ class DistributedTest:
 
             self.assertEqual(res[0], expected)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/77317")
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
@@ -7053,6 +7066,7 @@ class DistributedTest:
 
             return prof
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/77342")
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle("Currently failing in NVIDIA internal CI")
@@ -7148,6 +7162,7 @@ class DistributedTest:
             self.assertEqual(a1["out_msg_nelems"], 1, msg=f"{a1}")
             self.assertEqual(a1["dtype"], "Int", msg=f"{a1}")
 
+        @unittest.skip("https://github.com/pytorch/pytorch/issues/137765")
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode code causes hang")
@@ -8469,6 +8484,10 @@ class DistributedTest:
         def test_compute_bucket_assignment_by_size_sparse_error_without_logger(self):
             self._test_compute_bucket_assignment_by_size(use_logger=False)
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/85012",
+        )
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_compute_bucket_assignment_by_size_sparse_error_with_logger(self):
@@ -8547,6 +8566,7 @@ class DistributedTest:
             dist.all_reduce(t, group=group_gloo)
             self.assertGreater(t, 0)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/162676")
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
@@ -9740,6 +9760,10 @@ class DistributedTest:
             )
             model_ddp2(input).sum().backward()
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/102751",
+        )
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
