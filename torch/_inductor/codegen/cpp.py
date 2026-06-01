@@ -2605,10 +2605,44 @@ class CppKernel(Kernel):
         self.cse.put(expr, dst)
 
     def cache_lowp_fp_on_store(self, value):
-        # The reverse lowp-fp->fp32 conversion is only lossless when the lowp-fp
-        # value is round-tripped through a buffer store (issue #115260). Populate
-        # the CSE cache here, not at to_dtype time, so explicit user casts like
-        # fp32->fp16->fp32 keep their intermediate rounding.
+        """
+        https://github.com/pytorch/pytorch/issues/115260
+        For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
+        in low-precision floating point data type. When the output of node1 also serves as the output of the
+        kernel, the result of nodes would be different from the case when output of node1 is not the output
+        of the kernel (where we don't need to insert `to_dtype` for legalization). To address the problem, on
+        storing the lowp node1 output, we also add the inverse dtype conversion to high precision data type
+        to the cse cache.
+
+        Example (pseudo code):
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            store(buf, node1_output_lowp)
+            node2_input_lowp = load(buf)
+            node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+        Without cse cache trick:
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            store(buf, node1_output_lowp)
+            node2_input_lowp = node_output_lowp # hit store cache
+            node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+        With cse cache trick:
+            node1_output = ...
+            node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+            # also add `to_dtype(node1_input_lowp, dtype=torch.float)` -> `node1_output` to cse cache
+            store(buf, node1_output_lowp)
+            node2_input_lowp = node_output_lowp # hit store cache
+            node2_input = node1_output # hit cse cache
+
+        This caching is only sound because the lowp value is round-tripped through
+        a buffer store. It is populated here at store time, not when the lowp
+        `to_dtype` is generated (where `lowp_fp_from` is recorded), so that an
+        explicit in-register user cast such as fp32->fp16->fp32 keeps its
+        intermediate rounding instead of being collapsed back to the fp32 source
+        (issue #185337).
+        """
         if (
             isinstance(value, CppCSEVariable)
             and value.lowp_fp_from is not None
