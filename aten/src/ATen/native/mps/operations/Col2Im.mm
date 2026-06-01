@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/im2col_shape_check.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -72,13 +73,7 @@ static void col2im_out_mps_template(const Tensor& input,
   auto width_col = (output_width + 2 * pad_width - (dilation_width * (kernel_width - 1) + 1)) / stride_width + 1;
 
   auto stream = getCurrentMPSStream();
-  const int64_t max_col_offset = (batch_size > 0 ? (batch_size - 1) * input_batch_stride : 0) +
-      (n_input_plane > 0 ? (n_input_plane - 1) * input_channel_stride : 0) +
-      (height_col * width_col > 0 ? (height_col * width_col - 1) * input_spatial_stride : 0);
-  const int64_t max_im_offset =
-      (batch_size > 0 ? (batch_size - 1) * output_batch_stride : 0) + n_output_plane * output_height * output_width;
-  const bool use_u32 =
-      max_col_offset <= std::numeric_limits<uint32_t>::max() && max_im_offset <= std::numeric_limits<uint32_t>::max();
+  const bool use_u32 = canUse32BitIndexMath(col_tensor) && canUse32BitIndexMath(output);
   const std::string idx_suffix = use_u32 ? "_u32" : "_u64";
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
