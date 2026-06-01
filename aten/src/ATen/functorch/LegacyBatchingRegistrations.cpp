@@ -12,7 +12,6 @@
 #include <ATen/functorch/LegacyVmapTransforms.h>
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <ATen/WrapDimUtils.h>
 
 #include <utility>
 
