@@ -495,15 +495,17 @@ class NodeInfo(NamedTuple):
 def _combo_subkernel_config_cap(kernel) -> int:
     # Size-bucketed cap on autotune configs: 1 for small sub-kernels, 2 otherwise.
     if kernel.inside_reduction:
-        rnumel = 1
-        for tree in kernel.range_trees:
-            if tree.is_reduction:
-                rnumel *= int(V.graph.sizevars.optimization_hint(tree.numel))
+        rnumel = math.prod(
+            int(V.graph.sizevars.optimization_hint(tree.numel))
+            for tree in kernel.range_trees
+            if tree.is_reduction
+        )
         return 1 if rnumel <= config.combo_kernels_seed_small_rnumel else 2
-    total = 1
-    for tree in kernel.range_trees:
-        if not tree.is_reduction:
-            total *= int(V.graph.sizevars.optimization_hint(tree.numel))
+    total = math.prod(
+        int(V.graph.sizevars.optimization_hint(tree.numel))
+        for tree in kernel.range_trees
+        if not tree.is_reduction
+    )
     return 1 if total <= config.combo_kernels_seed_small_pointwise_total else 2
 
 
