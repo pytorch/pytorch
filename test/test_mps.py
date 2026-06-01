@@ -1651,7 +1651,7 @@ class TestMPS(TestCaseMPS):
             (0.2 + torch.rand(N, dtype=dtype, device='mps'), 0.2 + torch.rand(N, dtype=dtype, device='mps'), 2 + torch.rand(N, dtype=dtype, device='mps')),
         ]
 
-        atol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-3
+        atol = 1e-4 if dtype == torch.float else 1e-2
         rtol = atol
 
         for x_mps, alpha_mps, total_mps in cases:
