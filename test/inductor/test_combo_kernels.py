@@ -786,6 +786,91 @@ class ComboKernelTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
+    @requires_gpu_and_triton
+    @parametrize("compile_time_autotune", [True, False])
+    def test_combo_kernel_exclude_indirect_indexing(self, compile_time_autotune):
+        # Indirect-indexing nodes are filtered out of combo kernels only when
+        # compile-time seed autotune is on (the bench has no real index tensor
+        # to feed those reads).  With compile-time autotune off, indirect
+        # nodes are eligible and a single combo kernel is generated.
+        def fn(a, b, c, idx1):
+            g = a[idx1]
+            p1, p2 = b * 2.0, c + 1.0
+            return g, p1, p2
+
+        inps = [
+            torch.randn(1024, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randint(0, 1024, (256,), device=GPU_TYPE),
+        ]
+        expected = 2 if compile_time_autotune else 1
+        out_eager = fn(*inps)
+        with torch._inductor.config.patch(
+            {"combo_seed_autotune_at_compile_time": compile_time_autotune}
+        ):
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_seed_autotune_cap": True,
+            "combo_kernel_per_subkernel_blocks": True,
+            "combo_seed_autotune_at_compile_time": False,
+        }
+    )
+    def test_combo_kernel_config_cap_small_reduction(self):
+        # Small reduction (rnumel=32 <= 64) -> cap=1, recorded per-subkernel in
+        # combo_grid_meta and consumed by _handle_combo.
+        import re
+
+        def fn(a, b):
+            return a.sum(-1), b.sum(-1)
+
+        inps = [
+            torch.randn(128, 32, device=GPU_TYPE),
+            torch.randn(128, 32, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        caps = [int(c) for c in re.findall(r"config_cap_\d+'?\s*:\s*(\d+)", code[0])]
+        self.assertTrue(caps, "no config_cap metadata emitted")
+        self.assertTrue(all(c == 1 for c in caps), f"caps={caps}")
+
+    @requires_gpu_and_triton
+    @parametrize("numel,expected_cap", [(2048, 1), (65536, 2)])
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_seed_autotune_cap": True,
+            "combo_kernel_per_subkernel_blocks": True,
+            "combo_seed_autotune_at_compile_time": False,
+        }
+    )
+    def test_combo_kernel_config_cap_pointwise_bucket(self, numel, expected_cap):
+        # Pointwise bucketing: total <= 4096 -> cap=1, else cap=2. The cap is
+        # precomputed into combo_grid_meta per subkernel.
+        import re
+
+        def fn(a, b, c):
+            return a * 2, b + 1, c - 1
+
+        inps = [torch.randn(numel, device=GPU_TYPE) for _ in range(3)]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        caps = [int(c) for c in re.findall(r"config_cap_\d+'?\s*:\s*(\d+)", code[0])]
+        self.assertTrue(caps, "no config_cap metadata emitted")
+        self.assertTrue(all(c == expected_cap for c in caps), f"caps={caps}")
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu

@@ -1053,11 +1053,27 @@ combo_kernel_max_num_nodes = 8
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, per-subkernel combo block sizes are autotuned at compile time:
+# standalone "seed" kernels are benched at codegen and the stitched config is
+# baked into the combo kernel. When False, the combo is tuned at runtime by
+# CachingAutotuner._combo_sequential_autotune. cpp_wrapper always uses the
+# compile-time path. Indirect-indexing nodes are excluded from combos on the
+# compile-time path (the seed bench has no real index tensor).
+combo_seed_autotune_at_compile_time = True
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
 combo_kernel_autotune_grouping = True
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
+# When True, combo-kernel autotuning is size-bucketed: small subkernels
+# (rnumel <= combo_kernels_seed_small_rnumel for reductions, total numel <=
+# combo_kernels_seed_small_pointwise_total for pointwise) cap to 1 config,
+# larger ones to 2. The per-subkernel cap is precomputed into combo_grid_meta
+# and applied by _handle_combo_kernel_per_subkernel_blocks when building the
+# runtime candidate configs (the compile-time seed path reads the same cap).
+combo_kernels_seed_autotune_cap = True
+combo_kernels_seed_small_rnumel = 64
+combo_kernels_seed_small_pointwise_total = 4096
 # Memory-aware combo kernel gating.
 #   None: disable that threshold dimension
 #   0: allow no graph-peak increase
@@ -1411,6 +1427,15 @@ strict_static_triton_launcher: bool = Config(
 # and cuCtxGetCurrent.
 use_fast_triton_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER", "1") == "1"
+)
+
+# Use the Level 0 launch_metadata_schema from CompiledKernel.bin
+# (versioned, stable contract) instead of hasattr probing of
+# CompiledKernel internals in save_gpu_kernel().
+# When True (default), prefers schema["entry_name"]/["num_warps"]/["shared_mem"].
+# When False, forces the legacy hasattr fallback path.
+use_launch_metadata_schema: bool = (
+    os.environ.get("TORCHINDUCTOR_USE_LAUNCH_METADATA_SCHEMA", "1") == "1"
 )
 
 # gemm autotuning global cache dir
@@ -2879,6 +2904,7 @@ class test_configs:
     force_no_impl_grouping: bool = False
 
     max_mm_configs: int | None = None
+    max_flex_configs: int | None = None
 
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
