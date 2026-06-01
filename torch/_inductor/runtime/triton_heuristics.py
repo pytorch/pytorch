@@ -1746,9 +1746,11 @@ class CachingAutotuner(KernelInterface):
                 signature_keys,
             )
 
-        # num_warps: pick max among the top-50% subkernels by per-program
-        # tile elements.  Heavy subkernels drive occupancy/IPC; tiny-tile
-        # outliers should not drag the warp count down.
+        # num_warps: pick max among the top-50% subkernels by total work
+        # (per-program tile * grid block count). Per-program tile alone
+        # ignores that the small-tile subkernel may own ~all of the grid
+        # blocks; weighting by total work lets the dominant subkernel
+        # anchor occupancy/IPC.
         def _per_program_tile_elems(idx: int) -> int:
             te = 1
             for k, v in seeded_kwargs.items():
@@ -1762,11 +1764,18 @@ class CachingAutotuner(KernelInterface):
                         te *= int(val)
             return te
 
+        def _grid_blocks(idx: int) -> int:
+            xnumel = combo_grid_meta.get(f"xnumel_{idx}")
+            xblock = seeded_kwargs.get(f"XBLOCK_{idx}", 1)
+            if xnumel is None or not xblock:
+                return 1
+            return max(1, (int(xnumel) + int(xblock) - 1) // int(xblock))
+
+        def _total_work(idx: int) -> int:
+            return _per_program_tile_elems(idx) * _grid_blocks(idx)
+
         sub_tiles = sorted(
-            (
-                (_per_program_tile_elems(idx), cfg.num_warps)
-                for idx, cfg in enumerate(seed_configs)
-            ),
+            ((_total_work(idx), cfg.num_warps) for idx, cfg in enumerate(seed_configs)),
             key=lambda t: t[0],
             reverse=True,
         )

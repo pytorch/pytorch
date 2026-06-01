@@ -1972,6 +1972,56 @@ class ComboKernelMetadataTests(TestCase):
         code = self._combo_code(fn, inps)
         self.assertRegex(code, r"num_gb = \d*\.\d+")
 
+    def test_stitched_seed_picks_dominant_subkernel_warps(self):
+        """_stitched_seed_config must rank subkernels by total work
+        (tile * grid blocks), not per-program tile alone. Shape taken
+        from nfnet_l0__0_backward triton_red_fused_9: a 192-block
+        reduction (16 warps) fused with a 196608-block persistent
+        reduction (2 warps). The persistent reduction owns ~all the
+        work and its 2-warp config must anchor the combo."""
+        import triton
+
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+        from torch.utils._ordered_set import OrderedSet
+
+        combo_grid_meta = {
+            "num_kernels": 2,
+            "heuristic_0": "reduction",
+            "xnumel_0": 384,
+            "size_hints_0": {"x": 512, "r0_": 2048},
+            "no_x_dim_0": False,
+            "heuristic_1": "persistent_reduction",
+            "xnumel_1": 196608,
+            "size_hints_1": {"x": 262144, "r0_": 64},
+            "no_x_dim_1": False,
+        }
+        seed_configs = [
+            triton.Config(
+                {"XBLOCK_0": 2, "R0_BLOCK_0": 2048}, num_warps=16, num_stages=1
+            ),
+            triton.Config({"XBLOCK_1": 1}, num_warps=2, num_stages=1),
+        ]
+        current_kwargs = {"XBLOCK_0": 1, "R0_BLOCK_0": 1, "XBLOCK_1": 1}
+        # _stitched_seed_config only reads combo_standalone_autotune_seed_configs
+        # off self; SimpleNamespace is enough to drive it.
+        fake_self = SimpleNamespace(
+            combo_standalone_autotune_seed_configs=seed_configs,
+        )
+        current = triton.Config(current_kwargs, num_warps=4, num_stages=1)
+        stitched, _ = CachingAutotuner._stitched_seed_config(
+            fake_self, current, OrderedSet(current_kwargs.keys()), combo_grid_meta
+        )
+        self.assertEqual(
+            stitched.num_warps,
+            2,
+            msg=(
+                f"stitched num_warps={stitched.num_warps}; expected 2. The small "
+                "reduction subkernel has a larger per-program tile but only "
+                "192/196800 grid blocks, so its 16-warp config must not anchor "
+                "the combo."
+            ),
+        )
+
 
 # Minimal scheduler doubles for direct _try_combo_with_memory_check tests.
 class _PeakMemFakeNode:
