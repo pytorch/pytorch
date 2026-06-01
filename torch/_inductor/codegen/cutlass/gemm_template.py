@@ -1321,9 +1321,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             input_names = [evt_arg_renames.get(name) for name in input_names]
             output_names = [evt_arg_renames.get(name) for name in output_names]
 
-            names_str = ",".join(
-                ["X", "W", "Bias", *input_names, *extra_names, "Y"]
-            )
+            names_str = ",".join(["X", "W", "Bias", *input_names, *extra_names, "Y"])
         else:
             evt_name = None
             outputs = [Y]
