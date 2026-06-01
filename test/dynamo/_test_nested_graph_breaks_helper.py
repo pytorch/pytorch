@@ -18,15 +18,6 @@ def fn(val, call):
     return val
 
 
-_MODULE_CONST = 1
-
-
-def fn_with_module_global(x):
-    x = x + _MODULE_CONST
-    torch._dynamo.graph_break()
-    return x + _MODULE_CONST + 1
-
-
 HELPER_CONSTANT = torch.tensor([100.0])
 
 
