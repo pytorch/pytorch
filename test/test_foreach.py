@@ -1947,8 +1947,11 @@ class TestForeachMM(TestCase):
         ref = [torch.mm(a, b) for a, b in zip(A, B)]
         out = torch._foreach_mm(A, B)
         self.assertEqual(len(out), len(ref))
+        # Grouped GEMM backends may use different accumulation order than
+        # torch.mm, so fp32 needs relaxed tolerances.
+        kwargs = {"atol": 2e-4, "rtol": 2e-4} if dtype == torch.float32 else {}
         for i, (r, o) in enumerate(zip(ref, out)):
-            self.assertEqual(o, r, msg=f"mismatch at group {i}")
+            self.assertEqual(o, r, msg=f"mismatch at group {i}", **kwargs)
 
     @parametrize(
         "label,shapes",
@@ -1964,12 +1967,9 @@ class TestForeachMM(TestCase):
         _FOREACH_MM_SHAPES,
         name_fn=lambda label, shapes: label,
     )
-    def test_foreach_mm_cuda_bf16(self, label, shapes):
-        self._check(shapes, torch.bfloat16, "cuda")
-
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
-    def test_foreach_mm_cuda_fp32(self):
-        self._check([(256, 256, 256)] * 4, torch.float32, "cuda")
+    @parametrize("dtype", [torch.bfloat16, torch.float32])
+    def test_foreach_mm_cuda(self, label, shapes, dtype):
+        self._check(shapes, dtype, "cuda")
 
     def test_foreach_mm_gradcheck(self):
         G = 4
@@ -1995,27 +1995,18 @@ class TestForeachMM(TestCase):
     @parametrize(
         "label,shapes",
         [
-            # Non-aligned N (alignment=8 for bf16) — tests nvmath padding
-            ("unaligned_N_uniform", [(256, 253, 256)] * 8),
-            (
-                "unaligned_N_mixed",
-                [
-                    (256, 253, 256),
-                    (128, 67, 128),
-                    (64, 509, 64),
-                    (256, 127, 512),
-                ],
-            ),
             # Large uniform
             ("large_uniform", [(4096, 4096, 4096)] * 8),
-            # Mixed with wide range — stresses max-padded buffer allocation
+            # Non-square uniform (M is unaligned — ok for cublasLt)
+            ("nonsquare_uniform", [(1000, 2048, 512)] * 8),
+            # Mixed shapes — stresses per-group narrowing + max-padded buffer
             (
-                "mixed_wide_range",
+                "mixed_muon",
                 [
-                    (32, 32, 32),
                     (1024, 1024, 1024),
-                    (128, 512, 64),
-                    (512, 64, 128),
+                    (1024, 1024, 2752),
+                    (1024, 2752, 1024),
+                    (512, 512, 512),
                 ],
             ),
             # Many small groups
