@@ -535,14 +535,23 @@ Tensor linalg_vector_norm_backward(
 }
 
 Tensor pow_backward(Tensor grad, const Tensor& self, const Scalar& exponent) {
-  // Under dynamic shapes the exponent can be a symbolic scalar, which
-  // Scalar::equal does not support. Materialize it first; the backward formula
-  // genuinely branches on whether the exponent is zero, so specializing on its
-  // concrete value here is required.
-  const bool exponent_is_zero = exponent.isSymbolic()
-      ? (exponent.toDouble() == 0.0)
-      : exponent.equal(0.0);
-  if (exponent_is_zero) {
+  if (exponent.isSymbolic()) {
+    // Under dynamic shapes the exponent is a symbolic scalar (never complex).
+    // Branching on its value (exponent.equal(0)) would guard and specialize it,
+    // defeating dynamism, so emit the general gradient and mask the
+    // exponent == 0 case at the tensor level, mirroring pow_backward_self. The
+    // mask also avoids 0 * self.pow(-1) = nan at self == 0. Keep the exponent
+    // symbolic: toSymFloat() guards a symbolic int (it falls back to toDouble),
+    // so subtract via toSymInt for integral exponents.
+    Scalar exp_m1 = exponent.isIntegral(/*includeBool=*/false)
+        ? Scalar(exponent.toSymInt() - 1)
+        : Scalar(exponent.toSymFloat() - 1);
+    auto out = grad * (self.pow(exp_m1) * exponent).conj();
+    auto exponent_is_zero = at::scalar_tensor(exponent, self.options()).eq(0);
+    out = at::where(exponent_is_zero, at::zeros_like(out), out);
+    return handle_r_to_c(self, std::move(out));
+  }
+  if (exponent.equal(0.0)) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     auto grad_lambda = [&](auto exp) {
