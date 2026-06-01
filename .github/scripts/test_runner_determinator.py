@@ -917,7 +917,7 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
         self.assertEqual("mt-", result.prefix)
         self.assertTrue(result.use_arc)
 
-    def test_lf_takes_precedence_over_arc(self) -> None:
+    def test_arc_takes_precedence_over_lf(self) -> None:
         settings_text = """
         experiments:
             lf:
@@ -931,27 +931,8 @@ class TestRunnerDeterminatorArcExperiment(TestCase):
 
         """
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
-        self.assertEqual("lf.", result.prefix)
-        self.assertFalse(result.use_arc)
-
-    def test_lf_takes_precedence_over_arc_canary(self) -> None:
-        settings_text = """
-        experiments:
-            lf:
-                rollout_perc: 0
-            arc:
-                rollout_perc: 0
-        ---
-
-        Users:
-        @User1,lf,arc
-
-        """
-        result = rd.get_runner_prefix(
-            settings_text, ["User1"], USER_BRANCH, is_canary=True
-        )
-        self.assertEqual("lf.c.", result.prefix)
-        self.assertFalse(result.use_arc)
+        self.assertEqual("mt-", result.prefix)
+        self.assertTrue(result.use_arc)
 
     @patch("random.uniform", return_value=10)
     def test_listed_workflow_uses_rollout_perc_enabled(
