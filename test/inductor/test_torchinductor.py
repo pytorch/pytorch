@@ -10333,6 +10333,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             [torch.randn(8, 384, 20, 20).to(memory_format=torch.channels_last)],
         )
 
+    def test_as_strided_copy_out_of_bounds_empty_input(self):
+        def fn(x):
+            return torch.as_strided_copy(x, size=(1,), stride=(0,), storage_offset=None)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "out of bounds for storage of size 0"
+        ):
+            compiled(torch.empty(0, device=self.device))
+
+    def test_as_strided_copy_checks_runtime_storage_bounds(self):
+        def fn(x):
+            return torch.as_strided_copy(x, size=(6,), stride=(1,), storage_offset=None)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        valid = torch.arange(10, dtype=torch.float32, device=self.device)[:5]
+        self.assertEqual(compiled(valid), fn(valid))
+
+        invalid = torch.arange(5, dtype=torch.float32, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "out of bounds for storage"):
+            compiled(invalid)
+
     def test_exact_stride(self):
         full = torch.randn((16, 16), device=self.device)
         view = torch.as_strided(full, (16, 8), full.stride())
