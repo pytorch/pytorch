@@ -7622,6 +7622,38 @@ class CommonTemplate:
                 ),
             )
 
+    def test_pow_backward_dynamic_symint_exponent(self):
+        # Under dynamic=True the integer exponent becomes a symbolic scalar;
+        # pow's backward formula compared it with Scalar::equal, which was NYI
+        # for symbolic scalars. It must instead emit the general gradient and
+        # mask exponent == 0 (gradient 0) without specializing the exponent.
+        # Issue #185715.
+        def fn(x, exponent):
+            y = torch.pow(x, exponent)
+            (grad,) = torch.autograd.grad(y.sum(), x)
+            return y, grad
+
+        # base contains 0.0 so the exponent==0 path exercises the nan-avoidance
+        # mask (0 * self.pow(-1) would be nan at self == 0).
+        for exponent in (0, 1, 2, 3):
+            base = torch.tensor([0.0, 1.0, 2.5], device=self.device)
+            x = base.clone().requires_grad_(True)
+            x_c = base.clone().requires_grad_(True)
+            torch._dynamo.reset()
+            self.assertEqual(
+                fn(x, exponent), torch.compile(fn, dynamic=True)(x_c, exponent)
+            )
+
+        # The symbolic exponent must not be specialized: one graph serves all
+        # exponents, so changing it should not recompile.
+        cnts = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend=cnts, dynamic=True)
+        for exponent in (2, 3, 4, 5):
+            x = torch.ones(4, device=self.device, requires_grad=True)
+            compiled(x, exponent)
+        self.assertEqual(cnts.frame_count, 1)
+
     @xfail_if_triton_cpu
     def test_pow_symfloat(self):
         def fn(x):
