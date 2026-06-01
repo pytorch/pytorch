@@ -1053,6 +1053,14 @@ combo_kernel_max_num_nodes = 8
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, per-subkernel combo block sizes are autotuned at compile time:
+# standalone "seed" kernels are benched at codegen and the stitched config is
+# baked into the combo kernel. When False, the combo is tuned at runtime by
+# CachingAutotuner._combo_sequential_autotune. Indirect-indexing nodes are
+# excluded from combos on the compile-time path (the seed bench has no real
+# index tensor).
+# Note: the seed-kernel bench is not implemented yet (added in a later commit).
+combo_seed_autotune_at_compile_time = True
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
 combo_kernel_autotune_grouping = True
