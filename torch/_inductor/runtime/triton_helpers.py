@@ -266,6 +266,23 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
 
 
 @triton.jit
+def online_softmax_combine_with_sum(
+    lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math: tl.constexpr
+):
+    out_max = maximum(lhs_max, rhs_max)
+
+    lhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    )
+    rhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
+    )
+
+    out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    return out_max, out_sum
+
+
+@triton.jit
 def welford_reduce(value, mean, m2, weight, first_iteration):
     if first_iteration:
         new_weight = tl.full(weight.shape, 1, weight.dtype)
@@ -600,9 +617,13 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 @triton.jit
 def frexp(x):
     # TODO(isuruf): use inline_asm_elementwise here
-    y = libdevice.ilogb(x) + 1
-    exponent = tl.where(x == 0, 0, y)
-    mantissa = tl.where(x == 0, 0, libdevice.ldexp(x, -y))
+    zero = x == 0
+    not_finite = libdevice.isinf(x).to(tl.int1) | libdevice.isnan(x).to(tl.int1)
+    special = zero | not_finite
+    safe_x = tl.where(special, 1.0, x)
+    y = libdevice.ilogb(safe_x) + 1
+    exponent = tl.where(special, 0, y)
+    mantissa = tl.where(zero, 0, tl.where(not_finite, x, libdevice.ldexp(safe_x, -y)))
     return mantissa, exponent
 
 
