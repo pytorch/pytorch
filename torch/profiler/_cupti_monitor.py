@@ -25,6 +25,10 @@ _PY_PROFILER = torch._C._profiler
 
 
 _LIBCUPTI_PATH_ENV = "TORCH_CUPTI_MONITOR_LIBCUPTI_PATH"
+_LIBPTHREAD_PATH = ctypes.util.find_library("pthread") or "libpthread.so.0"
+_LIBPTHREAD = ctypes.CDLL(_LIBPTHREAD_PATH)
+_LIBPTHREAD.pthread_self.argtypes = []
+_LIBPTHREAD.pthread_self.restype = ctypes.c_uint64
 
 _CUPTI_SUCCESS = 0
 _CUPTI_ERROR_MAX_LIMIT_REACHED = 12
@@ -168,6 +172,12 @@ def _has_active_cuda_context() -> bool:
         return False
     raise RuntimeError(f"cuCtxGetCurrent failed with rc={rc}")
 
+
+def _current_thread_resource_tuple() -> tuple[int, int, int]:
+    pthread_self = int(_LIBPTHREAD.pthread_self())
+    opaque_tid = ctypes.c_int32(pthread_self & 0xFFFFFFFF).value
+    return (os.getpid(), opaque_tid, threading.get_native_id())
+
 def _cuda_version_string() -> str:
     return torch.version.cuda or ""
 
@@ -281,6 +291,7 @@ class CuptiMonitor:
         self._trace_window_start_ns = 0
         self._trace_window_user_annotations: dict[int, str] = {}
         self._next_user_external_id = 1
+        self._thread_resource_map: dict[int, dict[int, int]] = {}
         self._processing_inflight = 0
         self._time_converter = None
         self._timestamp_callback = None
@@ -482,6 +493,7 @@ class CuptiMonitor:
                 daemon=True,
             )
             self._flush_thread.start()
+        self._record_current_thread_info()
         self.enable_activities(self.activities)
         self._started = True
 
@@ -575,6 +587,7 @@ class CuptiMonitor:
         if self._trace_window_prepared:
             raise RuntimeError("A trace window is already prepared")
         activities = tuple(activities or _DEFAULT_TRACE_WINDOW_ACTIVITIES)
+        self._record_current_thread_info()
         newly_enabled = self.enable_activities(activities)
         with self._lock:
             self._trace_window_events = []
@@ -594,6 +607,7 @@ class CuptiMonitor:
             raise RuntimeError("No prepared trace window")
         if self._trace_window_active:
             raise RuntimeError("A trace window is already active")
+        self._record_current_thread_info()
         self.flush(forced=False)
         self._wait_for_processing_idle(timeout_s=5.0)
         with self._lock:
@@ -613,10 +627,14 @@ class CuptiMonitor:
     def end_trace_window(self) -> dict[str, Any]:
         if not self._trace_window_prepared:
             raise RuntimeError("No prepared trace window")
+        self._record_current_thread_info()
         with self._lock:
             extra = self._trace_window_extra_activities
             start_ns = self._trace_window_start_ns
             user_annotations = dict(self._trace_window_user_annotations)
+            thread_resource_map = {
+                pid: dict(mapping) for pid, mapping in self._thread_resource_map.items()
+            }
         self.disable_activities(extra)
         self.flush(forced=True)
         self._wait_for_processing_idle(timeout_s=5.0)
@@ -633,6 +651,7 @@ class CuptiMonitor:
             "events": self._filter_trace_window_events(events, start_ns),
             "extra_activities": list(extra),
             "user_annotations": user_annotations,
+            "thread_resource_map": thread_resource_map,
             "start_ns": start_ns,
         }
 
@@ -658,6 +677,7 @@ class CuptiMonitor:
             }
 
     def push_user_annotation(self, name: str) -> int | None:
+        self._record_current_thread_info()
         with self._lock:
             if (
                 not self._started
@@ -677,6 +697,7 @@ class CuptiMonitor:
         return external_id
 
     def pop_user_annotation(self) -> int | None:
+        self._record_current_thread_info()
         with self._lock:
             if (
                 not self._started
@@ -735,6 +756,11 @@ class CuptiMonitor:
         with open(self.output_dir / _META_FILE, "wb") as fp:
             fp.write(_META_HEADER.pack(_META_MAGIC, _META_VERSION, len(payload)))
             fp.write(payload)
+
+    def _record_current_thread_info(self) -> None:
+        pid, opaque_tid, sys_tid = _current_thread_resource_tuple()
+        with self._lock:
+            self._thread_resource_map.setdefault(pid, {})[opaque_tid] = sys_tid
 
     def _flush_loop(self) -> None:
         try:

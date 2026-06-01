@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ctypes
 import gzip
 import json
 import math
@@ -98,9 +99,22 @@ def _json_escape(s: str) -> str:
     return json.dumps(s)
 
 
+def _sanitize_tid(tid: int) -> int:
+    if tid == -(1 << 63):
+        return 0
+    return abs(tid)
+
+
+def _export_tid(tid):
+    if isinstance(tid, int):
+        return _sanitize_tid(tid)
+    return tid
+
+
 def _write_metadata_event(
     f: IO[str], name: str, ts: str, pid, tid, arg_key: str, arg_value: str
 ) -> None:
+    tid = _export_tid(tid)
     f.write(
         f'{{"ph":"M","name":"{name}","ts":{ts},'
         f'"pid":{pid},"tid":{tid},"args":{{"{arg_key}":{arg_value}}}}},\n'
@@ -120,7 +134,7 @@ def _metadata_event(
         "name": name,
         "ts": ts_us,
         "pid": pid,
-        "tid": tid,
+        "tid": _export_tid(tid),
         "args": {arg_key: arg_value},
     }
 
@@ -275,10 +289,36 @@ def _trace_window_entries(
     trace_window: dict[str, object],
     *,
     base_ns: int,
-    cpu_main_thread_by_pid: dict[int, int] | None = None,
+    cpu_thread_by_external_id: dict[int, tuple[int, int]] | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     events = trace_window["events"]
-    cpu_main_thread_by_pid = cpu_main_thread_by_pid or {}
+    cpu_thread_by_external_id = cpu_thread_by_external_id or {}
+    thread_resource_map = trace_window.get("thread_resource_map", {})
+    cpu_thread_by_correlation_id: dict[int, tuple[int, int]] = {}
+    for event in events:
+        if event.get("kind") != "external_correlation":
+            continue
+        correlation_id = int(event.get("correlation_id", 0))
+        external_id = int(event.get("external_id", 0))
+        if correlation_id == 0:
+            continue
+        linked = cpu_thread_by_external_id.get(external_id)
+        if linked is not None:
+            cpu_thread_by_correlation_id[correlation_id] = linked
+
+    def _runtime_thread_id(process_id: int, correlation_id: int, raw_thread_id: int) -> int:
+        linked = cpu_thread_by_correlation_id.get(correlation_id)
+        if linked is not None and linked[0] == process_id:
+            return linked[1]
+        process_map = thread_resource_map.get(process_id, {})
+        normalized_raw_thread_id = ctypes.c_int32(raw_thread_id & 0xFFFFFFFF).value
+        try:
+            return int(
+                process_map.get(normalized_raw_thread_id, normalized_raw_thread_id)
+            )
+        except AttributeError:
+            return normalized_raw_thread_id
+
     max_non_overhead_end_ns = 0
     for event in events:
         if event.get("kind") == "overhead":
@@ -312,8 +352,9 @@ def _trace_window_entries(
                 if not _driver_is_registered(cbid_name):
                     continue
             process_id = int(event["process_id"])
-            thread_id = cpu_main_thread_by_pid.get(
+            thread_id = _runtime_thread_id(
                 process_id,
+                int(event["correlation_id"]),
                 int(event["thread_id"]),
             )
             seen_cpu_processes.setdefault(process_id, int(event["start_ns"]))
@@ -395,7 +436,11 @@ def _trace_window_entries(
         if kind not in {"kernel", "gpu_memcpy", "gpu_memset", "overhead"}:
             if kind in {"cuda_runtime", "cuda_driver"}:
                 pid = int(event["process_id"])
-                tid = cpu_main_thread_by_pid.get(pid, int(event["thread_id"]))
+                tid = _runtime_thread_id(
+                    pid,
+                    int(event["correlation_id"]),
+                    int(event["thread_id"]),
+                )
                 cat = str(kind)
                 name = (
                     _runtime_cbid_name(int(event["cbid"]))
@@ -424,7 +469,7 @@ def _trace_window_entries(
                         "cat": cat,
                         "name": name,
                         "pid": pid,
-                        "tid": tid,
+                        "tid": _export_tid(tid),
                         "ts": ts_us,
                         "dur": dur_us,
                         "args": args,
@@ -437,7 +482,7 @@ def _trace_window_entries(
                             "ph": "s",
                             "id": correlation_id,
                             "pid": pid,
-                            "tid": tid,
+                            "tid": _export_tid(tid),
                             "ts": ts_us,
                             "cat": _FLOW_CATEGORY,
                             "name": _FLOW_CATEGORY,
@@ -500,7 +545,7 @@ def _trace_window_entries(
                 "cat": cat,
                 "name": name,
                 "pid": pid,
-                "tid": tid,
+                "tid": _export_tid(tid),
                 "ts": ts_us,
                 "dur": dur_us,
                 "args": args,
@@ -514,7 +559,7 @@ def _trace_window_entries(
                     "ph": "f",
                     "id": correlation_id,
                     "pid": pid,
-                    "tid": tid,
+                    "tid": _export_tid(tid),
                     "ts": ts_us,
                     "cat": _FLOW_CATEGORY,
                     "name": _FLOW_CATEGORY,
@@ -589,7 +634,7 @@ def _gpu_user_annotation_events(
                 "cat": "gpu_user_annotation",
                 "name": name,
                 "pid": device_id,
-                "tid": stream_id,
+                "tid": _export_tid(stream_id),
                 "ts": start_us,
                 "dur": dur_us,
                 "args": {"External id": external_id},
@@ -614,7 +659,7 @@ def merge_trace_window_into_chrome_trace(
 
     base_ns = int(data.get("baseTimeNanoseconds", _trimester_base_ns()))
     original_events = list(data.get("traceEvents", []))
-    cpu_main_thread_by_pid: dict[int, int] = {}
+    cpu_thread_by_external_id: dict[int, tuple[int, int]] = {}
     for event in original_events:
         if not isinstance(event, dict):
             continue
@@ -624,13 +669,21 @@ def merge_trace_window_into_chrome_trace(
             continue
         pid = event.get("pid")
         tid = event.get("tid")
-        if isinstance(pid, int) and isinstance(tid, int):
-            cpu_main_thread_by_pid.setdefault(pid, tid)
+        args = event.get("args")
+        if not (isinstance(pid, int) and isinstance(tid, int) and isinstance(args, dict)):
+            continue
+        external_id = args.get("External id")
+        if external_id is None:
+            continue
+        try:
+            cpu_thread_by_external_id[int(external_id)] = (pid, tid)
+        except (TypeError, ValueError):
+            continue
 
     metadata_events, trace_events = _trace_window_entries(
         trace_window,
         base_ns=base_ns,
-        cpu_main_thread_by_pid=cpu_main_thread_by_pid,
+        cpu_thread_by_external_id=cpu_thread_by_external_id,
     )
     events = [
         event
@@ -938,7 +991,7 @@ def export_monitor_trace(
             f.write(
                 f'{{"ph":"X","cat":{_json_escape(cat)},'
                 f'"name":{_json_escape(str(name))},'
-                f'"pid":{pid},"tid":{tid},'
+                f'"pid":{pid},"tid":{_export_tid(tid)},'
                 f'"ts":{ts_str},"dur":{dur_str},'
                 f'"args":{json.dumps(args, separators=(",", ":"))}}},\n'
             )
