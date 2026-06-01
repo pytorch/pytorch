@@ -88,6 +88,9 @@
 #include <ATen/ops/linalg_lu_solve.h>
 #include <ATen/ops/linalg_lu_solve_meta.h>
 #include <ATen/ops/linalg_lu_solve_native.h>
+#include <ATen/ops/linalg_qdwh.h>
+#include <ATen/ops/linalg_qdwh_meta.h>
+#include <ATen/ops/linalg_qdwh_native.h>
 #include <ATen/ops/linalg_qr.h>
 #include <ATen/ops/linalg_qr_meta.h>
 #include <ATen/ops/linalg_qr_native.h>
@@ -731,6 +734,27 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
   set_output_strided(1, R_shape, R_strides, A.options(), {});
 }
 
+TORCH_META_FUNC(linalg_qdwh)(const Tensor& A) {
+  at::native::checkIsMatrix(A, "linalg.qdwh");
+  at::native::checkFloatingOrComplex(A, "linalg.qdwh");
+
+  auto A_shape = A.sizes().vec();
+  const auto m = A_shape.cend()[-2];
+  const auto n = A_shape.cend()[-1];
+  TORCH_CHECK(
+      m >= n,
+      "linalg.qdwh: input must have at least as many rows as columns, but got ",
+      m, " by ", n, " matrices");
+
+  // U has the same shape as A; H is the (n x n) symmetric/Hermitian factor.
+  auto U_strides = at::native::batched_matrix_contiguous_strides(A_shape, /*f-contig*/true);
+  set_output_strided(0, A_shape, U_strides, A.options(), {});
+
+  auto H_shape = std::move(A_shape);
+  H_shape.end()[-2] = n;
+  auto H_strides = at::native::batched_matrix_contiguous_strides(H_shape, /*f-contig*/true);
+  set_output_strided(1, H_shape, H_strides, A.options(), {});
+}
 
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              bool full_matrices,
@@ -2498,6 +2522,20 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
     // Next perform ORGQR for Q using the result from GEQRF
     orgqr_stub(A.device().type(), const_cast<Tensor&>(Q), tau);
   }
+}
+
+TORCH_IMPL_FUNC(linalg_qdwh_out)(const Tensor& A,
+                                 const Tensor& U,
+                                 const Tensor& H) {
+  // The QDWH polar decomposition is provided through the Python native-op
+  // override (cuSOLVER Xpolar via nvmath-python, with an SVD-based fallback
+  // for CPU / when nvmath is unavailable). This kernel is the backstop for
+  // backends and dtypes the override does not match.
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "linalg.qdwh: no native kernel is registered for this backend. The QDWH "
+      "polar decomposition is provided by a Python override on CPU and CUDA; "
+      "install nvmath-python for the cuSOLVER QDWH path on CUDA.");
 }
 
 

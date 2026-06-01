@@ -466,6 +466,7 @@
     "multi_dot",
     "norm",
     "pinv",
+    "qdwh",
     "qr",
     "slogdet",
     "solve",

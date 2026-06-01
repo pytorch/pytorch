@@ -14731,6 +14731,17 @@
     CPU, CUDA: linalg_qr_out
     MPS: linalg_qr_out_mps
 
+- func: linalg_qdwh(Tensor A) -> (Tensor U, Tensor H)
+  python_module: linalg
+  variants: function
+  structured_delegate: linalg_qdwh.out
+
+- func: linalg_qdwh.out(Tensor A, *, Tensor(a!) U, Tensor(b!) H) -> (Tensor(a!) U, Tensor(b!) H)
+  python_module: linalg
+  structured: True
+  dispatch:
+    CPU, CUDA: linalg_qdwh_out
+
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg
 

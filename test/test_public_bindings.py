@@ -417,6 +417,7 @@ class TestPublicBindings(TestCase):
             # available in CPU-only CI. Registrations are no-ops when the
             # runtime is missing, so it's safe to skip them here.
             cuda_dep_prefixes = (
+                "torch._native.ops.qdwh.",
                 "torch._native.ops.scatter_add.",
                 "torch._vendor.quack",
             )

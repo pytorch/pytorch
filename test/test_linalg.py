@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     with_ieee_matmul_precision, MI200_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
+     with_ieee_matmul_precision, MI200_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA, skipIfNoNvmath)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -4419,6 +4419,69 @@ class TestLinalg(TestCase):
         self.assertEqual(q.device, t.device)
         # check r
         self.assertEqual(r, exp_r)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_qdwh(self, device, dtype):
+        # Polar decomposition A = U @ H: U has orthonormal columns and H is
+        # symmetric/Hermitian positive-semidefinite.
+        def run_test(shape):
+            A = make_tensor(shape, device=device, dtype=dtype, low=-2, high=2)
+            U, H = torch.linalg.qdwh(A)
+
+            m, n = shape[-2:]
+            self.assertEqual(U.shape, A.shape)
+            self.assertEqual(H.shape, (*shape[:-2], n, n))
+            self.assertEqual(U.dtype, dtype)
+            self.assertEqual(H.dtype, dtype)
+
+            # Reconstruction A = U @ H.
+            self.assertEqual(U @ H, A)
+            # U has orthonormal columns.
+            eye = torch.eye(n, device=device, dtype=dtype).expand(*shape[:-2], n, n)
+            self.assertEqual(U.mH @ U, eye)
+            # H is Hermitian.
+            self.assertEqual(H, H.mH)
+
+        for shape in [(4, 4), (7, 5), (1, 1), (16, 3)]:
+            run_test(shape)
+        # batched
+        for shape in [(3, 7, 5), (2, 4, 4, 4)]:
+            run_test(shape)
+
+    @skipCUDAIfNoCusolver
+    @skipIfNoNvmath
+    @dtypes(torch.float, torch.double)
+    def test_qdwh_matches_svd(self, device, dtype):
+        # On CUDA with nvmath present, the cuSOLVER QDWH (Xpolar) path and the
+        # SVD-based reference should agree on the polar factors. Invoke the
+        # Xpolar kernel directly so the comparison exercises it specifically,
+        # and check the reported residual is small.
+        if torch.device(device).type != "cuda":
+            self.skipTest("nvmath QDWH path is CUDA-only")
+        from torch._native.ops.qdwh import nvmath_impl as nv
+        from torch._native.ops.qdwh.impl import _qdwh_impl_svd
+
+        A = make_tensor((32, 16), device=device, dtype=dtype, low=-2, high=2)
+        U, H, residual = nv.qdwh_xpolar(A, return_residual=True)
+        self.assertLess(residual.item(), 1e-6)
+        U_ref, H_ref = _qdwh_impl_svd(A)
+        self.assertEqual(U, U_ref)
+        self.assertEqual(H, H_ref)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float)
+    def test_qdwh_error_cases(self, device, dtype):
+        # Fewer rows than columns is unsupported.
+        A = torch.randn((3, 5), device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "at least as many rows as columns"):
+            torch.linalg.qdwh(A)
+        # Must be a matrix.
+        v = torch.randn(5, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
+            torch.linalg.qdwh(v)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver

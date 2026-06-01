@@ -40,6 +40,7 @@ See {ref}`Linear Algebra Stability` for some common numerical edge-cases.
 
     cholesky
     qr
+    qdwh
     lu
     lu_factor
     eig

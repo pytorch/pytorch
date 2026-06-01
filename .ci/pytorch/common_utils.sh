@@ -329,6 +329,12 @@ function install_cutlass_dsl() {
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 
+function install_nvmath() {
+  echo "Installing nvmath-python from PyPI..."
+  pip_install nvmath-python
+  echo "nvmath-python installation complete."
+}
+
 function install_cutlass_api() {
   # cutlass-api requires Python >= 3.12
   local py_version

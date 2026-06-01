@@ -2923,6 +2923,66 @@ Examples::
 """,
 )
 
+qdwh = _add_docstr(
+    _linalg.linalg_qdwh,
+    r"""
+linalg.qdwh(A, *, out=None) -> (Tensor, Tensor)
+
+Computes the polar decomposition of a matrix.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+the **polar decomposition** of a matrix
+:math:`A \in \mathbb{K}^{m \times n}` with `m >= n` is defined as
+
+.. math::
+
+    A = UH\mathrlap{\qquad U \in \mathbb{K}^{m \times n}, H \in \mathbb{K}^{n \times n}}
+
+where :math:`U` has orthonormal columns (it is orthogonal in the real case and
+unitary in the complex case) and :math:`H` is symmetric positive-semidefinite in
+the real case and Hermitian positive-semidefinite in the complex case.
+
+The orthogonal factor :math:`U` is the closest matrix with orthonormal columns to
+:math:`A` in the Frobenius norm, which makes the polar decomposition a useful tool
+for orthogonalization.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+On CUDA, this is computed with the QR-based Dynamically Weighted Halley (QDWH)
+algorithm via cuSOLVER when `nvmath-python <https://pypi.org/project/nvmath-python/>`_
+is installed and the cuSOLVER runtime is >= 12.2 (CUDA 13.2, which introduces
+the required ``cusolverDnXpolar`` routine); otherwise (and on CPU) it falls back
+to an SVD-based computation.
+"""
+    + rf"""
+.. note:: {common_notes["sync_note"]}
+
+.. warning:: {common_notes["experimental_warning"]}
+"""
+    + r"""
+Args:
+    A (Tensor): tensor of shape `(*, m, n)` with `m >= n`, where `*` is zero or
+                more batch dimensions.
+
+Keyword args:
+    out (tuple, optional): output tuple of two tensors. Ignored if `None`. Default: `None`.
+
+Returns:
+    A named tuple `(U, H)`.
+
+Examples::
+
+    >>> A = torch.randn(4, 3)
+    >>> U, H = torch.linalg.qdwh(A)
+    >>> torch.dist(U @ H, A)
+    tensor(7.1512e-07)
+    >>> torch.dist(U.mT @ U, torch.eye(3))
+    tensor(4.8995e-07)
+""",
+)
+
 vander = _add_docstr(
     _linalg.linalg_vander,
     r"""
