@@ -185,7 +185,6 @@ class _ValueUseRules:
         mode: Any = None,
     ) -> _ValueUseRule:
         return _ValueUseRule(
-            value_inputs=(),
             value_sinks=(value,),
             indexing_inputs=(index,),
         )
@@ -194,7 +193,6 @@ class _ValueUseRules:
         self, name: str, index: sympy.Expr, value: Any
     ) -> _ValueUseRule:
         return _ValueUseRule(
-            value_inputs=(),
             value_sinks=(value,),
             indexing_inputs=(index,),
         )
@@ -206,7 +204,7 @@ class _ValueUseRules:
         reduction_type: str,
         value: Any,
     ) -> _ValueUseRule:
-        return _ValueUseRule(value_inputs=(value,), value_sinks=(value,))
+        return _ValueUseRule(value_sinks=(value,))
 
     def partial_accumulate(
         self,
@@ -215,7 +213,7 @@ class _ValueUseRules:
         value: Any,
         extra_meta: dict[str, Any],
     ) -> _ValueUseRule:
-        return _ValueUseRule(value_inputs=(), value_sinks=(value,))
+        return _ValueUseRule(value_sinks=(value,))
 
     def sort(
         self,
@@ -224,7 +222,7 @@ class _ValueUseRules:
         stable: bool,
         descending: bool,
     ) -> _ValueUseRule:
-        return _ValueUseRule(value_inputs=(values,), value_sinks=(values,))
+        return _ValueUseRule(value_sinks=(values,))
 
     def scan(
         self,
@@ -232,7 +230,7 @@ class _ValueUseRules:
         combine_fn: Any,
         values: tuple[Any, ...],
     ) -> _ValueUseRule:
-        return _ValueUseRule(value_inputs=(values,), value_sinks=(values,))
+        return _ValueUseRule(value_sinks=(values,))
 
     def bucketize(
         self,
@@ -268,7 +266,7 @@ class _ValueUseRules:
     def scan_subblock(
         self, dtypes: tuple[torch.dtype, ...], values: tuple[Any, ...]
     ) -> _ValueUseRule:
-        return _ValueUseRule(value_inputs=(values,), value_sinks=(values,))
+        return _ValueUseRule(value_sinks=(values,))
 
     def set_indirect(self, new_var: Any) -> _ValueUseRule:
         return _ValueUseRule(value_inputs=(), indexing_inputs=(new_var,))
@@ -394,6 +392,7 @@ def _convert_value_use_index_exprs(loop_body: LoopBody) -> bool:
                         _add_node(graph, arg_node)
         else:
             _add_arg(graph, rule.value_inputs)
+        _add_arg(graph, rule.value_sinks)
 
     return changed
 

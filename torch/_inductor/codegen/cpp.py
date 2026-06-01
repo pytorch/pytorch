@@ -1213,6 +1213,7 @@ class CppVecOverrides(CppOverrides):
             if getattr(method, "__class__", None) is staticmethod and name not in [
                 "masked",
                 "index_expr",
+                "value_expr",
             ]:
                 setattr(self, name, wrap(method.__func__))
 
@@ -3859,6 +3860,7 @@ def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[torch.dtype | None, bool]:
             if _node.op == "placeholder" or _node.target in (
                 "get_index",
                 "index_expr",
+                "value_expr",
             ):
                 continue
 
