@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -30,6 +32,7 @@ namespace c10 {
  * circumstances where you statically know a tensor is 0-dim and single size,
  * but don't know its type.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class C10_API Scalar {
  public:
   Scalar() : Scalar(int64_t(0)) {}
@@ -79,12 +82,12 @@ class C10_API Scalar {
 
   Scalar(uint16_t vv) : Scalar(vv, true) {}
   Scalar(uint32_t vv) : Scalar(vv, true) {}
-  Scalar(uint64_t vv) {
-    if (vv > static_cast<uint64_t>(INT64_MAX)) {
-      tag = Tag::HAS_u;
+  Scalar(uint64_t vv) // NOLINT(cppcoreguidelines-pro-type-member-init)
+      : tag(vv > static_cast<uint64_t>(INT64_MAX) ? Tag::HAS_u : Tag::HAS_i) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+    if (tag == Tag::HAS_u) {
       v.u = vv;
     } else {
-      tag = Tag::HAS_i;
       // NB: no need to use convert, we've already tested convertibility
       v.i = static_cast<int64_t>(vv);
     }
@@ -270,7 +273,7 @@ class C10_API Scalar {
         return static_cast<T>(v.u) == num;
       }
     } else if (tag == Tag::HAS_si) {
-      TORCH_INTERNAL_ASSERT(false, "NYI SymInt equality");
+      return equalSymInt(num);
     } else if (isBoolean()) {
       // boolean scalar does not equal to a non boolean value
       TORCH_INTERNAL_ASSERT(!isSymbolic());
@@ -302,7 +305,8 @@ class C10_API Scalar {
         return static_cast<T>(v.u) == num.real() && num.imag() == T();
       }
     } else if (tag == Tag::HAS_si) {
-      TORCH_INTERNAL_ASSERT(false, "NYI SymInt equality");
+      using value_type = typename T::value_type;
+      return num.imag() == value_type() && equalSymInt(num.real());
     } else if (isBoolean()) {
       // boolean scalar does not equal to a non boolean value
       TORCH_INTERNAL_ASSERT(!isSymbolic());
@@ -422,6 +426,43 @@ class C10_API Scalar {
     // NOLINTNEXTLINE(modernize-use-equals-default)
     v_t() {} // default constructor
   } v;
+
+  template <
+      typename T,
+      typename std::enable_if_t<std::is_integral_v<T>, bool>* = nullptr>
+  bool tryToInt64(T num, int64_t* out) const {
+    if (overflows<int64_t>(num, /* strict_unsigned */ true)) {
+      return false;
+    }
+    *out = static_cast<int64_t>(num);
+    return true;
+  }
+
+  template <
+      typename T,
+      typename std::enable_if_t<!std::is_integral_v<T>, bool>* = nullptr>
+  bool tryToInt64(T num, int64_t* out) const {
+    const auto num_double = static_cast<double>(num);
+    const auto lower = static_cast<double>(std::numeric_limits<int64_t>::min());
+    const auto upper = -lower;
+    if (!std::isfinite(num_double) || std::trunc(num_double) != num_double ||
+        num_double < lower || num_double >= upper) {
+      return false;
+    }
+    *out = static_cast<int64_t>(num_double);
+    return true;
+  }
+
+  template <typename T>
+  bool equalSymInt(T num) const {
+    int64_t int_num;
+    if (!tryToInt64(num, &int_num)) {
+      return false;
+    }
+    return toSymInt()
+        .sym_eq(c10::SymInt(int_num))
+        .guard_bool(__FILE__, __LINE__);
+  }
 
   template <
       typename T,
