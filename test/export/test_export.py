@@ -18854,6 +18854,20 @@ def forward(self, x, y):
             self.assertEqual(eager_result, export_result)
             self.assertEqual(export_result.dtype, expected_dtype)
 
+    def test_constant_pad_nd_run_decompositions(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167068
+        # constant_pad_nd's ref decomposition must be fully functional so that
+        # run_decompositions (used by ONNX dynamo export) doesn't trip
+        # assert_functional_graph.
+        class Pad(torch.nn.Module):
+            def forward(self, x):
+                return F.pad(x, (0, 0, 0, 240, 0, 0))
+
+        ep = export(Pad(), (torch.randn(1, 16, 64),), strict=False)
+        decomposed = ep.run_decompositions(decomposition_table)
+        result = decomposed.module()(torch.randn(1, 16, 64))
+        self.assertEqual(result.shape, (1, 256, 64))
+
 
 if __name__ == "__main__":
     run_tests()
