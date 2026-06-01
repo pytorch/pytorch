@@ -763,10 +763,15 @@ class _RuntimeForwardEpilogue:
 def _codegen_capture_orig_inputs(
     rw_lines: list[str],
     epilogue_args_idx: tuple[int, ...],
+    num_outputs_aliased: int,
 ) -> None:
     if epilogue_args_idx:
         idx_str = ", ".join(f"{i}: args[{i}]" for i in epilogue_args_idx)
         rw_lines.append(f"    orig_inputs = {{{idx_str}}}")
+    elif num_outputs_aliased > 0:
+        # _replay_aliases_ always receives orig_inputs even when all aliases are
+        # of intermediates (not inputs), so the dict must be defined even if empty.
+        rw_lines.append("    orig_inputs = {}")
 
 
 def _codegen_increment_mutation_versions(
@@ -1083,7 +1088,9 @@ def _create_runtime_wrapper(
     rw_lines.append(
         "def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args):"
     )
-    _codegen_capture_orig_inputs(rw_lines, epilogue_args_idx)
+    _codegen_capture_orig_inputs(
+        rw_lines, epilogue_args_idx, runtime_metadata.num_outputs_aliased
+    )
     _codegen_increment_mutation_versions(
         rw_lines, rw_globals, keep_input_mutations, runtime_metadata
     )
