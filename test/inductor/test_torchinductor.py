@@ -8193,6 +8193,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn([64]),),
         )
 
+    def test_threshold_low_precision_boundary(self):
+        # threshold's boundary comparison is device-dependent in eager: CUDA
+        # compares in the input dtype, CPU in fp32. bf16(0.1) == 0.10009765625,
+        # so an input equal to that is at the bound on CUDA (-> value) but above
+        # it on CPU (-> kept). Compiled must match eager per device (#185470).
+        def fn(x):
+            return F.threshold(x, 0.1, 0.0)
+
+        x = torch.tensor([0.10009765625], dtype=torch.bfloat16, device=self.device)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
     def test_hardsigmoid(self):
         def fn(x):
             return F.hardsigmoid(x), F.hardsigmoid(x + 3), F.hardsigmoid(x - 3)
