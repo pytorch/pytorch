@@ -8020,12 +8020,22 @@ def linear_backward(input_, grad_output_, weight_, output_mask):
 
 @register_meta(aten.pixel_shuffle.default)
 def meta_pixel_shuffle(self, upscale_factor):
-    if not (
-        len(self.shape) > 2 and self.shape[-3] % (upscale_factor * upscale_factor) == 0
-    ):
-        raise AssertionError(
-            f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
-        )
+    torch._check(
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got upscale_factor={upscale_factor}",
+    )
+    upscale_factor_squared = upscale_factor * upscale_factor
+    torch._check(
+        upscale_factor_squared <= torch.iinfo(torch.int64).max,
+        lambda: f"pixel_shuffle: upscale_factor ({upscale_factor}) is too large, "
+        f"upscale_factor^2 overflows int64",
+    )
+    torch._check(
+        len(self.shape) > 2 and self.shape[-3] % upscale_factor_squared == 0,
+        lambda: f"pixel_shuffle expects input channel to be divisible by "
+        f"upscale_factor^2, but got input shape {self.shape} and "
+        f"upscale_factor={upscale_factor}",
+    )
 
     def is_channels_last(ten):
         return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
@@ -8041,7 +8051,7 @@ def meta_pixel_shuffle(self, upscale_factor):
         elif self.is_contiguous(memory_format=torch.preserve_format):
             return torch.preserve_format
 
-    C = self.shape[-3] // (upscale_factor * upscale_factor)
+    C = self.shape[-3] // upscale_factor_squared
     Hr = self.shape[-2] * upscale_factor
     Wr = self.shape[-1] * upscale_factor
     out_shape = (*self.shape[:-3], C, Hr, Wr)

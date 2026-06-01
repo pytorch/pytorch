@@ -4659,6 +4659,39 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
 
+    def test_pixel_shuffle_decomp_validation(self):
+        from torch._refs.nn.functional import pixel_shuffle as pixel_shuffle_decomp
+
+        x = torch.randn(1, 4, 2, 2)
+        with self.assertRaisesRegex(RuntimeError, "positive upscale_factor"):
+            pixel_shuffle_decomp(x, 0)
+        with self.assertRaisesRegex(RuntimeError, "positive upscale_factor"):
+            pixel_shuffle_decomp(x, -2)
+
+        with self.assertRaisesRegex(RuntimeError, "too large"):
+            pixel_shuffle_decomp(x, 545460846592)
+
+        x_bad_channels = torch.randn(1, 5, 2, 2)
+        with self.assertRaisesRegex(RuntimeError, "divisible by"):
+            pixel_shuffle_decomp(x_bad_channels, 2)
+
+        x_2d = torch.randn(4, 4)
+        with self.assertRaisesRegex(RuntimeError, "at least 3 dimensions"):
+            pixel_shuffle_decomp(x_2d, 2)
+
+    def test_pixel_shuffle_meta_validation(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            x = torch.randn(1, 4, 2, 2)
+            with self.assertRaisesRegex(RuntimeError, "positive upscale_factor"):
+                torch.ops.aten.pixel_shuffle(x, 0)
+            with self.assertRaisesRegex(RuntimeError, "too large"):
+                torch.ops.aten.pixel_shuffle(x, 545460846592)
+            x_bad = torch.randn(1, 5, 2, 2)
+            with self.assertRaisesRegex(RuntimeError, "divisible by"):
+                torch.ops.aten.pixel_shuffle(x_bad, 2)
+
     @set_default_dtype(torch.double)
     def test_pixel_shuffle_nhwc_cpu(self):
         input = torch.randn(3, 18, 4, 4, device='cpu')
