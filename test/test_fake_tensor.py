@@ -1359,6 +1359,106 @@ def forward(self, x_1):
             )
             self.assertTrue(isinstance(ep, torch.export.ExportedProgram))
 
+    def test_frozen_shape_env_eager_fake_constant_pad_nd_preserves_symbols(self):
+        from torch.export.exported_program import _get_shape_env
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        def make_symbolic_fake_input():
+            ep = torch.export.export(
+                M(),
+                (torch.randn(1, 3, 9, 12),),
+                dynamic_shapes={
+                    "x": {
+                        2: torch.export.Dim("h", min=2, max=6) * 3,
+                        3: torch.export.Dim("w", min=2, max=6) * 3,
+                    }
+                },
+            )
+            gm = ep.graph_module
+            shape_env = _get_shape_env(gm)
+            x = next(
+                node.meta["val"]
+                for node in gm.graph.nodes
+                if node.op == "placeholder" and node.name == "x"
+            )
+            return x, shape_env
+
+        eager_x, eager_shape_env = make_symbolic_fake_input()
+        self.assertTrue(eager_shape_env.frozen)
+
+        input_shape = str(eager_x.shape)
+        guards = [guard.expr for guard in eager_shape_env.guards]
+        replacements = dict(eager_shape_env.replacements)
+
+        eager_y = torch.ops.aten.constant_pad_nd.default(eager_x, [0, 0, 0, 0], 0.0)
+
+        self.assertEqual(str(eager_x.shape), input_shape)
+        self.assertEqual(str(eager_y.shape), input_shape)
+        self.assertEqual([guard.expr for guard in eager_shape_env.guards], guards)
+        self.assertEqual(eager_shape_env.replacements, replacements)
+
+        # A previous ignored frozen guard must not mask explicit guard checks.
+        expr = eager_x.shape[2].node.expr
+        hint = eager_x.shape[2].node.hint
+        self.assertEqual(eager_shape_env.evaluate_expr(expr, hint), hint)
+        with self.assertRaisesRegex(
+            Exception, "Guard attempted while ShapeEnv guards are frozen"
+        ):
+            with eager_shape_env.error_on_new_guards():
+                eager_shape_env.evaluate_expr(expr, hint)
+
+        if not torch._functorch.config.fake_tensor_propagate_real_tensors:
+            with torch._dynamo.config.patch(
+                "fake_tensor_cache_crosscheck_enabled", False
+            ):
+                dispatch_x, dispatch_shape_env = make_symbolic_fake_input()
+                FakeTensorMode.cache_clear()
+                dispatch_shape_env.fake_tensor_cache.clear()
+                torch.ops.aten.constant_pad_nd.default(dispatch_x, [0, 0, 0, 0], 0.0)
+                self.assertGreater(len(dispatch_shape_env.fake_tensor_cache), 0)
+
+                with self.assertRaisesRegex(
+                    Exception, "Guard attempted while ShapeEnv guards are frozen"
+                ):
+                    with dispatch_shape_env.error_on_new_guards():
+                        torch.ops.aten.constant_pad_nd.default(
+                            dispatch_x, [0, 0, 0, 0], 0.0
+                        )
+
+        cache_x, cache_shape_env = make_symbolic_fake_input()
+        expr = cache_x.shape[2].node.expr
+        hint = cache_x.shape[2].node.hint
+        guards = [guard.expr for guard in cache_shape_env.guards]
+        self.assertEqual(cache_shape_env.evaluate_expr(expr, hint), hint)
+        self.assertEqual([guard.expr for guard in cache_shape_env.guards], guards)
+        cache_shape_env.frozen = False
+        self.assertEqual(cache_shape_env.evaluate_expr(expr, hint), hint)
+        self.assertEqual(len(cache_shape_env.guards), len(guards) + 1)
+
+        runtime_assert_x, runtime_assert_shape_env = make_symbolic_fake_input()
+        guard_expr = (
+            runtime_assert_x.shape[2] == runtime_assert_x.shape[2].node.hint
+        ).node.expr
+        guards = [guard.expr for guard in runtime_assert_shape_env.guards]
+        self.assertTrue(
+            runtime_assert_shape_env.guard_or_defer_runtime_assert(
+                guard_expr, "cache test"
+            )
+        )
+        self.assertEqual(
+            [guard.expr for guard in runtime_assert_shape_env.guards], guards
+        )
+        runtime_assert_shape_env.frozen = False
+        self.assertTrue(
+            runtime_assert_shape_env.guard_or_defer_runtime_assert(
+                guard_expr, "cache test"
+            )
+        )
+        self.assertEqual(len(runtime_assert_shape_env.guards), len(guards) + 1)
+
     def test_unsqueeze_copy(self):
         shape_env = ShapeEnv()
         t1 = torch.ones(2, 2, 768)
