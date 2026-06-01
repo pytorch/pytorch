@@ -117,7 +117,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix-osdc }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
@@ -165,7 +164,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.linux-jammy-aarch64-py3_10-gcc13-build.outputs.test-matrix-osdc }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
@@ -217,7 +215,6 @@ jobs:
       build-environment: linux-jammy-py3.14t-clang18
       docker-image: ${{ needs.linux-jammy-py3_14t-clang18-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang18-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.linux-jammy-py3_14t-clang18-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.14t"
       compiler: clang18
@@ -318,7 +315,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix-osdc }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
@@ -377,7 +373,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.linux-jammy-py3_10-clang18-build.outputs.test-matrix-osdc }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
@@ -432,7 +427,6 @@ jobs:
       build-environment: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.linux-jammy-py3_14-clang18-build.outputs.test-matrix-osdc }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.14"
@@ -572,7 +566,6 @@ jobs:
       build-environment: linux-jammy-py3.13-clang18
       docker-image: ${{ needs.dynamo-cpython-build.outputs.docker-image }}
       test-matrix: ${{ needs.dynamo-cpython-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.dynamo-cpython-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.13"
       compiler: clang18

@@ -1083,21 +1083,29 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 return torch._refs.tensor, args, kwargs
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
 
-            def rewrite(dim, item):
+            def rewrite(dim, current_ndim, item):
                 # Redirect to torch.select for indexing.
                 if item is None:
-                    return dim + 1, (torch.unsqueeze, [dim])
+                    return dim + 1, current_ndim + 1, (torch.unsqueeze, [dim])
+                if dim >= current_ndim:
+                    return None
                 if isinstance(item, (int, torch.SymInt)):
-                    return dim, (torch.select, [dim, item])
+                    return dim, current_ndim - 1, (torch.select, [dim, item])
                 # Redirect to torch.ops.aten.slice for slicing.
                 if isinstance(item, slice):
-                    step = item.step or 1
+                    step = 1 if item.step is None else item.step
+                    if isinstance(step, int) and step <= 0:
+                        return None
                     if item.start is None and item.stop is None and step == 1:
                         # no-op
-                        return dim + 1, (lambda t: t, [])
-                    return dim + 1, (
-                        torch.ops.aten.slice,
-                        [dim, item.start, item.stop, step],
+                        return dim + 1, current_ndim, (lambda t: t, [])
+                    return (
+                        dim + 1,
+                        current_ndim,
+                        (
+                            torch.ops.aten.slice,
+                            [dim, item.start, item.stop, step],
+                        ),
                     )
                 # Otherwise do nothing.
 
@@ -1106,7 +1114,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             has_symint = False
             index_ellipsis = None
             t = args[0]
-            n_none_slices = t.ndim + 1
+            dim_consuming_items = 0
             for i, item in enumerate(items):
                 if isinstance(item, torch.SymInt) or (
                     isinstance(item, slice)
@@ -1118,22 +1126,34 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                     has_symint = True
                 if item is Ellipsis:
                     index_ellipsis = i
-                if item is not None:
-                    n_none_slices -= 1
+                elif item is not None:
+                    dim_consuming_items += 1
 
-            # only rewrite when there are symints
-            if has_symint:
+            # Keep this rewrite narrow to cases that need to avoid Python
+            # indexing's concrete default slice bounds.
+            has_default_stop_step_slice = any(
+                isinstance(item, slice)
+                and item.stop is None
+                and isinstance(item.step, int)
+                and item.step > 1
+                for item in items
+            )
+            if has_symint or has_default_stop_step_slice:
                 if index_ellipsis is not None:
+                    n_none_slices = t.ndim - dim_consuming_items
+                    if n_none_slices < 0:
+                        return func, args, kwargs
                     none_slices = [slice(None)] * n_none_slices
                     items[index_ellipsis : index_ellipsis + 1] = none_slices
 
                 dim = 0
+                current_ndim = t.ndim
                 # Sequence rewrites.
                 sequence = []
                 for item in items:
-                    if (r := rewrite(dim, item)) is None:
+                    if (r := rewrite(dim, current_ndim, item)) is None:
                         return func, args, kwargs
-                    dim, call_spec = r
+                    dim, current_ndim, call_spec = r
                     sequence.append(call_spec)
 
                 def run():
