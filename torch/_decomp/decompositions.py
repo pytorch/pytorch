@@ -5658,7 +5658,15 @@ def scaled_dot_product_flash_attention_for_cpu(
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
+        from torch.fx.experimental.symbolic_shapes import sym_eq
+
         out = outplace_op(*args, **kwargs)
+        torch._check(
+            sym_eq(args[0].shape, out.shape),
+            lambda: "Bad in-place call: input tensor size "
+            f"{list(args[0].shape)} and output tensor size "
+            f"{list(out.shape)} should match",
+        )
         return args[0].copy_(out)
 
     return inplace_op
