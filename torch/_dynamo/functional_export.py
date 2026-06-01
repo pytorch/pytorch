@@ -20,7 +20,7 @@ from torch._dynamo.exc import UserErrorType
 from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
-from torch._guards import detect_fake_mode, TracingContext
+from torch._guards import TracingContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -757,18 +757,6 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
     def process_inputs(self, *inputs: Any) -> Any:
         self._inputs = inputs
         results = self.dynamo_bytecode_flatten(*inputs)
-        fake_mode = detect_fake_mode()
-        if fake_mode is not None and pytree.tree_any(
-            lambda x: isinstance(x, torch.Tensor) and not fake_mode.is_our_fake(x),
-            results,
-        ):
-            # Bytecode replay can recover tensors captured from module
-            # attributes as extra FX placeholder values. These tensors are not
-            # visible in AOTAutograd's user-facing call signature, so allow the
-            # active FakeTensorMode to convert them at dispatch time. This must
-            # remain enabled for AOT's backward trace too, since autograd can
-            # save the recovered tensors from the forward.
-            fake_mode.allow_non_fake_inputs = True
         return results
 
     def process_outputs(self, outputs: Any) -> Any:

@@ -744,6 +744,7 @@ Tensor special_ndtr(const Tensor& self) {
   return calc_ndtr(self);
 }
 
+// FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
   if (self.is_complex()) {
     sgn_stub(device_type(), *this);

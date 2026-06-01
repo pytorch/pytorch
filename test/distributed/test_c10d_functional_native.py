@@ -28,9 +28,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
-    IS_LINUX,
     run_tests,
-    TEST_WITH_TORCHINDUCTOR,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -1209,10 +1207,6 @@ class CompileTest(TestCase):
         AOTIRunnerUtil.run(func, (arg,))
         torch.accelerator.synchronize()
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHINDUCTOR or IS_LINUX,
-        "https://github.com/pytorch/pytorch/issues/146806",
-    )
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_inductor_all_gather_into_tensor_coalesced(self):

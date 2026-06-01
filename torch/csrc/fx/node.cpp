@@ -524,7 +524,7 @@ static int NodeBase_set_sort_key(
     void* /*closure*/) {
   NodeBase* node = reinterpret_cast<NodeBase*>(self);
   if (!PyTuple_Check(value)) {
-    PyErr_SetString(PyExc_TypeError, "_sort_key must be a tuple of ints");
+    PyErr_SetString(PyExc_TypeError, "_sort_key must be an tuple of ints");
     return -1;
   }
   Py_ssize_t size = PyTuple_GET_SIZE(value);

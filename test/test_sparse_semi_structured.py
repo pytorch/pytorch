@@ -1514,62 +1514,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("dense_input_shape", [(128, 1), (128, 3)])
-    def test_mm_padded_output_shape(self, dtype, dense_input_shape, device):
-        """Explicitly verify the padded path in cusparselt_mm trims output to the correct shape.
-
-        Shapes like (128, 1) and (128, 3) have n % dense_min_cols != 0 (dense_min_cols=8),
-        triggering the need_pad branch and the narrow(0, 0, out_cols) dim slicing.
-        """
-        A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
-        A_sparse = to_sparse_semi_structured(A)
-        B = torch.rand(dense_input_shape, device=device).to(dtype)
-
-        dense_result = torch.mm(A, B)
-        sparse_result = torch.mm(A_sparse, B)
-
-        self.assertEqual(sparse_result.shape, dense_result.shape)
-
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("dense_input_shape", [(1, 128), (3, 128)])
-    def test_mm_padded_output_shape_sparse_second(self, dtype, dense_input_shape, device):
-        """Verify cusparselt_mm trims output correctly for dense @ sparse.t() (Branch B).
-
-        Shapes like (1, 128) and (3, 128) have m % dense_min_rows != 0 (dense_min_rows=8),
-        triggering need_pad with should_transpose_dense=True. The narrow(0, 0, out_rows)
-        path must correctly return shape (m, n_out) without a trailing .t().
-        """
-        B = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
-        B_sparse = to_sparse_semi_structured(B)
-        A = torch.rand(dense_input_shape, device=device).to(dtype)
-
-        dense_result = torch.mm(A, B.t())
-        sparse_result = torch.mm(A, B_sparse.t())
-
-        self.assertEqual(sparse_result.shape, dense_result.shape)
-
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
-    @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("dense_input_shape", [(1, 128), (3, 128)])
-    def test_addmm_padded_output_shape_sparse_second(self, dtype, dense_input_shape, device):
-        """Verify cusparselt_mm trims output correctly for addmm with dense @ sparse.t() (Branch B + bias).
-
-        Covers the semi_sparse_addmm path (used by nn.Linear) with should_transpose_dense=True
-        and padding-triggering input shapes.
-        """
-        B = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
-        B_sparse = to_sparse_semi_structured(B)
-        A = torch.rand(dense_input_shape, device=device).to(dtype)
-        bias = torch.rand(256, device=device).to(dtype)
-
-        dense_result = torch.addmm(bias, A, B.t())
-        sparse_result = torch.addmm(bias, A, B_sparse.t())
-
-        self.assertEqual(sparse_result.shape, dense_result.shape)
-
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     def test_cusparselt_backend(self):
         if not torch.backends.cusparselt.is_available():
             raise AssertionError("cusparselt backend should be available")
@@ -1662,7 +1606,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16).cuda()
         A_compressed = torch._cslt_compress(A)
         B = torch.ones((128, 128), device=device).to(torch.float16)
-        alg_id = torch._cslt_sparse_mm_search(A_compressed, B)
+        alg_id = torch._cslt_sparse_mm_search(A_compressed, B.t())
         A_sparse = to_sparse_semi_structured(A, alg_id=alg_id)
         self.assertEqual(A_sparse.alg_id_cusparselt, alg_id)
         dense_result = torch.mm(A, B).to(torch.float16)

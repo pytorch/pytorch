@@ -69,7 +69,6 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     parametrize,
     run_tests,
-    skipIfRocm,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
@@ -4384,7 +4383,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail("torch.ops.aten._flash_attention_forward"),
     }
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/164556")
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(
         op_db + additional_op_db + autograd_function_db + custom_op_db,
@@ -4440,7 +4438,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                         sample.kwargs["memory_format"] == torch.channels_last
                     ),
                 ),
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -4617,7 +4614,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail(
                     "searchsorted"
                 ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
-                xfail("native_group_norm"),
             }
         ),
     )

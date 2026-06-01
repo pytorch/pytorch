@@ -31,7 +31,6 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
-    Min,
     ModularIndexing,
     TruncToFloat,
     TruncToInt,
@@ -1364,21 +1363,6 @@ class TritonOverrides(OpOverrides):
     @classmethod
     def constant(cls, value, dtype):
         return cls._shaped_constant(value, dtype, shape=[])
-
-    @staticmethod
-    def sub(x, y):
-        if (
-            isinstance(x, CSEVariable)
-            and x == y
-            and x.dtype is not None
-            and x.dtype.is_floating_point
-        ):
-            # Avoid giving LLVM a tmp - tmp pattern that it can reassociate
-            # through tmp's producer. A plain 0.0 is only valid for finite
-            # inputs; nan/inf inputs should still produce nan like x - x.
-            non_finite = f"({TritonOverrides.isnan(x)} | {TritonOverrides.isinf(x)})"
-            return f"tl.where({non_finite}, {x} * 0.0, 0.0)"
-        return f"{x} - {y}"
 
     @classmethod
     def _cast_libdevice_arg(cls, arg, dtype: torch.dtype) -> str:
@@ -3465,7 +3449,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         sizevars.lookup_precomputed_size(slice_numels[0]),
                     )
                 ] + [
-                    Min(
+                    sympy.Min(
                         CeilDiv(
                             linear_block_size, sizevars.lookup_precomputed_size(numel)
                         ),

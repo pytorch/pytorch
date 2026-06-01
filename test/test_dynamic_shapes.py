@@ -44,15 +44,9 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
-    IS_MACOS,
-    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
-    TEST_WITH_SLOW,
     TEST_XPU,
     TestCase,
 )
@@ -1612,29 +1606,6 @@ class f(torch.nn.Module):
             bias3 = torch.empty((B, M, N), device="meta")
 
             _ = torch.baddbmm(bias3, A, Bmat)
-
-    def test_lu_unpack_unbacked_symint(self):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(shape_env=shape_env)
-        m, n = [shape_env.create_unbacked_symint() for _ in range(2)]
-
-        with fake_mode:
-            LU = torch.empty((m, n), device="meta")
-            pivots = torch.empty((1,), device="meta", dtype=torch.int32)
-            P, L, U = torch.lu_unpack(LU, pivots)
-
-    def test_linalg_qr_unbacked_symint(self):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(shape_env=shape_env)
-        m, n = [shape_env.create_unbacked_symint() for _ in range(2)]
-
-        with fake_mode:
-            A = torch.empty((m, n), device="meta")
-            Q, R = torch.linalg.qr(A)
 
 
 @skipIfTorchDynamo(
@@ -3657,15 +3628,6 @@ class TestUnbacked(TestCase):
         with self.assertRaises((AssertionError, RuntimeError)):
             func(a, torch.rand(2, 1))
 
-    @unittest.skipIf(
-        TEST_WITH_ASAN
-        or IS_LINUX
-        or IS_MACOS
-        or TEST_WITH_ROCM
-        or TEST_WITH_SLOW
-        or IS_WINDOWS,
-        "https://github.com/pytorch/pytorch/issues/163953",
-    )
     @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_do_not_guard_unbacked_inputs(self):

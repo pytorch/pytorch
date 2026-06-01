@@ -1,10 +1,8 @@
 # Owner(s): ["oncall: package/deploy"]
 
-import unittest
-
 import torch
 from torch.package import analyze
-from torch.testing._internal.common_utils import IS_LINUX, run_tests
+from torch.testing._internal.common_utils import run_tests
 
 
 try:
@@ -17,7 +15,6 @@ except ImportError:
 class TestAnalyze(PackageTestCase):
     """Dependency analysis API tests."""
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/81213")
     def test_trace_dependencies(self):
         import test_trace_dep
 

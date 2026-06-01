@@ -565,6 +565,15 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       set(XNNPACK_ENABLE_AVX512FP16  OFF CACHE BOOL "")
     ENDIF()
 
+    # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
+    # XNNPACK does conditionally compile this based on GCC version. Once it also does
+    # so based on Clang version, this logic can be removed.
+    IF(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+      IF(CMAKE_C_COMPILER_VERSION VERSION_LESS "11")
+        set(XNNPACK_ENABLE_AVX512AMX OFF CACHE BOOL "")
+      ENDIF()
+    ENDIF()
+
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
     # be PIC to successfully link this static libXNNPACK with pytorch
@@ -1450,6 +1459,9 @@ if(NOT INTERN_BUILD_MOBILE)
       "-DUSE_MAGMA=OFF.")
     caffe2_update_option(USE_MAGMA OFF)
   endif()
+
+  # ARM specific flags
+  find_package(ARM)
 
   find_package(LAPACK)
   if(LAPACK_FOUND)

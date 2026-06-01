@@ -187,8 +187,10 @@ class Vectorized<float> {
     if (count == size()) {
       return vld1q_f32(reinterpret_cast<const float*>(ptr));
     } else {
-      // Zero tail past `count`.
-      __at_align__ float tmp_values[size()] = {};
+      __at_align__ float tmp_values[size()];
+      for (const auto i : c10::irange(size())) {
+        tmp_values[i] = 0.0;
+      }
       std::memcpy(
           tmp_values,
           reinterpret_cast<const float*>(ptr),

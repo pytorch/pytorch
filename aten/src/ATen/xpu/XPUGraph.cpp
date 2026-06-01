@@ -126,15 +126,8 @@ void XPUGraphImpl::capture_end() {
     wholegraph_increments = generator_state->capture_epilogue();
   }
 
-  // When SYCL_COMPILER_VERSION meets the threshold, use empty(); If empty()
-  // method is available, graphs must not use get_nodes(). Otherwise use "the
-  // old method", via get_nodes().
-#if SYCL_COMPILER_VERSION >= 20260101
-  const bool graph_is_empty = graph_->empty();
-#else
-  const bool graph_is_empty = (graph_->get_nodes().size() == 0);
-#endif
-  if (graph_is_empty) {
+  size_t num_xpu_graph_nodes = graph_->get_nodes().size();
+  if (num_xpu_graph_nodes == 0) {
     TORCH_WARN(
         "The XPU Graph is empty. This usually means that the graph was ",
         "attempted to be captured on wrong device or stream.");

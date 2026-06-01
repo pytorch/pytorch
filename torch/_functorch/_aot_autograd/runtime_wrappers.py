@@ -459,7 +459,7 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
 class _FirstInvocationContext:
     """
     Context manager that tracks first invocation and conditionally enables _AnalyzeCustomOpInputOutputMode.
-    This is useful when we have a custom op where we want to analyze its input
+    This is useful when we have a custom op where we want to analyze its' input
     and output during cold start.
     """
 

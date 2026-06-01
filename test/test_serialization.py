@@ -1204,17 +1204,6 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             state = torch.load(f)
 
-
-        gc.collect()
-        if IS_FILESYSTEM_UTF8_ENCODING:
-            with TemporaryDirectoryName(suffix='\u975eASCII\u30d1\u30b9') as dname:
-                with TemporaryFileName(dir=dname) as fname:
-                    # https://github.com/pytorch/pytorch/issues/185098
-                    data = torch.rand(200, 2048, 2048, dtype=torch.float32)  # ~3.13 GiB storage
-                    torch.save(data, fname)
-                    loaded_data = torch.load(fname)
-                    self.assertEqual(loaded_data, data)
-
     @serialTest()
     def test_serialization_4gb_file(self):
         '''

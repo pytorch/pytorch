@@ -71,6 +71,7 @@ jobs:
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang18
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang18-${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: ${{ needs.dynamo-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.dynamo-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: ${{ matrix.python-version }}
       compiler: clang18

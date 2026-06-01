@@ -52,14 +52,11 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     parametrize,
     run_tests,
     skipIfHpu,
     skipIfTorchDynamo,
     skipIfXpu,
-    TEST_WITH_SLOW,
-    TEST_XPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -251,10 +248,6 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = fn(x)
         res.to_local().sum().backward()
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW or TEST_XPU,
-        "https://github.com/pytorch/pytorch/issues/178745",
-    )
     @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
     def test_dtensor_basic_compile(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -301,7 +294,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     return (view_1,)""",
         )
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179690")
     @skipIfXpu(msg="AssertionError: torch-xpu-ops: 2958")
     @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
     def test_dtensor_basic_export(self):
@@ -589,7 +581,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/171934")
     def test_dtensor_input_mutations(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -963,7 +954,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         self.assertEqual(cnt.frame_count, 2)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177751")
     @with_comms
     @torch._dynamo.config.patch(trace_autograd_ops=True)
     def test_dtensor_requires_grad_intermediate_backward(self):
@@ -1436,9 +1426,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         out_dt = torch.matmul(tmp_dt, x_dt).permute(0, 2, 1)
         out_dt.sum().backward()
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/180656"
-    )
     def test_dynamo_dtensor_from_local_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 

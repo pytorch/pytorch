@@ -67,6 +67,7 @@ jobs:
       build-environment: ${{ needs.inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.inductor-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -101,6 +102,7 @@ jobs:
       build-environment: ${{ needs.inductor-halide-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-halide-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-halide-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.inductor-halide-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.12"
       compiler: gcc11
@@ -134,6 +136,7 @@ jobs:
       build-environment: ${{ needs.inductor-pallas-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-pallas-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-pallas-cpu-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.inductor-pallas-cpu-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.12"
       compiler: gcc11
@@ -167,6 +170,7 @@ jobs:
       build-environment: ${{ needs.inductor-triton-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-triton-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-triton-cpu-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.inductor-triton-cpu-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.12"
       compiler: gcc11
@@ -201,6 +205,7 @@ jobs:
       build-environment: ${{ needs.inductor-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-cpu-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.inductor-cpu-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -239,6 +244,7 @@ jobs:
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang18
       docker-image: ${{ needs.get-label-type.outputs.use-arc == 'true' && 'ghcr.io/pytorch/' || '' }}ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang18
       test-matrix: ${{ needs.inductor-cpu-core-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.inductor-cpu-core-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "${{ matrix.python-version }}"
       compiler: clang18

@@ -72,6 +72,7 @@ jobs:
       build-environment: ${{ needs.x86-opbenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.x86-opbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.x86-opbenchmark-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.x86-opbenchmark-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -109,6 +110,7 @@ jobs:
       build-environment: ${{ needs.aarch64-opbenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.aarch64-opbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.aarch64-opbenchmark-build.outputs.test-matrix }}
+      test-matrix-osdc: ${{ needs.aarch64-opbenchmark-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc13

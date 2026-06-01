@@ -29,11 +29,8 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     instantiate_parametrized_tests,
-    IS_LINUX,
     parametrize,
     run_tests,
-    TEST_WITH_ROCM,
-    TEST_WITH_TORCHINDUCTOR,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
@@ -482,11 +479,6 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHINDUCTOR or IS_LINUX or TEST_WITH_ROCM,
-        "https://github.com/pytorch/pytorch/issues/153223",
-    )
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/145924")
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("shard_dim", [0, 1])
     @fresh_cache()

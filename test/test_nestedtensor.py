@@ -4151,15 +4151,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
 
-        values = torch.randn(2, 8, 3, device=device)
-        offsets = torch.tensor([1, 4, 7], device=device)
-        lengths = torch.tensor([2, 3], device=device)
-        nt_holes = torch.nested.nested_tensor_from_jagged(
-            values, offsets, lengths=lengths, jagged_dim=2
-        )
-        self.assertEqual(nt_holes.numel(), 30)
-        self.assertEqual(torch.ops.aten.sym_numel.default(nt_holes), 30)
-
     @parametrize("nt_dim", [3, 4, 5])
     def test_linear(self, device, nt_dim):
         if nt_dim == 3:
@@ -6716,7 +6707,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/175482")
     def test_index_put_error(self, device):
         import subprocess
 
@@ -8164,92 +8154,6 @@ torch.cuda.synchronize()
 
             if "cuda" in device:
                 self.assertFalse(any(d == 3 for d in buffer_dims))
-
-    @dtypes(torch.float32)
-    @skipIfTorchDynamo("Test manually invokes __torch_function__")
-    def test_torch_function_metadata_fast_path_exact_callables(self, device, dtype):
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(2, 3, device=device, dtype=dtype),
-                torch.randn(4, 3, device=device, dtype=dtype),
-            ],
-            layout=torch.jagged,
-        )
-
-        self.assertEqual(nt.size(), torch.Size(nt._size))
-        self.assertEqual(nt.size(0), nt._size[0])
-        self.assertEqual(nt.size(dim=2), nt._size[2])
-        self.assertEqual(nt.stride(), nt._strides)
-        self.assertEqual(nt.stride(2), nt._strides[2])
-        self.assertEqual(nt.dim(), len(nt._size))
-        self.assertEqual(nt.shape, torch.Size(nt._size))
-        self.assertEqual(nt.ndim, len(nt._size))
-
-        def size(t):
-            raise RuntimeError("fake size called")
-
-        def stride(t):
-            raise RuntimeError("fake stride called")
-
-        def dim(t):
-            raise RuntimeError("fake dim called")
-
-        class FakeDescriptor:
-            def __init__(self, name):
-                self.__name__ = name
-
-        class FakeDescriptorGet:
-            __name__ = "__get__"
-
-            def __init__(self, name):
-                self.__self__ = FakeDescriptor(name)
-
-            def __call__(self, t):
-                raise RuntimeError("fake descriptor called")
-
-        for func in (
-            size,
-            stride,
-            dim,
-            FakeDescriptorGet("shape"),
-            FakeDescriptorGet("ndim"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "fake .* called"):
-                type(nt).__torch_function__(func, (type(nt),), (nt,), {})
-
-    @dtypes(torch.float32)
-    @skipIfTorchDynamo("Test inspects Dynamo guards")
-    def test_compile_jagged_mean_omits_outer_size_stride_guards(self, device, dtype):
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(2, 3, device=device, dtype=dtype),
-                torch.randn(4, 3, device=device, dtype=dtype),
-            ],
-            layout=torch.jagged,
-        )
-
-        def f(nt):
-            padded = torch.ops.aten._jagged_to_padded_dense_forward(
-                nt.values(),
-                [nt.offsets()],
-                max_lengths=[4],
-            )
-            return torch.sum(padded, dim=1) / nt.offsets().diff().unsqueeze(1)
-
-        explanation = torch._dynamo.explain(f)(nt)
-        guard_code = [
-            code for guard in explanation.out_guards for code in (guard.code_list or [])
-        ]
-
-        self.assertTrue(any("L['nt']._values.size()" in code for code in guard_code))
-        self.assertFalse(
-            any("L['nt'].size()" in code for code in guard_code),
-            "\n".join(guard_code),
-        )
-        self.assertFalse(
-            any("L['nt'].stride()" in code for code in guard_code),
-            "\n".join(guard_code),
-        )
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")

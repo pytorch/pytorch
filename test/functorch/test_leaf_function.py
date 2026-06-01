@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
-    skipIfXpu,
     TestCase,
 )
 from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTestCase
@@ -1200,7 +1199,6 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(counter.frame_count, 1)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180662")
     def test_leaf_function_closure_constants_without_grad(self):
         closure_scale = 2.0
         closure_tensor = torch.tensor([1.0, 2.0, 3.0])

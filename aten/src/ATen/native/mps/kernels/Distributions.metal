@@ -1,5 +1,3 @@
-#include <c10/metal/atomic.h>
-#include <c10/metal/error.h>
 #include <c10/metal/random.h>
 #include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
@@ -282,7 +280,6 @@ kernel void bernoulli_tensor(
     device const float* probs [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
     constant uint& numel [[buffer(3)]],
-    device c10::metal::ErrorMessages* error_buf [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   uint base = tid * 4;
   uint4 raw =
@@ -291,10 +288,6 @@ kernel void bernoulli_tensor(
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
     float p = probs[base + i];
-    if (!(p >= 0.0f && p <= 1.0f)) {
-      TORCH_REPORT_ERROR(error_buf, "bernoulli_mps_ expects p to be in [0, 1]");
-      return;
-    }
     output[base + i] = c10::metal::cast_to<T>(u < p ? 1u : 0u);
   }
 }
@@ -309,7 +302,6 @@ kernel void bernoulli_tensor(
       device const float*,                                                     \
       constant long2&,                                                         \
       constant uint&,                                                          \
-      device c10::metal::ErrorMessages*,                                       \
       uint)
 
 REGISTER_BERNOULLI(float);

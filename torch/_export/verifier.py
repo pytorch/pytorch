@@ -376,10 +376,6 @@ def _verify_exported_program_signature(exported_program) -> None:
     # Check ExportedProgram signature matches
     gs = exported_program.graph_signature
 
-    # Lazily computed on first use; avoids calling graph_module.state_dict()
-    # unless at least one buffer is missing from the top-level state_dict.
-    _gm_state_dict: dict | None = None
-
     # Check every node in the signature exists in the graph
     input_node_names = [
         node.name for node in exported_program.graph.nodes if node.op == "placeholder"
@@ -450,18 +446,7 @@ def _verify_exported_program_signature(exported_program) -> None:
                 input_spec.persistent is True
                 and buffer not in exported_program.state_dict
             ):
-                # Allow buffers that live in constants or in a subgraph
-                # submodule (e.g. lifted tensor constants from
-                # invoke_subgraph tracing stored under repeated_subgraph0).
-                # Use a lazy copy of the graph module state to avoid the
-                # cost of state_dict() when no fallback is needed.
-                if buffer not in exported_program.constants:
-                    if _gm_state_dict is None:
-                        _gm_state_dict = exported_program.graph_module.state_dict()
-                    if buffer not in _gm_state_dict:
-                        raise SpecViolationError(
-                            f"Buffer {buffer} is not in the state dict."
-                        )
+                raise SpecViolationError(f"Buffer {buffer} is not in the state dict.")
 
             if input_spec.persistent is False and buffer in exported_program.state_dict:
                 raise SpecViolationError(

@@ -25,7 +25,6 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     instantiate_parametrized_tests,
     IS_JETSON,
-    IS_LINUX,
     IS_REMOTE_GPU,
     IS_SANDCASTLE,
     NoTest,
@@ -288,7 +287,6 @@ class TestCudaMultiGPU(TestCase):
         for _ in self._test_memory_stats_generator(self):
             self._check_memory_stat_consistency()
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/129860")
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_memory_stats_multigpu(self):

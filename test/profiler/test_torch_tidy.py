@@ -13,14 +13,7 @@ import torch.optim
 import torch.utils.data
 from torch._C._profiler import _ExtraFields_PyCall, _TensorMetadata
 from torch.profiler import _utils, profile
-from torch.testing._internal.common_utils import (
-    IS_LINUX,
-    IS_MACOS,
-    IS_WINDOWS,
-    run_tests,
-    TEST_WITH_TORCHDYNAMO,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -367,10 +360,6 @@ class TestTorchTidyProfiler(TestCase):
                 0          1      Free""",
         )
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO or IS_LINUX or IS_MACOS or IS_WINDOWS,
-        "https://github.com/pytorch/pytorch/issues/87581",
-    )
     def test_module_and_optimizer_ids(self) -> None:
         model = torch.nn.Linear(2, 1, bias=True)
         optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)

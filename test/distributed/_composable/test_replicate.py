@@ -15,12 +15,7 @@ from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import (
-    IS_LINUX,
-    run_tests,
-    TEST_WITH_ROCM,
-    TEST_XPU,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_XPU
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -131,15 +126,11 @@ class ReplicateTest(MultiProcContinuousTest):
             torch.manual_seed(iteration)
             input = input[torch.randperm(global_batch_size)]
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180205")
     def test_replicate_single_module(self):
         model = Net()
         replicate_model = replicate(deepcopy(model))
         self._compare_module(model, replicate_model)
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/179948"
-    )
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_move_args_kwargs_to_device(self):
@@ -160,7 +151,6 @@ class ReplicateTest(MultiProcContinuousTest):
         a, b = torch.randn(2, 2), torch.randn(2, 2)
         model(a, kwarg=b).sum().backward()
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_ignore_module(self):
@@ -191,9 +181,6 @@ class ReplicateTest(MultiProcContinuousTest):
             for g in rest:
                 self.assertEqual(grad, g)
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180127"
-    )
     def test_replicate_multi_module(self):
         model = Net()
         replicate_model = deepcopy(model)
@@ -202,7 +189,6 @@ class ReplicateTest(MultiProcContinuousTest):
         replicate(replicate_model.fc3)
         self._compare_module(model, replicate_model)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180265")
     def test_replicate_with_kwargs(self):
         model = Net()
         replicate_model = replicate(
@@ -210,7 +196,6 @@ class ReplicateTest(MultiProcContinuousTest):
         )
         self._compare_module(model, replicate_model)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179746")
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_device_id(self):
@@ -238,7 +223,6 @@ class ReplicateTest(MultiProcContinuousTest):
         replicate_ddp_weakref = replicate.state(model_cuda2)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176155")
     def test_replicate_wrong_device_id_type(self):
         model = Net()
         with self.assertRaisesRegex(
@@ -248,7 +232,6 @@ class ReplicateTest(MultiProcContinuousTest):
 
 
 class ReplicateFullyShardInit(ReplicateTest):
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179810")
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_fully_shard_init(self):

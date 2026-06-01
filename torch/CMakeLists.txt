@@ -34,6 +34,7 @@ set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
 
 set(TORCH_PYTHON_SRCS
+    ${GENERATED_THNN_CXX}
     ${GENERATED_CXX_PYTHON}
     )
 append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
@@ -52,6 +53,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}
     ${TORCH_ROOT}/aten/src
+    ${TORCH_ROOT}/aten/src/TH
 
     ${CMAKE_BINARY_DIR}
     ${CMAKE_BINARY_DIR}/aten/src
@@ -129,6 +131,7 @@ endif()
 if(USE_CUDA)
     include(${TORCH_ROOT}/cmake/public/cuda.cmake)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
+    list(APPEND TORCH_PYTHON_SRCS ${GENERATED_THNN_CXX_CUDA})
 
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
     if(USE_CUDNN)
@@ -155,6 +158,7 @@ endif()
 
 if(USE_ROCM)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
+    list(APPEND TORCH_PYTHON_SRCS ${GENERATED_THNN_CXX_CUDA})
 
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS
       USE_ROCM
@@ -195,6 +199,33 @@ if(USE_VALGRIND AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_VALGRIND)
 endif()
 
+# In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
+# of type stub files to be omitted.
+# For compatibility with older CMake versions, we omit it for now, but leave it as a comment in case compatibility with the older
+# CMake versions is eventually dropped.
+# set(Modules
+#     __init__
+#     activation
+#     adaptive
+#     batchnorm
+#     container
+#     conv
+#     distance
+#     dropout
+#     fold
+#     instancenorm
+#     linear
+#     loss
+#     module
+#     normalization
+#     padding
+#     pixelshuffle
+#     pooling
+#     rnn
+#     sparse
+#     upsampling
+# )
+# list(TRANSFORM Modules PREPEND "${TORCH_SRC_DIR}/nn/modules/")
 add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
@@ -318,6 +349,11 @@ endif()
 # in case of the split build we need to add compile definitions
 if(BUILD_LIBTORCHLESS)
 
+  if(USE_UCC)
+    target_link_libraries(torch_python PRIVATE __caffe2_ucc)
+    target_compile_definitions(torch_python PRIVATE USE_UCC)
+  endif()
+
   if(USE_UCC AND USE_C10D_UCC)
     target_compile_definitions(torch_python PRIVATE USE_C10D_UCC)
   endif()
@@ -367,6 +403,7 @@ endif()
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
 add_dependencies(torch_python generate-torch-sources)
 set_source_files_properties(
+    ${GENERATED_THNN_SOURCES}
     ${GENERATED_CXX_PYTHON}
     PROPERTIES GENERATED TRUE
     )

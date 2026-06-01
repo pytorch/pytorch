@@ -38,7 +38,6 @@ struct MPSHooks : public at::MPSHooksInterface {
   size_t getDriverAllocatedMemory() const override;
   size_t getRecommendedMaxMemory() const override;
   void setMemoryFraction(double ratio) const override;
-  size_t getMaxBufferLength() const override;
   bool isPinnedPtr(const void* data) const override;
   Allocator* getPinnedMemoryAllocator() const override;
 

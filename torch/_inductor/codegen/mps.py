@@ -15,7 +15,6 @@ from sympy.printing.precedence import PRECEDENCE
 import torch
 from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -675,7 +674,7 @@ class MetalKernel(SIMDKernel):
                     f"{rd.prefix}numel", integer=True, positive=True
                 )
 
-        acc_buf_size = Min(acc_buf_size, self.max_threadgroup_size)
+        acc_buf_size = sympy.Min(acc_buf_size, self.max_threadgroup_size)
         acc_buf_size_str = self.sexpr(acc_buf_size)
         # metal threadgroup arrays need a compile time constant size, so
         # fall back to the static upper bound when acc buf size is symbolic
@@ -1098,7 +1097,7 @@ class MetalKernel(SIMDKernel):
         if len(self.active_range_trees()) > 0:
             threads = [
                 expr_printer(
-                    Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
+                    sympy.Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
                     if v.is_reduction
                     else v.numel
                 )
@@ -1113,7 +1112,7 @@ class MetalKernel(SIMDKernel):
 
         if self.inside_reduction:
             threads = [
-                expr_printer(Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
+                expr_printer(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
                 if v.is_reduction
                 else "1"
                 for v in self.active_range_trees()

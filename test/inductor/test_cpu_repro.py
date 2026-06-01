@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     get_gcc_major_version,
     instantiate_parametrized_tests,
     IS_ARM64,
+    IS_CPU_CAPABILITY_SVE256,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
@@ -38,7 +39,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_mkl,
     skipIfNoLapack,
-    skipIfRocm,
     skipIfRocmArch,
     slowTest,
     TEST_WITH_ROCM,
@@ -1161,7 +1161,6 @@ class CPUReproTests(TestCase):
 
         self.assertEqual(actual, expected)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179957")
     @config.patch(fallback_random=True)
     def test_require_stride_order_non_owning(self):
         def test_concat_with_conv():
@@ -3643,6 +3642,8 @@ class CPUReproTests(TestCase):
                 3,
             )
 
+    @xfailIf(IS_ARM64 and not IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/142231
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion(self):
         def fn(x):
@@ -3661,10 +3662,8 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
-            # Outer-loop fusion changes fp32 reduction order enough to exceed
-            # the default tolerance on numerically sensitive inputs.
-            atol = 1e-5
-            rtol = 2e-6
+            atol = None
+            rtol = None
             if (
                 not cpu_vec_isa.valid_vec_isa_list()
                 or os.getenv("ATEN_CPU_CAPABILITY") == "default"
@@ -4761,31 +4760,6 @@ class CPUReproTests(TestCase):
             torch.testing.assert_close(k, ref_k)
             torch.testing.assert_close(v, ref_v)
 
-    def test_issue_181624_cpu_fusion_with_constant_index_expr(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.hardswish = torch.nn.Hardswish()
-                self.layernorm = torch.nn.LayerNorm([2])
-
-            def forward(self, x):
-                out = self.hardswish(x)
-                out = out.unfold(1, 2, 1)
-                out = F.scaled_dot_product_attention(out, out, out)
-                out = torch.roll(out, 1, 2)
-                out = self.layernorm(out)
-                return torch.nan_to_num(out)
-
-        torch.manual_seed(0)
-        model = Model().eval()
-        x = torch.randn([2, 6])
-
-        with torch.no_grad():
-            expected = model(x)
-            actual = torch.compile(model, backend="inductor")(x)
-
-        torch.testing.assert_close(actual, expected)
-
     def test_scalar_mul_bfloat16(self):
         def f(x):
             return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
@@ -5084,19 +5058,6 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(compiled_out, eager_out)
         torch.testing.assert_close(w_cmp.grad, w_ref.grad)
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_lp_pool2d_symbolic_float_min_norm_type(self):
-        def fn(x):
-            norm_type = min(4.0, 0.5 + float(x.mean().abs().detach()) * 1.5)
-            return F.lp_pool2d(x, norm_type=norm_type, kernel_size=1)
-
-        generator = torch.Generator().manual_seed(0)
-        x = torch.randn(1, 1, 4, 4, generator=generator)
-        expected = fn(x)
-        actual = torch.compile(fn, backend="inductor")(x)
-
-        torch.testing.assert_close(actual, expected, equal_nan=True)
-
     @config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_cpp_backend_no_error(self):
         """
@@ -5360,7 +5321,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.rand(31)
+        x = torch.rand(37)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():

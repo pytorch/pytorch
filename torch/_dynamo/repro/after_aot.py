@@ -1258,20 +1258,19 @@ def repro_minify(options: Any, mod: nn.Module, load_args: Any) -> None:
     else:
         module_fails = ACCURACY_FAILS[options.accuracy]
 
-    with config.patch(repro_after=None):
-        minifier(
-            mod,
-            args,
-            module_fails=functools.partial(module_fails, check_str=options.check_str),
-            dump_state=functools.partial(
-                dump_compiler_graph_state, compiler_name=compiler_name
-            ),
-            save_dir=options.save_dir,
-            offload_to_disk=options.offload_to_disk,
-            skip_offload=options.skip_saving_eager_intermediates,
-            skip_sanity=options.skip_sanity,
-            max_granularity=options.max_granularity,
-        )
+    minifier(
+        mod,
+        args,
+        module_fails=functools.partial(module_fails, check_str=options.check_str),
+        dump_state=functools.partial(
+            dump_compiler_graph_state, compiler_name=compiler_name
+        ),
+        save_dir=options.save_dir,
+        offload_to_disk=options.offload_to_disk,
+        skip_offload=options.skip_saving_eager_intermediates,
+        skip_sanity=options.skip_sanity,
+        max_granularity=options.max_granularity,
+    )
 
 
 def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
@@ -1550,13 +1549,13 @@ p-value, which we leave for future work.
             default=accuracy,
             help="""\
 by default, when doing accuracy minification we will reject reductions which
-change the divergence from a floating point divergence to an integral/boolean
+change the divergence from a floating point divergence to a integral/boolean
 divergence.  This is because some operations like ReLU involve temporarily
 sharp boundaries that smooth out again afterwards; without requiring
 divergence on floating point, the minifier will often fixate on divergent
 boolean tensor even though this is not the true source of the divergence.
 However, rejecting these reductions makes it more difficult for the minifier
-to make progress.  Using this option will let the minifier progress for ALL
+to make process.  Using this option will let the minifier progress for ALL
 divergences--you just might not end up with a useful repro in the end.""",
         )
 

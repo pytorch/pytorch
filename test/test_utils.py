@@ -33,8 +33,6 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
-    skipIfTorchDynamo,
-    TEST_WITH_ASAN,
 )
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
@@ -122,7 +120,6 @@ class TestCheckpoint(TestCase):
 
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
-    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/97402")
     def test_checkpoint_trigger(self):
         class Net(nn.Module):
             def __init__(self) -> None:
@@ -597,7 +594,6 @@ class TestCheckpoint(TestCase):
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
 
-    @unittest.skipIf(TEST_WITH_ASAN, "https://github.com/pytorch/pytorch/issues/84937")
     def test_random_seed(self):
         def run():
             dataloader = torch.utils.data.DataLoader(

@@ -167,7 +167,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
 
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
-  for ([[maybe_unused]] const auto i : c10::irange(ntensors)) {
+  for (const auto i : c10::irange(ntensors)) {
     vec_res.push_back(at::native::empty_cuda(
         {},
         optTypeMetaToScalarType(options.dtype_opt()),
@@ -232,7 +232,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   int i = 0;
   for (const auto& t : tensors) {
     if (t.numel() != 0) {
-      result.emplace_back(std::move(vec_res[i]));
+      result.emplace_back(vec_res[i]);
       i++;
     } else {
       result.emplace_back(at::native::empty_cuda(
@@ -467,7 +467,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
   const auto res_option = options.dtype(output_dtype);
-  for ([[maybe_unused]] const auto i : c10::irange(ntensors)) {
+  for (const auto i : c10::irange(ntensors)) {
     vec_res.push_back(at::native::empty_cuda(
         {},
         optTypeMetaToScalarType(res_option.dtype_opt()),
@@ -588,7 +588,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
   int i = 0;
   for (const auto& t : tensors) {
     if (t.numel() != 0) {
-      result.emplace_back(std::move(vec_res[i]));
+      result.emplace_back(vec_res[i]);
       i++;
     } else {
       result.emplace_back(at::zeros({}, res_option));

@@ -449,13 +449,6 @@ class Shard(torch._C._distributed.Shard):
                     f"{orig_size} -> {local_tensor.size(self.dim)}"
                 )
 
-        # narrow/unpad on a non-leading dim leaves the tensor non-contiguous,
-        # which leaks out to callers that expect a Replicate() result to have
-        # a contiguous local tensor (e.g. downstream view ops in TP linear).
-        # Use unconditional .contiguous() to avoid guarding on symbolic strides
-        # under torch.compile with unbacked symints.
-        local_tensor = local_tensor.contiguous()
-
         return local_tensor
 
     def _to_replicate_tensor(

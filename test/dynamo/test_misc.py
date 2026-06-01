@@ -2920,8 +2920,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """0""")
-            self.assertExpectedInline(cnts.op_count, """0""")
+            self.assertExpectedInline(cnts.frame_count, """1""")
+            self.assertExpectedInline(cnts.op_count, """2""")
 
     def test_list_slice_mul(self):
         def fn(count):
@@ -2936,8 +2936,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """0""")
-            self.assertExpectedInline(cnts.op_count, """0""")
+            self.assertExpectedInline(cnts.frame_count, """1""")
+            self.assertExpectedInline(cnts.op_count, """2""")
 
     def test_tuple_mul(self):
         def fn(count):
@@ -2951,8 +2951,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """0""")
-            self.assertExpectedInline(cnts.op_count, """0""")
+            self.assertExpectedInline(cnts.frame_count, """1""")
+            self.assertExpectedInline(cnts.op_count, """2""")
 
     def test_tuple_mul_with_shape(self):
         def fn(a):

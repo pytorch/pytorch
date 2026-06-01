@@ -256,8 +256,13 @@ class Vectorized16 {
     // explicitly so the memcpy bound is provable to gcc-14 (#159962) and
     // out-of-contract callers stay safe.
     const int n = std::clamp(static_cast<int>(count), 0, size());
-    // Zero tail past `n`.
-    __at_align__ int16_t tmp_values[size()] = {};
+    __at_align__ int16_t tmp_values[size()];
+#ifndef __msvc_cl__
+#pragma unroll
+#endif
+    for (const auto i : c10::irange(n, size())) {
+      tmp_values[i] = 0;
+    }
     std::memcpy(tmp_values, ptr, n * sizeof(int16_t));
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(tmp_values));
   }

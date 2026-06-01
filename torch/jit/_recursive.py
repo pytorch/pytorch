@@ -273,7 +273,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         attr_type, _ = infer_type(name, item)
         if item is None:
             # Modules can be None. We don't have direct support for optional
-            # Modules, so we register it as a NoneType attribute instead.
+            # Modules, so the register it as an NoneType attribute instead.
             concrete_type_builder.add_attribute(name, attr_type.type(), False, False)
             continue
         if attr_type.success():

@@ -161,8 +161,6 @@ from .variables.ctx_manager import (
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
-    CO_VARARGS,
-    CO_VARKEYWORDS,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -2964,10 +2962,6 @@ class InstructionTranslatorBase(
         if not self.check_if_exc_matches():
             self.jump(inst)
 
-    @break_graph_if_unsupported(
-        push=True,
-        msg_prefix="Encountered graph break when attempting to trace COMPARE_OP: a comparison operation, e.g. a == b",
-    )
     def COMPARE_OP(self, inst: Instruction) -> None:
         if inst.argval == "exception match":
             self.CHECK_EXC_MATCH(inst)
@@ -4038,7 +4032,7 @@ class InstructionTranslatorBase(
             vals_suffix = vals[len(vals) - suffix :]
             for item in reversed(vals_suffix):
                 self.push(item)
-            self.push(ListVariable(vals_list, mutation_type=ValueMutationNew()))
+            self.push(TupleVariable(vals_list))
             for item in reversed(vals_prefix):
                 self.push(item)
         else:
@@ -4189,8 +4183,12 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected inst.argval == 0 or inst.argval == 1 to be true"
             )
-        argval = "is" if inst.argval == 0 else "is not"
-        self.push(compare_op_handlers[argval](self, self.popn(2), {}))
+        if inst.argval == 0:
+            new_argval = "is"
+        else:
+            new_argval = "is not"
+        new_inst = create_instruction("COMPARE_OP", argval=new_argval)
+        self.COMPARE_OP(new_inst)
 
     def CONTAINS_OP(self, inst: Instruction) -> None:
         if not (inst.argval == 0 or inst.argval == 1):
@@ -5337,19 +5335,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             # Populate `symbolic_locals` with non-cell variables.
             cell_and_freevars: set[str] = set(self.cell_and_freevars())
 
-            # Identify the names of `*args` / `**kwargs` parameters (if any)
-            # via the function's `co_flags`. The varargs param (if present)
-            # comes immediately after `co_argcount + co_kwonlyargcount`
-            # entries in `co_varnames`; the varkw param comes right after.
-            varargs_name: str | None = None
-            varkw_name: str | None = None
-            _vararg_idx = f_code.co_argcount + f_code.co_kwonlyargcount
-            if f_code.co_flags & CO_VARARGS:
-                varargs_name = f_code.co_varnames[_vararg_idx]
-                _vararg_idx += 1
-            if f_code.co_flags & CO_VARKEYWORDS:
-                varkw_name = f_code.co_varnames[_vararg_idx]
-
             dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
@@ -5362,8 +5347,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                             name,
                             is_input=True,
                             dynamism=local_dynamism,
-                            is_varargs=(name == varargs_name),
-                            is_varkw=(name == varkw_name),
                         ),
                     )
                     self.symbolic_locals[name] = var
@@ -5793,23 +5776,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
 
-        if code.co_name in (
-            "__setitem__",
-            "__setattr__",
-            "__delitem__",
-            "__delattr__",
-        ) and not (
-            args
-            and isinstance(
-                args[0],
-                (
-                    variables.UserDefinedObjectVariable,
-                    variables.UserDefinedClassVariable,
-                ),
-            )
+        if code.co_name in ("__setitem__", "__setattr__") and not (
+            args and isinstance(args[0], variables.UserDefinedObjectVariable)
         ):
             unimplemented(
-                gb_type="Unsupported __setitem__/__setattr__/__delitem__/__delattr__ inline attempt",
+                gb_type="Unsupported __setitem__/__setattr__ inline attempt",
                 context=f"code name: {code.co_name}, args: {args}",
                 explanation=f"Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
                 hints=[],

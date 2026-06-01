@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     parametrize,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
@@ -226,8 +225,6 @@ class TestBenchmarker(TestCase):
             _bench._BENCHMARK_DISPATCH.clear()
             _bench._BENCHMARK_DISPATCH.update(orig)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184491")
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184470")
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @parametrize(
         "hip_value, expected_buffer_size_bytes",

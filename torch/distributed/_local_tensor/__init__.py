@@ -1324,44 +1324,6 @@ class LocalTensorMode(TorchDispatchMode):
             )
             return NotImplemented
 
-        # device_mesh::_runtime_compute_coordinate_on_dim is checked before the
-        # no-LocalTensor early return because compile-on-one-rank calls it with
-        # only a plain mesh-tensor argument, but the result must still vary per
-        # simulated rank under LocalTensorMode.
-        if (
-            not self._disable
-            and func.namespace == "device_mesh"
-            and func is torch.ops.device_mesh._runtime_compute_coordinate_on_dim.default
-        ):
-            from torch.fx.operator_schemas import normalize_function
-
-            normalized = normalize_function(
-                func,
-                args,
-                kwargs,
-                normalize_to_only_use_kwargs=True,
-            )
-            if normalized is None:
-                raise AssertionError(
-                    "LocalTensorMode could not normalize arguments for "
-                    "device_mesh::_runtime_compute_coordinate_on_dim"
-                )
-            full_mesh = normalized.kwargs["full_mesh"]
-            index = normalized.kwargs["index"]
-            rank_results: dict[int, int] = {}
-            for r in self.ranks:
-                mesh_tensor = DeviceMesh._get_mesh_tensor_from_full_mesh(
-                    full_mesh, current_rank=r
-                )
-                mesh_coords = DeviceMesh._compute_coordinates_from_mesh(mesh_tensor, r)
-                if mesh_coords is None:
-                    raise RuntimeError(
-                        f"Rank {r} not found in mesh tensor for "
-                        "_runtime_compute_coordinate_on_dim"
-                    )
-                rank_results[r] = mesh_coords[index]
-            return _combine_int_rank_results(rank_results)
-
         # Factory functions convert into LocalTensor, so we don't have to
         # transmute a Tensor into a LocalTensor if mutation happens...
         # But if you do an operation on a Tensor, do NOT wrap it into a

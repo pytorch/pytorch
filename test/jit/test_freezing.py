@@ -16,7 +16,6 @@ from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import (
     IS_ARM64,
-    IS_LINUX,
     raise_on_run_directly,
     set_default_dtype,
     skipCUDAMemoryLeakCheckIf,
@@ -3381,7 +3380,6 @@ class TestMKLDNNReinplacing(JitTestCase):
         inp = self.getInput()
         self.assertEqual(mod1(inp), mod2(inp))
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91489")
     def test_successful(self):
         # simple conv-relu
 
@@ -3392,7 +3390,6 @@ class TestMKLDNNReinplacing(JitTestCase):
         ).check_next("aten::relu_").run(mod.graph)
         self.checkResults(mod_eager, mod)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91481")
     def test_merge_liveness(self):
         class Mod(nn.Module):
             def __init__(self, tensor):
@@ -3411,7 +3408,6 @@ class TestMKLDNNReinplacing(JitTestCase):
         FileCheck().check("aten::mul_").check_not("aten::add_").run(mod.graph)
         self.checkResults(mod_eager, mod)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91486")
     def test_always_alive_values(self):
         class Mod(nn.Module):
             def __init__(self, tensor):
@@ -3447,7 +3443,6 @@ class TestMKLDNNReinplacing(JitTestCase):
         # in the torch.add(x, x) call
         FileCheck().check_not("aten::add_").run(mod.graph)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91488")
     def test_switch_inputs_to_inplace(self):
         class Mod(nn.Module):
             def __init__(self, tensor):

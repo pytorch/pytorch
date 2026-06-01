@@ -12,9 +12,6 @@ from torch.utils.mobile_optimizer import (LintCode,
                                           MobileOptimizerType)
 from torch.nn import functional as F
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import (
-    IS_MACOS,
-)
 
 try:
     import torchvision
@@ -264,7 +261,6 @@ class TestOptimizer(TestCase):
             rtol=1e-2,
             atol=1e-3)
 
-    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/157254")
     @skipIfNoXNNPACK
     def test_quantized_conv_no_asan_failures(self):
         # There were ASAN failures when fold_conv_bn was run on
@@ -405,7 +401,6 @@ class TestOptimizer(TestCase):
         incomplete_bi_module_optim = optimize_for_mobile(incomplete_bi_module, preserved_methods=['get_all_bundled_inputs'])
         self.assertTrue(hasattr(incomplete_bi_module_optim, 'get_all_bundled_inputs'))
 
-    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/157247")
     @skipIfNoXNNPACK
     def test_hoist_conv_packed_params(self):
 

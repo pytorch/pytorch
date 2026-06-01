@@ -73,9 +73,6 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
 static inline std::string scalarToMetalTypeString(const TensorBase& t) {
   return scalarToMetalTypeString(t.scalar_type());
 }
-static inline std::string scalarToMetalTypeString(const std::optional<Tensor>& t) {
-  return t.has_value() ? scalarToMetalTypeString(t.value()) : "void";
-}
 NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);

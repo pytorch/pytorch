@@ -15,16 +15,13 @@ import torch.utils.hooks
 from torch.nn import Parameter
 from torch.testing._internal.common_cuda import IS_JETSON
 from torch.testing._internal.common_utils import (
-    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     load_tests,
     run_tests,
-    skipIfRocm,
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TEST_WITH_SLOW,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -864,9 +861,6 @@ if __name__ == "__main__":
         out = q.get(timeout=1)
         self.assertEqual(out, empty)
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/167522"
-    )
     def test_meta_simple(self):
         self._test_sharing(mp.get_context("spawn"), "meta", torch.float)
 
@@ -978,7 +972,6 @@ if __name__ == "__main__":
                 RuntimeError, r"requires_grad", lambda: queue.put(var)
             )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/92131")
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_variable_sharing(self):
         for requires_grad in [True, False]:

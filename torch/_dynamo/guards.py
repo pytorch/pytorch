@@ -798,10 +798,6 @@ def _ast_unparse(node: ast.AST) -> str:
 strip_function_call = torch._C._dynamo.strip_function_call
 
 
-def _safe_type_repr(t: type[Any]) -> str:
-    return type.__repr__(t)
-
-
 def get_verbose_code_part(code_part: str, guard: Guard | None) -> str:
     extra = ""
     if guard is not None:
@@ -2212,7 +2208,7 @@ class GuardBuilder(GuardBuilderBase):
             guard._unserializable = True
 
         obj_id = self.id_ref(t, f"type({guard.name})")
-        type_repr = _safe_type_repr(t)
+        type_repr = repr(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id}), type={type_repr}"
         self._set_guard_export_info(guard, [code])
 
@@ -2248,7 +2244,7 @@ class GuardBuilder(GuardBuilderBase):
             guard._unserializable = True
 
         obj_id = self.id_ref(t, f"type({guard.name})")
-        type_repr = _safe_type_repr(t)
+        type_repr = repr(t)
         code = f"___check_fake_script_type({self.arg_ref(guard)}, {obj_id}), type={type_repr}"
         self._set_guard_export_info(guard, [code])
 
@@ -2427,7 +2423,12 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard)
         id_val = self.id_ref(val, guard.name)
-        type_repr = _safe_type_repr(val if inspect.isclass(val) else type(val))
+        try:
+            type_repr = repr(val)
+        except Exception:
+            # During deepcopy reconstruction or other state transitions,
+            # objects may be in an incomplete state where repr() fails
+            type_repr = f"<{type(val).__name__}>"
         code = f"___check_obj_id({ref}, {id_val}), type={type_repr}"
         self._set_guard_export_info(guard, [code], provided_func_name="ID_MATCH")
         self.get_guard_manager(guard).add_id_match_guard(

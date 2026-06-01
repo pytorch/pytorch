@@ -417,15 +417,6 @@ class DeviceTypeTestBase(TestCase):
         return cls.device_type
 
     @classmethod
-    def distributed_backend(cls) -> str:
-        """
-        Default distributed backend for this device type.
-        """
-        import torch.distributed as dist
-
-        return dist.get_default_backend_for_device(cls.device_type)
-
-    @classmethod
     def _get_test_exclusions(cls, test_class_name):
         test_exclusions = getattr(cls, "test_exclusions", None)
         if test_exclusions is not None and test_class_name in test_exclusions:
@@ -2041,7 +2032,9 @@ def has_cusolver():
 
 
 def has_hipsolver():
-    return TEST_WITH_ROCM
+    rocm_version = _get_torch_rocm_version()
+    # hipSOLVER is disabled on ROCM < 5.3
+    return rocm_version >= (5, 3)
 
 
 # Skips a test on CUDA if cuSOLVER is not available,

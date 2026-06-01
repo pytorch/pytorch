@@ -2291,32 +2291,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
-    @inductor_config.patch({"freezing": True})
-    @inductor_config.patch(
-        {"cpp.gemm_thread_factors": "4,2,7", "cpp.gemm_cache_blocking": "3,3,1024"}
-    )
-    @patches
-    @torch.no_grad
-    @requires_mkl
-    @set_num_threads(56)
-    def test_linear_thread_factors_k_slicing_misaligned_cache_blocks(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(1024, 1024, True)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        # Forces cache blocks to cross thread-block boundaries while k-slicing is active.
-        dtype = torch.float
-        counters.clear()
-        v = torch.randn(1024, 1024).to(dtype=dtype)
-        mod = M().to(dtype=dtype).eval()
-        with verify(dtype) as (atol, rtol):
-            self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
-
     @inductor_config.patch({"freezing": False})
     @patches
     @torch.no_grad

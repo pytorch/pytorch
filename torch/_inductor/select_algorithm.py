@@ -42,7 +42,7 @@ from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
-from ..utils._sympy.functions import CeilDiv, Max, Min
+from ..utils._sympy.functions import CeilDiv
 from . import config, ir
 from .autotune_process import (
     AsyncAutotuner,
@@ -5814,8 +5814,8 @@ class SymbolicGridFn:
         params = inspect.signature(fn).parameters
         for name, fn_sym, fn_int in [
             ("cdiv", CeilDiv, ceildiv),
-            ("min", Min, min),
-            ("max", Max, max),
+            ("min", sympy.Min, min),
+            ("max", sympy.Max, max),
         ]:
             if name in params:
                 self.kwargs_int[name] = fn_int

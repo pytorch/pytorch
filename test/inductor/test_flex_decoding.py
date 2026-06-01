@@ -33,7 +33,6 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
-    skipCUDAIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
@@ -91,7 +90,7 @@ else:
         LONG_COMPILATION_ON_CPU = True
 
     test_dtypes = (
-        [torch.float32, torch.bfloat16, torch.float16]
+        [torch.float32, torch.bfloat16]
         if torch.backends.mkldnn.is_available()
         and torch.ops.mkldnn._is_mkldnn_bf16_supported()
         else [torch.float32]
@@ -585,7 +584,6 @@ class TestFlexDecoding(InductorTestCase):
         v: Tensor,
         dtype: torch.dtype = torch.float16,
         block_mask: BlockMask | None = None,
-        kernel_options: dict | None = None,
         device="cuda",
     ):
         Q_B, Q_H, KV_H = q.shape[0], q.shape[1], k.shape[1]
@@ -616,7 +614,6 @@ class TestFlexDecoding(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(Q_H != KV_H),
-                kernel_options=kernel_options,
             )
         else:
             compiled_lse = None
@@ -628,7 +625,6 @@ class TestFlexDecoding(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(Q_H != KV_H),
-                kernel_options=kernel_options,
             )
         return compiled_out, compiled_lse
 
@@ -645,7 +641,6 @@ class TestFlexDecoding(InductorTestCase):
         KV_S: int = S,
         V_D: int = D,
         block_mask: BlockMask | None = None,
-        kernel_options: dict | None = None,
         device="cuda",
     ):
         if Q_H % KV_H != 0:
@@ -683,14 +678,7 @@ class TestFlexDecoding(InductorTestCase):
         ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
 
         compiled_out, compiled_lse = self.run_paged_attention(
-            score_mod,
-            q,
-            k,
-            v,
-            dtype,
-            block_mask,
-            device=device,
-            kernel_options=kernel_options,
+            score_mod, q, k, v, dtype, block_mask, device
         )
 
         self._check_out(
@@ -757,7 +745,7 @@ class TestFlexDecoding(InductorTestCase):
             block_mask = create_block_mask(noop_mask, Q_B, 1, Q_S, KV_S, device=device)
 
         compiled_out, _ = self.run_paged_attention(
-            score_mod, q, k, v, dtype, block_mask, device=device
+            score_mod, q, k, v, dtype, block_mask, device
         )
 
         self._check_out(
@@ -1752,23 +1740,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 compiled_fn(q, k, v, _identity, kernel_options=kernel_options)
             ).mean()
             out_mixed.backward()
-
-    @supported_platform
-    @skipCUDAIf(True, "Not supported on CUDA")
-    @skipXPUIf(True, "Not supported on XPU")
-    @common_utils.parametrize("dtype", test_dtypes)
-    @common_utils.parametrize("partition_size", [64, 128, 256, 1024])
-    def test_flash_decoding_partition_size(self, device, dtype, partition_size):
-        def score_mod(score, b, h, m, n):
-            return score * 2
-
-        self.run_test_with_paged_attention(
-            score_mod,
-            dtype,
-            KV_S=64,
-            device=device,
-            kernel_options={"PARTITION_SIZE": partition_size},
-        )
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)

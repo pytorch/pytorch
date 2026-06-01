@@ -292,10 +292,7 @@ def _log_compute_estimations(
                 continue
             if "val" in arg.meta:
                 t = arg.meta["val"]
-                if isinstance(t, torch.Tensor):
-                    ret += f" {dtype_abbrs[t.dtype]}{tuple(t.shape)}"
-                elif isinstance(t, torch.SymInt):
-                    ret += f" SymInt({t})"
+                ret += f" {dtype_abbrs[t.dtype]}{tuple(t.shape)}"
         return ret
 
     headers = [

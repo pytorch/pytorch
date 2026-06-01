@@ -330,15 +330,6 @@ MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format) {
     const NSUInteger W = sizes[3];
     return @[ @(N), @(H), @(W), @(C) ];
   }
-  if (memory_format == MemoryFormat::ChannelsLast3d) {
-    TORCH_INTERNAL_ASSERT(sizes.size() == 5, "ChannelsLast3d memory format must have 5 dimensions!");
-    const NSUInteger N = sizes[0];
-    const NSUInteger C = sizes[1];
-    const NSUInteger D = sizes[2];
-    const NSUInteger H = sizes[3];
-    const NSUInteger W = sizes[4];
-    return @[ @(N), @(D), @(H), @(W), @(C) ];
-  }
   const int sz = sizes.size();
   const int sz_ = (sz > 0) ? sz : 1;
 

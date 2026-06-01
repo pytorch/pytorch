@@ -18,7 +18,7 @@ class HopArgumentInfo:
     # Could give a name to the operand by default it's empty string.
     name: str
     example_value: Any
-    # Provide a default_value
+    # Provide an default_value
     default_value: Any
     # Whether this argument gets mutated in the hop subgraph.
     # For output, this should always be False

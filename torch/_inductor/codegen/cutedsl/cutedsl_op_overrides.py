@@ -375,35 +375,15 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def exp2(x: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.exp2({x})")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
     def sqrt(x: CuteDSLArg) -> CuteDSLArg:
         """Square root using CuteDSL cute.math.sqrt function."""
         return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.sqrt({x})")
 
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def rsqrt(x: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.rsqrt({x})")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
     def log(x: CuteDSLArg) -> CuteDSLArg:
         """Natural logarithm using CuteDSL cute.math.log function."""
         return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.log({x})")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def log2(x: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.log2({x})")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def log10(x: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.log10({x})")
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -416,31 +396,6 @@ class CuteDSLOpOverrides(OpOverrides):
     def sin(x: CuteDSLArg) -> CuteDSLArg:
         """Sine using CuteDSL cute.math.sin function."""
         return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.sin({x})")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def tan(x: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.tan({x})")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def acos(x: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.acos({x})")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def asin(x: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.asin({x})")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def atan(x: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.atan({x})")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def atan2(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(a, b, "cute.math.atan2({a}, {b})")
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -582,11 +537,6 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def floor(x: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.floor({x})")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
     def abs(x: CuteDSLArg) -> CuteDSLArg:
         """Absolute value using CuteDSL cute.math.abs function."""
         if isinstance(x, CSEVariable):
@@ -665,10 +615,6 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def logical_or(x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
         return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} | {b})")
-
-    @staticmethod
-    def logical_xor(x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} ^ {b})")
 
     # Bitwise operations (override parent class to properly CSE)
     @staticmethod

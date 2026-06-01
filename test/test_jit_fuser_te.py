@@ -56,7 +56,6 @@ from torch.testing._internal.common_utils import (
     enable_profiling_mode_for_profiling_tests,
     GRAPH_EXECUTOR,
     IS_FBCODE,
-    IS_LINUX,
     ProfilingMode,
     run_tests,
     skipIfTorchDynamo,
@@ -1205,7 +1204,6 @@ class TestTEFuser(JitTestCase):
         ge = self.checkScript(fn, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/156438")
     def test_inlined_optimized_graph(self):
         @torch.jit.script
         def foo(x):
@@ -1327,7 +1325,6 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
-    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/121876")
     def test_torch_to(self):
         # test no op
         @torch.jit.script
@@ -2448,7 +2445,6 @@ class TestTEFuser(JitTestCase):
                 test(*args)
         self.assertIn("fused_mul_add", prof.table())
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/156436")
     def test_skip_grad_in_check(self):
         @torch.jit.script
         def foo(x):

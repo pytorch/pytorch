@@ -58,3 +58,20 @@ def get_core_count() -> int:
     And one ALU can run 24 threads, i.e. one core is capable of executing 3072 threads concurrently.
     """
     return torch._C._mps_get_core_count()
+
+
+_lib: _Library | None = None
+
+
+def _init() -> None:
+    r"""Register prims as implementation of var_mean and group_norm."""
+    global _lib
+
+    if _lib is not None or not is_built():
+        return
+
+    from torch._decomp.decompositions import native_group_norm_backward
+    from torch._refs import native_group_norm
+
+    _lib = _Library("aten", "IMPL")
+    _lib.impl("native_group_norm_backward", native_group_norm_backward, "MPS")

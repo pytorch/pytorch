@@ -59,7 +59,15 @@ if("X${CMAKE_CUDA_STANDARD}" STREQUAL "X" )
 endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
+# CMP0074 - find_package will respect <PackageName>_ROOT variables
+cmake_policy(PUSH)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
+  cmake_policy(SET CMP0074 NEW)
+endif()
+
 find_package(CUDAToolkit REQUIRED)
+
+cmake_policy(POP)
 
 if(NOT CMAKE_CUDA_COMPILER_VERSION VERSION_EQUAL CUDAToolkit_VERSION)
   message(FATAL_ERROR "Found two conflicting CUDA versions:\n"

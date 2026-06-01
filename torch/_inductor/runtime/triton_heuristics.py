@@ -19,16 +19,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import (
-    Any,
-    Final,
-    Generic,
-    get_args,
-    Literal,
-    TYPE_CHECKING,
-    TypeAlias,
-    TypeVar,
-)
+from typing import Any, Final, Generic, Literal, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -130,16 +121,10 @@ if TYPE_CHECKING:
 
     LauncherType = Any
 
-_KernelType: TypeAlias = (
+_KernelType = (
     CompiledKernel | StaticallyLaunchedCudaKernel | StaticallyLaunchedXpuKernel
 )
-_T = TypeVar(
-    "_T",
-    CompiledKernel,
-    StaticallyLaunchedCudaKernel,
-    StaticallyLaunchedXpuKernel,
-)
-assert get_args(_KernelType) == _T.__constraints__
+_T = TypeVar("_T", bound=_KernelType)
 
 log = logging.getLogger(__name__)
 
@@ -492,7 +477,7 @@ class CachingAutotuner(KernelInterface):
             for c in self.configs:
                 log.debug(c)
 
-        self.compile_results: list[_KernelCompileResult] = []
+        self.compile_results: list[CompileResult[_KernelType]] = []
         self.launchers: list[LauncherType] = []
         self.lock = threading.Lock()
         self.benchmark_failure_reasons: dict[Any, BenchmarkFailureReason] = {}
@@ -812,7 +797,7 @@ class CachingAutotuner(KernelInterface):
         return result.make_launcher()
 
     def _make_launcher(
-        self, compile_result: _KernelCompileResult
+        self, compile_result: CompileResult[_KernelType]
     ) -> tuple[LauncherType, None] | tuple[None, Exception]:
         """Create a launcher from a compile result.
 
@@ -1058,7 +1043,7 @@ class CachingAutotuner(KernelInterface):
 
         return options
 
-    def _precompile_config(self, cfg: Config) -> _KernelCompileResult:
+    def _precompile_config(self, cfg: Config) -> CompileResult[_KernelType]:
         """Ahead of time compile a given autotuner config."""
         compile_meta = self._create_compile_meta(cfg)
 
@@ -2310,13 +2295,6 @@ class CompileResult(Generic[_T]):
             def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
 
         return call_args, def_args, none_args
-
-
-_KernelCompileResult: TypeAlias = (
-    CompileResult[CompiledKernel]
-    | CompileResult[StaticallyLaunchedCudaKernel]
-    | CompileResult[StaticallyLaunchedXpuKernel]
-)
 
 
 class CannotStaticallyLaunchKernel(Exception):

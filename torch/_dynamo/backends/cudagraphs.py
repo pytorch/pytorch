@@ -22,7 +22,6 @@ Key components:
 """
 
 import functools
-import logging
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -50,9 +49,6 @@ from torch._inductor.utils import (
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from .registry import register_backend
-
-
-log = logging.getLogger(__name__)
 
 
 def find_input_mutations(g: torch.fx.Graph) -> set[int]:
@@ -255,11 +251,7 @@ class CudagraphsBackend:
         reset_cudagraph_trees()
 
     @staticmethod
-    def __call__(
-        model: torch.fx.GraphModule, inputs: Sequence[Any], **kwargs: Any
-    ) -> Any:
-        if kwargs:
-            log.warning("cudagraphs backend ignoring extra kwargs %s", kwargs)
+    def __call__(model: torch.fx.GraphModule, inputs: Sequence[Any]) -> Any:
         return cudagraphs(model, inputs)
 
 

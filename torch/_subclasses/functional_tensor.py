@@ -682,18 +682,9 @@ class FunctionalTensorMode(TorchDispatchMode):
                 try:
                     tracker_entry = m.tracer.tensor_tracker[unwrapped]
                 except KeyError:
-                    # A tensor constant lifted from a nested HOP subgraph
-                    # (e.g. invoke_subgraph / nested_compile_region) is wrapped
-                    # as a FunctionalTensor during dispatch but is owned by the
-                    # inner subgraph's tracer, not the outer one. Constants do
-                    # not require grad; for any grad-requiring tensor that is
-                    # missing from the tracker, re-raise to preserve visibility
-                    # of genuine bugs.
-                    if unwrapped.requires_grad:
-                        raise RuntimeError(
-                            f"cannot find {unwrapped} in tensor_tracker"
-                        ) from None
-                    continue
+                    raise RuntimeError(
+                        f"cannot find {unwrapped} in tensor_tracker"
+                    ) from None
                 curr_node = tracker_entry.proxy.node
                 with fx_traceback.set_current_replay_node(curr_node):
                     torch._sync(a)
