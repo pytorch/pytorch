@@ -95,6 +95,11 @@ _orig_module_call = torch.nn.Module.__call__
 lib = torch.library.Library("test_sample", "DEF")  # noqa: SCOPED_LIBRARY
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
+
+
+requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
+
+
 _GLOBAL_CPU_TENSOR = torch.randn(3)
 
 HAS_MSGSPEC = importlib.util.find_spec("msgspec")

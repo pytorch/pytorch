@@ -20,18 +20,14 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTIO
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
-    onlyOn,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfXpu,
 )
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 try:
     from . import test_functions
@@ -3004,8 +3000,8 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
-    @skipIfXpu(msg="autocast with float64 not support on XPU")
-    @onlyOn(("cuda", "xpu"))
+	# autocast with float64 not support on XPU
+    @onlyCUDA
     def test_amp_autocast(self, device):
         device_type = torch.device(device).type
 
