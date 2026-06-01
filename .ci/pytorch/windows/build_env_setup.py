@@ -274,22 +274,38 @@ def install_magma(cuda_prefix: str, build_type: str) -> Path:
     return target
 
 
-def install_sccache_binaries(tmp_bin: Path) -> None:
-    """Download sccache, sccache-cl, and the randomtemp NVCC wrapper.
+def setup_sccache(tmp_bin: Path) -> dict[str, str]:
+    """Download sccache + sccache-cl and return env wiring host compilation
+    through them. Mirrors the USE_SCCACHE!=0 branch of check_opts.bat.
 
-    randomtemp resolves an intermittent NVCC + sccache race that causes
-    spurious CUDA build failures; see gh-25393.
+    Honors USE_SCCACHE=0 by returning an empty dict so a CI override can
+    bypass the cache (e.g. to debug cache corruption, or for XPU where
+    binary_windows_build.sh disables sccache).
     """
+    if os.environ.get("USE_SCCACHE") == "0":
+        return {}
     tmp_bin.mkdir(parents=True, exist_ok=True)
     download(SCCACHE_URL, tmp_bin / "sccache.exe")
     download(SCCACHE_CL_URL, tmp_bin / "sccache-cl.exe")
-    download(RANDOMTEMP_URL, tmp_bin / "randomtemp.exe")
+    return {
+        "SCCACHE_IDLE_TIMEOUT": "1500",
+        "CC": "sccache-cl",
+        "CXX": "sccache-cl",
+        "PATH": prepend_path(tmp_bin),
+    }
 
 
 def setup_nvcc_wrapper(tmp_bin: Path, cuda_path: Path) -> dict[str, str]:
     """Write the randomtemp+sccache NVCC wrapper batch file and return the
     env that points CMake's CUDA rule at it.
+
+    randomtemp resolves an intermittent NVCC + sccache race that causes
+    spurious CUDA build failures; see gh-25393. Returns an empty dict when
+    USE_SCCACHE=0 so nvcc runs unwrapped.
     """
+    if os.environ.get("USE_SCCACHE") == "0":
+        return {}
+    download(RANDOMTEMP_URL, tmp_bin / "randomtemp.exe")
     nvcc_bat = tmp_bin / "nvcc.bat"
     randomtemp = tmp_bin / "randomtemp.exe"
     sccache = tmp_bin / "sccache.exe"
@@ -330,7 +346,7 @@ def setup_cuda() -> dict[str, str]:
     magma_home = install_magma(cuda_prefix, build_type)
 
     tmp_bin = WIN_CI_DIR / "tmp_bin"
-    install_sccache_binaries(tmp_bin)
+    sccache_env = setup_sccache(tmp_bin)
     nvcc_env = setup_nvcc_wrapper(tmp_bin, cuda_path)
 
     return {
@@ -340,9 +356,8 @@ def setup_cuda() -> dict[str, str]:
         "TORCH_CUDA_ARCH_LIST": arch_list,
         "NVTOOLSEXT_PATH": str(nvtools_ext),
         "MAGMA_HOME": str(magma_home),
-        "SCCACHE_IDLE_TIMEOUT": "1500",
-        "CC": "sccache-cl",
-        "CXX": "sccache-cl",
+        **sccache_env,
+        # PATH last so cuda_path/bin layers on top of sccache_env's PATH.
         "PATH": prepend_path(tmp_bin, cuda_path / "bin"),
         **nvcc_env,
     }
@@ -497,6 +512,7 @@ def main() -> None:
 
     if gpu_arch_type == "cpu":
         env_out.update(CPU_BUILD_ENV)
+        env_out.update(setup_sccache(WIN_CI_DIR / "tmp_bin"))
         print("CPU environment configured")
     elif gpu_arch_type == "cuda":
         env_out.update(setup_cuda())
