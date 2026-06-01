@@ -936,8 +936,6 @@ with torch.cuda.use_mem_pool(pool):
      {class}`torch.cuda.MemPool` object is holding a reference. Only at that point, can the memory
      held by the pool be returned to the system when the pool's destructor is called using
      `del`.
-   * {class}`torch.cuda.MemPool` doesn't currently support `expandable_segments` mode of
-     CUDACachingAllocator.
    * [NCCL has specific requirements](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/bufferreg.html#memory-allocator) for a buffer to be compatible with NVLS reductions.
      These requirements can be broken in a dynamic workload, for instance, the buffer being
      sent to NCCL by the CUDACachingAllocator might be split and hence, not correctly aligned.
