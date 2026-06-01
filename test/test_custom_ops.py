@@ -5655,9 +5655,10 @@ class TestCustomOpFastPath(TestCase):
         fp_ac.register_autocast("cpu", torch.float16)
 
         x = torch.randn(3, dtype=torch.float32)
-        with torch.autocast("cpu", dtype=torch.float16):
-            r_direct = fp_ac(x)
-            r_packet = torch.ops._torch_testing.fp_ac(x)
+        with self._assert_fast_path_not_taken(fp_ac):
+            with torch.autocast("cpu", dtype=torch.float16):
+                r_direct = fp_ac(x)
+                r_packet = torch.ops._torch_testing.fp_ac(x)
         self.assertEqual(r_direct.dtype, torch.float16)
         self.assertEqual(r_packet.dtype, torch.float16)
 
@@ -5670,9 +5671,10 @@ class TestCustomOpFastPath(TestCase):
         fp_ac_cuda.register_autocast("cuda", torch.float16)
 
         x = torch.randn(3, dtype=torch.float32, device="cuda")
-        with torch.autocast("cuda", dtype=torch.float16):
-            r_direct = fp_ac_cuda(x)
-            r_packet = torch.ops._torch_testing.fp_ac_cuda(x)
+        with self._assert_fast_path_not_taken(fp_ac_cuda):
+            with torch.autocast("cuda", dtype=torch.float16):
+                r_direct = fp_ac_cuda(x)
+                r_packet = torch.ops._torch_testing.fp_ac_cuda(x)
         self.assertEqual(r_direct.dtype, torch.float16)
         self.assertEqual(r_packet.dtype, torch.float16)
 
@@ -5734,8 +5736,9 @@ class TestCustomOpFastPath(TestCase):
         expected = x + 1
         v_before = x._version
         # inference_mode bails from fast path; slow path still bumps version
-        with torch.inference_mode():
-            fp_im_bump(x)
+        with self._assert_fast_path_not_taken(fp_im_bump):
+            with torch.inference_mode():
+                fp_im_bump(x)
         self.assertEqual(x, expected)
         self.assertEqual(x._version, v_before + 1)
 
@@ -5745,11 +5748,12 @@ class TestCustomOpFastPath(TestCase):
             x.data.add_(1)
 
         # inference_mode tensors go through slow path
-        with torch.inference_mode():
-            x = torch.randn(3)
-            expected = x + 1
-            fp_im_mut(x)
-            self.assertEqual(x, expected)
+        with self._assert_fast_path_not_taken(fp_im_mut):
+            with torch.inference_mode():
+                x = torch.randn(3)
+                expected = x + 1
+                fp_im_mut(x)
+                self.assertEqual(x, expected)
 
     def test_fast_path_disabled_for_tensorlist_dispatch_subclass(self):
         from torch.testing._internal.two_tensor import TwoTensor
@@ -5771,11 +5775,13 @@ class TestCustomOpFastPath(TestCase):
 
             x = torch.randn(3)
             tt = TwoTensor(torch.randn(3), torch.randn(3))
-            fp_tl2(x, [tt])
+            with self._assert_fast_path_not_taken(fp_tl2):
+                fp_tl2(x, [tt])
             self.assertTrue(called)
 
             called = False
-            torch.ops._torch_testing.fp_tl2(x, [tt])
+            with self._assert_fast_path_not_taken(fp_tl2):
+                torch.ops._torch_testing.fp_tl2(x, [tt])
             self.assertTrue(called)
 
     def test_fast_path_no_wrapper_nest_on_multi_device_register(self):
@@ -5806,11 +5812,13 @@ class TestCustomOpFastPath(TestCase):
 
         # Exercise the fallback path (meta tensor forces fast_path to bail)
         x_meta = torch.randn(3, device="meta")
-        result = torch.ops._torch_testing.fp_chain(x_meta)
+        with self._assert_fast_path_not_taken(fp_chain):
+            result = torch.ops._torch_testing.fp_chain(x_meta)
         self.assertEqual(result.shape, x_meta.shape)
 
         x = torch.randn(3)
-        self.assertEqual(fp_chain(x), x)
+        with self._assert_fast_path_taken(fp_chain):
+            self.assertEqual(fp_chain(x), x)
 
     def test_fast_path_falls_back_for_functorch(self):
         @torch.library.custom_op("_torch_testing::fp_functorch", mutates_args=())
