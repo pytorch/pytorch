@@ -153,10 +153,6 @@ class CppCSEVariable(CSEVariable):
         super().__init__(name, bounds, dtype, shape=shape)
         self.is_vec = False
         self.dependent_itervars = OrderedSet[sympy.Symbol]()
-        # The fp32 source of a fp32->lowp_fp `to_dtype`, if this var is one.
-        # Used at store time to cache the lossless reverse conversion; see
-        # CppKernel.cache_lowp_fp_on_store (issue #115260).
-        self.lowp_fp_from: CppCSEVariable | None = None
 
     def __repr__(self) -> str:
         return (
