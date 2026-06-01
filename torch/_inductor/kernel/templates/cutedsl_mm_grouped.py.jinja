@@ -1,6 +1,5 @@
 import functools
 
-from torch._inductor.ir import get_stride_order
 from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
 from torch._inductor.runtime.runtime_utils import ceildiv
 from cutlass.utils import TensorMapUpdateMode
@@ -57,10 +56,10 @@ _TORCH_TO_CUTLASS_DTYPE = {
 
 def _to_fake_cute_tensor(t, assumed_align=16):
     dyn_shape = tuple(map(int, t.shape))
-    stride_order = tuple(get_stride_order(t.stride()))
-    return cute.runtime.make_fake_compact_tensor(
+    dyn_stride = tuple(map(int, t.stride()))
+    return cute.runtime.make_fake_tensor(
         _TORCH_TO_CUTLASS_DTYPE[t.dtype], dyn_shape,
-        stride_order=stride_order, assumed_align=assumed_align,
+        dyn_stride, assumed_align=assumed_align,
     )
 
 
