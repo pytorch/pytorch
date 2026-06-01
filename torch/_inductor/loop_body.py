@@ -729,6 +729,13 @@ class CaptureIndexing(WrapperHandler):
         index = self._add_index(index, MemoryUsageType.INDEX_EXPR)
         return self._inner.index_expr(index, dtype)
 
+    def value_expr(self, index, dtype):
+        index = self._simplify(index)
+        if isinstance(index, (int, sympy.Integer)):
+            return self._inner.constant(int(index), dtype)
+        index = self._add_index(index, MemoryUsageType.INDEX_EXPR)
+        return self._inner.value_expr(index, dtype)
+
     def check_bounds(self, index, size, lower, upper):
         index = self._simplify(index)
         index = self._add_index(index, MemoryUsageType.CHECK_BOUNDS)

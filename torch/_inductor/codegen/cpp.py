@@ -973,6 +973,10 @@ class CppOverrides(OpOverrides):
         return ops.to_dtype(var, dtype)
 
     @staticmethod
+    def value_expr(expr, dtype):
+        return CppOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def masked(mask, body, other):
         code = BracesBuffer()
 
@@ -1803,6 +1807,10 @@ class CppVecOverrides(CppOverrides):
         return csevar
 
     @staticmethod
+    def value_expr(expr, dtype):
+        return CppVecOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def frexp(x):
         cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
         if all(V.kernel.cse.try_get(cache_key) is not None for cache_key in cache_keys):
@@ -1937,6 +1945,10 @@ class CppTile2DOverrides(CppVecOverrides):
         assert isinstance(V.kernel, CppTile2DKernel)
         expr = V.kernel.transform_indexing(expr)
         return CppVecOverrides.index_expr(expr, dtype)
+
+    @staticmethod
+    def value_expr(expr, dtype):
+        return CppTile2DOverrides.index_expr(expr, dtype)
 
 
 class CppKernel(Kernel):
@@ -3958,15 +3970,24 @@ class TilingSelect:
                 )
                 op_counter: dict[str, int] = {}
                 # ops may cause overhead with vectorization, like non-contiguous
-                # index_expr, load, store
+                # index/value_expr, load, store
                 non_contig_indexing_op_counter: dict[str, int] = {}
                 for _body in loop_bodies:
                     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
                     for sub_block in sub_blocks:
                         for _node in sub_block.graph.nodes:
-                            if _node.target in ["index_expr", "load", "store"]:
+                            if _node.target in [
+                                "index_expr",
+                                "value_expr",
+                                "load",
+                                "store",
+                            ]:
                                 # get the index and replace prefix from z to x
-                                arg_idx = 1 if _node.target == "index_expr" else 2
+                                arg_idx = (
+                                    1
+                                    if _node.target in ("index_expr", "value_expr")
+                                    else 2
+                                )
                                 index = sub_block.body.indexing_from_args(
                                     (vars, reduction_vars)
                                 )[_node.args[arg_idx].args[0]]
@@ -3976,7 +3997,7 @@ class TilingSelect:
                                     )
                                     if (
                                         stride is None
-                                        if _node.target == "index_expr"
+                                        if _node.target in ("index_expr", "value_expr")
                                         else stride not in [0, 1]
                                     ):
                                         _update_negative_op_count(
@@ -4002,7 +4023,7 @@ class TilingSelect:
                     op_num > 0
                     and non_contig_indexing_op_num / op_num >= ratio_threshold
                 ):
-                    # Too many non-contiguous load/store/index_expr which hurts the
+                    # Too many non-contiguous load/store/index/value_expr which hurts the
                     # vectorization performance. Disable vectorization when exceeding
                     # the thresholds.
                     return [], []
@@ -4158,7 +4179,12 @@ class CppKernelProxy(CppKernel):
                 if node.target == "load":
                     assert len(node.args) == 3
                     return V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
-                elif node.target in ["to_dtype", "constant", "index_expr"]:
+                elif node.target in [
+                    "to_dtype",
+                    "constant",
+                    "index_expr",
+                    "value_expr",
+                ]:
                     return node.args[-1]  # type: ignore[return-value]
                 elif node.target == "to_dtype_bitcast":
                     return node.args[2]  # type: ignore[return-value]
@@ -4193,7 +4219,7 @@ class CppKernelProxy(CppKernel):
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if (
-                    _node.target in ["load", "index_expr"]
+                    _node.target in ["load", "index_expr", "value_expr"]
                     and (dt := get_output_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     # No need to promote to float if all users are ops that accepts lowp fp input
