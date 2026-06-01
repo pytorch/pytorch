@@ -1611,7 +1611,7 @@ optim_db: list[OptimizerInfo] = [
             "maximize",
             "capturable",
         ),
-        supports_fused_on=("cpu", "cuda"),
+        supports_fused_on=("cpu", "cuda", "xpu"),
         supports_sparse=True,
         metadata_for_sparse=(
             {"lr": 0.1, "weight_decay": 0, "lr_decay": 0},
