@@ -45,6 +45,7 @@ from torch import nn
 from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
@@ -1041,6 +1042,41 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         if guard_manager_wrapper.diff_guard_root:
             self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
 
+    def test_linalg_inv_singular_aot_eager_raises(self):
+        def fn(x):
+            return torch.linalg.inv(x)
+
+        x = torch.zeros(2, 2)
+        msg = r"linalg\.inv: The diagonal element 1 is zero"
+
+        with self.assertRaisesRegex(torch._C._LinAlgError, msg):
+            fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(torch._C._LinAlgError, msg):
+            opt_fn(x)
+
+    def test_linalg_inv_check_errors_preserved_in_aot_graph(self):
+        def fn(x):
+            return torch.linalg.inv(x)
+
+        backend = AotEagerAndRecordGraphs()
+        x = torch.tensor([[2.0, 0.0], [0.0, 4.0]])
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(len(backend.fw_graphs), 1)
+
+        fw_graph = backend.fw_graphs[0]
+        self.assertTrue(
+            any(
+                node.target is torch.ops.higher_order.with_effects
+                and node.args[1] is torch.ops.aten._linalg_check_errors.default
+                for node in fw_graph.graph.nodes
+            ),
+            fw_graph.code,
+        )
+
     def test_swap_tensors_subclass_not_blocked_by_metaconverter_refcycle(self):
         """Checks that MetaConverter doesn't create refcycles of itself that blocks swap_tensor on subclass tensors"""
         was_gc_enabled = gc.isenabled()
@@ -1204,6 +1240,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
         compiled_out = compiled_fn(x)
         self.assertTrue(compiled_out.is_contiguous())
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
+
+    # https://github.com/pytorch/pytorch/issues/183771
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_interpolate_nearest_5d_channels_last_stride(self, backend):
+        def fn(x):
+            return F.interpolate(x, size=(5, 6, 7), mode="nearest")
+
+        x = torch.arange(2 * 5 * 2 * 3 * 2, dtype=torch.float32).reshape(2, 5, 2, 3, 2)
+        x = x.permute(0, 4, 1, 2, 3)
+        eager_out = fn(x)
+        compiled_out = torch.compile(fn, backend=backend, fullgraph=True)(x)
+
         self.assertEqual(eager_out, compiled_out)
         self.assertEqual(eager_out.stride(), compiled_out.stride())
 
