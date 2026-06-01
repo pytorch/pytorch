@@ -2327,7 +2327,7 @@ class TritonKernelOverrides(TritonOverrides):
         return cls._shaped_constant(value, dtype, shape=shape)
 
     @classmethod
-    def _prepare_expr_indexing(cls, expr, dtype):
+    def index_expr(cls, expr, dtype):
         expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
             expr, block_ptr=False, tma_compatibility_checker=None
@@ -2339,35 +2339,7 @@ class TritonKernelOverrides(TritonOverrides):
             shape = indexing.expand_shape
         else:
             shape = TritonSymbols.get_block_shape(indexing.index)
-        return expr, indexing, shape
 
-    @classmethod
-    def _emit_expr_indexing(
-        cls,
-        expr,
-        indexing,
-        shape,
-        index_str,
-        cast_dtype,
-        output_dtype,
-        *,
-        use_compute_types,
-    ):
-        var = V.kernel.cse.generate(
-            V.kernel.compute,
-            cls.to_dtype(
-                f"({index_str})", cast_dtype, use_compute_types=use_compute_types
-            ),
-            dtype=output_dtype,
-            bounds=get_bounds_index_expr(expr),
-            shape=shape,
-        )
-        var.mask_vars = indexing.mask_vars
-        return var
-
-    @classmethod
-    def index_expr(cls, expr, dtype):
-        expr, indexing, shape = cls._prepare_expr_indexing(expr, dtype)
         # Our sympy expr printing casts to the current kernel index dtype.
         # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
         index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
@@ -2420,97 +2392,19 @@ class TritonKernelOverrides(TritonOverrides):
     @classmethod
     def value_expr(cls, expr, dtype):
         """
-        Like :meth:`index_expr`, but honors ``dtype``. This is the right op when
-        the user explicitly requested ``dtype`` (e.g. ``arange(int64)``
-        whose result participates in tensor computation).
+        Like :meth:`index_expr`, but casts the result to ``dtype``.
         """
-        expr, indexing, shape = cls._prepare_expr_indexing(expr, dtype)
-
-        # Pick the dtype for the integer arithmetic inside the expression.
-        # TODO: use bounds analysis to narrow to int32 when safe, avoiding
-        # unnecessary int64 widening for float-targeted expressions.
-        if expr.is_integer and (dtype.is_floating_point or dtype == torch.bool):
-            compute_dtype = torch.int64
-        else:
-            compute_dtype = dtype
-
-        index_str = cls._value_expr_index_str(indexing, compute_dtype)
-        var = cls._emit_expr_indexing(
-            expr,
-            indexing,
-            shape,
-            index_str,
-            compute_dtype,
-            compute_dtype,
-            use_compute_types=False,
-        )
-
-        if compute_dtype != dtype:
+        # TODO: upcast operands so expressions with large int literals
+        # (> 2^31) don't fail at Triton parse time.
+        var = cls.index_expr(expr, dtype)
+        if var.dtype != dtype:
             var = V.kernel.cse.generate(
                 V.kernel.compute,
-                cls.to_dtype(
-                    var,
-                    dtype,
-                    src_dtype=compute_dtype,
-                    use_compute_types=False,
-                ),
+                f"({var}).to({triton_type(dtype)})",
                 dtype=dtype,
                 shape=var.shape,
             )
-            var.mask_vars = indexing.mask_vars
         return var
-
-    @classmethod
-    def _value_expr_index_str(
-        cls, indexing: IndexingOptions, dtype: torch.dtype
-    ) -> str:
-        # Cast at least one operand to ``dtype`` before printing so Triton
-        # promotes the whole expression (including large int literals that
-        # would overflow int32 if all operands were int32).
-        index = cls._upcast_one_operand(indexing.index, dtype)
-        index_dtype = V.kernel._index_dtype
-        V.kernel._index_dtype = dtype
-        try:
-            index_str = V.kernel.index_to_str(index)
-        finally:
-            V.kernel._index_dtype = index_dtype
-        triton_dtype = triton_type(dtype)
-        if is_sympy_integer_like(indexing.index):
-            return f"tl.full({indexing.expand_str}, {index_str}, {triton_dtype})"
-        if indexing.expand_str is not None:
-            return f"tl.broadcast_to({index_str}, {indexing.expand_str})"
-        return index_str
-
-    @classmethod
-    def _upcast_one_operand(
-        cls, index: sympy.Expr, dtype: torch.dtype
-    ) -> sympy.Expr:
-        """
-        Cast one variable in ``index`` to ``dtype`` so Triton promotes the
-        entire expression. Without this, large integer constants in the
-        expression overflow int32 at Triton parse time.
-        """
-        triton_dtype = triton_type(dtype)
-        for sym in sorted(index.free_symbols, key=operator.attrgetter("name")):
-            if not isinstance(sym, sympy.Symbol):
-                continue
-            if symbol_is_type(sym, TritonSymbols.block_types):
-                name = sym.name
-                shape = TritonSymbols.get_block_shape(sym)
-            elif symbol_is_type(sym, SymT.TMP):
-                name = sym.name
-                shape = V.kernel.cse.varname_map[sym.name].shape
-            else:
-                name = V.kernel.index_to_str(sym)
-                shape = ()
-            cast_var = V.kernel.cse.generate(
-                V.kernel.compute,
-                f"({name}).to({triton_dtype})",
-                dtype=dtype,
-                shape=shape,
-            )
-            return sympy_subs(index, {sym: sympy.Symbol(str(cast_var))})
-        return index
 
     @staticmethod
     def masked(mask, body, other):
