@@ -1243,6 +1243,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_out, compiled_out)
         self.assertEqual(eager_out.stride(), compiled_out.stride())
 
+    # https://github.com/pytorch/pytorch/issues/183771
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_interpolate_nearest_5d_channels_last_stride(self, backend):
+        def fn(x):
+            return F.interpolate(x, size=(5, 6, 7), mode="nearest")
+
+        x = torch.arange(2 * 5 * 2 * 3 * 2, dtype=torch.float32).reshape(2, 5, 2, 3, 2)
+        x = x.permute(0, 4, 1, 2, 3)
+        eager_out = fn(x)
+        compiled_out = torch.compile(fn, backend=backend, fullgraph=True)(x)
+
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
+
     # https://github.com/pytorch/pytorch/issues/174963
     def test_roll_as_strided_channels_last(self):
         def fn(x):
