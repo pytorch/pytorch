@@ -1465,7 +1465,7 @@ if(USE_ROCM)
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
   endif()
-  if(TARGET ck_sdpa)
+  if(USE_ROCM_CK_SDPA)
     target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
   endif()
 
@@ -1850,7 +1850,7 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
-  if(TARGET ck_sdpa)
+  if(USE_ROCM_CK_SDPA)
     target_link_libraries(torch_hip PRIVATE ck_sdpa)
   endif()
 

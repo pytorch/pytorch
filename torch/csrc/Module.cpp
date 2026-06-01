@@ -778,21 +778,20 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     }
   }
 
-  // Get current CUDA/ROCm or XPU work stream
+  // Get current CUDA/ROCm work stream
   static int CurrentWorkStream(
       DLDeviceType device_type,
       int32_t device_id,
       void** out_stream) {
     try {
-      *out_stream = nullptr;
-      const auto acc_type = at::accelerator::getAccelerator(false);
-      if (!acc_type) {
+#ifdef USE_CUDA
+      if (device_type == kDLCUDA || device_type == kDLROCM) {
+        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
         return 0;
       }
-      if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
-        *out_stream =
-            at::accelerator::getCurrentStream(device_id).native_handle();
-      }
+#endif
+      // For CPU and other devices, return NULL (no stream concept)
+      *out_stream = nullptr;
       return 0;
     } catch (const std::exception& e) {
       PyErr_SetString(PyExc_RuntimeError, e.what());

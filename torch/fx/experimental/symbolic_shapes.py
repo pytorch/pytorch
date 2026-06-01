@@ -2363,7 +2363,6 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
     """
 
     inner_contexts: dict[str, SymbolicContext] = field(default_factory=dict)
-    track_outer_size_stride: bool = True
 
 
 @dataclass(slots=True)
@@ -5365,24 +5364,6 @@ class ShapeEnv:
         """Check if a sympy symbol matches the naming convention for unbacked symbols"""
         return symbol_is_type(symbol, SymT.UNBACKED_INT)
 
-    def _add_shape_id_eq_check(self, sym_int: SymInt, shape_id: str | None) -> None:
-        """
-        Dedup unbacked symbols sharing a `shape_id` via a runtime equality
-        check. The first symbol for a `shape_id` is recorded; subsequent
-        symbols emit `torch._check(new == existing)` so the ShapeEnv learns
-        the equality without changing symbol identity.
-
-        No-op when `shape_id` is None.
-        """
-        if shape_id is None:
-            return
-        existing_sym = self._shape_id_to_unbacked_symbol.get(shape_id)
-        if existing_sym is None:
-            self._shape_id_to_unbacked_symbol[shape_id] = sym_int.node.expr
-            return
-        existing_symint = self.create_symintnode(existing_sym, hint=None)
-        torch._check(sym_int == existing_symint)
-
     @record_shapeenv_event()
     def create_unbacked_symbool(self) -> SymBool:
         """Create a symbolic boolean without a hint value"""
@@ -5539,10 +5520,14 @@ class ShapeEnv:
 
             # Add runtime equality check for shape_id if applicable
             if shape_id is not None:
-                # `out` is freshly created from an unbacked symbol, so
-                # create_symintnode always wraps it as a SymInt (never an int).
-                out_sym = cast(SymInt, self.create_symintnode(out, hint=None))
-                self._add_shape_id_eq_check(out_sym, shape_id)
+                if shape_id in self._shape_id_to_unbacked_symbol:
+                    # Add runtime equality check instead of reusing the same symbol
+                    existing_sym = self._shape_id_to_unbacked_symbol[shape_id]
+                    existing_symint = self.create_symintnode(existing_sym, hint=None)
+                    out_symint = self.create_symintnode(out, hint=None)
+                    torch._check(out_symint == existing_symint)
+                else:
+                    self._shape_id_to_unbacked_symbol[shape_id] = out
 
             self.unbacked_inputs.add(out)
 
@@ -6175,14 +6160,6 @@ class ShapeEnv:
                         constraint.warn_only, self._debug_name(source), msg
                     )
 
-        def track_singletonint_source(source: Source, val: IntLikeType) -> None:
-            if isinstance(val, SymInt) and is_symbolic(val):
-                s = val.node.expr
-                if isinstance(s, sympy.Symbol) and isinstance(
-                    self.backed_var_to_val.get(s), SingletonInt
-                ):
-                    symbol_to_source[s].append(source)
-
         def track_symfloat(source: Source, val: FloatLikeType) -> None:
             log.debug("track_symfloat %s %s", LazyString(lambda: source.name), val)
             if isinstance(val, SymFloat) and not is_symbolic(val):
@@ -6229,31 +6206,12 @@ class ShapeEnv:
                         f"Expected SubclassSymbolicContext, got {type(context)}"
                     )
 
-                # For most subclasses, we need to track symints on BOTH the
-                # outer and inner tensors.  Some wrapper subclasses expose an
-                # outer size/stride that is fully derived from inner tensors
-                # and metadata; for those, the outer guards are redundant and
-                # can be costly to evaluate on small compiled graphs.
+                # For subclasses, we need to track symints on BOTH the outer
+                # and inner tensors.
                 # TODO: type this better
-                sources_tensors_constraints: list[tuple[Source, Any, Any, Any]] = []
-                if context.track_outer_size_stride:
-                    sources_tensors_constraints.append(
-                        (
-                            source,
-                            t,
-                            context.constraint_sizes,
-                            context.constraint_strides,
-                        )
-                    )
-                else:
-                    for i, ss in enumerate(t.size()):
-                        track_singletonint_source(
-                            TensorPropertySource(source, TensorProperty.SIZE, i), ss
-                        )
-                    for i, ss in enumerate(t.stride()):
-                        track_singletonint_source(
-                            TensorPropertySource(source, TensorProperty.STRIDE, i), ss
-                        )
+                sources_tensors_constraints: list[tuple[Source, Any, Any, Any]] = [
+                    (source, t, context.constraint_sizes, context.constraint_strides)
+                ]
                 attrs, _ = t.__tensor_flatten__()
                 for attr in attrs:
                     match getattr(t, attr):

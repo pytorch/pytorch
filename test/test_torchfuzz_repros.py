@@ -12,7 +12,7 @@ it actually means your PR fixed the bug! Feel free to delete the test and close 
 import pytest
 
 import torch
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestFuzzerCompileIssues(TestCase):
@@ -72,7 +72,6 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/170259")
     @pytest.mark.xfail(reason="Issue #164185")
     def test_fuzzer_issue_164185(self):
         torch.manual_seed(0)

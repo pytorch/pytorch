@@ -28,7 +28,6 @@ from torch.testing._internal.common_utils import (
     MI200_ARCH,
     NAVI_ARCH,
     parametrize,
-    skipIfRocm,
     skipIfRocmArch,
     subtest,
 )
@@ -319,7 +318,6 @@ class CommonTemplate:
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/161095")
     def test_broadcast_with_singleton_dims(self):
         # This tests the case when the input / output contains both zero strides
         # and singleton dimensions. In this case the broadcasting dimensions
@@ -1030,7 +1028,6 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/158328")
     @parametrize("reduction_op", [torch.sum, torch.argmax])
     def test_2d_reductions_mixed_indexing(
         self,

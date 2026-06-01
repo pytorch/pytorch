@@ -12,7 +12,7 @@ import sympy
 import torch
 
 from ...utils._ordered_set import OrderedSet
-from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
+from ...utils._sympy.functions import FloorDiv, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
@@ -568,7 +568,7 @@ class StatsForReadsOrWrites:
                     numel += dep.get_numel()
                 if len(deps) > 1:
                     # can't read more elements than exist in the buffer
-                    numel = Min(numel, V.graph.get_numel(name))
+                    numel = sympy.Min(numel, V.graph.get_numel(name))
                 nbytes = numel * itemsize
                 for i in range(ndim):
                     if contiguous_or_broadcast[i]:

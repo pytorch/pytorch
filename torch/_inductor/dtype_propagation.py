@@ -244,7 +244,7 @@ class DtypePropagationOpsHandler:
         # indexing dtype wins over the requested int dtype. For uses that
         # must honor `dtype` (e.g. user-typed `arange(int64)` whose result
         # participates in tensor computation), `value_expr` is the right op
-        # See `convert_index_expr_to_value_expr` which rewrites accordingly.
+        # — see `convert_index_expr_to_value_expr` which rewrites accordingly.
         if dtype not in (torch.int32, torch.int64) or not hasattr(
             V.kernel, "index_dtype"
         ):

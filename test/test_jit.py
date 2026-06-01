@@ -152,9 +152,6 @@ import unittest
 import warnings
 import zipfile
 import tracemalloc
-from torch.testing._internal.common_utils import (
-    IS_LINUX,
-)
 
 
 def canonical(graph):
@@ -380,8 +377,6 @@ class TestJitProfiler(JitTestCase):
             self.graph_executor_optimize_opt
         )
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/81626")
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/65521")
     def test_profiler(self):
         torch._C._set_graph_executor_optimize(False)
 
@@ -3723,7 +3718,6 @@ def foo(x):
 
         self.assertEqual(D()(v), v + v)
 
-    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/119949")
     def test_tensor_subclasses(self):
         def check_subclass(x, tensor):
             template = dedent("""
@@ -4642,7 +4636,6 @@ def foo(xyz):
         self.checkScript(f_grad, (x,))
         self.checkScript(f_grad, (y,))
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91493")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "shape analysis is only enabled in Legacy")
     def test_prim_grad_undefined(self):
 
@@ -5629,7 +5622,6 @@ a")
             m()
 
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91492")
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't use requires_grad information")
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Peeling is now disabled")
     def test_requires_grad_loop(self):
@@ -6286,7 +6278,6 @@ a")
         with self.assertRaisesRegex(Exception, ""):
             test(1, None)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91494")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "the current version of Profiler doesn't profile/specialize Optionals")
     def test_optional_tensor(self):
         @torch.jit.script
@@ -6328,7 +6319,6 @@ a")
         g = torch.jit.last_executed_optimized_graph()
         self.assertIn(next(g.outputs()).type().str(), ("Tensor", "Tensor(requires_grad=1)"))
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91484")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "the current version of Profiler doesn't profile/specialize Optionals")
     def test_optional_list(self):
         @torch.jit.script
@@ -7288,7 +7278,6 @@ a")
                 self.assertEqual(t1, t2, exact_dtype=False)
                 self.assertEqual(t1.device, t2.device)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91482")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple Executor doesn't have any shapes to propagate")
     def test_tensor_as_tensor_shape_prop(self):
         tensor_template = dedent('''
@@ -7339,7 +7328,6 @@ a")
             g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
             FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *, requires_grad=0, device=cpu) = aten::as_tensor").run(g)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91497")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "testing legacy behavior")
     def test_tensor_requires_grad(self):
         @torch.jit.script
@@ -11006,7 +10994,6 @@ dedent """
 
         self.checkScript(foo, ())
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/91495")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "the original version of test_rand")
     def test_rand(self):
         def test_rand():
@@ -12857,7 +12844,6 @@ dedent """
             if data != buffers[i]:
                 raise AssertionError(f"Record mismatch at offset {offset}: {data} != {buffers[i]}")
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/138885")
     def test_file_reader_no_memory_leak(self):
         num_iters = 10000
         filename, _, _ = self._make_filereader_test_file()
@@ -14792,7 +14778,6 @@ dedent """
 
         self.checkScript(test_uses, ())
 
-    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/131104")
     def test_method_overloading(self):
         class Over(torch.nn.Module):
             @torch.jit._overload_method

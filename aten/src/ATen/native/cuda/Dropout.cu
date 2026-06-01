@@ -58,7 +58,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
 
   // Helps align the total number of times curand_uniform4 is called by each thread for the same totalElements
   // in the vec=2 and vec=4 cases.
-  bool gridxvec_loop_state = false;
+  bool gridxvec_loop_state = 0;
   accscalar_t scale = 1.0 / p;
 
   constexpr int RAND_SIZE = (VEC + 4 - 1) / 4;

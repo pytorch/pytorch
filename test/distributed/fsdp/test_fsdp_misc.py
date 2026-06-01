@@ -3,7 +3,6 @@
 import functools
 import os
 import sys
-import unittest
 import warnings
 from collections import namedtuple
 from contextlib import nullcontext
@@ -44,7 +43,6 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -957,7 +955,6 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
             )
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/105024")
     @skip_if_lt_x_gpu(2)
     def test_homogeneous_attributes(self):
         """
@@ -1010,7 +1007,6 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             inp = fsdp_model.module.get_input(torch.device(device_type))
             fsdp_model(*inp)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/137948")
     @skip_if_lt_x_gpu(2)
     def test_fsdp_unsupported_module_cls(self):
         regex = r"FSDP will not all-gather parameters for containers that do not implement forward"

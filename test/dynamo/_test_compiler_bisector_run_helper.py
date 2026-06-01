@@ -3,7 +3,6 @@ from contextlib import contextmanager
 
 import torch
 import torch._prims_common as utils
-from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 aten = torch.ops.aten
@@ -49,7 +48,7 @@ def vq(x):
 def test_fn():
     with patch_exp_decomp():
         vq_compiled = torch.compile(vq)
-        x = torch.randn(4, 400, 256, device=GPU_TYPE)
+        x = torch.randn(4, 400, 256).cuda()
         out_compiled = vq_compiled(x)
 
     return 1 if out_compiled.isnan().any() else 0

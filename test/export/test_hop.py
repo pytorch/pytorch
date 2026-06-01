@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, skipIfRocm
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 from torch.testing._internal.hop_db import (
     FIXME_hop_that_doesnt_have_opinfo_test_allowlist,
     hop_db,
@@ -89,7 +89,6 @@ class TestHOP(TestCase):
             self._compare(model, ep, args, kwargs)
         torchdynamo._reset_guarded_backend_cache()
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/178177")
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_retrace_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
@@ -107,7 +106,6 @@ class TestHOP(TestCase):
             self._compare(model, ep, args, kwargs)
         torchdynamo._reset_guarded_backend_cache()
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/178077")
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_serialize_export(self, device, dtype, op):
         class Foo(torch.nn.Module):

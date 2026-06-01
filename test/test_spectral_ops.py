@@ -443,6 +443,7 @@ class TestFFT(TestCase):
          allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
+        # FIXME: https://github.com/pytorch/pytorch/issues/108205
         errMsg = "dims must be unique"
         with self.assertRaisesRegex(RuntimeError, errMsg):
             op(a, dim=(0, 1, 0))

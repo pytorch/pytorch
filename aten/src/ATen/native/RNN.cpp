@@ -302,9 +302,9 @@ struct QuantizedCellParams : public CellParamsBase {
                                                zero_point_hh.toLong()};
     return CellParamsSerializationType(
         "quantized",
-        std::move(tensors_to_serialize),
-        std::move(doubles_to_serialize),
-        std::move(longs_to_serialize),
+        tensors_to_serialize,
+        doubles_to_serialize,
+        longs_to_serialize,
         {});
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -444,10 +444,10 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
-        std::move(tensors_to_serialize),
+        tensors_to_serialize,
         {},
         {reduce_range_},
-        std::move(packed_params_to_serialize));
+        packed_params_to_serialize);
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -520,7 +520,7 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         packed_params_to_serialize{packed_ih, packed_hh};
 
     return CellParamsSerializationType(
-        "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
+        "quantized_fp16", {}, {}, {}, packed_params_to_serialize);
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -608,13 +608,11 @@ std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool h
   if (has_biases) {
     if (has_projections) {
       TORCH_CHECK(params.size() % 5 == 0, "got an incorrect number of RNN parameters");
-      result.reserve(params.size() / 5);
       for (size_t i = 0; i < params.size(); i += 5) {
         result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], params[i + 4]);
       }
     } else {
       TORCH_CHECK(params.size() % 4 == 0, "got an incorrect number of RNN parameters");
-      result.reserve(params.size() / 4);
       for (size_t i = 0; i < params.size(); i += 4) {
         result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], undefined);
       }
@@ -622,13 +620,11 @@ std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool h
   } else {
     if (has_projections) {
       TORCH_CHECK(params.size() % 3 == 0, "got an incorrect number of RNN parameters");
-      result.reserve(params.size() / 3);
       for (size_t i = 0; i < params.size(); i += 3) {
         result.emplace_back(params[i], params[i + 1], undefined, undefined, params[i + 2]);
       }
     } else {
       TORCH_CHECK(params.size() % 2 == 0, "got an incorrect number of RNN parameters");
-      result.reserve(params.size() / 2);
       for (size_t i = 0; i < params.size(); i += 2) {
         result.emplace_back(params[i], params[i + 1], undefined, undefined, undefined);
       }
@@ -870,12 +866,12 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
           (*this)(inputs_w.unbind(0), input_hidden, params, true);
       TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
       return {at::stack(unstacked_output.outputs, 0),
-              std::move(unstacked_output.final_hidden)};
+              unstacked_output.final_hidden};
     }
     auto unstacked_output = (*this)(inputs.unbind(0), input_hidden, params);
     TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
     return {at::stack(unstacked_output.outputs, 0),
-            std::move(unstacked_output.final_hidden)};
+            unstacked_output.final_hidden};
   }
 
   Cell<hidden_type, cell_params>& cell_;
@@ -911,9 +907,7 @@ struct FullBidirectionalLayer
       std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
       auto rev_output = at::stack(rev_result.outputs, 0);
       return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
-              std::make_pair(
-                  std::move(fw_result.final_hidden),
-                  std::move(rev_result.final_hidden))};
+              std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
     }
 
     step_inputs = input.unbind(0);
@@ -926,9 +920,7 @@ struct FullBidirectionalLayer
     std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
     auto rev_output = at::stack(rev_result.outputs, 0);
     return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
-            std::make_pair(
-                std::move(fw_result.final_hidden),
-                std::move(rev_result.final_hidden))};
+            std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
   }
 
   std::vector<Tensor> reverse(std::vector<Tensor>&& x) const {
@@ -1048,7 +1040,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     }
     std::reverse(step_outputs.begin(), step_outputs.end());
     return {PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
-            std::move(hidden)};
+            hidden};
   }
 
   Cell<hidden_type, cell_params>& cell_;
@@ -1074,10 +1066,8 @@ struct PackedBidirectionalLayer
     PackedSequence output{
         at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1),
         input.batch_sizes};
-    return {std::move(output),
-            std::make_pair(
-                std::move(fw_result.final_hidden),
-                std::move(rev_result.final_hidden))};
+    return {output,
+            std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
   }
 
   PackedLayer<dir_hidden_type, cell_params> layer_;
@@ -1114,8 +1104,8 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
   std::vector<hidden_type> final_hiddens;
   for (const auto l : c10::irange(num_layers)) {
     auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++));
-    final_hiddens.push_back(std::move(layer_output.final_hidden));
-    layer_input = std::move(layer_output.outputs);
+    final_hiddens.push_back(layer_output.final_hidden);
+    layer_input = layer_output.outputs;
 
     if (dropout_p != 0 && train && l < num_layers - 1) {
       layer_input = dropout(layer_input, dropout_p);
@@ -1140,7 +1130,7 @@ LayerOutput<io_type, std::vector<typename CellType::hidden_type>> _rnn_impl(
   if (bidirectional) {
     using BidirLayer = BidirLayerT<hidden_type, cell_params>;
     auto bidir_result = apply_layer_stack(BidirLayer{cell}, input, pair_vec(hiddens), pair_vec(params), num_layers, dropout_p, train);
-    return {std::move(bidir_result.outputs), unpair_vec(std::move(bidir_result.final_hidden))};
+    return {bidir_result.outputs, unpair_vec(std::move(bidir_result.final_hidden))};
   } else {
     return apply_layer_stack(LayerT<hidden_type,cell_params>{cell}, input, hiddens, params, num_layers, dropout_p, train);
   }

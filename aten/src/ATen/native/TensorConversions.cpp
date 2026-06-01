@@ -585,7 +585,6 @@ Tensor to(
 // across tensors.
 std::vector<Tensor> _to_cpu(TensorList tensors) {
   std::vector<Tensor> cpu_tensors;
-  cpu_tensors.reserve(tensors.size());
   for (const auto& t : tensors) {
     cpu_tensors.push_back(t.cpu());
   }

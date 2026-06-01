@@ -1547,15 +1547,6 @@ op_db: list[OpInfo] = [
         skips=(
             # NotImplementedError: The operator 'aten::linalg_ldl_factor_ex.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
-            # https://github.com/pytorch/pytorch/issues/76962
-            DecorateInfo(
-                unittest.skip("Flaky on Linux CUDA"),
-                "TestDecomp",
-                "test_comprehensive",
-                device_type="cuda",
-                dtypes=(torch.complex64, torch.complex128),
-                active_if=IS_LINUX,
-            ),
         ),
     ),
     OpInfo(

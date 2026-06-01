@@ -129,7 +129,6 @@ inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValu
   std::vector<int64_t> dims;
   std::vector<Tensor> transposedIndices;
   dims.reserve(self.dim());
-  transposedIndices.reserve(self.dim());
   for (const auto i : c10::irange(self.dim())) {
     if (indices[i].defined()) {
       dims.push_back(i);
@@ -152,7 +151,6 @@ transposeToFrontAndInvPerm(const Tensor& self, TensorList indices) {
   std::vector<Tensor> transposedIndices;
   dims.reserve(self.dim());
   invPerm.resize(self.dim());
-  transposedIndices.reserve(self.dim());
   for (const auto i : c10::irange(self.dim())) {
     if (indices[i].defined()) {
       dims.push_back(i);

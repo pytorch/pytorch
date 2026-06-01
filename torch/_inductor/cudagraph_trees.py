@@ -2644,23 +2644,10 @@ class CUDAGraphTreeManager:
         )
 
     @staticmethod
-    def format_dealloc_msg(
-        stack_trace: str | None, *, is_grad_output: bool = False
-    ) -> str:
+    def format_dealloc_msg(stack_trace: str | None) -> str:
         stack_trace = (
             stack_trace.strip() if stack_trace else "[Could not find stack trace]"
         )
-        if is_grad_output:
-            return (
-                "Error: accessing gradient tensor output of CUDAGraphs that has been overwritten "
-                f"by a subsequent run. Stack trace: {stack_trace}. "
-                "This can happen with torch.compile(mode='reduce-overhead') and gradient "
-                "accumulation when a .grad tensor is allocated during CUDAGraph capture. "
-                "If you need gradient accumulation, allocate stable .grad buffers outside "
-                "CUDAGraph capture before the compiled backward runs, for example by running "
-                "an eager warmup iteration or by preallocating zeroed .grad tensors. "
-                "If you do not need gradient accumulation, set .grad to None before each backward."
-            )
         return (
             "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
             f"Stack trace: {stack_trace}. "
@@ -2673,21 +2660,17 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
 
-        stor_dealloc_info: dict[int, tuple[str | None, bool]] = {}
+        stor_stack_trace: dict[int, str | None] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
-            is_grad_output = (
-                self.id_to_mode[node.wrapped_function.id] == CompilationMode.BACKWARD
-            )
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()
                 if ten is None:
                     continue
 
                 torch._C._set_storage_access_error_msg(
-                    ten,
-                    self.format_dealloc_msg(stack_trace, is_grad_output=is_grad_output),
+                    ten, self.format_dealloc_msg(stack_trace)
                 )
 
             # we would to enable the following assertion, but an internal model failed with a command
@@ -2703,10 +2686,7 @@ class CUDAGraphTreeManager:
                 if not storage_ref:
                     continue
 
-                stor_dealloc_info[storage_ref.data_ptr()] = (
-                    stack_trace,
-                    is_grad_output,
-                )
+                stor_stack_trace[storage_ref.data_ptr()] = stack_trace
 
         deleted = OrderedSet[Any]()
         for storage_ref in self.current_node.path_live_weakrefs():
@@ -2714,11 +2694,8 @@ class CUDAGraphTreeManager:
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
 
-                stack_trace, is_grad_output = stor_dealloc_info.get(
-                    storage_ref.data_ptr(), (None, False)
-                )
                 msg = self.format_dealloc_msg(
-                    stack_trace, is_grad_output=is_grad_output
+                    stor_stack_trace.get(storage_ref.data_ptr())
                 )
                 torch._C._free_And_Remove_DeleterFn(_storage_deref)
 

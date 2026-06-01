@@ -397,7 +397,7 @@ class CustomOp:
         if _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "Meta"):
             raise RuntimeError(
                 f"impl_abstract(...): the operator {self._qualname} "
-                f"already has a DispatchKey::Meta implementation via a "
+                f"already has an DispatchKey::Meta implementation via a "
                 f"pre-existing torch.library or TORCH_LIBRARY registration. "
                 f"Please either remove that registration or don't call impl_abstract."
             )

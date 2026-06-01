@@ -1686,25 +1686,6 @@ class TestForeachGroupsUnit(InductorTestCase):
         self.assertTrue(torch.allclose(result_with, result_without))
 
 
-class TestNodeRuntimeEstimationUnit(InductorTestCase):
-    def test_compute_estimation_logging_handles_symbolic_scalar_meta(self):
-        from torch._inductor.fx_passes.node_runtime_estimation import (
-            _log_compute_estimations,
-        )
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        graph = fx.Graph()
-        x = graph.placeholder("x")
-        y = graph.placeholder("y")
-        x.meta["val"] = torch.empty(2, 3)
-        y.meta["val"] = ShapeEnv().create_unbacked_symint()
-        add = graph.call_function(torch.ops.aten.add.Tensor, (x, y))
-        add.meta["val"] = torch.empty(2, 3)
-        graph.output(add)
-
-        _log_compute_estimations([add], [1.0], [1.0])
-
-
 def _make_pge_trace(
     collectives=None,
     matmuls=None,

@@ -4211,12 +4211,6 @@ def run_node(
             )
         except Unsupported:
             raise
-        except IndexError:
-            # Re-raise IndexError from tensor dim validation (e.g. canonicalize_dim,
-            # maybe_wrap_dim) so it reaches the user as IndexError, not RuntimeError.
-            # This is intentionally broad: an internal Dynamo indexing bug would also
-            # propagate this way, but such bugs are rare and the traceback is preserved.
-            raise
         except Exception as e:
             raise RuntimeError(make_error_message(e)).with_traceback(
                 e.__traceback__
@@ -5675,23 +5669,19 @@ def get_traced_code() -> list[CodeType] | None:
 
 
 def is_pybind11_enum_member(value: Any) -> bool:
-    """Check if value is a pybind11 enum member (with stable hash and eq).
+    """Check if value is a pybind11 enum member (singleton with stable hash).
 
-    Pybind11 enums have __members__ on their type. Unlike Python's enum.Enum,
-    pybind11 injects __hash__ and __eq__ directly into the type's __dict__,
-    which trips raise_on_overridden_hash. But these are safe: members have
-    deterministic hash and equality, same as Python enums.
-
-    Note: pybind11 doesn't always return the singleton for enum values (e.g.
-    a C++ function returning an enum may construct a new Python wrapper), so
-    we check by name membership rather than identity.
+    Pybind11 enums have __members__ on their type and each member is a singleton.
+    Unlike Python's enum.Enum, pybind11 injects __hash__ and __eq__ directly
+    into the type's __dict__, which trips raise_on_overridden_hash. But these
+    are safe: members are singletons with hash == value, same as Python enums.
     """
     t = type(value)
     members = getattr(t, "__members__", None)
     if members is None:
         return False
     name = getattr(value, "name", None)
-    return name is not None and name in members
+    return name is not None and members.get(name) is value
 
 
 def _make_inlined(

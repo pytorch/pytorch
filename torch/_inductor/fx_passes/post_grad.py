@@ -1654,18 +1654,7 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         torch.bfloat16,
         torch.float16,
     ):
-        # Allow unfuse when inp is a narrowing dtype cast (e.g. AMP casting
-        # fp32 bias to bf16/fp16). Unfusing lets the Triton pointwise kernel
-        # load the original higher-precision tensor directly, preserving
-        # precision instead of truncating bias before the fused addmm.
-        if not (
-            inp.op == "call_function"
-            and inp.target is torch.ops.prims.convert_element_type.default
-            and inp.args[0].meta["val"].dtype.is_floating_point
-            and torch.finfo(inp.args[0].meta["val"].dtype).bits
-            > torch.finfo(inp.meta["val"].dtype).bits
-        ):
-            return
+        return
 
     def repl(inp, x1, x2, alpha, beta):
         mm_result = x1 @ x2

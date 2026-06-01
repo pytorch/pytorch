@@ -140,10 +140,6 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
     return Xq, loss
 
 class TestQuantizedTensor(TestCase):
-    def test_quantized_tensor_creation_deprecation_warning(self):
-        with self.assertWarnsOnceRegex(UserWarning, ".*deprecated and will be removed"):
-            torch.quantize_per_tensor(torch.randn(4), 0.1, 10, torch.quint8)
-
     def test_qtensor_equal(self):
         x = torch.rand(5)
         x_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)

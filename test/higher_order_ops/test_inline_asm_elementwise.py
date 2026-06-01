@@ -21,7 +21,6 @@ from torch.testing._internal.common_utils import (
     NAVI_ARCH,
     parametrize,
     run_tests,
-    skipIfRocm,
     TEST_CUDA,
     TestCase,
     xfailIfNoAcceleratorTriton,
@@ -340,11 +339,6 @@ class TestInlineAsmElementwise(TestCase):
             eager_result = fn(*inputs)
             self.assertEqual(eager_result, compiled_result)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180228")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180131")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180124")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180116")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180132")
     @parametrize(
         "case_idx", list(range(len(TEST_CASES))), name_fn=lambda i: TEST_CASE_NAMES[i]
     )

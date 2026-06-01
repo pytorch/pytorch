@@ -80,8 +80,6 @@ from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
 from torch.fx.experimental.dynamic_spec import (
-    DictSpec,
-    IntermediateSpec,
     IntVar,
     LeafSpec,
     ObjectSpec,
@@ -359,197 +357,77 @@ def safe_has_grad(t: object) -> bool:
         return hasattr(t, "grad")
 
 
-@dataclasses.dataclass(frozen=True)
-class _LocalToken:
-    """Root token: a top-level function-argument access."""
+def lookup_spec_from_dynamo_source(
+    source: Source, shapes_spec: ShapesSpec | None
+) -> LeafSpec:
+    """Walk a dynamo ``Source`` chain against the spec tree.
 
-    name: str
-    is_varargs: bool = False
-    is_varkw: bool = False
+    Returns the leaf ``TensorSpec`` / ``IntVar`` / ``int`` at the
+    corresponding path, or ``None`` if the source isn't covered.
+    Supported source kinds:
 
+    - ``LocalSource(name, is_input=True)`` — top-level function arg
+      (the root of any walk).
+    - ``AttrSource(base, member)`` — attribute access; matched against
+      ``ObjectSpec._fields[member]``.
+    - ``NNModuleSource`` (and subclasses) — transparently unwrapped.
+      ``nn.Module`` attribute access produces
+      ``AttrSource(NNModuleSource(...))``; ``NNModuleSource`` is a
+      guard-semantics marker, not an access step, so the walk skips
+      past it.
+    - ``DictGetItemSource(UnspecializedParamBufferSource(_,
+      '_parameters' | '_buffers'), key)`` — dynamo rewrites
+      ``self.weight`` internally as ``self._parameters["weight"]``;
+      the walk collapses that pair into a single ``("attr", key)``
+      step so the user-facing attribute name matches the spec.
 
-@dataclasses.dataclass(frozen=True)
-class _AttrToken:
-    """Attribute access (``obj.name``)."""
-
-    name: str
-
-
-@dataclasses.dataclass(frozen=True)
-class _SubscriptToken:
-    """Subscript access (``obj[key]``).
-
-    Emitted for ``dict`` key lookups (matched against ``DictSpec`` entries).
-    The key may be ``int`` or ``str`` — both are valid dict keys.
+    Other source kinds (globals, ``GetItemSource``, etc.) return
+    ``None`` — later container PRs extend this dispatch.
     """
+    if shapes_spec is None or shapes_spec._params is None:
+        return None
 
-    key: int | str
-
-
-_AccessToken = _LocalToken | _AttrToken | _SubscriptToken
-_AccessPath = list[_AccessToken]
-
-
-def _source_to_access_path(source: Source) -> _AccessPath | None:
-    """Translate a dynamo ``Source`` chain into a flat ``_AccessPath``.
-
-    Walks ``source.base`` from leaf to root, then reverses so the path
-    reads root-first. The returned path always starts with a single
-    ``_LocalToken`` (the input arg) followed by zero or more access
-    tokens, each of which is either an ``_AttrToken`` (attribute
-    access) or a ``_SubscriptToken`` (``dict[key]`` access with an
-    ``int`` or ``str`` key).
-
-    Returns ``None`` for sources that we know we can't represent them
-    in shapes specs.
-    """
-    path: list[_AccessToken] = []
+    # Walk source.base chain to its root, collecting (kind, key) entries.
+    path: list[tuple[str, Any]] = []
     cur: Source = source
     while not isinstance(cur, LocalSource):
         if isinstance(cur, NNModuleSource):
-            # ``NNModuleSource`` is a guard-semantics marker, not an
-            # access step — transparently unwrap.
             cur = cur.base
             continue
         # ``self.weight`` → dynamo emits
         # ``DictGetItemSource(UnspecializedParamBufferSource(_,
-        # '_parameters'), 'weight')``. Collapse that pair into a single
-        # attr token.
+        # '_parameters'), 'weight')``. Collapse this pair into a single
+        # ``("attr", key)`` step so the user's ``ObjectSpec({"weight":
+        # ...})`` matches.
         if isinstance(cur, DictGetItemSource) and isinstance(
             cur.base, UnspecializedParamBufferSource
         ):
-            path.append(_AttrToken(cur.index))
+            path.append(("attr", cur.index))
             cur = cur.base.base
             continue
-        # Plain ``dict[key]`` access.
-        if isinstance(cur, DictGetItemSource) and isinstance(cur.index, (int, str)):
-            path.append(_SubscriptToken(cur.index))
-            cur = cur.base
-            continue
-        # Integer subscript (e.g. *args[i] or list[i]).
-        if isinstance(cur, GetItemSource) and type(cur.index) is int:
-            path.append(_SubscriptToken(cur.index))
-            cur = cur.base
-            continue
         if isinstance(cur, AttrSource):
-            path.append(_AttrToken(cur.member))
-            cur = cur.base
-            continue
-        return None
+            path.append(("attr", cur.member))
+        else:
+            return None
+        cur = cur.base
     if not cur.is_input:
         return None
-    path.append(
-        _LocalToken(cur.local_name, is_varargs=cur.is_varargs, is_varkw=cur.is_varkw)
-    )
     path.reverse()
-    return path
 
-
-def _walk_spec(
-    current_spec: IntermediateSpec,
-    remaining_tokens: _AccessPath,
-) -> LeafSpec:
-    """Walk down a spec tree starting at ``current_spec``, consuming each
-    token in order. Returns the leaf spec at the end of the walk, or
-    ``None`` if a key/field along the way wasn't specified by the user.
-    Raises on type-mismatch (the existing tight invariants).
-    """
-    for token in remaining_tokens:
-        if current_spec is None:
-            # Under-specified: a previous descent (DictSpec key lookup or
-            # ObjectSpec field lookup) returned None because the user didn't
-            # provide a spec for this entry. Treat as static.
+    # Walk the spec tree from the named-arg root following the path.
+    spec: Any = shapes_spec._params._named_args.get(cur.local_name)
+    for kind, key in path:
+        if spec is None:
             return None
-        match current_spec:
-            case ObjectSpec():
-                if not isinstance(token, _AttrToken):
-                    raise RuntimeError(
-                        f"shapes_spec walk: ObjectSpec at path {remaining_tokens!r} expects "
-                        f"an attribute access (_AttrToken), got "
-                        f"{type(token).__name__}"
-                    )
-                current_spec = current_spec._fields.get(token.name)
-            case DictSpec():
-                if not isinstance(token, _SubscriptToken):
-                    raise RuntimeError(
-                        f"shapes_spec walk: DictSpec at path {remaining_tokens!r} expects "
-                        f"a str/int subscript (_SubscriptToken), got "
-                        f"{type(token).__name__}"
-                        f"({getattr(token, 'key', None)!r})"
-                    )
-                current_spec = current_spec._entries.get(token.key)
-            case _:
-                # leaf spec (TensorSpec / IntVar / int / None) but path still
-                # has tokens → the user spec is too shallow for the access.
-                raise RuntimeError(
-                    f"shapes_spec walk: leaf spec ({type(current_spec).__name__}) "
-                    f"at path {remaining_tokens!r} cannot consume further token {token!r}; "
-                    f"the spec is too shallow for this access"
-                )
-    if not isinstance(current_spec, LeafSpec):
-        raise RuntimeError(
-            f"shapes_spec walk ended on a container ({type(current_spec).__name__}) "
-            f"for access path {remaining_tokens!r}; expected a leaf spec"
-        )
-    return current_spec
-
-
-def lookup_spec_from_dynamo_source(
-    source: Source, shapes_spec: ShapesSpec | None
-) -> LeafSpec:
-    """Look up the LeafSpec at the access path derived from ``source`` in ``params``.
-    Returns ``None`` if the source isn't covered.
-    """
-    if shapes_spec is None or shapes_spec._params is None:
+        if kind == "attr":
+            if not isinstance(spec, ObjectSpec):
+                return None
+            spec = spec._fields.get(key)
+    # Only return leaves — a container at the end of the walk means
+    # the source's path didn't reach an applicable spec.
+    if isinstance(spec, ObjectSpec):
         return None
-    path = _source_to_access_path(source)
-    if not path or not isinstance(path[0], _LocalToken):
-        return None
-    params = shapes_spec._params
-    root = path[0]
-    if root.is_varargs:
-        # ``*args`` element access: root is the varargs local, next token must
-        # be an int subscript. A varargs local is always followed by a
-        # subscript token in ``_source_to_access_path``; anything else means
-        # the chain was mis-tokenized.
-        if not isinstance(path[1], _SubscriptToken):
-            raise RuntimeError(
-                f"Expected _SubscriptToken after *args local at path "
-                f"{path!r}, got {type(path[1]).__name__}"
-            )
-        key = path[1].key
-        if type(key) is not int:
-            raise RuntimeError(
-                f"Unexpected non-int subscript for *args access at path "
-                f"{path!r}: {type(key).__name__}({key!r})"
-            )
-        if params._varargs is None or not (0 <= key < len(params._varargs)):
-            return None
-        return _walk_spec(params._varargs[key], path[2:])
-    if root.is_varkw:
-        # ``**kwargs`` element access: root is the varkw local, next token must
-        # be a str subscript. A varkw local is always followed by a subscript
-        # token in ``_source_to_access_path``; anything else means the chain
-        # was mis-tokenized.
-        if not isinstance(path[1], _SubscriptToken):
-            raise RuntimeError(
-                f"Expected _SubscriptToken after **kwargs local at path "
-                f"{path!r}, got {type(path[1]).__name__}"
-            )
-        key = path[1].key
-        if not isinstance(key, str):
-            raise RuntimeError(
-                f"Unexpected non-str subscript for **kwargs access at path "
-                f"{path!r}: {type(key).__name__}({key!r})"
-            )
-        if params._varkw is None or key not in params._varkw:
-            return None
-
-        return _walk_spec(params._varkw[key], path[2:])
-    # Regular named arg: seed at the named-arg root and descend the rest.
-
-    current_spec: IntermediateSpec = params._named_args.get(root.name)
-    return _walk_spec(current_spec, path[1:])
+    return spec
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
@@ -2556,14 +2434,6 @@ class VariableBuilder:
                         sym_val.node.shape_env.var_to_hint_override[expr] = (
                             int_spec.optimization_hint
                         )
-                    # Dedup multiple uses of the same IntVar via runtime
-                    # equality check. `_uid` distinguishes IntVars with
-                    # the same name (including default `anon`). The
-                    # `__intvar__:` prefix keeps these from colliding
-                    # with user-supplied `shape_id` strings.
-                    sym_val.node.shape_env._add_shape_id_eq_check(
-                        sym_val, f"__intvar__:{int_spec._uid}"
-                    )
                     return result
                 else:
                     raise ValueError(
@@ -4364,9 +4234,6 @@ def _automatic_dynamic(
             tensor_source=outer_context.tensor_source,
             shape_env_to_source_to_symbol_cache=outer_context.shape_env_to_source_to_symbol_cache,
             inner_contexts=inner_contexts,
-            track_outer_size_stride=not isinstance(
-                e, torch.nested._internal.nested_tensor.NestedTensor
-            ),
         )
 
     # We preserve the dynamism of inputs. For example, when users call
@@ -4722,13 +4589,6 @@ def _wrap_to_fake_tensor_and_record_impl(
                 size_sym = fake_e.size(dim_i)
                 if not isinstance(size_sym, torch.SymInt):
                     continue
-                # Dedup multiple uses of the same IntVar via runtime equality
-                # check. `_uid` distinguishes IntVars with the same name
-                # (including default `anon`). The `__intvar__:` prefix keeps
-                # these from colliding with user-supplied `shape_id` strings.
-                size_sym.node.shape_env._add_shape_id_eq_check(
-                    size_sym, f"__intvar__:{dim_spec._uid}"
-                )
                 if dim_spec.min is not None:
                     torch._check(size_sym >= dim_spec.min)
                 if dim_spec.max is not None:

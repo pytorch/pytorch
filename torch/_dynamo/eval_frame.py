@@ -89,7 +89,6 @@ from torch.fx.experimental._dynamism import (
     clone_and_convert_to_meta,
     track_dynamism_across_examples,
 )
-from torch.fx.experimental.dynamic_spec import ShapesSpec
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -126,7 +125,7 @@ if TYPE_CHECKING:
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
     from torch._subclasses import fake_tensor
-    from torch.fx.experimental.dynamic_spec import ParamsSpec
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
     from torch.fx.node import Argument, Node, Target
 
     from .types import (
@@ -815,17 +814,13 @@ class _TorchDynamoContext:
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
         isolate_recompiles: bool = False,
-        shapes_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
+        shapes_spec: ShapesSpec | ParamsSpec | None = None,
     ) -> None:
         super().__init__()
         if not (callable(callback) or callback is False or callback is None):
             raise AssertionError(
                 f"callback must be callable, False, or None, got {type(callback)}"
             )
-        # Normalize the shorthand forms: dict / ParamsSpec / ShapesSpec all
-        # land here as a ShapesSpec (or None).
-        if shapes_spec is not None and not isinstance(shapes_spec, ShapesSpec):
-            shapes_spec = ShapesSpec(shapes_spec)
         self.callback: DynamoCallback = callback
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Unset | DynamoCallback = unset
@@ -1038,12 +1033,8 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if config.debug_force_nested_calls and filename not in DONT_WRAP_FILES:
+        if config.debug_force_nested_calls:
             fn = external_utils.wrap_inline(fn)
-            # Create a new code object for `fn` so that functions have different
-            # recompilation caches.
-            # Copy hack since deepcopy doesn't actually give a new code object
-            fn.__code__ = fn.__code__.replace(co_varnames=fn.__code__.co_varnames)  # type: ignore[attr-defined]
         elif config.wrap_top_frame or (
             (
                 # exec/eval'd Python functions also report no source file
@@ -1306,7 +1297,7 @@ class OptimizeContext(_TorchDynamoContext):
         package: CompilePackage | None = None,
         hooks: Hooks | None = None,
         isolate_recompiles: bool = False,
-        shapes_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
+        shapes_spec: ShapesSpec | ParamsSpec | None = None,
     ) -> None:
         def on_enter() -> None:
             install_generation_tagging_init()
@@ -1487,7 +1478,7 @@ def _optimize_catch_errors(
     rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator] | None = None,
     package: CompilePackage | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
+    shapes_spec: ShapesSpec | ParamsSpec | None = None,
 ) -> OptimizeContext:
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -1697,7 +1688,7 @@ def _optimize(
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
+    shapes_spec: ShapesSpec | ParamsSpec | None = None,
 ) -> OptimizeContext | _NullDecorator:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -2670,7 +2661,7 @@ def _optimize_assert(
     package: CompilePackage | None = None,
     recompile_limit: int | None = None,
     isolate_recompiles: bool = False,
-    shapes_spec: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
+    shapes_spec: ShapesSpec | ParamsSpec | None = None,
 ) -> OptimizeContext:
     """
     Guarantees single-graph capture.

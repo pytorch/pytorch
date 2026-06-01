@@ -702,10 +702,6 @@ static void check_shape_forward(const at::Tensor& input,
   if (!transposed) {
     std::vector<T> input_shape;
     std::vector<T> kernel_shape;
-    if (k > 2) {
-      input_shape.reserve(k - 2);
-      kernel_shape.reserve(k - 2);
-    }
     bool kernel_size_correct = true;
 
     if constexpr (std::is_same_v<T, c10::SymInt>) {

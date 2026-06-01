@@ -134,7 +134,6 @@ class TestExecutionTrace(TestCase):
             e.get("args", {}).get("Record function id", -1) for e in ops_and_annotations
         )
 
-    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/123536")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfHpu
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")

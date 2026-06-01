@@ -135,7 +135,7 @@ class OpsHandler(Generic[T]):
     def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
         """
         Converts a sympy expression into a scalar suitable for indexing memory.
-        The kernel decides the actual computation dtype (typically int32); the
+        The kernel decides the actual computation dtype (typically int32) — the
         ``dtype`` argument is advisory and is not honored when it would conflict
         with the kernel's indexing dtype. For values that must respect the
         requested dtype, use ``value_expr`` instead.

@@ -26,7 +26,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     parametrize,
     xfailIfTorchDynamo,
-    skipIfXpu,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -2058,7 +2057,6 @@ class TestMetaKernelRegistrations(TestCase):
             )
             self.assertEqual(result, expected)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181490")
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_padded_dense_to_jagged_total_L_zero(self):
         from torch._subclasses.fake_tensor import FakeTensorMode

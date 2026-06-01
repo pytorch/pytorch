@@ -589,7 +589,7 @@ static bool check_group_multicast_support(
   } else {
     // We don't expect this to happen. But we want to let the user to know if
     // this happens.
-    if (!ranks_with_multicast_support.empty()) {
+    if (ranks_with_multicast_support.size() != 0) {
       LOG(WARNING)
           << "Only a subset of ranks in the group has multicast support: "
           << ranks_with_multicast_support << " (world_size=" << reqs.size()

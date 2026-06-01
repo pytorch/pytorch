@@ -187,7 +187,7 @@ class Attention(nn.Module):
             self.dropout_p if self.training else 0,
             self.use_attn_mask,
         )
-        output = output.transpose(1, 2).reshape(bsz, seq_len, -1)
+        output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
         return self.resid_dropout(self.wo(output))
 
 

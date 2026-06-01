@@ -31,7 +31,6 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
-    Min,
     ModularIndexing,
     TruncToFloat,
     TruncToInt,
@@ -43,7 +42,7 @@ from torch.utils._triton import (
 )
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
-from ...utils._sympy.value_ranges import bound_sympy, ValueRanges
+from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
@@ -211,65 +210,6 @@ def _materialize_trunc_to_float_expr(
         return node.func(*new_args)
 
     return rewrite_float_subexpr(expr)
-
-
-def _val_expressible_in_32_bits(val: Any) -> bool:
-    if getattr(val, "is_Boolean", False):
-        return True
-
-    if isinstance(val, sympy.Expr):
-        if not val.is_number:
-            return False
-        if val.is_Integer or val.is_Boolean:
-            val = int(val)
-        else:
-            val = float(val)
-
-    if isinstance(val, float):
-        return -(2**24) <= val <= 2**24
-
-    if isinstance(val, int):
-        iinfo = torch.iinfo(torch.int32)
-        return iinfo.min <= val <= iinfo.max
-
-    return False
-
-
-def _range_expressible_in_32_bits(bounds: ValueRanges[Any]) -> bool:
-    return _val_expressible_in_32_bits(bounds.lower) and _val_expressible_in_32_bits(
-        bounds.upper
-    )
-
-
-def _bound_triton_expr(expr: sympy.Expr) -> ValueRanges[Any]:
-    ranges: dict[sympy.Symbol, ValueRanges[Any]] = {}
-    for sym in expr.free_symbols:
-        if not isinstance(sym, sympy.Symbol):
-            continue
-        if node := V.kernel.range_tree_nodes.get(sym):
-            upper = node.length - 1
-            if isinstance(upper, sympy.Expr) and not upper.is_number:
-                upper = V.graph.sizevars.shape_env.bound_sympy(upper).upper
-            ranges[sym] = ValueRanges(0, upper)
-        elif symbol_is_type(sym, SymT.TMP):
-            ranges[sym] = V.kernel.cse.varname_map[sym.name].bounds
-    return bound_sympy(expr, ranges)
-
-
-def _integer_expr_requires_int64(expr: sympy.Expr) -> bool:
-    if expr.is_integer:
-        bounds = _bound_triton_expr(expr)
-        if getattr(bounds.lower, "is_infinite", False) or getattr(
-            bounds.upper, "is_infinite", False
-        ):
-            return True
-        if not _range_expressible_in_32_bits(bounds):
-            return True
-
-    return any(
-        isinstance(arg, sympy.Expr) and _integer_expr_requires_int64(arg)
-        for arg in expr.args
-    )
 
 
 class OpDtypeSupport:
@@ -1280,8 +1220,17 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
 
         def wrapped(*args, **kwargs) -> str:
             # Optionally upcast args to float32.
-            upcast_args = [maybe_upcast_arg(arg) for arg in args]
-            upcast_kwargs = {key: maybe_upcast_arg(val) for key, val in kwargs.items()}
+            def maybe_cast_arg(arg) -> str:
+                if (
+                    func.__name__ == "sqrt"
+                    and (arg_dtype := triton_arg_dtype(arg)) is not None
+                    and (arg_dtype == torch.bool or is_integer_dtype(arg_dtype))
+                ):
+                    return TritonOverrides._cast_libdevice_arg(arg, torch.float32)
+                return maybe_upcast_arg(arg)
+
+            upcast_args = [maybe_cast_arg(arg) for arg in args]
+            upcast_kwargs = {key: maybe_cast_arg(val) for key, val in kwargs.items()}
 
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
@@ -1424,21 +1373,6 @@ class TritonOverrides(OpOverrides):
     @classmethod
     def constant(cls, value, dtype):
         return cls._shaped_constant(value, dtype, shape=[])
-
-    @staticmethod
-    def sub(x, y):
-        if (
-            isinstance(x, CSEVariable)
-            and x == y
-            and x.dtype is not None
-            and x.dtype.is_floating_point
-        ):
-            # Avoid giving LLVM a tmp - tmp pattern that it can reassociate
-            # through tmp's producer. A plain 0.0 is only valid for finite
-            # inputs; nan/inf inputs should still produce nan like x - x.
-            non_finite = f"({TritonOverrides.isnan(x)} | {TritonOverrides.isinf(x)})"
-            return f"tl.where({non_finite}, {x} * 0.0, 0.0)"
-        return f"{x} - {y}"
 
     @classmethod
     def _cast_libdevice_arg(cls, arg, dtype: torch.dtype) -> str:
@@ -2501,48 +2435,33 @@ class TritonKernelOverrides(TritonOverrides):
         whose result participates in tensor computation).
         """
         expr, indexing, shape = cls._prepare_expr_indexing(expr, dtype)
-        is_predicate = bool(
-            getattr(expr, "is_Boolean", False) or getattr(expr, "is_Relational", False)
-        )
-        index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-        operand_dtype = dtype
-        result_dtype = dtype
-        if is_predicate or dtype == torch.bool:
-            expr_requires_int64 = _integer_expr_requires_int64(expr)
-            operand_dtype = torch.int64 if expr_requires_int64 else index_dtype
-            if is_predicate:
-                result_dtype = torch.bool
-            elif expr.is_integer:
-                result_dtype = operand_dtype
-            else:
-                result_dtype = torch.float32
-        elif dtype.is_floating_point:
-            expr_requires_int64 = _integer_expr_requires_int64(expr)
-            if expr.is_integer:
-                operand_dtype = torch.int64 if expr_requires_int64 else index_dtype
-                result_dtype = operand_dtype
-            else:
-                result_dtype = upcast_compute_type(dtype)
-                operand_dtype = torch.int64 if expr_requires_int64 else result_dtype
 
-        index_str = cls._value_expr_index_str(indexing, operand_dtype)
+        # Pick the dtype for the integer arithmetic inside the expression.
+        # TODO: use bounds analysis to narrow to int32 when safe, avoiding
+        # unnecessary int64 widening for float-targeted expressions.
+        if expr.is_integer and (dtype.is_floating_point or dtype == torch.bool):
+            compute_dtype = torch.int64
+        else:
+            compute_dtype = dtype
+
+        index_str = cls._value_expr_index_str(indexing, compute_dtype)
         var = cls._emit_expr_indexing(
             expr,
             indexing,
             shape,
             index_str,
-            result_dtype,
-            result_dtype,
+            compute_dtype,
+            compute_dtype,
             use_compute_types=False,
         )
 
-        if result_dtype != dtype:
+        if compute_dtype != dtype:
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 cls.to_dtype(
                     var,
                     dtype,
-                    src_dtype=result_dtype,
+                    src_dtype=compute_dtype,
                     use_compute_types=False,
                 ),
                 dtype=dtype,
@@ -2592,13 +2511,7 @@ class TritonKernelOverrides(TritonOverrides):
             if not isinstance(sym, sympy.Symbol):
                 continue
 
-            if symbol_is_type(sym, scalar_float_types):
-                continue
-            if symbol_is_type(sym, scalar_int_types):
-                name = V.kernel.index_to_str(sym)
-                shape = ()
-                src_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-            elif symbol_is_type(sym, TritonSymbols.block_types):
+            if symbol_is_type(sym, TritonSymbols.block_types):
                 name = sym.name
                 shape = TritonSymbols.get_block_shape(sym)
                 src_dtype = V.kernel.get_index_dtype_as_torch_dtype()
@@ -2607,6 +2520,14 @@ class TritonKernelOverrides(TritonOverrides):
                 shape = src_var.shape
                 src_dtype = src_var.dtype
                 name = sym.name
+            elif symbol_is_type(sym, scalar_int_types):
+                name = V.kernel.index_to_str(sym)
+                shape = ()
+                src_dtype = torch.int64
+            elif symbol_is_type(sym, scalar_float_types):
+                name = V.kernel.index_to_str(sym)
+                shape = ()
+                src_dtype = torch.float64
             else:
                 continue
             if is_integer_dtype(dtype) and src_dtype.is_floating_point:
@@ -3689,7 +3610,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         sizevars.lookup_precomputed_size(slice_numels[0]),
                     )
                 ] + [
-                    Min(
+                    sympy.Min(
                         CeilDiv(
                             linear_block_size, sizevars.lookup_precomputed_size(numel)
                         ),

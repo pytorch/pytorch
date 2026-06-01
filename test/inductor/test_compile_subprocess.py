@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI350_ARCH,
-    skipIfRocm,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -75,12 +74,6 @@ test_failures = {
     "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
     # can not pickle ParametrizedConv2d
     "test_weight_norm_conv2d": TestFailure(("cpu", "cuda"), is_skip=True),
-    # This manually constructs an FX graph with an OpOverloadPacket target to
-    # cover a legacy lowering table entry, which is outside the subprocess
-    # compile serialization path this file exercises.
-    "test_split_overload_packet_lowering": TestFailure(
-        ("cpu", "cuda", "xpu"), is_skip=True
-    ),
 }
 
 if TEST_WITH_ROCM and not torch.cuda.has_magma:
@@ -116,8 +109,6 @@ class TestSubprocess(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157788")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157724")
     @requires_gpu()
     @requires_triton()
     @unittest.skipIf(

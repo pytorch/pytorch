@@ -61,18 +61,15 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
-    IS_LINUX,
     IS_SANDCASTLE,
     MACOS_VERSION,
     noncontiguous_like,
     parametrize,
     run_tests,
     set_default_dtype,
-    skipIfRocm,
     skipIfTorchDynamo,
     skipIfTorchInductor,
     suppress_warnings,
-    TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
     TestCase,
@@ -494,7 +491,6 @@ class TestCommon(TestCase):
                 )
 
     # Tests that the cpu and gpu results are consistent
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/101625")
     @onlyOn(["cuda", "xpu"])
     @suppress_warnings
     @skipCUDAIfNotRocm
@@ -836,7 +832,6 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/165294")
     @skipXPU
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -1539,7 +1534,6 @@ class TestCommon(TestCase):
 
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/108743")
     @skipXPU
     @ops(op_db, allowed_dtypes=(torch.complex32,))
     def test_complex_half_reference_testing(self, device, dtype, op):
@@ -1968,10 +1962,6 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
             )
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHINDUCTOR or IS_LINUX,
-        "https://github.com/pytorch/pytorch/issues/181685",
-    )
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
@@ -2500,6 +2490,7 @@ class TestRefsOpsInfo(TestCase):
         "_refs.index_add_",
         "_refs.index_copy_",
         "_refs.index_fill_",
+        "_refs.native_group_norm",
     }
 
     not_in_decomp_table = {
@@ -2976,19 +2967,12 @@ class TestFakeTensor(TestCase):
             except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/159151"
-    )
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(fake_backward_xfails)
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHINDUCTOR or IS_LINUX or TEST_WITH_ROCM,
-        "https://github.com/pytorch/pytorch/issues/159150",
-    )
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(fake_backward_xfails | fake_autocast_backward_xfails)

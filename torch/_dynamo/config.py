@@ -620,8 +620,7 @@ issue_3_13_0_warning = True
 # traced FX graph is empty when RETURN_* is traced.
 allow_empty_graphs = False
 
-# Used for testing - forces all top-level functions to be nested when traced with Dynamo.
-# There are slight differences between this config and wrap_top_frame.
+# Used for testing - forces all top-level functions to be nested when traced with Dynamo
 debug_force_nested_calls = False
 
 # Used for testing - forces a graph break when a function

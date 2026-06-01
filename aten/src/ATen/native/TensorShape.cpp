@@ -356,7 +356,6 @@ DEFINE_DISPATCH(stack_serial_stub);
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
   TORCH_CHECK(shape_tensor.dim() == 1);
   std::vector<int64_t> shape;
-  shape.reserve(shape_tensor.numel());
   auto accessor = shape_tensor.accessor<int64_t, 1>();
   for (const auto i : c10::irange(shape_tensor.numel())) {
     shape.push_back(accessor[i]);
@@ -873,8 +872,6 @@ static Tensor cat_sparse_impl(
   int64_t dense_dim = tensors[0].get().dense_dim();
   IntArrayRef sizes = tensors[0].get().sizes();
   if (wrapped < sparse_dim) {
-    indices.reserve(tensors.size());
-    values.reserve(tensors.size());
     for (const auto i : c10::irange(tensors.size())) {
       const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
@@ -949,8 +946,6 @@ static Tensor cat_sparse_impl(
     int64_t cumulative_size = 0;
     std::vector<Tensor> vals_pieces;
     std::vector<Tensor> idxs_pieces;
-    vals_pieces.reserve(tensors.size());
-    idxs_pieces.reserve(tensors.size());
     for (const auto i : c10::irange(tensors.size())) {
       const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);

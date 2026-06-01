@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import math
 import operator
 from typing import *  # noqa: F403
 
@@ -8,7 +9,7 @@ import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
-from .nested_tensor import _jagged_numel, NestedTensor
+from .nested_tensor import NestedTensor
 
 
 __all__: list[Any] = []
@@ -507,7 +508,9 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
         return len(args[0]._size)
 
     if func in (torch.ops.aten.sym_numel.default, torch.ops.aten.numel.default):
-        return _jagged_numel(args[0], func)
+        if args[0]._lengths is not None:
+            return int(sum(args[0]._lengths) * math.prod(args[0]._size[2:]))
+        return args[0]._values.numel()
 
     if func is torch.ops.aten.sym_stride.default:
         return args[0]._strides

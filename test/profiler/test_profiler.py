@@ -61,20 +61,17 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_JETSON,
     IS_LINUX,
-    IS_MACOS,
     IS_WINDOWS,
     IS_X86,
     parametrize,
     run_tests,
     serialTest,
-    skipIfRocm,
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
     TEST_CUDA,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
-    TEST_WITH_SLOW,
     TEST_XPU,
     TestCase,
     xfailIfNoAcceleratorTriton,
@@ -111,7 +108,6 @@ except ModuleNotFoundError:
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/78457")
     def test_mem_leak(self):
         """Checks that there's no memory leak when using profiler with CUDA"""
         t = torch.rand(1, 1).cuda()
@@ -1354,9 +1350,6 @@ class TestProfiler(TestCase):
             # Should fall back to normal path
             prof.events()
 
-    @unittest.skipIf(
-        IS_MACOS or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/82915"
-    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_tensorboard_trace_handler(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -2930,7 +2923,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             y = torch.mm(x, x)
         self.assertEqual(len(p.events()), 0)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180072")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not TEST_CUDA, "CUDA is required")
     def test_kineto_kernel_metadata_in_trace(self):
@@ -3452,7 +3444,6 @@ aten::mm""",
         shapes_factor_map = pattern.benchmark(pattern.matched_events())
         self.assertEqual(len(shapes_factor_map), 2)
 
-    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/165949")
     def test_profiler_optimizer_single_tensor_pattern(self):
         x = torch.ones((100, 100))
         cases = (
@@ -3784,10 +3775,6 @@ aten::mm""",
 
         check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/158727",
-    )
     @xfailIfNoAcceleratorTriton
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_profiler_debug_autotuner(self):
@@ -4714,7 +4701,6 @@ class TestProfilerEventsParity(TestCase):
                     f"activity_type mismatch for {e.name}",
                 )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
     def test_structured_metadata_matches_chrome_trace(self):
         # Compare metadata fields between events() and Chrome trace JSON to make sure they stay in parity
         # 1. Run a dummy workload with profiling enabled and collect the json/events() outputs

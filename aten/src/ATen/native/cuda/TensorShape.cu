@@ -515,7 +515,7 @@ get_chunk_cat_metadata(
   // Inline computing `chunk_size` to avoid redundant computation
   int64_t chunk_size = 0;
   for (const auto i : c10::irange(num_tensors)) {
-    const at::Tensor& tensor = tensors[i];
+    at::Tensor tensor = tensors[i];
     srcs.push_back(reinterpret_cast<int64_t>(tensor.data_ptr()));
     auto sizes = tensor.sizes();
     auto [pad_size_along_dim, trailing_numel] =
@@ -543,13 +543,13 @@ get_chunk_cat_metadata(
       leading_dim,
       num_blocks_per_chunk,
       slice_size,
-      std::move(srcs),
-      std::move(block_idx_to_tensor_idx),
-      std::move(tensor_idx_to_start_tensor_bytes),
-      std::move(start_block_idx_per_tensor_chunk),
-      std::move(actual_tensor_sizes),
-      std::move(pad_tensor_chunk_sizes),
-      std::move(num_blocks_per_tensor_chunk));
+      srcs,
+      block_idx_to_tensor_idx,
+      tensor_idx_to_start_tensor_bytes,
+      start_block_idx_per_tensor_chunk,
+      actual_tensor_sizes,
+      pad_tensor_chunk_sizes,
+      num_blocks_per_tensor_chunk);
 }
 
 // See [CUDA kernel for chunk_cat_cuda]

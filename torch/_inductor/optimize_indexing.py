@@ -153,7 +153,7 @@ class _IndexValueRule:
     # Inputs in the LoopBody FX node that act as terminal sinks.
     indexing_sinks: tuple[Any, ...] = ()
     value_sinks: tuple[Any, ...] = ()
-    # Inputs whose values determine this op's result. None means all inputs.
+    # Inputs that receive value use from this op's result. None means all inputs.
     value_inputs: tuple[Any, ...] | None = ()
 
 
@@ -222,6 +222,7 @@ class _IndexValueOpsHandler:
         "trunc_to_int",
         "truncdiv",
         "value_expr",
+        "where",
     )
 
     def __new__(cls) -> "_IndexValueOpsHandler":
@@ -371,7 +372,7 @@ class _IndexValueOpsHandler:
 
     def masked(self, mask: Any, body: Any, other: Any) -> _IndexValueRule:
         return _IndexValueRule(
-            value_sinks=(mask,),
+            indexing_sinks=(mask,),
             value_inputs=(other,),
         )
 
@@ -422,17 +423,11 @@ class _IndexValueOpsHandler:
     ) -> _IndexValueRule:
         return self.store(name, index, value)
 
-    def where(self, condition: Any, input: Any, other: Any) -> _IndexValueRule:
-        return _IndexValueRule(
-            value_sinks=(condition,),
-            value_inputs=(input, other),
-        )
-
     # LoopBody pseudo call_module rules.
 
     def masked_subblock(self, mask: Any, other: Any) -> _IndexValueRule:
         return _IndexValueRule(
-            value_sinks=(mask,),
+            indexing_sinks=(mask,),
             value_inputs=(other,),
         )
 
@@ -531,14 +526,19 @@ def _compute_graph_uses(
             continue
 
         if demand & _INDEXING_DEMAND and node.target != "load":
-            if rule is not None and rule.value_inputs is not None:
-                for arg in rule.value_inputs:
-                    mark_rule_arg(node, arg, _INDEXING_DEMAND)
+            if _is_masked_subblock(node):
+                if rule is not None:
+                    value_inputs = rule.value_inputs
+                    assert value_inputs is not None
+                    for arg in value_inputs:
+                        mark_rule_arg(node, arg, _INDEXING_DEMAND)
             else:
                 mark_args(node, _INDEXING_DEMAND)
 
         if demand & _VALUE_DEMAND and node.target != "load":
             if rule is None:
+                continue
+            if _is_masked_subblock(node) and demand & _INDEXING_DEMAND:
                 continue
             if rule.value_inputs is not None:
                 for arg in rule.value_inputs:
@@ -578,11 +578,15 @@ def _graph_output_contexts(
                 continue
 
             child_is_indexing = node in indexing_use
-            child_is_value = node in value_use
+            # Policy choice for this pass: if the same masked-subblock result
+            # is both index-used and value-used, keep its body on the indexing
+            # path instead of cloning the subblock for a separate value result.
+            child_is_value = node in value_use and not child_is_indexing
             old_is_indexing, old_is_value = contexts.get(subblock_graph, (False, False))
+            new_is_indexing = old_is_indexing or child_is_indexing
             new_context = (
-                old_is_indexing or child_is_indexing,
-                old_is_value or child_is_value,
+                new_is_indexing,
+                (old_is_value or child_is_value) and not new_is_indexing,
             )
             if new_context != (old_is_indexing, old_is_value):
                 contexts[subblock_graph] = new_context
@@ -608,8 +612,8 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
       - Any ``index_expr`` reachable from a value sink is rewritten to
         ``value_expr`` on the value path. If the same node also reaches an
         indexing sink, the value path is cloned first so indexing uses keep
-        the original ``index_expr``. Mixed masked-subblock outputs are
-        rewritten on the value path without cloning the subblock.
+        the original ``index_expr``. A mixed masked-subblock output is treated
+        as indexing-only by policy above, avoiding subblock cloning.
 
     """
     graphs = [
@@ -632,9 +636,8 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
             output_is_value=output_is_value,
         )
         value_clones: dict[torch.fx.Node, torch.fx.Node] = {}
-        rewritten_value_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
 
-        def value_version(node: torch.fx.Node) -> torch.fx.Node:
+        def value_version(node: torch.fx.Node, anchor: torch.fx.Node) -> torch.fx.Node:
             # Value-only chains can be rewritten in place. Mixed value/indexing
             # chains are cloned so indexing users keep the original path.
             if node.op == "placeholder":
@@ -648,7 +651,7 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                     node.target = "value_expr"
                     return node
                 if node not in value_clones:
-                    with graph.inserting_after(node):
+                    with graph.inserting_before(anchor):
                         clone = graph.call_method(
                             "value_expr", node.args, dict(node.kwargs)
                         )
@@ -665,13 +668,11 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                 if not value_inputs:
                     return node
                 if node not in indexing_use:
-                    if node not in rewritten_value_nodes:
-                        rewritten_value_nodes.add(node)
-                        rewrite_rule_args(node, value_inputs)
+                    rewrite_rule_args(node, value_inputs)
                     return node
 
                 if node not in value_clones:
-                    with graph.inserting_after(node):
+                    with graph.inserting_before(anchor):
                         clone = graph.node_copy(node, lambda n: n)
                     clone.meta = node.meta.copy()
                     clone_rule = _IndexValueOpsHandler().rule_for_node(clone)
@@ -683,30 +684,30 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                 return value_clones[node]
 
             if node not in indexing_use:
-                if node not in rewritten_value_nodes:
-                    rewritten_value_nodes.add(node)
-                    node.args = map_arg(node.args, value_version)
-                    node.kwargs = map_arg(node.kwargs, value_version)
+                node.args = map_arg(node.args, lambda n: value_version(n, node))
+                node.kwargs = map_arg(node.kwargs, lambda n: value_version(n, node))
                 return node
 
             if node not in value_clones:
-                with graph.inserting_after(node):
-                    clone = graph.node_copy(node, value_version)
+                with graph.inserting_before(anchor):
+                    clone = graph.node_copy(node, lambda n: value_version(n, anchor))
                 clone.meta = node.meta.copy()
                 value_clones[node] = clone
             return value_clones[node]
 
-        def rewrite_value_arg(arg: Any) -> Any:
-            return map_arg(arg, value_version)
+        def rewrite_value_arg(arg: Any, anchor: torch.fx.Node) -> Any:
+            return map_arg(arg, lambda n: value_version(n, anchor))
 
         def rewrite_rule_args(node: torch.fx.Node, sinks: tuple[Any, ...]) -> None:
             for arg in sinks:
-                _rewrite_rule_arg(node, arg, rewrite_value_arg)
+                _rewrite_rule_arg(
+                    node, arg, lambda value: rewrite_value_arg(value, node)
+                )
 
         for node in graph.nodes:
             if node.op == "output":
                 if output_is_value:
-                    node.args = rewrite_value_arg(node.args)
+                    node.args = rewrite_value_arg(node.args, node)
                 continue
 
             rule = _IndexValueOpsHandler().rule_for_node(node)
@@ -714,7 +715,11 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
                 continue
             if rule.value_sinks:
                 rewrite_rule_args(node, rule.value_sinks)
-            if _is_masked_subblock(node) and node in value_use:
+            if (
+                _is_masked_subblock(node)
+                and node in value_use
+                and node not in indexing_use
+            ):
                 value_inputs = rule.value_inputs
                 assert value_inputs is not None
                 rewrite_rule_args(node, value_inputs)

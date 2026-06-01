@@ -3021,7 +3021,7 @@
 
 - func: native_group_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, SymInt N, SymInt C, SymInt HxW, int group, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU, CUDA, MPS: native_group_norm_backward
+    CPU, CUDA: native_group_norm_backward
   autogen: native_group_norm_backward.out
   tags: core
 

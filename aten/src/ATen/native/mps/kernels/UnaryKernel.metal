@@ -375,8 +375,7 @@ struct log10_functor {
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    constexpr float inv_log_base = 1.0f / M_LN10_F;
-    return T(inv_log_base * real, inv_log_base * imag);
+    return div(T(real, imag), T(::precise::log(10), 0));
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -401,7 +400,7 @@ struct log1p_functor {
     return T(real, imag);
   }
   inline float operator()(const bool x) {
-    return x ? M_LN2_F : 0;
+    return x ? ::precise::log(2.0) : 0;
   }
 };
 
@@ -416,12 +415,11 @@ struct log2_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // Base 2 complex log = ln(x+yi)/ln(2)
+    // Base 10 complex log = ln(x+yi)/ln(2)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
     auto real = ::precise::log(magnitude);
     auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    constexpr float inv_log_base = 1.0f / M_LN2_F;
-    return T(inv_log_base * real, inv_log_base * imag);
+    return div(T(real, imag), T(::precise::log(2), 0));
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -500,13 +498,14 @@ struct exp2_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // based on https://mathworld.wolfram.com/ComplexExponentiation.html
-    auto coef = ::precise::pow(2, x.x);
+    auto coef = ::precise::pow(4, x.x / 2);
     // y == 0: same rationale as exp_ short-circuit (avoid coef*0 = NaN).
     if (x.y == 0) {
       return T(coef, 0);
     }
+    auto ln = ::precise::log(4);
     float real;
-    float imag = ::precise::sincos(static_cast<float>(x.y) * M_LN2_F, real);
+    float imag = ::precise::sincos(static_cast<float>(0.5 * x.y * ln), real);
     using elem_t = decltype(x.x + x.x);
     return T(
         coef * static_cast<elem_t>(real), coef * static_cast<elem_t>(imag));

@@ -12,7 +12,6 @@ import sys
 import tempfile
 import threading
 import time
-import unittest
 import warnings
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -68,14 +67,12 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     IS_SANDCASTLE,
     parametrize,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
-    skipIfRocm,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
@@ -91,6 +88,10 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
     torch.version.cuda is not None or torch.version.hip is not None
+)
+
+CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
+    torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
 )
 
 _start_time = time.time()
@@ -354,7 +355,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         #       exit code -6
         TEST_NAN_ASSERT_RETURN = (
             0
-            if (IS_SANDCASTLE and not TEST_MULTIGPU)
+            if (IS_SANDCASTLE and not (TEST_MULTIGPU and CUDA_12_AND_ABOVE))
             else (-signal.SIGABRT if torch.version.hip else signal.SIGABRT)
         )
         self.special_return_code_checks = {
@@ -547,16 +548,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # reset ENV
         os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "0"
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176975")
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177007")
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/166067")
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177006")
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/164426")
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/166066")
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU,
-        "NCCL test requires 2+ GPUs",
+        # skip for cu126 as well due to https://github.com/pytorch/pytorch/issues/153479
+        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
+        "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
     )
     @parametrize(
         "type",
@@ -4624,7 +4620,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 output = torch.zeros(60 * self.world_size, device=device)
                 torch.distributed.all_gather_into_tensor(output, t)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/115859")
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize(

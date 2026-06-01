@@ -28,13 +28,11 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     parametrize,
     run_tests,
     skipIfHpu,
     TEST_CUDA,
     TEST_HPU,
-    TEST_WITH_ROCM,
     TEST_XPU,
     TestCase,
 )
@@ -251,9 +249,6 @@ class TestPgTag(MultiThreadedTestCase):
         # Cannot erase the tag of a PG
         self.assertEqual(pg_tag0, roundtrip(pg_tag0, ""))
 
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/107278"
-    )
     def test_find_or_create_pg(self):
         pg = c10d._find_or_create_pg_by_ranks_and_tag("blu", [0, 1, 2, 3], 2)
         pg_tag0, _ = new_subgroups(group_size=2, pg_tag="blu")

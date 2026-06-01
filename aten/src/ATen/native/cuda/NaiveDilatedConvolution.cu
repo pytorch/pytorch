@@ -538,7 +538,7 @@ Tensor slow_conv_dilated3d_cuda(
   Tensor output_ = (is_batch ? output : output.unsqueeze(0));
 
   slow_conv_dilated_all_cuda_template<3>(
-      output_,
+      output,
       input_,
       weight_,
       bias_,

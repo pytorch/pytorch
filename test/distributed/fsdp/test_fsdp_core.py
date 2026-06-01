@@ -36,7 +36,6 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    IS_LINUX,
     parametrize,
     run_tests,
     TEST_HPU,
@@ -105,7 +104,6 @@ class TestParityWithDDP(FSDPTest):
             "use_orig_params": [False, True],
         }
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/170373")
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_nested_wrapped_model(

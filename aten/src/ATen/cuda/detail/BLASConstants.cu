@@ -2,14 +2,16 @@
 #include <ATen/Tensor.h>
 #include <ATen/cuda/Exceptions.h>
 
-namespace at::cuda::detail {
+namespace at {
+namespace cuda {
+namespace detail {
 
 __device__ __constant__ float cublas_one_device;
 __device__ __constant__ float cublas_zero_device;
 
 float *get_cublas_device_one() {
   static float *ptr = nullptr;
-  [[maybe_unused]] static auto init_flag = [&]() {
+  static auto init_flag = [&]() {
     const float one = 1.f;
     AT_CUDA_CHECK(cudaMemcpyToSymbol(cublas_one_device, &one, sizeof(float)));
     AT_CUDA_CHECK(cudaGetSymbolAddress(reinterpret_cast<void**>(&ptr), cublas_one_device));
@@ -21,7 +23,7 @@ float *get_cublas_device_one() {
 
 float *get_cublas_device_zero() {
   static float *ptr = nullptr;
-  [[maybe_unused]] static auto init_flag = [&]() {
+  static auto init_flag = [&]() {
     const float zero = 0.f;
     AT_CUDA_CHECK(cudaMemcpyToSymbol(cublas_zero_device, &zero, sizeof(float)));
     AT_CUDA_CHECK(cudaGetSymbolAddress(reinterpret_cast<void**>(&ptr), cublas_zero_device));
@@ -42,4 +44,6 @@ float *get_user_alpha_ptr() {
   return alpha_ptr;
 }
 
-} // namespace at::cuda::detail
+} // namespace detail
+} // namespace cuda
+} // namespace at

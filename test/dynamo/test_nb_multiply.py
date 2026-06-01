@@ -512,54 +512,6 @@ class TestNbMultiply(torch._dynamo.test_case.TestCase):
         self.assertEqual(f(2, 3), [2, 2, 2])
         self.assertEqual(f(2, True), [2])
 
-    # --- Sequence * SymNode must route through sq_repeat, not nb_multiply ---
-
-    def test_list_mul_symint_iter(self):
-        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
-        def f(t):
-            return list([1, 2] * t.shape[0])
-
-        self.assertEqual(f(torch.randn(3, 4)), [1, 2, 1, 2, 1, 2])
-
-    def test_symint_mul_list_iter(self):
-        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
-        def f(t):
-            return list(t.shape[0] * [1, 2])
-
-        self.assertEqual(f(torch.randn(3, 4)), [1, 2, 1, 2, 1, 2])
-
-    def test_tuple_mul_symint_iter(self):
-        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
-        def f(t):
-            return list((1, 2) * t.shape[0])
-
-        self.assertEqual(f(torch.randn(3, 4)), [1, 2, 1, 2, 1, 2])
-
-    def test_str_mul_symint_iter(self):
-        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
-        def f(t):
-            return list("ab" * t.shape[0])
-
-        self.assertEqual(f(torch.randn(3, 4)), ["a", "b", "a", "b", "a", "b"])
-
-    def test_list_imul_symint_iter(self):
-        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
-        def f(t):
-            xs = [1, 2]
-            xs *= t.shape[0]
-            return list(xs)
-
-        self.assertEqual(f(torch.randn(3, 4)), [1, 2, 1, 2, 1, 2])
-
-    def test_list_mul_symint_sum(self):
-        # Forces iteration via sum() rather than list() to exercise a
-        # different consumer of the resulting sequence VT.
-        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
-        def f(t):
-            return sum([1, 2] * t.shape[0])
-
-        self.assertEqual(f(torch.randn(3, 4)), 9)
-
     # --- Error message accuracy (matches CPython exactly) ---
 
     @make_dynamo_test

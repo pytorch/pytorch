@@ -15,14 +15,7 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
-from torch.testing._internal.common_utils import (
-    IS_LINUX,
-    IS_MACOS,
-    IS_WINDOWS,
-    requires_cuda,
-    TEST_WITH_ROCM,
-    TEST_XPU,
-)
+from torch.testing._internal.common_utils import requires_cuda, TEST_XPU
 
 
 def remove_file_comment(gm_str: str) -> str:
@@ -1863,10 +1856,6 @@ class GraphModule(torch.nn.Module):
                 torch.ones(2, 2, device="cuda")
             )
 
-    @unittest.skipIf(
-        IS_LINUX or IS_MACOS or TEST_WITH_ROCM or IS_WINDOWS,
-        "https://github.com/pytorch/pytorch/issues/178155",
-    )
     @requires_cuda
     @unittest.skip("https://github.com/pytorch/pytorch/issues/177771")
     def test_cuda_event_record_on_stream(self):

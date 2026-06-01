@@ -42,9 +42,6 @@ from torch.testing._internal.common_utils import (
     MI200_ARCH,
     skipIfRocm,
     skipIfRocmArch,
-    skipIfXpu,
-    TEST_WITH_ROCM,
-    TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -315,7 +312,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184490")
     @patches
     def test_mm_plus_mm(self):
         @torch.compile
@@ -1170,9 +1166,6 @@ class TestTemplateRender(TestCase):
                 kernels[0]
             )
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM or TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959"
-    )
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")

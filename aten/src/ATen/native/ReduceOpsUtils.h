@@ -308,7 +308,6 @@ inline std::vector<int64_t> get_zero_numel_tensor_size(
     sizes[dim] = 1;
   }
   else {
-    sizes.reserve(self.dim() - 1);
     for (const auto d : c10::irange(self.dim())) {
       if (d != dim) {
         sizes.push_back(self.sizes()[d]);

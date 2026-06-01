@@ -324,6 +324,8 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   if (scale_grad_by_freq) {
     count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
+      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
       // Compute an increasing sequence per unique item in sortedIndices:
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 1 2 3 1 2 1 1 2

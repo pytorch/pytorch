@@ -612,7 +612,7 @@ Tensor slow_conv_dilated3d_cpu(
   Tensor output_ = (is_batch ? output : output.unsqueeze(0));
 
   slow_conv_dilated_all_cpu_template<3>(
-      output_,
+      output,
       input_,
       weight_,
       bias_,

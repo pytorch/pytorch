@@ -7,7 +7,6 @@ import shutil
 import sys
 import tempfile
 import unittest
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch._dynamo.test_case
@@ -16,7 +15,6 @@ from torch._dynamo.repro.after_aot import (
     _get_compile_args,
     InputReader,
     InputWriter,
-    repro_minify,
     save_graph_repro,
 )
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -117,41 +115,6 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
 
             self.assertIsInstance(restored, torch.SymInt)
             self.assertTrue(restored.node.expr.has(ModularIndexing))
-
-    def test_repro_minify_disables_repro_after(self):
-        seen_repro_after = object()
-
-        def fake_repro_common(options, mod, load_args):
-            def f(x):
-                return (x,)
-
-            args = [torch.randn(1)]
-            return make_fx(f)(*args), args
-
-        def fake_minifier(*args, **kwargs):
-            nonlocal seen_repro_after
-            seen_repro_after = torch._dynamo.config.repro_after
-
-        options = SimpleNamespace(
-            accuracy="accuracy",
-            check_str=None,
-            isolate=False,
-            save_dir=None,
-            tracing_mode="real",
-            offload_to_disk=False,
-            skip_saving_eager_intermediates=False,
-            skip_sanity=False,
-            max_granularity=None,
-        )
-
-        with (
-            torch._dynamo.config.patch(repro_after="aot"),
-            patch("torch._dynamo.repro.after_aot.repro_common", fake_repro_common),
-            patch("functorch.compile.minifier", fake_minifier),
-        ):
-            repro_minify(options, torch.nn.Identity(), lambda reader: None)
-
-        self.assertIsNone(seen_repro_after)
 
     @unittest.skipIf(IS_FBCODE, "NotImplementedError")
     def test_save_graph_repro(self):

@@ -11,15 +11,13 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
-#include <ATen/ops/full_native.h>
 #include <ATen/ops/group_norm_native.h>
+#include <ATen/ops/native_batch_norm.h>
 #include <ATen/ops/native_group_norm.h>
 #include <ATen/ops/native_group_norm_backward_native.h>
 #include <ATen/ops/native_group_norm_native.h>
-#include <ATen/ops/var_mean.h>
 #endif
 
-#include <algorithm>
 #include <array>
 #include <tuple>
 #include <vector>
@@ -211,6 +209,7 @@ Tensor group_norm(
 DEFINE_DISPATCH(GroupNormKernel);
 DEFINE_DISPATCH(GroupNormBackwardKernel);
 
+// Ported from pytorch/xla repo
 std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     const Tensor& input,
     const std::optional<Tensor>& weight_opt,
@@ -220,30 +219,38 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     int64_t HxW,
     int64_t group,
     double eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  const Tensor& bias = bias_opt.value_or(Tensor());
+
   auto input_shape = input.sizes();
-  if (std::ranges::any_of(input_shape, [](auto s) { return s == 0; })) {
-    return std::make_tuple(
-        at::native::empty_like(input),
-        at::native::full({N, group}, NAN, input.scalar_type(), {}, input.device()),
-        at::native::full({N, group}, NAN, input.scalar_type(), {}, input.device()));
+  at::Tensor input_reshaped = input.view({1, N * group, N ? -1 : 1});
+  auto outputs = at::native_batch_norm(
+      input_reshaped,
+      /*weight=*/{},
+      /*bias=*/{},
+      /*running_mean=*/{},
+      /*running_var=*/{},
+      /*training=*/true,
+      /*momentum=*/0,
+      eps);
+  auto out = std::get<0>(outputs).view(input_shape);
+  std::vector<int64_t> affine_param_shape(input.dim(), 1);
+  affine_param_shape[1] = C;
+  if (weight.defined() && bias.defined()) {
+    out = bias.view(affine_param_shape)
+              .addcmul(out, weight.view(affine_param_shape), 1);
+  } else if (weight.defined()) {
+    out = out.mul(weight.view(affine_param_shape));
+  } else if (bias.defined()) {
+    out = out.add(bias.view(affine_param_shape));
   }
-
-  auto input_reshaped = input.view({N, group, C / group * HxW});
-  auto [var, mean] = at::var_mean(input_reshaped, {2}, c10::Scalar(0), true);
-  auto rsqrt = var.add(eps).rsqrt();
-  auto out = input_reshaped.sub(mean).mul(rsqrt).reshape(input_shape);
-
-  std::vector<int64_t> weight_bias_shape(input.ndimension(), 1);
-  weight_bias_shape[1] = C;
-  if (weight_opt && weight_opt->defined()) {
-    out = out.mul(weight_opt->view(weight_bias_shape));
-  }
-  if (bias_opt && bias_opt->defined()) {
-    out = out.add(bias_opt->view(weight_bias_shape));
-  }
-
-  mean = mean.squeeze(-1);
-  rsqrt = rsqrt.squeeze(-1);
-  return std::make_tuple(std::move(out), std::move(mean), std::move(rsqrt));
+  // convert mean/std to have the same dtype as input.
+  // This follows the same behavior as the CPU and CUDA kernels.
+  at::Tensor mean = std::get<1>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
+  at::Tensor rstd = std::get<2>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
+  return std::make_tuple(std::move(out), std::move(mean), std::move(rstd));
 }
 } // namespace at::native

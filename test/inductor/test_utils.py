@@ -368,25 +368,5 @@ class TestFP4Support(TestCase):
         self.assertTrue(t.is_cuda)
 
 
-class TestTritonTypeMapping(TestCase):
-    """Tests for acc_type() dtype conversions."""
-
-    def test_acc_type(self):
-        from torch._inductor.kernel.mm_common import acc_type
-
-        cases = {
-            "half promotes to float32": (torch.float16, "tl.float32"),
-            "bfloat16 promotes to float32": (torch.bfloat16, "tl.float32"),
-            "float32 passthrough": (torch.float32, "tl.float32"),
-            "fp8 e4m3fn promotes to float32": (torch.float8_e4m3fn, "tl.float32"),
-            "fp8 e5m2 promotes to float32": (torch.float8_e5m2, "tl.float32"),
-            "fp8 e4m3fnuz promotes to float32": (torch.float8_e4m3fnuz, "tl.float32"),
-            "fp8 e5m2fnuz promotes to float32": (torch.float8_e5m2fnuz, "tl.float32"),
-        }
-        for desc, (dtype, expected) in cases.items():
-            with self.subTest(desc=desc, dtype=dtype):
-                self.assertEqual(acc_type(dtype), expected)
-
-
 if __name__ == "__main__":
     run_tests()

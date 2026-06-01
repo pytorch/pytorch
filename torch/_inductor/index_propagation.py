@@ -16,7 +16,8 @@ The underlying handler would just see:
     ops.load("buf0", x * 2)
 
 This is limited by the set of operators handled in the sympy expression
-printers.
+printers. So simple operations like minimum and maximum cannot be translated to
+SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 
 """
 

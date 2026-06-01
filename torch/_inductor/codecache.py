@@ -3924,7 +3924,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             for (size_t i = 0; i < {array_len}; i++) {{
                 PyObject *elem =
                     arr[i] == nullptr
-                        ? Py_NewRef(Py_None)
+                        ? Py_None
                         // Store AtenTensorHandle as PyCapsulate
                         : PyCapsule_New(reinterpret_cast<void*>(arr[i]), NULL, NULL);
                 PyList_SET_ITEM(result, i, elem);

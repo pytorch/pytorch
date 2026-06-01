@@ -146,15 +146,12 @@ class DeferredTritonCallWrapper:
         self, name: str, arg_type: Any, signature: dict[str, str] | None = None
     ) -> str:
         """Get the C++ parameter declaration for a given arg type."""
-        sig_type = signature.get(name) if signature else None
         if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
             # TMA descriptors need non-const references since their fields
             # are passed as void* pointers to kernel launch args
-            if signature_is_tma_desc(sig_type):
+            if signature and signature_is_tma_desc(signature.get(name)):
                 return f"{name}_type_& {name}"
             return f"const {name}_type_& {name}"
-        elif sig_type in ("fp32", "fp64"):
-            return f"{TRITON_SIGNATURE_TO_CPP[sig_type]} {name}"
         elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
             return f"int64_t {name}"
         elif arg_type is float:
@@ -252,13 +249,7 @@ class DeferredTritonCallWrapper:
             kernel_var_name = f"kernels_.{self.kernel_name}"
 
         # Write wrapper function signature
-        self._write_wrapper_signature(
-            prefix,
-            wrapper,
-            def_args,
-            arg_types,
-            params["triton_meta"]["signature"],
-        )
+        self._write_wrapper_signature(prefix, wrapper, def_args, arg_types)
 
         with prefix.indent():
             if V.graph.aot_mode:
@@ -645,14 +636,6 @@ class DeferredTritonCallWrapper:
                     str(params["shared_mem"]),
                     "cubin_dir_",
                 ]
-
-            # In AOTI mode on CUDA/HIP, pass the loaded_modules_ vector so
-            # CUmodule handles are tracked and can be unloaded on destruction,
-            # preventing GPU code object leaks. XPU is excluded because its
-            # loadKernel returns std::unique_ptr<sycl::kernel> and manages
-            # cleanup via RAII.
-            if V.graph.aot_mode and V.graph.device_type != "xpu":
-                load_kernel_args = load_kernel_args + ["&kernels_.loaded_modules_"]
 
             prefix.writeline(
                 f"{kernel_var_name} = loadKernel({', '.join(load_kernel_args)}); "

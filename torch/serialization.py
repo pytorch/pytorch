@@ -817,7 +817,8 @@ class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
             # PyTorchFileWriter only supports ascii filename.
             # For filenames with non-ascii characters, we rely on Python
             # for writing out the file.
-            self.file_stream = open(self.name, mode="wb")  # noqa: SIM115
+            # pyrefly: ignore [bad-assignment]
+            self.file_stream = io.FileIO(self.name, mode="w")
             super().__init__(
                 torch._C.PyTorchFileWriter(  # pyrefly: ignore  # no-matching-overload
                     self.file_stream, get_crc32_options(), _get_storage_alignment()

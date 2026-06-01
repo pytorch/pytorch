@@ -5,7 +5,6 @@ from collections import defaultdict
 from contextlib import contextmanager
 
 import torch
-import torch.distributed as dist
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -246,17 +245,6 @@ with _temp_test_configs(
     instantiate_device_type_tests(
         TestSupportedOpsWithOverrides, globals(), only_for=("openreg",)
     )
-
-
-@unittest.skipIf(not dist.is_available(), "Distributed not available, skipping tests")
-class TestDistributedBackendHook(TestCase):
-    def test_distributed_backend_for_openreg(self, device):
-        self.assertEqual(type(self).distributed_backend(), "occl")
-
-
-instantiate_device_type_tests(
-    TestDistributedBackendHook, globals(), only_for=("openreg",)
-)
 
 if __name__ == "__main__":
     run_tests()

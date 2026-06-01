@@ -673,7 +673,7 @@ class FunctionModifiers:
     UNUSED = "unused (ignored and replaced with raising of an exception)"
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
-    DEFAULT = "default (compile if called from an exported function / forward)"
+    DEFAULT = "default (compile if called from a exported function / forward)"
     COPY_TO_SCRIPT_WRAPPER = (
         "if this method is not scripted, copy the python method onto the scripted model"
     )
