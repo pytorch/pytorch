@@ -3389,7 +3389,11 @@ def native_group_norm(
         input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
-    if input.device.type == "cpu" and (weight is not None or bias is not None):
+    if (
+        input.device.type == "cpu"
+        and input.dtype in (torch.float32, torch.float64)
+        and (weight is not None or bias is not None)
+    ):
         if weight is not None:
             weight_reshaped = torch.reshape(
                 weight, [1, num_groups, num_channels // num_groups, 1]

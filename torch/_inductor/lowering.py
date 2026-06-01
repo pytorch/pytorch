@@ -85,6 +85,7 @@ from .utils import (
     decode_device,
     is_dynamic,
     is_gpu,
+    is_nvidia_sm100_or_later,
     is_pointwise_use,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
@@ -1566,11 +1567,27 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     new_strides = list(x.get_stride())
     new_sizes[dim] = sym_size
     new_strides[dim] *= step
-    return as_strided(x, new_sizes, new_strides, new_storage_offset)
+    return as_strided(
+        x,
+        new_sizes,
+        new_strides,
+        new_storage_offset,
+        storage_offset_relative_to_input_storage=False,
+    )
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
-def as_strided(x, size, stride, storage_offset=None):
+def as_strided(
+    x,
+    size,
+    stride,
+    storage_offset=None,
+    *,
+    storage_offset_relative_to_input_storage=True,
+):
+    explicit_storage_offset = (
+        storage_offset is not None and storage_offset_relative_to_input_storage
+    )
     new_device = None
     new_dtype = None
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
@@ -1590,12 +1607,23 @@ def as_strided(x, size, stride, storage_offset=None):
     if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
     storage, old_layout = ir.as_storage_and_layout(x)
+    storage_offset = (
+        convert_symint_to_expr(storage_offset) if storage_offset is not None else 0
+    )
+    storage_data = storage.data if isinstance(storage, ir.StorageBox) else storage
+    if explicit_storage_offset and isinstance(storage_data, ir.InputBuffer):
+        # Runtime graph input pointers already include the input tensor's
+        # storage_offset(), but explicit as_strided offsets are storage-relative.
+        storage_offset = sympy.expand(
+            storage_offset
+            - V.graph.graph_input_storage_offsets.get(storage_data.get_name(), 0)
+        )
     new_layout = ir.FixedLayout(
         new_device if new_device else old_layout.device,
         new_dtype if new_dtype else old_layout.dtype,
         [sympy.expand(s) for s in size],
         [sympy.expand(s) for s in stride],
-        sympy.expand(storage_offset or 0),
+        sympy.expand(storage_offset),
     )
     return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
@@ -2339,7 +2367,13 @@ def select(x, dim, idx):
 
             del new_size[dim]
             del new_stride[dim]
-            return as_strided(x, new_size, new_stride, new_storage_offset)
+            return as_strided(
+                x,
+                new_size,
+                new_stride,
+                new_storage_offset,
+                storage_offset_relative_to_input_storage=False,
+            )
         else:
             # no need to clamp, this function handles negative indexing itself
             slice_result = slice_(x, dim, actual_index, actual_index + 1, clamp=False)
@@ -2374,7 +2408,13 @@ def select(x, dim, idx):
 
     del new_size[dim]
     del new_stride[dim]
-    return as_strided(x, new_size, new_stride, new_storage_offset)
+    return as_strided(
+        x,
+        new_size,
+        new_stride,
+        new_storage_offset,
+        storage_offset_relative_to_input_storage=False,
+    )
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
@@ -3201,9 +3241,14 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
 
 
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
+    def get_fake_val(fx_arg):
+        if isinstance(fx_arg, torch.fx.Node):
+            return fx_arg.meta.get("val")
+        return fx_arg
+
     def apply_constraint(arg, fx_arg):
+        fake_val = get_fake_val(fx_arg)
         if _is_tensor_irnode(arg):
-            fake_val = fx_arg.meta.get("val")
             if not isinstance(fake_val, torch.Tensor):
                 return arg
             stride_order = ir.get_stride_order(
@@ -3211,7 +3256,15 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
-            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg}
+            if not isinstance(fake_val, dict):
+                return arg
+            return {key: apply_constraint(arg[key], fake_val[key]) for key in arg}
+        if isinstance(arg, (tuple, list)):
+            if not isinstance(fake_val, (tuple, list)):
+                return arg
+            return type(arg)(
+                apply_constraint(a, fx_a) for a, fx_a in zip(arg, fake_val)
+            )
         return arg
 
     args = tuple(
@@ -3846,6 +3899,9 @@ def _unwrap(x):
 
 @register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
+    # Match eager/meta scalar_tensor behavior; NJT handles scalar broadcasting.
+    if layout == torch.jagged:
+        layout = torch.strided
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
@@ -5069,6 +5125,7 @@ def inplace_constant_pad_nd(
         padded_size,
         layout.stride,
         layout.offset,
+        storage_offset_relative_to_input_storage=False,
     )
 
     sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad, clamp=False)
@@ -6751,7 +6808,15 @@ def _make_reduction_inner(
         ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
     )
     if (
-        reduction_type in ("argmax", "argmin")
+        reduction_type
+        in (
+            "argmax",
+            "argmin",
+            "argmax_value",
+            "argmin_value",
+            "argmax_with_value",
+            "argmin_with_value",
+        )
         and len(reduced_sizes) > 1
         and supports_logical_index_argreduce
     ):
@@ -6778,7 +6843,7 @@ def _make_reduction_inner(
             new_index[idx] = var
         value = inner_loader(new_index)
 
-        # For argmax/argmin, return tuple with logical linear index if needed
+        # For argmax/argmin reductions, return tuple with logical linear index if needed
         if should_compute_logical_index:
             rindex = [sympy.expand(i) for i in reduction_index]
 
@@ -6842,6 +6907,25 @@ def make_reduction(
     return inner
 
 
+def make_arg_with_value_reduction(
+    reduction_type: ReductionType,
+) -> Callable[..., Sequence[TensorBox]]:
+    def inner(x, axis=None, keepdims=False) -> Sequence[TensorBox]:
+        kwargs = _make_reduction_inner(
+            x,
+            axis=axis,
+            keepdims=keepdims,
+            dtype=None,
+            override_return_dtype=x.get_dtype(),
+            reduction_type=reduction_type,
+        )
+        return ir.ArgReduction.create(
+            reduction_type=reduction_type, input_node=x, **kwargs
+        )
+
+    return inner
+
+
 def _make_scan_inner(x, *, axis, dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
@@ -6899,7 +6983,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     return x_var, x_mean
 
 
-def use_two_step_variance(x, axis, keepdim, *, max_reduction_numel=None):
+def use_two_step_variance(x, axis, keepdim):
     # two-step algorithm can get better performance in small reductions size
     # while it can accumulate more numerical error than Welford algorithm.
     axis = _validate_reduction_axis(x, axis)
@@ -6919,9 +7003,21 @@ def use_two_step_variance(x, axis, keepdim, *, max_reduction_numel=None):
     if not isinstance(reduction_numel, sympy.Integer):
         return False
     reduction_numel = int(reduction_numel)
-    if max_reduction_numel is not None and reduction_numel > max_reduction_numel:
-        return False
     return reduction_numel <= threshold and sympy_product(ranges) != 1
+
+
+def _is_current_node_native_group_norm():
+    current_node = V.graph.current_node
+    original_aten = (
+        current_node.meta.get("original_aten")
+        if current_node is not None and current_node.meta is not None
+        else None
+    )
+    return (
+        isinstance(original_aten, torch._ops.OpOverload)
+        and original_aten._schema.name == "aten::native_group_norm"
+        and original_aten._overloadname == "default"
+    )
 
 
 def preserve_welford_mean(x, axis, keepdim):
@@ -6929,22 +7025,9 @@ def preserve_welford_mean(x, axis, keepdim):
     if device is None or device.type != "cpu" or not keepdim:
         return False
 
-    current_node = V.graph.current_node
-    original_aten = (
-        current_node.meta.get("original_aten")
-        if current_node is not None and current_node.meta is not None
-        else None
-    )
     # native_group_norm's CPU affine path consumes this mean, so keep Welford
     # across the two-step threshold to match native RowwiseMoments.
-    if (
-        isinstance(original_aten, torch._ops.OpOverload)
-        and original_aten._schema.name == "aten::native_group_norm"
-        and original_aten._overloadname == "default"
-    ):
-        return True
-
-    return use_two_step_variance(x, axis=axis, keepdim=keepdim, max_reduction_numel=64)
+    return _is_current_node_native_group_norm()
 
 
 def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
@@ -7436,6 +7519,27 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
+def _current_node_uses_all_tuple_outputs(indices: tuple[int, ...]) -> bool:
+    current_node = V.graph.current_node
+    if current_node is None:
+        return True
+
+    used_indices: OrderedSet[int] = OrderedSet()
+    for user in current_node.users:
+        if (
+            user.op == "call_function"
+            and user.target is operator.getitem
+            and len(user.args) >= 2
+            and isinstance(user.args[1], int)
+        ):
+            if len(user.users) > 0:
+                used_indices.add(user.args[1])
+        else:
+            return True
+
+    return all(index in used_indices for index in indices)
+
+
 @register_lowering(aten.any)
 def reduce_any(x, dim=None, keepdim=False):
     x = to_dtype(x, torch.bool)
@@ -7445,6 +7549,13 @@ def reduce_any(x, dim=None, keepdim=False):
 @register_lowering(aten.max, type_promotion_kind=None)
 def reduce_max(x, dim=None, keepdim=False):
     if dim is not None:
+        if is_triton(x) and x.get_dtype() != torch.bool:
+            if _current_node_uses_all_tuple_outputs((0, 1)):
+                return reduce_argmax_with_value(x, axis=dim, keepdims=keepdim)
+            return (
+                reduce_argmax_value(x, axis=dim, keepdims=keepdim),
+                reduce_argmax(x, axis=dim, keepdims=keepdim),
+            )
         return (
             reduce_amax(x, axis=dim, keepdims=keepdim),
             reduce_argmax(x, axis=dim, keepdims=keepdim),
@@ -7456,6 +7567,13 @@ def reduce_max(x, dim=None, keepdim=False):
 @register_lowering(aten.min, type_promotion_kind=None)
 def reduce_min(x, dim=None, keepdim=False):
     if dim is not None:
+        if is_triton(x) and x.get_dtype() != torch.bool:
+            if _current_node_uses_all_tuple_outputs((0, 1)):
+                return reduce_argmin_with_value(x, axis=dim, keepdims=keepdim)
+            return (
+                reduce_argmin_value(x, axis=dim, keepdims=keepdim),
+                reduce_argmin(x, axis=dim, keepdims=keepdim),
+            )
         return (
             reduce_amin(x, axis=dim, keepdims=keepdim),
             reduce_argmin(x, axis=dim, keepdims=keepdim),
@@ -7473,6 +7591,10 @@ reduce_argmax = register_lowering(aten.argmax)(
 reduce_argmin = register_lowering(aten.argmin)(
     make_reduction("argmin", override_return_dtype=torch.int64)
 )
+reduce_argmax_value = make_reduction("argmax_value")
+reduce_argmin_value = make_reduction("argmin_value")
+reduce_argmax_with_value = make_arg_with_value_reduction("argmax_with_value")
+reduce_argmin_with_value = make_arg_with_value_reduction("argmin_with_value")
 
 add = register_pointwise(
     aten.add,
@@ -7786,18 +7908,19 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
-    # mul_rn/div_rn are only available for floating-point types on CUDA/XPU.
-    # CPU addcmul(value=1) still uses FMA to match native addcmul semantics.
+    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
         and device is not None
         and device.type in ["cuda", "xpu"]
     )
-    use_fma_for_value_one = use_fma or (
-        dtype in [torch.float32, torch.float64]
+    use_cpu_native_group_norm_fma = (
+        value == 1
+        and dtype in [torch.float32, torch.float64]
         and device is not None
         and device.type == "cpu"
+        and _is_current_node_native_group_norm()
     )
 
     def inner_fn(idx):
@@ -7805,7 +7928,7 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         t1_val = t1_loader(idx)
         t2_val = t2_loader(idx)
 
-        if value == 1 and use_fma_for_value_one:
+        if value == 1 and (use_fma or use_cpu_native_group_norm_fma):
             return ops.fma(t1_val, t2_val, self_val)
 
         # Match eager order: self + value * (tensor1 * tensor2)
@@ -8744,15 +8867,10 @@ def prepare_softmax_online(x, dim):
         return amax, xsum
 
 
-def _is_sm100_or_later():
-    """Check if we're on SM100+ hardware (Blackwell)."""
-    return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0)
-
-
 @register_lowering(inductor_prims.cvt_e8m0_rceil, type_promotion_kind=None)
 def cvt_e8m0_rceil_lowering(inp):
     """
-    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on SM100+.
+    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on NVIDIA SM100+.
 
     The PTX instruction takes 2 float32 and outputs 2 e8m0 packed in uint16.
     Currently we pass 0.0 as the second input and only use the low byte result.
@@ -8760,9 +8878,9 @@ def cvt_e8m0_rceil_lowering(inp):
     # TODO: Optimize to process pairs (pack=2) by creating a custom Pointwise
     # that loads adjacent elements, applies PTX to both, and uses a follow-up
     # kernel to extract the packed uint16 results as uint8.
-    if not _is_sm100_or_later():
+    if not is_nvidia_sm100_or_later():
         raise NotImplementedError(
-            "cvt_e8m0_rceil requires SM100+ (Blackwell) for PTX instruction support"
+            "cvt_e8m0_rceil requires NVIDIA SM100+ (Blackwell) for PTX instruction support"
         )
 
     dtype = inp.get_dtype()
