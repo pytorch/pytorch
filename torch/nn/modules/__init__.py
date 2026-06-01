@@ -83,7 +83,6 @@ from .instancenorm import (
     LazyInstanceNorm2d,
     LazyInstanceNorm3d,
 )
-from .linear_cross_entropy_options import LinearCrossEntropyOptions
 from .loss import (
     BCELoss,
     BCEWithLogitsLoss,
@@ -258,7 +257,6 @@ __all__ = [
     "LeakyReLU",
     "Linear",
     "LinearCrossEntropyLoss",
-    "LinearCrossEntropyOptions",
     "LocalResponseNorm",
     "LogSigmoid",
     "LogSoftmax",
