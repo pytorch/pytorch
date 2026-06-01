@@ -1185,6 +1185,14 @@ def wait_for_process(p, timeout=None):
         except Exception:
             pass
         try:
+            import subprocess_debug
+
+            subprocess_debug.dump_recent_subprocess_traces(
+                "wait_for_process.timeout"
+            )
+        except Exception:
+            pass
+        try:
             dump_subprocess_log_files("wait_for_process.timeout")
         except Exception:
             pass

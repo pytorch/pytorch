@@ -372,6 +372,14 @@ class SubprocPool:
                 # MI355 hang debug: worker didn't shut down in time. Dump its
                 # captured stdio to sys.__stderr__ before SIGKILL so we can see
                 # why it hung in CI logs.
+                try:
+                    import subprocess_debug
+
+                    subprocess_debug.dump_recent_subprocess_traces(
+                        "subproc_pool.shutdown.timeout"
+                    )
+                except Exception:
+                    pass
                 self._dump_worker_log("subproc_pool.shutdown.timeout")
                 try:
                     self.process.kill()

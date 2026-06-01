@@ -26,7 +26,6 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
-    dump_subprocess_log_files,
     get_report_path,
     IS_CI,
     IS_MACOS,
@@ -99,6 +98,43 @@ except ImportError:
 
 # Make sure to remove REPO_ROOT after import is done
 sys.path.remove(str(REPO_ROOT))
+
+
+def install_subprocess_debug() -> None:
+    test_dir = str(REPO_ROOT / "test")
+    python_path = os.environ.get("PYTHONPATH", "")
+    paths = [path for path in python_path.split(os.pathsep) if path]
+    if test_dir not in paths:
+        os.environ["PYTHONPATH"] = os.pathsep.join([test_dir, *paths])
+    if test_dir not in sys.path:
+        sys.path.insert(0, test_dir)
+    try:
+        import subprocess_debug
+
+        subprocess_debug.install()
+    except Exception:
+        pass
+
+
+def dump_subprocess_log_files(reason: str) -> None:
+    try:
+        import subprocess_debug
+
+        subprocess_debug.dump_recent_subprocess_traces(reason)
+    except Exception:
+        pass
+
+    try:
+        from torch.testing._internal.common_utils import (
+            dump_subprocess_log_files as dump_common_utils_logs,
+        )
+
+        dump_common_utils_logs(reason)
+    except Exception:
+        pass
+
+
+install_subprocess_debug()
 
 
 HAVE_TEST_SELECTION_TOOLS = True
@@ -1239,12 +1275,10 @@ def handle_log_file(
     )
     os.rename(file_path, REPO_ROOT / new_file)
 
-    # MI355 hang debug: always print the entire captured log so subprocess
-    # output is visible in CI even on the success path. Previously gated on
-    # failed/was_rerun.
-    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
-    print_to_stderr(full_text)
-    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
+    if failed or was_rerun:
+        print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
+        print_to_stderr(full_text)
+        print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
 def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
