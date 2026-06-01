@@ -1921,6 +1921,7 @@ def _export_to_aten_ir_make_fx(
             finally:
                 if hook is not None:
                     hook.remove()
+                    hook = None
 
             if non_strict_root is not None:
                 input_names = _graph_input_names(gm)

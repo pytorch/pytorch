@@ -351,6 +351,7 @@ def aot_dispatch_base_graph(
     finally:
         if hook is not None:
             hook.remove()
+            hook = None
     saved_updated_flat_args_subclasses_desugared_descs = (
         updated_flat_args_subclasses_desugared_descs
     )
