@@ -39,15 +39,15 @@ enum class InverseReturnMode {
 //   FUNCTIONALIZATION_VIEWMETA_NAME(view1_ViewMeta);
 //   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
 //       bool /* reapply_views */,
-//       const std::vector<int64_t>&);
+//       std::vector<int64_t> /* size */);
 //
 //   view1_ViewMeta(const SerializableTuple& tpl)
 //       : view1_ViewMeta(std::get<0>(tpl), std::get<1>(tpl)) {}
 //
-//   view1_ViewMeta(bool reapply_views, const std::vector<int64_t>& size)
+//   view1_ViewMeta(bool reapply_views, std::vector<int64_t> size_arg)
 //       : ViewMeta(/*has_symbolic_inputs=*/false),
 //         reapply_views(reapply_views),
-//         size(size) {}
+//         size(std::move(size_arg)) {}
 //
 //   Tensor forward(const Tensor& base) override {
 //       return base.view1(...);
@@ -143,9 +143,9 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
  public:
   struct Update {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const at::Tensor new_val;
+    const at::Tensor new_val = {};
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const std::vector<std::shared_ptr<ViewMeta>> view_metas;
+    const std::vector<std::shared_ptr<ViewMeta>> view_metas = {};
   };
 
   explicit FunctionalStorageImpl(const Tensor& value);
@@ -202,9 +202,9 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     return mutation_counter_ <= mutation_counter_hidden_from_autograd_;
   }
 
-  void mark_inductor_storage_resize(c10::SymInt new_size) {
+  void mark_inductor_storage_resize(const c10::SymInt& new_size) {
     inductor_storage_resized_ = true;
-    curr_storage_size_ = std::move(new_size);
+    curr_storage_size_ = new_size;
     inductor_storage_resized_counter_++;
   }
 

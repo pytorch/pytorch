@@ -2,6 +2,8 @@
 
 #include <ATen/FunctionalStorageImpl.h>
 
+#include <utility>
+
 namespace at::functionalization {
 
 // `ViewMeta` implementation for `resize_` operation.
@@ -9,15 +11,15 @@ struct TORCH_API resize__ViewMeta : public ViewMeta {
   FUNCTIONALIZATION_VIEWMETA_NAME(resize__ViewMeta)
   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
       bool /* reapply_views */,
-      const std::vector<int64_t>&);
+      std::vector<int64_t> /* size */);
 
   resize__ViewMeta(const SerializableTuple& tpl)
       : resize__ViewMeta(std::get<0>(tpl), std::get<1>(tpl)) {}
 
-  resize__ViewMeta(bool reapply_views, const std::vector<int64_t>& size)
+  resize__ViewMeta(bool reapply_views, std::vector<int64_t> size_arg)
       : ViewMeta(/*has_symbolic_inputs=*/false),
         reapply_views(reapply_views),
-        size(size) {}
+        size(std::move(size_arg)) {}
 
   Tensor forward(const Tensor& base) override;
   Tensor reverse(const Tensor& base, const Tensor& mutated_view) override;
@@ -27,7 +29,7 @@ struct TORCH_API resize__ViewMeta : public ViewMeta {
   }
 
   bool reapply_views;
-  std::vector<int64_t> size;
+  std::vector<int64_t> size = {};
 };
 
 // `ViewMeta` implementation for `_unsafe_view` operation.
@@ -35,15 +37,15 @@ struct TORCH_API _unsafe_view_ViewMeta : public ViewMeta {
   FUNCTIONALIZATION_VIEWMETA_NAME(_unsafe_view_ViewMeta)
   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
       bool /* has_symbolic_inputs */,
-      const std::vector<c10::SymInt>&);
+      std::vector<c10::SymInt> /* size */);
 
   _unsafe_view_ViewMeta(const SerializableTuple& tpl)
       : _unsafe_view_ViewMeta(std::get<0>(tpl), std::get<1>(tpl)) {}
 
   _unsafe_view_ViewMeta(
       bool has_symbolic_inputs,
-      const std::vector<c10::SymInt>& size)
-      : ViewMeta(has_symbolic_inputs), size(size) {}
+      std::vector<c10::SymInt> size_arg)
+      : ViewMeta(has_symbolic_inputs), size(std::move(size_arg)) {}
 
   Tensor forward(const Tensor& base) override;
   Tensor reverse(const Tensor& base, const Tensor& mutated_view) override;
@@ -52,7 +54,7 @@ struct TORCH_API _unsafe_view_ViewMeta : public ViewMeta {
     return std::make_tuple(has_symbolic_inputs, size);
   }
 
-  std::vector<c10::SymInt> size;
+  std::vector<c10::SymInt> size = {};
 };
 
 } // namespace at::functionalization

@@ -1,6 +1,7 @@
 # Owner(s): ["module: codegen"]
 # ruff: noqa: F841
 
+import pickle
 import unittest
 from contextlib import nullcontext
 
@@ -83,6 +84,20 @@ def _functionalize(
 )
 class TestFunctionalization(TestCase):
     crossref = False
+
+    def test_special_view_meta_pickle_roundtrip(self):
+        functionalization = torch._C._functionalization
+        cases = (
+            (functionalization.resize__ViewMeta, (False, [2, 6, 24])),
+            (functionalization._unsafe_view_ViewMeta, (False, [2, 6, 24])),
+        )
+        for view_meta_cls, state in cases:
+            with self.subTest(view_meta_cls=view_meta_cls.__name__):
+                view_meta = view_meta_cls(state)
+                self.assertEqual(view_meta.as_tuple(), state)
+
+                restored = pickle.loads(pickle.dumps(view_meta))
+                self.assertEqual(restored.as_tuple(), state)
 
     def get_logs(self, func, *inpts, reapply_views=False, run_reinplace=False):
         inpts_clone = tree_map_only(torch.Tensor, torch.clone, inpts)
