@@ -2150,7 +2150,9 @@ static Tensor _matmul_impl(
 
     // flatten expanded batches
     const auto tensor1_expand_size = [&output_shape, n, m1]{
-      c10::SymDimVector ret(output_shape);
+      c10::SymDimVector ret;
+      ret.reserve(output_shape.size() + 2);
+      ret.append(output_shape.begin(), output_shape.end());
       ret.append({n, m1});
       return ret;
     }();
@@ -2161,8 +2163,9 @@ static Tensor _matmul_impl(
     // a vector of shape (n,) into a batch of matrices of shape (*, n, 1)
     auto vector_rhs = dim_tensor2 == 1;
     const auto tensor2_expand_size = [&output_shape, m2, p, vector_rhs]{
-      c10::SymDimVector ret(output_shape);
-      ret.reserve(ret.size() + (vector_rhs ? 1 : 2));
+      c10::SymDimVector ret;
+      ret.reserve(output_shape.size() + (vector_rhs ? 1 : 2));
+      ret.append(output_shape.begin(), output_shape.end());
       if (vector_rhs) {
         ret.push_back(m2);
       } else {
