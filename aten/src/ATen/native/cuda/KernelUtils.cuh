@@ -90,10 +90,11 @@ idx(const size_t nc,
 }
 
 // for channels-last
-__device__ __forceinline__ size_t
+template <typename index_t = size_t>
+__device__ __forceinline__ index_t
 idx_cl(
-  const size_t n, const size_t h, const size_t w, const size_t c,
-  const size_t height, const size_t width, const size_t channel
+  const index_t n, const index_t h, const index_t w, const index_t c,
+  const index_t height, const index_t width, const index_t channel
 ) {
   return ((n * height + h) * width + w) * channel + c;
 }

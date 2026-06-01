@@ -11158,6 +11158,45 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out[0], out[-1])
 
     @onlyCUDA
+    @skipCUDAIfRocm(msg="launch bounds error out on ROCM")
+    @dtypes(torch.half, torch.bfloat16)
+    @largeTensorTest('40GB')
+    def test_upsampling_64bit_indexing_bilinear_channels_last(self, device, dtype):
+        # Output has 2**31 elements, exercising the 64-bit indexed channels_last forward kernel.
+        x = torch.rand((8, 64, 128, 128), dtype=dtype, device=device)
+        out = torch.nn.functional.interpolate(
+            x.to(memory_format=torch.channels_last),
+            scale_factor=16, mode='bilinear'
+        )
+        out_ref = torch.nn.functional.interpolate(x, scale_factor=16, mode='bilinear')
+        del x
+        self.assertEqual(out.numel(), 2**31)
+        self.assertTrue(torch.allclose(out, out_ref))
+        x = torch.ones((8, 64, 128, 128), dtype=dtype, device=device).to(memory_format=torch.channels_last)
+        out = torch.nn.functional.interpolate(x, scale_factor=16, mode='bilinear')
+        self.assertEqual(out[0], out[-1])
+
+    @onlyCUDA
+    @skipCUDAIfRocm(msg="launch bounds error out on ROCM")
+    @dtypes(torch.half, torch.bfloat16)
+    @largeTensorTest('10GB')
+    def test_upsampling_64bit_indexing_bilinear_channels_last_backward(self, device, dtype):
+        # Output has 2**31 elements, exercising the 64-bit indexed channels_last backward
+        # kernel. The backward accumulates with atomicAdd (nondeterministic in low precision),
+        # so we only verify that the kernel runs without the launch-config overflow and
+        # produces finite, non-trivial gradients in the right memory format; rigorous
+        # nhwc-vs-contiguous numerics are checked by the small-tensor interpolate tests.
+        x = torch.ones((8, 64, 128, 128), dtype=dtype, device=device).to(
+            memory_format=torch.channels_last).requires_grad_(True)
+        out = torch.nn.functional.interpolate(x, scale_factor=16, mode='bilinear')
+        self.assertEqual(out.numel(), 2**31)
+        out.backward(torch.ones_like(out))
+        self.assertTrue(torch.isfinite(x.grad).all())
+        self.assertGreater(x.grad.abs().sum().item(), 0)
+        self.assertTrue(x.grad.is_contiguous(memory_format=torch.channels_last))
+
+
+    @onlyCUDA
     @dtypes(torch.half)
     @largeTensorTest('40GB')
     def test_replicatepad_64bit_indexing(self, device, dtype):
