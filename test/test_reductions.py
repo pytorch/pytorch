@@ -2795,6 +2795,49 @@ class TestReductions(TestCase):
         check([1, float('nan'), 2], 0.5, 0, [0, 1, 0], [torch.quantile])
         check([1, float('nan'), 2], 0.5, 0, [0.5, 0, 0.5], [torch.nanquantile])
 
+    @skipIfMPS
+    def test_quantile_backward_tied_values(self, device):
+        # Verify gradients are deterministic for tied values (stable sort guarantees
+        # the first element among ties receives the gradient for q=0.0).
+        def check(a, q, dim, expected_grad, ops=(torch.quantile, torch.nanquantile)):
+            for op in ops:
+                t = torch.tensor(a, device=device, dtype=torch.float64, requires_grad=True)
+                op(t, torch.tensor(q, device=device, dtype=torch.float64), dim).sum().backward()
+                self.assertEqual(t.grad, torch.tensor(expected_grad, device=device, dtype=torch.float64))
+
+        # q=0.0 on all-tied values: gradient goes to first element (stable sort)
+        check([0., 0., 0.], 0.0, 0, [1., 0., 0.])
+        # q=1.0 on all-tied values: gradient goes to last element (stable sort)
+        check([0., 0., 0.], 1.0, 0, [0., 0., 1.])
+        # 2D with tied values along dim=1
+        check([[0., 0., 0.], [0., 0., 0.]], 0.0, 1, [[1., 0., 0.], [1., 0., 0.]])
+        check([[0., 0., 0.], [0., 0., 0.]], 1.0, 1, [[0., 0., 1.], [0., 0., 1.]])
+        # NaN row with tied non-NaN row
+        check(
+            [[float('nan'), float('nan'), float('nan')], [0., 0., 0.]],
+            0.0, 1,
+            [[0., 0., 1.], [1., 0., 0.]],
+            ops=(torch.quantile,),
+        )
+
+    @skipIfMPS
+    @skipIfTorchDynamo("compile test below")
+    def test_quantile_backward_tied_values_compile(self, device):
+        # Verify torch.compile produces the same gradients as eager for tied values
+        def fn(x, q):
+            return torch.quantile(x, q, dim=1, keepdim=True).sum()
+
+        x = torch.zeros(2, 3, device=device, dtype=torch.float64)
+        q = torch.tensor(0.0, device=device, dtype=torch.float64)
+
+        x_eager = x.clone().requires_grad_(True)
+        fn(x_eager, q).backward()
+
+        x_compiled = x.clone().requires_grad_(True)
+        torch.compile(fn, backend="inductor", fullgraph=True)(x_compiled, q).backward()
+
+        self.assertEqual(x_eager.grad, x_compiled.grad)
+
     def test_quantile_error(self, device):
         def check(a, q, args, kwargs, message):
             with self.assertRaisesRegex(RuntimeError, r'quantile\(\) ' + message):

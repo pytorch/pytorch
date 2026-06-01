@@ -267,11 +267,11 @@ Tensor quantile_compute(
   // Sort to efficiently query kth values.
   Tensor sorted;
   if (!orginal_dim) {
-    sorted = std::get<0>(self.flatten().sort());
+    sorted = std::get<0>(self.flatten().sort(/*stable=*/true, /*dim=*/-1, /*descending=*/false));
   } else if (wrapped_dim == self.dim() - 1) {
-    sorted = std::get<0>(self.sort());
+    sorted = std::get<0>(self.sort(/*stable=*/true, /*dim=*/-1, /*descending=*/false));
   } else {
-    sorted = std::get<0>(self.unsqueeze(-1).transpose(wrapped_dim, -1).sort());
+    sorted = std::get<0>(self.unsqueeze(-1).transpose(wrapped_dim, -1).sort(/*stable=*/true, /*dim=*/-1, /*descending=*/false));
   }
 
   // Treat q as a 1D tensor for the following computations
