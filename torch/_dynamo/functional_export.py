@@ -789,6 +789,23 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
         has_orig_self = (fn_args[0] == "self") if len(fn_args) > 0 else False
         if has_orig_self:
             free_vars.insert(0, "self")
+        # Rename any non-first `self` in fn_args to a unique name. The base
+        # CodeGen.gen_fn_def prepends `"self"` for the GraphModule's bound-
+        # method receiver whenever fn_args[0] != "self", which collides with
+        # a schema param literally named `self` (e.g. `aten.where.self(Tensor
+        # cond, Tensor self, Tensor other)` -> `def forward(self, cond, self,
+        # other)` -> `SyntaxError: duplicate argument 'self' in function
+        # definition`). Both the function-def arg list (via super().gen_fn_def)
+        # and the body binding (via gen_var_bindings) reference fn_args, so
+        # the rename is consistent end-to-end.
+        fn_args = list(fn_args)
+        first_pos = 1 if has_orig_self else 0
+        for i in range(first_pos, len(fn_args)):
+            if fn_args[i] == "self":
+                new_name = "self_"
+                while new_name in fn_args:
+                    new_name += "_"
+                fn_args[i] = new_name
         fn_definition = super().gen_fn_def(
             fn_args[:], maybe_return_annotation, expanded_def=expanded_def
         )
