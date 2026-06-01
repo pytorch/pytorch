@@ -902,6 +902,17 @@ class GraphModule(torch.nn.Module):
         self.assertRaises(StopIteration, next, g)
         self.assertFalse(3 in whoo())
 
+    def test_raise_immediately(self):
+        # see https://github.com/python/cpython/issues/143493
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(s):
+            return (x for x in s)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "'int' object is not iterable"
+        ):
+            f(1)
+
 
 class TestGeneratorSend(GeneratorTestsBase):
     def test_send(self):
