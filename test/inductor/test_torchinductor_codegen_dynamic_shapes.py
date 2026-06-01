@@ -177,6 +177,9 @@ test_failures = {
     # Triton kernel or C++ loop is generated, so dynamic-shape codegen check fails.
     "test_bincount_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_bincount_with_weights_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_bincount_with_int_weights_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
     "test_unique_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_unique_dim_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_unique_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),

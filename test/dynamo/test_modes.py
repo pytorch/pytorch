@@ -22,9 +22,8 @@ from torch.overrides import (
 from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
 )
-from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.common_utils import skipIfXpu, TEST_ACCELERATOR
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -209,7 +208,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     def test_torch_function_mode_guards_cpp(self):
         self._run_torch_function_mode_guard_test()
 
-    @requires_gpu
     def test_torch_function_mode_preserves_cuda_rng_state(self):
         class ConstantReturnMode(TorchFunctionMode):
             def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -750,7 +748,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
             func(torch.randn(3))
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     def test_flex_attention(self):
         import torch
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
@@ -793,7 +791,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         with torch.device("cpu"):
             torch.compile(mod, fullgraph=True)(x)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop(self):
         import torch
@@ -802,7 +800,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             flex_attention as flex_attention_eager,
         )
 
-        with torch.device(GPU_TYPE):
+        with torch.device(device_type):
             flex_attention = torch.compile(flex_attention_eager, dynamic=False)
 
             with self.assertRaisesRegex(
@@ -817,7 +815,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                     )
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop_eager(self):
         import torch
@@ -826,7 +824,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             flex_attention as flex_attention_eager,
         )
 
-        with torch.device(GPU_TYPE):
+        with torch.device(device_type):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
                 "raised exception HopDetectionError\\('test'\\)",
@@ -838,11 +836,11 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                     )
 
-    @requires_gpu
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
     def test_default_device_factory_functions(self):
         """Test that factory functions respect default device in compiled code"""
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(backend="eager", fullgraph=True)
         def random_func(
             x: torch.Tensor,
         ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -873,12 +871,12 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         finally:
             torch.set_default_device(None)
 
-    @requires_gpu
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
     def test_default_device_factory_functions_priority(self):
         try:
             torch.set_default_device(device_type)
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(backend="eager", fullgraph=True)
             def with_explicit_device(
                 x: torch.Tensor,
             ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -1543,7 +1541,7 @@ class outer_fn(torch.nn.Module):
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     def test_nested_compile_dynamic(self):
         """Test that wrap_compiled_regions works with dynamic shapes."""
 
@@ -1559,7 +1557,7 @@ class outer_fn(torch.nn.Module):
 
         torch._dynamo.reset()
 
-        layer = MMLayer(d_model).to(GPU_TYPE)
+        layer = MMLayer(d_model).to(device_type)
         compiled_mm = torch.compile(
             layer,
             backend="inductor",
@@ -1567,18 +1565,18 @@ class outer_fn(torch.nn.Module):
             dynamic=True,
         )
 
-        x = torch.randn(2, d_model, device=GPU_TYPE)
+        x = torch.randn(2, d_model, device=device_type)
         result = compiled_mm(x)
         self.assertEqual(result.shape, (2, d_model))
         torch.testing.assert_close(result, layer(x))
 
         # Different batch size reuses the same compiled code
-        x2 = torch.randn(5, d_model, device=GPU_TYPE)
+        x2 = torch.randn(5, d_model, device=device_type)
         result2 = compiled_mm(x2)
         self.assertEqual(result2.shape, (5, d_model))
         torch.testing.assert_close(result2, layer(x2))
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     def test_nested_compile_input_mutation(self):
         """Test nested compile with input mutation inside a compiled region.
 
@@ -1649,9 +1647,9 @@ class outer_fn(torch.nn.Module):
         ):
             torch._dynamo.reset()
 
-            model = StackedMutating(d_model, n_layers=2).to(GPU_TYPE)
+            model = StackedMutating(d_model, n_layers=2).to(device_type)
 
-            x = torch.randn(2, d_model, device=GPU_TYPE, requires_grad=True)
+            x = torch.randn(2, d_model, device=device_type, requires_grad=True)
 
             fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             saved_params = list(model.parameters())
@@ -1690,7 +1688,7 @@ class outer_fn(torch.nn.Module):
             out = wrapped_fn(x)
             out.sum().backward()
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     def test_nested_compile_output_aliases_input(self):
         """Test nested compile where output is a view-alias of input.
 
@@ -1761,9 +1759,9 @@ class outer_fn(torch.nn.Module):
         ):
             torch._dynamo.reset()
 
-            model = StackedView(d_model, n_layers=2).to(GPU_TYPE)
+            model = StackedView(d_model, n_layers=2).to(device_type)
 
-            x = torch.randn(2, d_model, device=GPU_TYPE, requires_grad=True)
+            x = torch.randn(2, d_model, device=device_type, requires_grad=True)
 
             fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             saved_params = list(model.parameters())
@@ -1849,7 +1847,7 @@ class outer_fn(torch.nn.Module):
         batch_size, seq_len = 2, 32
 
         # dumb mask mod that closes over a tensor
-        mask_bias = torch.tensor(0, device=GPU_TYPE, dtype=torch.int32)
+        mask_bias = torch.tensor(0, device=device_type, dtype=torch.int32)
 
         def mask_mod(b_idx, h_idx, q_idx, k_idx):
             return (q_idx >= k_idx) | (mask_bias == 1)
@@ -1861,7 +1859,7 @@ class outer_fn(torch.nn.Module):
             H=None,  # Broadcast over heads
             Q_LEN=seq_len,
             KV_LEN=seq_len,
-            device=GPU_TYPE,
+            device=device_type,
         )
 
         # Transformer layer with flex_attention
@@ -1962,7 +1960,7 @@ class outer_fn(torch.nn.Module):
 
         fake_store = FakeStore()
         dist.init_process_group("fake", store=fake_store, rank=0, world_size=2)
-        device_mesh = init_device_mesh(GPU_TYPE, (2,))
+        device_mesh = init_device_mesh(device_type, (2,))
 
         with (
             # Needed when wrapping a compiled region with FX tracing
@@ -1976,7 +1974,7 @@ class outer_fn(torch.nn.Module):
             torch._dynamo.reset()
 
             model = SmallTransformer(d_model, n_heads, d_ff, n_layers=4)
-            model = model.to(GPU_TYPE)
+            model = model.to(device_type)
 
             def replicate_all(name, module, device_mesh):
                 for param_name, param in module.named_parameters(recurse=False):
@@ -1991,7 +1989,7 @@ class outer_fn(torch.nn.Module):
                 batch_size,
                 seq_len,
                 d_model,
-                device=GPU_TYPE,
+                device=device_type,
                 dtype=torch.float32,
                 requires_grad=True,
             )
@@ -2155,12 +2153,12 @@ class outer_fn(torch.nn.Module):
         ):
             torch._dynamo.reset()
 
-            model = SimpleModel().to(GPU_TYPE)
+            model = SimpleModel().to(device_type)
             x = torch.randn(
                 batch_size,
                 seq_len,
                 d_model,
-                device=GPU_TYPE,
+                device=device_type,
                 dtype=torch.float32,
                 requires_grad=True,
             )
@@ -2168,7 +2166,7 @@ class outer_fn(torch.nn.Module):
                 batch_size,
                 2,
                 seq_len,
-                device=GPU_TYPE,
+                device=device_type,
                 dtype=torch.int64,
             )
             visibility[:, 1, :] = seq_len - 1
