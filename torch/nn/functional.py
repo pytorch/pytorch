@@ -1,6 +1,5 @@
 """Functional interface."""
 
-import dataclasses
 import importlib
 import math
 import warnings
@@ -37,7 +36,6 @@ ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
 
 if TYPE_CHECKING:
-    from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
     from torch.types import _dtype as DType
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
@@ -3664,7 +3662,6 @@ def linear_cross_entropy(
     reduction: str = "mean",
     ignore_index: int | None = None,
     label_smoothing: float = 0.0,
-    options: "LinearCrossEntropyOptions | None" = None,
 ) -> Tensor:
     r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
 
@@ -3712,36 +3709,6 @@ def linear_cross_entropy(
             Architecture for Computer Vision
             <https://arxiv.org/abs/1512.00567>`__.
             Default: :math:`0.0`.
-        options (LinearCrossEntropyOptions, optional): Specify
-            chunking strategy options, see
-            :class:`~torch.nn.LinearCrossEntropyOptions`
-            for more details. Enabling chunking will decrease the
-            memory usage.  To enable reference implementation of
-            ``linear_cross_entropy``, use `options=None`. Default:
-            ``None``. See the autograd / compile note below for
-            which higher-level APIs (``torch.compile``,
-            ``torch.func.grad``, ``torch.func.vmap(grad(...))``,
-            higher-order or forward-mode AD) only work on the
-            ``options=None`` reference path.
-
-    .. note::
-        **Limitations of the chunked path** (``options`` not ``None``).
-        The chunked op precomputes gradients inside forward and consumes
-        them via in-place backward mutation, which puts it outside the
-        standard autograd contract:
-
-        - Higher-order AD (``create_graph=True``, ``hessian``) is
-          unsupported.
-        - Forward-mode AD (``jvp``, ``jacfwd``) is unsupported.
-        - ``torch.func.grad`` / ``vmap(grad(...))`` does not work, but
-          plain ``output.backward()`` does.
-        - ``torch.compile`` falls back to eager at the chunked op (no
-          Inductor lowering). To keep double-backward correct under
-          compile, ``allow_retain_graph=True`` is forced internally
-          with a warning.
-        - :class:`LinearCrossEntropyOptions` is not TorchScript-scriptable.
-
-        The reference path (``options=None``) supports all of the above.
 
     Shape:
         - Input: :math:`(in_features)` or :math:`(N, in\_features)`.
@@ -3783,7 +3750,6 @@ def linear_cross_entropy(
             reduction=reduction,
             ignore_index=ignore_index,
             label_smoothing=label_smoothing,
-            options=options,
         )
     if input.dim() < 1 or input.dim() > 2:
         raise RuntimeError(
@@ -3819,93 +3785,11 @@ def linear_cross_entropy(
         )
     ignore_index = ignore_index if ignore_index is not None else -100
 
-    # K-dim loss (out_features != ()) falls back to the reference
-    # cross_entropy: the chunked op runs softmax over the full
-    # linear_weight.shape[0], not per-position over the num_classes
-    # axis.
-    if options is not None and (
-        out_features
-        or reduction not in {"mean", "sum"}
-        or label_smoothing != 0.0
-        or target.dtype != torch.int64
-    ):
-        warnings.warn(
-            "linear_cross_entropy: ``options`` ignored; chunked path needs "
-            "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
-            f" == int64, out_features == (). Got reduction={reduction!r}, "
-            f"label_smoothing={label_smoothing}, target.dtype={target.dtype}"
-            f", out_features={tuple(out_features)}.",
-            stacklevel=2,
-        )
-
-    if (
-        options is not None
-        and reduction in {"mean", "sum"}
-        and label_smoothing == 0.0
-        and target.dtype == torch.int64
-        and not out_features
-    ):
-        if input.dim() == 2:
-            num_batches = input.shape[0]
-            has_batches = True
-        else:
-            num_batches = 1
-            has_batches = False
-            input = input.unsqueeze(0)
-            target = target.unsqueeze(0)
-
-        options = options._adjust(
-            num_batches=num_batches,
-            in_features=in_features,
-            num_classes=num_classes,
-            dtype=input.dtype,
-            device=input.device,
-        )
-
-        # Force allow_retain_graph=True under torch.compile: the default
-        # mode's second-backward guard relies on a Python ``ctx._gi = None``
-        # mutation that Dynamo's autograd tracing does not preserve, so
-        # without this override double-backward under torch.compile would
-        # silently return wrong gradients.
-        if not options.allow_retain_graph and torch.compiler.is_compiling():
-            warnings.warn(
-                "linear_cross_entropy: forcing allow_retain_graph=True under "
-                "torch.compile (adds one gradient-sized allocation/call). "
-                "Construct options with allow_retain_graph=True to silence.",
-                stacklevel=2,
-            )
-            options = dataclasses.replace(options, allow_retain_graph=True)
-
-        # Local import avoids a circular init via torch.library.custom_op.
-        from torch.nn.modules.linear_cross_entropy import (
-            _linear_cross_entropy_batch_chunked,
-        )
-
-        result = _linear_cross_entropy_batch_chunked(
-            input,
-            linear_weight,
-            target,
-            weight,
-            reduction,
-            ignore_index,
-            label_smoothing,
-            options.batch_chunk_size,
-            options.acc_policy,
-            options.acc_dtype,
-            options.allow_retain_graph,
-            input.requires_grad and torch.is_grad_enabled(),
-            linear_weight.requires_grad and torch.is_grad_enabled(),
-        )[0]
-
-        if not has_batches:
-            result = result.squeeze(0)
-        return result
-
     if out_features:
+        # reshape linear_weight to 2D required by linear
         linear_weight = linear_weight.reshape(
             (math.prod(out_features, start=num_classes), in_features)
         )
-
     logits = linear(input, linear_weight)
     # recover logits shape that corresponds to the shape of specified
     # linear_weight:
