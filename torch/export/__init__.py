@@ -228,7 +228,7 @@ def save(
     Args:
         ep (ExportedProgram): The exported program to save.
 
-        f (str | os.PathLike[str] | IO[bytes]) A file-like object (has to
+        f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
         extra_files (Optional[Dict[str, Any]]): Map from filename to contents

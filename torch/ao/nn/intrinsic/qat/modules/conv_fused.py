@@ -553,7 +553,7 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
     quantization aware training.
 
     We combined the interface of :class:`~torch.nn.Conv1d` and
-    :class:`~torch.nn.BatchNorm1d`.
+    :class:`~torch.nn.ReLU`.
 
     Attributes:
         weight_fake_quant: fake quant module for weight
@@ -721,7 +721,7 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
     quantization aware training.
 
     We combined the interface of :class:`~torch.nn.Conv2d` and
-    :class:`~torch.nn.BatchNorm2d`.
+    :class:`~torch.nn.ReLU`.
 
     Attributes:
         weight_fake_quant: fake quant module for weight
@@ -890,7 +890,7 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
     quantization aware training.
 
     We combined the interface of :class:`~torch.nn.Conv3d` and
-    :class:`~torch.nn.BatchNorm3d`.
+    :class:`~torch.nn.ReLU`.
 
     Attributes:
         weight_fake_quant: fake quant module for weight

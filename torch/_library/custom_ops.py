@@ -373,7 +373,7 @@ class CustomOpDef:
         else:  # enable the kernel
             if not originally_disabled:
                 log.warning(
-                    "Attempted to enable kernel for  %s but it was already enabled.",
+                    "Attempted to enable kernel for %s but it was already enabled.",
                     device_type,
                 )
             else:

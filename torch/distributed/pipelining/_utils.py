@@ -525,7 +525,7 @@ def generate_stage_to_rank_mapping(
         rank_index = 0
         for stage_index in range(num_stages):
             mapping[stage_index] = rank_index
-            # dont change rank if we are on the border (to keep v shape)
+            # don't change rank if we are on the border (to keep v shape)
             if (stage_index + 1) % pp_size == 0:
                 continue
             if (stage_index // pp_size) % 2 == 0:

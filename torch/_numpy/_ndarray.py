@@ -312,7 +312,7 @@ class ndarray:
             self.tensor = t
         else:
             raise ValueError(
-                "ndarray constructor is not recommended; prefer"
+                "ndarray constructor is not recommended; prefer "
                 "either array(...) or zeros/empty(...)"
             )
 

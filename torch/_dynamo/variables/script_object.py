@@ -409,7 +409,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 # Special case: __bool__ and __len__ are used for truthiness checks.
                 # If they're not registered and the real object doesn't have them,
                 # raise ObservedAttributeError so the caller can fall back to
-                # treating the object as truthy (Python default behavior
+                # treating the object as truthy (Python default behavior)
                 raise_observed_exception(AttributeError, tx)
 
             else:

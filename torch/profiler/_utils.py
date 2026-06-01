@@ -494,7 +494,7 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
     # Process events in chronological order with a stack
     context_stack: list[ContextStackEntry] = []
 
-    # Invariant: all start event has a corresponding end event
+    # Invariant: all start events have a corresponding end event
     for timeline_event in event_timeline:
         match timeline_event.event_type:
             case "start":
