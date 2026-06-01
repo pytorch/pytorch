@@ -1413,6 +1413,15 @@ use_fast_triton_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER", "1") == "1"
 )
 
+# Use the Level 0 launch_metadata_schema from CompiledKernel.bin
+# (versioned, stable contract) instead of hasattr probing of
+# CompiledKernel internals in save_gpu_kernel().
+# When True (default), prefers schema["entry_name"]/["num_warps"]/["shared_mem"].
+# When False, forces the legacy hasattr fallback path.
+use_launch_metadata_schema: bool = (
+    os.environ.get("TORCHINDUCTOR_USE_LAUNCH_METADATA_SCHEMA", "1") == "1"
+)
+
 # gemm autotuning global cache dir
 global_cache_dir: str | None
 if is_fbcode():
@@ -1844,6 +1853,11 @@ class triton:
     # not incurring large memory overhead
     reorder_for_reducing_graph_partitions: bool = True
 
+    # Memory budget multiplier for cudagraph partition reordering.
+    # When reordering nodes to minimize partitions, the reordering is only
+    # applied if the peak memory increase is within this budget.
+    cudagraph_partition_memory_budget: float = 1.1
+
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
 
@@ -2170,6 +2184,9 @@ class aot_inductor:
     enable_frame_pointer = (
         os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "1") == "1"
     )
+
+    # Enable lightweight line tables for profiling tools (e.g. strobelight)
+    enable_line_tables = os.environ.get("AOT_INDUCTOR_ENABLE_LINE_TABLES", "1") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
