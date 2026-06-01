@@ -43,8 +43,6 @@ class CppWrapperMps(CppWrapperGpu):
         raw_args: tuple[Any, ...] | None = None,
         triton_meta: dict[str, Any] | None = None,
         inductor_meta: dict[str, Any] | None = None,
-        triton_autotune_seed_infos: list[tuple[str, list[Any], list[Any]]]
-        | None = None,
         graph_name: str = "",
         original_fxnode_name: str | None = None,
         current_stream_idx: int | None = None,

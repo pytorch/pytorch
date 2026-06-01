@@ -54,6 +54,7 @@ class ComboKernelTests(TestCase):
     check_model_cpu = check_model
     check_kernel_count = True
     combo_kernel_per_subkernel_blocks = False
+    combo_seed_autotune_at_compile_time = True
 
     def setUp(self):
         super().setUp()
@@ -65,6 +66,7 @@ class ComboKernelTests(TestCase):
                     "combo_kernels": True,
                     "benchmark_combo_kernel": False,
                     "combo_kernel_per_subkernel_blocks": self.combo_kernel_per_subkernel_blocks,
+                    "combo_seed_autotune_at_compile_time": self.combo_seed_autotune_at_compile_time,
                     "combo_kernel_max_distance": -1,
                     "combo_kernel_peak_memory_increase_gb": None,
                     "combo_kernel_peak_memory_pct_threshold": None,
@@ -229,10 +231,7 @@ class ComboKernelTests(TestCase):
         out_eager = fn(*inps)
         fn_c = torch.compile(fn)
         out_compiled, code = run_and_get_code(fn_c, *inps)
-        if (
-            torch._inductor.config.combo_kernel_per_subkernel_blocks
-            and torch._inductor.config.combo_seed_autotune_at_compile_time
-        ):
+        if torch._inductor.config.combo_kernel_per_subkernel_blocks:
             # Inline bench at codegen consumes the seed kernels; the
             # per-subkernel persistent-reduction size hints survive in
             # combo_grid_meta as size_hints_0/1/... (slot 0 is the 16-col
@@ -288,14 +287,19 @@ class ComboKernelTests(TestCase):
                     "combo_kernel_max_num_nodes": 128,
                     "combo_kernel_allow_mixed_sizes": 2,
                     "combo_kernels_autotune": 2,
-                    "combo_kernel_autotune_grouping": True,
                 }
             ),
         ):
             fn_c = torch.compile(fn)
             out_compiled, code = run_and_get_code(fn_c, *inps)
         self.assertEqual(out_eager, out_compiled)
-        FileCheck().check("triton_heuristics.persistent_reduction").run(code[0])
+        # Sort subkernels are forced persistent regardless of flow. The
+        # compile-time seed flow emits the @combo_kernel decorator; the runtime
+        # flow uses the dominant heuristic decorator instead.
+        check = FileCheck()
+        if torch._inductor.config.combo_seed_autotune_at_compile_time:
+            check = check.check("triton_heuristics.combo_kernel")
+        check.check("persistent_reduction").run(code[0])
 
     @requires_gpu_and_triton
     def test_fuse_mix_order_reductions_combo_kernels(self):
@@ -802,6 +806,91 @@ class ComboKernelTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
+    @requires_gpu_and_triton
+    @parametrize("compile_time_autotune", [True, False])
+    def test_combo_kernel_exclude_indirect_indexing(self, compile_time_autotune):
+        # Indirect-indexing nodes are filtered out of combo kernels only when
+        # compile-time seed autotune is on (the bench has no real index tensor
+        # to feed those reads).  With compile-time autotune off, indirect
+        # nodes are eligible and a single combo kernel is generated.
+        def fn(a, b, c, idx1):
+            g = a[idx1]
+            p1, p2 = b * 2.0, c + 1.0
+            return g, p1, p2
+
+        inps = [
+            torch.randn(1024, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randn(256, device=GPU_TYPE),
+            torch.randint(0, 1024, (256,), device=GPU_TYPE),
+        ]
+        expected = 2 if compile_time_autotune else 1
+        out_eager = fn(*inps)
+        with torch._inductor.config.patch(
+            {"combo_seed_autotune_at_compile_time": compile_time_autotune}
+        ):
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_seed_autotune_cap": True,
+            "combo_kernel_per_subkernel_blocks": True,
+            "combo_seed_autotune_at_compile_time": False,
+        }
+    )
+    def test_combo_kernel_config_cap_small_reduction(self):
+        # Small reduction (rnumel=32 <= 64) -> cap=1, recorded per-subkernel in
+        # combo_grid_meta and consumed by _handle_combo.
+        import re
+
+        def fn(a, b):
+            return a.sum(-1), b.sum(-1)
+
+        inps = [
+            torch.randn(128, 32, device=GPU_TYPE),
+            torch.randn(128, 32, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        caps = [int(c) for c in re.findall(r"config_cap_\d+'?\s*:\s*(\d+)", code[0])]
+        self.assertTrue(caps, "no config_cap metadata emitted")
+        self.assertTrue(all(c == 1 for c in caps), f"caps={caps}")
+
+    @requires_gpu_and_triton
+    @parametrize("numel,expected_cap", [(2048, 1), (65536, 2)])
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_seed_autotune_cap": True,
+            "combo_kernel_per_subkernel_blocks": True,
+            "combo_seed_autotune_at_compile_time": False,
+        }
+    )
+    def test_combo_kernel_config_cap_pointwise_bucket(self, numel, expected_cap):
+        # Pointwise bucketing: total <= 4096 -> cap=1, else cap=2. The cap is
+        # precomputed into combo_grid_meta per subkernel.
+        import re
+
+        def fn(a, b, c):
+            return a * 2, b + 1, c - 1
+
+        inps = [torch.randn(numel, device=GPU_TYPE) for _ in range(3)]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        caps = [int(c) for c in re.findall(r"config_cap_\d+'?\s*:\s*(\d+)", code[0])]
+        self.assertTrue(caps, "no config_cap metadata emitted")
+        self.assertTrue(all(c == expected_cap for c in caps), f"caps={caps}")
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu
@@ -1251,6 +1340,12 @@ class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
     combo_kernel_per_subkernel_blocks = True
 
 
+class ComboKernelTestsPerSubkernelBlocksRuntimeSeed(ComboKernelTests):
+    # Exercises the runtime _combo_sequential_autotune path (pre-seed flow).
+    combo_kernel_per_subkernel_blocks = True
+    combo_seed_autotune_at_compile_time = False
+
+
 class ComboKernelBenchmarkTestsPerSubkernelBlocks(ComboKernelBenchmarkTests):
     combo_kernel_per_subkernel_blocks = True
 
@@ -1414,91 +1509,19 @@ class ComboKernelTestsMaxAutotune(TestCase):
         torch._inductor.metrics.reset()
         super().tearDown()
 
-    def _run_and_get_combo_seed_logs(self, fn, inps):
-        logger = logging.getLogger("torch._inductor.runtime.triton_heuristics")
-        with fresh_cache(), self.assertLogs(logger, level=logging.DEBUG) as cm:
+    def _run_and_get_combo_code(self, fn, inps):
+        with fresh_cache():
             out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
-        return out_compiled, " ".join(code), "\n".join(cm.output)
+        return out_compiled, " ".join(code)
 
-    def _assert_combo_seed_launch_path(self, code, logs, seed_count):
+    def _assert_combo_seed_launch_path(self, code):
         # Inline bench at codegen consumes the seed kernels and bakes the
-        # winning configs into combo_grid_meta["prepicked_seed_configs"].
-        # The wrapper has no runtime seed call; the combo's precompile
-        # (driven by defer_combo_precompile loading the prepicked configs)
-        # stitches and compiles before first launch.
+        # winning configs into combo_grid_meta["prepicked_seed_configs"];
+        # precompile stitches them into the combo config before first launch.
         FileCheck().check("'prepicked_seed_configs':").check(".run(").run(code)
         # Seed kernels are internal autotune artifacts and must not inflate
-        # generated_kernel_count. Only the combo kernel itself counts.
+        # generated_kernel_count -- only the combo kernel itself counts.
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
-        self.assertIn(
-            f"Combo standalone autotune seed: applying {seed_count} standalone configs",
-            logs,
-        )
-        self.assertTrue(
-            "Combo standalone autotune seed: selected stitched combo config" in logs
-            or "Combo standalone autotune seed: no combo field changes" in logs
-        )
-
-    @torch._inductor.config.patch("combo_seed_autotune_at_compile_time", False)
-    def test_combo_seed_infos_remapped_for_compile_time_autotune(self):
-        # This test specifically exercises the runtime-bench emission path;
-        # flip combo_seed_autotune_at_compile_time off so the runtime
-        # writeline is enabled.
-        from torch._inductor.codegen.common import InplacedBuffer
-        from torch._inductor.codegen.triton_combo_kernel import ComboKernel
-        from torch._inductor.virtualized import V
-
-        class FakeArgs:
-            inplace_buffers = {
-                "old_buf": InplacedBuffer("inner_buf", ["old_buf", "live_buf"])
-            }
-
-            def python_argdefs(self):
-                return [], ["combo_arg"], [], [torch.float32]
-
-        class FakeWrapper:
-            def __init__(self):
-                self.lines = []
-                self.generated_kernel_call = None
-
-            def prepare_triton_kernel_call(self, call_args):
-                return list(call_args)
-
-            def writeline(self, line):
-                self.lines.append(line)
-
-            def generate_kernel_call(self, *args, **kwargs):
-                self.generated_kernel_call = (args, kwargs)
-
-        wrapper = FakeWrapper()
-        graph = SimpleNamespace(
-            wrapper_code=wrapper,
-            removed_buffers={"old_buf"},
-            cpp_wrapper=False,
-        )
-        kernel = ComboKernel(object, enable_autotune=True)
-        kernel.args = FakeArgs()
-        kernel.dispatch_class = ComboKernel.SequentialDispatch
-        kernel.triton_meta = {}
-        kernel.inductor_meta = {}
-        kernel.standalone_autotune_seed_infos = [
-            ("seed_kernel", ["old_buf"], [torch.float32])
-        ]
-
-        with V.set_graph_handler(graph):
-            kernel.call_kernel("combo_kernel")
-
-        self.assertEqual(len(wrapper.lines), 2)
-        joined = "\n".join(wrapper.lines)
-        self.assertIn("combo_seeds_need_tuning", joined)
-        self.assertIn("live_buf", joined)
-        self.assertNotIn("old_buf", joined)
-        self.assertIsNotNone(wrapper.generated_kernel_call)
-        _, kwargs = wrapper.generated_kernel_call
-        self.assertEqual(
-            kwargs["triton_autotune_seed_infos"],
-            [("seed_kernel", ["live_buf"], [torch.float32])],
-        )
 
     @requires_gpu_and_triton
     def test_combo_kernel_max_autotune(self):
@@ -1515,8 +1538,8 @@ class ComboKernelTestsMaxAutotune(TestCase):
         ]
 
         out_eager = fn(*inps)
-        out_compiled, code, logs = self._run_and_get_combo_seed_logs(fn, inps)
-        self._assert_combo_seed_launch_path(code, logs, seed_count=3)
+        out_compiled, code = self._run_and_get_combo_code(fn, inps)
+        self._assert_combo_seed_launch_path(code)
         self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
@@ -1531,8 +1554,8 @@ class ComboKernelTestsMaxAutotune(TestCase):
         ]
 
         out_eager = fn(*inps)
-        out_compiled, code, logs = self._run_and_get_combo_seed_logs(fn, inps)
-        self._assert_combo_seed_launch_path(code, logs, seed_count=2)
+        out_compiled, code = self._run_and_get_combo_code(fn, inps)
+        self._assert_combo_seed_launch_path(code)
         self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
@@ -1546,8 +1569,8 @@ class ComboKernelTestsMaxAutotune(TestCase):
         ]
 
         out_eager = fn(*inps)
-        out_compiled, code, logs = self._run_and_get_combo_seed_logs(fn, inps)
-        self._assert_combo_seed_launch_path(code, logs, seed_count=2)
+        out_compiled, code = self._run_and_get_combo_code(fn, inps)
+        self._assert_combo_seed_launch_path(code)
         self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
@@ -1572,8 +1595,8 @@ class ComboKernelTestsMaxAutotune(TestCase):
         ]
 
         out_eager = fn(*inps)
-        out_compiled, code, logs = self._run_and_get_combo_seed_logs(fn, inps)
-        self._assert_combo_seed_launch_path(code, logs, seed_count=6)
+        out_compiled, code = self._run_and_get_combo_code(fn, inps)
+        self._assert_combo_seed_launch_path(code)
         self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
@@ -1621,8 +1644,8 @@ class ComboKernelTestsMaxAutotune(TestCase):
         ]
 
         out_eager = fn(*inps)
-        out_compiled, code, logs = self._run_and_get_combo_seed_logs(fn, inps)
-        self._assert_combo_seed_launch_path(code, logs, seed_count=4)
+        out_compiled, code = self._run_and_get_combo_code(fn, inps)
+        self._assert_combo_seed_launch_path(code)
         self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
