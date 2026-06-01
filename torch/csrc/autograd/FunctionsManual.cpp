@@ -535,6 +535,15 @@ Tensor linalg_vector_norm_backward(
 }
 
 Tensor pow_backward(Tensor grad, const Tensor& self, const Scalar& exponent) {
+  if (exponent.isSymbolic()) {
+    // Under dynamic shapes the exponent is a symbolic scalar. Branching on its
+    // value (exponent.equal(0)) would guard and specialize it, defeating
+    // dynamic shapes (and Scalar::equal is NYI for symbolic scalars). Fall back
+    // to the tensor-exponent backward, which handles a dynamic exponent at
+    // runtime.
+    return pow_backward_self(
+        grad, self, at::scalar_tensor(exponent, self.options()));
+  }
   if (exponent.equal(0.0)) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
