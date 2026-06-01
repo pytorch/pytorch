@@ -1,0 +1,82 @@
+name: Upload docs preview
+
+# Runs in the base-repo context so it has the AWS credentials needed to write
+# to s3://doc-previews. This exists because OSDC docs builds run in a k8s pod
+# that does not (and should not) have S3 write permission, and fork PRs cannot
+# authenticate via OIDC from the build job itself. The pull.yml docs job stages
+# the built docs as a GHA artifact; this workflow downloads that artifact and
+# performs the actual S3 upload.
+
+on:
+  workflow_run:
+    workflows:
+      - pull
+    types:
+      - completed
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  upload-docs-preview:
+    if: >-
+      github.repository_owner == 'pytorch' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        docs_type: [python, cpp]
+    steps:
+      - name: Download docs preview artifact
+        id: download
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: docs-preview-osdc-${{ matrix.docs_type }}
+          path: docs-preview-staging
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read PR metadata
+        if: steps.download.outcome == 'success'
+        id: metadata
+        shell: bash
+        run: |
+          set -ex
+          if [ ! -f docs-preview-staging/pr-metadata.txt ]; then
+            echo "pr-metadata.txt missing from artifact, aborting."
+            exit 1
+          fi
+          # shellcheck disable=SC1091
+          source docs-preview-staging/pr-metadata.txt
+          if [ -z "${PR_NUMBER:-}" ]; then
+            echo "PR_NUMBER is empty, aborting."
+            exit 1
+          fi
+          echo "pr_number=${PR_NUMBER}" >> "${GITHUB_OUTPUT}"
+          echo "docs_type=${DOCS_TYPE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure AWS credentials
+        if: steps.download.outcome == 'success'
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-region: us-east-1
+          role-session-name: docs-preview-uploader
+
+      - name: Upload Python docs preview
+        if: ${{ steps.download.outcome == 'success' && matrix.docs_type == 'python' }}
+        env:
+          PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
+        run: |
+          aws s3 sync docs-preview-staging/content/ "s3://doc-previews/pytorch/pytorch/${PR_NUMBER}" --quiet
+
+      - name: Upload C++ docs preview
+        if: ${{ steps.download.outcome == 'success' && matrix.docs_type == 'cpp' }}
+        env:
+          PR_NUMBER: ${{ steps.metadata.outputs.pr_number }}
+        run: |
+          aws s3 sync docs-preview-staging/content/ "s3://doc-previews/pytorch/pytorch/${PR_NUMBER}/cppdocs" --quiet

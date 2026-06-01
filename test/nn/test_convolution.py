@@ -61,12 +61,10 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_LINUX,
     MACOS_VERSION,
-    MI300_ARCH,
     parametrize as parametrize_test,
     run_tests,
     serialTest,
     set_default_dtype,
-    skipIfRocmArch,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -599,6 +597,35 @@ class TestConvolutionNN(NNTestCase):
                         lambda x, w, b: convfn(x, w, b, **kwargs),
                         (inputs.cpu(), weight.cpu(), bias.cpu()),
                     )
+
+                # Non-batched must match batched-then-squeezed.
+                inputs_nb = inputs[0]
+                with torch.backends.cudnn.flags(enabled=False):
+                    res_nb = convfn(inputs_nb, weight, bias, **kwargs)
+                    res_via_batched = convfn(
+                        inputs_nb.unsqueeze(0), weight, bias, **kwargs
+                    ).squeeze(0)
+                self.assertEqual(res_nb, res_via_batched)
+
+    def test_slow_conv_dilated3d_unbatched(self):
+        # Direct op call to guarantee the slow path.
+        for device in ["cpu"] + (["cuda"] if TEST_CUDA else []):
+            input = torch.randn(2, 5, 5, 5, dtype=torch.double, device=device)
+            weight = torch.randn(3, 2, 3, 3, 3, dtype=torch.double, device=device)
+            bias = torch.randn(3, dtype=torch.double, device=device)
+            kwargs = dict(
+                kernel_size=[3, 3, 3],
+                stride=[1, 1, 1],
+                padding=[0, 0, 0],
+                dilation=[2, 2, 2],
+            )
+            out_nb = torch.ops.aten.slow_conv_dilated3d(
+                input, weight, bias=bias, **kwargs
+            )
+            out_batched = torch.ops.aten.slow_conv_dilated3d(
+                input.unsqueeze(0), weight, bias=bias, **kwargs
+            ).squeeze(0)
+            self.assertEqual(out_nb, out_batched)
 
     def test_Conv2d_inconsistent_types(self):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float)
@@ -3524,9 +3551,14 @@ class TestConvolutionNNDeviceType(NNTestCase):
         F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device=device))
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
-    @skipIfRocmArch(MI300_ARCH)
     @onlyCUDA
-    @tf32_on_and_off(0.005)
+    # Test disables cuDNN, forcing the ATen slow_conv2d fallback in
+    # ConvolutionMM2d.cu which calls at::cuda::blas::gemm directly. On ROCm
+    # the weight-gradient GEMM (K=25 per-batch, accumulated across 2 batches
+    # in FP32) picks up hipBLASLt FAST_TF32 and breaches 0.005 with AMD XF32
+    # round-down bias (measured 5.9e-3); ideal NV-TF32 passes at 2.7e-3.
+    # See https://github.com/jeffdaily/tf32_analysis.
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     def test_Conv2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.Conv2d(3, 3, kernel_size=1)
@@ -3557,9 +3589,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
             exact_device=False,
         )
 
-    @skipIfRocmArch(MI300_ARCH)
     @onlyCUDA
-    @tf32_on_and_off(0.005)
+    # Structurally identical to test_Conv2d_size_1_kernel: cuDNN disabled →
+    # ATen slow_conv_transpose2d fallback → GEMM under hipBLASLt FAST_TF32
+    # on ROCm. See https://github.com/jeffdaily/tf32_analysis.
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     def test_ConvTranspose2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.ConvTranspose2d(3, 3, kernel_size=1)
