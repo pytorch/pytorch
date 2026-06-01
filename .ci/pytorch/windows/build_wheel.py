@@ -7,6 +7,12 @@ the sibling build_env_setup.py + build_install_deps.py + the parent
 bash wrapper. This script is the wheel-build step proper -- the
 Windows-side analog of `.ci/manywheel/build_wheel.py`.
 
+The Linux manywheel pipeline follows the build with a repair_wheel.py
+step that patches ELF RPATHs and bundles native deps. Windows doesn't
+need that: DLL discovery uses PATH / AddDllDirectory rather than RPATH,
+and the CUDA DLLs ship inside torch/lib/ already (torch/__init__.py
+adds that directory to the dll search path at import time).
+
 Usage: build_wheel.py <output_dir>
 """
 
