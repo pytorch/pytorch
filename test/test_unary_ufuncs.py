@@ -592,13 +592,14 @@ class TestUnaryUfuncs(TestCase):
         x = torch.tensor([-0.0, 0.0], device=device, dtype=dtype)
         exp = torch.signbit(x)
 
-        for result in (
-            torch.clamp_min(x, 0),
-            torch.clamp_max(x, 0),
-            torch.clamp(x, min=0),
-            torch.clamp(x, min=0, max=1)
+        for name, result in (
+            ("clamp_min", torch.clamp_min(x, 0)),
+            ("clamp_max", torch.clamp_max(x, 0)),
+            ("clamp_min_kwarg", torch.clamp(x, min=0)),
+            ("clamp_min_max_kwarg", torch.clamp(x, min=0, max=1))
         ):
-            self.assertEqual(torch.signbit(result), exp)
+            with self.subTest(op=name):
+                self.assertEqual(torch.signbit(result), exp)
 
     @unittest.skipIf(not TEST_SCIPY, "Requires SciPy")
     @dtypes(torch.float, torch.double)
