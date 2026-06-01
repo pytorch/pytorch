@@ -64,14 +64,16 @@ changes. Instead, if the PR is large, explain the order to review changes
 (e.g., the logical progression), or if it's short just omit the bullet list
 entirely.
 
+The commit message should be clear, informative, and have a Test Plan section
+that describes how you tested the change. If you are fixing a bug, the commit
+message must explain the root cause of the bug and how the fix works.
+If there were multiple potential paths you could have taken, please call them
+out succinctly and justify the one you took.
+
 When describing the testing strategy in a commit message, include the literal
 commands that were run in fenced Markdown code blocks.
 
-Disclose that the PR was authored with an AI assistant. Do this informally in
-the commit body (e.g., "Authored by Claude." or a similar attribution for
-whichever assistant was used). NEVER add a `Co-authored-by:` trailer
-attributing the AI assistant, as it interferes with the Linux Foundation CLA
-bot.
+Disclose that the PR was authored with an AI assistant.
 
 When the user asks you to amend a commit, check whether the commit message
 still accurately describes the changes. If it doesn't and the commit is not a

@@ -21,6 +21,7 @@ from .utils import (
     _from_fun,
     _stack_pytree,
     _unstack_pytree,
+    check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
     fill_none_with_masks,
     filter_with_masks,
@@ -39,6 +40,61 @@ class MapImpl(HigherOrderOperator):
     def __call__(self, *args, **kwargs):
         # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
+
+    # pyrefly: ignore [bad-override]
+    def gen_schema(self, f, xs, pos_args):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+
+        # Mutation semantics for map:
+        # - xs is mutable: each iteration sees a storage-disjoint slice
+        #   (xs[t] and xs[t+1] share no storage), so in-place writes are
+        #   race-free regardless of evaluation order, preserving map's
+        #   "iterations are independent" contract.
+        # - pos_args is NOT mutable: every iteration sees the same
+        #   tensor, so mutating it makes iterations depend on each
+        #   other, breaking the independence contract and introducing a
+        #   data race under any parallel lowering. Users who need a
+        #   shared mutable buffer should use scan / while_loop, where
+        #   sequential iteration is part of the contract.
+        xs_slices = [first_slice_copy(x) for x in xs]
+        all_inputs = tuple(xs_slices + list(pos_args))
+
+        body_gm: torch.fx.GraphModule = materialize_as_graph(f, all_inputs)
+        (
+            _,
+            _,
+            _,
+            mutated_inputs,
+            outputs,
+        ) = check_input_alias_and_mutation_return_outputs(body_gm)
+
+        n_xs = len(xs)
+        pos_args_mutated = [i for i in mutated_inputs if i >= n_xs]
+        if pos_args_mutated:
+            raise RuntimeError(
+                "For map, f cannot mutate pos_args inputs but found "
+                f"{[i - n_xs for i in pos_args_mutated]}-th pos_args inputs "
+                "are mutated. Map iterations are independent, so mutating "
+                "a shared pos_args buffer is undefined under parallel "
+                "lowering. Use scan or while_loop if sequential buffer "
+                "updates are required."
+            )
+        mutated_set = set(mutated_inputs)
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("f", body_gm)
+
+        for idx, x in enumerate(xs):
+            schema_gen.add_arg(f"xs{idx}", x, is_mutated=idx in mutated_set)
+
+        for idx, arg in enumerate(pos_args):
+            schema_gen.add_arg(f"additional_input{idx}", arg)
+
+        for out in outputs:
+            schema_gen.add_output(out)
+
+        schema_gen.add_schema_tree_spec(f, xs, pos_args)
+        return schema_gen.gen_schema()
 
 
 map_impl = MapImpl()

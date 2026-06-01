@@ -206,55 +206,60 @@ def stage_backward_input(
     )
 
     handles = []
-    for param_group in param_groups:
-        for i, intermediate in enumerate(param_group["intermediates"]):
+    try:
+        for param_group in param_groups:
+            intermediates = list(param_group["intermediates"])
+            param_group["intermediates"] = intermediates
+            for i, intermediate in enumerate(intermediates):
 
-            def get_hook(param_group, i):
-                def hook(grad_inputs):
-                    if param_group.get("grads", None) is None:
-                        param_group["grads"] = [None] * len(
-                            param_group["intermediates"]
-                        )
-                    param_group["grads"][i] = grad_inputs
+                def get_hook(param_group, i):
+                    def hook(grad_inputs):
+                        if param_group.get("grads", None) is None:
+                            param_group["grads"] = [None] * len(
+                                param_group["intermediates"]
+                            )
+                        param_group["grads"][i] = grad_inputs
 
-                return hook
+                    return hook
 
-            # These are always "split" nodes that we need to recompute, so
-            # save their inputs.
-            handle = intermediate.register_prehook(get_hook(param_group, i))
-            handles.append(handle)
+                handle = intermediate.register_prehook(get_hook(param_group, i))
+                handles.append(handle)
 
-    if output_grads is None:
-        # In case this is the loss and there are no output_grads, then we just use 1s
-        output_grads = [
-            torch.ones_like(stage_output) for stage_output in stage_outputs_or_loss
-        ]
+        if output_grads is None:
+            output_grads = [
+                torch.ones_like(stage_output) for stage_output in stage_outputs_or_loss
+            ]
 
-    dinputs = _autograd_grad_for_inputs(
-        stage_outputs_or_loss,
-        input_values,
-        output_grads,
-        retain_graph=True,
-    )
+        dinputs = _autograd_grad_for_inputs(
+            stage_outputs_or_loss,
+            input_values,
+            output_grads,
+            retain_graph=True,
+        )
 
-    # Accumulate into .grad
-    for inp, dinput in zip(input_values, dinputs):
-        if isinstance(inp, torch.Tensor) and dinput is not None:
-            if inp.grad is None:
-                inp.grad = dinput
-            else:
-                inp.grad += dinput
+        for inp, dinput in zip(input_values, dinputs):
+            if isinstance(inp, torch.Tensor) and dinput is not None:
+                if inp.grad is None:
+                    inp.grad = dinput
+                else:
+                    inp.grad += dinput
 
-    # stage_outputs_or_loss are not used in backwards after this point, so we can safely remove it from the autograd graph
-    # this allows autograd to clear up the graph dedicated for this tensor and free up significant memory
-    for t in stage_outputs_or_loss:
-        t.detach_()
+        # drop output side graph state we no longer need
+        for t in stage_outputs_or_loss:
+            t.detach_()
 
-    # hooks are no longer necessary, clean up for consistency
-    for handle in handles:
-        handle.remove()
-
-    return dinputs, param_groups
+        return dinputs, param_groups
+    except Exception as e:
+        exc_msg = f"""
+        Failed to run stage backward input:
+        Stage output: {map_debug_info(stage_outputs_or_loss)}
+        Output gradient: {map_debug_info(output_grads)}
+        Input: {map_debug_info(input_values)}
+        """
+        raise RuntimeError(exc_msg) from e
+    finally:
+        for handle in handles:
+            handle.remove()
 
 
 def stage_backward_weight(
@@ -281,33 +286,44 @@ def stage_backward_weight(
                     # pyrefly: ignore [bad-argument-type]
                     valid_grad_outputs.append(grad)
 
-        # Break a reference cycle caused inside stage_backward_input->get_hook->hook
-        # The summarized cycle is:
-        # `hook` -> cell -> param_group -> intermediates -> `hook`
-        # because we install the hook function onto each of the intermediate autograd nodes.
-        # We need to keep intermediates alive up until backward_weight, but we can free it now.
-        del param_group["intermediates"]
+        # clamp saved grads to avoid double counting through descendant intermediates.
+        handles = []
+        try:
+            if len(param_group["intermediates"]) > 1:
+                for grads_tuple, intermediate in zip(
+                    param_group["grads"],
+                    param_group["intermediates"],
+                    strict=True,
+                ):
+                    handles.append(
+                        intermediate.register_prehook(
+                            lambda grad_outputs, sg=grads_tuple: sg
+                        )
+                    )
 
-        if valid_edges:  # Only call autograd.grad if we have valid gradients
-            # [NEW!] Able to pass a GradientEdge to autograd.grad as output
-            weights_edges = tuple(GradientEdge(w, 0) for w in param_group["params"])
-            dweights = torch.autograd.grad(
-                valid_edges,
-                weights_edges,
-                grad_outputs=valid_grad_outputs,
-                retain_graph=retain_graph,
-            )
+            # break the hook -> param_group -> intermediates cycle
+            del param_group["intermediates"]
 
-            # release grad memory early after use
-            del param_group["grads"]
+            if valid_edges:
+                weights_edges = tuple(GradientEdge(w, 0) for w in param_group["params"])
+                dweights = torch.autograd.grad(
+                    valid_edges,
+                    weights_edges,
+                    grad_outputs=valid_grad_outputs,
+                    retain_graph=retain_graph,
+                )
 
-            for grad_acc, dw in zip(param_group["params"], dweights):
-                weight, index = grad_acc_to_weight[grad_acc]
-                if weight.grad is None:
-                    weight.grad = dw
-                else:
-                    weight.grad += dw
-    # return grads in the original order weights were provided in
+                del param_group["grads"]
+
+                for grad_acc, dw in zip(param_group["params"], dweights):
+                    weight, index = grad_acc_to_weight[grad_acc]
+                    if weight.grad is None:
+                        weight.grad = dw
+                    else:
+                        weight.grad += dw
+        finally:
+            for handle in handles:
+                handle.remove()
     return tuple(weight_grads)
 
 

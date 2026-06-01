@@ -197,7 +197,7 @@ struct FunctionCallContext : public ObserverContext { // NOLINT
   std::vector<std::string> inputShapes;
   std::vector<std::string> inputStrides;
   std::vector<std::string> inputValues;
-  std::map<int, std::pair<long, long>> tensor_index_min_max_map;
+  std::map<int, std::pair<int64_t, int64_t>> tensor_index_min_max_map;
 
   std::string get_string_for_tensor_range() {
     if (tensor_index_min_max_map.empty()) {
@@ -413,7 +413,7 @@ convertIValue(
     const std::string& functionName,
     ExecutionTraceObserver::ID opId,
     int& tensorIndex,
-    std::map<int, std::pair<long, long>>& tensor_index_min_max_map,
+    std::map<int, std::pair<int64_t, int64_t>>& tensor_index_min_max_map,
     bool isInput,
     const c10::IValue& val,
     const bool baseType = true,
@@ -468,9 +468,9 @@ convertIValue(
         }
 
         if (ob.record_integral_tensor_range) {
-          long min = tensor.min().item().toLong();
-          long max = tensor.max().item().toLong();
-          tensor_index_min_max_map[tensorIndex] = std::make_pair(min, max);
+          auto [min_t, max_t] = tensor.aminmax();
+          tensor_index_min_max_map[tensorIndex] =
+              std::make_pair(min_t.item<int64_t>(), max_t.item<int64_t>());
         }
 
         enableRecordFunction(true);
@@ -583,7 +583,7 @@ static void appendValueInfo(
     const std::string& functionName,
     ExecutionTraceObserver::ID opId,
     int& tensorIndex,
-    std::map<int, std::pair<long, long>>& tensor_index_min_max_map,
+    std::map<int, std::pair<int64_t, int64_t>>& tensor_index_min_max_map,
     bool isInput,
     const c10::IValue& val,
     std::vector<std::string>& shapes,
