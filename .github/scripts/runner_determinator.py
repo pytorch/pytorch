@@ -48,7 +48,9 @@ Example config:
         # Comma-separated allowlist of github.workflow names that are
         # eligible for this experiment. rollout_perc is then applied within
         # that set; non-listed workflows are 0%. Use the literal "ALL" (or
-        # leave empty) to make every workflow eligible.
+        # leave empty) to make every workflow eligible. Prefix an entry with
+        # "-" to exclude that workflow even when "ALL" is present (e.g.
+        # "ALL,-B200 Smoke Tests"); exclusions take priority over inclusions.
         workflows: pull,trunk
     ---
 
@@ -119,8 +121,9 @@ class Experiment(NamedTuple):
     # Per-experiment workflow eligibility. Comma-separated github.workflow
     # names; when non-empty, only listed workflows are eligible for the
     # experiment and rollout_perc is applied within that set. The literal
-    # "ALL" (or empty) makes every workflow eligible. Applied after user
-    # opt-in/out.
+    # "ALL" (or empty) makes every workflow eligible. A "-" prefix excludes
+    # that workflow even when "ALL" is present (e.g. "ALL,-B200 Smoke Tests");
+    # exclusions take priority over inclusions. Applied after user opt-in/out.
     workflows: str = ""
 
     # Add more fields as needed
@@ -623,14 +626,18 @@ def get_runner_prefix(
 
         else:
             # workflows: gates which workflows are eligible. rollout_perc is
-            # applied within that gate; non-listed workflows are 0%.
-            # The literal "ALL" (or empty) makes every workflow eligible.
+            # applied within that gate; non-listed workflows are 0%. The
+            # literal "ALL" (or empty) makes every workflow eligible. Entries
+            # prefixed with "-" are exclusions that take priority, so
+            # "ALL,-foo" enables every workflow except "foo".
             workflow_list = parse_workflow_list(experiment_settings.workflows)
+            excluded = {e[1:] for e in workflow_list if e.startswith("-")}
+            included = {e for e in workflow_list if not e.startswith("-")}
             eligible = (
-                not workflow_list
-                or WORKFLOW_ALLOWLIST_ALL in workflow_list
-                or (workflow_name and workflow_name in workflow_list)
-            )
+                not included
+                or WORKFLOW_ALLOWLIST_ALL in included
+                or (workflow_name and workflow_name in included)
+            ) and workflow_name not in excluded
             if not eligible:
                 log.info(
                     f"Workflow '{workflow_name}' is not eligible for experiment "
@@ -661,7 +668,18 @@ def get_runner_prefix(
             else:
                 prefixes.append(label)
 
-    # ARC experiment takes precedence: return a fixed label prefix
+    # LF fleet takes precedence over ARC (a.k.a. OSDC): when both are enabled
+    # (e.g. a user is opted into both), prefer LF and disable ARC. OSDC is not
+    # deployed on the LF fleet yet, so it must stay off whenever LF is the
+    # active fleet, until we deploy it there.
+    if use_arc and fleet_prefix:
+        log.info(
+            "Both the LF and ARC experiments are enabled; LF takes precedence. Disabling ARC."
+        )
+        use_arc = False
+
+    # ARC experiment takes precedence over the remaining experiments: return a
+    # fixed label prefix
     if use_arc:
         arc_prefix = (
             ARC_CANARY_LABEL_PREFIX + ARC_LABEL_PREFIX
