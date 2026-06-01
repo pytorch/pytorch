@@ -390,16 +390,10 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
             mm for mm in gram_mms if _gram_shape_is_decomposable(mm, gathered_rows)
         ]
 
-        # Only apply to iterative optimizer patterns (>= 2 Gram mms).
-        # The math is valid for any Gram mm (fwd/bwd included) --
-        # TODO: test and enable for single-Gram-mm cases.
-        _MIN_GRAM_MMS = 2
-        if len(valid_grams) < _MIN_GRAM_MMS:
+        if not valid_grams:
             logger.debug(
-                "decomp_gram: skip %s -- %d Gram mms (need >= %d)",
+                "decomp_gram: skip %s -- 0 decomposable Gram mms",
                 ag_node.name,
-                len(valid_grams),
-                _MIN_GRAM_MMS,
             )
             continue
         gram_mms = valid_grams
