@@ -8179,6 +8179,8 @@ class ShapeEnv:
 
         # Add extra state that evaluate_expr() depends on.
         suppress_guards_tls = ShapeEnv._suppress_guards_tls()
+        error_on_new_guards = self._error_on_new_guards
+        frozen = self.frozen
         return self._inner_evaluate_expr(
             orig_expr,
             hint,
@@ -8186,6 +8188,8 @@ class ShapeEnv:
             size_oblivious,
             forcing_spec,
             suppress_guards_tls,
+            error_on_new_guards,
+            frozen,
             fallback_value,
         )
 
@@ -8199,8 +8203,13 @@ class ShapeEnv:
         size_oblivious: bool,
         forcing_spec: bool,
         _suppress_guards_tls: bool,
+        _error_on_new_guards: bool,
+        _frozen: bool,
         fallback_value: bool | None = None,
     ) -> sympy.Basic:
+        # The guard-state parameters are cache-key inputs. _evaluate_expr reads
+        # the live state on cache misses, where frozen/error_on_new_guards can
+        # turn a would-be guard into an ignored guard or an error.
         try:
             return self._evaluate_expr(
                 orig_expr,
@@ -8291,6 +8300,7 @@ class ShapeEnv:
             self._translation_validation_enabled
             and fx_node is not None
             and not self._suppress_guards_tls()
+            and not self.frozen
             and not size_oblivious
             and not any(symbol_is_type(s, SymT.FLOAT) for s in orig_expr.free_symbols)
             and fallback_value is None
@@ -8446,6 +8456,8 @@ class ShapeEnv:
             if concrete_val is None:
                 concrete_val = compute_concrete_val()
             self._check_frozen(expr, concrete_val)
+            if self.frozen:
+                return concrete_val
 
             if (
                 config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY
@@ -8563,10 +8575,25 @@ class ShapeEnv:
                 return True
         return False
 
-    @lru_cache(256)
-    @record_shapeenv_event(save_tracked_fakes=True)
+    def _maybe_refine_frozen_runtime_assert(self, expr: SympyBoolean) -> None:
+        if not free_unbacked_symbols(expr):
+            return
+
+        # This is the one intentional exception to treating a frozen ShapeEnv as
+        # side-effect-free: frozen means no new guards/runtime asserts are
+        # recorded, not that existing fact-propagation state is never refined.
+        # Explicit runtime assert nodes in an already-exported graph still carry
+        # facts needed to propagate later unbacked SymInt uses.
+        self._maybe_guard_rel(expr)
+        expr = canonicalize_bool_expr(expr)
+        self.axioms.update(dict(self.get_implications(self.simplify(expr))))
+        self._update_version_counter()
+
     def guard_or_defer_runtime_assert(
-        self, orig_expr: SympyBoolean, msg: str, fx_node: torch.fx.Node | None = None
+        self,
+        orig_expr: SympyBoolean,
+        msg: str,
+        fx_node: torch.fx.Node | None = None,
     ) -> bool:
         """
         Adds a guard that orig_expr is True if we can or fall back to adding an assert
@@ -8578,7 +8605,35 @@ class ShapeEnv:
             fx_node (Optional, torch.fx.Node): node in ``self.graph`` corresponding
                 to the expression, if applicable
         """
+        suppress_guards_tls = ShapeEnv._suppress_guards_tls()
+        error_on_new_guards = self._error_on_new_guards
+        frozen = self.frozen
+        return self._guard_or_defer_runtime_assert(
+            orig_expr,
+            msg,
+            fx_node,
+            suppress_guards_tls,
+            error_on_new_guards,
+            frozen,
+        )
+
+    @lru_cache(256)
+    @record_shapeenv_event(
+        save_tracked_fakes=True, name="guard_or_defer_runtime_assert"
+    )
+    def _guard_or_defer_runtime_assert(
+        self,
+        orig_expr: SympyBoolean,
+        msg: str,
+        fx_node: torch.fx.Node | None,
+        _suppress_guards_tls: bool,
+        _error_on_new_guards: bool,
+        _frozen: bool,
+    ) -> bool:
         expr = orig_expr
+        # These guard-state parameters are part of the lru_cache key. They are
+        # captured by the public wrapper and match the live state on cache
+        # misses; _check_frozen reads the live state for diagnostics.
 
         # TODO: split conjunctions and evaluate them separately
         # Try to quickly evaluate trivially true/false comparisons
@@ -8614,7 +8669,8 @@ class ShapeEnv:
         if (
             self._translation_validation_enabled
             and fx_node is not None
-            and not self._suppress_guards_tls()
+            and not _suppress_guards_tls
+            and not _frozen
         ):
             node, fresh = self._create_fx_call_function(torch._assert, (fx_node,))
             if node is None:
@@ -8622,13 +8678,16 @@ class ShapeEnv:
             if fresh:
                 self._add_fx_node_metadata(node)
 
-        if not self._suppress_guards_tls():
+        if not _suppress_guards_tls:
             self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
             # If you're here because of this assert, read Note [Backwards runtime asserts]
             # in torch/_inductor/graph.py
             if self.runtime_asserts_frozen:
                 log.debug("runtime_asserts_frozen but then got %s", expr)
             self._check_frozen(expr, sympy.true)
+            if _frozen:
+                self._maybe_refine_frozen_runtime_assert(expr)
+                return True
             # eliminate symbols on equality tests / refine ranges
             self._maybe_guard_rel(expr)
 

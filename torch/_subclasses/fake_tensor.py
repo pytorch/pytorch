@@ -1717,6 +1717,20 @@ class FakeTensorMode(TorchDispatchMode):
         if kwargs:
             # pyrefly: ignore [bad-argument-type]
             self._prep_args_for_hash(key_values, kwargs, state, id_hashed_objects)
+
+        if state.cache_on_shape_env():
+            if state.shape_env is None:
+                raise AssertionError(
+                    "state.shape_env must not be None when caching on shape_env"
+                )
+            key_values.extend(
+                [
+                    "shape_env_guard_state",
+                    state.shape_env.frozen,
+                    state.shape_env._error_on_new_guards,
+                    type(state.shape_env)._suppress_guards_tls(),
+                ]
+            )
         key = _DispatchCacheKey(tuple(key_values))
 
         for id_hashed_obj in id_hashed_objects:
