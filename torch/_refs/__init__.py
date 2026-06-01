@@ -3069,8 +3069,6 @@ def constant_pad_nd(
     if builtins.all(p < 0 for p in pad):
         return c_input.clone()
 
-    new_shape = list(input_sizes[:l_diff])
-
     for i in range(l_pad):
         pad_idx = len(pad) - ((i + 1) * 2)
         new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
@@ -3080,34 +3078,39 @@ def constant_pad_nd(
             f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
             f"which is invalid. Check dimension {l_diff + i} of your input.",
         )
-        new_shape.append(new_dim)
-
-    memory_format = utils.suggest_memory_format(input)
-    output = torch.empty(
-        new_shape,
-        dtype=input.dtype,
-        device=input.device,
-        requires_grad=input.requires_grad,
-        memory_format=memory_format,
-    )
 
     if value == 0 and input.dtype == torch.bool:
         value = False
-    # torch.fill isn't typed to allow complex values
-    output = torch.fill(output, value)  # type: ignore[arg-type]
 
-    c_output = output
+    result = c_input
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
-        if pad[pad_idx] >= 0:
-            c_output = c_output.narrow(
-                i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
+        left = max(pad[pad_idx], 0)
+        right = max(pad[pad_idx + 1], 0)
+        if left == 0 and right == 0:
+            continue
+        parts = []
+        if left > 0:
+            left_shape = list(result.shape)
+            left_shape[i] = left
+            # torch.full isn't typed to allow complex values
+            parts.append(
+                torch.full(left_shape, value, dtype=input.dtype, device=input.device)  # type: ignore[arg-type]
             )
-        if pad[pad_idx + 1] >= 0:
-            c_output = c_output.narrow(i, 0, c_output.shape[i] - pad[pad_idx + 1])
+        parts.append(result)
+        if right > 0:
+            right_shape = list(result.shape)
+            right_shape[i] = right
+            # torch.full isn't typed to allow complex values
+            parts.append(
+                torch.full(right_shape, value, dtype=input.dtype, device=input.device)  # type: ignore[arg-type]
+            )
+        result = torch.cat(parts, dim=i)
 
-    prims.copy_to(c_output, c_input)
-    return output
+    if result is c_input:
+        result = result.clone()
+
+    return result.contiguous(memory_format=utils.suggest_memory_format(input))
 
 
 def contiguous(
