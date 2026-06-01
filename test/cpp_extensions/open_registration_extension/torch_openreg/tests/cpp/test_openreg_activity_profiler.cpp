@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <csrc/tracer.h>
 #include "profiler/OpenRegActivityProfiler.h"
 #include "profiler/OpenRegActivityProfilerSession.h"
 
@@ -40,7 +41,7 @@ TEST(OpenRegActivityProfilerTest, AsyncConfigureReturnsNonNullSession) {
 
 class OpenRegSessionTest : public ::testing::Test {
  protected:
-    void SetUp() override {
+  void SetUp() override {
     OpenRegTracer::instance().disableActivityTracing();
   }
   void TearDown() override {

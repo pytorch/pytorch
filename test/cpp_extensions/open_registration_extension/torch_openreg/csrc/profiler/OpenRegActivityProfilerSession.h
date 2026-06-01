@@ -5,12 +5,11 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include <IActivityProfiler.h>
 #include <libkineto.h>
-#include <csrc/tracer.h>
+#include <include/openreg.h>
 
 namespace openreg::profiler {
 

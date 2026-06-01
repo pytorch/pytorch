@@ -3,10 +3,7 @@
 #include "profiler/OpenRegActivityProfilerSession.h"
 
 #include <output_base.h> // ActivityLogger complete definition
-#include <libkineto.h>
 #include <c10/util/ApproximateClock.h>
-
-#include <string>
 
 namespace openreg::profiler {
 
@@ -26,12 +23,12 @@ int64_t nowUs() {
 
 void OpenRegActivityProfilerSession::start() {
   startTs_ = nowUs();
-  OpenRegTracer::instance().enableActivityTracing();
+  orActivityEnableTracing();
   status_ = libkineto::TraceStatus::RECORDING;
 }
 
 void OpenRegActivityProfilerSession::stop() {
-  OpenRegTracer::instance().disableActivityTracing();
+  orActivityDisableTracing();
   endTs_ = nowUs();
   status_ = libkineto::TraceStatus::PROCESSING;
 }
@@ -43,18 +40,13 @@ std::vector<std::string> OpenRegActivityProfilerSession::errors() {
 void OpenRegActivityProfilerSession::processTrace(
     libkineto::ActivityLogger& /*logger*/) {
   traceBuffer_.span = libkineto::TraceSpan(startTs_, endTs_, "openreg");
-  // auto records = OpenRegTracer::instance().flush();
-  // convertRecords(records, logger);
 }
 
 void OpenRegActivityProfilerSession::processTrace(
     libkineto::ActivityLogger& logger,
-    libkineto::getLinkedActivityCallback getLinkedActivity,
+    libkineto::getLinkedActivityCallback /*getLinkedActivity*/,
     int64_t /*captureWindowStartTime*/,
     int64_t /*captureWindowEndTime*/) {
-  // captureWindowStartTime_ = captureWindowStartTime / kNsPerUs;
-  // captureWindowEndTime_ = captureWindowEndTime / kNsPerUs;
-  // cpuActivity_ = getLinkedActivity;
   processTrace(logger);
 }
 
@@ -88,11 +80,11 @@ OpenRegActivityProfilerSession::getTraceBuffer() {
 // ---------------------------------------------------------------------------
 
 void OpenRegActivityProfilerSession::pushCorrelationId(uint64_t id) {
-  OpenRegTracer::instance().pushExternalCorrelationId(id);
+  orActivityPushExternalCorrelationId(id);
 }
 
 void OpenRegActivityProfilerSession::popCorrelationId() {
-  OpenRegTracer::instance().popExternalCorrelationId();
+  orActivityPopExternalCorrelationId(nullptr);
 }
 
 } // namespace openreg::profiler
