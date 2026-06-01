@@ -582,6 +582,7 @@ def promote_constants(
     inputs: Sequence[_T],
     override_return_dtype: torch.dtype | None = None,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
+    round_scalar_constants: bool = False,
 ) -> Sequence[_T | BaseView | BaseConstant]:
     assert override_return_dtype is None or type_promotion_kind is None, (
         "only one of override_return_dtype or type_promotion_kind may be given"
@@ -612,7 +613,9 @@ def promote_constants(
     tensor_dtype = ex.get_dtype()
 
     # Round scalar to tensor's dtype for comparison ops to match eager
-    if override_return_dtype == torch.bool and tensor_dtype in (
+    if (
+        override_return_dtype == torch.bool or round_scalar_constants
+    ) and tensor_dtype in (
         torch.bfloat16,
         torch.float16,
     ):
@@ -8181,7 +8184,21 @@ register_lowering(aten.clamp_max)(minimum)
 neg = register_pointwise(aten.neg)
 abs = register_pointwise(aten.abs)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
-register_pointwise(aten.remainder)
+
+register_op_dtype_propagation_rules(
+    "remainder",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    override_return_dtype=None,
+)
+
+
+@register_lowering(aten.remainder, broadcast=True)
+def remainder(a, b):
+    a, b = promote_constants((a, b), round_scalar_constants=True)
+    fn = ops_wrapper("remainder")
+    return make_pointwise(fn)(a, b)
+
+
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 
