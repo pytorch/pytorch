@@ -43,6 +43,7 @@ from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
+    make_channels_last_strides_for,
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -3778,14 +3779,28 @@ def copy(self, src, non_blocking=False):
 
 
 @register_lowering(aten.clone)
-def clone(x, *, memory_format=None):
-    # TODO(jansel): memory format
-    return Pointwise.create(
+def clone(x: IRNode, *, memory_format=None):
+    cloned = Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=x.make_loader(),
         ranges=list(x.get_size()),
     )
+
+    match memory_format:
+        case torch.contiguous_format:
+            cloned.realize()
+            ir.as_storage_and_layout(cloned, freeze=True, want_contiguous=True)
+        case torch.channels_last | torch.channels_last_3d:
+            cloned.realize()
+            ir.as_storage_and_layout(
+                cloned,
+                freeze=True,
+                exact_strides=make_channels_last_strides_for(cloned.shape),
+            )
+        case _:
+            assert memory_format is None or memory_format == torch.preserve_format
+    return cloned
 
 
 def clone_preserve_reinterpret_view(x):
