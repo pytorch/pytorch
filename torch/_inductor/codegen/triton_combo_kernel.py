@@ -473,6 +473,26 @@ class ComboKernel(Kernel):
         self.num_warps = 8
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
+        # (src_code, kernel, node_schedule) for each subkernel, populated by
+        # SIMDScheduling.generate_combo_kernel_code BEFORE process_kernel so the
+        # seed signature matches the combo subkernel's (incl. in_out_ptr0).
+        self.standalone_autotune_seed_kernels: list[tuple[str, Any, Any]] = []
+        # {slot_idx: Config} for subkernels whose heuristic produced a single
+        # config at codegen time.  These skip define_kernel / async_compile
+        # entirely and are baked into combo_grid_meta["prepicked_seed_configs"].
+        self.prepicked_seed_configs: dict[int, Any] = {}
+
+    def dominant_sub_kernel_category(self) -> str:
+        counts: dict[str, int] = {}
+        for sk in self.sub_kernels:
+            if sk.persistent_reduction:
+                cat = "persistent_reduction"
+            elif sk.inside_reduction:
+                cat = "reduction"
+            else:
+                cat = "pointwise"
+            counts[cat] = counts.get(cat, 0) + 1
+        return max(counts, key=counts.__getitem__) if counts else "unknown"
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
@@ -802,6 +822,20 @@ class ComboKernel(Kernel):
                     filename=__file__,
                     triton_meta={triton_meta!r},
                     inductor_meta={inductor_meta!r},
+                )
+                @triton.jit
+            """
+        elif self.per_subkernel_blocks and (
+            config.combo_seed_autotune_at_compile_time or V.graph.cpp_wrapper
+        ):
+            # Compile-time seed flow: each subkernel was tuned by a standalone
+            # seed kernel and the stitched config baked into combo_grid_meta, so
+            # the combo only needs a placeholder config + metadata.
+            heuristics_line = f"""
+                @triton_heuristics.combo_kernel(
+                    filename=__file__,
+                    triton_meta={triton_meta!r},
+                    inductor_meta={inductor_meta!r}
                 )
                 @triton.jit
             """
@@ -1183,10 +1217,12 @@ class ComboKernel(Kernel):
         meta: dict[str, Any] = {
             "num_kernels": num_kernels,
             "min_blocks": min_blocks,
-            # Captured at codegen time so runtime sees the same value the
-            # source was generated with, regardless of later config changes.
-            "autotune_grouping": config.combo_kernel_autotune_grouping,
         }
+        if self.per_subkernel_blocks:
+            # Used by the runtime _handle_combo_kernel_per_subkernel_blocks path
+            # (combo_seed_autotune_at_compile_time=False) to group sub-kernels
+            # with identical heuristic inputs.
+            meta["autotune_grouping"] = config.combo_kernel_autotune_grouping
 
         if not self.enable_autotune:
             default_config: dict[str, int] = {}
@@ -1253,5 +1289,15 @@ class ComboKernel(Kernel):
                         meta[numel_name] = None
                     else:
                         meta[numel_name] = int(V.graph.sizevars.simplify(tree.numel))
+
+        if self.prepicked_seed_configs:
+            meta["prepicked_seed_configs"] = {
+                idx: {
+                    "kwargs": dict(cfg.kwargs),
+                    "num_warps": cfg.num_warps,
+                    "num_stages": cfg.num_stages,
+                }
+                for idx, cfg in self.prepicked_seed_configs.items()
+            }
 
         return meta
