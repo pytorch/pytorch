@@ -13,7 +13,7 @@ Dispatch (CUDA, SM90+):
 
 Notes:
 - cublasLt grouped GEMM is bf16-only (fp32 returns CUBLAS_STATUS_NOT_SUPPORTED).
-- cublasLt has a bug producing wrong results for non-16-byte-aligned N or K.
+- cublasLt grouped GEMM requires N and K to be 16-byte aligned.
 - At dim >= 2048 each mm saturates the GPU; loop fallback is equivalent.
 """
 
@@ -58,8 +58,6 @@ def _foreach_mm_cond(
 
     if not first_a.is_cuda:
         return False
-    if first_a.dim() != 2 or first_b.dim() != 2:
-        return False
     _SUPPORTED_DTYPES = {torch.bfloat16, torch.float32}
     if first_a.dtype not in _SUPPORTED_DTYPES or first_b.dtype not in _SUPPORTED_DTYPES:
         return False
@@ -70,15 +68,28 @@ def _foreach_mm_cond(
     first_a_rm = first_a.stride(-1) == 1
     first_b_rm = first_b.stride(-1) == 1
 
+    elem_size = first_a.element_size()
+    alignment = 16 // elem_size
+    nvmath_ok = first_a.dtype == torch.bfloat16 and _check_nvmath_cublaslt()
+    max_dim = 0
+
     for i in range(len(self)):
         a, b = self[i], mat2[i]
+        if a.dim() != 2 or b.dim() != 2:
+            return False
         if a.size(1) != b.size(0):
             return False
-        # cuBLAS errors on self-overlapping memory
         if not is_non_overlapping_and_dense_or_false(a):
             return False
         if not is_non_overlapping_and_dense_or_false(b):
             return False
+        K_i, N_i = a.size(1), b.size(1)
+        if nvmath_ok and (N_i % alignment != 0 or K_i % alignment != 0):
+            nvmath_ok = False
+        if not nvmath_ok:
+            if (K_i * elem_size) % 16 != 0 or (N_i * elem_size) % 16 != 0:
+                return False
+        max_dim = max(max_dim, a.size(0), K_i, N_i)
         if i > 0:
             if a.dtype != first_a.dtype or b.dtype != first_b.dtype:
                 return False
@@ -87,25 +98,8 @@ def _foreach_mm_cond(
             if (a.stride(-1) == 1) != first_a_rm or (b.stride(-1) == 1) != first_b_rm:
                 return False
 
-    M, K = first_a.shape
-    N = first_b.size(1)
-    elem_size = first_a.element_size()
-
-    # nvmath cublasLt grouped GEMM: bf16-only, requires 16-byte aligned N and K
-    use_nvmath = (
-        first_a.dtype == torch.bfloat16
-        and _check_nvmath_cublaslt()
-        and N % (16 // elem_size) == 0
-        and K % (16 // elem_size) == 0
-    )
-
-    if not use_nvmath:
-        # _grouped_mm (CUTLASS) requires 16-byte aligned strides
-        if (K * elem_size) % 16 != 0 or (N * elem_size) % 16 != 0:
-            return False
-        # At dim >= 2048, individual mm calls saturate the GPU
-        if min(M, N, K) >= 2048:
-            return False
+    if not nvmath_ok and max_dim >= 2048:
+        return False
 
     return True
 
@@ -133,7 +127,6 @@ def _foreach_mm_impl_stack(
     return [torch.mm(a, b) for a, b in zip(self, mat2)]
 
 
-_nvmath_cache: dict[tuple, object] = {}
 _ForeachMMCublasLt = None
 
 
@@ -144,6 +137,9 @@ def _get_nvmath_cls():
 
         _ForeachMMCublasLt = ForeachMMCublasLt
     return _ForeachMMCublasLt
+
+
+_nvmath_cache: dict[tuple, object] = {}
 
 
 def _foreach_mm_impl_nvmath(
@@ -168,14 +164,18 @@ def _foreach_mm_impl(
     mat2: list[torch.Tensor],
 ) -> list[torch.Tensor]:
     if self[0].dtype == torch.bfloat16:
-        global _nvmath_available
+        global _nvmath_available, _nvmath_warned
         if _check_nvmath_cublaslt():
             try:
                 return _foreach_mm_impl_nvmath(self, mat2)
-            except Exception:
+            except RuntimeError as e:
+                warnings.warn(
+                    f"_foreach_mm: nvmath cublasLt failed ({e}), disabling.",
+                    stacklevel=3,
+                )
                 _nvmath_available = False
+                _nvmath_warned = True
         else:
-            global _nvmath_warned
             if not _nvmath_warned:
                 _nvmath_warned = True
                 reason = _unavailable_reason(_NVMATH_DEPS) or (

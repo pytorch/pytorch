@@ -1932,11 +1932,13 @@ instantiate_device_type_tests(TestForeach, globals(), allow_xpu=True)
 
 _FOREACH_MM_SHAPES = [
     # (label, [(M, N, K)] * G)
+    ("single_group", [(64, 64, 64)]),
     ("uniform_1024_G16", [(1024, 1024, 1024)] * 16),
     ("uniform_2048_G8", [(2048, 2048, 2048)] * 8),
     ("uniform_4096_G4", [(4096, 4096, 4096)] * 4),
     ("mixed_small", [(128, 64, 256), (256, 128, 512), (64, 32, 128)]),
     ("mixed_muon", [(1024, 1024, 1024), (1024, 1024, 2752), (1024, 2752, 1024)]),
+    ("nonsquare", [(32, 64, 128), (64, 128, 32)]),
 ]
 
 

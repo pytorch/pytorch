@@ -18,18 +18,16 @@ import torch
 # for large shapes; 32 MB matches the PyTorch C++ cublasLt path.
 CUBLASLT_WORKSPACE_BYTES = 32 * 1024 * 1024
 
-_cublaslt_workspace = None
+_cublaslt_workspaces: dict[torch.device, torch.Tensor] = {}
 
 
 def _get_cublaslt_workspace(device="cuda"):
-    global _cublaslt_workspace
-    if _cublaslt_workspace is None or _cublaslt_workspace.device != torch.device(
-        device
-    ):
-        _cublaslt_workspace = torch.empty(
-            CUBLASLT_WORKSPACE_BYTES, dtype=torch.uint8, device=device
+    dev = torch.device(device)
+    if dev not in _cublaslt_workspaces:
+        _cublaslt_workspaces[dev] = torch.empty(
+            CUBLASLT_WORKSPACE_BYTES, dtype=torch.uint8, device=dev
         )
-    return _cublaslt_workspace
+    return _cublaslt_workspaces[dev]
 
 
 def _set_attr(setter, handle, attr, val, ctype):
