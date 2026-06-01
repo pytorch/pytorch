@@ -3407,7 +3407,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 )
             filtered_nodes = [x for x in filtered_nodes if not x.is_reduction()]
 
-        if config.combo_seed_autotune_at_compile_time or V.graph.cpp_wrapper:
+        if config.combo_seed_autotune_at_compile_time:
             indirect_nodes = [
                 n
                 for n in filtered_nodes
