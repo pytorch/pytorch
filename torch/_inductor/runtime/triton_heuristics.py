@@ -2299,7 +2299,9 @@ class CompileResult(Generic[_T]):
 
     def make_launcher(self) -> LauncherType: ...
 
-    def _gen_launcher_code(self, scope, def_args, runner_args) -> LauncherType:
+    def _gen_launcher_code(
+        self, scope, def_args, runner_args, pre_runner_lines=None
+    ) -> LauncherType:
         grid = GridExpr.from_meta(self.inductor_meta, self.config)
         # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
         lines = [
@@ -2308,6 +2310,7 @@ class CompileResult(Generic[_T]):
             f"    grid_0 = {grid.x_grid}",
             f"    grid_1 = {grid.y_grid}",
             f"    grid_2 = {grid.z_grid}",
+            *(f"    {l}" for l in (pre_runner_lines or [])),
             f"    runner({', '.join(runner_args)})",
         ]
         launcher_code = "\n".join(lines)
@@ -2763,7 +2766,35 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 *call_args,
             ]
 
-        launcher = self._gen_launcher_code(scope, def_args, runner_args)
+        # ── Host-side TMA descriptors (issue #185819) ───────────────────
+        # For each buffer in host_tma_descriptor_args the compiled Triton
+        # kernel expects a TensorDescriptor argument rather than a raw
+        # pointer.  Create those descriptors here — once per launcher
+        # invocation using this config's concrete block sizes — eliminating
+        # the per-CTA tl.make_tensor_descriptor() overhead.
+        host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
+        pre_runner_lines: list[str] = []
+        if host_tma_args:
+            cfg_kwargs = cfg.kwargs
+            for inner_name, block_shape_strs in host_tma_args.items():
+                if inner_name not in call_args:
+                    continue
+                block_shape_vals = [
+                    cfg_kwargs.get(s, s) for s in block_shape_strs
+                ]
+                desc_var = f"{inner_name}_host_tma_desc"
+                pre_runner_lines.append(
+                    f"{desc_var} = triton.tools.tensor_descriptor"
+                    f".TensorDescriptor.from_tensor({inner_name}, {block_shape_vals})"
+                )
+                runner_args = [
+                    desc_var if a == inner_name else a for a in runner_args
+                ]
+        # ── end host-side TMA ─────────────────────────────────────────────
+
+        launcher = self._gen_launcher_code(
+            scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
+        )
 
         launcher = scope["launcher"]
         launcher.config = cfg
