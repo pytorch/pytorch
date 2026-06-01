@@ -757,6 +757,13 @@ class OutputGraph(OutputGraphCommon):
         self.dynamo_compile_id: CompileId | None = CompileContext.current_compile_id()
         self.init_ambient_guards()
 
+        # Wire ShapesSpec.assumptions BEFORE any input is processed. Each
+        # assumption is appended to `_shape_spec_pending_assumptions`;
+        if config._shapes_spec is not None:
+            from torch._dynamo.variables.builder import _wire_spec_assumptions
+
+            _wire_spec_assumptions(self.shape_env, config._shapes_spec)
+
         # Map each tensor id to a list of sources. This is necessary because
         # tensor ids cannot be recovered from tracked fakes (in general).
         # We use this map to interpret (i.e., check for violations of) constraints,
@@ -1663,7 +1670,7 @@ class OutputGraph(OutputGraphCommon):
                 proxy = tracer.create_proxy("get_attr", module_key, (), {})
                 set_example_value(proxy.node, fake_script_obj)
                 return torch._dynamo.variables.script_object.TorchScriptObjectVariable.create(
-                    proxy, fake_script_obj, **options
+                    proxy, fake_script_obj, tx=self.root_tx, **options
                 )
 
             # HACKY CODE REGION END
@@ -1938,6 +1945,14 @@ class OutputGraph(OutputGraphCommon):
 
         if self.root_tx is None:
             raise AssertionError("root_tx must not be None")
+
+        # Finalize shapes_spec wiring: errors if any spec assumption/derived
+        # check still has unbound IntVar dependencies (i.e. an IntVar
+        # appears in an expression but never as a bare-IntVar input slot).
+        if config._shapes_spec is not None:
+            from torch._dynamo.variables.builder import _finalize_spec_wiring
+
+            _finalize_spec_wiring(self.shape_env)
 
         if not config.nested_graph_breaks:
             # expect to only compile 1 frame
