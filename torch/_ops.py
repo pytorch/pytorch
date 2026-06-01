@@ -901,7 +901,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         if entry is not None:
             target_op, chain, idx = entry
             if target_op is self and idx < len(chain):
-                entry[2] = idx + 1
+                entry[2] += 1
                 _fast_redispatch_count += 1
                 return chain[idx](keyset, *args, **kwargs)
         return self._handle.redispatch_boxed(keyset, *args, **kwargs)  # type: ignore[return-value]

@@ -1314,7 +1314,6 @@ static PyObject* custom_op_fast_path_check(
 
   c10::DeviceType first_device = c10::DeviceType::CPU;
   bool seen_tensor = false;
-  bool mixed_device = false;
 
   for (Py_ssize_t i = 0; i < n; i++) {
     PyObject* obj = PyTuple_GET_ITEM(py_args, i);
@@ -1332,11 +1331,11 @@ static PyObject* custom_op_fast_path_check(
       first_device = dev;
       seen_tensor = true;
     } else if (dev != first_device) {
-      mixed_device = true;
+      Py_RETURN_NONE;
     }
   }
 
-  if (!seen_tensor || mixed_device) {
+  if (!seen_tensor) {
     Py_RETURN_NONE;
   }
 

@@ -919,7 +919,7 @@ class CustomOpDef:
             if check is None:
                 return _DO_SLOW_PATH
 
-            device_type = check[0]
+            device_type, keyset_raw = check
 
             # meta tensors and disabled kernels need C++ fallback logic
             if device_type == "meta" or device_type in disabled_kernel:
@@ -935,7 +935,7 @@ class CustomOpDef:
                 chain_cache[device_type] = chain
 
             opdef._fast_path_hits += 1
-            keyset = _C.DispatchKeySet.from_raw_repr(check[1])
+            keyset = _C.DispatchKeySet.from_raw_repr(keyset_raw)
             prev = _ops._set_fast_redispatch(op, chain)
             try:
                 return op.redispatch(keyset, *args)
