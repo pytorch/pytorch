@@ -57,6 +57,10 @@ REGISTER_COPY_CASTOUT(char);
 REGISTER_COPY_CASTOUT(short);
 REGISTER_COPY_CASTOUT(int);
 REGISTER_COPY_CASTOUT(long);
+// Unsigned integer views (e.g. complex64 viewed as uint64) reach the copy path.
+REGISTER_COPY_CASTOUT(ushort);
+REGISTER_COPY_CASTOUT(uint);
+REGISTER_COPY_CASTOUT(ulong);
 REGISTER_COPY_CASTOUT(half);
 REGISTER_COPY_CASTOUT(bfloat);
 REGISTER_COPY_CASTOUT(float);
