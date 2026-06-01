@@ -840,12 +840,11 @@ class ComboKernelTests(TestCase):
         {
             "combo_kernels_seed_autotune_cap": True,
             "combo_kernel_per_subkernel_blocks": True,
-            "combo_seed_autotune_at_compile_time": False,
         }
     )
     def test_combo_kernel_config_cap_small_reduction(self):
         # Small reduction (rnumel=32 <= 64) -> cap=1, recorded per-subkernel in
-        # combo_grid_meta and consumed by _handle_combo.
+        # combo_grid_meta.
         import re
 
         def fn(a, b):
@@ -870,7 +869,6 @@ class ComboKernelTests(TestCase):
         {
             "combo_kernels_seed_autotune_cap": True,
             "combo_kernel_per_subkernel_blocks": True,
-            "combo_seed_autotune_at_compile_time": False,
         }
     )
     def test_combo_kernel_config_cap_pointwise_bucket(self, numel, expected_cap):
