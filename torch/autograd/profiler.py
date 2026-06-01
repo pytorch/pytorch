@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import copy
 import logging
 import uuid
 from collections import defaultdict
@@ -258,6 +259,14 @@ class profile:
         self.acc_events = acc_events
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
+        if experimental_config.trace_only and with_stack:
+            warn(
+                "trace_only=True is incompatible with with_stack=True "
+                "(stack traces require event post-processing). "
+                "Disabling trace_only."
+            )
+            experimental_config = copy.copy(experimental_config)
+            experimental_config.trace_only = False
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
@@ -435,7 +444,7 @@ class profile:
 
         # If we plan to accumulate events we should post process the function events
         # right away to retain the state across multiple start/stop calls
-        if self.acc_events:
+        if self.acc_events and not self.experimental_config.trace_only:
             self._ensure_function_events()
         return False
 
@@ -455,6 +464,11 @@ class profile:
 
     def _ensure_function_events(self):
         """Process function events lazily if required"""
+        if self.experimental_config.trace_only:
+            raise RuntimeError(
+                "events() is not available when trace_only=True in "
+                "ExperimentalConfig. Use export_chrome_trace() instead."
+            )
         if self._function_events is not None:
             return
         self._needs_processing = False

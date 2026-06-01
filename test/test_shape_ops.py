@@ -17,9 +17,8 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyCPU,
-    onlyNativeDeviceTypes,
-    onlyOn,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -269,7 +268,6 @@ class TestShapeOps(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
-    @onlyNativeDeviceTypes
     @dtypes(*all_types())
     @dtypesIfCUDA(*all_types_and(torch.half))
     @dtypesIfXPU(*all_types_and(torch.half))
@@ -577,7 +575,7 @@ class TestShapeOps(TestCase):
                     np_fn = partial(np.flip, axis=flip_dim)
                     self.compare_with_numpy(torch_fn, np_fn, data)
 
-    @onlyOn(["cuda", "xpu"])  # CPU is too slow
+    @onlyAccelerator  # CPU is too slow
     @largeTensorTest("17GB")  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
     @largeTensorTest(
         "81GB", "cpu"
@@ -783,7 +781,6 @@ class TestShapeOps(TestCase):
         self.assertEqual(traced_nontuple, expected_nontuple)
         self.assertEqual(traced_out, expected_nontuple)
 
-    @onlyNativeDeviceTypes
     def test_nonzero_discontiguous(self, device):
         shape = (4, 4)
         tensor = torch.randint(2, shape, device=device)
