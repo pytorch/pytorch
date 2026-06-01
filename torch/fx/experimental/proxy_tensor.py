@@ -1986,29 +1986,24 @@ def _maybe_rewrite_getitem_with_scalar_tensor_index(
 
     items = list(args[1]) if isinstance(args[1], tuple) else [args[1]]
 
-    has_traceable_index = False
+    has_scalar_tensor_index = False
     index_ellipsis = None
     t = args[0]
     n_none_slices = t.ndim + 1
     for i, item in enumerate(items):
-        if (
-            isinstance(item, SymInt)
-            or (
-                isinstance(item, slice)
-                and any(
-                    isinstance(s, SymInt) or _is_scalar_tensor_index(s)
-                    for s in (item.start, item.stop, item.step)
-                )
+        if _is_scalar_tensor_index(item) or (
+            isinstance(item, slice)
+            and any(
+                _is_scalar_tensor_index(s) for s in (item.start, item.stop, item.step)
             )
-            or _is_scalar_tensor_index(item)
         ):
-            has_traceable_index = True
+            has_scalar_tensor_index = True
         if item is Ellipsis:
             index_ellipsis = i
         if item is not None:
             n_none_slices -= 1
 
-    if not has_traceable_index:
+    if not has_scalar_tensor_index:
         return None
 
     if index_ellipsis is not None:
