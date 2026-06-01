@@ -1288,9 +1288,10 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # It is certainly faster though!  It probably makes sense to let the
     # user specify the offload strategy.
 
-    compile_args = _get_compile_args(mod, args)
+    compile_mod = copy.deepcopy(mod)
+    compile_args = _get_compile_args(compile_mod, args)
     with tqdm(desc="Compiling"):
-        compiled = compile_fx_inner(mod, compile_args)
+        compiled = compile_fx_inner(compile_mod, compile_args)
     total = counters["inductor"]["intermediate_hooks"]
 
     known_names = set()
@@ -1435,8 +1436,9 @@ def repro_run(options: Any, mod: nn.Module, load_args: Any) -> None:
 
     mod, args = repro_common(options, mod, load_args)
 
-    compile_args = _get_compile_args(mod, args)
-    compiled = compile_fx_inner(mod, compile_args)
+    compile_mod = copy.deepcopy(mod)
+    compile_args = _get_compile_args(compile_mod, args)
+    compiled = compile_fx_inner(compile_mod, compile_args)
     if isinstance(compiled, str):
         raise AssertionError("compile_fx_inner should not return a string")
 
