@@ -1527,11 +1527,11 @@ class GemmEpilogueFusionTests(TestCase):
             else F.SwizzleType.SWIZZLE_32_4_4
         )
 
-        def fn(a, b, scale_a, scale_b, epilogue):
+        def fn(a, b, scale_a, scale_b, row_bias, col_scale, tile_bias, epilogue):
             return gemm_epilogue_fusion(
                 torch.ops.aten._scaled_mm_v2.default,
                 (a, b, scale_a, scale_b),
-                lambda acc: epilogue(acc.float()),
+                lambda acc: epilogue(acc.float(), row_bias, col_scale, tile_bias),
                 gemm_kwargs={
                     "scale_recipe_a": F.ScalingType.BlockWise1x32,
                     "scale_recipe_b": F.ScalingType.BlockWise1x32,
@@ -1543,9 +1543,23 @@ class GemmEpilogueFusionTests(TestCase):
             )
 
         cases = (
-            ("affine_relu", lambda acc: (acc * 0.25 + 0.1).relu()),
-            ("silu_residual", lambda acc: F.silu(acc) + acc * 0.125),
-            ("gelu_tanh_mix", lambda acc: F.gelu(acc + 0.2) - torch.tanh(acc * 0.5)),
+            (
+                "affine_relu",
+                lambda acc, row_bias, col_scale, tile_bias: (
+                    (acc + row_bias) * col_scale + tile_bias
+                ).relu(),
+            ),
+            (
+                "silu_with_broadcasts",
+                lambda acc, row_bias, col_scale, tile_bias: F.silu(
+                    acc * col_scale + row_bias + tile_bias
+                ),
+            ),
+            (
+                "gelu_residual",
+                lambda acc, row_bias, col_scale, tile_bias: F.gelu(acc + tile_bias)
+                + row_bias * col_scale,
+            ),
         )
 
         for seed, (name, epilogue) in enumerate(cases):
@@ -1570,20 +1584,31 @@ class GemmEpilogueFusionTests(TestCase):
                     device="cuda",
                     dtype=torch.float8_e8m0fnu,
                 )
+                row_bias = torch.randn(m, 1, device="cuda", dtype=torch.float32) * 0.1
+                col_scale = torch.randn(1, n, device="cuda", dtype=torch.float32) * 0.1
+                tile_bias = torch.randn(m, n, device="cuda", dtype=torch.float32) * 0.1
 
-                checks, check_nots = self._quack_codegen_invariants("scale_a=", "scale_b=")
+                checks, check_nots = self._quack_codegen_invariants(
+                    "scale_a=", "scale_b=", "epilogue_args=", "aux0", "aux2"
+                )
                 self._assert_compiled_matches(
-                    lambda a, b, scale_a, scale_b: fn(
+                    lambda a, b, scale_a, scale_b, row_bias, col_scale, tile_bias: fn(
                         a,
                         b,
                         scale_a,
                         scale_b,
+                        row_bias,
+                        col_scale,
+                        tile_bias,
                         epilogue,
                     ),
                     a,
                     b,
                     scale_a,
                     scale_b,
+                    row_bias,
+                    col_scale,
+                    tile_bias,
                     atol=2e-1,
                     rtol=5e-2,
                     checks=checks,

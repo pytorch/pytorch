@@ -8473,9 +8473,14 @@ def _infer_quack_epilogue_arg_kinds(
 ):
     if not epilogue_arg_indices:
         return ()
-    if gemm_op not in (torch.ops.aten.mm.default, torch.ops.aten.bmm.default):
+    nonbatched_ops = (
+        torch.ops.aten.mm.default,
+        torch.ops.aten._scaled_mm.default,
+        torch.ops.aten._scaled_mm_v2.default,
+    )
+    if gemm_op not in (*nonbatched_ops, torch.ops.aten.bmm.default):
         raise NotImplementedError(
-            "QUACK epilogues with captured tensor reads currently support only mm/bmm aux tensors"
+            "QUACK epilogues with captured tensor reads currently support only mm/bmm/scaled_mm aux tensors"
         )
     *_, m, n = output_size
     epilogue_arg_kinds = []
@@ -8483,9 +8488,9 @@ def _infer_quack_epilogue_arg_kinds(
         epilogue_arg_size = quack_args[epilogue_arg_index].get_size()
         if epilogue_arg_size == output_size:
             epilogue_arg_kinds.append("tile")
-        elif gemm_op == torch.ops.aten.mm.default and epilogue_arg_size == [1, n]:
+        elif gemm_op in nonbatched_ops and epilogue_arg_size == [1, n]:
             epilogue_arg_kinds.append("row")
-        elif gemm_op == torch.ops.aten.mm.default and epilogue_arg_size == [m, 1]:
+        elif gemm_op in nonbatched_ops and epilogue_arg_size == [m, 1]:
             epilogue_arg_kinds.append("col")
         else:
             raise NotImplementedError(
@@ -8509,7 +8514,7 @@ def _quack_mxfp8_expected_swizzle():
 
 def _validate_quack_scaled_mm(gemm_kwargs, quack_args) -> None:
     if (
-        len(quack_args) != 4
+        len(quack_args) < 4
         or gemm_kwargs.get("out_dtype") is None
         or gemm_kwargs.get("bias") is not None
         or gemm_kwargs.get("scale_result") is not None
@@ -8546,7 +8551,7 @@ def _validate_quack_scaled_mm_v2(kernel_options, quack_args) -> None:
     metadata = kernel_options.get("_scaled_mm_v2", {})
     expected_swizzle = _quack_mxfp8_expected_swizzle().value
     if (
-        len(quack_args) != 4
+        len(quack_args) < 4
         or metadata.get("scale_a_len") != 1
         or metadata.get("scale_b_len") != 1
         or metadata.get("out_dtype") is None
