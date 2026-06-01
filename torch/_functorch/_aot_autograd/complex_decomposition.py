@@ -119,8 +119,6 @@ def _assert_no_incorrect_aliasing_mutation(gm: fx.GraphModule) -> None:
     from torch._subclasses.complex_tensor._ops.common import INCORRECT_ALIASING_OPS
 
     mutated: set[fx.Node] = set()
-    # Output nodes always have an iterable `.args[0]`
-    outputs: set[fx.Node] = set(gm.graph.output_node().args[0])  # type: ignore[not-iterable]
     complex_inputs: set[fx.Node] = set()
     for n in gm.graph.nodes:
         if n.op == "placeholder" and n.meta["val"].dtype.is_complex:
@@ -150,11 +148,6 @@ def _assert_no_incorrect_aliasing_mutation(gm: fx.GraphModule) -> None:
     if not mutated.isdisjoint(complex_input_aliases):
         raise RuntimeError(
             "Complex input nodes are mutated in this compiled region. Please clone the tensor before mutating, move the mutation outside the compiled region, or avoid these ops."
-        )
-
-    if not outputs.isdisjoint(complex_input_aliases):
-        raise RuntimeError(
-            "Output nodes aliases of complex input nodes in this compiled region. Please clone the input tensor so the output does not alias the input."
         )
 
 

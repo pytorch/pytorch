@@ -807,25 +807,21 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
 
 @register_complex(aten._conj)
 def _conj_impl(self: ComplexTensor) -> ComplexTensor:
-    # See "NOTE conj/neg (hameerabbasi)"
     return ComplexTensor(aten.alias(self.re), -self.im)
 
 
 @register_complex(aten._neg_view)
 def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
-    # See "NOTE conj/neg (hameerabbasi)"
     return ComplexTensor(-self.re, -self.im)
 
 
 @register_complex(aten.resolve_conj)
 def resolve_conj_impl(self: ComplexTensor) -> ComplexTensor:
-    # See "NOTE conj/neg (hameerabbasi)"
     return self
 
 
 @register_complex(aten.resolve_neg)
 def resolve_neg_impl(self: ComplexTensor) -> ComplexTensor:
-    # See "NOTE conj/neg (hameerabbasi)"
     return self
 
 

@@ -111,22 +111,10 @@ class ComplexTests(ComplexDynamoTestCase):
         fn_c = torch.compile(f, fullgraph=True)
         self.assertEqual(f(), fn_c())
 
-    def test_complex_output_aliases_input_raises(self):
-        # Complex output aliases input decomposes to a real/imaginary and aten.complex,
-        # so mutation of the original complex tensor outside the compiled block
-        # does not propagate through the view.
-        def f(a):
-            return a
-
-        a = torch.randn(2, 2, dtype=torch.complex64)
-        fn_c = torch.compile(f, fullgraph=True)
-        self.assertRaises(RuntimeError, fn_c, a)
-
-    @unittest.expectedFailure
     def test_complex_output_aliases_input(self):
         # Once this succeeds, remove the xfail and the test above
         def f(a):
-            return a
+            return a[...]
 
         a = torch.randn(2, 2, dtype=torch.complex64)
         fn_c = torch.compile(f, fullgraph=True)

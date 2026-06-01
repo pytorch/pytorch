@@ -94,12 +94,10 @@ class ComplexTensor(Tensor):
 
     @property
     def re(self) -> Tensor:
-        # See "NOTE conj/neg (hameerabbasi)"
         return self._re
 
     @property
     def im(self) -> Tensor:
-        # See "NOTE conj/neg (hameerabbasi)"
         return self._im
 
     @property
