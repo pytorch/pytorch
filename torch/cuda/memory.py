@@ -1403,6 +1403,7 @@ def _use_uvm(device: "Device" = None):
         ) from None
 
     log = logging.getLogger(__name__)
+    _has_mem_location = hasattr(_rt, "cudaMemLocation")
 
     _ALLOC_FN = ctypes.CFUNCTYPE(
         ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
@@ -1421,15 +1422,21 @@ def _use_uvm(device: "Device" = None):
             err, ptr = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
             _check(err, f"cudaMallocManaged({size})")
             if device >= 0:
-                location = _runtime.cudaMemLocation()
-                location.type = _runtime.cudaMemLocationType.cudaMemLocationTypeDevice
-                location.id = device
+                if _has_mem_location:
+                    location = _runtime.cudaMemLocation()
+                    location.type = (
+                        _runtime.cudaMemLocationType.cudaMemLocationTypeDevice
+                    )
+                    location.id = device
+                    advise_target = location
+                else:
+                    advise_target = device
                 _check(
                     _runtime.cudaMemAdvise(
                         ptr,
                         size,
                         _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
-                        location,
+                        advise_target,
                     ),
                     "cudaMemAdvise(SetPreferredLocation)",
                 )
@@ -1438,7 +1445,7 @@ def _use_uvm(device: "Device" = None):
                         ptr,
                         size,
                         _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
-                        location,
+                        advise_target,
                     ),
                     "cudaMemAdvise(SetAccessedBy)",
                 )
