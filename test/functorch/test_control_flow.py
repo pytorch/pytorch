@@ -7296,6 +7296,7 @@ def forward(self, arg0_1):
         res_compiled = torch.compile(f)(*example_inputs)
         self.assertEqual(res, res_compiled)
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_no_outputs_aot_autograd_graph(self):
         backend = AotEagerAndRecordGraphs()
