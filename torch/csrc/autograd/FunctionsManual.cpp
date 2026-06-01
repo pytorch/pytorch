@@ -1238,17 +1238,17 @@ Tensor clamp_backward(
     const Tensor& self,
     const std::optional<Scalar>& min,
     const std::optional<Scalar>& max) {
-  // clamp: gradients not defined on min and max, so we return the subgradient 1
-  // for these cases.
+  // clamp: gradients not defined on min and max, so we return the subgradient 0
+  // for these cases, consistent with relu and minimum-norm convention. 
   if (max && min) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where((self >= *min).logical_and_(self <= *max), grad, zero);
+    return where((self > *min).logical_and_(self < *max), grad, zero);
   } else if (min) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self >= *min, grad, zero);
+    return where(self > *min, grad, zero);
   } else if (max) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self <= *max, grad, zero);
+    return where(self < *max, grad, zero);
   } else {
     return grad;
   }
@@ -1259,22 +1259,22 @@ Tensor clamp_backward(
     const Tensor& self,
     const Tensor& min,
     const Tensor& max) {
-  // clamp: gradients not defined on min and max, so we return the subgradient 1
-  // for these cases.
+  // clamp: gradients not defined on min and max, so we return the subgradient 0
+  // for these cases, consistent with relu and minimum-norm convention.
   if (max.defined() && min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
-    const auto self_ge_min = self >= min;
-    const auto self_le_max = self <= max;
+    const auto self_gt_min = self > min;
+    const auto self_lt_max = self < max;
     const auto& pred = areAnyTensorSubclassLike({self, min, max})
-        ? self_ge_min.logical_and(self_le_max)
-        : self_ge_min.logical_and_(self_le_max);
+        ? self_gt_min.logical_and(self_lt_max)
+        : self_gt_min.logical_and_(self_lt_max);
     return where(pred, grad, zero);
   } else if (min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self >= min, grad, zero);
+    return where(self > min, grad, zero);
   } else if (max.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self <= max, grad, zero);
+    return where(self < max, grad, zero);
   } else {
     return grad;
   }
