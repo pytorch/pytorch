@@ -111,8 +111,8 @@ TORCH_META_FUNC(replication_pad2d) (
   int64_t oheight = iheight + pad_t + pad_b;
   int64_t owidth  = iwidth + pad_l + pad_r;
 
-  TORCH_CHECK(owidth >= 1 || oheight >= 1,
-      "input (H: ", iheight, ", W: ", iwidth, " ) is too small."
+  TORCH_CHECK(owidth >= 1 && oheight >= 1,
+      "input (H: ", iheight, ", W: ", iwidth, ") is too small."
       " Calculated output H: ", oheight, " W: ", owidth);
 
   if (input.dim() == 3) {
@@ -157,8 +157,8 @@ TORCH_META_FUNC(replication_pad3d) (
   int64_t oheight = iheight + ptop + pbottom;
   int64_t owidth  = iwidth + pleft + pright;
 
-  TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
-      "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
+  TORCH_CHECK(owidth >= 1 && oheight >= 1 && odepth >= 1,
+      "input (D: ", idepth, ", H: ", iheight, ", W: ", iwidth,
       ") is too small."
       " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
 
