@@ -139,6 +139,10 @@ def prod(input, axis):
 
 @triton.jit
 def _is_neg_zero(x):
+    # Triton does not expose a `.dtype` attribute on
+    # raw Python scalars. We temporarily promote `x`
+    # to a tensor strictly for compile-time type resolution,
+    # preserving the unmodified `x` for the actual bitcast.
     x_tensor = promote_to_tensor(x)
     dtype = x_tensor.dtype
     if dtype == tl.float32:
@@ -148,15 +152,15 @@ def _is_neg_zero(x):
     elif dtype == tl.float64:
         return (x == 0.0) & (x.to(tl.int64, bitcast=True) < 0)
     elif dtype in (
-        tl.float8e4nv,
-        tl.float8e5,
-        tl.float8e4b8,
-        tl.float8e4b15,
-        tl.float8e5b16,
+        getattr(tl, "float8e4nv", None),
+        getattr(tl, "float8e5", None),
+        getattr(tl, "float8e4b8", None),
+        getattr(tl, "float8e4b15", None),
+        getattr(tl, "float8e5b16", None),
     ):
         return (x == 0.0) & (x.to(tl.int8, bitcast=True) < 0)
     else:
-        return False
+        return x != x
 
 
 @triton.jit
@@ -165,7 +169,9 @@ def minimum(a, b):
     if is_floating(a):
         mask |= a != a
         # Handle signed zeros: -0.0 < +0.0
-        mask |= _is_neg_zero(a) & (b == 0.0) & (~_is_neg_zero(b))
+        a_is_neg = _is_neg_zero(a)
+        b_is_neg = _is_neg_zero(b)
+        mask |= a_is_neg & (b == 0.0) & (~b_is_neg)
     return tl.where(mask, a, b)
 
 
@@ -175,7 +181,9 @@ def maximum(a, b):
     if is_floating(a):
         mask |= a != a
         # Handle signed zeros: +0.0 > -0.0
-        mask |= (a == 0.0) & (~_is_neg_zero(a)) & _is_neg_zero(b)
+        a_is_neg = _is_neg_zero(a)
+        b_is_neg = _is_neg_zero(b)
+        mask |= (a == 0.0) & (~a_is_neg) & b_is_neg
     return tl.where(mask, a, b)
 
 

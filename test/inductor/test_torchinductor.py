@@ -17984,6 +17984,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
+    @requires_gpu()
     def test_minimum_maximum_signed_zero(self):
         """
         Tests that Inductor correctly preserves the sign bit for -0.0 vs 0.0.
@@ -18003,15 +18004,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Add FP8 types if hardware/software support allows
         # (Requires CUDA 12.1+ and Hopper+ architecture for native execution)
         if (
-            hasattr(torch, "float8_e4m3fn")
-            and torch.cuda.get_device_capability()[0] >= 9
+            self.device == "cuda"
+            and hasattr(torch, "float8_e4m3fn")
+            and torch.cuda.get_device_capability(self.device)[0] >= 9
         ):
             fp_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
 
         for dtype in fp_dtypes:
             # Construct permutations matrix for signed zeros
-            a = torch.tensor([-0.0, 0.0, -0.0, 0.0], device="cuda", dtype=dtype)
-            b = torch.tensor([0.0, -0.0, -0.0, 0.0], device="cuda", dtype=dtype)
+            a = torch.tensor([-0.0, 0.0, -0.0, 0.0], device=self.device, dtype=dtype)
+            b = torch.tensor([0.0, -0.0, -0.0, 0.0], device=self.device, dtype=dtype)
 
             eager_min, eager_max, eager_argmin, eager_argmax = fn(a, b)
 
@@ -18052,8 +18054,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Since integers can't represent -0.0, we just want to ensure our fallback branch doesn't break them.
         int_dtypes = [torch.int8, torch.int32, torch.int64, torch.uint8, torch.bool]
         for dtype in int_dtypes:
-            a = torch.tensor([0, 1, 0, 1], device="cuda", dtype=dtype)
-            b = torch.tensor([1, 0, 0, 1], device="cuda", dtype=dtype)
+            a = torch.tensor([0, 1, 0, 1], device=self.device, dtype=dtype)
+            b = torch.tensor([1, 0, 0, 1], device=self.device, dtype=dtype)
 
             eager_min, eager_max, _, _ = fn(a, b)
             compiled_fn = torch.compile(fn)
