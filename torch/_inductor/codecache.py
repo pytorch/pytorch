@@ -1659,6 +1659,7 @@ class InductorCacheArtifact(CacheArtifact):
     @override
     def populate_cache(self) -> None:
         FxGraphCache._write_to_local_cache(self.key, self.content)
+        FxGraphCache._emit_triton_bundle(self.content)
 
     @override
     @staticmethod
@@ -1938,6 +1939,15 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
         write_atomic(path, content, make_dirs=True)
+
+    @staticmethod
+    def _emit_triton_bundle(content: bytes) -> None:
+        if not TritonBundler.is_enabled():
+            return
+
+        graph = pickle.loads(content)
+        if bundle := graph._triton_bundle:
+            TritonBundler.read_and_emit(bundle)
 
     @staticmethod
     def _save_graph(
