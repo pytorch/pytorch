@@ -35,7 +35,12 @@ from .common import (
     SizeArg,
     WorkspaceArg,
 )
-from .simd import NodeInfo, prefix_is_reduction, SIMDScheduling
+from .simd import (
+    _combo_subkernel_config_cap,
+    NodeInfo,
+    prefix_is_reduction,
+    SIMDScheduling,
+)
 from .simd_kernel_features import SIMDKernelFeatures
 from .triton import TritonKernel
 from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
@@ -1165,23 +1170,6 @@ class ComboKernel(Kernel):
             inductor_meta=self.inductor_meta,
         )
 
-    def _subkernel_config_cap(self, sub_kernel: TritonKernel) -> int:
-        """Size-bucketed cap on autotune configs for a sub-kernel: 1 for small
-        sub-kernels, 2 for larger. Precomputed into combo_grid_meta and consumed
-        by _handle_combo_kernel_per_subkernel_blocks (and, later, the seed path).
-        """
-        if sub_kernel.inside_reduction:
-            rnumel = 1
-            for tree in sub_kernel.range_trees:
-                if tree.is_reduction:
-                    rnumel *= int(V.graph.sizevars.optimization_hint(tree.numel))
-            return 1 if rnumel <= config.combo_kernels_seed_small_rnumel else 2
-        total = 1
-        for tree in sub_kernel.range_trees:
-            if not tree.is_reduction:
-                total *= int(V.graph.sizevars.optimization_hint(tree.numel))
-        return 1 if total <= config.combo_kernels_seed_small_pointwise_total else 2
-
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:
         """
         Build metadata used by combo-kernel grid/dispatch/autotune helpers.
@@ -1256,7 +1244,7 @@ class ComboKernel(Kernel):
                     )
 
                 if config.combo_kernels_seed_autotune_cap:
-                    meta[f"config_cap_{num}"] = self._subkernel_config_cap(sub_kernel)
+                    meta[f"config_cap_{num}"] = _combo_subkernel_config_cap(sub_kernel)
 
             for tree in sub_kernel.range_trees:
                 if not tree.is_reduction:
