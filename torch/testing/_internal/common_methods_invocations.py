@@ -5391,26 +5391,31 @@ def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(get_tensor_input(()), 1, -1, True, True)
 
 def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
-    """Samples for the CuTeDSL radix-select ``topk`` override.
+    """Samples for the CuTeDSL ``topk`` override.
 
-    Constraints the override enforces (see torch/_native/ops/topk/cutedsl_impl.py):
-      - fp32, CUDA, contiguous input
-      - dim is the last axis, largest=True, sorted=True
-      - k in {64, 128, 256, 512, 1024} (cooperative sort, K <= 1024 threads)
-      - N >= per-K threshold and N divisible by 4 (k<=256: 2*k, k=512: 8*k,
-        k=1024: 32*k; tuned from a B200 sweep)"""
-    from torch._native.ops.topk.cutedsl_impl import _MIN_N_MULTIPLIER
+    Constraints (see torch/_native/ops/topk/cutedsl_impl.py):
+      - fp32, CUDA, contiguous input, dim=-1, largest=True, sorted=True
+      - radix kernel: K in {64, 128, 256, 512, 1024}; N >= per-K
+        threshold and N % 4 == 0
+      - register kernel: K in {16, 32}; N a power of 2 in per-K range
+    """
+    from torch._native.ops.topk.cutedsl_impl import (
+        _RADIX_MIN_N_MULTIPLIER,
+        _REGISTER_N_RANGE,
+    )
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
-    # Cross product of supported Ks with shapes that keep N above the
-    # per-K gate. M is set to 256 (>= typical GPU SM count) so the
-    # cond's SM-wave gate passes and the kernel actually runs.
+    # M=256 is >= typical GPU SM count so the cond's SM-wave gate passes.
     for K in (64, 128, 256, 512, 1024):
-        N = max(_MIN_N_MULTIPLIER[K] * K, 4096)
+        N = max(_RADIX_MIN_N_MULTIPLIER[K] * K, 4096)
         yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
         yield SampleInput(make_arg((256, N)).contiguous(), args=(K, -1))
-        # nD flatten-to-2D view; leading prod >= 256.
+        yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
+
+    for K in (16, 32):
+        N = _REGISTER_N_RANGE[K][1]
+        yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
         yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
 
 
@@ -23767,9 +23772,9 @@ if "cutedsl" in dsl_ops_by_dsl:
             ),
         )
     )
-    # CuTeDSL radix-select topk override. Fires for fp32, CUDA, contiguous,
-    # last-dim inputs at K in {64, 128, 256, 512, 1024}; everything else
-    # falls through to aten. Two variants exercise both gather strategies:
+    # CuTeDSL topk override. Fires for fp32, CUDA, contiguous, last-dim
+    # inputs at K in {16, 32, 64, 128, 256, 512, 1024}; everything else
+    # falls through to aten. Two variants exercise both kernel paths:
     # default (atomic gather, ord-only sort) and deterministic
     # (prefix-sum gather, lex (ord, -idx) sort).
     _cutedsl_topk_skips = (

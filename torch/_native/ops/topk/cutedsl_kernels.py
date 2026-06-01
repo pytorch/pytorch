@@ -1,5 +1,8 @@
-"""CuTeDSL fused radix-select top-K kernel for fp32 inputs.
+"""CuTeDSL fp32 top-K kernels.
 
+Two kernels live here, picked by K and N in ``cutedsl_impl.py``:
+
+``topk_radix`` - fused radix-select for K in {64,128,256,512,1024}.
 Layout per CTA (one row):
   * Phase 1 - four radix byte passes (MSB to LSB) build shared-memory
     histograms via smem atomic-add; thread 0 scans descending to locate
@@ -19,13 +22,16 @@ Layout per CTA (one row):
     ``(ord, -idx)`` (deterministic) or ord-only (non-deterministic).
   * Phase 4 - write (values, indices) to global memory.
 
-The whole thing is one kernel launch; only loads/stores of the input and
-final outputs hit global memory, plus transient smem for histograms and
-the survivor buffer.
+``topk_register`` - register-resident top-K for K in {16, 32} with
+N a power of 2 in [K, 2048]. Each warp owns one row; ``ROWS_PER_CTA``
+warps share a CTA. Per-thread VEC = N/32 elements held in registers,
+encoded as Int64 ``(ord << 32) | ~idx`` keys so a descending sort gives
+``(value desc, idx asc)`` matching aten. Local bitonic sort, then a
+warp-cooperative bitonic-topk merge across butterfly partners. No smem,
+no global staging - only the final K writes hit gmem. Bit-exact to aten.
 
-Requires K a power of 2 in ``{64, 128, 256, 512, 1024}``, N % 4 == 0
-(128-bit vector loads), and M >= SM count (full-wave perf gate). All
-enforced by the cond in ``cutedsl_impl.py``.
+Both kernels do one launch; only loads/stores of the input and final
+outputs hit global memory.
 """
 
 import math
@@ -34,7 +40,7 @@ import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import const_expr, Float32, Int32
+from cutlass import const_expr, Float32, Int32, Int64
 from cutlass._mlir.dialects import llvm
 from cutlass.cutlass_dsl import dsl_user_op, T
 
@@ -656,4 +662,210 @@ def topk_radix(
     # Kernel writes int32 indices; widen before returning to match aten.
     out_i_i32 = torch.empty(M, k, dtype=torch.int32, device=x.device)
     _compile_topk_radix(N, k, deterministic)(x, out_v, out_i_i32)
+    return out_v, out_i_i32.to(torch.int64)
+
+
+# ---------------------------------------------------------------------------
+# Register-resident top-K (small K, small N).
+# ---------------------------------------------------------------------------
+
+
+@cute.jit
+def _make_key(val: Float32, idx: Int32) -> Int64:
+    """Compose the descending-sort key: ``(ord_u32 << 32) | (~idx_u32)``.
+
+    Sorting this Int64 descending gives ``(value desc, idx asc)`` -
+    exactly aten's tie-break order. Real fp32 inputs (no NaN) keep keys
+    away from INT64_MIN, leaving that bit pattern free as a sentinel.
+    """
+    ord32 = _f32_to_radix_ord(val)
+    ord64 = Int64(ord32) & Int64(0xFFFFFFFF)
+    inv_idx64 = Int64(~idx) & Int64(0xFFFFFFFF)
+    return (ord64 << Int64(32)) | inv_idx64
+
+
+@cute.jit
+def _decode_key(key: Int64) -> tuple[Float32, Int32]:
+    ord32 = Int32(key >> Int64(32))
+    inv_idx = Int32(key & Int64(0xFFFFFFFF))
+    val_bits = ord32 ^ ((ord32 >> Int32(31)) & Int32(0x7FFFFFFF))
+    return Float32(llvm.bitcast(T.f32(), val_bits.ir_value())), ~inv_idx
+
+
+@cute.jit
+def _cas_desc(arr: cute.Tensor, i: cutlass.Constexpr, j: cutlass.Constexpr) -> None:
+    a = arr[i]
+    b = arr[j]
+    if a < b:
+        arr[i] = b
+        arr[j] = a
+
+
+@cute.jit
+def _bitonic_sort_desc(arr: cute.Tensor, n: cutlass.Constexpr) -> None:
+    if const_expr(n > 1):
+        num_stages = int(math.log2(n))
+        for s in cutlass.range_constexpr(num_stages):
+            for sub_rev in cutlass.range_constexpr(s + 1):
+                step = 1 << (s - sub_rev)
+                for i in cutlass.range_constexpr(n):
+                    j = i ^ step
+                    if j > i:
+                        block_dir = (i >> (s + 1)) & 1
+                        if block_dir == 0:
+                            _cas_desc(arr, i, j)
+                        else:
+                            a = arr[i]
+                            b = arr[j]
+                            if a > b:
+                                arr[i] = b
+                                arr[j] = a
+
+
+@cute.jit
+def _bitonic_merge_desc(arr: cute.Tensor, n: cutlass.Constexpr) -> None:
+    """Merge a bitonic sequence of length n into descending sorted."""
+    if const_expr(n > 1):
+        num_levels = int(math.log2(n))
+        for level in cutlass.range_constexpr(num_levels):
+            length = n >> level
+            step = length // 2
+            for i in cutlass.range_constexpr(n // length):
+                start_i = i * length
+                for j in cutlass.range_constexpr(step):
+                    _cas_desc(arr, start_i + j, start_i + j + step)
+
+
+@cute.jit
+def _topk_merge_desc(a: cute.Tensor, b: cute.Tensor, K: cutlass.Constexpr) -> None:
+    """Top-K of two K-sorted-descending sequences, in place into ``a``.
+
+    ``a[i] <- max(a[i], b[K-1-i])`` yields a bitonic sequence in ``a``;
+    one bitonic merge of length K finishes it.
+    """
+    for i in cutlass.range_constexpr(K):
+        x = a[i]
+        y = b[K - 1 - i]
+        if y > x:
+            a[i] = y
+    _bitonic_merge_desc(a, K)
+
+
+class _RegisterTopK:
+    """Register-resident top-K. Each warp owns one row; ``ROWS_PER_CTA``
+    warps per CTA. K in {16, 32}, N a power of 2 in [K, 2048].
+    """
+
+    def __init__(self, N: int, K: int, rows_per_cta: int = 4):
+        self.N = N
+        self.K = K
+        self.VEC = N // 32
+        self.ROWS_PER_CTA = rows_per_cta
+        self.NUM_THREADS = 32 * rows_per_cta
+
+    @cute.jit
+    def __call__(
+        self,
+        mX: cute.Tensor,
+        mValues: cute.Tensor,
+        mIndices: cute.Tensor,
+        stream: cuda.CUstream,
+    ):
+        M = mX.shape[0]
+        ROWS = const_expr(self.ROWS_PER_CTA)
+        num_blocks = (M + ROWS - 1) // ROWS
+        self.kernel(mX, mValues, mIndices).launch(
+            grid=[num_blocks, 1, 1],
+            block=[self.NUM_THREADS, 1, 1],
+            stream=stream,
+        )
+
+    @cute.kernel
+    def kernel(self, mX: cute.Tensor, mValues: cute.Tensor, mIndices: cute.Tensor):
+        tidx, _, _ = cute.arch.thread_idx()
+        bidx, _, _ = cute.arch.block_idx()
+
+        K = const_expr(self.K)
+        VEC = const_expr(self.VEC)
+        ROWS = const_expr(self.ROWS_PER_CTA)
+        WARP_SIZE = const_expr(cute.arch.WARP_SIZE)
+
+        warp_idx = tidx // Int32(WARP_SIZE)
+        lane_idx = tidx % Int32(WARP_SIZE)
+        row = Int32(bidx) * Int32(ROWS) + warp_idx
+
+        M = mX.shape[0]
+        # CuTeDSL can't early-return on a dynamic predicate. Clamp the row
+        # for loads to keep them in-bounds, and gate the writes only.
+        row_safe = row if row < M else Int32(0)
+        in_bounds = row < M
+
+        # Per-thread Int64 keys covering this row's VEC-sized stripe.
+        keys = cute.make_rmem_tensor(VEC, Int64)
+        for i in cutlass.range_constexpr(VEC):
+            col = lane_idx * Int32(VEC) + Int32(i)
+            keys[i] = _make_key(mX[row_safe, col], col)
+
+        _bitonic_sort_desc(keys, VEC)
+
+        # Build per-thread top-K. If VEC < K, pad with INT64_MIN so the
+        # sentinel sorts strictly below any real key; if VEC >= K take the
+        # leading K (already sorted).
+        topk = cute.make_rmem_tensor(K, Int64)
+        if const_expr(VEC >= K):
+            for i in cutlass.range_constexpr(K):
+                topk[i] = keys[i]
+        else:
+            SENTINEL = const_expr(-(1 << 63))
+            for i in cutlass.range_constexpr(VEC):
+                topk[i] = keys[i]
+            for i in cutlass.range_constexpr(K - VEC):
+                topk[VEC + i] = Int64(SENTINEL)
+            _bitonic_sort_desc(topk, K)
+
+        # Warp-cooperative top-K merge via butterfly shuffles.
+        log2_warp = const_expr(int(math.log2(WARP_SIZE)))
+        for s in cutlass.range_constexpr(log2_warp):
+            other = cute.make_rmem_tensor(K, Int64)
+            for i in cutlass.range_constexpr(K):
+                other[i] = cute.arch.shuffle_sync_bfly(topk[i], offset=Int32(1 << s))
+            _topk_merge_desc(topk, other, K)
+
+        # Lane 0 of each warp now holds the row's top-K descending.
+        if lane_idx == Int32(0) and in_bounds:
+            for i in cutlass.range_constexpr(K):
+                v, idx = _decode_key(topk[i])
+                mValues[row, i] = v
+                mIndices[row, i] = idx
+
+
+@jit_cache
+def _compile_topk_register(N: int, K: int):
+    batch_sym = cute.sym_int()
+    div_n = math.gcd(4, N)
+    div_k = math.gcd(4, K)
+    x_fake = _make_fake_tensor(Float32, (batch_sym, N), div_n)
+    v_fake = _make_fake_tensor(Float32, (batch_sym, K), div_k)
+    i_fake = _make_fake_tensor(Int32, (batch_sym, K), div_k)
+    return cute.compile(
+        _RegisterTopK(N, K),
+        x_fake,
+        v_fake,
+        i_fake,
+        cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
+        options="--enable-tvm-ffi",
+    )
+
+
+def topk_register(x: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Register-resident top-K for fp32 2D contiguous ``x``.
+
+    Returns ``(values[M, K]: fp32, indices[M, K]: int64)``, descending,
+    bit-exact to aten on both values and indices. Caller must ensure
+    ``k`` in {16, 32} and ``N`` is a power of 2 in [k, 2048].
+    """
+    M, N = x.shape
+    out_v = torch.empty(M, k, dtype=torch.float32, device=x.device)
+    out_i_i32 = torch.empty(M, k, dtype=torch.int32, device=x.device)
+    _compile_topk_register(N, k)(x, out_v, out_i_i32)
     return out_v, out_i_i32.to(torch.int64)
