@@ -33,6 +33,7 @@ static Tensor padRight(const Tensor& tensor, std::optional<int64_t> has_bdim, in
     return tensor;
   }
   VmapDimVector new_sizes(tensor.sizes().begin(), tensor.sizes().end());
+  new_sizes.reserve(new_sizes.size() + logical_rank - tensor_logical_rank);
   for (int64_t i = 0; i < logical_rank - tensor_logical_rank; i++) {
     new_sizes.push_back(1);
   }

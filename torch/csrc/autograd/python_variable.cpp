@@ -1841,6 +1841,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
       checked_not(schema_info.ptr()) ? py::handle() : py::handle(schema_info),
       args_schema.size());
   c10::SmallVector<py::object, 8> args_to_hash;
+  args_to_hash.reserve(args_schema.size());
   size_t idx = 0;
   for (const auto& e : args_schema) {
     if (idx >= native_info.static_argnum ||
@@ -2300,6 +2301,7 @@ create_native_op_schema(
 
   c10::SmallVector<IValueOrDTensorSpec, 8> comparison_key;
   std::size_t comparison_key_hash = 0;
+  comparison_key.reserve(op.schema().arguments().size());
 
   py::object compute_mesh = py::none();
 

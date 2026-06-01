@@ -552,6 +552,7 @@ static DimVector _estimate_sparse_compressed_tensor_size(
                       (block_ndim == 2 ? std::max<int64_t>(1, values.size(batch_ndim + 2)) : 1)
   };
   DimVector size = DimVector(compressed_indices.sizes().slice(0, batch_ndim));
+  size.reserve(batch_ndim + 2);
   int64_t compressed_dim_size = (compressed_indices.dim() > 0 && compressed_indices.size(-1) > 0 ? compressed_indices.size(-1) - 1 : 0);
   int64_t plain_dim_size = AT_DISPATCH_INTEGRAL_TYPES(plain_indices.scalar_type(), "estimate_sparse_compressed_tensor_size",
                                                       [&]() -> int64_t {

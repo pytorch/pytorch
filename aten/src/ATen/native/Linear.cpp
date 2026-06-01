@@ -609,6 +609,10 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
     std::vector<int64_t> sum_dims;
     SmallVector<int64_t, 5> a_dims_to_sum;
     SmallVector<int64_t, 5> b_dims_to_sum;
+    if (perm_index > out_num_dim) {
+      a_dims_to_sum.reserve(perm_index - out_num_dim);
+      b_dims_to_sum.reserve(perm_index - out_num_dim);
+    }
     for (auto dim = out_num_dim; dim < perm_index; ++dim) {
       auto sa = TORCH_GUARD_OR_TRUE(a.sym_size(dim).sym_ne(1));
       auto sb = TORCH_GUARD_OR_TRUE(b.sym_size(dim).sym_ne(1));

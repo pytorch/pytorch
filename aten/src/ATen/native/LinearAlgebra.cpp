@@ -2162,6 +2162,7 @@ static Tensor _matmul_impl(
     auto vector_rhs = dim_tensor2 == 1;
     const auto tensor2_expand_size = [&output_shape, m2, p, vector_rhs]{
       c10::SymDimVector ret(output_shape);
+      ret.reserve(ret.size() + (vector_rhs ? 1 : 2));
       if (vector_rhs) {
         ret.push_back(m2);
       } else {

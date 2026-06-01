@@ -1078,6 +1078,8 @@ static Tensor convolution_same(
 
   // Calculate the correct padding
   SymDimVector padding_l, padding_r;
+  padding_l.reserve(dim);
+  padding_r.reserve(dim);
   bool symmetric_padding = true;
   for (auto i: c10::irange(dim)) {
     auto s = stride.size() == 1 ? stride[0] : stride[i];

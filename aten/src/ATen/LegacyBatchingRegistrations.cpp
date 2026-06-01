@@ -274,6 +274,7 @@ Tensor squeeze_batching_rule(const Tensor& self) {
   // Don't squeeze the batch dims!
   VmapDimVector squeezed_sizes;
   int64_t num_batch_dims = self_physical.numBatchDims();
+  squeezed_sizes.reserve(physical_sizes.size());
   squeezed_sizes.insert(
       squeezed_sizes.end(),
       physical_sizes.begin(),

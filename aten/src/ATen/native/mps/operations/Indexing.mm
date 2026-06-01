@@ -1003,6 +1003,8 @@ static void index_fill_mps_kernel(TensorIterator& iter,
 
     c10::SmallVector<int64_t> all_sizes, all_strides;
     if (!is_dense) {
+      all_sizes.reserve(self.dim());
+      all_strides.reserve(self.dim());
       for (int64_t d = 0; d < self.dim(); d++) {
         all_sizes.push_back(self.size(d));
         all_strides.push_back(self.stride(d));
@@ -1064,6 +1066,8 @@ static void index_fill_mps_kernel(TensorIterator& iter,
 
     c10::SmallVector<int64_t> slice_sizes, slice_out_strides;
     if (!is_dense) {
+      slice_sizes.reserve(self.dim());
+      slice_out_strides.reserve(self.dim());
       for (int64_t d = 0; d < self.dim(); d++) {
         if (d != dim) {
           slice_sizes.push_back(self.size(d));

@@ -1808,6 +1808,8 @@ Tensor repeat_backward(
 
   at::SymDimVector grad_size;
   at::DimVector sum_dims;
+  grad_size.reserve(input_dims * 2);
+  sum_dims.reserve(input_dims);
   for (const auto dim : c10::irange(input_dims)) {
     const auto& repeat = repeats[dim + num_unsqueezed];
     // Reshape gradient (repeat > 1)
