@@ -168,8 +168,11 @@ struct RNNParams {
   }
 };
 
+template<bool is_single_direction>
 static std::vector<int64_t> _output_size(const RNNParams& rnn) {
-  return {rnn.seq_length, rnn.mini_batch, rnn.hidden_size};
+  auto output_channels = is_single_direction ? rnn.hidden_size
+                                             : rnn.hidden_size * rnn.num_directions;
+  return {rnn.seq_length, rnn.mini_batch, output_channels};
 }
 
 // MKLDNN GRU gate order is different from PyTorch's which requires gates shuffle
@@ -236,7 +239,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       batch_first,
       train);
 
-  auto output_size = _output_size(rnn);
+  auto output_size = _output_size</*is_single_direction*/ true>(rnn);
   auto output = at::empty(output_size, input.options());
 
   auto hy_ = at::empty(hx_.sizes(), hx_.options());
@@ -330,7 +333,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
       bidirectional,
       batch_first,
       train);
-  auto output_size = _output_size(rnn);
+  auto output_size = _output_size</*is_single_direction*/ true>(rnn);
 
   auto weight_ih = _shuffle_weight(weight0, rnn.mode);
   auto weight_hh = _shuffle_weight(weight1, rnn.mode);

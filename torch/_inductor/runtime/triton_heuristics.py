@@ -1189,9 +1189,9 @@ class CachingAutotuner(KernelInterface):
             cloned_args, cloned_kwargs = self.maybe_clone_args(
                 cpu_copies, *args, **kwargs
             )
-            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
+            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
             if autograd_profiler._is_profiler_enabled:
                 profiler_kwargs = self.get_profiler_kwargs(stream, launcher)
                 with torch._C._profiler._RecordFunctionFast(
@@ -1205,9 +1205,7 @@ class CachingAutotuner(KernelInterface):
                             **cloned_kwargs,
                             stream=stream,
                         )
-                    except Exception as e:
-                        if isinstance(e, TypeError):
-                            self._check_launcher_call_args(launcher, cloned_args)
+                    except Exception:
                         log.error(
                             "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
                             kernel_name,
@@ -1225,9 +1223,7 @@ class CachingAutotuner(KernelInterface):
                         **cloned_kwargs,
                         stream=stream,
                     )
-                except Exception as e:
-                    if isinstance(e, TypeError):
-                        self._check_launcher_call_args(launcher, cloned_args)
+                except Exception:
                     log.error(
                         "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
                         kernel_name,
@@ -1665,60 +1661,34 @@ class CachingAutotuner(KernelInterface):
         return launcher
 
     def save_gpu_kernel(self, stream, launcher):
-        """Save compiled GPU kernel metadata to the CudaKernelParamCache."""
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
-
-        from torch._inductor import config as inductor_config
-
-        # Prefer Level 0 launch metadata schema (versioned, stable contract)
-        # over hasattr probing of CompiledKernel internals.
-        # TODO: When the AOTI C++ launch path gains cuLaunchKernelEx support for
-        # CTA clusters, add num_ctas/cluster_dims here from the schema.
-        # Currently num_ctas is already captured via config_to_dict(launcher.config)
-        # for scratch space scaling, but is not used in the actual kernel launch.
-        schema = getattr(launcher.bin, "launch_metadata_schema", None)
-        if schema is not None and inductor_config.use_launch_metadata_schema:
-            params = {
-                "mangled_name": schema["entry_name"],
-                "num_warps": schema["num_warps"],
-                "shared_mem": schema["shared_mem"],
-                "stream": stream,
-                "config": config_to_dict(launcher.config),
-                "inductor_meta": self.inductor_meta,
-                "triton_meta": self.triton_meta,
-                "def_args": launcher.def_args,
-                "call_args": launcher.call_args,
-                "global_scratch": launcher.global_scratch,
-                "profile_scratch": launcher.profile_scratch,
-            }
-        else:
-            # Fallback: hasattr probing for older Triton versions
-            params = {
-                "mangled_name": (
-                    launcher.bin.metadata.name
-                    if hasattr(launcher.bin.metadata, "name")
-                    else launcher.bin.metadata["name"]
-                ),
-                "num_warps": (
-                    launcher.bin.num_warps
-                    if hasattr(launcher.bin, "num_warps")
-                    else launcher.bin.metadata.num_warps
-                ),
-                "shared_mem": (
-                    launcher.bin.shared
-                    if hasattr(launcher.bin, "shared")
-                    else launcher.bin.metadata.shared
-                ),
-                "stream": stream,
-                "config": config_to_dict(launcher.config),
-                "inductor_meta": self.inductor_meta,
-                "triton_meta": self.triton_meta,
-                "def_args": launcher.def_args,
-                "call_args": launcher.call_args,
-                "global_scratch": launcher.global_scratch,
-                "profile_scratch": launcher.profile_scratch,
-            }
+        params = {
+            "mangled_name": (
+                launcher.bin.metadata.name
+                if hasattr(launcher.bin.metadata, "name")
+                else launcher.bin.metadata["name"]
+            ),
+            "num_warps": (
+                launcher.bin.num_warps
+                if hasattr(launcher.bin, "num_warps")
+                else launcher.bin.metadata.num_warps
+            ),
+            "shared_mem": (
+                launcher.bin.shared
+                if hasattr(launcher.bin, "shared")
+                else launcher.bin.metadata.shared
+            ),
+            "stream": stream,
+            # User defined triton kernels will have arbitrary kwarg names
+            "config": config_to_dict(launcher.config),
+            "inductor_meta": self.inductor_meta,
+            "triton_meta": self.triton_meta,
+            "def_args": launcher.def_args,
+            "call_args": launcher.call_args,
+            "global_scratch": launcher.global_scratch,
+            "profile_scratch": launcher.profile_scratch,
+        }
 
         from torch._inductor import config
         from torch._inductor.codecache import CudaKernelParamCache
@@ -2073,12 +2043,7 @@ class CachingAutotuner(KernelInterface):
 
         try:
             self._pre_launch(launcher, *args, stream=stream, **kwargs)
-            try:
-                result = launcher(*args, **kwargs, stream=stream)
-            except Exception as e:
-                if isinstance(e, TypeError):
-                    self._check_launcher_call_args(launcher, args)
-                raise
+            result = launcher(*args, **kwargs, stream=stream)
         finally:
             self._post_launch()
 
@@ -2095,24 +2060,6 @@ class CachingAutotuner(KernelInterface):
         ):
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
         return result
-
-    def _check_launcher_call_args(
-        self,
-        launcher: LauncherType,
-        args: tuple[Any, ...],
-    ) -> None:
-        """Raise TypeError with a helpful message when stream is passed positionally."""
-        expected = getattr(launcher, "_expected_positional_count", None)
-        if expected is None:
-            return
-
-        if len(args) > expected:
-            kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
-            raise TypeError(
-                f"{kernel_name}: too many positional arguments - "
-                f"expected {expected}, got {len(args)}. "
-                "'stream' must be passed as a keyword argument."
-            ) from None
 
     def _build_fast_launcher(self, launcher: LauncherType) -> LauncherType | None:
         """Try to build a _FastCudaLauncher-backed version of the launcher.
@@ -2183,7 +2130,6 @@ class CachingAutotuner(KernelInterface):
                 "cache_hash",
                 "store_cubin",
                 "_is_static",
-                "_expected_positional_count",
             ):
                 val = getattr(launcher, attr, None)
                 if val is not None:
@@ -2285,11 +2231,7 @@ class CompileResult(Generic[_T]):
         ]
         launcher_code = "\n".join(lines)
         exec(launcher_code, scope)
-        launcher = scope["launcher"]
-        # Stash expected positional arg count at codegen time so
-        # _check_launcher_call_args can validate without inspect.signature().
-        launcher._expected_positional_count = len(def_args)
-        return launcher
+        return scope["launcher"]
 
     def _get_arg_lists(
         self, arg_names, constexprs
