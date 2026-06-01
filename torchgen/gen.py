@@ -470,7 +470,7 @@ def generate_static_dispatch_backend_call(
     f: NativeFunction,
     backend_index: BackendIndex,
 ) -> str:
-    cpp_sig = gen_static_dispatch_backend_call_signature(sig, f)
+    cpp_sig = gen_static_dispatch_backend_call_signature(f)
     name = cpp_sig.name()
     exprs = translate_args(sig, cpp_sig)
     backend_metadata = backend_index.get_kernel(f)
