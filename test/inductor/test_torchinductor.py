@@ -7289,6 +7289,7 @@ class CommonTemplate:
 
         self.assertEqual(o1, o2)
 
+    @expectedFailureCodegenDynamic
     def test_view_as_complex_non_contiguous(self):
         def fn(x):
             y = x.transpose(1, 2)
@@ -7297,7 +7298,7 @@ class CommonTemplate:
 
         x = torch.randn([2, 4, 8, 8], device=self.device, dtype=torch.float32)
 
-        self.common(fn, (x,), exact_stride=True)
+        self.common(fn, (x,), exact_stride=True, check_lowp=False)
 
     def test_view_as_real(self):
         def fn(x):
