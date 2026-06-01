@@ -492,13 +492,6 @@ class NodeInfo(NamedTuple):
     is_persistent_reduction: bool
 
 
-class ComboKernelCodegenResult(NamedTuple):
-    src_code: str | None
-    kernel: Any
-    node_group: list[BaseSchedulerNode]
-    node_info_group: list[NodeInfo]
-
-
 class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     """
     Common base class for Triton/Halide codegen which both use flattened indexing rather than loop nests.
@@ -3414,7 +3407,7 @@ class SIMDScheduling(BaseScheduling):
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
         per_subkernel_blocks: bool = False,
-    ) -> list[ComboKernelCodegenResult]:
+    ) -> list[tuple[str | None, Any, Any]]:
         """
         Generate kernel code for combo kernel partitions.
 
@@ -3422,7 +3415,7 @@ class SIMDScheduling(BaseScheduling):
         kernel code for each partition. Single-node partitions are generated as
         regular kernels, while multi-node partitions use ComboKernel.
 
-        Returns a list of (src_code, kernel, node_group, node_info_group) tuples.
+        Returns a list of (src_code, kernel, node_group) tuples.
         """
         from .triton import TritonKernel
         from .triton_combo_kernel import ComboKernel
@@ -3483,7 +3476,7 @@ class SIMDScheduling(BaseScheduling):
             len(subkernel_nodes),
             [len(p) for p in partitions],
         )
-        kernel_code_list: list[ComboKernelCodegenResult] = []
+        kernel_code_list = []
         for node_group in partitions:
             if len(node_group) == 0:
                 continue
@@ -3493,9 +3486,7 @@ class SIMDScheduling(BaseScheduling):
                 node_info = node_schedule_map[node_group[0]]
                 if only_gen_src_code:
                     # Skip code generation - caller has cached benchmark results
-                    kernel_code_list.append(
-                        ComboKernelCodegenResult(None, None, node_group, [node_info])
-                    )
+                    kernel_code_list.append((None, None, node_group))
                 else:
                     # Generate regular kernel
                     kernel_kwargs: dict[str, Any] = {}
@@ -3513,25 +3504,17 @@ class SIMDScheduling(BaseScheduling):
                     with V.set_kernel_handler(kernel):
                         src_code = kernel.codegen_kernel()
                     # pyrefly: ignore [bad-argument-type]
-                    kernel_code_list.append(
-                        ComboKernelCodegenResult(
-                            src_code, kernel, node_group, [node_info]
-                        )
-                    )
+                    kernel_code_list.append((src_code, kernel, node_group))
             else:
-                # Multi-node: create ComboKernel with combo subkernels.
-                # Combo is horizontal fusion — all subkernels are independent.
+                # Multi-node: create ComboKernel with combo subkernels
                 kernel = ComboKernel(
                     triton_kernel_cls=self.kernel_type,
                     enable_autotune=enable_autotune,
                     mixed_sizes=mixed_sizes,
                     per_subkernel_blocks=per_subkernel_blocks,
                 )
-                node_info_group: list[NodeInfo] = []
-                gen_seeds = per_subkernel_blocks and not only_gen_src_code
                 for pn in node_group:
                     node_info = node_schedule_map[pn]
-                    node_info_group.append(node_info)
                     subkernel = ComboKernel.create_triton_kernel(
                         node_info.tiling,
                         features=node_info.features,
@@ -3540,61 +3523,15 @@ class SIMDScheduling(BaseScheduling):
                         tiling_scores=node_info.tiling_scores,
                         per_subkernel_blocks=per_subkernel_blocks,
                     )
-                    # Seed codegen must precede process_kernel: the latter's
-                    # mark_run -> codegen_inplace_reuse adds the inplaced input
-                    # to V.graph.wrapper_code.freed, which then blocks the
-                    # seed's own decide_inplace_update.can_reuse() and forces
-                    # a non-inplace signature that diverges from the combo
-                    # subkernel's (bench skips cloning -> NaN under AMP on T5).
-                    if gen_seeds:
-                        slot_idx = len(node_info_group) - 1
-                        seed_src_code, seed_kernel = (
-                            self.generate_kernel_code_and_kernel_from_node_info(
-                                node_info
-                            )
-                        )
-                        prepicked = self._try_prepick_seed_config(seed_kernel)
-                        if prepicked is not None:
-                            kernel.prepicked_seed_configs[slot_idx] = prepicked
-                        else:
-                            kernel.standalone_autotune_seed_kernels.append(
-                                (seed_src_code, seed_kernel, node_info.node_schedule)
-                            )
                     self.process_kernel(
                         kernel.create_sub_kernel(subkernel),
                         node_info.node_schedule,
                         only_gen_src_code,
                     )
 
-                # Compile-time bench: fold multi-config seed winners into
-                # prepicked_seed_configs; runtime then takes the existing
-                # all-slots-prepicked stitch path.
-                if (
-                    gen_seeds
-                    and config.combo_seed_autotune_at_compile_time
-                    and kernel.standalone_autotune_seed_kernels
-                ):
-                    standalone_with_slots: list[tuple[int, str, Any]] = []
-                    standalone_iter = iter(kernel.standalone_autotune_seed_kernels)
-                    for slot_idx in range(len(node_info_group)):
-                        if slot_idx in kernel.prepicked_seed_configs:
-                            continue
-                        seed_src_inline, seed_kernel_inline, _ = next(standalone_iter)
-                        standalone_with_slots.append(
-                            (slot_idx, seed_src_inline, seed_kernel_inline)
-                        )
-                    kernel.prepicked_seed_configs.update(
-                        self._bench_combo_seeds_inline(standalone_with_slots)
-                    )
-                    kernel.standalone_autotune_seed_kernels = []
-
                 src_code = kernel.codegen_kernel()
                 # pyrefly: ignore [bad-argument-type]
-                kernel_code_list.append(
-                    ComboKernelCodegenResult(
-                        src_code, kernel, node_group, node_info_group
-                    )
-                )
+                kernel_code_list.append((src_code, kernel, node_group))
         # pyrefly: ignore [bad-return]
         return kernel_code_list
 
@@ -3616,40 +3553,7 @@ class SIMDScheduling(BaseScheduling):
             per_subkernel_blocks=per_subkernel_blocks,
         )
 
-        for src_code, kernel, node_group, node_info_group in kernel_code_list:
-            if len(node_group) > 1:
-                assert len(kernel.sub_kernels) > 1
-                assert len(node_group) == len(node_info_group)
-                if per_subkernel_blocks:
-                    # Seeds were codegened in generate_combo_kernel_code.
-                    # Single-config seeds were prepicked; only multi-config
-                    # seeds remain in standalone_autotune_seed_kernels and
-                    # need define_kernel + async_compile.
-                    assert len(kernel.standalone_autotune_seed_kernels) + len(
-                        kernel.prepicked_seed_configs
-                    ) == len(node_info_group)
-                    seed_infos = []
-                    for (
-                        seed_src_code,
-                        seed_kernel,
-                        seed_node_schedule,
-                    ) in kernel.standalone_autotune_seed_kernels:
-                        seed_kernel_name = self.define_kernel(
-                            seed_src_code,
-                            seed_node_schedule,
-                            seed_kernel,
-                        )
-                        _, seed_call_args, _, seed_arg_types = (
-                            seed_kernel.args.python_argdefs()
-                        )
-                        seed_kernel.add_numel_to_call_args(
-                            seed_kernel_name, seed_call_args, seed_arg_types
-                        )
-                        seed_infos.append(
-                            (seed_kernel_name, seed_call_args, seed_arg_types)
-                        )
-                    kernel.standalone_autotune_seed_infos = seed_infos
-
+        for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             self.codegen_comment(combo_kernel_node.snodes, kernel_name)
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
@@ -4442,227 +4346,6 @@ class SIMDScheduling(BaseScheduling):
         # pyrefly: ignore [missing-attribute]
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         return src_code
-
-    def generate_kernel_code_and_kernel_from_node_info(self, node_info: NodeInfo):
-        kernel = self.kernel_type(
-            node_info.tiling,
-            features=node_info.features,
-            tiling_scores=node_info.tiling_scores,
-        )
-        # Combo-seed kernels are only used to read .config off their launcher;
-        # the compiled binary is never launched. codegen_kernel() picks this
-        # up and bakes "combo_seed_use_config_only" into the source so the
-        # runtime autotuner can skip the wasted compile when the heuristic
-        # produces a single config.
-        kernel._is_combo_seed = True
-        metrics.generated_kernel_count -= 1  # pyrefly: ignore [bad-assignment]
-        config_patches = self._collect_config_patches(node_info.node_schedule)
-        config_patches["benchmark_kernel"] = False
-        with (
-            config.patch(**config_patches),
-            V.set_kernel_handler(kernel),
-        ):
-            self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
-            src_code = kernel.codegen_kernel()
-        return src_code, kernel
-
-    @staticmethod
-    def _try_prepick_seed_config(seed_kernel):
-        """Return the single Config if the seed's heuristic produces exactly one,
-        else None.  When non-None the caller can skip define_kernel /
-        async_compile for this seed entirely."""
-        from torch._inductor.runtime.runtime_utils import next_power_of_2
-        from torch._inductor.runtime.triton_heuristics import (
-            persistent_reduction,
-            pointwise,
-            reduction,
-        )
-
-        size_hints = {
-            prefix: next_power_of_2(V.graph.sizevars.optimization_hint(numel))
-            for prefix, numel in seed_kernel.numels.items()
-            if not prefix_is_reduction(prefix) or seed_kernel.inside_reduction
-        }
-
-        inductor_meta = {
-            **seed_kernel.inductor_meta_common(),
-            **seed_kernel.inductor_meta_per_kernel(),
-        }
-
-        if seed_kernel.persistent_reduction:
-            configs = persistent_reduction(
-                size_hints,
-                reduction_hint=seed_kernel.features.get_reduction_hint(
-                    seed_kernel.tiling_scores
-                ),
-                triton_meta=seed_kernel.triton_meta,
-                inductor_meta=inductor_meta,
-                return_configs=True,
-            )
-        elif seed_kernel.inside_reduction:
-            configs = reduction(
-                size_hints,
-                reduction_hint=seed_kernel.features.get_reduction_hint(
-                    seed_kernel.tiling_scores
-                ),
-                triton_meta=seed_kernel.triton_meta,
-                inductor_meta=inductor_meta,
-                return_configs=True,
-            )
-        else:
-            tile_hint = None
-            if len(size_hints) == 2:
-                from torch._inductor.codegen.triton_utils import non_constexpr_signature
-                from torch._inductor.runtime.hints import TileHint
-
-                _, _, signature, _ = seed_kernel.args.python_argdefs()
-                if len(non_constexpr_signature(signature)) == 4:
-                    tile_hint = TileHint.SQUARE
-                else:
-                    tile_hint = TileHint.DEFAULT
-            configs = pointwise(
-                size_hints,
-                triton_meta=seed_kernel.triton_meta,
-                tile_hint=tile_hint,
-                inductor_meta=inductor_meta,
-                return_configs=True,
-            )
-
-        if len(configs) == 1:
-            return configs[0]
-        return None
-
-    @staticmethod
-    def _bench_combo_seeds_inline(
-        seeds_with_slots: list[tuple[int, str, Any]],
-    ) -> dict[int, Any]:
-        """Compile and bench each combo seed kernel at codegen time.
-
-        Each entry is (slot_idx, src_code, seed_kernel). Returns a dict
-        {slot_idx: winning Config}. The seed binaries are compiled via
-        async_compile.triton (worker pool when available) and benched
-        serially on the calling thread (each bench is a single autotune
-        pass, typically a few ms of GPU work). When this returns, the
-        winning configs can be folded into ComboKernel.prepicked_seed_configs
-        so the combo's runtime path becomes "stitch + compile + launch"
-        with no first-invocation bench.
-        """
-        if not seeds_with_slots:
-            return {}
-
-        from torch._dynamo.device_interface import DeviceGuard
-
-        from ..async_compile import AsyncCompile
-        from ..select_algorithm import AlgorithmSelectorCache
-
-        async_compile = AsyncCompile()
-
-        # Deterministic kernel name so identical seed sources hit the same
-        # CompiledTritonKernels / PyCodeCache entry across processes. The
-        # cache key is the full source content (which includes this name);
-        # using a process-local id() would defeat cross-process reuse.
-        seed_name = "triton_combo_seed_bench"
-
-        # Two-pass: submit ALL compiles to the worker pool first, THEN wait
-        # on results. Calling .result() inside the loop serializes compiles
-        # because each iteration blocks on the previous handle before
-        # submitting the next -- defeating the worker pool's parallelism.
-        #
-        # Dedup by source content first: async_compile.triton's serial path
-        # does NOT save to CompiledTritonKernels, so two submissions with
-        # the same source hit cache miss and both trigger precompile on the
-        # PyCodeCache-shared autotuner -- the second one asserts because
-        # launchers are already populated. Submitting unique sources only
-        # avoids that.
-        source_to_handle: dict[str, Any] = {}
-        slot_to_source: list[tuple[int, str, Any]] = []
-        for slot_idx, src_code, seed_kernel in seeds_with_slots:
-            src_named = src_code.replace(str(Placeholder.KERNEL_NAME), seed_name)
-            slot_to_source.append((slot_idx, src_named, seed_kernel))
-            if src_named not in source_to_handle:
-                source_to_handle[src_named] = async_compile.triton(seed_name, src_named)
-        compiled: list[tuple[int, Any, Any]] = []
-        source_to_autotuner: dict[str, Any] = {}
-        for slot_idx, src_named, seed_kernel in slot_to_source:
-            if src_named not in source_to_autotuner:
-                handle = source_to_handle[src_named]
-                source_to_autotuner[src_named] = (
-                    handle.result() if hasattr(handle, "result") else handle
-                )
-            compiled.append((slot_idx, source_to_autotuner[src_named], seed_kernel))
-
-        # Pin RNG so example-tensor generation is deterministic across
-        # processes / compile invocations. Without this, rand_strided pulls
-        # from whatever torch RNG state happens to be live at codegen,
-        # so two compiles of the same graph get different bench inputs ->
-        # different winning configs -> non-deterministic runtime perf.
-        from torch._dynamo.utils import preserve_rng_state
-
-        results: dict[int, Any] = {}
-        autotuner_to_config: dict[int, Any] = {}
-        with preserve_rng_state():
-            torch.manual_seed(0)
-            for slot_idx, autotuner, seed_kernel in compiled:
-                # Identical seed source -> same autotuner; reuse its config.
-                cached = autotuner_to_config.get(id(autotuner))
-                if cached is not None:
-                    results[slot_idx] = cached
-                    continue
-                _, call_args, _, arg_types = seed_kernel.args.python_argdefs()
-                call_args = list(call_args)
-                arg_types = list(arg_types)
-                # Empty name -> generate_numel_expr treats as benchmark
-                # kernel and skips writeline; avoids polluting the wrapper
-                # module with phantom triton_combo_seed_bench_*numel lines.
-                seed_kernel.add_numel_to_call_args("", call_args, arg_types)
-
-                example_args: list[Any] = []
-                for arg, arg_type in zip(call_args, arg_types):
-                    if isinstance(arg_type, torch.dtype):
-                        buf = V.graph.try_get_buffer(arg)
-                        if buf is None:
-                            raise RuntimeError(
-                                f"Combo seed inline bench: no buffer for arg {arg!r}"
-                            )
-                        size = V.graph.sizevars.optimization_hints(buf.get_size())
-                        stride = V.graph.sizevars.optimization_hints(buf.get_stride())
-                        allocation_size = V.graph.sizevars.optimization_hints(
-                            V.graph.get_allocation_size(buf)
-                        )
-                        example_args.append(
-                            AlgorithmSelectorCache.generate_example_value(
-                                size,
-                                stride,
-                                buf.get_device(),
-                                buf.get_dtype(),
-                                extra_size=0,
-                                allocation_size=allocation_size,
-                            )
-                        )
-                    elif isinstance(arg, (int, float, bool)):
-                        example_args.append(arg)
-                    else:
-                        from .wrapper import SymbolicCallArg
-
-                        expr = (
-                            arg.inner_expr if isinstance(arg, SymbolicCallArg) else arg
-                        )
-                        example_args.append(
-                            int(V.graph.sizevars.optimization_hint(expr))
-                        )
-
-                device_interface = autotuner.get_device_interface()
-                device_idx = autotuner.device_props.index
-                with DeviceGuard(device_interface, device_idx):
-                    stream = device_interface.get_raw_stream(device_idx)
-                    autotuner.autotune_to_one_config_no_launch(
-                        *example_args, stream=stream
-                    )
-                cfg = autotuner.launchers[0].config
-                autotuner_to_config[id(autotuner)] = cfg
-                results[slot_idx] = cfg
-
-        return results
 
     def define_kernel(self, src_code, node_schedule, kernel):
         raise NotImplementedError

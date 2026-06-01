@@ -169,10 +169,6 @@ class CoordescTuner:
         return False
 
     def value_too_small(self, name: str, val: int) -> bool:
-        field_minimums = self.inductor_meta.get("combo_coordesc_field_minimums")
-        if isinstance(field_minimums, dict) and name in field_minimums:
-            return val < field_minimums[name]
-
         min_block = None
         if name == "XBLOCK":
             min_block = self.inductor_meta.get("min_xblock")
@@ -246,14 +242,9 @@ class CoordescTuner:
         if self.is_mix_order_reduction:
             # Mix order reduction has an extra constraint that
             # we should not tune XBLOCK beyond RSPLIT_SIZE
-            if "XBLOCK" in config.kwargs and "RSPLIT_SIZE" in config.kwargs:
-                return config.kwargs["XBLOCK"] <= config.kwargs["RSPLIT_SIZE"]
-            for key, xblock in config.kwargs.items():
-                if key.startswith("XBLOCK_"):
-                    suffix = key.removeprefix("XBLOCK_")
-                    split_size = config.kwargs.get(f"RSPLIT_SIZE_{suffix}")
-                    if split_size is not None and xblock > split_size:
-                        return False
+            xblock = config.kwargs["XBLOCK"]
+            split_size = config.kwargs["RSPLIT_SIZE"]
+            return xblock <= split_size
         if self.is_native_matmul:
             r0_block = None
             if "R0_BLOCK" not in config.kwargs:

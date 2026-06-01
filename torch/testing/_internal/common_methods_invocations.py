@@ -2563,7 +2563,7 @@ def error_inputs_cat(op_info, device, **kwargs):
     d = make_tensor((2, 3), device=device, dtype=torch.double if not device.startswith("mps") else torch.float16)
     x = make_tensor((2, 3), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(x, kwargs={'out': d}), error_type=TypeError,
-                     error_regex='must be tuple of Tensors')
+                     error_regex='invalid combination of arguments')
 
 def reference_inputs_cat(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_cat_concat(op, device, dtype, requires_grad, **kwargs)
@@ -6889,9 +6889,7 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **
     if not dtype.is_floating_point:
         raise ValueError(f"linear_cross_entropy requires floating point type inputs, got {dtype}")
     reductions = ("mean", "sum", "none")
-    chunked_reductions = ("mean", "sum")
 
-    LinearCrossEntropyOptions = torch.nn.LinearCrossEntropyOptions
     # Samples with non-zero label_smoothing are not generated because
     # linear_cross_entropy relies on cross_entropy that fails on
     # composite-compliance tests (cross_entropy calls `masked_fill_`
@@ -6901,21 +6899,7 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **
         *[dict(reduction=reduction) for reduction in reductions if reduction != "mean"],
         *[dict(weight="<to be initialized>", reduction=reduction) for reduction in reductions],
         dict(ignore_index=1),
-        *[dict(reduction=reduction, options=LinearCrossEntropyOptions(batch_chunk_size=2,
-                                                                      allow_retain_graph=True)) for reduction in chunked_reductions],
-        *[dict(reduction=reduction, options=LinearCrossEntropyOptions(batch_chunk_size=3,
-                                                                      allow_retain_graph=True)) for reduction in chunked_reductions],
-        *[dict(weight="<to be initialized>", reduction=reduction,
-               options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True))
-          for reduction in chunked_reductions],
-        dict(ignore_index=1, options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True)),
-        dict(weight="<to be initialized>", ignore_index=1, options=LinearCrossEntropyOptions(batch_chunk_size=2, allow_retain_graph=True)),
     ]
-    if dtype in {torch.float16, torch.bfloat16}:
-        kwargs_list.extend([
-            dict(reduction=reduction, options=LinearCrossEntropyOptions(acc_dtype=torch.float32,
-                                                                        allow_retain_graph=True)) for reduction in chunked_reductions
-        ])
 
     for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
         for linear_sample in sample_inputs_linear(op_info, device, dtype, requires_grad):
@@ -15768,8 +15752,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linear_cross_entropy,
         error_inputs_func=error_inputs_linear_cross_entropy,
         supports_out=False,
-        # Flags are True for the unchunked fallback path (options=None);
-        # chunked-op samples expectedFailure on Forward AD tests below.
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -15793,12 +15775,6 @@ op_db: list[OpInfo] = [
                 "test_output_match",
                 device_type="mps",
             ),
-            DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=5e-3, rtol=5e-3)}),
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                device_type="cpu",
-            ),
         ),
         skips=(
             # RuntimeError: Difference from float64 is larger with
@@ -15819,19 +15795,23 @@ op_db: list[OpInfo] = [
                 unittest.skip("internal assert failure"),
                 'TestJit', 'test_variant_consistency_jit',
                 dtypes=(torch.float32,)),
-            # MPS fp16/bf16: 1/8 mismatched, max abs 4.6e-4 (atol 1e-5),
-            # max rel 0.89 (rtol 1e-3).
+            # Exception: Tensor-likes are not close!
+            # Mismatched elements: 1 / 8 (12.5%)
+            # Greatest absolute difference: 0.0004601478576660156 at index (5,) (up to 1e-05 allowed)
+            # Greatest relative difference: 0.89208984375 at index (5,) (up to 0.001 allowed)
             DecorateInfo(
                 unittest.skip("Inconsistent accuracy"),
                 'TestConsistency', 'test_output_match',
                 dtypes=(torch.float16, torch.bfloat16),
                 device_type="mps",),
-            # MPS scalar mismatch: -152.75 vs -157.25 (abs 4.5 vs atol 1e-3,
-            # rel 0.029 vs rtol 1e-2).
+            # Exception: Scalars are not close!
+            # Expected -152.75 but got -157.25.
+            # Absolute difference: 4.5 (up to 0.001 allowed)
+            # Relative difference: 0.029459901800327332 (up to 0.01 allowed)
             DecorateInfo(
                 unittest.skip("Inconsistent accuracy"),
                 "TestConsistency", "test_output_grad_match",
-                dtypes=(torch.float16, torch.bfloat16, torch.float32),
+                dtypes=(torch.float16, torch.bfloat16),
                 device_type="mps",),
             # torch.allclose(arg, arg_copy, rtol=0, atol=0, equal_nan=True),
             # -> torch.AcceleratorError: HIP error: unspecified launch failure
@@ -15842,34 +15822,6 @@ op_db: list[OpInfo] = [
                 "TestCompositeCompliance", "test_cow_input",
                 device_type="cuda",
                 active_if=TEST_WITH_ROCM or IS_LINUX or TEST_WITH_TORCHINDUCTOR),
-            # No Inductor lowering for the chunked op. Unchunked samples
-            # (options=None) would lower, but OpInfo can't gate per-sample.
-            DecorateInfo(unittest.skip("no Inductor lowering for the chunked op"),
-                         'TestInductorOpInfo', 'test_comprehensive'),
-            # Chunked op: no jvp / no second derivatives. Keep in sync with
-            # F.linear_cross_entropy limitations notes (unexpectedSuccess => sync).
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_grad'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_jvpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vjpvmap'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjpvjp'),
-            DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
-            # Exception: Jacobian mismatch for output 0 with respect to input 0
-            # numerical:0.21544406078673195 analytical:0.0
-            # Jacobian mismatch -- analytical=0 because the chunked op precomputes
-            # only first derivatives.
-            DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_gradgrad',),
-            # No jvp; see header comment for the path forward.
-            DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',),
-            DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad',),
-            # JIT type inference doesn't recognise the LinearCrossEntropyOptions
-            # dataclass; any sample with options=... fails inferred_arg_type.
-            # Benign -- the wrapper unpacks options before any JIT-visible op.
-            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
         )
     ),
     OpInfo('nn.functional.normalize',
