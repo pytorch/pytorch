@@ -817,9 +817,9 @@ class TestTorchDlPack(TestCase):
         )
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
     def test_numpy_cross_device_transfer(self, device):
-        """Test cross-device transfer from NumPy (CPU) to PyTorch (CUDA).
+        """Test cross-device transfer from NumPy (CPU) to PyTorch (CUDA/XPU).
 
         This tests the fix for issue #169186 where torch.from_dlpack(numpy_array, device="cuda")
         would fail with "unsupported device requested" because PyTorch incorrectly asked
@@ -830,17 +830,18 @@ class TestTorchDlPack(TestCase):
         """
         import numpy as np
 
+        device_type = torch.device(device).type
         np_array = np.arange(10, dtype=np.float32)
         expected = torch.arange(10, dtype=torch.float32, device=device)
 
         # Test 1: copy=None (default) - should allow copy for cross-device
         t1 = from_dlpack(np_array, device=device)
-        self.assertEqual(t1.device.type, "cuda")
+        self.assertEqual(t1.device.type, device_type)
         self.assertEqual(t1, expected)
 
         # Test 2: copy=True - explicit copy
         t2 = from_dlpack(np_array, device=device, copy=True)
-        self.assertEqual(t2.device.type, "cuda")
+        self.assertEqual(t2.device.type, device_type)
         self.assertEqual(t2, expected)
 
         # Test 3: copy=False - should raise ValueError (can't do cross-device without copy)
@@ -850,10 +851,10 @@ class TestTorchDlPack(TestCase):
             from_dlpack(np_array, device=device, copy=False)
 
         # Test 4: device as string vs torch.device object (both should work)
-        t_str = from_dlpack(np_array, device="cuda")
-        t_obj = from_dlpack(np_array, device=torch.device("cuda"))
-        self.assertEqual(t_str.device.type, "cuda")
-        self.assertEqual(t_obj.device.type, "cuda")
+        t_str = from_dlpack(np_array, device=device_type)
+        t_obj = from_dlpack(np_array, device=torch.device(device_type))
+        self.assertEqual(t_str.device.type, device_type)
+        self.assertEqual(t_obj.device.type, device_type)
         self.assertEqual(t_str, t_obj)
 
         # Test 5: Regression - CPU -> CPU should still be zero-copy (share memory)
