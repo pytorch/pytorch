@@ -1059,7 +1059,6 @@ combo_kernel_per_subkernel_blocks = False
 # CachingAutotuner._combo_sequential_autotune. Indirect-indexing nodes are
 # excluded from combos on the compile-time path (the seed bench has no real
 # index tensor).
-# Note: the seed-kernel bench is not implemented yet (added in a later commit).
 combo_seed_autotune_at_compile_time = True
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.

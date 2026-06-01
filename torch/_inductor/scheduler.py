@@ -6053,12 +6053,13 @@ class Scheduler:
                     )
                     memory_sim_time += time.perf_counter() - sim_start
                 else:
+                    per_subkernel_blocks = config.combo_kernel_per_subkernel_blocks
                     combo_node = ForeachKernelSchedulerNode(
                         window[0].scheduler,
                         window,
                         use_custom_partition_algo=True,
-                        enable_autotune=enable_autotune,
-                        per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
+                        enable_autotune=enable_autotune or per_subkernel_blocks,
+                        per_subkernel_blocks=per_subkernel_blocks,
                     )
                     _register_accept(combo_node, window, num)
 
@@ -6143,12 +6144,13 @@ class Scheduler:
         """
         from .memory import estimate_region_peak_memory
 
+        per_subkernel_blocks = config.combo_kernel_per_subkernel_blocks
         combo_node = ForeachKernelSchedulerNode(
             group_nodes[0].scheduler,
             group_nodes,
             use_custom_partition_algo=True,
-            enable_autotune=enable_autotune,
-            per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
+            enable_autotune=enable_autotune or per_subkernel_blocks,
+            per_subkernel_blocks=per_subkernel_blocks,
         )
         # Wire the combo's pred_buffers from its members so the gate
         # simulator can read `node.mpi_node.pred_buffers` uniformly.

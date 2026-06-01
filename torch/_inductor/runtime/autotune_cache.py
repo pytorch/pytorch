@@ -24,6 +24,7 @@ expensive autotuning operations when the same kernels are compiled multiple time
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import logging
 import os
@@ -306,6 +307,7 @@ class AutotuneCache:
         config: Config,
         time_taken_ns: int,
         found_by_coordesc: bool = False,
+        found_by_combo_autotune: bool = False,
         triton_cache_hash: str | None = None,
     ) -> None:
         data: dict[str, JsonDataTy] = {
@@ -317,6 +319,7 @@ class AutotuneCache:
             "num_stages": config.num_stages,
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
+            "found_by_combo_autotune": found_by_combo_autotune,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
             "triton_cache_hash": triton_cache_hash,
         }
@@ -676,6 +679,9 @@ def _load_cached_autotuning(
     found_by_coordesc = inductor_meta.get(
         "coordinate_descent_tuning"
     ) and best_config.pop("found_by_coordesc", False)
+    found_by_combo_autotune = bool(
+        inductor_meta.get("combo_grid_meta")
+    ) and best_config.pop("found_by_combo_autotune", False)
 
     if not found_by_coordesc:
         matching_configs = [
@@ -689,19 +695,28 @@ def _load_cached_autotuning(
             and cfg.num_stages == best_config.get("num_stages")
         ]
         if len(matching_configs) == 1:
-            matched_config = matching_configs[0]
+            # Copy before mutating: `configs` is a shared heuristic-owned list,
+            # so setattr on the original would leak provenance across compiles.
+            matched_config = copy.copy(matching_configs[0])
             # pyrefly: ignore [missing-attribute]
             matched_config.extra_options = extra_options
+            if found_by_combo_autotune:
+                # pyrefly: ignore [missing-attribute]
+                matched_config.found_by_combo_autotune = True
             return matched_config
 
     # Reconstruct Config from cached data. This handles both coordesc
     # configs and dynamically added configs (e.g. _dynamic_scale_rblock)
     # that aren't in the original config list.
     best_config.pop("found_by_coordesc", None)
+    best_config.pop("found_by_combo_autotune", None)
     triton_config = _reconstruct_triton_config(best_config, extra_options)
     if found_by_coordesc:
         # pyrefly: ignore [missing-attribute]
         triton_config.found_by_coordesc = True
+    if found_by_combo_autotune:
+        # pyrefly: ignore [missing-attribute]
+        triton_config.found_by_combo_autotune = True
     return triton_config
 
 

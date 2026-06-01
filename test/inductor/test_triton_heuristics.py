@@ -1285,7 +1285,13 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         )
 
         self.assertIsNotNone(result)
-        self.assertIs(result, cfg_b)
+        # Loader copies the matched config before any setattr, so the result is
+        # a fresh Config equivalent to cfg_b (not the same object).
+        self.assertIsNot(result, cfg_b)
+        self.assertEqual(result.kwargs, cfg_b.kwargs)
+        self.assertEqual(result.num_warps, cfg_b.num_warps)
+        self.assertEqual(result.num_stages, cfg_b.num_stages)
+        self.assertFalse(hasattr(cfg_b, "found_by_combo_autotune"))
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_rejects_hash_mismatch(self):

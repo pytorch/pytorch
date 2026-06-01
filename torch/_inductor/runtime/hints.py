@@ -135,6 +135,7 @@ _NUM_THREADS_PER_WARP = 32
 
 
 class HeuristicType(Enum):
+    COMBO_KERNEL = auto()
     PERSISTENT_REDUCTION = auto()
     POINTWISE = auto()
     REDUCTION = auto()
