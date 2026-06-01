@@ -5851,6 +5851,11 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return _scatter_meta_output(self)
 
 
+@register_meta(aten.diagonal_scatter.default)
+def meta_diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
+    return _scatter_meta_output(self)
+
+
 def _scatter_meta_output(self):
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
@@ -6347,7 +6352,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
             max_seqlen_batch_q,
             num_heads,
         ),
-        dtype=torch.float,
+        dtype=utils.get_computation_dtype(query.dtype),
         device=query.device,
     ).transpose(1, 2)
     return (
