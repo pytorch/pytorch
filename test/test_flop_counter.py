@@ -820,6 +820,44 @@ class TestFlopCounter(TestCase):
             int(get_total_flops(real_flop_counter_mode)),
         )
 
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support all SDPA backends (pre-SM80 hardware on CUDA)",
+    )
+    def test_nested_attention_worst_case_flop_mode(self):
+        def count_flops(seqlens, flop_mode):
+            total = sum(seqlens)
+            offsets = torch.tensor(
+                [0, *torch.tensor(seqlens, device="cpu").cumsum(0).tolist()],
+                dtype=torch.int32,
+                device="cuda",
+            )
+            x = torch.randn(total, 2, 16, device="cuda", dtype=torch.bfloat16)
+            with FlopCounterMode(data_dependent_flop_mode=flop_mode) as mode:
+                torch.ops.aten._flash_attention_forward(
+                    x,
+                    x,
+                    x,
+                    offsets,
+                    offsets,
+                    max(seqlens),
+                    max(seqlens),
+                    0.0,
+                    False,
+                    False,
+                )
+            return int(get_total_flops(mode))
+
+        self.assertNotEqual(
+            count_flops([32, 32], "actual"),
+            count_flops([60, 4], "actual"),
+        )
+
+        expected = sdpa_flop_count((1, 2, 64, 16), (1, 2, 64, 16), (1, 2, 64, 16))
+        self.assertEqual(count_flops([32, 32], "worst_case"), expected)
+        self.assertEqual(count_flops([60, 4], "worst_case"), expected)
+
     def test_addmm_out(self):
         def f(x):
             y = torch.zeros(10, 10)

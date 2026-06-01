@@ -5,11 +5,16 @@ from math import prod
 
 import torch
 import torch._functorch.config as config
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
-from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
+from torch.utils.flop_counter import (
+    FlopCounterMode,
+    register_flop_formula,
+    sdpa_flop_count,
+)
 
 
 if has_triton():
@@ -378,6 +383,70 @@ class MemoryBudgetTest(TestCase):
         try_seq_length(2, 5, "attn")
         try_seq_length(4, 7, "mm")
         try_seq_length(4, 9, "attn")
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support flash attention",
+    )
+    def test_flash_attention_autoac_uses_worst_case_flops(self):
+        import torch._functorch.partitioners as partitioners
+
+        orig_estimate_runtime = partitioners.estimate_runtime
+        estimates = []
+
+        def estimate_runtime_and_record(node):
+            estimate = orig_estimate_runtime(node)
+            if node.target is torch.ops.aten._flash_attention_forward.default:
+                estimates.append(estimate)
+            return estimate
+
+        def run_with_seqlens(seqlens):
+            total = sum(seqlens)
+            offsets = torch.tensor(
+                [0, *torch.tensor(seqlens, device="cpu").cumsum(0).tolist()],
+                dtype=torch.int32,
+                device="cuda",
+            )
+            max_seqlen = max(seqlens)
+
+            def f(x, w):
+                y = torch.ops.aten._flash_attention_forward(
+                    x,
+                    x,
+                    x,
+                    offsets,
+                    offsets,
+                    max_seqlen,
+                    max_seqlen,
+                    0.0,
+                    False,
+                    False,
+                )[0]
+                return (y.flatten(0, 1) @ w).sum()
+
+            x = torch.randn(
+                total, 2, 16, dtype=torch.bfloat16, device="cuda", requires_grad=True
+            )
+            w = torch.randn(
+                16, 16, dtype=torch.bfloat16, device="cuda", requires_grad=True
+            )
+
+            torch._dynamo.reset()
+            with config.patch(activation_memory_budget=0.5):
+                out = torch.compile(
+                    f, backend="aot_eager_decomp_partition", fullgraph=True
+                )(x, w)
+                out.backward()
+
+        partitioners.estimate_runtime = estimate_runtime_and_record
+        try:
+            run_with_seqlens([32, 32])
+            run_with_seqlens([60, 4])
+        finally:
+            partitioners.estimate_runtime = orig_estimate_runtime
+
+        expected = sdpa_flop_count((1, 2, 64, 16), (1, 2, 64, 16), (1, 2, 64, 16))
+        self.assertEqual(estimates, [expected, expected])
 
     def test_manual_ac(self):
         # test that manual checkpoint boundaries are respected

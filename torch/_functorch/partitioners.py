@@ -3080,7 +3080,9 @@ def estimate_runtime(node: fx.Node) -> float:
         from torch.utils.flop_counter import FlopCounterMode
 
         args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
-        with FlopCounterMode(display=False) as mode:
+        with FlopCounterMode(
+            display=False, data_dependent_flop_mode="worst_case"
+        ) as mode:
             # pyrefly: ignore[not-callable]
             node.target(*args, **kwargs)
         counted_flops = mode.get_total_flops()

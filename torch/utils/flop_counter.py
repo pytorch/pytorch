@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
-from types import NoneType
 import logging
+from contextvars import ContextVar
+from types import NoneType
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
@@ -20,6 +21,10 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
+
+_data_dependent_flop_mode: ContextVar[str] = ContextVar(
+    "_data_dependent_flop_mode", default="actual"
+)
 
 
 try:
@@ -331,6 +336,11 @@ def _offsets_to_lengths(offsets, max_len):
     return [max_len] * (offsets.size(0) - 1)
 
 
+def _use_worst_case_for_data_dependent_flops() -> bool:
+    # AutoAC needs flop estimates that do not vary with rank-local input data.
+    return _data_dependent_flop_mode.get() == "worst_case"
+
+
 def _unpack_flash_attention_nested_shapes(
     *,
     query,
@@ -370,6 +380,15 @@ def _unpack_flash_attention_nested_shapes(
             raise AssertionError("sdpa_flop_count: cum_seq_k must not be None")
         if cum_seq_q.shape != cum_seq_k.shape:
             raise AssertionError("sdpa_flop_count: cum_seq_q and cum_seq_k must have the same shape")
+
+        if _use_worst_case_for_data_dependent_flops():
+            new_query_shape = (1, h_q, query.shape[0], d_q)
+            new_key_shape = (1, h_k, key.shape[0], d_k)
+            new_value_shape = (1, h_v, value.shape[0], d_v)
+            new_grad_out_shape = new_query_shape if grad_out is not None else None
+            yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
+            return
+
         seq_q_lengths = _offsets_to_lengths(cum_seq_q, max_q)
         seq_k_lengths = _offsets_to_lengths(cum_seq_k, max_k)
         for (seq_q_len, seq_k_len) in zip(seq_q_lengths, seq_k_lengths, strict=True):
@@ -425,6 +444,15 @@ def _unpack_efficient_attention_nested_shapes(
         if cu_seqlens_q.shape != cu_seqlens_k.shape:
             raise AssertionError("_unpack_efficient_attention_nested_shapes: "
                                  "cu_seqlens_q and cu_seqlens_k must have the same shape")
+
+        if _use_worst_case_for_data_dependent_flops():
+            new_query_shape = (1, h_q, query.shape[1], d_q)
+            new_key_shape = (1, h_k, key.shape[1], d_k)
+            new_value_shape = (1, h_v, value.shape[1], d_v)
+            new_grad_out_shape = new_query_shape if grad_out is not None else None
+            yield new_query_shape, new_key_shape, new_value_shape, new_grad_out_shape
+            return
+
         seqlens_q = _offsets_to_lengths(cu_seqlens_q, max_seqlen_q)
         seqlens_k = _offsets_to_lengths(cu_seqlens_k, max_seqlen_k)
         for len_q, len_k in zip(seqlens_q, seqlens_k, strict=True):
@@ -816,12 +844,19 @@ class FlopCounterMode:
             mods: torch.nn.Module | list[torch.nn.Module] | None = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: dict[Any, Any] | None = None) -> None:
+            custom_mapping: dict[Any, Any] | None = None,
+            data_dependent_flop_mode: str = "actual") -> None:
         super().__init__()
+        if data_dependent_flop_mode not in {"actual", "worst_case"}:
+            raise ValueError(
+                "data_dependent_flop_mode must be either 'actual' or 'worst_case'"
+            )
         self.flop_counts: dict[str, dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
         self.mode: _FlopCounterMode | None = None
+        self._data_dependent_flop_mode_token = None
+        self.data_dependent_flop_mode = data_dependent_flop_mode
         if custom_mapping is None:
             custom_mapping = {}
         if mods is not None:
@@ -912,6 +947,9 @@ class FlopCounterMode:
     # NB: This context manager is NOT reentrant
     def __enter__(self):
         self.flop_counts.clear()
+        self._data_dependent_flop_mode_token = _data_dependent_flop_mode.set(
+            self.data_dependent_flop_mode
+        )
         self.mod_tracker.__enter__()
         self.mode = _FlopCounterMode(self)
         self.mode.__enter__()
@@ -923,6 +961,13 @@ class FlopCounterMode:
         b = self.mode.__exit__(*args)
         self.mode = None  # break cycles
         self.mod_tracker.__exit__()
+        if self._data_dependent_flop_mode_token is None:
+            raise AssertionError(
+                "Internal error: FlopCounter.__exit__ called but "
+                "data-dependent mode token is None"
+            )
+        _data_dependent_flop_mode.reset(self._data_dependent_flop_mode_token)
+        self._data_dependent_flop_mode_token = None
         if self.display:
             print(self.get_table(self.depth))
         return b
