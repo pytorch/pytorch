@@ -3414,6 +3414,12 @@ make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_t
 make_fallback(aten._pdist_forward, require_contiguous)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
 make_fallback(aten._fused_rms_norm, warn=False)  # (MPS-only and faster than decomp)
+make_fallback(
+    aten._native_batch_norm_legit_functional,
+    constrain_to_fx_strides,
+    warn=False,
+    override_decomp=True,
+)
 if torch.xpu._is_compiled():
     make_fallback(
         aten.embedding_dense_backward, warn=False
@@ -7961,10 +7967,109 @@ bitwise_or = register_pointwise(aten.bitwise_or)
 bitwise_right_shift = register_pointwise(aten.bitwise_right_shift)
 bitwise_xor = register_pointwise(aten.bitwise_xor)
 register_pointwise_numeric(aten.lgamma)
-erf = register_pointwise_numeric(aten.erf)
+register_op_dtype_propagation_rules(
+    "erf", ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, None
+)
+_erf_pointwise = make_pointwise(ops_wrapper("erf"))
+_missing = object()
+
+
+def _node_has_target(node, targets):
+    return (
+        isinstance(node, torch.fx.Node)
+        and node.op == "call_function"
+        and node.target in targets
+    )
+
+
+def _node_arg(node, name, index, default=_missing):
+    if not isinstance(node, torch.fx.Node):
+        return default
+    target = node.target
+    if not callable(target):
+        return default
+    try:
+        normalized = torch.fx.operator_schemas.normalize_function(
+            target, node.args, node.kwargs
+        )
+    except (AssertionError, RuntimeError, TypeError):
+        normalized = None
+
+    args, kwargs = normalized if normalized is not None else (node.args, node.kwargs)
+    if name in kwargs:
+        return kwargs[name]
+    if index < len(args):
+        return args[index]
+    return default
+
+
+def _cpu_erf_feeds_normalize_neg_one(node):
+    # F.normalize(x, p=-1, dim=-1) decomposes to:
+    # x / expand(clamp_min(pow(sum(pow(abs(x), -1)), -1.0), eps)).
+    # If x is erf(...), 1 ULP differences between generated C++ erf and eager
+    # CPU's VML-backed erf are amplified by the eps clamp on rows containing
+    # zeros, e.g. rows produced by diag_embed.
+    if not isinstance(node, torch.fx.Node):
+        return False
+
+    abs_targets = (aten.abs.default,)
+    pow_targets = (aten.pow.Tensor_Scalar,)
+    sum_targets = (aten.sum.dim_IntList,)
+    clamp_min_targets = (aten.clamp_min.default,)
+    expand_targets = (aten.expand.default,)
+    div_targets = (aten.div.Tensor,)
+
+    def users_matching(input_node, targets):
+        return [
+            user
+            for user in input_node.users
+            if _node_has_target(user, targets)
+            and _node_arg(user, "self", 0) is input_node
+        ]
+
+    for abs_node in users_matching(node, abs_targets):
+        for pow_abs_node in users_matching(abs_node, pow_targets):
+            if _node_arg(pow_abs_node, "exponent", 1) != -1:
+                continue
+            for sum_node in users_matching(pow_abs_node, sum_targets):
+                if (
+                    _node_arg(sum_node, "dim", 1) not in ([-1], (-1,))
+                    or _node_arg(sum_node, "keepdim", 2, False) is not True
+                ):
+                    continue
+                for pow_sum_node in users_matching(sum_node, pow_targets):
+                    if _node_arg(pow_sum_node, "exponent", 1) != -1.0:
+                        continue
+                    for clamp_node in users_matching(pow_sum_node, clamp_min_targets):
+                        for expand_node in users_matching(clamp_node, expand_targets):
+                            for div_node in expand_node.users:
+                                if (
+                                    _node_has_target(div_node, div_targets)
+                                    and _node_arg(div_node, "self", 0) is node
+                                    and _node_arg(div_node, "other", 1) is expand_node
+                                ):
+                                    return True
+    return False
+
+
+@register_lowering(
+    aten.erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+def erf(x):
+    device = x.get_device()
+    if (
+        device is not None
+        and device.type == "cpu"
+        and _cpu_erf_feeds_normalize_neg_one(V.graph.current_node)
+    ):
+        return fallback_handler(aten.erf.default)(x)
+    return _erf_pointwise(x)
+
+
 register_lowering(
     aten.special_erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )(erf)
+register_lowering(prims.erf, type_promotion_kind=None)(erf)
 
 register_pointwise_numeric(aten.log1p)
 register_pointwise_numeric(aten.tan)

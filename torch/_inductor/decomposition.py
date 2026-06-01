@@ -20,6 +20,7 @@ from torch._decomp import (
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
     _index_add,
+    _native_batch_norm_legit_functional as decomp_native_batch_norm_legit_functional,
     embedding_dense_backward as decomp_embedding_dense_backward,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
@@ -113,6 +114,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._unsafe_index,
     aten._unsafe_masked_index,
     aten._unsafe_masked_index_put_accumulate,
+    aten._native_batch_norm_legit_functional.default,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten._softmax_backward_data,
     aten.clamp_max,
@@ -152,6 +154,26 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition(aten._native_batch_norm_legit_functional.default)
+def _native_batch_norm_legit_functional(
+    input: torch.Tensor,
+    weight: torch.Tensor | None,
+    bias: torch.Tensor | None,
+    running_mean: torch.Tensor,
+    running_var: torch.Tensor,
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Any:
+    # Eager CPU training BatchNorm uses a native, layout-sensitive reduction
+    # order. Keep the op intact so the lowering can fall back to that kernel.
+    if input.device.type == "cpu" and training:
+        return NotImplemented
+    return decomp_native_batch_norm_legit_functional(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    )
 
 
 @register_decomposition([aten.lerp.Scalar])

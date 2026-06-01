@@ -6609,6 +6609,43 @@ class CPUReproTests(TestCase):
         res = compiled_vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
         self.assertEqual(ref, res)
 
+    def test_issue_185589_conv_bn_relu_diag_erf_normalize_dynamic(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/185589.
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv1 = nn.Conv2d(3, 8, kernel_size=3, padding=1)
+                self.bn1 = nn.BatchNorm2d(8)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = F.relu(x)
+                x = torch.diag_embed(x)
+                x = torch.erf(x)
+                return F.normalize(x, p=-1, dim=-1)
+
+        torch.manual_seed(0)
+        with torch.no_grad():
+            model = Model()
+            x = torch.randn(2, 3, 16, 16)
+            expected = model(x)
+            actual = torch.compile(model, backend="inductor", dynamic=True)(x)
+
+        torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+
+    def test_issue_185589_erf_matcher_sum_without_keepdim(self):
+        def fn(x):
+            y = torch.erf(x)
+            z = torch.pow(torch.abs(y), -1).sum(dim=[-1])
+            return y + z.unsqueeze(-1)
+
+        x = torch.randn(2, 3)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="inductor", dynamic=True, fullgraph=True)(x)
+
+        torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
+
     def test_fractional_max_pool2d_3d_input(self):
         """Test for https://github.com/pytorch/pytorch/issues/156682 - 3D input causing assertion error"""
 
