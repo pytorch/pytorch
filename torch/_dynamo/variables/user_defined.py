@@ -55,8 +55,6 @@ from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
     ObservedKeyError,
-    ObservedTypeError,
-    ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -99,6 +97,7 @@ from ..utils import (
     tensortype_to_dtype,
     tracked_repr,
     tuple_methods,
+    unpack_iterable,
     unpatched_nn_module_getattr,
 )
 from .base import (
@@ -858,13 +857,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 m, self, source_fn=source
             ).call_function(tx, [], {})
-        try:
-            items = self.unpack_var_sequence(tx)
-            return variables.ListIteratorVariable(
-                items, mutation_type=ValueMutationNew()
-            )
-        except NotImplementedError:
-            pass
         return super().tp_iter_impl(tx)
 
     def nb_negative_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -1059,6 +1051,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self,
                 args[0],
                 init_args,
+                tx=tx,
             )
         elif name == "__setattr__" and self.ban_mutation:
             unimplemented(
@@ -1121,6 +1114,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 SourcelessBuilder.create(tx, object),
                 self,
                 [],
+                tx=tx,
             )
             var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
             return var
@@ -1151,6 +1145,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 SourcelessBuilder.create(tx, dict),
                 self,
                 [],
+                tx=tx,
             )
             result.call_method(tx, "__init__", list(args), kwargs)
             return result
@@ -1193,21 +1188,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if bound_args is None:
                 raise AssertionError("bound_args is None after signature binding")
             if "iterable" in bound_args.arguments:
-                if not bound_args.arguments["iterable"].has_force_unpack_var_sequence(
-                    tx
-                ):
-                    unimplemented(
-                        gb_type="collections.deque() with bad iterable argument",
-                        context=f"args={args}, kwargs={kwargs}",
-                        explanation="Call to collections.deque() has an iterable argument that Dynamo cannot "
-                        "convert to a list.",
-                        hints=[
-                            "Use a simpler sequence type that Dynamo can convert to a list "
-                            "(e.g. list, tuple, list iterator, etc.)",
-                            *graph_break_hints.USER_ERROR,
-                        ],
-                    )
-                items = bound_args.arguments["iterable"].force_unpack_var_sequence(tx)
+                items = unpack_iterable(tx, bound_args.arguments["iterable"])
             else:
                 # pyrefly: ignore [implicit-any]
                 items = []
@@ -1378,6 +1359,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     self,
                     self,
                     list(args),
+                    tx=tx,
                 )
             else:
                 # Namedtuple __new__ is a Python function that calls
@@ -1606,6 +1588,7 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
                 SourcelessBuilder.create(tx, BaseException),
                 self,
                 list(args),
+                tx=tx,
             )
             var.call_method(tx, "__init__", list(args), dict(kwargs))
             return var
@@ -1671,6 +1654,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         init_args: list[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
+        kwargs.pop("tx", None)
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
@@ -2928,48 +2912,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             iter_method = self._maybe_get_baseclass_method("__iter__")
             if iter_method is not None and iter_method in self._base_methods:
                 return self._base_vt.unpack_var_sequence(tx)
-        if (
-            self.source
-            and self._maybe_get_baseclass_method("__iter__") is list.__iter__
-            and self._maybe_get_baseclass_method("__len__") is list.__len__
-            and self._maybe_get_baseclass_method("__getitem__") is list.__getitem__
-        ):
-            install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
-            return [
-                variables.LazyVariableTracker.create(
-                    self.value[k],  # type: ignore[index]
-                    source=GetItemSource(self.source, k),
-                )
-                for k in range(len(self.value))  # type: ignore[arg-type]
-            ]
         return super().unpack_var_sequence(tx)
-
-    def has_force_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        from .builder import SourcelessBuilder
-
-        try:
-            SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
-            return True
-        except ObservedTypeError:
-            handle_observed_exception(tx)
-            return False
-
-    def force_unpack_var_sequence(
-        self, tx: "InstructionTranslatorBase"
-    ) -> list[VariableTracker]:
-        from .builder import SourcelessBuilder
-
-        result = []
-        iter_ = SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
-
-        while True:
-            try:
-                r = iter_.tp_iternext_impl(tx)
-                result.append(r)
-            except ObservedUserStopIteration:
-                handle_observed_exception(tx)
-                break
-        return result
 
     def is_supported_random(self) -> bool:
         try:
@@ -4849,6 +4792,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
             VariableTracker.build(tx, dict),
             VariableTracker.build(tx, collections.defaultdict),
             [],
+            tx=tx,
         )
         new.default_factory = self.default_factory  # type: ignore[missing-attribute]
         new._base_vt = ConstDictVariable(items.copy(), mutation_type=ValueMutationNew())  # type: ignore[missing-attribute]
@@ -4908,6 +4852,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
                 SourcelessBuilder.create(tx, dict),
                 SourcelessBuilder.create(tx, collections.defaultdict),
                 [],
+                tx=tx,
             )
             if not isinstance(new_dd, DefaultDictVariable):
                 raise AssertionError(
@@ -4970,8 +4915,6 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 )
             else:
                 init_args = kwargs.get("init_args", {})
-                if tx is None:
-                    tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
                 self._base_vt = SourcelessBuilder.create(tx, python_type).call_function(  # type: ignore[assignment]
                     tx, init_args, {}
                 )
@@ -5081,11 +5024,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
             #
             # TODO this duplicates the logic in `BuiltinVariable(tuple)`
-            if tx is None:
-                from torch._dynamo.symbolic_convert import InstructionTranslator
-
-                tx = InstructionTranslator.current_tx()
-            elems = init_args[0].force_unpack_var_sequence(tx)
+            elems = unpack_iterable(tx, init_args[0])
             self._base_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
         else:
             self._base_vt = tuple_vt
