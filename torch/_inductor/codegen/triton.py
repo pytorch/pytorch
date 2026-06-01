@@ -2464,77 +2464,53 @@ class TritonKernelOverrides(TritonOverrides):
     def _value_expr_index_str(
         cls, indexing: IndexingOptions, dtype: torch.dtype
     ) -> str:
-        index = cls._cast_expr_vars_to(indexing.index, dtype)
+        # Cast at least one operand to ``dtype`` before printing so Triton
+        # promotes the whole expression (including large int literals that
+        # would overflow int32 if all operands were int32).
+        index = cls._upcast_one_operand(indexing.index, dtype)
         index_dtype = V.kernel._index_dtype
         V.kernel._index_dtype = dtype
         try:
             index_str = V.kernel.index_to_str(index)
         finally:
             V.kernel._index_dtype = index_dtype
+        triton_dtype = triton_type(dtype)
         if is_sympy_integer_like(indexing.index):
-            return f"tl.full({indexing.expand_str}, {index_str}, {triton_type(dtype)})"
+            return f"tl.full({indexing.expand_str}, {index_str}, {triton_dtype})"
         if indexing.expand_str is not None:
             return f"tl.broadcast_to({index_str}, {indexing.expand_str})"
         return index_str
 
     @classmethod
-    def _cast_expr_vars_to(cls, index: sympy.Expr, dtype: torch.dtype) -> sympy.Expr:
+    def _upcast_one_operand(
+        cls, index: sympy.Expr, dtype: torch.dtype
+    ) -> sympy.Expr:
         """
-        Emit CSE'd casts to ``dtype`` of each symbolic variable referenced
-        by ``index`` and return a new expression that references the casted
-        temporaries.
-
-        Casting at least one operand forces Triton to perform the surrounding
-        arithmetic at ``dtype``'s width, which is what callers want when the
-        expression participates in value computation rather than indexing.
+        Cast one variable in ``index`` to ``dtype`` so Triton promotes the
+        entire expression. Without this, large integer constants in the
+        expression overflow int32 at Triton parse time.
         """
-        replacements: dict[sympy.Symbol, sympy.Symbol] = {}
         triton_dtype = triton_type(dtype)
-        scalar_int_types = (
-            SymT.INDEX,
-            SymT.PRECOMPUTED_SIZE,
-            SymT.SIZE,
-            SymT.UNBACKED_INT,
-        )
-        scalar_float_types = (SymT.FLOAT, SymT.UNBACKED_FLOAT)
         for sym in sorted(index.free_symbols, key=operator.attrgetter("name")):
             if not isinstance(sym, sympy.Symbol):
                 continue
-
             if symbol_is_type(sym, TritonSymbols.block_types):
                 name = sym.name
                 shape = TritonSymbols.get_block_shape(sym)
-                src_dtype = V.kernel.get_index_dtype_as_torch_dtype()
             elif symbol_is_type(sym, SymT.TMP):
-                src_var = V.kernel.cse.varname_map[sym.name]
-                shape = src_var.shape
-                src_dtype = src_var.dtype
                 name = sym.name
-            elif symbol_is_type(sym, scalar_int_types):
-                name = V.kernel.index_to_str(sym)
-                shape = ()
-                src_dtype = torch.int64
-            elif symbol_is_type(sym, scalar_float_types):
-                name = V.kernel.index_to_str(sym)
-                shape = ()
-                src_dtype = torch.float64
+                shape = V.kernel.cse.varname_map[sym.name].shape
             else:
-                continue
-            if is_integer_dtype(dtype) and src_dtype.is_floating_point:
-                continue
-            if src_dtype in (dtype, torch.bool):
-                continue
-
+                name = V.kernel.index_to_str(sym)
+                shape = ()
             cast_var = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"({name}).to({triton_dtype})",
                 dtype=dtype,
                 shape=shape,
             )
-            replacements[sym] = sympy.Symbol(str(cast_var))
-        if not replacements:
-            return index
-        return sympy_subs(index, replacements)
+            return sympy_subs(index, {sym: sympy.Symbol(str(cast_var))})
+        return index
 
     @staticmethod
     def masked(mask, body, other):

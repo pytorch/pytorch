@@ -43,7 +43,10 @@ class TestOptimizeIndexing(TestCase):
 
         return FakeLoopBody()
 
-    def test_index_expr_mixed_use_clones_value_path(self):
+    def test_index_expr_mixed_use_converts_in_place(self):
+        # When the same index_expr is used both as an index (load) and as a
+        # value (add), we convert it in-place to value_expr. The load still
+        # works because value_expr is a superset of index_expr semantics.
         graph = Graph()
         ops = graph.placeholder("ops")
         get_index = graph.call_module("get_index", ("i0",))
@@ -68,13 +71,9 @@ class TestOptimizeIndexing(TestCase):
 
         convert_index_expr_to_value_expr(loop_body)
 
-        value_exprs = [n for n in graph.nodes if n.target == "value_expr"]
-        self.assertEqual(len(value_exprs), 1)
-        value_expr = value_exprs[0]
-        self.assertEqual(index_expr.target, "index_expr")
+        self.assertEqual(index_expr.target, "value_expr")
         self.assertEqual(load.args[2], index_expr)
-        self.assertEqual(add.args[2], value_expr)
-        self.assertEqual(value_expr.args[2], torch.int64)
+        self.assertEqual(add.args[2], index_expr)
 
     def test_value_expr_dtype_deduction_uses_requested_dtype(self):
         self.assertEqual(

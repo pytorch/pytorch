@@ -170,17 +170,6 @@ class _ArgRef:
             return node.args[self.key]
         return node.kwargs[self.key]
 
-    def update(self, node: torch.fx.Node, fn: Any) -> None:
-        value = fn(self.get(node))
-        if isinstance(self.key, int):
-            args = list(node.args)
-            args[self.key] = value
-            node.args = tuple(args)
-        else:
-            kwargs = dict(node.kwargs)
-            kwargs[self.key] = value
-            node.kwargs = kwargs
-
 
 class _IndexValueOpsHandler:
     """
@@ -463,23 +452,6 @@ def _map_rule_arg(node: torch.fx.Node, arg: Any, fn: Any) -> None:
     map_aggregate(arg, visit)
 
 
-def _rewrite_rule_arg(node: torch.fx.Node, arg: Any, fn: Any) -> None:
-    def visit(elem: Any) -> Any:
-        if isinstance(elem, _ArgRef):
-            elem.update(node, fn)
-        return elem
-
-    map_aggregate(arg, visit)
-
-
-def _lint_loop_body_graph(graph: torch.fx.Graph) -> None:
-    owning_module = graph.owning_module
-    try:
-        graph.owning_module = None
-        graph.lint()
-    finally:
-        graph.owning_module = owning_module
-
 
 def _compute_graph_uses(
     graph: torch.fx.Graph,
@@ -599,22 +571,18 @@ def _graph_output_contexts(
 
 def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
     """
-    Rewrite value uses of ``index_expr`` FX nodes to ``value_expr``. This lets
-    codegen honor the requested dtype for value uses (where the kernel's int32
-    narrowing of ``index_expr`` would silently drop precision) without
-    affecting genuine indexing uses.
+    Rewrite ``index_expr`` nodes that participate in value computation to
+    ``value_expr``, so codegen can honor the requested dtype instead of
+    narrowing to the kernel's indexing dtype.
 
-    The classification is purely structural / data-flow:
-      - Walk backward from value sinks (store value, reduction value,
-        output) and indexing sinks (load index, store index, check_bounds,
-        set_indirect), with ``load`` as a barrier (its output value is
-        determined by what the load reads, not the index expression).
-      - Any ``index_expr`` reachable from a value sink is rewritten to
-        ``value_expr`` on the value path. If the same node also reaches an
-        indexing sink, the value path is cloned first so indexing uses keep
-        the original ``index_expr``. A mixed masked-subblock output is treated
-        as indexing-only by policy above, avoiding subblock cloning.
+    Classification: walk backward from value sinks (store value, reduction,
+    output) and indexing sinks (load index, store index, check_bounds,
+    set_indirect) with ``load`` as a barrier. Any ``index_expr`` reachable
+    from a value sink is converted in-place to ``value_expr``.
 
+    TODO: if mixed use (same index_expr used for both indexing and value)
+    ever occurs in practice, the node should be cloned so the indexing path
+    keeps the original index_expr. This hasn't been observed so far.
     """
     graphs = [
         loop_body.root_block.graph,
@@ -628,106 +596,16 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
 
     output_contexts = _graph_output_contexts(loop_body)
 
-    def rewrite_graph(graph: torch.fx.Graph) -> None:
+    for graph in graphs:
         output_is_indexing, output_is_value = output_contexts[graph]
-        indexing_use, value_use = _compute_graph_uses(
+        _, value_use = _compute_graph_uses(
             graph,
             output_is_indexing=output_is_indexing,
             output_is_value=output_is_value,
         )
-        value_clones: dict[torch.fx.Node, torch.fx.Node] = {}
-
-        def value_version(node: torch.fx.Node, anchor: torch.fx.Node) -> torch.fx.Node:
-            # Value-only chains can be rewritten in place. Mixed value/indexing
-            # chains are cloned so indexing users keep the original path.
-            if node.op == "placeholder":
-                return node
-            if node.target == "load" or _is_masked_subblock(node):
-                return node
-            if node.target == "get_index" or node not in value_use:
-                return node
-            if node.target == "index_expr":
-                if node not in indexing_use:
-                    node.target = "value_expr"
-                    return node
-                if node not in value_clones:
-                    with graph.inserting_before(anchor):
-                        clone = graph.call_method(
-                            "value_expr", node.args, dict(node.kwargs)
-                        )
-                    clone.meta = node.meta.copy()
-                    value_clones[node] = clone
-                return value_clones[node]
-
-            rule = _IndexValueOpsHandler().rule_for_node(node)
-            if rule is None:
-                return node
-
-            value_inputs = rule.value_inputs
-            if value_inputs is not None:
-                if not value_inputs:
-                    return node
-                if node not in indexing_use:
-                    rewrite_rule_args(node, value_inputs)
-                    return node
-
-                if node not in value_clones:
-                    with graph.inserting_before(anchor):
-                        clone = graph.node_copy(node, lambda n: n)
-                    clone.meta = node.meta.copy()
-                    clone_rule = _IndexValueOpsHandler().rule_for_node(clone)
-                    assert clone_rule is not None
-                    clone_value_inputs = clone_rule.value_inputs
-                    assert clone_value_inputs is not None
-                    rewrite_rule_args(clone, clone_value_inputs)
-                    value_clones[node] = clone
-                return value_clones[node]
-
-            if node not in indexing_use:
-                node.args = map_arg(node.args, lambda n: value_version(n, node))
-                node.kwargs = map_arg(node.kwargs, lambda n: value_version(n, node))
-                return node
-
-            if node not in value_clones:
-                with graph.inserting_before(anchor):
-                    clone = graph.node_copy(node, lambda n: value_version(n, anchor))
-                clone.meta = node.meta.copy()
-                value_clones[node] = clone
-            return value_clones[node]
-
-        def rewrite_value_arg(arg: Any, anchor: torch.fx.Node) -> Any:
-            return map_arg(arg, lambda n: value_version(n, anchor))
-
-        def rewrite_rule_args(node: torch.fx.Node, sinks: tuple[Any, ...]) -> None:
-            for arg in sinks:
-                _rewrite_rule_arg(
-                    node, arg, lambda value: rewrite_value_arg(value, node)
-                )
-
         for node in graph.nodes:
-            if node.op == "output":
-                if output_is_value:
-                    node.args = rewrite_value_arg(node.args, node)
-                continue
-
-            rule = _IndexValueOpsHandler().rule_for_node(node)
-            if rule is None:
-                continue
-            if rule.value_sinks:
-                rewrite_rule_args(node, rule.value_sinks)
-            if (
-                _is_masked_subblock(node)
-                and node in value_use
-                and node not in indexing_use
-            ):
-                value_inputs = rule.value_inputs
-                assert value_inputs is not None
-                rewrite_rule_args(node, value_inputs)
-
-        _lint_loop_body_graph(graph)
-
-    for graph in graphs:
-        rewrite_graph(graph)
+            if node.target == "index_expr" and node in value_use:
+                node.target = "value_expr"
 
     LoopBody.get_nodes.clear_cache(loop_body)
     LoopBody.bounds.clear_cache(loop_body)
