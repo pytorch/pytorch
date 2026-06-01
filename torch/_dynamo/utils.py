@@ -3896,6 +3896,27 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
     raise AssertionError("should be unreachable")
 
 
+def _has_active_exception_handler(tx: InstructionTranslatorBase) -> bool:
+    cur_tx: InstructionTranslatorBase | None = tx
+    while cur_tx is not None:
+        if sys.version_info >= (3, 11):
+            if cur_tx.current_instruction.exn_tab_entry:
+                return True
+        elif len(cur_tx.block_stack):
+            return True
+        cur_tx = cur_tx.parent
+    return False
+
+
+def _observed_exception_args(
+    e: BaseException, fake_mode: FakeTensorMode | None
+) -> list[Any]:
+    return [
+        get_concrete_sizes_from_symints(arg, fake_mode) if isinstance(arg, str) else arg
+        for arg in e.args
+    ]
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4093,6 +4114,15 @@ def _get_fake_value_impl(
                 explanation="",
                 hints=[*graph_break_hints.USER_ERROR],
                 from_exc=cause,
+            )
+        elif isinstance(cause, RuntimeError) and _has_active_exception_handler(tx):
+            from .exc import raise_observed_exception
+
+            tx.output.remove_node(node)
+            raise_observed_exception(
+                RuntimeError,
+                tx,
+                args=_observed_exception_args(cause, fake_mode),
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
         _wrap_graph_break_with_torch_runtime_err(
