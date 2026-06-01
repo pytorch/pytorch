@@ -2,6 +2,7 @@
 
 import functools
 import unittest
+from unittest import mock
 
 import torch
 from torch import Tensor
@@ -17,7 +18,6 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
-    SM100OrLater,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -173,6 +173,33 @@ class TestFP8Types(TestCase):
 
         torch.testing.assert_close(y0_fp8, x, rtol=5e-1, atol=5e-1)
         torch.testing.assert_close(y1_fp8, x, rtol=5e-1, atol=5e-1)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipIfRocm
+    @onlyCUDA
+    @parametrize(
+        "src_dtype",
+        (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+    )
+    @parametrize("dst_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
+    def test_int_to_float8_cast(
+        self, src_dtype: torch.dtype, dst_dtype: torch.dtype, device: torch.device
+    ):
+        def fp8_cast(x):
+            return x.to(dtype=dst_dtype)
+
+        if src_dtype == torch.bool:
+            x = torch.tensor([False, True, False, True], device=device)
+        elif src_dtype == torch.uint8:
+            x = torch.tensor([0, 1, 2, 16], dtype=src_dtype, device=device)
+        else:
+            x = torch.tensor([-16, -2, 0, 16], dtype=src_dtype, device=device)
+
+        expected = fp8_cast(x)
+        actual = torch.compile(fp8_cast, backend="inductor", fullgraph=True)(x)
+
+        self.assertEqual(actual.dtype, dst_dtype)
+        torch.testing.assert_close(actual.float(), expected.float(), rtol=0, atol=0)
 
     @skipIfXpu(
         msg="Conversions between float8_e5m2 and float8_e4m3fn is not supported, torch-xpu-ops: 2888"
@@ -1418,7 +1445,7 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
-    @onlyOn(["cuda", "xpu", "cpu"])
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     def test_mx_fp8_max_autotune(self, device):
         M, K, N = 128, 32, 128
@@ -1543,9 +1570,24 @@ class TestFP8Lowering(TestCase):
         self.assertTrue("Invalid scaling configuration." in str(cm.exception))
 
 
-@unittest.skipIf(not SM100OrLater, "Requires SM100+ (Blackwell) for PTX instruction")
+class TestCvtE8M0RceilGating(TestCase):
+    def test_nvidia_sm100_gate_excludes_rocm_gfx1101(self):
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(
+                torch.cuda, "get_device_capability", return_value=(11, 0)
+            ),
+            mock.patch.object(torch.version, "hip", "7.2.26015"),
+        ):
+            self.assertFalse(utils.is_nvidia_sm100_or_later())
+
+
+@unittest.skipIf(
+    not utils.is_nvidia_sm100_or_later(),
+    "Requires NVIDIA SM100+ (Blackwell) for PTX instruction",
+)
 class TestCvtE8M0Rceil(TestCase):
-    """Tests for cvt_e8m0_rceil prim with PTX lowering on Blackwell."""
+    """Tests for cvt_e8m0_rceil prim with PTX lowering on NVIDIA Blackwell."""
 
     def test_correctness(self):
         """Test correctness for various dtypes."""
@@ -1633,7 +1675,10 @@ class TestCvtE8M0Rceil(TestCase):
 
 
 @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
-@unittest.skipIf(SM100OrLater, "Pre-SM100 path: uses bit-manipulation fallback")
+@unittest.skipIf(
+    utils.is_nvidia_sm100_or_later(),
+    "Pre-NVIDIA-SM100 path: uses bit-manipulation fallback",
+)
 class TestE8M0Log2PatternBitManip(TestCase):
     """Tests for the e8m0_rceil_log2 pattern on pre-SM100 hardware.
 

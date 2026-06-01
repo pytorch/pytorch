@@ -15,7 +15,10 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
-from torch._inductor.custom_graph_pass import CustomInferenceAwareGraphPass
+from torch._inductor.custom_graph_pass import (
+    CustomInferenceAwareGraphPass,
+    get_custom_graph_passes,
+)
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
@@ -161,7 +164,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater = FakeTensorUpdater(gm)
 
-    if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
+    for post_grad_custom_pre_pass in get_custom_graph_passes(
+        config.post_grad_custom_pre_pass
+    ):
         if isinstance(post_grad_custom_pre_pass, CustomInferenceAwareGraphPass):
             post_grad_custom_pre_pass = functools.partial(
                 post_grad_custom_pre_pass, is_inference=is_inference
@@ -245,7 +250,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
         )
 
-    if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
+    for post_grad_custom_post_pass in get_custom_graph_passes(
+        config.post_grad_custom_post_pass
+    ):
         if isinstance(post_grad_custom_post_pass, CustomInferenceAwareGraphPass):
             post_grad_custom_post_pass = functools.partial(
                 post_grad_custom_post_pass, is_inference=is_inference
@@ -1395,6 +1402,8 @@ def decompose_auto_functionalized(graph):
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
+    apply_pass_to_subgraphs(decompose_auto_functionalized, graph)
+
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
@@ -1405,9 +1414,9 @@ def decompose_auto_functionalized(graph):
     def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
-        only_clone_these_tensors = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
-        )
+        only_clone_these_tensors = match.nodes[0].meta.get("only_clone_these_tensors")
+        if only_clone_these_tensors is not None:
+            only_clone_these_tensors = tuple(only_clone_these_tensors)
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
@@ -1433,9 +1442,9 @@ def decompose_auto_functionalized(graph):
             auto_functionalized_v2_dense,
         )
 
-        only_clone_these_bases = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
-        )
+        only_clone_these_bases = match.nodes[0].meta.get("only_clone_these_tensors")
+        if only_clone_these_bases is not None:
+            only_clone_these_bases = tuple(only_clone_these_bases)
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
@@ -1647,7 +1656,18 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         torch.bfloat16,
         torch.float16,
     ):
-        return
+        # Allow unfuse when inp is a narrowing dtype cast (e.g. AMP casting
+        # fp32 bias to bf16/fp16). Unfusing lets the Triton pointwise kernel
+        # load the original higher-precision tensor directly, preserving
+        # precision instead of truncating bias before the fused addmm.
+        if not (
+            inp.op == "call_function"
+            and inp.target is torch.ops.prims.convert_element_type.default
+            and inp.args[0].meta["val"].dtype.is_floating_point
+            and torch.finfo(inp.args[0].meta["val"].dtype).bits
+            > torch.finfo(inp.meta["val"].dtype).bits
+        ):
+            return
 
     def repl(inp, x1, x2, alpha, beta):
         mm_result = x1 @ x2
@@ -2067,7 +2087,7 @@ class ConstructorMoverPass:
                     cannot_move_to_gpu.update(dependencies)
                     break
 
-                # this node was used on a op which takes in multiple devices and output a gpu
+                # this node was used on an op which takes in multiple devices and output a gpu
                 # tensor. we can convert its cpu input to gpu without making further changes
                 if self.allow_cpu_device(user) and self.is_on_target_device(user):
                     del cpu_indeg[user]
