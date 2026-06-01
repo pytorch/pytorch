@@ -5134,7 +5134,15 @@ class SourcelessBuilder:
             value,
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
         ) or is_pybind11_enum_member(value):
-            return UserDefinedObjectVariable(value)
+            if id(value) in tx.output.side_effects.id_to_variable:
+                return tx.output.side_effects.id_to_variable[id(value)]
+            vt = UserDefinedObjectVariable(
+                value,
+                mutation_type=AttributeMutationNew(),
+            )
+            tx.output.side_effects.id_to_variable[id(value)] = vt
+            tx.output.side_effects.keepalive.append(value)
+            return vt
         elif isinstance(value, (type, abc.ABCMeta)):
             if issubclass(type(value), type) and issubclass(value, BaseException):
                 return UserDefinedExceptionClassVariable(value)

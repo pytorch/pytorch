@@ -639,6 +639,24 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, dist.ReduceOp.SUM)
         self.assertEqual(ref, res)
 
+    def test_flag_enum_invert(self):
+        class Permission(enum.Flag):
+            READ = 1
+            WRITE = 2
+            EXECUTE = 4
+
+        def fn(x, perm):
+            inverted = ~perm
+            if Permission.WRITE in inverted:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(4)
+        ref = fn(x, Permission.READ)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, Permission.READ)
+        self.assertEqual(ref, res)
+
     def test_dispatch_key_as_dict_key(self):
         """Test DispatchKey (also a pybind11 enum) works as dict key."""
         d = {

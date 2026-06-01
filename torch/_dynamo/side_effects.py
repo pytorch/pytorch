@@ -1003,6 +1003,16 @@ class SideEffects:
             ) and not self.has_pending_mutation(var):
                 continue
 
+            # Sourceless enum members (and similar python constants) registered
+            # with AttributeMutationNew don't need __new__-based tempvar
+            # reconstruction -- they are reconstructible as constants.
+            if (
+                isinstance(var, variables.UserDefinedObjectVariable)
+                and isinstance(var.mutation_type, AttributeMutationNew)
+                and var.is_python_constant()
+            ):
+                continue
+
             if isinstance(var, variables.CellVariable):
                 # Cells created in the root frame are created either by
                 # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
@@ -1434,6 +1444,14 @@ class SideEffects:
                 # avoid double-emitting.
                 if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
                     var, variables.FrozenDataClassVariable
+                ):
+                    continue
+
+                # Sourceless enum members: mutations (like _inverted_ caching)
+                # already happened on the real object during tracing.
+                if (
+                    isinstance(var.mutation_type, AttributeMutationNew)
+                    and var.is_python_constant()
                 ):
                     continue
 
