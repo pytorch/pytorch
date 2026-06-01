@@ -43,9 +43,9 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
   c10::Device get_device() override;
 
-  ncclWindow_t get_window();
+  bool world_within_direct_access() override;
 
-  ncclWindow_t get_signal_pad_handle();
+  ncclWindow_t get_window();
 
   size_t get_offset() override;
 

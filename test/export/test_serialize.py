@@ -11,6 +11,7 @@ import tempfile
 import unittest
 import zipfile
 from collections import namedtuple
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
@@ -51,6 +52,7 @@ from torch._export.serde.serialize import (
     SerializeError,
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
+from torch._library.opaque_object import get_opaque_type_name, register_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
@@ -66,6 +68,29 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+
+
+@dataclass(frozen=True)
+class _OpaqueConfig(torch._opaque_base.OpaqueBase):
+    scale: int
+
+    def __fx_repr__(self):
+        return (
+            f"_OpaqueConfig(scale={self.scale!r})",
+            {"_OpaqueConfig": _OpaqueConfig},
+        )
+
+
+register_opaque_type(_OpaqueConfig, typ="value")
+
+
+class _OpaqueEngine(torch._opaque_base.OpaqueBase):
+    def __init__(self, multiplier: int):
+        super().__init__()
+        self.multiplier = multiplier
+
+
+register_opaque_type(_OpaqueEngine, typ="reference")
 
 
 def get_filtered_export_db_tests():
@@ -2009,6 +2034,60 @@ def forward(self, x):
                 },
             ),
         )
+
+    def test_opaque_value_type_constant(self):
+        opaque_type_name = get_opaque_type_name(_OpaqueConfig)
+        with torch.library._scoped_library("test_opaque_val", "FRAGMENT") as lib:
+            lib.define(
+                f"scale(Tensor x, {opaque_type_name} config) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+
+            @torch.library.impl(lib, "scale", "CompositeExplicitAutograd")
+            def scale_impl(x, config):
+                return x * config.scale
+
+            @torch.library.register_fake("test_opaque_val::scale")
+            def scale_fake(x, config):
+                return torch.empty_like(x)
+
+            class M(torch.nn.Module):
+                def __init__(self, config):
+                    super().__init__()
+                    self.config = config
+
+                def forward(self, x):
+                    return torch.ops.test_opaque_val.scale(x, self.config)
+
+            self.check_graph(M(_OpaqueConfig(scale=3)), (torch.randn(4),), strict=False)
+
+    def test_opaque_reference_type_constant(self):
+        opaque_type_name = get_opaque_type_name(_OpaqueEngine)
+        with torch.library._scoped_library("test_opaque_ref", "FRAGMENT") as lib:
+            lib.define(
+                f"transform(Tensor x, {opaque_type_name} engine) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+
+            @torch.library.impl(lib, "transform", "CompositeExplicitAutograd")
+            def transform_impl(x, engine):
+                return x * engine.multiplier
+
+            @torch.library.register_fake("test_opaque_ref::transform")
+            def transform_fake(x, engine):
+                return torch.empty_like(x)
+
+            class M(torch.nn.Module):
+                def __init__(self, engine):
+                    super().__init__()
+                    self.engine = engine
+
+                def forward(self, x):
+                    return torch.ops.test_opaque_ref.transform(x, self.engine)
+
+            self.check_graph(
+                M(_OpaqueEngine(multiplier=5)), (torch.randn(4),), strict=False
+            )
 
 
 instantiate_parametrized_tests(TestDeserialize)

@@ -37,6 +37,10 @@ StoreMode = AtomicMode | Literal["tma"] | None
 ReductionType = Literal[
     "argmax",
     "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
     "welford_reduce",
     "welford_combine",
     "any",
@@ -1183,7 +1187,7 @@ class SimpleCSEHandler(WrapperHandler):
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
-        return super().indirect_indexing(*args, **kwargs)
+        return super().indirect_indexing(*args, **kwargs)  # type: ignore[misc]
 
     def store(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")

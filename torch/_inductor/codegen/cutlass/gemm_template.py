@@ -871,7 +871,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         Filter ops without using information about the torch op, input nodes and output node.
         """
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         # Skip simt kernels
         ops = [
@@ -1219,7 +1219,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         name_to_buffer = {node.get_name(): node for node in self.input_nodes}
         # handle the fake output buffer during lowering
-        name_to_buffer[Y.get_name()] = Y
+        name_to_buffer[Y.get_name()] = Y  # type: ignore[assignment]
 
         if epilogue_nodes or is_scaled_mm:
             if epilogue_nodes:
@@ -1242,7 +1242,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
                 D_output_name = var_name_to_buffer_name["D"]
                 D_output_buffer = name_to_buffer[D_output_name]
-                Y = D_output_buffer
+                Y = D_output_buffer  # type: ignore[assignment]
                 # Interestingly, I don't think the rest of the layout matters here since we
                 # use the properties of the Y buffer to fill in D's properties in the epilogue
                 # args. This is needed though because it defines types expected in the epilogue args.
@@ -1294,7 +1294,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 X,
                 W,
                 Bias,
-                *epilogue_inputs,
+                *epilogue_inputs,  # type: ignore[list-item]
                 Y,
                 *extra_inputs,
             ]
@@ -1391,7 +1391,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         name_to_buffer: dict[str, Buffer],
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
-    ) -> tuple[str, str, str, EVTArgRenames]:
+    ) -> tuple[str, str, str, EVTArgRenames]:  # type: ignore[name-defined]
         raise NotImplementedError("_render_evt in CUTLASSGemmTemplate not implemented")
 
 
@@ -1441,9 +1441,9 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         return (GEMM_ARGS_CUTLASS_3X, GEMM_ARGS_CUTLASS_3X_EPILOGUE)
 
     @staticmethod
-    def _has_tma_epilogue(
+    def _has_tma_epilogue(  # type: ignore[arg-type,name-defined]
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined,arg-type] # noqa: F821
-    ) -> bool:
+    ) -> bool:  # type: ignore[name-defined]
         """Helper method: Determine whether a given Cutlass GEMM op has a TMA Epilogue"""
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.library as cutlass_lib
@@ -1566,8 +1566,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             examples,
             acc_dtype,
             output_dtype,
-            op.tile_description,
-            op.epilogue_schedule,
+            op.tile_description,  # type: ignore[attr-defined]
+            op.epilogue_schedule,  # type: ignore[attr-defined]
             {k: name_to_buffer[v] for k, v in var_name_to_buffer_name.items()},  # type: ignore[arg-type,misc]
             V.graph.sizevars.guarding_hint_or_throw,
             kernel_schedule=op.kernel_schedule,
@@ -1644,7 +1644,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
         emitter = gemm_extensions.EmitGemmUniversal3xInstanceWithEVT(
             evt_name=evt_name, device_type=self.device_type
-        )
+        )  # type: ignore[call-arg]
 
         if not hasattr(op, "epilogue_functor") or not isinstance(
             op.epilogue_functor, enum.Enum
@@ -1747,15 +1747,15 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             # Swap
             def clone_with_transposed_stride(node: IRNode) -> IRNode:
                 old_layout = node.get_layout()
-                new_stride = list(old_layout.stride)
+                new_stride = list(old_layout.stride)  # type: ignore[union-attr]
                 new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
                 assert old_layout.device is not None
                 new_layout = FixedLayout(
                     old_layout.device,
                     old_layout.dtype,
-                    list(old_layout.size),
+                    list(old_layout.size),  # type: ignore[union-attr]
                     new_stride,
-                    old_layout.offset,
+                    old_layout.offset,  # type: ignore[union-attr]
                 )
                 return Buffer(name=node.get_name(), layout=new_layout)
 

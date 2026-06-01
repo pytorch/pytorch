@@ -16,7 +16,7 @@ from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.nn.functional import ScalingType
+from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 
 from .. import config as inductor_config, distributed_autotune
@@ -695,8 +695,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             else:
                 templates_to_use.append(persistent_mm_template)
 
-        templates_to_use.append(addmm_contiguous_subgraph_template)
-
+        # Manually call get_template_configs as use 1-D bias if possible
+        choices.extend(
+            V.choices.get_template_configs(
+                kernel_inputs_aten, [addmm_contiguous_subgraph_template], name
+            )
+        )
     # Single unified call for all templates
     choices.extend(
         V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
@@ -886,7 +890,7 @@ def get_scaling_options(
     )  # verify that shapes are supported by at least one existing pairing
 
 
-@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)
+@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
 def tuned_scaled_mm(
     mat_a,
     mat_b,
@@ -961,7 +965,7 @@ def tuned_scaled_mm(
     _, is_nonzero = _is_static_problem(layout)
 
     if (
-        # We dont have triton lowerings for the MX variants yet
+        # We don't have triton lowerings for the MX variants yet
         scale_a.dtype == torch.float32
         and is_nonzero
         and use_triton_template(layout, enable_float8=True, check_max_autotune=False)
@@ -1057,8 +1061,8 @@ def tuned_scaled_mm(
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
-            kernel_inputs.nodes(),
-            use_fast_accum=use_fast_accum,
+            kernel_inputs.nodes(),  # type: ignore[arg-type]
+            use_fast_accum=use_fast_accum,  # type: ignore[arg-type]
         )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
