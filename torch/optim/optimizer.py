@@ -902,27 +902,26 @@ class Optimizer:
 
         Example:
             >>> # xdoctest: +SKIP
-            >>> model = torch.nn.Linear(10, 10)
-            >>> optim = torch.optim.SGD(model.parameters(), lr=3e-4)
+            >>> optimizer = ...  # initialized optimizer matching the saved state
             >>> scheduler1 = torch.optim.lr_scheduler.LinearLR(
-            ...     optim,
+            ...     optimizer,
             ...     start_factor=0.1,
             ...     end_factor=1,
             ...     total_iters=20,
             ... )
             >>> scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(
-            ...     optim,
+            ...     optimizer,
             ...     T_max=80,
             ...     eta_min=3e-5,
             ... )
             >>> lr = torch.optim.lr_scheduler.SequentialLR(
-            ...     optim,
+            ...     optimizer,
             ...     schedulers=[scheduler1, scheduler2],
             ...     milestones=[20],
             ... )
             >>> lr.load_state_dict(torch.load("./save_seq.pt"))
             >>> # now load the optimizer checkpoint after loading the LRScheduler
-            >>> optim.load_state_dict(torch.load("./save_optim.pt"))
+            >>> optimizer.load_state_dict(torch.load("./save_optim.pt"))
 
         """
         # shallow copy, to be consistent with module API
