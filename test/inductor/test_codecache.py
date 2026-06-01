@@ -14,6 +14,7 @@ import tempfile
 import textwrap
 import types
 import unittest
+import warnings
 from contextlib import contextmanager
 from typing import Any, cast
 from typing_extensions import override
@@ -4459,6 +4460,82 @@ class TestUtils(TestCase):
         torch.compile(fn)()
 
 
+class TestVecISACheckBuild(TestCase):
+    # Regression tests for the VecISA.check_build dlopen probe behavior:
+    # the parent must (1) bound the child with a timeout and return
+    # False if it expires, and (2) make libtorch findable in the
+    # child's loader path so the child can dlopen the probe .so
+    # without importing torch.
+    #
+    # These target the small helpers (_probe_load, _build_probe_env)
+    # directly so they don't depend on CppBuilder / CppTorchOptions
+    # succeeding on the host, which would otherwise make the tests
+    # platform-specific (the production path is fine; only the
+    # CppTorchOptions construction is brittle to host compiler probes
+    # when handed an off-arch VecISA like VecAVX2 on aarch64/macOS-arm64).
+
+    def test_probe_load_returns_false_on_timeout(self):
+        from torch._inductor import cpu_vec_isa
+
+        calls: list[Any] = []
+
+        def fake_run(*args, **kwargs):
+            calls.append(kwargs.get("timeout"))
+            raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+
+        fake_subprocess = types.SimpleNamespace(
+            run=fake_run,
+            TimeoutExpired=subprocess.TimeoutExpired,
+            CalledProcessError=subprocess.CalledProcessError,
+            DEVNULL=subprocess.DEVNULL,
+        )
+
+        instance = cpu_vec_isa.VecAVX2()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
+                result = instance._probe_load("/nonexistent/probe.so")
+
+        self.assertFalse(result)
+        self.assertEqual(calls, [60])
+        self.assertTrue(
+            any("hung after 60s" in str(w.message) for w in caught),
+            msg=f"expected timeout warning, got: {[str(w.message) for w in caught]}",
+        )
+
+    def test_probe_load_returns_false_on_called_process_error(self):
+        from torch._inductor import cpu_vec_isa
+
+        def fake_run(*args, **kwargs):
+            raise subprocess.CalledProcessError(returncode=1, cmd=args[0])
+
+        fake_subprocess = types.SimpleNamespace(
+            run=fake_run,
+            TimeoutExpired=subprocess.TimeoutExpired,
+            CalledProcessError=subprocess.CalledProcessError,
+            DEVNULL=subprocess.DEVNULL,
+        )
+
+        instance = cpu_vec_isa.VecAVX2()
+        with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
+            result = instance._probe_load("/nonexistent/probe.so")
+
+        self.assertFalse(result)
+
+    def test_build_probe_env_prepends_torch_lib_dir_to_loader_path(self):
+        from torch._inductor import cpu_vec_isa
+
+        env = cpu_vec_isa.VecISA._build_probe_env()
+
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+        value = env.get("LD_LIBRARY_PATH", "")
+        self.assertEqual(
+            value.split(os.pathsep)[0],
+            torch_lib,
+            msg=f"LD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+        )
+
+
 class TestCompilationEventLogging(TestCase):
     def reset(self):
         DynamoCache.clear()
@@ -4727,14 +4804,8 @@ class TestAutotuneCacheExtraOptions(TestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result.extra_options, {"backend_specific": "option"})
-        # The returned config is a copy of the matched one (loader does
-        # `copy.copy` before applying provenance attrs so the shared
-        # heuristic-owned configs list stays pristine).
-        self.assertIsNot(result, original_config)
-        self.assertEqual(result.kwargs, original_config.kwargs)
-        self.assertEqual(result.num_warps, original_config.num_warps)
-        self.assertEqual(result.num_stages, original_config.num_stages)
-        self.assertFalse(hasattr(original_config, "extra_options"))
+        # The returned config should be the matched one
+        self.assertIs(result, original_config)
 
     @requires_triton()
     def test_load_cached_autotuning_handles_none_extra_options(self):
@@ -4809,41 +4880,6 @@ class TestAutotuneCacheExtraOptions(TestCase):
         saved_data = mock_local_backend.put.call_args[0][1]
         self.assertIn("extra_options", saved_data)
         self.assertEqual(saved_data["extra_options"], {"custom_key": "custom_value"})
-
-    @requires_triton()
-    def test_autotune_cache_save_includes_combo_autotune_marker(self):
-        """
-        Test that AutotuneCache.save() persists combo seed tuning state.
-        """
-        from unittest.mock import MagicMock
-
-        from triton import Config
-
-        from torch._inductor.runtime.autotune_cache import AutotuneCache
-
-        tuned_config = Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64},
-            num_warps=4,
-            num_stages=2,
-        )
-
-        cache = AutotuneCache.__new__(AutotuneCache)
-        cache.configs_hash = "test_hash"
-
-        mock_local_backend = MagicMock()
-        cache.local_cache = (mock_local_backend, "test_key")
-        cache.remote_cache = None
-
-        with mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"):
-            cache.save(
-                tuned_config,
-                time_taken_ns=1000000,
-                found_by_combo_autotune=True,
-            )
-
-        mock_local_backend.put.assert_called_once()
-        saved_data = mock_local_backend.put.call_args[0][1]
-        self.assertTrue(saved_data["found_by_combo_autotune"])
 
     @requires_triton()
     def test_autotune_cache_save_omits_extra_options_when_none(self):
