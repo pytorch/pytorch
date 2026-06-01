@@ -8586,7 +8586,7 @@ def _validate_quack_scaled_mm_v2(kernel_options, quack_args) -> None:
     if common_unsupported or not (is_mxfp8 or is_nvfp4):
         raise NotImplementedError(
             "QUACK _scaled_mm_v2 epilogue currently supports MXFP8-like "
-            "BlockWise1x32 or NVFP4 BlockWise1x16+TensorWise unit global scales without "
+            "BlockWise1x32 or NVFP4 BlockWise1x16+TensorWise scales without "
             "bias/contraction_dim/use_fast_accum"
         )
 
@@ -8809,6 +8809,7 @@ def _build_quack_epilogue_config(
     concat_layout,
     tuned,
     scaled_mm_scale_a_len=1,
+    scaled_mm_scale_b_len=1,
 ):
     return ir.QuackGemmEpilogueConfig(
         epilogue_name=epilogue_key,
@@ -8818,6 +8819,7 @@ def _build_quack_epilogue_config(
         beta=beta,
         out_dtype=main_output_dtype,
         scaled_mm_scale_a_len=scaled_mm_scale_a_len,
+        scaled_mm_scale_b_len=scaled_mm_scale_b_len,
         epilogue_arg_indices=epilogue_arg_indices,
         epilogue_arg_kinds=epilogue_arg_kinds,
         local_reduce_out_index=local_reduce_out_index,
@@ -9025,6 +9027,9 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 tuned=tuned,
                 scaled_mm_scale_a_len=kernel_options.get("_scaled_mm_v2", {}).get(
                     "scale_a_len", 1
+                ),
+                scaled_mm_scale_b_len=kernel_options.get("_scaled_mm_v2", {}).get(
+                    "scale_b_len", 1
                 ),
             ),
             mutated_inputs=mutated_inputs or None,

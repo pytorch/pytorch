@@ -1669,10 +1669,10 @@ class GemmEpilogueFusionTests(TestCase):
         if not PLATFORM_SUPPORTS_MX_GEMM or torch.version.hip:
             self.skipTest("NVFP4 GEMM is not supported")
 
-        def fn(a, b, scale_a, global_scale, scale_b):
+        def fn(a, b, scale_a, global_scale_a, scale_b, global_scale_b):
             return gemm_epilogue_fusion(
                 torch.ops.aten._scaled_mm_v2.default,
-                (a, b, [scale_a, global_scale], [scale_b, global_scale]),
+                (a, b, [scale_a, global_scale_a], [scale_b, global_scale_b]),
                 lambda acc: acc.relu(),
                 gemm_kwargs={
                     "scale_recipe_a": [
@@ -1718,18 +1718,19 @@ class GemmEpilogueFusionTests(TestCase):
         ).to(torch.float8_e4m3fn)
         scale_a = pack_scale_2d_to_blocked_contig(scale_a_2d).flatten()
         scale_b = pack_scale_2d_to_blocked_contig(scale_b_2d).flatten()
-        global_scale = torch.ones((1,), device="cuda", dtype=torch.float32)
+        global_scale_a = torch.tensor([1.25], device="cuda", dtype=torch.float32)
+        global_scale_b = torch.tensor([0.75], device="cuda", dtype=torch.float32)
 
         result = torch.compile(fn, backend="inductor", fullgraph=True)(
-            a, b, scale_a, global_scale, scale_b
+            a, b, scale_a, global_scale_a, scale_b, global_scale_b
         )
         expected = torch.ops.aten._scaled_mm_v2.default(
             a,
             b,
-            [scale_a, global_scale],
+            [scale_a, global_scale_a],
             [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
             [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
-            [scale_b, global_scale],
+            [scale_b, global_scale_b],
             [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
             [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
             None,
@@ -1742,9 +1743,59 @@ class GemmEpilogueFusionTests(TestCase):
         logical_expected[diagonal, diagonal] = (
             scale_a_2d.float()[diagonal, diagonal // 16]
             * scale_b_2d.float()[diagonal, diagonal // 16]
+            * global_scale_a.item()
+            * global_scale_b.item()
         )
         self.assertEqual(expected, logical_expected.to(torch.bfloat16))
         self.assertEqual(result, expected)
+
+        def fn_shared_global_with_aux(a, b, scale_a, global_scale, scale_b, row_bias):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm_v2.default,
+                (a, b, [scale_a, global_scale], [scale_b, global_scale]),
+                lambda acc: (acc + row_bias).relu(),
+                gemm_kwargs={
+                    "scale_recipe_a": [
+                        F.ScalingType.BlockWise1x16,
+                        F.ScalingType.TensorWise,
+                    ],
+                    "scale_recipe_b": [
+                        F.ScalingType.BlockWise1x16,
+                        F.ScalingType.TensorWise,
+                    ],
+                    "swizzle_a": [
+                        F.SwizzleType.SWIZZLE_32_4_4,
+                        F.SwizzleType.NO_SWIZZLE,
+                    ],
+                    "swizzle_b": [
+                        F.SwizzleType.SWIZZLE_32_4_4,
+                        F.SwizzleType.NO_SWIZZLE,
+                    ],
+                    "output_dtype": torch.bfloat16,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        shared_global = torch.tensor([0.875], device="cuda", dtype=torch.float32)
+        row_bias = torch.randn(1, n, device="cuda", dtype=torch.float32) * 0.1
+        result = torch.compile(
+            fn_shared_global_with_aux, backend="inductor", fullgraph=True
+        )(a, b, scale_a, shared_global, scale_b, row_bias)
+        expected = torch.ops.aten._scaled_mm_v2.default(
+            a,
+            b,
+            [scale_a, shared_global],
+            [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+            [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+            [scale_b, shared_global],
+            [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+            [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+            None,
+            torch.bfloat16,
+            [],
+            False,
+        )
+        self.assertEqual(result, (expected + row_bias).relu(), atol=5e-3, rtol=5e-3)
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_scaled_mm_v2_fast_accum(self):

@@ -146,10 +146,22 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
             return [input_args[0], input_args[1]], out_dtype_kwargs
         if config.gemm_op == "scaled_mm":
             scale_b_index = 2 + config.scaled_mm_scale_a_len
-            return [input_args[0], input_args[1]], (
+            kwargs = (
                 f", scale_a={input_args[2]}, scale_b={input_args[scale_b_index]}, "
                 f"out_dtype={config.out_dtype!r}"
             )
+            if config.scaled_mm_scale_a_len == 2 and config.scaled_mm_scale_b_len == 2:
+                scale_b_global_index = scale_b_index + 1
+                if (
+                    scale_b_global_index >= len(input_args)
+                    or scale_b_global_index in config.epilogue_arg_indices
+                ):
+                    scale_b_global_index = 3
+                kwargs += (
+                    f", scale_a_global={input_args[3]}, "
+                    f"scale_b_global={input_args[scale_b_global_index]}"
+                )
+            return [input_args[0], input_args[1]], kwargs
         if config.gemm_op == "grouped_mm":
             return [input_args[0], input_args[1]], (
                 f", offs={input_args[2]}, out_dtype={config.out_dtype!r}"
