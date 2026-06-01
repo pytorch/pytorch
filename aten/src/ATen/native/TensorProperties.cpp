@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/TensorProperties.h>
@@ -102,6 +103,16 @@ bool is_contiguous(const Tensor& self) {
 
 bool is_contiguous(const Tensor& self, at::MemoryFormat memory_format) {
   return self.is_contiguous(memory_format);
+}
+
+int64_t size(const Tensor& self, Dimname dim) {
+  size_t pos_dim = dimname_to_position(self, dim);
+  return self.sizes()[pos_dim];
+}
+
+int64_t stride(const Tensor& self, Dimname dim) {
+  size_t pos_dim = dimname_to_position(self, dim);
+  return self.strides()[pos_dim];
 }
 
 bool cudnn_is_acceptable(const TensorBase& self) {
