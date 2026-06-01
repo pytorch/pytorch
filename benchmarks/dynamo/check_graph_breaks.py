@@ -65,29 +65,50 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
     for model in actual_csv["name"]:
         graph_breaks = get_field(actual_csv, model, "graph_breaks")
         expected_graph_breaks = get_field(expected_csv, model, "graph_breaks")
+        recompiles = get_field(actual_csv, model, "recompiles")
+        expected_recompiles = get_field(expected_csv, model, "recompiles")
         flaky = model in flaky_models
 
         if expected_graph_breaks is None:
             status = "MISSING:"
             improved.append(model)
-        elif graph_breaks == expected_graph_breaks:
+        elif graph_breaks == expected_graph_breaks and (
+            expected_recompiles is None or recompiles == expected_recompiles
+        ):
             status = "PASS_BUT_FLAKY" if flaky else "PASS"
             print(f"{model:34}  {status}")
             continue
-        elif graph_breaks > expected_graph_breaks:
+        elif graph_breaks > expected_graph_breaks or (
+            expected_recompiles is not None
+            and recompiles is not None
+            and recompiles > expected_recompiles
+        ):
             if flaky:
                 status = "FAIL_BUT_FLAKY:"
             else:
                 status = "FAIL:"
                 failed.append(model)
-        elif graph_breaks < expected_graph_breaks:
+        elif graph_breaks < expected_graph_breaks or (
+            expected_recompiles is not None
+            and recompiles is not None
+            and recompiles < expected_recompiles
+        ):
             if flaky:
                 status = "IMPROVED_BUT_FLAKY:"
             else:
                 status = "IMPROVED:"
                 improved.append(model)
+        else:
+            status = "PASS_BUT_FLAKY" if flaky else "PASS"
+            print(f"{model:34}  {status}")
+            continue
+        recompiles_str = (
+            f", recompiles={recompiles}, expected_recompiles={expected_recompiles}"
+            if expected_recompiles is not None
+            else ""
+        )
         print(
-            f"{model:34}  {status:19} graph_breaks={graph_breaks}, expected={expected_graph_breaks}"
+            f"{model:34}  {status:19} graph_breaks={graph_breaks}, expected={expected_graph_breaks}{recompiles_str}"
         )
 
     msg = ""

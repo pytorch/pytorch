@@ -1960,6 +1960,8 @@ def _compile(
 
         # Check recompilations
         recompile_reason: str | None = None
+        if is_recompilation(cache_size):
+            counters["stats"]["recompiles"] += 1
         if is_recompilation(cache_size) and frame:
             reasons = get_and_maybe_log_recompilation_reasons(
                 cache_entries_for_reasons, frame, innermost_backend(compiler_fn)
