@@ -65,7 +65,8 @@ kernel void col2im_kernel(
         if (h_k < kernel_h && w_k < kernel_w) {
           IdxT dim1_idx = (IdxT(c_im) * kernel_h + h_k) * kernel_w + w_k;
           IdxT dim2_idx = IdxT(h_col) * width_col + w_col;
-          IdxT col_index = dim1_idx * col_channel_stride + dim2_idx * col_spatial_stride;
+          IdxT col_index =
+              dim1_idx * col_channel_stride + dim2_idx * col_spatial_stride;
           accumulator +=
               static_cast<float>(data_col[col_batch_offset + col_index]);
         }
