@@ -107,7 +107,6 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
-    convert_shape_to_inductor,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
@@ -592,7 +591,7 @@ class GraphLowering(torch.fx.Interpreter):
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
 
-    def symbolic_sizes_strides(
+    def get_placeholder_sizes_strides(
         self, ex: torch.Tensor
     ) -> tuple[Sequence[int | Expr], Sequence[int | Expr]]:
         sizes, strides, _ = self.symbolic_sizes_strides_storage_offset(ex)
@@ -607,14 +606,8 @@ class GraphLowering(torch.fx.Interpreter):
         have the same size they get assigned the same symbolic variable.
         """
         if self.reuse_shape_env:
+            size, stride = ex.size(), ex.stride()
             storage_offset = ex.storage_offset()
-            return (
-                convert_shape_to_inductor(ex.size()),
-                convert_shape_to_inductor(ex.stride()),
-                storage_offset.node.expr
-                if isinstance(storage_offset, torch.SymInt)
-                else sympy.sympify(storage_offset),
-            )
         else:
             from torch._dynamo.source import ConstantSource
 
@@ -638,8 +631,8 @@ class GraphLowering(torch.fx.Interpreter):
                 source,
             )
 
-        r_size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
-        r_stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
+        r_size = [sympy.sympify(i) for i in size]
+        r_stride = [sympy.sympify(i) for i in stride]
         r_storage_offset = (
             storage_offset.node.expr
             if isinstance(storage_offset, torch.SymInt)
