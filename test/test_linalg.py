@@ -33,7 +33,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
      skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest,
+     onlyCUDA, onlyAccelerator, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -1572,8 +1572,9 @@ class TestLinalg(TestCase):
                     continue
             run_test_case(make_arg(shape), ord, dim, keepdim)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.bfloat16, torch.float16)
+    @dtypesIfMPS(torch.float16)
     def test_norm_fused_type_promotion(self, device, dtype):
         x = torch.randn(10, device=device, dtype=dtype)
 
@@ -1879,7 +1880,7 @@ class TestLinalg(TestCase):
                     expected = x.abs().pow(ord).sum(dim=dim, keepdim=keepdim)
                     self.assertEqual(result, expected)
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_powsum_dtype_kwarg(self, device):
         # Test dtype kwarg with bfloat16 input and float32 computation
         # This tests the dtype conversion path in the kernel
@@ -1935,7 +1936,7 @@ class TestLinalg(TestCase):
                 expected = t.abs().pow(ord).sum()
                 self.assertEqual(r, expected)
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_foreach_powsum_dtype_kwarg(self, device):
         # Test dtype kwarg with bfloat16 input and float32 computation
         # This tests the dtype conversion path in both slow and fast CUDA paths
@@ -4939,7 +4940,7 @@ class TestLinalg(TestCase):
             run_test((4, 4), (2, 1, 3, 4, 2), device, upper, transpose, unitriangular)  # broadcasting A
             run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), device, upper, transpose, unitriangular)  # broadcasting A & b
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float)
     def test_triangular_solve_large(self, device, dtype):
         # Repro for https://github.com/pytorch/pytorch/issues/79191
@@ -6405,13 +6406,13 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(out, y_ref)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyCUDA
+    @onlyAccelerator
     def test_matmul_45724(self, device):
         # https://github.com/pytorch/pytorch/issues/45724
         a = torch.rand(65537, 22, 64, device=device, dtype=torch.half)
         b = torch.rand(65537, 64, 22, device=device, dtype=torch.half)
         c = torch.full((65537, 22, 22), math.nan, dtype=torch.half, device=device)
-        cpu_result = torch.matmul(a.cpu().float(), b.cpu().float()).cuda().half()
+        cpu_result = torch.matmul(a.cpu().float(), b.cpu().float()).to(device=device, dtype=torch.half)
         torch.matmul(a, b, out=c)
         self.assertEqual(c, cpu_result)
 
@@ -8443,7 +8444,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(*floating_and_complex_types())
     # this tests https://github.com/pytorch/pytorch/issues/36921
     def test_lu_solve_large_matrices(self, device, dtype):
@@ -8910,7 +8911,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         self.assertEqual(C, B.sum().expand(B.shape))
 
-    @onlyCUDA
+    @onlyAccelerator
     @largeTensorTest("40GB")
     def test_triu_tril_large_matrix_64bit(self, device):
         """
@@ -8977,64 +8978,38 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             a_strided.cpu().numpy() @ b_strided.cpu().numpy()).to(device=device, dtype=dtype)
         self.assertEqual(expect, res)
 
-    @onlyCUDA
-    def test_logaddexp_cpu_vs_cuda_complex(self, device):
-        # test logaddexp with complex values produce the same values (up to machine precision) on cpu and CUDA.
+    @onlyAccelerator
+    def test_logaddexp_cpu_vs_accelerator_complex(self, device):
+        # test logaddexp with complex values produce the same values (up to machine precision) on cpu and accelerator.
         input_real = torch.tensor([0.052, -0.2115, 0.6913], dtype=torch.float64)
         input_img = torch.tensor([-0.3229, -0.8374, 0.8391], dtype=torch.float64)
-        input_complex = torch.complex(input_real, input_img).cuda()
+        input_complex = torch.complex(input_real, input_img).to(device)
 
         other_real = torch.tensor([0.2550, 0.8769, -0.4884], dtype=torch.float64)
         other_img = torch.tensor([0.6063, 0.4343, -1.4166], dtype=torch.float64)
-        other_complex = torch.complex(other_real, other_img).cuda()
+        other_complex = torch.complex(other_real, other_img).to(device)
 
-        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
+        out_accelerator = torch.logaddexp(input=input_complex, other=other_complex)
         out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
 
-        torch.testing.assert_close(out_gpu.cpu(), out_cpu, rtol=1e-12, atol=1e-14)
+        torch.testing.assert_close(out_accelerator.cpu(), out_cpu, rtol=1e-12, atol=1e-14)
 
-        # test extreme cases (infty, -infty, and nan) are handled the same between cuda and cpu
-        input_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
-        other_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
-        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
-        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
-        self.assertEqual(out_gpu.cpu(), out_cpu)
-
-        input_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
-        other_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(-float('inf')))
-        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
-        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
-        self.assertEqual(out_gpu.cpu(), out_cpu)
-
-        input_complex = torch.complex(torch.tensor(-float('inf')), torch.tensor(float('inf')))
-        other_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
-        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
-        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
-        self.assertEqual(out_gpu.cpu(), out_cpu)
-
-        input_complex = torch.complex(torch.tensor(-float('inf')), torch.tensor(float('inf')))
-        other_complex = torch.complex(torch.tensor(-float('inf')), torch.tensor(float('inf')))
-        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
-        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
-        self.assertEqual(out_gpu.cpu(), out_cpu)
-
-        input_complex = torch.complex(torch.tensor(-float('inf')), torch.tensor(float('inf')))
-        other_complex = torch.complex(torch.tensor(-float('inf')), torch.tensor(2.))
-        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
-        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
-        self.assertEqual(out_gpu.cpu(), out_cpu)
-
-        input_complex = torch.complex(torch.tensor(2.), torch.tensor(float('inf')))
-        other_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
-        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
-        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
-        self.assertEqual(out_gpu.cpu(), out_cpu)
-
-        input_complex = torch.complex(torch.tensor(float('nan')), torch.tensor(float('inf')))
-        other_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
-        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
-        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
-        self.assertEqual(out_gpu.cpu(), out_cpu)
+        # test extreme cases (infty, -infty, and nan) are handled the same between accelerator and cpu
+        extreme_cases = [
+            (float('inf'), float('inf'), float('inf'), float('inf')),
+            (float('inf'), float('inf'), float('inf'), -float('inf')),
+            (-float('inf'), float('inf'), float('inf'), float('inf')),
+            (-float('inf'), float('inf'), -float('inf'), float('inf')),
+            (-float('inf'), float('inf'), -float('inf'), 2.),
+            (2., float('inf'), float('inf'), float('inf')),
+            (float('nan'), float('inf'), float('inf'), float('inf')),
+        ]
+        for in_re, in_im, oth_re, oth_im in extreme_cases:
+            input_complex = torch.complex(torch.tensor(in_re), torch.tensor(in_im)).to(device)
+            other_complex = torch.complex(torch.tensor(oth_re), torch.tensor(oth_im)).to(device)
+            out_accelerator = torch.logaddexp(input=input_complex, other=other_complex)
+            out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
+            self.assertEqual(out_accelerator.cpu(), out_cpu)
 
 
 class TestLinalgCudaOnly(TestCase):
