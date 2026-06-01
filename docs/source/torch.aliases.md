@@ -19,7 +19,6 @@ in which they are defined. Feel free to use either the top-level version in ``to
     broadcast_tensors
     cartesian_prod
     cdist
-    chain_matmul
     einsum
     lu
     meshgrid

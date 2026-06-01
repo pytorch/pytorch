@@ -2588,7 +2588,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.broadcast_tensors",
         "torch.cartesian_prod",
         "torch.cdist",
-        "torch.chain_matmul",
         "torch.compile",
         "torch.compiled_with_cxx11_abi",
         "torch.cpu._init_amx",

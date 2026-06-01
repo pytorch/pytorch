@@ -150,6 +150,13 @@ def eig(
     )
 
 
+def chain_matmul(*matrices, out=None):
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed. "
+        "Please use the `torch.linalg.multi_dot` function instead."
+    )
+
+
 def qr(
     input: Tensor,
     some: bool = True,

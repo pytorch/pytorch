@@ -2397,6 +2397,7 @@ from torch import masked as masked
 # Import removed ops with error message about removal
 from torch._linalg_utils import (  # type: ignore[misc]
     _symeig as symeig,
+    chain_matmul,
     eig,
     lstsq,
     matrix_rank,

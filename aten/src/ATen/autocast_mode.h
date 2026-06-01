@@ -840,7 +840,6 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
   _(addbmm)                              \
   _(baddbmm)                             \
   _(bmm)                                 \
-  _(chain_matmul)                        \
   _(linalg_multi_dot)                    \
   _(_thnn_fused_lstm_cell)               \
   _(_thnn_fused_gru_cell)                \

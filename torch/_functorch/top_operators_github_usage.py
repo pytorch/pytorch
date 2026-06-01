@@ -211,7 +211,6 @@ top_torch: list[tuple[str, int]] = [
     ("diagflat", 562),
     ("cholesky_solve", 559),
     ("tril_indices", 552),
-    ("chain_matmul", 551),
     ("triu_indices", 548),
     ("angle", 522),
     ("poisson", 505),
