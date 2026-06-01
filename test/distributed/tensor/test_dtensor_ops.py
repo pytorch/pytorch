@@ -294,7 +294,6 @@ dtensor_compiled_fails = {
     skip("norm", "nuc"),
     # Flaky in CI: https://github.com/pytorch/pytorch/issues/176973
     skip("histc"),
-    xfail("nn.functional.linear_cross_entropy"),
 }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
@@ -309,6 +308,7 @@ dtensor_numeric_only_fails = {
     xfail("linspace"),
     xfail("logspace"),
     xfail("nn.functional.huber_loss"),
+    xfail("nn.functional.linear_cross_entropy"),
     xfail("nn.functional.max_unpool3d", "grad"),
     xfail("nn.functional.smooth_l1_loss"),
     xfail("nn.functional.softshrink"),
@@ -775,6 +775,7 @@ ops_unbacked_dtensor_dde = {
     xfail("cartesian_prod"),
     xfail("constant_pad_nd"),
     xfail("cumprod"),
+    xfail("diagonal_scatter"),
     xfail("dist"),
     xfail("fill"),
     xfail("flatten"),
@@ -1154,6 +1155,14 @@ class TestCompiledDTensorOps(TestDTensorOps):
         """
         to_dtensor = DTensorConverter(self.mesh, args, kwargs)
 
+        def is_accepted_linalg_error(exc):
+            return isinstance(exc, torch._C._LinAlgError) or (
+                # lu_factor intentionally raises a plain RuntimeError from
+                # _linalg_check_errors for singular factors.
+                isinstance(exc, RuntimeError)
+                and str(exc).startswith("torch.linalg.lu_factor:")
+            )
+
         for dtensor_args, dtensor_kwargs in to_dtensor:
             if not to_dtensor.successful():
                 continue
@@ -1164,8 +1173,24 @@ class TestCompiledDTensorOps(TestDTensorOps):
             def compiled_func(*a, **kw):
                 return func(*a, **kw)
 
-            # Just run - if it compiles and runs without error, we pass
-            compiled_func(*dtensor_args, **dtensor_kwargs)
+            try:
+                compiled_func(*dtensor_args, **dtensor_kwargs)
+            except (torch._C._LinAlgError, RuntimeError) as compiled_exc:
+                if not is_accepted_linalg_error(compiled_exc):
+                    raise
+                try:
+                    func(*dtensor_args, **dtensor_kwargs)
+                except (torch._C._LinAlgError, RuntimeError) as eager_exc:
+                    # Some valid OpInfo samples can raise for particular DTensor
+                    # placements. This test is a compile smoke, so accept
+                    # runtime errors that eager DTensor raises in the same way.
+                    if (
+                        is_accepted_linalg_error(eager_exc)
+                        and type(compiled_exc) is type(eager_exc)
+                        and str(compiled_exc) == str(eager_exc)
+                    ):
+                        continue
+                raise
 
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
