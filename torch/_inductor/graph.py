@@ -2826,6 +2826,17 @@ class SubgraphLowering(GraphLowering):
         self.parent = parent
         super().__init__(*args, **kwargs)
 
+    def allocate_non_dup_const_name(self, name: str | None, data: Tensor) -> str:
+        name = super().allocate_non_dup_const_name(name, data)
+        # The generated subgraph wrapper shares the parent's module, but tensor
+        # constants are attached to the module from the root graph's constants
+        # dict at load time. Propagate the value up so it is not left as None.
+        root = self.parent
+        while isinstance(root, SubgraphLowering):
+            root = root.parent
+        root.constants[name] = data
+        return name
+
     def init_wrapper_code(
         self,
         is_subgraph: bool = False,
