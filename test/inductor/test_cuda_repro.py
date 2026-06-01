@@ -119,6 +119,22 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_frexp_non_finite(self):
+        def fn(x):
+            return torch.frexp(x)
+
+        x = torch.tensor(
+            [float("inf"), float("-inf"), float("nan")], device=device_type
+        )
+        expected_mantissa, expected_exponent = fn(x)
+        actual_mantissa, actual_exponent = torch.compile(
+            fn, backend="inductor", fullgraph=True
+        )(x)
+
+        self.assertEqual(actual_mantissa, expected_mantissa, equal_nan=True)
+        self.assertEqual(actual_exponent, expected_exponent)
+
     def test_index_put_issue(self):
         def forward(
             self,
@@ -1625,6 +1641,7 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180948")
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_preserves_explicit_precision_cast(
@@ -1740,6 +1757,7 @@ class CudaReproTests(TestCase):
                     atol=1e-3,
                 )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163765")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_mean_ratio_chain(self):
         torch.manual_seed(12345)
@@ -2648,6 +2666,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163701")
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         counters.clear()
@@ -2869,6 +2888,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(eager_out, compile_out)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163689")
     @skipIfXpu(
         msg="Explicit attn_mask should not be set when is_causal=True - torch-xpu-ops: 2802"
     )
@@ -3080,6 +3100,51 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         x = torch.randn(1000, device=device_type, dtype=torch.float32) + 0.1
         self.common(fn, [x])
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIfRocm(msg="PTX atan codegen is CUDA-specific")
+    @skipIfXpu(msg="PTX atan codegen is CUDA-specific")
+    def test_atan_special_psi_eager_parity(self):
+        def atan_fn(x):
+            return torch.ops.aten.atan(x)
+
+        def fn(x):
+            out = atan_fn(x)
+            return torch.ops.aten.special_psi(out, out=out)
+
+        atan_x = torch.tensor(
+            [
+                -float("inf"),
+                -10.0,
+                -1.5516796112060547,
+                -1.0,
+                -0.0,
+                0.0,
+                1.0,
+                1.5516796112060547,
+                10.0,
+                float("inf"),
+                float("nan"),
+            ],
+            device=device_type,
+        )
+        actual_atan = torch.compile(atan_fn, backend="inductor", fullgraph=True)(atan_x)
+        expected_atan = atan_fn(atan_x)
+        self.assertEqual(
+            actual_atan.view(torch.uint32),
+            expected_atan.view(torch.uint32),
+        )
+
+        # Selected from the original seed-0 repro where a 1 ULP atan difference
+        # was amplified by special_psi into an assert_close failure.
+        x = torch.tensor([-1.5516796112060547], device=device_type)
+        actual, code = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x
+        )
+        expected = fn(x)
+
+        torch.testing.assert_close(actual, expected)
+        self.assertTrue(any("rcp.approx.ftz.f32" in src for src in code))
 
     def test_vector_norm_negative_dim_size_one(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/182181

@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Stores the last error message from a failed AOTI runtime call so that
@@ -57,6 +58,21 @@ struct AOTINoGradGuard {
   AOTINoGradGuard& operator=(AOTINoGradGuard&&) noexcept = delete;
   bool prev_mode{aoti_torch_grad_mode_is_enabled()};
 };
+
+namespace {
+
+std::unordered_map<std::string, AtenTensorHandle> constant_map_from_pairs(
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs) {
+  std::unordered_map<std::string, AtenTensorHandle> input_map;
+  input_map.reserve(num_pairs);
+  for (size_t i = 0; i < num_pairs; ++i) {
+    input_map.emplace(pairs[i].name, pairs[i].handle);
+  }
+  return input_map;
+}
+
+} // namespace
 
 extern "C" {
 
@@ -247,6 +263,25 @@ AOTIRuntimeError AOTInductorModelContainerExtractConstantsMap(
     })
 }
 
+AOTIRuntimeError AOTInductorModelContainerExtractConstantsMapEntries(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry** entries,
+    size_t* num_entries,
+    bool use_inactive) {
+  if (!entries || !num_entries) {
+    return AOTI_RUNTIME_FAILURE;
+  }
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto& extracted =
+        container->extract_constants_map_entries(use_inactive);
+    *entries = extracted.empty() ? nullptr : extracted.data();
+    *num_entries = extracted.size();
+  })
+}
+
 AOTIRuntimeError AOTInductorModelContainerUpdateUserManagedConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
@@ -297,6 +332,22 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
   })
 }
 
+AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto input_map = constant_map_from_pairs(pairs, num_pairs);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    container->update_constant_buffer(
+        input_map, use_inactive, validate_full_update);
+  })
+}
+
 AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
@@ -316,13 +367,46 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
   })
 }
 
+AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpuPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  auto input_map = constant_map_from_pairs(pairs, num_pairs);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    container->update_constant_buffer(
+        input_map,
+        use_inactive,
+        validate_full_update,
+        /*user_managed=*/false,
+        /*allow_h2d_copy=*/true);
+  })
+}
+
 AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle) {
-  return AOTInductorModelContainerUpdateConstantBuffer(container_handle,
-          constant_map_handle,
-          /*use_inactive*/ true,
-          /*validate_full_update*/ true);
+  return AOTInductorModelContainerUpdateConstantBuffer(
+      container_handle,
+      constant_map_handle,
+      /*use_inactive=*/true,
+      /*validate_full_update=*/true);
+}
+
+AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs) {
+  return AOTInductorModelContainerUpdateConstantBufferPairs(
+      container_handle,
+      pairs,
+      num_pairs,
+      /*use_inactive=*/true,
+      /*validate_full_update=*/true);
 }
 
 AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
