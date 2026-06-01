@@ -268,7 +268,9 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         ),
         (torch.float64, torch.ops.aten.native_layer_norm.default): (1e-6, 1e-6),
         # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
-        (torch.float32, torch.ops.aten.native_group_norm.default): (1e-4, 5e-6),
+        (torch.float32, torch.ops.aten.native_group_norm.default): (1e-5, 5e-6),
+        # Only errors in some configurations in the CI pipeline on CPU
+        (torch.float32, torch.ops.aten.native_group_norm_backward.multiple_grads): (1e-5, 5e-6),
         # This exceeds default tolerances only on CPU, on CUDA it's fine
         (torch.float32, torch.ops.aten.grid_sampler_2d.default): (7e-6, 3e-5),
         # Exceeds tolerances on CUDA, likely due to fma
