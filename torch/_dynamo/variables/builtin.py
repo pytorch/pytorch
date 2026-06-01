@@ -78,7 +78,6 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
     specialize_symnode,
-    str_methods,
     tensortype_to_dtype,
     unpack_iterable,
 )
@@ -389,6 +388,45 @@ class BaseBuiltinVariable(VariableTracker):
             self.as_python_constant() is other.as_python_constant()  # type: ignore[union-attr]
         )
 
+    def _call_method_descriptor(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        cls = self.as_python_constant()
+        if not (inspect.isclass(cls) and args):
+            return None
+
+        try:
+            resolved_fn = inspect.getattr_static(cls, name)
+        except AttributeError:
+            return None
+
+        if not isinstance(resolved_fn, types.MethodDescriptorType):
+            return None
+        owner = resolved_fn.__objclass__
+
+        try:
+            first_arg_type = args[0].python_type()
+        except NotImplementedError:
+            return None
+
+        if not issubclass(first_arg_type, owner):
+            return None
+
+        receiver = args[0]
+        if first_arg_type is not owner:
+            if not (
+                isinstance(receiver, UserDefinedObjectVariable)
+                and receiver._base_vt is not None
+            ):
+                return None
+            receiver = receiver._base_vt
+
+        return receiver.call_method(tx, name, args[1:], kwargs)
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -412,6 +450,9 @@ class BaseBuiltinVariable(VariableTracker):
                         tx, type.__repr__(arg.as_python_constant())
                     )
             return generic_repr(tx, arg)
+        result = self._call_method_descriptor(tx, name, args, kwargs)
+        if result is not None:
+            return result
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1681,12 +1722,9 @@ class BuiltinVariable(BaseBuiltinVariable):
             else:
                 return args[0].call_method(tx, name, args[1:], kwargs)
 
-        if self.fn is str and len(args) >= 1:
-            resolved_fn = getattr(self.fn, name, None)
-            if resolved_fn in str_methods:
-                # Only delegate to ConstantVariable, not other types that happen to be constants
-                if isinstance(args[0], ConstantVariable):
-                    return args[0].call_method(tx, name, args[1:], kwargs)
+        result = self._call_method_descriptor(tx, name, args, kwargs)
+        if result is not None:
+            return result
 
         if self.fn is float and len(args) >= 1:
             # Only delegate to ConstantVariable, not other types that happen to be constants

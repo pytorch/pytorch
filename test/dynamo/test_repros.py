@@ -6950,15 +6950,54 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         ):
             torch.compile(lambda: None, backend="eager")
 
-    def test_str_isalnum(self):
-        def f(x, c):
-            str.isalnum(c)
-            return x.sin()
+    def test_class_method_descriptor_call(self):
+        def f(x, c, n, b, values, dq):
+            descriptor_total = (
+                str.isalnum(c)
+                + int.bit_length(n)
+                + bytes.decode(b, encoding="utf-8").count("o")
+                + list.count(values, 1)
+                + collections.deque.count(dq, 1)
+            )
+            return x + descriptor_total
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         x = torch.randn(3)
-        c = "foobar"
-        self.assertEqual(f(x, c), opt_f(x, c))
+        args = (x, "foobar", 5, b"foobar", [1, 2, 1], collections.deque([1, 2, 1]))
+        self.assertEqual(f(*args), opt_f(*args))
+
+        class MyStr(str):
+            __slots__ = ()
+
+            def isalnum(self):
+                return False
+
+        class MyList(list):
+            def count(self, value):
+                return 99
+
+        class MyDeque(collections.deque):
+            pass
+
+        def subclass_f(c, values, dq):
+            return (
+                str.isalnum(c)
+                + list.count(values, 1)
+                + MyStr.isalnum("abc")
+                + MyList.count([1, 1], 1)
+                + MyDeque.count(dq, 1)
+            )
+
+        opt_subclass_f = torch.compile(subclass_f, backend="eager", fullgraph=True)
+        subclass_args = (MyStr("abc"), MyList([1, 1]), collections.deque([1, 1]))
+        self.assertEqual(subclass_f(*subclass_args), opt_subclass_f(*subclass_args))
+
+        def tensor_f(x, y):
+            return torch.Tensor.add(torch.Tensor.sin(x), y, alpha=2)
+
+        opt_tensor_f = torch.compile(tensor_f, backend="eager", fullgraph=True)
+        y = torch.randn(3)
+        self.assertEqual(tensor_f(x, y), opt_tensor_f(x, y))
 
     def test_nn_param_freevar_codegen(self):
         class Model2(nn.Module):
