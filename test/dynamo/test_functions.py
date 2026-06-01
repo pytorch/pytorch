@@ -54,6 +54,7 @@ T = TypeVar("T")
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True
+numpy_identity_user_dispatch_hits = []
 
 
 class CustomDictSubclass(collections.OrderedDict):
@@ -5265,6 +5266,310 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(x, y), fn_opt(x, y))
         self.assertEqual(fn(x, x), fn_opt(x, x))
+
+    def test_is_numpy_bool_singleton(self):
+        def fn(x):
+            a = np.bool_(True)
+            b = np.bool_(True)
+            if a is b:
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
+    def test_is_numpy_bool_global_singleton(self):
+        a = np.bool_(True)
+
+        def fn(x):
+            if a is np.bool_(True):
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
+    def test_is_not_numpy_bool_singleton(self):
+        def fn(x):
+            a = np.bool_(True)
+            b = np.bool_(True)
+            if a is not b:
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
+    def test_is_numpy_bool_tensor_input(self):
+        def fn(x):
+            if np.bool_(True) is x:
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
+    def test_is_numpy_bool_sourceful_operator_graph_break(self):
+        def fn(x, a):
+            b = a | np.bool_(False)
+            if b is a:
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(
+            Unsupported, "unsupported NumPy identity comparison"
+        ):
+            fn_opt(x, np.bool_(True))
+
+    def test_is_numpy_bool_sourceful_constructor_graph_break(self):
+        def fn(x, a):
+            b = np.bool_(a)
+            c = np.bool_(True)
+            if b is c:
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(
+            Unsupported, "unsupported NumPy identity comparison"
+        ):
+            fn_opt(x, np.bool_(True))
+
+    def test_is_numpy_bool_sourceless_nested_constructor_singleton(self):
+        def fn(x):
+            a = np.bool_(True)
+            b = np.bool_(a)
+            if b is a:
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
+    def test_numpy_operator_identity_metadata_no_extra_user_dispatch(self):
+        global numpy_identity_user_dispatch_hits
+
+        class C:
+            def __ror__(self, other):
+                numpy_identity_user_dispatch_hits.append(isinstance(other, bool))
+                return np.bool_(isinstance(other, bool))
+
+        def fn(x):
+            c = C()
+            y = np.bool_(False) | c
+            if y is np.bool_(True):
+                return x + 1
+            else:
+                return x + 2
+
+        x = torch.zeros(2)
+        numpy_identity_user_dispatch_hits.clear()
+        fn_opt = torch.compile(backend="eager")(fn)
+        self.assertEqual(fn_opt(x), x + 1)
+        self.assertEqual(numpy_identity_user_dispatch_hits, [True])
+
+        numpy_identity_user_dispatch_hits.clear()
+        fn_fullgraph = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(fn_fullgraph(x), x + 1)
+        self.assertEqual(numpy_identity_user_dispatch_hits, [True])
+
+    def test_numpy_operator_user_dispatch_input_value_guards(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class C:
+            def __ror__(self, other):
+                return np.bool_(other)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, a):
+            y = a | C()
+            if y is np.bool_(True):
+                return x + 1
+            else:
+                return x + 2
+
+        x = torch.zeros(2)
+
+        self.assertEqual(fn(x, np.bool_(True)), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x, np.bool_(False)), x + 2)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(fn(x, np.bool_(True)), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_numpy_operator_missing_reverse_dunder_type_error(self):
+        class NoRor:
+            pass
+
+        with self.assertRaisesRegex(TypeError, "unsupported operand type"):
+            np.bool_(False) | NoRor()
+
+        def fn(x):
+            y = np.bool_(False) | NoRor()
+            if y is np.bool_(True):
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager")(fn)
+        with self.assertRaisesRegex(TypeError, "unsupported operand type"):
+            fn_opt(torch.zeros(2))
+
+        fn_fullgraph = torch.compile(backend="eager", fullgraph=True)(fn)
+        with self.assertRaisesRegex(TypeError, "unsupported operand type"):
+            fn_fullgraph(torch.zeros(2))
+
+    def test_numpy_operator_reverse_dunder_not_implemented_type_error(self):
+        class RorNotImpl:
+            def __ror__(self, other):
+                return NotImplemented
+
+        with self.assertRaisesRegex(TypeError, "unsupported operand type"):
+            np.bool_(False) | RorNotImpl()
+
+        def fn(x):
+            y = np.bool_(False) | RorNotImpl()
+            if y is np.bool_(True):
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager")(fn)
+        with self.assertRaisesRegex(TypeError, "unsupported operand type"):
+            fn_opt(torch.zeros(2))
+
+        fn_fullgraph = torch.compile(backend="eager", fullgraph=True)(fn)
+        with self.assertRaisesRegex(TypeError, "unsupported operand type"):
+            fn_fullgraph(torch.zeros(2))
+
+    def test_is_numpy_bool_operator_singletons(self):
+        def fn(x):
+            t = np.bool_(True)
+            f = np.bool_(False)
+            return (
+                x
+                + (1 if (t | f) is t else 10)
+                + (2 if (t & f) is f else 20)
+                + (4 if (t ^ f) is t else 40)
+            )
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
+    def test_is_numpy_float_distinct(self):
+        def fn(x):
+            a = np.float64(1.0)
+            b = np.float64(1.0)
+            if a is b:
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
+    def test_is_numpy_float_input_alias_guards(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, a, b):
+            if a is b:
+                return x + 1
+            else:
+                return x + 2
+
+        x = torch.zeros(2)
+        a = np.float64(1.0)
+
+        self.assertEqual(fn(x, a, a), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x, a, np.float64(1.0)), x + 2)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(fn(x, a, a), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_is_not_numpy_float_input_alias_guards(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, a, b):
+            if a is not b:
+                return x + 1
+            else:
+                return x + 2
+
+        x = torch.zeros(2)
+        a = np.float64(1.0)
+
+        self.assertEqual(fn(x, a, a), x + 2)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x, a, np.float64(1.0)), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(fn(x, a, a), x + 2)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_is_numpy_float_tensor_input_no_identity_recompile(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, a):
+            if a is x:
+                return x + 1
+            else:
+                return x + 2
+
+        x = torch.zeros(2)
+
+        self.assertEqual(fn(x, np.float64(1.0)), x + 2)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x, np.float64(1.0)), x + 2)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_is_numpy_float_closure_alias_guards(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+        a = np.float64(1.0)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, b):
+            if a is b:
+                return x + 1
+            else:
+                return x + 2
+
+        x = torch.zeros(2)
+
+        self.assertEqual(fn(x, a), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x, np.float64(1.0)), x + 2)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(fn(x, a), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_is_mutated_tensor_tensor(self):
         def fn(x):

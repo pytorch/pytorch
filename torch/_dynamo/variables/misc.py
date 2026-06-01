@@ -77,6 +77,40 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
+_NUMPY_SCALAR_METADATA_CONSTANT_TYPES = (
+    bool,
+    int,
+    float,
+    complex,
+    str,
+    bytes,
+    type(None),
+)
+
+
+def _safe_numpy_scalar_constructor_arg(arg: VariableTracker) -> object:
+    try:
+        import numpy as np
+    except ModuleNotFoundError:
+        return NO_SUCH_SUBOBJ
+
+    if arg.source is not None:
+        return NO_SUCH_SUBOBJ
+
+    if isinstance(arg, variables.NumpyNdarrayVariable):
+        value = arg.get_real_python_backed_value()
+        if isinstance(value, np.generic):
+            return value
+        return NO_SUCH_SUBOBJ
+
+    if isinstance(arg, ConstantVariable):
+        value = arg.as_python_constant()
+        if type(value) in _NUMPY_SCALAR_METADATA_CONSTANT_TYPES:
+            return value
+
+    return NO_SUCH_SUBOBJ
+
+
 class SuperVariable(VariableTracker):
     # PySuper_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L11511
     _cpython_type = super
@@ -1791,6 +1825,36 @@ class NumpyVariable(VariableTracker):
             )
         return np_constant_collections_map.get(fn)
 
+    def _python_scalar_value(
+        self, args: list[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> object:
+        try:
+            import numpy as np
+        except ModuleNotFoundError:
+            return NO_SUCH_SUBOBJ
+
+        if not (isinstance(self.value, type) and issubclass(self.value, np.generic)):
+            return NO_SUCH_SUBOBJ
+
+        python_args = []
+        for arg in args:
+            value = _safe_numpy_scalar_constructor_arg(arg)
+            if value is NO_SUCH_SUBOBJ:
+                return NO_SUCH_SUBOBJ
+            python_args.append(value)
+
+        python_kwargs = {}
+        for key, arg in kwargs.items():
+            value = _safe_numpy_scalar_constructor_arg(arg)
+            if value is NO_SUCH_SUBOBJ:
+                return NO_SUCH_SUBOBJ
+            python_kwargs[key] = value
+
+        try:
+            return self.value(*python_args, **python_kwargs)
+        except Exception:
+            return NO_SUCH_SUBOBJ
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -1879,12 +1943,13 @@ class NumpyVariable(VariableTracker):
                 )
 
             # TODO Add all the functions that go from constants to constants to can_constant_fold_through
+            python_value = self._python_scalar_value(args, kwargs)
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_to_tensor_wrapper(func),
                 *proxy_args_kwargs(args, kwargs),
             )
-            return NumpyNdarrayVariable.create(tx, proxy)
+            return NumpyNdarrayVariable.create(tx, proxy, python_value=python_value)
 
     def call_method(
         self,

@@ -74,7 +74,12 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
+from .base import (
+    AttributeMutationNew,
+    NO_SUCH_SUBOBJ,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import TorchScriptObjectVariable
@@ -2762,6 +2767,26 @@ class NumpyNdarrayVariable(TensorVariable):
     Represents a np.ndarray, but backed by torch Tensor via torch._numpy.ndarray.
     Use this for Tensor.numpy() call.
     """
+
+    _nonvar_fields = {
+        "python_value",
+        *TensorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        proxy: torch.fx.Proxy,
+        *,
+        python_value: Any = NO_SUCH_SUBOBJ,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(proxy, **kwargs)
+        self.python_value = python_value
+
+    def get_real_python_backed_value(self) -> object:
+        if self.python_value is not NO_SUCH_SUBOBJ:
+            return self.python_value
+        return super().get_real_python_backed_value()
 
     @staticmethod
     def create(

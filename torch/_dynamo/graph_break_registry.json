@@ -1882,6 +1882,26 @@
       ]
     }
   ],
+  "GB6029": [
+    {
+      "Gb_type": "unsupported NumPy identity comparison",
+      "Context": "{op.__name__}({left}, {right})",
+      "Explanation": "Dynamo cannot determine NumPy object identity for values without preserved Python identity.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6030": [
+    {
+      "Gb_type": "unsupported NumPy operator with user-defined operand",
+      "Context": "{fn.__name__}({left}, {right})",
+      "Explanation": "Dynamo does not model NumPy scalar/array binary dispatch to user-defined operands.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0140": [
     {
       "Gb_type": "Unsupported autograd.Function method",
