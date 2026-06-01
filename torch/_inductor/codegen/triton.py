@@ -2392,12 +2392,16 @@ class TritonKernelOverrides(TritonOverrides):
     @classmethod
     def value_expr(cls, expr, dtype):
         """
-        Like :meth:`index_expr`, but casts the result to ``dtype``.
+        Like :meth:`index_expr`, but honors ``dtype`` by setting the kernel
+        index dtype before emitting, and casting the result if needed.
         """
-        # TODO: upcast operands so expressions with large int literals
-        # (> 2^31) don't fail at Triton parse time.
-        var = cls.index_expr(expr, dtype)
-        if var.dtype != dtype:
+        real_index_dtype = V.kernel._index_dtype
+        V.kernel._index_dtype = dtype
+        try:
+            var = cls.index_expr(expr, dtype)
+        finally:
+            V.kernel._index_dtype = real_index_dtype
+        if real_index_dtype != dtype or var.dtype != dtype:
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"({var}).to({triton_type(dtype)})",
