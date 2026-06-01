@@ -122,6 +122,7 @@ from torch.utils._sympy.functions import (
     CleanDiv,
     FloorDiv,
     Identity,
+    Max,
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -193,7 +194,7 @@ def _align(nbytes: int) -> int:
 
 def _is_aligned(v: sympy.Expr) -> bool:
     """v can be statically proven to be a multiple of ALIGN_BYTES"""
-    if isinstance(v, (sympy.Add, sympy.Max)):
+    if isinstance(v, (sympy.Add, sympy.Max, Max)):
         return all(map(_is_aligned, v.args))
     return isinstance(v, align) or sympy.gcd(v, ALIGN_BYTES) == ALIGN_BYTES
 
@@ -1422,36 +1423,24 @@ def fresh_cache(
     cache_entries: dict[str, Any] | None = None,
     dir: str | None = None,
     delete: bool = True,
-    share_triton: bool = False,
 ) -> Iterator[None]:
     """
     Contextmanager that provides a clean tmp cachedir for pt2 caches.
 
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
-
-    When share_triton=True, the Triton compilation cache is placed in a
-    persistent shared directory rather than inside the per-test temp dir.
-    Triton compilation is a pure function of the kernel source, so sharing
-    compiled kernels across tests is safe and avoids redundant compilation.
     """
     clear_caches()
 
     from torch._inductor.cpp_builder import normalize_path_separator
-    from torch._inductor.runtime.cache_dir_utils import default_cache_dir
 
     inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
         with _set_env("TORCHINDUCTOR_CACHE_DIR", inductor_cache_dir):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
-            if share_triton:
-                triton_cache_dir = normalize_path_separator(
-                    os.path.join(default_cache_dir(), "triton")
-                )
-            else:
-                triton_cache_dir = normalize_path_separator(
-                    os.path.join(inductor_cache_dir, "triton")
-                )
+            triton_cache_dir = normalize_path_separator(
+                os.path.join(inductor_cache_dir, "triton")
+            )
             with _set_env("TRITON_CACHE_DIR", triton_cache_dir):
                 yield
                 if isinstance(cache_entries, dict):
@@ -1960,6 +1949,15 @@ def using_b200() -> bool:
     # compute capability 10.0 or 10.0a is NVIDIA B200
     device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
     return device_properties.major == 10
+
+
+def is_nvidia_sm100_or_later() -> bool:
+    """Return true for NVIDIA CUDA devices with compute capability SM100+."""
+    return (
+        torch.cuda.is_available()
+        and torch.version.hip is None
+        and torch.cuda.get_device_capability() >= (10, 0)
+    )
 
 
 def get_num_sms() -> int:
@@ -3135,6 +3133,13 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     if ds_tops is not None:
         return ds_tops
 
+    if not torch.cuda.is_available():
+        log.warning(
+            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
+            "Returning 0.0; roofline estimates will use memory bandwidth only."
+        )
+        return 0.0
+
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
     SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
@@ -3198,7 +3203,11 @@ def is_welford_reduction(reduction_type: str) -> bool:
 def reduction_num_outputs(reduction_type: str) -> int:
     if is_welford_reduction(reduction_type):
         return 3
-    elif reduction_type == "online_softmax_reduce":
+    elif reduction_type in (
+        "argmax_with_value",
+        "argmin_with_value",
+        "online_softmax_reduce",
+    ):
         return 2
     else:
         return 1
@@ -4610,12 +4619,22 @@ def set_customized_partition_wrappers(wrapper: CUDAGraphWrapperType) -> None:
 
 
 def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, Any]]:
-    args = snode.node.inputs  # type: ignore[union-attr]
-    args = snode.node.fill_non_provided_args(  # type: ignore[union-attr]
-        [*args, *snode.node.constant_args],  # type: ignore[union-attr]
-        snode.node.kwargs,  # type: ignore[union-attr]
-    )
-    kwargs = snode.node.kwargs  # type: ignore[union-attr]
+    node = cast("ExternKernel", snode.node)
+    if isinstance(node, torch._inductor.ir.FallbackKernel):
+        args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
+    else:
+        args = [*node.inputs, *node.constant_args]
+        kwargs = node.kwargs
+
+    args = node.fill_non_provided_args(args, kwargs)
+    kwargs = dict(kwargs)
+    op_overload = getattr(node, "op_overload", None)
+    if isinstance(op_overload, torch._ops.OpOverload):
+        positional_arg_names = [
+            arg.name for arg in op_overload._schema.arguments if not arg.kwarg_only
+        ]
+        for arg_name in positional_arg_names[: len(args)]:
+            kwargs.pop(arg_name, None)
     flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
 
     def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]

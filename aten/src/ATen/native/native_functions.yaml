@@ -3014,14 +3014,14 @@
 
 - func: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU, CUDA: native_group_norm
+    CPU, CUDA, MPS: native_group_norm
     CompositeExplicitAutograd: math_group_norm
   autogen: native_group_norm.out
   tags: core
 
 - func: native_group_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, SymInt N, SymInt C, SymInt HxW, int group, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU, CUDA: native_group_norm_backward
+    CPU, CUDA, MPS: native_group_norm_backward
   autogen: native_group_norm_backward.out
   tags: core
 
@@ -5151,7 +5151,8 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, ZeroTensor, MPS, MTIA: _reshape_alias
+    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, MPS, MTIA: _reshape_alias
+    ZeroTensor: _reshape_alias_symint
     # We don't need to support mkldnn since this is handled explicitly by the reshape operator.
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
@@ -6890,6 +6891,7 @@
   dispatch:
     CPU: _s_dirichlet_cpu
     CUDA: _s_dirichlet_cuda
+    MPS: _s_dirichlet_mps
   autogen: _sample_dirichlet.out
 
 - func: poisson(Tensor self, Generator? generator=None) -> Tensor
@@ -8413,7 +8415,8 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    ZeroTensor, Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA: view
+    Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA: view
+    ZeroTensor: view_symint
     MkldnnCPU: mkldnn_view
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: view_nested
   tags: core
