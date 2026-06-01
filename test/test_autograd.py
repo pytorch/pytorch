@@ -11814,6 +11814,36 @@ def bernoulli_scalar():
     return torch.tensor(0, dtype=torch.uint8).bernoulli_()
 
 
+class TestClampSubgradient(TestCase):
+    def _get_grad_at_boundary(self, fn):
+        x = torch.tensor(0.0, requires_grad=True)
+        fn(x).backward()
+        return x.grad.item()
+
+    def test_clamp_min_scalar_grad_at_boundary(self):
+        self.assertEqual(self._get_grad_at_boundary(lambda x: torch.clamp_min(x, 0.0)), 0.0)
+
+    def test_clamp_max_scalar_grad_at_boundary(self):
+        self.assertEqual(self._get_grad_at_boundary(lambda x: torch.clamp_max(x, 0.0)), 0.0)
+
+    def test_clamp_both_grad_at_boundary(self):
+        self.assertEqual(self._get_grad_at_boundary(lambda x: torch.clamp(x, min=0.0)), 0.0)
+        self.assertEqual(self._get_grad_at_boundary(lambda x: torch.clamp(x, max=0.0)), 0.0)
+        self.assertEqual(self._get_grad_at_boundary(lambda x: torch.clamp(x, min=0.0, max=1.0)), 0.0)
+        x = torch.tensor(1.0, requires_grad=True)
+        torch.clamp(x, min=0.0, max=1.0).backward()
+        self.assertEqual(x.grad.item(), 0.0)
+
+    def test_clamp_grad_away_from_boundary(self):
+        x = torch.tensor(1.0, requires_grad=True)
+        torch.clamp_min(x, 0.0).backward()
+        self.assertEqual(x.grad.item(), 1.0)
+
+        x = torch.tensor(-1.0, requires_grad=True)
+        torch.clamp_max(x, 0.0).backward()
+        self.assertEqual(x.grad.item(), 1.0)
+
+
 class TestAutogradForwardModeBatchedGrad(TestCase):
     def test_out_of_place_basic(self):
         a = torch.rand(4, 4, dtype=torch.double, requires_grad=True)

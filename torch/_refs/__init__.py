@@ -2015,16 +2015,16 @@ def clamp(
 
     if min is not None:
         a_isnan = torch.isnan(a)
-        condition = torch.bitwise_or(torch.ge(a, min), a_isnan)  # type: ignore[arg-type]
+        condition = torch.bitwise_or(torch.gt(a, min), a_isnan)  # type: ignore[arg-type]
         # we should also propagate `nan` coming from boundaries. However, that's
-        # not necessary since `ge` would already `False` when either operands has
+        # not necessary since `gt` would already `False` when either operands has
         # a `nan`. So this line below is redundant
         #   `condition = bitwise_and(condition, bitwise_not(isnan(min)))`
         a = torch.where(condition, a, min)  # type: ignore[arg-type]
     if max is not None:
         a_isnan = torch.isnan(a)
         # same as above, no need to adjust `nan` from `max`
-        condition = torch.bitwise_or(torch.le(a, max), a_isnan)  # type: ignore[arg-type]
+        condition = torch.bitwise_or(torch.lt(a, max), a_isnan)  # type: ignore[arg-type]
         a = torch.where(condition, a, max)  # type: ignore[arg-type]
 
     return a
