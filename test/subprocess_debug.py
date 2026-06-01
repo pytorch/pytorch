@@ -37,6 +37,22 @@ def _output_path(stream: str) -> str:
     return path
 
 
+def _is_devnull(value: Any) -> bool:
+    if value == subprocess.DEVNULL:
+        return True
+    if isinstance(value, int) and value >= 0:
+        try:
+            return os.path.abspath(os.readlink(f"/proc/self/fd/{value}")) == os.path.abspath(
+                os.devnull
+            )
+        except Exception:
+            return False
+    try:
+        return os.path.abspath(value.name) == os.path.abspath(os.devnull)
+    except Exception:
+        return False
+
+
 def _short_text(value: Any) -> str:
     if isinstance(value, bytes):
         text = os.fsdecode(value)
@@ -99,9 +115,11 @@ class _TracedPopen(_ORIGINAL_POPEN):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         start_time = time.time()
         command = args[0] if args else kwargs.get("args")
+        kwargs, spooled_files = _maybe_spool_devnull_outputs(kwargs)
         try:
             super().__init__(*args, **kwargs)
         except Exception as exc:
+            _close_files(spooled_files)
             _write_record(
                 {
                     "event": "spawn_error",
@@ -120,6 +138,7 @@ class _TracedPopen(_ORIGINAL_POPEN):
         self._pytorch_subprocess_debug_trace_id = (
             f"{os.getpid()}:{self.pid}:{start_time}"
         )
+        self._pytorch_subprocess_debug_spooled_files = spooled_files
         _write_record(
             {
                 "event": "start",
@@ -141,6 +160,7 @@ class _TracedPopen(_ORIGINAL_POPEN):
         if self.returncode is None:
             return
         self._pytorch_subprocess_debug_finished = True
+        _close_files(getattr(self, "_pytorch_subprocess_debug_spooled_files", []))
         start_time = getattr(self, "_pytorch_subprocess_debug_start", None)
         elapsed = time.time() - start_time if start_time is not None else None
         _write_record(
@@ -170,6 +190,30 @@ class _TracedPopen(_ORIGINAL_POPEN):
         result = super().poll()
         self._record_finish()
         return result
+
+
+def _maybe_spool_devnull_outputs(kwargs: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
+    spooled_kwargs = kwargs.copy()
+    files = []
+    stdout = spooled_kwargs.get("stdout")
+    stderr = spooled_kwargs.get("stderr")
+
+    if _is_devnull(stdout):
+        path = _output_path("stdout")
+        stdout_file = open(path, "w+b")
+        files.append(stdout_file)
+        spooled_kwargs["stdout"] = stdout_file
+        if stderr is stdout:
+            spooled_kwargs["stderr"] = stdout_file
+            return spooled_kwargs, files
+
+    if _is_devnull(stderr):
+        path = _output_path("stderr")
+        stderr_file = open(path, "w+b")
+        files.append(stderr_file)
+        spooled_kwargs["stderr"] = stderr_file
+
+    return spooled_kwargs, files
 
 
 def _text_mode(kwargs: dict[str, Any]) -> bool:

@@ -1130,7 +1130,7 @@ small_memory_access_threshold: int = 16777216
 worker_suppress_logging: bool = Config(
     justknob="pytorch/compiler:worker_suppress_logging",
     env_name_force="TORCHINDUCTOR_WORKER_SUPPRESS_LOGGING",
-    default=True,
+    default=False,
 )
 
 # Log per-operation runtime estimates for TLParse analysis.
