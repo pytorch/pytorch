@@ -1307,32 +1307,12 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
     if guard_or_false(x.numel() == 0):
         unnormalized = torch.exp(x)
     else:
-        x_max = _softmax_unbacked_safe_amax(x, dim)
+        x_max = torch.amax(x, dim, keepdim=True)
         unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
     return result
-
-
-def _softmax_unbacked_safe_amax(x: Tensor, dim: int) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
-    if x.ndim == 0:
-        return torch.amax(x, dim, keepdim=True)
-
-    dim = utils.canonicalize_dim(x.ndim, dim)
-    if guard_or_false(x.shape[dim] > 0):
-        return torch.amax(x, dim, keepdim=True)
-
-    # Plain amax has no identity, so it cannot reduce over an empty dim.
-    # With unbacked sizes this becomes a deferred runtime assert, but eager
-    # softmax handles empty inputs. Pad a single -inf, the identity for max:
-    # it never wins for non-empty input and makes empty input well-defined.
-    pad_shape = list(x.shape)
-    pad_shape[dim] = 1
-    x = torch.cat((x, x.new_full(pad_shape, float("-inf"))), dim=dim)
-    return torch.amax(x, dim, keepdim=True)
 
 
 @register_decomposition(aten._log_softmax)
@@ -1355,7 +1335,7 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     if guard_or_false(x.numel() == 0):
         shifted = x
     else:
-        x_max = _softmax_unbacked_safe_amax(x, dim)
+        x_max = torch.amax(x, dim, keepdim=True)
         shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     result = shifted - shifted_logsumexp
