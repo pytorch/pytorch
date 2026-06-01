@@ -89,7 +89,6 @@ def get_patches():
         "force_disable_caches": True,
         # Messes up existing test strings
         "aten_distributed_optimizations.insert_overlap_deps": False,
-        "aten_distributed_optimizations.enable_simple_overlap": False,
         # interferes with testing, / custom estimation
         "test_configs.assume_bucketing_reduces_latency": False,
     }
@@ -525,7 +524,6 @@ def get_bucket_patches(compute_multiplier=1.0):
         "force_disable_caches": True,
         # messes up test strings
         "aten_distributed_optimizations.insert_overlap_deps": False,
-        "aten_distributed_optimizations.enable_simple_overlap": False,
         # interferes with testing, / custom estimation
         "test_configs.assume_bucketing_reduces_latency": False,
         # these tests verify overlap scheduling bucketing, not pre-bucketing
