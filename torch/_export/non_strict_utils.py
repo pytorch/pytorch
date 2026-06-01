@@ -370,11 +370,21 @@ def _tensor_min_max(*args, real_callable, tensor_callable, **kwargs):
     return real_callable(*args, **kwargs)
 
 
+def _tensor_len(obj, *, real_callable):
+    if isinstance(obj, torch.Tensor):
+        return obj.__len__()
+    return real_callable(obj)
+
+
 @contextmanager
 def _override_builtin_ops():
+    original_len = builtins.len
     original_max = builtins.max
     original_min = builtins.min
     original_pow = math.pow
+
+    # pyrefly: ignore [bad-assignment]
+    builtins.len = functools.partial(_tensor_len, real_callable=original_len)
 
     # pyrefly: ignore [bad-assignment]
     builtins.max = functools.partial(
@@ -391,6 +401,7 @@ def _override_builtin_ops():
     try:
         yield
     finally:
+        builtins.len = original_len
         builtins.max = original_max
         builtins.min = original_min
         math.pow = original_pow

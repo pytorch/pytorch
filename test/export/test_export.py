@@ -650,6 +650,94 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
+    def test_non_strict_export_len_tensor_pytree_nn_module_input(self):
+        class Cache(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.key_cache: list[torch.Tensor] = []
+                self.value_cache: list[torch.Tensor] = []
+
+            def update(
+                self, key_states: torch.Tensor, value_states: torch.Tensor
+            ) -> None:
+                self.key_cache.append(key_states)
+                self.value_cache.append(value_states)
+
+            def get_seq_length(self) -> int:
+                if len(self.key_cache) == 0 or len(self.key_cache[0]) == 0:
+                    return 0
+                return self.key_cache[0].shape[-2]
+
+        def flatten_cache(cache):
+            return [cache.key_cache, cache.value_cache], [
+                "key_cache",
+                "value_cache",
+            ]
+
+        def flatten_with_keys_cache(cache):
+            values, context = flatten_cache(cache)
+            return [(pytree.MappingKey(k), v) for k, v in zip(context, values)], context
+
+        def unflatten_cache(values, context):
+            cache = Cache()
+            for k, v in zip(context, values):
+                setattr(cache, k, v)
+            return cache
+
+        class Module(torch.nn.Module):
+            def forward(self, x, cache):
+                key = torch.cat(cache.key_cache, dim=1)
+                value = torch.cat(cache.value_cache, dim=1)
+                seq_length = cache.get_seq_length()
+                zeros = torch.zeros(
+                    (
+                        len(cache.key_cache[0]),
+                        cache.key_cache[0].shape[1],
+                        seq_length,
+                        cache.key_cache[0].shape[-1],
+                    )
+                )
+                return x + (key + value + zeros).sum(dim=2, keepdim=True)
+
+        def make_inputs(batch, seq_length):
+            x = torch.randn(batch, 8, 7, 1)
+            cache = Cache()
+            cache.update(
+                torch.ones(batch, 8, seq_length, 6),
+                torch.ones(batch, 8, seq_length, 6) * 2,
+            )
+            return x, cache
+
+        pytree.register_pytree_node(
+            Cache,
+            flatten_cache,
+            unflatten_cache,
+            serialized_type_name="test.export.test_export.Cache",
+            flatten_with_keys_fn=flatten_with_keys_cache,
+        )
+        torch.fx._pytree.register_pytree_flatten_spec(
+            Cache, lambda cache, _: [cache.key_cache, cache.value_cache]
+        )
+        try:
+            x, cache = make_inputs(3, 5)
+            batch = Dim("batch", min=1, max=1024)
+            seq_length = Dim("seq_length", min=1, max=1024)
+            ep = export(
+                Module(),
+                (x, cache),
+                dynamic_shapes=(
+                    {0: batch},
+                    [[{0: batch, 2: seq_length}], [{0: batch, 2: seq_length}]],
+                ),
+                strict=False,
+            )
+
+            x2, cache2 = make_inputs(4, 6)
+            self.assertEqual(ep.module()(x2, cache2), Module()(x2, cache2))
+        finally:
+            pytree._deregister_pytree_node(Cache)
+            torch.fx._pytree._deregister_pytree_flatten_spec(Cache)
+
     @skipIfCrossRef  # CrossRefMode interferes with functorch ops
     @skipIfTorchDynamo("export inside dynamo is not supported")
     def test_gradient_tracking_tensors(self) -> None:
