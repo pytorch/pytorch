@@ -174,6 +174,33 @@ class TestFP8Types(TestCase):
         torch.testing.assert_close(y0_fp8, x, rtol=5e-1, atol=5e-1)
         torch.testing.assert_close(y1_fp8, x, rtol=5e-1, atol=5e-1)
 
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
+    @skipIfRocm
+    @onlyCUDA
+    def test_cuda_fp8_cast_fallback_for_unsupported_triton_dtype(self, device):
+        def fp8_cast(x, dtype):
+            return x.to(dtype=dtype)
+
+        fp8_dtypes = [torch.float8_e4m3fnuz, torch.float8_e5m2fnuz]
+        if not utils.is_triton_fp8_dtype_supported(torch.float8_e4m3fn, device):
+            fp8_dtypes.append(torch.float8_e4m3fn)
+
+        x = torch.tensor(
+            [-32.0, -16.0, -1.0, -0.25, 0.0, 0.25, 1.0, 16.0],
+            device=device,
+            dtype=torch.float32,
+        )
+        compiled_fp8_cast = torch.compile(fp8_cast, backend="inductor", fullgraph=True)
+
+        for fp8_dtype in fp8_dtypes:
+            torch._dynamo.reset()
+            expected = fp8_cast(x, fp8_dtype)
+            actual, code = run_and_get_code(compiled_fp8_cast, x, fp8_dtype)
+
+            self.assertEqual(actual.dtype, fp8_dtype)
+            torch.testing.assert_close(actual.float(), expected.float(), rtol=0, atol=0)
+            self.assertNotIn(utils.triton_type(fp8_dtype), "\n".join(code))
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm
     @onlyCUDA
@@ -579,7 +606,9 @@ class TestFP8Lowering(TestCase):
             else:
                 self.assertEqual(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    def _test_scaled_mm_preserves_strides_impl(self, device):
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @onlyOn(["cuda", "xpu", "cpu"])
+    def test_scaled_mm_preserves_strides(self, device):
         """Test that scaled_mm preserves stride ordering through a custom pass."""
 
         GPU_TYPE = device
@@ -620,12 +649,12 @@ class TestFP8Lowering(TestCase):
 
                             # Clone the inputs to potentially change stride ordering
                             a_cloned = g.call_function(
-                                torch.ops.aten.clone.default,
+                                torch.ops.aten.clone,
                                 (a_fp8,),
                                 {"memory_format": torch.contiguous_format},
                             )
                             b_cloned = g.call_function(
-                                torch.ops.aten.clone.default,
+                                torch.ops.aten.clone,
                                 (b_fp8,),
                                 {"memory_format": torch.contiguous_format},
                             )
@@ -666,19 +695,6 @@ class TestFP8Lowering(TestCase):
             self.assertIn("scaled_mm", wrapper.lower())
             # The clones should be visible in the generated code
             self.assertIn("clone", wrapper.lower())
-
-    # TODO: collapse this back into one test once fixed on CUDA and XPU.
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    def test_scaled_mm_preserves_strides_cpu_actual(self):
-        self._test_scaled_mm_preserves_strides_impl("cpu")
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    # TODO (eellison): fails with:
-    # "RuntimeError: mat2 must be col_major, got stride (64, 1)".
-    @unittest.expectedFailure
-    @onlyOn(["cuda", "xpu"])
-    def test_scaled_mm_preserves_strides(self, device):
-        self._test_scaled_mm_preserves_strides_impl(device)
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
