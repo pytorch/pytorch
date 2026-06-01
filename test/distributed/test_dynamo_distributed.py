@@ -2317,6 +2317,47 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         torch.compile(mod, backend=cnt)(*args)
 
+    @patch.object(config, "optimize_ddp", True)
+    def test_selective_activation_checkpoint(self):
+        """DDPOptimizer must not clobber SAC's _checkpoint_context_fn metadata."""
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        N = 1000
+        policy_call_count = 0
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            nonlocal policy_call_count
+            policy_call_count += 1
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(N, N)
+                self.linear2 = torch.nn.Linear(N, N)
+
+            def forward(self, x):
+                x = checkpoint(
+                    self.linear1, x, use_reentrant=False, context_fn=context_fn
+                )
+                return checkpoint(
+                    self.linear2, x, use_reentrant=False, context_fn=context_fn
+                )
+
+        mod = MockModule().to(self.device_type)
+        mod = DDP(mod, bucket_cap_mb=1)
+        x = torch.randn(N, N, device=self.device_type, requires_grad=True)
+
+        compiled = torch.compile(mod, backend="aot_eager")
+        compiled(x).sum().backward()
+        self.assertGreater(policy_call_count, 0)
+
     def test_fsdp_orig_params_assert(self):
         # Test with basic FSDP wrapping (outer wrap around whole model)
         m, inputs, _ = get_model(f"{self.device_type}:{self.rank}")
