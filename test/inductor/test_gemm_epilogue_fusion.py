@@ -1703,24 +1703,47 @@ class GemmEpilogueFusionTests(TestCase):
         b = _bfloat16_to_float4_e2m1fn_x2(
             torch.eye(n, k, device="cuda", dtype=torch.bfloat16)
         ).t()
-        scale_a = torch.full(
-            (self._block_scaled_numel(m, k, 16),),
-            1.0,
-            device="cuda",
-            dtype=torch.float8_e4m3fn,
-        )
-        scale_b = torch.full(
-            (self._block_scaled_numel(n, k, 16),),
-            1.0,
-            device="cuda",
-            dtype=torch.float8_e4m3fn,
-        )
+        from quack.blockscaled_gemm_utils import pack_scale_2d_to_blocked_contig
+
+        sf_k = k // 16
+        scale_a_2d = (
+            0.5
+            + (torch.arange(m, device="cuda")[:, None] % 7).float() * 0.125
+            + (torch.arange(sf_k, device="cuda")[None, :] % 5).float() * 0.0625
+        ).to(torch.float8_e4m3fn)
+        scale_b_2d = (
+            0.75
+            + (torch.arange(n, device="cuda")[:, None] % 5).float() * 0.125
+            + (torch.arange(sf_k, device="cuda")[None, :] % 7).float() * 0.0625
+        ).to(torch.float8_e4m3fn)
+        scale_a = pack_scale_2d_to_blocked_contig(scale_a_2d).flatten()
+        scale_b = pack_scale_2d_to_blocked_contig(scale_b_2d).flatten()
         global_scale = torch.ones((1,), device="cuda", dtype=torch.float32)
 
         result = torch.compile(fn, backend="inductor", fullgraph=True)(
             a, b, scale_a, global_scale, scale_b
         )
-        expected = torch.eye(m, n, device="cuda", dtype=torch.bfloat16).relu()
+        expected = torch.ops.aten._scaled_mm_v2.default(
+            a,
+            b,
+            [scale_a, global_scale],
+            [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+            [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+            [scale_b, global_scale],
+            [F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+            [F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+            None,
+            torch.bfloat16,
+            [],
+            False,
+        ).relu()
+        logical_expected = torch.zeros((m, n), device="cuda", dtype=torch.float32)
+        diagonal = torch.arange(m, device="cuda")
+        logical_expected[diagonal, diagonal] = (
+            scale_a_2d.float()[diagonal, diagonal // 16]
+            * scale_b_2d.float()[diagonal, diagonal // 16]
+        )
+        self.assertEqual(expected, logical_expected.to(torch.bfloat16))
         self.assertEqual(result, expected)
 
     @requires_cuda_and_triton
