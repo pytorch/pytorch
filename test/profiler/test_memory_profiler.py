@@ -9,10 +9,11 @@ from collections.abc import Callable, Iterator
 import torch
 from torch._C._profiler import _EventType, _TensorMetadata
 from torch.profiler import _memory_profiler, _utils
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import (
-    ALLOW_XPU_PROFILING_TEST,
-    DEVICE_LIST_SUPPORT_PROFILING_TEST,
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
@@ -25,6 +26,29 @@ from torch.utils import _pytree as pytree
 profile = functools.partial(
     torch.profiler.profile, record_shapes=True, profile_memory=True, with_stack=True
 )
+
+
+def _lookup_tensor_categories(
+    t: torch.Tensor, memory_profile: _memory_profiler.MemoryProfile
+) -> dict[_memory_profiler.TensorAndID, _memory_profiler.Category | None]:
+    storage = t.storage()
+    if storage is None:
+        raise ValueError("Cannot look up uninitialized Tensor.")
+
+    snapshot = memory_profile._category_snapshot()
+    ids = {
+        key.storage.allocation_id
+        for key, _ in snapshot
+        if key.storage.ptr == storage.data_ptr() and key.device == storage.device
+    }
+
+    return {
+        (key, version): category
+        for (key, version), category in memory_profile._category_snapshot().items()
+        #
+        # If a Tensor is live we want the most recent ID
+        if key.storage.allocation_id == max(ids | {-1})
+    }
 
 
 @skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
@@ -68,9 +92,11 @@ class LazyLinear(torch.nn.Module):
     def forward(self, x) -> torch.Tensor:
         if getattr(self, "weight", None) is None:
             self.weight = torch.nn.Parameter(
-                torch.empty((self.out_features, self.in_features))
+                torch.empty((self.out_features, self.in_features), device=x.device)
             )
-            self.bias = torch.nn.Parameter(torch.empty(self.out_features))
+            self.bias = torch.nn.Parameter(
+                torch.empty(self.out_features, device=x.device)
+            )
 
         return torch.nn.functional.linear(x, self.weight, self.bias)
 
@@ -163,10 +189,10 @@ class TestIdentifyGradients(TestCase):
                     f"Tensor wrongly marked as gradient: {node.name}: {p_grad_key}",
                 )
 
-    def test_extract_gradients_low_level(self) -> None:
-        x = torch.ones((1,))
-        w0 = torch.ones((1,), requires_grad=True)
-        w1 = torch.ones((1,), requires_grad=True)
+    def test_extract_gradients_low_level(self, device) -> None:
+        x = torch.ones((1,), device=device)
+        w0 = torch.ones((1,), requires_grad=True, device=device)
+        w1 = torch.ones((1,), requires_grad=True, device=device)
 
         def check(cold_start: bool):
             self.assertEqual(w0.grad is None, cold_start)
@@ -184,8 +210,8 @@ class TestIdentifyGradients(TestCase):
         check(cold_start=True)
         check(cold_start=False)
 
-    def test_extract_gradients_from_module(self) -> None:
-        model = torch.nn.Sequential(torch.nn.Linear(2, 1), ScaleLayer())
+    def test_extract_gradients_from_module(self, device) -> None:
+        model = torch.nn.Sequential(torch.nn.Linear(2, 1), ScaleLayer()).to(device)
         named_parameters = dict(model.named_parameters())
         self.assertEqual(len(named_parameters), 3)
 
@@ -195,7 +221,7 @@ class TestIdentifyGradients(TestCase):
             self.assertOnlyGradients(prof, gradients)
 
         def check(cold_start: bool):
-            x = torch.ones((2, 2))
+            x = torch.ones((2, 2), device=device)
             with profile() as prof:
                 model(x).sum().backward()
 
@@ -215,7 +241,7 @@ class TestIdentifyGradients(TestCase):
 
             # We can detect gradients even when `.backward()` is not called.
             with profile() as prof:
-                model(torch.ones((2, 2)))
+                model(torch.ones((2, 2), device=device))
 
             for name, p in named_parameters.items():
                 self.assertGradientDetected(name, prof, _EventType.PyCall, p.grad, p)
@@ -227,10 +253,10 @@ class TestIdentifyGradients(TestCase):
         check(cold_start=True)
         check(cold_start=False)
 
-    def _test_extract_gradients_from_optimizer(self, set_to_none: bool) -> None:
-        x = torch.ones((1,))
-        w0 = torch.ones((1,), requires_grad=True)
-        w1 = torch.ones((1,), requires_grad=True)
+    def _test_extract_gradients_from_optimizer(self, device, set_to_none: bool) -> None:
+        x = torch.ones((1,), device=device)
+        w0 = torch.ones((1,), requires_grad=True, device=device)
+        w1 = torch.ones((1,), requires_grad=True, device=device)
         optimizer = torch.optim.SGD((w0, w1), lr=0.1, momentum=0.9)
 
         def check(cold_start: bool):
@@ -251,51 +277,56 @@ class TestIdentifyGradients(TestCase):
             self.assertGradientDetected("w1", prof, _EventType.TorchOp, w1.grad)
             self.assertOnlyGradients(prof, (w0.grad, w1.grad))
 
-            with profile() as prof:
-                for _ in range(2):
-                    optimizer.zero_grad(set_to_none=set_to_none)
-                    z = x.expand(4) * w0
-                    (z * w1).sum().backward()
-                    optimizer.step()
+            # Caching behavior is CPU-specific: on accelerators the profiler
+            # can still detect gradients even after set_to_none=True.
+            if device == "cpu":
+                with profile() as prof:
+                    for _ in range(2):
+                        optimizer.zero_grad(set_to_none=set_to_none)
+                        z = x.expand(4) * w0
+                        (z * w1).sum().backward()
+                        optimizer.step()
 
-            # Inspected state is cached, so if we replace gradients (as is the
-            # case for `set_to_none=True`) our python instrumentation will not
-            # see them.
-            # TODO(robieta): Should `.step()` be excluded from caching?
-            self.assertNotEqual(
-                self.gradient_detected(prof, _EventType.PyCall, w0.grad, w0),
-                set_to_none,
-            )
+                # Inspected state is cached, so if we replace gradients (as is
+                # the case for `set_to_none=True`) our python instrumentation
+                # will not see them.
+                # TODO(robieta): Should `.step()` be excluded from caching?
+                self.assertNotEqual(
+                    self.gradient_detected(prof, _EventType.PyCall, w0.grad, w0),
+                    set_to_none,
+                )
 
-            self.assertNotEqual(
-                self.gradient_detected(prof, _EventType.PyCall, w1.grad, w1),
-                set_to_none,
-            )
+                self.assertNotEqual(
+                    self.gradient_detected(prof, _EventType.PyCall, w1.grad, w1),
+                    set_to_none,
+                )
 
-            if set_to_none:
-                with self.assertRaisesRegex(AssertionError, "Tensor wrongly marked"):
-                    self.assertOnlyGradients(prof, (w0.grad, w1.grad))
+                if set_to_none:
+                    with self.assertRaisesRegex(
+                        AssertionError, "Tensor wrongly marked"
+                    ):
+                        self.assertOnlyGradients(prof, (w0.grad, w1.grad))
 
         check(cold_start=True)
         check(cold_start=False)
 
-    def test_extract_gradients_from_optimizer(self) -> None:
-        self._test_extract_gradients_from_optimizer(set_to_none=False)
+    def test_extract_gradients_from_optimizer(self, device) -> None:
+        self._test_extract_gradients_from_optimizer(device, set_to_none=False)
 
     @unittest.skipIf(
         IS_MACOS or IS_WINDOWS, "https://github.com/pytorch/pytorch/issues/88721"
     )
-    def test_extract_gradients_from_optimizer_set_to_none(self) -> None:
-        self._test_extract_gradients_from_optimizer(set_to_none=True)
+    def test_extract_gradients_from_optimizer_set_to_none(self, device) -> None:
+        self._test_extract_gradients_from_optimizer(device, set_to_none=True)
 
-    def test_extract_gradients_from_module_and_optimizer(self) -> None:
+    def test_extract_gradients_from_module_and_optimizer(self, device) -> None:
         # Module and optimizer are thoroughly tested individually and should be
         # additive. Thus we can manage with a lightweight check that they don't
         # interact adversely.
-        model = torch.nn.Sequential(torch.nn.Linear(2, 1), ScaleLayer())
+        model = torch.nn.Sequential(torch.nn.Linear(2, 1), ScaleLayer()).to(device)
         optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
         with profile() as prof:
-            model(torch.ones((2, 2))).sum().backward()
+            model(torch.ones((2, 2), device=device)).sum().backward()
             optimizer.step()
 
         self.assertGradientDetected(
@@ -733,157 +764,9 @@ class TestDataFlow(TestCase):
             [memory]                  T8(v0*)          ->""",
         )
 
-        return
-
-        x = torch.ones((25,))
-        w0 = torch.ones((1,), requires_grad=True)
-        w1 = torch.ones((1,), requires_grad=True)
-
-        with profile() as prof_no_grad:
-            with torch.no_grad():
-                x.mul(w0).relu().mul(w1).relu().sum()
-
-        # TODO: one with `.logsumexp(dim=0)`
-
-        self.assertExpectedInline(
-            self._format_graph(prof_no_grad),
-            """\
-            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
-            aten::relu                T2(v0)           ->  T3(v0)
-            [memory]                  T2(v0*)          ->
-            aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
-            [memory]                  T3(v0*)          ->
-            aten::relu                T5(v0)           ->  T6(v0)
-            [memory]                  T5(v0*)          ->
-            aten::sum                 T6(v0)           ->  T7(v0)
-            [memory]                  T6(v0*)          ->
-            [memory]                  T7(v0*)          ->""",
-        )
-
-        with profile() as prof_grad:
-            loss = x.mul(w0).relu().mul(w1).relu().sum()
-            loss.backward()
-
-        self.assertExpectedInline(
-            self._format_graph(prof_grad),
-            """\
-            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
-            aten::relu                T2(v0)           ->  T3(v0)
-            [memory]                  T2(v0*)          ->
-            aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
-            aten::relu                T5(v0)           ->  T6(v0)
-            [memory]                  T5(v0*)          ->
-            aten::sum                 T6(v0)           ->  T7(v0)
-            aten::ones_like           T7(v0)           ->  T8(v0)
-            SumBackward0              T8(v0)           ->  T8(v1)
-            ReluBackward0             T6(v0), T8(v1)   ->  T8(v2), T9(v0)
-            [memory]                  T6(v0*)          ->
-            MulBackward0              T3(v0), T4(v0), T9(v0)  ->  T9(v1), T10(v0), T11(v0)
-            aten::sum                 T10(v0)          ->  T12(v0)
-            [memory]                  T10(v0*)         ->
-            [memory]                  T9(v1*)          ->
-            AccumulateGrad            T12(v0)          ->  T12(v1)
-            ReluBackward0             T3(v0), T11(v0)  ->  T11(v1), T13(v0)
-            [memory]                  T11(v1*)         ->
-            [memory]                  T3(v0*)          ->
-            MulBackward0              T0(v0), T13(v0)  ->  T13(v1), T14(v0)
-            aten::sum                 T14(v0)          ->  T15(v0)
-            [memory]                  T14(v0*)         ->
-            [memory]                  T13(v1*)         ->
-            AccumulateGrad            T15(v0)          ->  T15(v1)
-            [memory]                  T8(v2*)          ->""",
-        )
-
-        # Second time grads are already initialized.
-        with profile() as prof_grad:
-            loss = x.mul(w0).relu().mul(w1).relu().sum()
-            loss.backward()
-
-        self.assertExpectedInline(
-            self._format_graph(prof_grad),
-            """\
-            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
-            aten::relu                T2(v0)           ->  T3(v0)
-            [memory]                  T2(v0*)          ->
-            aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
-            aten::relu                T5(v0)           ->  T6(v0)
-            [memory]                  T5(v0*)          ->
-            aten::sum                 T6(v0)           ->  T7(v0)
-            aten::ones_like           T7(v0)           ->  T8(v0)
-            SumBackward0              T8(v0)           ->  T8(v1)
-            ReluBackward0             T6(v0), T8(v1)   ->  T8(v2), T9(v0)
-            [memory]                  T6(v0*)          ->
-            MulBackward0              T3(v0), T4(v0), T9(v0)  ->  T9(v1), T10(v0), T11(v0)
-            aten::sum                 T10(v0)          ->  T12(v0)
-            [memory]                  T10(v0*)         ->
-            [memory]                  T9(v1*)          ->
-            AccumulateGrad            T12(v0*), T13(v0)  ->  T13(v1)
-            ReluBackward0             T3(v0), T11(v0)  ->  T11(v1), T14(v0)
-            [memory]                  T11(v1*)         ->
-            [memory]                  T3(v0*)          ->
-            MulBackward0              T0(v0), T14(v0)  ->  T14(v1), T15(v0)
-            aten::sum                 T15(v0)          ->  T16(v0)
-            [memory]                  T15(v0*)         ->
-            [memory]                  T14(v1*)         ->
-            AccumulateGrad            T16(v0*), T17(v0)  ->  T17(v1)
-            [memory]                  T8(v2*)          ->""",
-        )
-
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2E(TestCase):
-    @staticmethod
-    def _lookup_tensor_categories(
-        t: torch.Tensor, memory_profile: _memory_profiler.MemoryProfile
-    ) -> dict[_memory_profiler.TensorAndID, _memory_profiler.Category | None]:
-        storage = t.storage()
-        if storage is None:
-            raise ValueError("Cannot look up uninitialized Tensor.")
-
-        snapshot = memory_profile._category_snapshot()
-        ids = {
-            key.storage.allocation_id
-            for key, _ in snapshot
-            if key.storage.ptr == storage.data_ptr() and key.device == storage.device
-        }
-
-        return {
-            (key, version): category
-            for (key, version), category in memory_profile._category_snapshot().items()
-            #
-            # If a Tensor is live we want the most recent ID
-            if key.storage.allocation_id == max(ids | {-1})
-        }
-
-    def _run_and_check_parameters_and_gradients(
-        self, inner_fn, model, grads_none: bool = False
-    ):
-        with profile() as prof:
-            inner_fn()
-
-        memory_profile = prof._memory_profile()
-
-        def assert_category(
-            t: torch.Tensor,
-            category: _memory_profiler.Category,
-            should_be_none: bool = False,
-        ):
-            if should_be_none:
-                if t is not None:
-                    raise AssertionError("tensor should be None but is not.")
-                return
-            self.assertIsNotNone(t)
-            categories = self._lookup_tensor_categories(t, memory_profile)
-            self.assertGreater(len(categories), 0)
-            self.assertTrue(all(c == category for c in categories.values()), categories)
-
-        for p in model.parameters():
-            assert_category(p, _memory_profiler.Category.PARAMETER)
-            assert_category(p.grad, _memory_profiler.Category.GRADIENT, grads_none)
-
-        # Rely on internal asserts
-        _ = memory_profile.timeline
-
     def _run_and_format_categories(self, fn, indent=12):
         """Generate summary of assigned categories for expecttest."""
 
@@ -939,189 +822,6 @@ class TestMemoryProfilerE2E(TestCase):
                 out.append(f"\n{name}")
 
         return textwrap.indent("\n".join(out), " " * indent)
-
-    def test_parameters_and_gradients(self):
-        model = torch.nn.Sequential(
-            torch.nn.Linear(2, 2), ScaleLayer(), torch.nn.Linear(2, 1), ScaleLayer()
-        )
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-
-        def fwd_only():
-            _ = model(torch.ones((2, 2)))
-
-        def fwd_bwd_step():
-            optimizer.zero_grad()
-            y = model(torch.ones((2, 2)))
-            torch.nn.functional.mse_loss(y, torch.rand((2, 1))).backward()
-            optimizer.step()
-
-        # If we profile the first step then gradients will not have been
-        # created when we call `model.forward`, so if we don't call `.backward`
-        # then gradients are never created.
-        self._run_and_check_parameters_and_gradients(
-            inner_fn=fwd_only, model=model, grads_none=True
-        )
-
-        # On the first step we must rely on `AccumulateGrad`, since gradients
-        # did not exist when `model.forward` was called.
-        self.assertTrue(all(p.grad is None for p in model.parameters()))
-        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
-
-        # After one step the python tracer will also flag gradients.
-        self.assertTrue(not any(p.grad is None for p in model.parameters()))
-        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
-
-        # The parameter gradients are not used but we still detect them with
-        # the python tracer.
-        self._run_and_check_parameters_and_gradients(inner_fn=fwd_only, model=model)
-
-    def test_parameters_and_gradients_set_to_none(self):
-        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-
-        def fwd_bwd_step():
-            for _ in range(3):
-                # zero grads at the start so gradients are still live to be
-                # checked.
-                optimizer.zero_grad(set_to_none=True)
-
-                y = model(torch.ones((2, 2)))
-                torch.nn.functional.mse_loss(y, torch.rand((2, 1))).backward()
-                optimizer.step()
-
-        fwd_bwd_step()
-        self.assertTrue(not any(p.grad is None for p in model.parameters()))
-        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
-
-        optimizer.zero_grad(set_to_none=True)
-        self.assertTrue(all(p.grad is None for p in model.parameters()))
-        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
-
-    def test_inputs_fwd(self):
-        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
-        inputs = [torch.ones((2, 2)) for _ in range(2)]
-
-        with profile() as prof:
-            # Inputs which were allocated before profiling began
-            for x in inputs:
-                _ = model(x)
-
-            # Inputs which were allocated after profiling began
-            for _ in range(2):
-                x = torch.ones((2, 2))
-                inputs.append(x)
-                _ = model(x)
-
-        memory_profile = prof._memory_profile()
-        for x in inputs:
-            categories = self._lookup_tensor_categories(x, memory_profile)
-            self.assertGreater(len(categories), 0)
-            self.assertTrue(
-                all(i == _memory_profiler.Category.INPUT for i in categories.values()),
-                categories,
-            )
-
-        snapshot = memory_profile._category_snapshot()
-        self.assertTrue(_memory_profiler.Category.INPUT in snapshot.values())
-
-    def test_inputs_fwd_lazy(self):
-        model = torch.nn.Sequential(LazyLinear(2, 2), LazyLinear(2, 1))
-        inputs = [torch.ones((2, 2)) for _ in range(2)]
-
-        with profile() as prof:
-            # Inputs which were allocated before profiling began
-            for x in inputs:
-                _ = model(x)
-
-            # Inputs which were allocated after profiling began
-            for _ in range(2):
-                x = torch.ones((2, 2))
-                inputs.append(x)
-                _ = model(x)
-
-        # For now we can't make any meaningful statements without a backward
-        # pass. Here we simply ensure that passes don't generate false positive
-        # category classifications.
-        memory_profile = prof._memory_profile()
-        for x in inputs:
-            categories = self._lookup_tensor_categories(x, memory_profile)
-            self.assertGreater(len(categories), 0)
-            self.assertTrue(all(i is None for i in categories.values()), categories)
-
-        snapshot = memory_profile._category_snapshot()
-        self.assertFalse(_memory_profiler.Category.INPUT in snapshot.values())
-
-    def test_inputs_fwd_bwd(self):
-        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-        inputs_targets = [(torch.ones((2, 2)), torch.rand((2, 1))) for _ in range(2)]
-
-        def fwd_bwd_step(x, targets):
-            y = model(x)
-            torch.nn.functional.mse_loss(y, targets).backward()
-            optimizer.step()
-            optimizer.zero_grad()
-
-        with profile() as prof:
-            # Inputs which were allocated before profiling began
-            for x, targets in inputs_targets:
-                fwd_bwd_step(x, targets)
-
-            # Inputs which were allocated after profiling began
-            for _ in range(2):
-                x = torch.ones((2, 2))
-                targets = torch.rand((2, 1))
-                inputs_targets.append((x, targets))
-                fwd_bwd_step(x, targets)
-
-        memory_profile = prof._memory_profile()
-
-        def check(t):
-            categories = self._lookup_tensor_categories(t, memory_profile)
-            self.assertGreater(len(categories), 0)
-            self.assertTrue(
-                all(i == _memory_profiler.Category.INPUT for i in categories.values())
-            )
-
-        for x, targets in inputs_targets:
-            check(x)
-            check(targets)
-
-    def test_lazily_initialized(self) -> None:
-        model = torch.nn.Sequential(
-            torch.nn.Linear(2, 2),
-            torch.nn.ReLU(),
-            LazyLinear(2, 2),
-            torch.nn.ReLU(),
-            torch.nn.Linear(2, 1),
-        )
-
-        self.assertEqual(len(list(model.parameters())), 4)
-
-        def inner_fn():
-            y = model(torch.ones((2, 2)))
-            optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-            optimizer.zero_grad()
-            torch.nn.functional.mse_loss(y, torch.rand((2, 1))).backward()
-            optimizer.step()
-
-        self._run_and_check_parameters_and_gradients(inner_fn=inner_fn, model=model)
-        self.assertEqual(len(list(model.parameters())), 6)
-
-    def test_manual_optimizer_step(self) -> None:
-        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
-
-        def inner_fn():
-            y = model(torch.ones((2, 2)))
-            torch.nn.functional.mse_loss(y, torch.rand((2, 1))).backward()
-
-            with torch.no_grad():
-                for p in model.parameters():
-                    grad = p.grad
-                    self.assertIsNotNone(grad)
-                    p.add_(grad, alpha=-0.1)
-
-        self._run_and_check_parameters_and_gradients(inner_fn=inner_fn, model=model)
 
     def test_categories_e2e_simple_fwd(self) -> None:
         w0 = torch.ones((1,), requires_grad=True)
@@ -1557,9 +1257,237 @@ class TestMemoryProfilerE2E(TestCase):
 
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
+class TestMemoryProfilerE2EDeviceType(TestCase):
+    def _run_and_check_parameters_and_gradients(
+        self, inner_fn, model, grads_none: bool = False
+    ):
+        with profile() as prof:
+            inner_fn()
+
+        memory_profile = prof._memory_profile()
+
+        def assert_category(
+            t: torch.Tensor,
+            category: _memory_profiler.Category,
+            should_be_none: bool = False,
+        ):
+            if should_be_none:
+                if t is not None:
+                    raise AssertionError("tensor should be None but is not.")
+                return
+            self.assertIsNotNone(t)
+            categories = _lookup_tensor_categories(t, memory_profile)
+            self.assertGreater(len(categories), 0)
+            self.assertTrue(all(c == category for c in categories.values()), categories)
+
+        for p in model.parameters():
+            assert_category(p, _memory_profiler.Category.PARAMETER)
+            assert_category(p.grad, _memory_profiler.Category.GRADIENT, grads_none)
+
+        # Rely on internal asserts
+        _ = memory_profile.timeline
+
+    def test_parameters_and_gradients(self, device):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 2), ScaleLayer(), torch.nn.Linear(2, 1), ScaleLayer()
+        ).to(device)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        def fwd_only():
+            _ = model(torch.ones((2, 2), device=device))
+
+        def fwd_bwd_step():
+            optimizer.zero_grad()
+            y = model(torch.ones((2, 2), device=device))
+            torch.nn.functional.mse_loss(
+                y, torch.rand((2, 1), device=device)
+            ).backward()
+            optimizer.step()
+
+        # If we profile the first step then gradients will not have been
+        # created when we call `model.forward`, so if we don't call `.backward`
+        # then gradients are never created.
+        self._run_and_check_parameters_and_gradients(
+            inner_fn=fwd_only, model=model, grads_none=True
+        )
+
+        # On the first step we must rely on `AccumulateGrad`, since gradients
+        # did not exist when `model.forward` was called.
+        self.assertTrue(all(p.grad is None for p in model.parameters()))
+        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
+
+        # After one step the python tracer will also flag gradients.
+        self.assertTrue(not any(p.grad is None for p in model.parameters()))
+        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
+
+        # The parameter gradients are not used but we still detect them with
+        # the python tracer.
+        self._run_and_check_parameters_and_gradients(inner_fn=fwd_only, model=model)
+
+    def test_parameters_and_gradients_set_to_none(self, device):
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1)).to(
+            device
+        )
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        def fwd_bwd_step():
+            for _ in range(3):
+                # zero grads at the start so gradients are still live to be
+                # checked.
+                optimizer.zero_grad(set_to_none=True)
+
+                y = model(torch.ones((2, 2), device=device))
+                torch.nn.functional.mse_loss(
+                    y, torch.rand((2, 1), device=device)
+                ).backward()
+                optimizer.step()
+
+        fwd_bwd_step()
+        self.assertTrue(not any(p.grad is None for p in model.parameters()))
+        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
+
+        optimizer.zero_grad(set_to_none=True)
+        self.assertTrue(all(p.grad is None for p in model.parameters()))
+        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
+
+    def test_inputs_fwd(self, device):
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1)).to(
+            device
+        )
+        inputs = [torch.ones((2, 2), device=device) for _ in range(2)]
+
+        with profile() as prof:
+            for x in inputs:
+                _ = model(x)
+
+            for _ in range(2):
+                x = torch.ones((2, 2), device=device)
+                inputs.append(x)
+                _ = model(x)
+
+        memory_profile = prof._memory_profile()
+        for x in inputs:
+            categories = _lookup_tensor_categories(x, memory_profile)
+            self.assertGreater(len(categories), 0)
+            self.assertTrue(
+                all(i == _memory_profiler.Category.INPUT for i in categories.values()),
+                categories,
+            )
+
+        snapshot = memory_profile._category_snapshot()
+        self.assertTrue(_memory_profiler.Category.INPUT in snapshot.values())
+
+    def test_inputs_fwd_lazy(self, device):
+        model = torch.nn.Sequential(LazyLinear(2, 2), LazyLinear(2, 1)).to(device)
+        inputs = [torch.ones((2, 2), device=device) for _ in range(2)]
+
+        with profile() as prof:
+            for x in inputs:
+                _ = model(x)
+
+            for _ in range(2):
+                x = torch.ones((2, 2), device=device)
+                inputs.append(x)
+                _ = model(x)
+
+        # For now we can't make any meaningful statements without a backward
+        # pass. Here we simply ensure that passes don't generate false positive
+        # category classifications.
+        memory_profile = prof._memory_profile()
+        for x in inputs:
+            categories = _lookup_tensor_categories(x, memory_profile)
+            self.assertGreater(len(categories), 0)
+            self.assertTrue(all(i is None for i in categories.values()), categories)
+
+        snapshot = memory_profile._category_snapshot()
+        self.assertFalse(_memory_profiler.Category.INPUT in snapshot.values())
+
+    def test_inputs_fwd_bwd(self, device):
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1)).to(
+            device
+        )
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+        inputs_targets = [
+            (torch.ones((2, 2), device=device), torch.rand((2, 1), device=device))
+            for _ in range(2)
+        ]
+
+        def fwd_bwd_step(x, targets):
+            y = model(x)
+            torch.nn.functional.mse_loss(y, targets).backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+        with profile() as prof:
+            for x, targets in inputs_targets:
+                fwd_bwd_step(x, targets)
+
+            for _ in range(2):
+                x = torch.ones((2, 2), device=device)
+                targets = torch.rand((2, 1), device=device)
+                inputs_targets.append((x, targets))
+                fwd_bwd_step(x, targets)
+
+        memory_profile = prof._memory_profile()
+
+        def check(t):
+            categories = _lookup_tensor_categories(t, memory_profile)
+            self.assertGreater(len(categories), 0)
+            self.assertTrue(
+                all(i == _memory_profiler.Category.INPUT for i in categories.values())
+            )
+
+        for x, targets in inputs_targets:
+            check(x)
+            check(targets)
+
+    def test_lazily_initialized(self, device) -> None:
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 2),
+            torch.nn.ReLU(),
+            LazyLinear(2, 2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(2, 1),
+        ).to(device)
+
+        self.assertEqual(len(list(model.parameters())), 4)
+
+        def inner_fn():
+            y = model(torch.ones((2, 2), device=device))
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+            optimizer.zero_grad()
+            torch.nn.functional.mse_loss(
+                y, torch.rand((2, 1), device=device)
+            ).backward()
+            optimizer.step()
+
+        self._run_and_check_parameters_and_gradients(inner_fn=inner_fn, model=model)
+        self.assertEqual(len(list(model.parameters())), 6)
+
+    def test_manual_optimizer_step(self, device) -> None:
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1)).to(
+            device
+        )
+
+        def inner_fn():
+            y = model(torch.ones((2, 2), device=device))
+            torch.nn.functional.mse_loss(
+                y, torch.rand((2, 1), device=device)
+            ).backward()
+
+            with torch.no_grad():
+                for p in model.parameters():
+                    grad = p.grad
+                    self.assertIsNotNone(grad)
+                    p.add_(grad, alpha=-0.1)
+
+        self._run_and_check_parameters_and_gradients(inner_fn=inner_fn, model=model)
+
+
+@skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerTimeline(TestCase):
-    @unittest.skipIf(
-        torch.xpu.is_available(),
+    @skipXPUIf(
+        True,
         "The XPU Profiler will not cover this case for now. Will support it in next period.",
     )
     def test_memory_timeline_no_id(self, device) -> None:
@@ -1618,12 +1546,11 @@ class TestMemoryProfilerTimeline(TestCase):
             )
 
 
+instantiate_device_type_tests(TestIdentifyGradients, globals(), only_for=("cpu",))
 instantiate_device_type_tests(
-    TestMemoryProfilerTimeline,
-    globals(),
-    only_for=DEVICE_LIST_SUPPORT_PROFILING_TEST,
-    allow_xpu=ALLOW_XPU_PROFILING_TEST,
+    TestMemoryProfilerE2EDeviceType, globals(), only_for=("cpu",)
 )
+instantiate_device_type_tests(TestMemoryProfilerTimeline, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
