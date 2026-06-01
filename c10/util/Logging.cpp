@@ -515,7 +515,7 @@ MessageLogger::MessageLogger(
   time(&rawtime);
 
 #ifndef _WIN32
-  struct tm raw_timeinfo = {0};
+  struct tm raw_timeinfo = {};
   struct tm* timeinfo = &raw_timeinfo;
   localtime_r(&rawtime, timeinfo);
 #else
@@ -525,7 +525,7 @@ MessageLogger::MessageLogger(
 
 #ifndef _WIN32
   // Get the current nanoseconds since epoch
-  struct timespec ts = {0};
+  struct timespec ts = {};
   clock_gettime(CLOCK_MONOTONIC, &ts);
   long ns = ts.tv_nsec;
 #else
@@ -613,10 +613,8 @@ void setLogLevelFlagFromEnv() {
     return;
   }
 
-  std::transform(
-      level.begin(), level.end(), level.begin(), [](unsigned char c) {
-        return toupper(c);
-      });
+  std::ranges::transform(
+      level, level.begin(), [](unsigned char c) { return toupper(c); });
 
   if (level == "0" || level == "INFO") {
     FLAGS_caffe2_log_level = 0;
