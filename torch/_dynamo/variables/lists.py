@@ -318,8 +318,6 @@ class BaseListVariable(VariableTracker):
         count: VariableTracker,
     ) -> VariableTracker:
         n = count.as_python_constant()
-        if pytuple_checkexact(self) and (n == 1 or not self.items):
-            return self
         try:
             new_items = self.items * n
         except (MemoryError, OverflowError) as e:
