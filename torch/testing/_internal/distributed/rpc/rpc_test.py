@@ -8,6 +8,7 @@ import os
 import sys
 import threading
 import time
+import unittest
 from collections import namedtuple
 from functools import partial
 from threading import Event, Lock
@@ -40,6 +41,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    IS_LINUX,
     IS_MACOS,
     load_tests,
     skip_but_pass_in_sandcastle_if,
@@ -1809,6 +1811,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                     )
                     self.assertTrue(event_exists)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/125365")
     @dist_init
     def test_profiler_rpc_key_names(self):
         # tests that remote events are properly prefixed with the RPC profiling key.
@@ -4490,6 +4493,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
 
 class CudaRpcTest(RpcAgentTestFixture):
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/154587")
     @skip_if_lt_x_gpu(2)
     @dist_init
     def test_profiler_remote_cuda(self):
@@ -4595,6 +4599,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.shutdown()
 
     # FIXME Merge this test with the corresponding one in RpcTest.
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/70546")
     @dist_init(setup_rpc=False)
     def test_tensorpipe_set_default_timeout(self):
         # Set a high timeout since it doesn't affect test runtime and ensures

@@ -95,7 +95,6 @@ from .utils import (
     call_and_expect_output_descs,
     call_func_at_runtime_with_args,
     make_boxed_func,
-    normalize_as_list,
     partial_flatten_asdict,
     simple_wraps,
     strict_zip,
@@ -460,7 +459,7 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
 class _FirstInvocationContext:
     """
     Context manager that tracks first invocation and conditionally enables _AnalyzeCustomOpInputOutputMode.
-    This is useful when we have a custom op where we want to analyze its' input
+    This is useful when we have a custom op where we want to analyze its input
     and output during cold start.
     """
 
@@ -523,17 +522,21 @@ class _RuntimeCompiledFnInvoker:
                 # It's possible to have trace_joint inside user specified with no_grad() region,
                 # if there is a nested with enable_grad(), that forces some outputs to require gradients.
                 # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
-                with (
-                    torch.autograd._force_original_view_tracking(True),
-                    torch.enable_grad(),
-                ):
-                    on_before_call()
-                    return call_func_at_runtime_with_args(
-                        self.compiled_fn,
-                        args_,
-                        disable_amp=self.disable_amp,
-                        steal_args=True,
-                    )
+                prev_view_replay_enabled = torch._C._is_view_replay_enabled()
+                try:
+                    if not prev_view_replay_enabled:
+                        torch._C._set_view_replay_enabled(True)
+                    with torch.enable_grad():
+                        on_before_call()
+                        return call_func_at_runtime_with_args(
+                            self.compiled_fn,
+                            args_,
+                            disable_amp=self.disable_amp,
+                            steal_args=True,
+                        )
+                finally:
+                    if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:
+                        torch._C._set_view_replay_enabled(prev_view_replay_enabled)
 
             # When we have an inference graph, we run with grad disabled.
             # It's possible to get an inference graph with inputs that require grad,
@@ -780,6 +783,16 @@ def _codegen_increment_mutation_versions(
         rw_lines.append(f"    _increment_version_(({gen_expr},))")
 
 
+def _codegen_normalize_as_list(
+    lines: list[str], var_name: str, *, indent_level: int
+) -> None:
+    indent = "    " * indent_level
+    lines.append(f"{indent}if isinstance({var_name}, tuple):")
+    lines.append(f"{indent}    {var_name} = list({var_name})")
+    lines.append(f"{indent}elif not isinstance({var_name}, list):")
+    lines.append(f"{indent}    {var_name} = [{var_name}]")
+
+
 def _codegen_compiled_fn_invocation(
     rw_lines: list[str],
     rw_globals: dict[str, object],
@@ -788,6 +801,8 @@ def _codegen_compiled_fn_invocation(
     disable_amp: bool,
 ) -> None:
     rw_lines.append("    with _first_ctx_():")
+    # trace_joint is known at codegen time. Only the joint/training path needs
+    # forced view replay; inference wrappers should not touch this TLS state.
     if trace_joint:
         rw_lines.append("        args_ = list(args)")
         for idx in indices_of_inps_to_detach:
@@ -795,23 +810,29 @@ def _codegen_compiled_fn_invocation(
                 f"        if isinstance(args_[{idx}], torch.Tensor): "
                 f"args_[{idx}] = args_[{idx}].detach()"
             )
-        rw_globals["_force_view_tracking_"] = (
-            torch.autograd._force_original_view_tracking
-        )
         rw_lines.append(
-            "        with _force_view_tracking_(True), torch.enable_grad():"
+            "        prev_view_replay_enabled = torch._C._is_view_replay_enabled()"
         )
-        rw_lines.append("            _on_before_call_()")
+        rw_lines.append("        try:")
+        rw_lines.append("            if not prev_view_replay_enabled:")
+        rw_lines.append("                torch._C._set_view_replay_enabled(True)")
+        rw_lines.append("            with torch.enable_grad():")
+        rw_lines.append("                _on_before_call_()")
         if disable_amp:
             rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-            rw_lines.append("            with _DisableAutocast_():")
-            rw_lines.append(
-                "                all_outs = _normalize_as_list_(_compiled_fn_(args_))"
-            )
+            rw_lines.append("                with _DisableAutocast_():")
+            rw_lines.append("                    all_outs = _compiled_fn_(args_)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=5)
         else:
-            rw_lines.append(
-                "            all_outs = _normalize_as_list_(_compiled_fn_(args_))"
-            )
+            rw_lines.append("                all_outs = _compiled_fn_(args_)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
+        rw_lines.append("        finally:")
+        rw_lines.append(
+            "            if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:"
+        )
+        rw_lines.append(
+            "                torch._C._set_view_replay_enabled(prev_view_replay_enabled)"
+        )
     else:
         rw_lines.append("        grad_enabled = torch.is_grad_enabled()")
         rw_lines.append("        try:")
@@ -822,13 +843,11 @@ def _codegen_compiled_fn_invocation(
         if disable_amp:
             rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
             rw_lines.append("            with _DisableAutocast_():")
-            rw_lines.append(
-                "                all_outs = _normalize_as_list_(_compiled_fn_(args))"
-            )
+            rw_lines.append("                all_outs = _compiled_fn_(args)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
         else:
-            rw_lines.append(
-                "            all_outs = _normalize_as_list_(_compiled_fn_(args))"
-            )
+            rw_lines.append("            all_outs = _compiled_fn_(args)")
+            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=3)
         rw_lines.append("        finally:")
         rw_lines.append("            if grad_enabled: torch._C._set_grad_enabled(True)")
     rw_lines.append("    del args")
@@ -1076,10 +1095,7 @@ def _create_runtime_wrapper(
     )
 
     rw_lines: list[str] = []
-    rw_globals: dict[str, object] = {
-        "torch": torch,
-        "_normalize_as_list_": normalize_as_list,
-    }
+    rw_globals: dict[str, object] = {"torch": torch}
 
     rw_lines.append(
         "def _runtime_wrapper(_compiled_fn_, _first_ctx_, _on_before_call_, args):"
@@ -2404,19 +2420,6 @@ class CachedAutogradLazyBackwardCompileInfo:
     bw_module_fn: Callable[..., Any]
 
 
-def _raise_if_functorch_active() -> None:
-    # not ideal but prevent the user from seeing a nasty traceback - See #138422
-    stack = torch._C._functorch.peek_interpreter_stack()
-    torch._check(
-        stack is None,
-        lambda: (
-            "It looks like you're trying to call a compiled backward function within vmap/grad/vjp, "
-            "which isn't supported. Try wrapping vmap inside torch.compile, or skip compiling the "
-            "backward function."
-        ),
-    )
-
-
 def initialize_rng_states(
     num_rng: int,
     graphsafe_idx: int,
@@ -2978,12 +2981,23 @@ def _codegen_backward_prologue(
         "def _backward_prologue("
         "ctx_saved_tensors, ctx_symints, ctx_opaque_objects, flat_args):"
     ]
-    G: dict[str, object] = {
-        "_raise_if_functorch_active_": _raise_if_functorch_active,
-        "torch": torch,
-    }
+    G: dict[str, object] = {"torch": torch}
 
-    L.append("    _raise_if_functorch_active_()")
+    L.append("    stack = torch._C._functorch.peek_interpreter_stack()")
+    L.append("    torch._check(")
+    L.append("        stack is None,")
+    L.append("        lambda: (")
+    L.append(
+        "            \"It looks like you're trying to call a compiled backward "
+        'function within vmap/grad/vjp, "'
+    )
+    L.append(
+        "            \"which isn't supported. Try wrapping vmap inside "
+        'torch.compile, or skip compiling the "'
+    )
+    L.append('            "backward function."')
+    L.append("        ),")
+    L.append("    )")
 
     if deterministic is not None and not deterministic:
         L.append("    _gd = torch.are_deterministic_algorithms_enabled()")
@@ -3154,7 +3168,6 @@ def _codegen_compiled_forward(
     code_globals: dict[str, object] = {
         "torch": torch,
         "BackwardState": BackwardState,
-        "_normalize_as_list_": normalize_as_list,
     }
 
     if backward_state_indices:
@@ -3171,9 +3184,11 @@ def _codegen_compiled_forward(
     if disable_amp:
         code_globals["_DisableAutocast_"] = torch._C._DisableAutocast
         lines.append("    with _DisableAutocast_():")
-        lines.append("        fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+        lines.append("        fw_outs = _compiled_fw_(list(args))")
+        _codegen_normalize_as_list(lines, "fw_outs", indent_level=2)
     else:
-        lines.append("    fw_outs = _normalize_as_list_(_compiled_fw_(list(args)))")
+        lines.append("    fw_outs = _compiled_fw_(list(args))")
+        _codegen_normalize_as_list(lines, "fw_outs", indent_level=1)
 
     lines.append("    _save_(ctx, fw_outs)")
     lines.append("    return _finalize_(ctx, fw_outs)")

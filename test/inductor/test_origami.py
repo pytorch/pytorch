@@ -188,29 +188,25 @@ class TestOrigami(TestCase):
         Uses benchmark_gpu_calls count instead of wall-clock timing to avoid flakiness
         on shared CI runners and sequencing bias (origami runs first and pays import cost).
         """
-        # InductorTestCase caps test_configs.max_mm_configs=2, which would
-        # collapse both branches to 0 benchmark calls; restore the unlimited
-        # default so the differential comparison is meaningful.
-        with config.patch({"test_configs.max_mm_configs": None}):
-            for op_name in ("mm", "addmm", "bmm"):
-                with self.subTest(op_name=op_name):
-                    origami_case = self._compile_with_config(
-                        op_name,
-                        self._origami_default_config(ORIGAMI_COMPILE_TOPK),
-                        size=256,
-                    )
-                    max_autotune_case = self._compile_with_config(
-                        op_name,
-                        self._max_autotune_default_config(),
-                        size=256,
-                    )
-                    # Origami with topk should benchmark fewer configs than full max_autotune
-                    self.assertLess(
-                        origami_case["benchmark_gpu_calls"],
-                        max_autotune_case["benchmark_gpu_calls"],
-                        msg=f"Origami ({origami_case['benchmark_gpu_calls']} calls) should have fewer "
-                        f"GPU benchmarks than max_autotune ({max_autotune_case['benchmark_gpu_calls']} calls)",
-                    )
+        for op_name in ("mm", "addmm", "bmm"):
+            with self.subTest(op_name=op_name):
+                origami_case = self._compile_with_config(
+                    op_name,
+                    self._origami_default_config(ORIGAMI_COMPILE_TOPK),
+                    size=256,
+                )
+                max_autotune_case = self._compile_with_config(
+                    op_name,
+                    self._max_autotune_default_config(),
+                    size=256,
+                )
+                # Origami with topk should benchmark fewer configs than full max_autotune
+                self.assertLess(
+                    origami_case["benchmark_gpu_calls"],
+                    max_autotune_case["benchmark_gpu_calls"],
+                    msg=f"Origami ({origami_case['benchmark_gpu_calls']} calls) should have fewer "
+                    f"GPU benchmarks than max_autotune ({max_autotune_case['benchmark_gpu_calls']} calls)",
+                )
 
     @unittest.skipIf(
         not DO_PERF_TEST,
@@ -444,11 +440,17 @@ class TestOrigami(TestCase):
                 # Configuration with origami enabled, but we'll mock it to fail
                 patch_config = self._origami_default_config(ORIGAMI_COMPILE_TOPK)
 
-                # Mock origami module to be None (simulating import failure)
+                # Patch the cached origami binding directly. Avoid mock.patch.dict
+                # on sys.modules: its snapshot/restore evicts modules lazily imported
+                # inside the `with` (e.g. torch._dynamo.repro.after_dynamo), causing
+                # duplicate backend registration on the next subtest iteration.
                 with (
                     fresh_cache(),
                     config.patch(patch_config),
-                    mock.patch.dict("sys.modules", {"origami": None}),
+                    mock.patch(
+                        "torch._inductor.template_heuristics.triton.origami",
+                        None,
+                    ),
                 ):
                     compiled = torch.compile(fn, dynamic=False)
                     result = compiled(*args)

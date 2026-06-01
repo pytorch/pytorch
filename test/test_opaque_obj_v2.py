@@ -44,13 +44,14 @@ from torch._library.opaque_object import (
     OpaqueBase,
     register_opaque_type,
 )
-from torch._subclasses.fake_tensor import FakeTensorMode, unset_fake_temporarily
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -213,8 +214,7 @@ class NestedCounters(OpaqueBase):
         # Model DeviceMesh.__getitem__: the graph records this method call, and
         # runtime execution creates an opaque object derived from the guarded
         # parent rather than baking in a compile-time constant.
-        with unset_fake_temporarily():
-            return Counter(counter.start, counter.end)
+        return Counter(counter.start, counter.end)
 
 
 class AddModule(OpaqueBase, torch.nn.Module):
@@ -1461,6 +1461,7 @@ def forward(self, arg0_1, arg1_1):
         res = torch.compile(foo, fullgraph=True, backend="inductor")(rng, x)
         self.assertFalse(torch.allclose(res, x * x + x))
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184597")
     def test_reference_type_recompile(self):
         cnt = CompileCounter()
 
@@ -3206,8 +3207,45 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
         x = Issue175968Tensor(torch.randn(4, requires_grad=True))
         self.assertRaisesRegex(
             RuntimeError,
-            "created during tracing",
+            "untracked reference-type opaque object",
             lambda: torch.compile(fn, fullgraph=True, backend="aot_eager")(x),
+        )
+
+    def test_reference_opaque_input_is_tracked(self):
+        def fn(meta, x):
+            return torch.ops._issue_175968_base.apply(x, meta)
+
+        meta = Issue175968Meta()
+        gm = make_fx(fn, tracing_mode="fake")(meta, torch.randn(4))
+        apply_node = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is torch.ops._issue_175968_base.apply.default
+        )
+        self.assertEqual(apply_node.args[1].op, "placeholder")
+        self.assertNotIn("_opaque_obj", gm.code)
+
+    def test_reference_opaque_closure_errors(self):
+        meta = Issue175968Meta()
+
+        def fn(x):
+            return torch.ops._issue_175968_base.apply(x, meta)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked reference-type opaque object",
+            lambda: make_fx(fn, tracing_mode="fake")(torch.randn(4)),
+        )
+
+    def test_equal_reference_opaque_is_still_untracked(self):
+        def fn(tracked_counter, x):
+            equal_but_distinct = Counter(1, 5)
+            return x + torch.ops._TestOpaqueObject.counter_start(equal_but_distinct)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked reference-type opaque object",
+            lambda: make_fx(fn, tracing_mode="fake")(Counter(1, 5), torch.randn(4)),
         )
 
     def test_reference_opaque_subclass_creation_errors(self):
@@ -3221,7 +3259,7 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
 
         self.assertRaisesRegex(
             RuntimeError,
-            "created during tracing",
+            "untracked reference-type opaque object",
             lambda: make_fx(fn, tracing_mode="fake")(torch.randn(4)),
         )
 

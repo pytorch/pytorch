@@ -4,6 +4,7 @@
 import dataclasses
 import functools
 import importlib
+import warnings
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from typing import Any, cast, Literal
@@ -67,13 +68,9 @@ def _get_flex_flash_fwd_configs(
         return [FlexFlashConfig(score_mod_vec_size=1)]
     if not torch._inductor.config.max_autotune:
         return [FlexFlashConfig()]
-    configs = [
+    return [
         FlexFlashConfig(score_mod_vec_size=v) for v in (1, 2, 4, 8, 16, 32, 64, 128)
     ]
-    max_configs = torch._inductor.config.test_configs.max_flex_configs
-    if max_configs is not None and len(configs) > max_configs:
-        configs = configs[:max_configs]
-    return configs
 
 
 def _select_aux_score_mod_vec_size(
@@ -737,6 +734,10 @@ def create_flex_flash_attention_backward_kernel(
     q_indices: TensorBox | None = None,
     full_q_num_blocks: TensorBox | None = None,
     full_q_indices: TensorBox | None = None,
+    dq_write_order: TensorBox | None = None,
+    dq_write_order_full: TensorBox | None = None,
+    dq_kv_order: TensorBox | None = None,
+    dq_kv_order_spt: bool | None = None,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
@@ -816,6 +817,82 @@ def create_flex_flash_attention_backward_kernel(
             ]
         )
 
+    has_dq_write_order = dq_write_order is not None
+    if has_dq_write_order:
+        input_nodes.append(dq_write_order)
+        if dq_write_order_full is not None:
+            input_nodes.append(dq_write_order_full)
+    has_dq_kv_order = dq_kv_order is not None and has_dq_write_order
+    dq_kv_order_spt_for_flash = dq_kv_order_spt if has_dq_write_order else None
+    if has_dq_kv_order:
+        input_nodes.append(dq_kv_order)
+
+    supports_dq_kv_order = False
+    supports_spt = False
+    if has_block_mask:
+        # pyrefly: ignore[missing-import]
+        from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
+
+        block_sparse_fields = getattr(BlockSparseTensorsTorch, "_fields", ())
+        supports_dq_kv_order = "dq_kv_order" in block_sparse_fields
+        supports_spt = "spt" in block_sparse_fields
+        if has_dq_kv_order and not supports_dq_kv_order:
+            raise NotImplementedError(
+                "Explicit tensor dq_kv_order requires flash-attn-4 with dq_kv_order support"
+            )
+        if dq_kv_order_spt_for_flash is not None and not (
+            supports_dq_kv_order or supports_spt
+        ):
+            raise NotImplementedError(
+                "Boolean dq_kv_order requires flash-attn-4 with dq_kv_order or spt support"
+            )
+
+    deterministic_requested = torch.are_deterministic_algorithms_enabled()
+    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    deterministic_backward_enabled = deterministic_requested
+    if deterministic_requested and has_block_mask:
+        major, _ = torch.cuda.get_device_capability(device)
+        missing_dq_write_order = dq_write_order is None or (
+            full_q_num_blocks is not None and dq_write_order_full is None
+        )
+        missing_dq_kv_order = not (
+            has_dq_kv_order or dq_kv_order_spt_for_flash is not None
+        )
+        if major < 10:
+            if warn_only:
+                deterministic_backward_enabled = False
+            else:
+                raise NotImplementedError(
+                    "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
+                    "requires SM100+ (compute capability >= 10.0). "
+                    "Use BACKEND='TRITON' for deterministic backward on older architectures."
+                )
+        elif missing_dq_write_order:
+            if warn_only:
+                deterministic_backward_enabled = False
+            else:
+                raise ValueError(
+                    "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
+                    "requires dQ write-order metadata. Create the block mask with "
+                    "create_block_mask(..., compute_dq_write_order=True)."
+                )
+        elif missing_dq_kv_order:
+            if warn_only:
+                deterministic_backward_enabled = False
+            else:
+                raise ValueError(
+                    "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH' "
+                    "requires dQ KV scheduler-order metadata. Create the block mask with "
+                    "create_block_mask(..., compute_dq_write_order=True)."
+                )
+    if deterministic_requested and not deterministic_backward_enabled:
+        warnings.warn(
+            "flex_attention backward with block_mask and BACKEND='FLASH' does not have "
+            "a deterministic implementation for this configuration, but you set "
+            "'torch.use_deterministic_algorithms(True, warn_only=True)'. "
+            "Running non-deterministic backward.",
+        )
+
     has_score_mod = fw_subgraph_buffer is not None and joint_subgraph_buffer is not None
     subgraphs = []
     if has_score_mod:
@@ -839,6 +916,13 @@ def create_flex_flash_attention_backward_kernel(
                 HAS_SCORE_MOD=has_score_mod,
                 SCORE_MOD_VEC_SIZE=conf.score_mod_vec_size,
                 HAS_BLOCK_MASK=has_block_mask,
+                HAS_DQ_WRITE_ORDER=has_dq_write_order,
+                HAS_DQ_WRITE_ORDER_FULL=dq_write_order_full is not None,
+                HAS_DQ_KV_ORDER=has_dq_kv_order,
+                DQ_KV_ORDER_SPT=dq_kv_order_spt_for_flash,
+                SUPPORTS_DQ_KV_ORDER=supports_dq_kv_order,
+                SUPPORTS_SPT=supports_spt,
+                DETERMINISTIC_BACKWARD_ENABLED=deterministic_backward_enabled,
                 SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
             )
