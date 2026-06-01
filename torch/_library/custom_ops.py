@@ -956,9 +956,9 @@ class CustomOpDef:
             result = fast_path(*args, **kwargs)
             if result is not _DO_SLOW_PATH:
                 return result
-            return overload._orig_op(
+            return overload._orig_op(  # pyrefly: ignore[missing-attribute]
                 *args, **kwargs
-            )  # pyrefly: ignore[missing-attribute]
+            )
 
         overload._op = fast_op
 
