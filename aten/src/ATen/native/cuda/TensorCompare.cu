@@ -44,7 +44,7 @@ void isneginf_kernel_impl(TensorIteratorBase &iter) {
 void clamp_kernel_impl(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_cuda", [&] {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower, scalar_t upper) -> scalar_t {
-      scalar_t result = std::clamp(v, lower, upper);
+      scalar_t result = (v < lower) ? lower : (upper < v) ? upper : v;
 
       if constexpr (std::numeric_limits<scalar_t>::has_quiet_NaN) {
         result = at::_isnan(upper) ? upper : result;
@@ -72,7 +72,11 @@ void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar li
       } else if (minmax==at::native::detail::ClampLimits::Max){
         return std::min(static_cast<opmath_t>(v), lim0_val);
       } else {
-        return std::clamp(static_cast<opmath_t>(v), lim0_val, lim1_val);
+        opmath_t val = static_cast<opmath_t>(v);
+        // The following replaces std::clamp(val, low, high) and is a viable solution for
+        // both CUDA and ROCm since std::clamp and this replacement generates the same PTX.
+        // The replacement should generate the same PTX as std::clamp. See https://godbolt.org/z/Wde9KW3v4
+        return (val < lim0_val) ? lim0_val : (lim1_val < val) ? lim1_val : val;
       }
     });
   });
