@@ -45,7 +45,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfRocm
+    TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -5389,6 +5389,58 @@ def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(get_tensor_input(()), 1, -1, True)
     yield SampleInput(get_tensor_input(()), 1, 0, True, True)
     yield SampleInput(get_tensor_input(()), 1, -1, True, True)
+
+def sample_inputs_cutedsl_topk(op_info, device, dtype, requires_grad, **kwargs):
+    """Samples for the CuTeDSL radix-select ``topk`` override.
+
+    Constraints the override enforces (see torch/_native/ops/topk/cutedsl_impl.py):
+      - fp32, CUDA, contiguous input
+      - dim is the last axis, largest=True, sorted=True
+      - k in {64, 128, 256, 512, 1024} (cooperative sort, K <= 1024 threads)
+      - N >= per-K threshold and N divisible by 4 (k<=256: 2*k, k=512: 8*k,
+        k=1024: 32*k; tuned from a B200 sweep)"""
+    from torch._native.ops.topk.cutedsl_impl import _MIN_N_MULTIPLIER
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    # Cross product of supported Ks with shapes that keep N above the
+    # per-K gate. M is set to 256 (>= typical GPU SM count) so the
+    # cond's SM-wave gate passes and the kernel actually runs.
+    for K in (64, 128, 256, 512, 1024):
+        N = max(_MIN_N_MULTIPLIER[K] * K, 4096)
+        yield SampleInput(make_arg((256, N)).contiguous(), args=(K,))
+        yield SampleInput(make_arg((256, N)).contiguous(), args=(K, -1))
+        # nD flatten-to-2D view; leading prod >= 256.
+        yield SampleInput(make_arg((4, 64, N)).contiguous(), args=(K,))
+
+
+def _topk_deterministic(*args, **kwargs):
+    prior = torch.are_deterministic_algorithms_enabled()
+    try:
+        torch.use_deterministic_algorithms(True)
+        return torch.topk(*args, **kwargs)
+    finally:
+        torch.use_deterministic_algorithms(prior)
+
+
+def _topk_method_deterministic(self, *args, **kwargs):
+    prior = torch.are_deterministic_algorithms_enabled()
+    try:
+        torch.use_deterministic_algorithms(True)
+        return self.topk(*args, **kwargs)
+    finally:
+        torch.use_deterministic_algorithms(prior)
+
+
+def reference_topk(a, k, dim=-1, largest=True, sorted=True):
+    # OpInfo numpy ref hook. NumPy has no direct topk, so we sort the whole
+    # axis and take the first k (sample shapes are small enough that this
+    # is fine).
+    order = np.argsort(-a if largest else a, axis=dim, kind="stable")
+    idx = np.take(order, np.arange(k), axis=dim)
+    vals = np.take_along_axis(a, idx, axis=dim)
+    return vals, idx
+
 
 def sample_inputs_outer(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -23715,6 +23767,66 @@ if "cutedsl" in dsl_ops_by_dsl:
             ),
         )
     )
+    # CuTeDSL radix-select topk override. Fires for fp32, CUDA, contiguous,
+    # last-dim inputs at K in {64, 128, 256, 512, 1024}; everything else
+    # falls through to aten. Two variants exercise both gather strategies:
+    # default (atomic gather, ord-only sort) and deterministic
+    # (prefix-sum gather, lex (ord, -idx) sort).
+    _cutedsl_topk_skips = (
+        DecorateInfo(skipCUDAIf(not torch.cuda.is_available(), "CUDA not available")),
+        DecorateInfo(skipIfNoCuteDSL),
+        DecorateInfo(unittest.skip("topk override requires contiguous input"),
+                     "TestCommon", "test_noncontiguous_samples"),
+        DecorateInfo(unittest.skip("Sample generator allocates on the primary CUDA device"),
+                     "TestCommon", "test_multiple_devices"),
+        DecorateInfo(unittest.skip("torch.topk supports more dtypes than the DSL override"),
+                     "TestCommon", "test_dtypes"),
+        DecorateInfo(unittest.skip("topk override incompatible with tensor subclasses"),
+                     "TestCompositeCompliance"),
+        DecorateInfo(unittest.skip("topk override incompatible with FakeTensor"),
+                     "TestFakeTensor"),
+        DecorateInfo(unittest.skip("topk override not introspectable for tag inference"),
+                     "TestTags"),
+        DecorateInfo(unittest.skip("topk override not introspectable for conjugate/negate views"),
+                     "TestMathBits"),
+        DecorateInfo(unittest.skip("torch.topk supports out= even though the DSL OpInfo does not exercise it"),
+                     "TestCommon", "test_out"),
+        DecorateInfo(unittest.skip("torch.topk supports out= even though the DSL OpInfo does not exercise it"),
+                     "TestCommon", "test_out_warning"),
+    )
+    _cutedsl_topk_kwargs = dict(
+        dtypes=_dispatch_dtypes((torch.float32,)),
+        dtypesIfCUDA=_dispatch_dtypes((torch.float32,)),
+        sample_inputs_func=sample_inputs_cutedsl_topk,
+        ref=reference_topk,
+        supports_autograd=False,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        supports_out=False,
+        supports_cow_input_no_materialize_forward=False,
+        decorators=[DecorateInfo(onlyCUDA)],
+        skips=_cutedsl_topk_skips,
+    )
+    dsl_ops_by_dsl.setdefault('cutedsl', []).extend([
+        OpInfo(
+            "topk", op=torch.topk,
+            variant_test_name="cutedsl_optimized",
+            # The default kernel resolves ties via smem atomic counters, so
+            # tied indices are nondeterministic across launches. The
+            # deterministic variant below covers the consistency check.
+            skips=_cutedsl_topk_skips + (
+                DecorateInfo(unittest.skip("nondeterministic on tied indices by design"),
+                             "TestCommon", "test_variant_consistency_eager"),
+            ),
+            **{k: v for k, v in _cutedsl_topk_kwargs.items() if k != "skips"},
+        ),
+        OpInfo(
+            "topk", op=_topk_deterministic,
+            variant_test_name="cutedsl_optimized_deterministic",
+            method_variant=_topk_method_deterministic,
+            **_cutedsl_topk_kwargs,
+        ),
+    ])
 
 op_db += opinfo.definitions.op_db
 
