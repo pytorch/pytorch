@@ -75,6 +75,9 @@ from .simd_kernel_features import (
 )
 
 
+_MAX_INLINE_PRECOMPUTABLE_SIZE_EXPR_OPS = 64
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
@@ -1084,6 +1087,33 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return f"[{', '.join(map(self.index_to_str, index))}]"
         return self.kexpr(self.rename_indexing(index))  # type: ignore[call-arg]
 
+    @staticmethod
+    def _should_precompute_size_expr(index: sympy.Expr) -> bool:
+        if (
+            isinstance(index, (int, sympy.Symbol, sympy.Number))
+            or index.is_number
+            or index.is_symbol
+            or index.is_integer is not True
+        ):
+            return False
+
+        symbols = index.free_symbols
+        return (
+            bool(symbols)
+            and all(
+                symbol_is_type(
+                    s,
+                    (
+                        SymT.SIZE,
+                        SymT.UNBACKED_INT,
+                        SymT.PRECOMPUTED_SIZE,
+                    ),
+                )
+                for s in symbols
+            )
+            and sympy.count_ops(index) > _MAX_INLINE_PRECOMPUTABLE_SIZE_EXPR_OPS
+        )
+
     def prepare_indexing(
         self,
         index: sympy.Expr,
@@ -1131,6 +1161,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         simp_index = (
             simp_index if not isinstance(simp_index, Identity) else simp_index.args[0]
         )
+
+        if self._should_precompute_size_expr(simp_index):
+            simp_index = V.graph.sizevars.lookup_precomputed_size(simp_index)
 
         return self.codegen_indexing(simp_index)
 
