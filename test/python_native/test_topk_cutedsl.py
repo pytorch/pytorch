@@ -1,16 +1,21 @@
 # Owner(s): ["module: dsl-native-ops"]
 #
-# Correctness tests for the CuTeDSL radix-select topk override.
+# Correctness tests for the CuTeDSL topk override (register + radix
+# kernels).
 #
-# The kernel has two specialisations:
+# Radix kernel (K in {64,128,256,512,1024}) has two specialisations:
 #   * Default (non-deterministic): atomic-counter gather + ord-only sort.
 #     Returns correct top-K values; indices may differ from aten on ties
 #     and may differ across successive calls. Tests verify values match
 #     aten bit-exactly and ``gather(input, indices)`` reproduces values.
 #   * Deterministic (under torch.use_deterministic_algorithms): prefix-sum
 #     gather + lex ``(ord, -idx)`` sort. Bit-exact aten match on both
-#     values and indices, stable across runs. Tests assert that under
-#     this mode.
+#     values and indices, stable across runs.
+#
+# Register kernel (K in {16,32}) is bit-exact on values and stable across
+# runs. Index ordering on ties is ``(value desc, idx asc)``, which doesn't
+# match aten's small-K CUDA topk; tests check value-equality + gather
+# round-trip rather than index-equality.
 
 import unittest
 
@@ -25,21 +30,29 @@ from torch.testing._internal.common_utils import (
 )
 
 
-_SUPPORTED_KS = (64, 128, 256, 512, 1024)
+_RADIX_KS = (64, 128, 256, 512, 1024)
+_REGISTER_KS = (16, 32)
+_SUPPORTED_KS = _REGISTER_KS + _RADIX_KS
 
 
-def _min_n_for_k(k: int) -> int:
-    """Mirror of the override's per-K N gate; used to size test shapes so
-    the override actually fires rather than falling through to aten."""
-    from torch._native.ops.topk.cutedsl_impl import _MIN_N_MULTIPLIER
+def _radix_min_n_for_k(k: int) -> int:
+    """Mirror of the radix kernel's per-K N gate; used to size test
+    shapes so the override actually fires rather than falling through
+    to aten."""
+    from torch._native.ops.topk.cutedsl_impl import _RADIX_MIN_N_MULTIPLIER
 
-    return _MIN_N_MULTIPLIER[k] * k
+    return _RADIX_MIN_N_MULTIPLIER[k] * k
 
 
 def _test_n(k: int) -> int:
-    """Pick a test N >= _min_n_for_k(k), aligned to 4, reasonably large
-    for correctness checking but small enough to keep tests fast."""
-    return max(_min_n_for_k(k), 4096)
+    """Pick a test N for which the override fires."""
+    if k in _REGISTER_KS:
+        # Register kernel has a (min, max) N range per K. Pick max so it
+        # exercises the largest in-range tile.
+        from torch._native.ops.topk.cutedsl_impl import _REGISTER_N_RANGE
+
+        return _REGISTER_N_RANGE[k][1]
+    return max(_radix_min_n_for_k(k), 4096)
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
@@ -153,18 +166,31 @@ class TestCuTeDSLTopK(TestCase):
         torch.manual_seed(5)
         x = torch.randn(256, 16384, device="cuda", dtype=torch.float32)
         pn = torch.backends.python_native
-        for bad_k in (32, 100, 2048):
+        for bad_k in (8, 100, 2048):
             with pn.cutedsl.disabled():
                 ref = torch.topk(x, bad_k, dim=-1)
             got = torch.topk(x, bad_k, dim=-1)
             self.assertEqual(got.values, ref.values)
             self.assertEqual(got.indices, ref.indices)
 
-    @parametrize("k", _SUPPORTED_KS)
+    def test_register_n_out_of_range_falls_through(self) -> None:
+        """Register K values with N outside the per-K cap should fall through."""
+        torch.manual_seed(8)
+        pn = torch.backends.python_native
+        # K=32 register accepts N <= 256; N=512 must fall through (radix
+        # doesn't accept K=32 either).
+        x = torch.randn(256, 512, device="cuda", dtype=torch.float32)
+        with pn.cutedsl.disabled():
+            ref = torch.topk(x, 32, dim=-1)
+        got = torch.topk(x, 32, dim=-1)
+        self.assertEqual(got.values, ref.values)
+        self.assertEqual(got.indices, ref.indices)
+
+    @parametrize("k", _RADIX_KS)
     def test_deterministic_mode_matches_aten_with_heavy_ties(self, k: int) -> None:
-        """Under ``torch.use_deterministic_algorithms`` the kernel uses
-        prefix-sum gather + lex ``(ord, -idx)`` sort and must match aten
-        bit-exactly on both values and indices, even with heavy ties."""
+        """Under ``torch.use_deterministic_algorithms`` the radix kernel
+        uses prefix-sum gather + lex ``(ord, -idx)`` sort and must match
+        aten bit-exactly on both values and indices, even with heavy ties."""
         torch.manual_seed(6)
         x = torch.randint(0, 4, (256, _test_n(k)), device="cuda", dtype=torch.float32)
         pn = torch.backends.python_native
@@ -184,6 +210,24 @@ class TestCuTeDSLTopK(TestCase):
         # And bit-exact match to aten.
         self.assertEqual(v1, ref_v)
         self.assertEqual(i1, ref_i)
+
+    @parametrize("k", _REGISTER_KS)
+    def test_register_stable_with_heavy_ties(self, k: int) -> None:
+        """Register kernel index order on ties is ``(value desc, idx asc)``,
+        which doesn't match aten's small-K CUDA topk. Check the weaker
+        contract: bit-exact values, gather round-trip, and stability
+        across successive calls."""
+        torch.manual_seed(9)
+        x = torch.randint(0, 4, (256, _test_n(k)), device="cuda", dtype=torch.float32)
+        pn = torch.backends.python_native
+        with pn.cutedsl.disabled():
+            ref_v, _ = torch.topk(x, k, dim=-1)
+        v1, i1 = torch.topk(x, k, dim=-1)
+        v2, i2 = torch.topk(x, k, dim=-1)
+        self.assertEqual(v1, v2)
+        self.assertEqual(i1, i2)
+        self.assertEqual(v1, ref_v)
+        self.assertEqual(torch.gather(x, -1, i1), v1)
 
     def test_autograd_passes_through(self) -> None:
         """aten's derivative handles backward; override runs at CUDA key
