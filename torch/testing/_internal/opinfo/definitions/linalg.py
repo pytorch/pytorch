@@ -1587,7 +1587,6 @@ op_db: list[OpInfo] = [
             # we skip gradient checks for this suite as they are tested in
             # variant_test_name='grad_oriented'
             DecorateInfo(unittest.skip("Skipped!"), "TestFwdGradients"),
-            DecorateInfo(unittest.skip("Skipped!"), "TestBwdGradients"),
             # The values for attribute 'shape' do not match
             DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
             DecorateInfo(
@@ -1763,9 +1762,6 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         skips=(
             DecorateInfo(
-                unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"
-            ),
-            DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestFakeTensor",
                 "test_fake_crossref_backward_amp",
@@ -1834,17 +1830,12 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         skips=(
             # [NEW] Skips specifically for sample inputs at zero
-            # norm's vjp/jvp are not well-conditioned near zero
-            DecorateInfo(
-                unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"
-            ),
             DecorateInfo(
                 unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"
             ),
             DecorateInfo(
                 unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"
             ),
-            DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
             # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
             DecorateInfo(
                 unittest.expectedFailure,
