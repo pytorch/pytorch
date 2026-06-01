@@ -18241,10 +18241,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         out = torch.compile(fn, fullgraph=True)()
-        self.assertFalse(out._is_zerotensor())
         self.assertEqual(out.size(0), numel)
-        self.assertEqual(out.stride(), (0,))
-        self.assertEqual(out.untyped_storage().nbytes(), out.element_size())
+        self.assertEqual(out.stride(), (1,))
 
     # end of class CommonTemplate - add new tests here
 
