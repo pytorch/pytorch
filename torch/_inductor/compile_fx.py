@@ -116,12 +116,9 @@ from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
-from .fx_passes.post_grad import (
-    post_grad_passes,
-    require_view_as_complex_input_layout,
-    view_to_reshape,
-)
+from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
+from .fx_utils import maybe_fake_layout_constraints
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
 from .triton_bundler import TritonBundler
@@ -713,6 +710,54 @@ def maybe_disable_graph_partition(
         return contextlib.nullcontext()
 
 
+class _InductorFakeTensorProp(FakeTensorProp):
+    _current_node: torch.fx.Node | None = None
+
+    def run_node(self, n: torch.fx.Node) -> Any:
+        if (
+            n.op == "call_function"
+            and n.target is torch.ops.higher_order.invoke_subgraph
+            and n.args[1] not in self.seen_subgraphs
+        ):
+            if not isinstance(n.args[1], str):
+                raise AssertionError(f"Expected str, got {type(n.args[1])}")
+            if not (
+                isinstance(n.args[0], torch.fx.Node)
+                and n.args[0].op == "get_attr"
+                and isinstance(n.args[0].target, str)
+            ):
+                raise AssertionError(
+                    "Expected n.args[0] to be a get_attr Node with str target"
+                )
+            self.seen_subgraphs.add(n.args[1])
+            example_inputs = []
+            for operand in n.args[2:]:
+                if not (isinstance(operand, torch.fx.Node) and "val" in operand.meta):
+                    raise AssertionError("Expected Node with 'val' in meta")
+                example_inputs.append(operand.meta["val"])
+            return _InductorFakeTensorProp(
+                getattr(self.module, n.args[0].target), mode=self._mode
+            ).propagate(*example_inputs)
+
+        self._current_node = n
+        try:
+            return super().run_node(n)
+        finally:
+            self._current_node = None
+
+    def call_function(
+        self,
+        target: torch.fx.node.Target,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> Any:
+        if self._current_node is not None:
+            args, kwargs = maybe_fake_layout_constraints(
+                self._current_node, args, kwargs
+            )
+        return super().call_function(target, args, kwargs)
+
+
 def fake_tensor_prop(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -728,17 +773,17 @@ def fake_tensor_prop(
         fake_mode = detect_fake_mode(example_inputs)
         if not fake_mode:
             fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
-            FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+            _InductorFakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
         else:
             ctx = (
                 contextlib.nullcontext()
                 if not force_allow_non_fake_inputs
                 else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
             )
-            with ctx:
-                FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
-                    *example_inputs
-                )
+            with ctx:  # type: ignore[attr-defined]
+                _InductorFakeTensorProp(
+                    gm, mode=fake_mode
+                ).propagate_dont_convert_inputs(*example_inputs)
 
     return fake_mode
 
@@ -1124,9 +1169,10 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
+        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
-            metadata=cache_info or {},
+            metadata=cache_event_metadata,
             time_ns=start_time,
         )
         # Add event data about cache hits/miss
@@ -1349,8 +1395,6 @@ class _InProcessFxCompile(FxCompile):
             # Also this has to be done before FakeTensorProp below to avoid the failed
             # .view() call.
             view_to_reshape(gm)
-            if is_backward:
-                require_view_as_complex_input_layout(gm)
 
             with dynamo_timed(
                 "additional_fake_tensor_prop", log_pt2_compile_event=True
@@ -1962,10 +2006,10 @@ def cudagraphify_impl(
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
-    check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)
+    check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
     # pyrefly: ignore [annotation-mismatch, redefinition]
     static_input_idxs: OrderedSet[int] = OrderedSet(
-        remove_unaligned_input_idxs(inputs, static_input_idxs)
+        remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
     )
     copy_misaligned_inputs(inputs, check_input_idxs)  # type: ignore[arg-type]
 
@@ -2267,7 +2311,7 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
     )
 
     return (
-        torch.cuda.device(next(iter(cuda_devices)))
+        torch.cuda.device(next(iter(cuda_devices)))  # type: ignore[return-value]
         if len(cuda_devices) == 1
         else contextlib.nullcontext()
     )
@@ -3123,7 +3167,7 @@ def handle_dynamo_export_graph(
 
     compiled_fn = compile_gm(gm, codegen.process_inputs(*inputs))
 
-    @functools.wraps(compiled_fn)
+    @functools.wraps(compiled_fn)  # type: ignore[misc]
     def wrapper(*args: Any) -> Any:
         return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
 
@@ -3135,7 +3179,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         from torch._dynamo.exc import SkipFrame
 
         assert device is not None
-
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
         warnings.warn(
@@ -3153,8 +3196,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
             or node.get_dtype() != torch.bfloat16
         ):
             continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
         device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return
