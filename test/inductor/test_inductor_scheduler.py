@@ -799,6 +799,44 @@ class TestScheduler(TestCase):
         self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
         self.assertEqual(metrics.generated_kernel_count, 1)
 
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_expand_reuse_realizes_in_deterministic_mode(self):
+        def fn(a, b, c, d, e):
+            x = a * b * c * d * e
+            y = x.view(8, 8, 1).expand(8, 8, 16)
+            return y.sum(dim=1)
+
+        def check_realizes():
+            torch._dynamo.reset()
+            metrics.reset()
+            with fresh_inductor_cache():
+                actual = torch.compile(fn, backend="inductor", fullgraph=True)(*args)
+
+            self.assertTrue(torch.allclose(expected, actual, atol=1e-4, rtol=1e-4))
+            self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
+            self.assertEqual(metrics.generated_kernel_count, 2)
+
+        device = "cuda"
+        torch.manual_seed(0)
+        args = [
+            torch.rand((8, 8), dtype=torch.float32, device=device) for _ in range(5)
+        ]
+        expected = fn(*args)
+
+        prev_deterministic = torch.are_deterministic_algorithms_enabled()
+        prev_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        torch.use_deterministic_algorithms(True, warn_only=True)
+        try:
+            check_realizes()
+        finally:
+            torch.use_deterministic_algorithms(
+                prev_deterministic, warn_only=prev_warn_only
+            )
+
+        with inductor_config.patch(deterministic=True):
+            check_realizes()
+
 
 class TestScoreFusionMemory(TestCase):
     """
