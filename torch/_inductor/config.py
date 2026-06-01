@@ -1034,7 +1034,7 @@ compute_all_bounds = False
 
 # enable the combo kernel that combines data-independent kernels (additional
 # to foreach kernels) into a single one (Experimental)
-combo_kernels = False
+combo_kernels = True
 # benchmark combo kernels and only allow ones with perf gains
 benchmark_combo_kernel = False
 # combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
@@ -1052,7 +1052,8 @@ combo_kernel_max_num_nodes = 8
 # When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
-combo_kernel_per_subkernel_blocks = False
+# Implies enable_autotune=True (per-subkernel blocks without tuning is pointless).
+combo_kernel_per_subkernel_blocks = True
 # When True, per-subkernel combo block sizes are autotuned at compile time:
 # standalone "seed" kernels are benched at codegen and the stitched config is
 # baked into the combo kernel. When False, the combo is tuned at runtime by
@@ -1063,6 +1064,11 @@ combo_seed_autotune_at_compile_time = True
 # When True, combo-kernel autotuning groups sub-kernels that share the same
 # candidate config set and kernel-analysis signature. Disabled by default.
 combo_kernel_autotune_grouping = True
+# When True, pointwise and reduction sub-kernels can share a combo kernel.
+# Requires combo_kernel_per_subkernel_blocks=True so each sub-kernel keeps its
+# own block geometry; otherwise the shared XBLOCK/R0_BLOCK would force one
+# heuristic onto the other.
+combo_kernel_allow_mixed_pointwise_reduction = False
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
 # When True, combo-kernel autotuning is size-bucketed: small subkernels cap to

@@ -476,6 +476,66 @@ class ComboKernelTests(TestCase):
                 "R0_BLOCK : tl.constexpr"
             ).check_not("XBLOCK_0 : tl.constexpr").run(code[0])
 
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernel_per_subkernel_blocks": True,
+            "combo_kernel_allow_mixed_pointwise_reduction": True,
+        }
+    )
+    def test_combo_kernel_per_config_subkernel_poi_red_mix(self):
+        def fn(a, b, c):
+            r_persistent = a.sum(dim=-1)  # rnumel=64  -> persistent reduction
+            r_nonpersistent = b.sum(dim=-1)  # rnumel=4096 -> non-persistent reduction
+            p = c * 2.0 + 1.0  # pointwise
+            return r_persistent, r_nonpersistent, p
+
+        inps = [
+            torch.randn(1024, 64, device=GPU_TYPE),
+            torch.randn(256, 4096, device=GPU_TYPE),
+            torch.randn(1024, 64, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        self.assertEqual(out_eager, out_compiled, atol=1e-4, rtol=1e-4)
+        FileCheck().check("'grid_type': 'SequentialFlattenComboKernelGrid'").check(
+            "'num_kernels': 3"
+        ).check("'heuristic_0': 'pointwise'").check(
+            "'heuristic_1': 'persistent_reduction'"
+        ).check("'heuristic_2': 'reduction'").check("XBLOCK_0 : tl.constexpr").check(
+            "XBLOCK_1 : tl.constexpr"
+        ).check("XBLOCK_2 : tl.constexpr").check("R0_BLOCK_2 : tl.constexpr").run(
+            code[0]
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernel_per_subkernel_blocks": True,
+            "combo_kernel_allow_mixed_pointwise_reduction": False,
+        }
+    )
+    def test_combo_kernel_mixed_pw_red_disabled_by_default(self):
+        # With mixing disabled, pointwise and reduction nodes never share a
+        # combo even when per-subkernel blocks is on. Each goes to its own
+        # group; single-node groups stay standalone.
+        def fn(a, b, c):
+            return a.sum(dim=-1), b.sum(dim=-1), c * 2.0 + 1.0
+
+        inps = [
+            torch.randn(1024, 64, device=GPU_TYPE),
+            torch.randn(256, 4096, device=GPU_TYPE),
+            torch.randn(1024, 64, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        self.assertEqual(out_eager, out_compiled, atol=1e-4, rtol=1e-4)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+        FileCheck().check_not("combo_grid_meta").run(code[0])
+
     @skipIfRocm
     @requires_gpu_and_triton
     @torch._inductor.config.patch(
