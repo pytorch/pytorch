@@ -6,6 +6,7 @@ import builtins
 import collections
 import contextlib
 import copy
+import dataclasses
 import gc
 import functools
 import inspect
@@ -1758,6 +1759,152 @@ class TestFX(JitTestCase):
 
         self.assertTrue(neg not in relu.users)
 
+    def test_replace_uses_with_dataclass_args_and_dce(self):
+        @dataclasses.dataclass(frozen=True)
+        class Pair:
+            lhs: object
+            rhs: object
+
+        def pick_lhs(pair):
+            return pair.lhs
+
+        pair = Pair("lhs", "rhs")
+        visited = []
+        self.assertEqual(torch.fx.node.map_aggregate(pair, visited.append), None)
+        self.assertEqual(visited, [pair])
+        self.assertIs(torch.fx.node.map_arg(pair, lambda n: n), pair)
+
+        graph: torch.fx.Graph = torch.fx.Graph()
+        x: torch.fx.Node = graph.placeholder("x")
+        y: torch.fx.Node = graph.placeholder("y")
+        z: torch.fx.Node = graph.placeholder("z")
+        add: torch.fx.Node = graph.call_function(operator.add, (x, 1))
+        consumer: torch.fx.Node = graph.call_function(pick_lhs, (Pair(add, x),))
+        output = graph.output(Pair(consumer, add))
+        self.assertIn(consumer, add.users)
+        self.assertIn(consumer, x.users)
+        self.assertIn(output, add.users)
+
+        consumer.replace_input_with(add, y)
+        self.assertIs(consumer.args[0].lhs, y)
+        self.assertNotIn(consumer, add.users)
+        self.assertIn(consumer, y.users)
+
+        add.replace_all_uses_with(z)
+        graph.eliminate_dead_code()
+        self.assertNotIn(add, graph.nodes)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        result = gm(torch.tensor(2), torch.tensor(3), torch.tensor(4))
+        self.assertEqual(result.lhs, torch.tensor(3))
+        self.assertEqual(result.rhs, torch.tensor(4))
+
+    def test_create_dataclass_instance_rejects_descriptor_fields(self):
+        class RaisesOnSet:
+            def __get__(self, instance, owner=None):
+                if instance is None:
+                    return self
+                return instance.__dict__["field"]
+
+            def __set__(self, instance, value):
+                raise AssertionError("descriptor setter should not run")
+
+        @dataclasses.dataclass
+        class HasDescriptor:
+            field: object = RaisesOnSet()
+
+        with self.assertRaisesRegex(TypeError, "backed by a descriptor"):
+            torch.fx.node._create_dataclass_instance(
+                HasDescriptor, {"field": torch.tensor(1)}
+            )
+
+    def test_create_dataclass_instance_avoids_metaclass_getattribute(self):
+        armed = False
+
+        class TrapMeta(type):
+            def __getattribute__(cls, name):
+                if armed:
+                    raise AssertionError(f"metaclass lookup should not run: {name}")
+                return super().__getattribute__(name)
+
+        @dataclasses.dataclass(frozen=True)
+        class HasMeta(metaclass=TrapMeta):
+            field: object
+
+        def pick_field(dc):
+            return dc.field
+
+        graph: torch.fx.Graph = torch.fx.Graph()
+        x: torch.fx.Node = graph.placeholder("x")
+        graph.output(HasMeta(x))
+
+        armed = True
+        instance = torch.fx.node._create_dataclass_instance(
+            HasMeta, {"field": torch.tensor(1)}
+        )
+        self.assertEqual(instance.field, torch.tensor(1))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        result = gm(torch.tensor(2))
+        self.assertEqual(pick_field(result), torch.tensor(2))
+
+    def test_interpreter_shape_prop_transformer_dataclass_args(self):
+        post_init_calls = 0
+
+        @dataclasses.dataclass(frozen=True)
+        class Pair:
+            lhs: object
+            rhs: object
+
+            def __post_init__(self):
+                nonlocal post_init_calls
+                post_init_calls += 1
+
+        def consume(pair):
+            return pair.lhs + pair.rhs
+
+        graph: torch.fx.Graph = torch.fx.Graph()
+        x: torch.fx.Node = graph.placeholder("x")
+        y: torch.fx.Node = graph.placeholder("y")
+        add: torch.fx.Node = graph.call_function(operator.add, (x, 1))
+        pair_arg = torch.fx.node._create_dataclass_instance(
+            Pair, {"lhs": add, "rhs": y}
+        )
+        consume_node: torch.fx.Node = graph.call_function(consume, (pair_arg,))
+        graph.output(
+            torch.fx.node._create_dataclass_instance(
+                Pair, {"lhs": consume_node, "rhs": add}
+            )
+        )
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        x_value = torch.randn(2, 3)
+        y_value = torch.randn(2, 3)
+        expected_lhs = x_value + 1 + y_value
+        expected_rhs = x_value + 1
+
+        post_init_calls = 0
+        interpreted = Interpreter(gm).run(x_value, y_value)
+        self.assertEqual(interpreted.lhs, expected_lhs)
+        self.assertEqual(interpreted.rhs, expected_rhs)
+        self.assertEqual(post_init_calls, 0)
+
+        shape_prop.ShapeProp(gm).propagate(x_value, y_value)
+        self.assertEqual(consume_node.meta["tensor_meta"].shape, torch.Size([2, 3]))
+        self.assertEqual(post_init_calls, 0)
+
+        transformed = Transformer(gm).transform()
+        transformed.graph.lint()
+        for node in transformed.graph.nodes:
+            if node.op == "call_function":
+                self.assertIsNot(node.target, Pair)
+
+        post_init_calls = 0
+        transformed_result = transformed(x_value, y_value)
+        self.assertEqual(transformed_result.lhs, expected_lhs)
+        self.assertEqual(transformed_result.rhs, expected_rhs)
+        self.assertEqual(post_init_calls, 0)
+
     @skipIfTorchDynamo("Dynamo does not free right away")
     def test_prepend_does_not_leak(self):
         g = Graph()
@@ -2871,6 +3018,11 @@ class TestFX(JitTestCase):
         module = ModuleReturnDataclass()
         traced_graph = symbolic_trace(module).graph
         print(traced_graph)
+
+        out_arg = traced_graph.output_node().args[0]
+        self.assertTrue(isinstance(out_arg, Node))
+        self.assertEqual(out_arg.op, "call_function")
+        self.assertEqual(out_arg.target, MyOutput)
 
         gm = GraphModule(module, traced_graph)
         x = torch.rand(1)

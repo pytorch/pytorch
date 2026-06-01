@@ -1,6 +1,8 @@
 # Owner(s): ["module: ProxyTensor"]
 # ruff: noqa: F841
 
+import dataclasses
+
 from torch.testing._internal.common_utils import TestCase, run_tests, xfailIfNoAcceleratorTriton
 import torch
 import torch._dynamo
@@ -211,6 +213,80 @@ def forward(self, a_1):
         def f(x):
             return torch.sin(x)
         self._test(f, (torch.randn(3),))
+
+    def test_make_fx_dataclass_output(self):
+        @dataclasses.dataclass(frozen=True)
+        class Pair:
+            foo: object
+            bar: object
+            n: int = dataclasses.field(init=False)
+
+            def __post_init__(self):
+                object.__setattr__(self, "n", 3)
+
+        def f(x):
+            return Pair(foo=x + 1, bar=x + 2)
+
+        x = torch.randn(3)
+        gm = make_fx(f, tracing_mode=self.tracing_mode)(x)
+
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                self.assertIsNot(node.target, Pair)
+
+        out_arg = gm.graph.output_node().args[0]
+        self.assertIs(type(out_arg), Pair)
+        self.assertIsInstance(out_arg.foo, torch.fx.Node)
+        self.assertIsInstance(out_arg.bar, torch.fx.Node)
+        self.assertEqual(out_arg.n, 3)
+
+        x2 = torch.randn(3)
+        actual = gm(x2)
+        expected = f(x2)
+        self.assertEqual(actual.foo, expected.foo)
+        self.assertEqual(actual.bar, expected.bar)
+        self.assertEqual(actual.n, expected.n)
+
+    def test_make_fx_dataclass_output_nested_aggregate(self):
+        @dataclasses.dataclass(frozen=True)
+        class Pair:
+            foo: object
+            bar: object
+
+        def f(x):
+            return {"p": [Pair(foo=x + 1, bar=x + 2), (Pair(foo=x + 3, bar=x + 4),)]}
+
+        x = torch.randn(3)
+        gm = make_fx(f, tracing_mode=self.tracing_mode)(x)
+
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                self.assertIsNot(node.target, Pair)
+
+        out_arg = gm.graph.output_node().args[0]
+        self.assertIs(type(out_arg["p"][0]), Pair)
+        self.assertIs(type(out_arg["p"][1][0]), Pair)
+
+        x2 = torch.randn(3)
+        actual = gm(x2)
+        expected = f(x2)
+        self.assertEqual(actual["p"][0].foo, expected["p"][0].foo)
+        self.assertEqual(actual["p"][0].bar, expected["p"][0].bar)
+        self.assertEqual(actual["p"][1][0].foo, expected["p"][1][0].foo)
+        self.assertEqual(actual["p"][1][0].bar, expected["p"][1][0].bar)
+
+    def test_make_fx_rejects_dataclass_dict_key_with_proxy(self):
+        @dataclasses.dataclass(frozen=True)
+        class Key:
+            value: object
+
+        def f(x):
+            return {Key(x + 1): x + 2}
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Keys for dictionaries used as an argument"
+        ):
+            make_fx(f, tracing_mode=self.tracing_mode)(torch.randn(3))
 
     def test_scalar_device(self, device='cpu'):
         def f(a, b):

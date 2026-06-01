@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
+import dataclasses
 import functools
 import operator
 import os
 import re
 import unittest
 import unittest.mock as mock
+from typing import Any
 from unittest.mock import patch
 
 import torch
@@ -215,6 +217,47 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # check for no graph break
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
+
+    def test_allow_in_graph_dataclass(self):
+        @dataclasses.dataclass(frozen=True)
+        class Pair:
+            foo: Any
+            bar: Any
+            n: int = dataclasses.field(init=False)
+
+            def __post_init__(self):
+                object.__setattr__(self, "n", 3)
+
+        @torch.compiler.allow_in_graph
+        def trace_me(dc):
+            return dc.bar + dc.n
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def func(d):
+            inner = Pair(foo=d, bar=d + 1)
+            outer = Pair(foo=inner, bar=d + 2)
+            return trace_me(outer)
+
+        x = torch.randn(10)
+        expected = trace_me(Pair(foo=Pair(foo=x, bar=x + 1), bar=x + 2))
+        self.assertEqual(func(x), expected)
+
+        graph = backend.graphs[0].graph
+        graph.lint()
+        for node in graph.nodes:
+            if node.op == "call_function":
+                self.assertNotEqual(node.target, Pair)
+
+        trace_me_node = next(
+            node
+            for node in graph.nodes
+            if node.op == "call_function" and node.target is trace_me
+        )
+        trace_me_arg = trace_me_node.args[0]
+        self.assertIs(type(trace_me_arg), Pair)
+        self.assertIs(type(trace_me_arg.foo), Pair)
 
     def test_allow_in_graph_no_id_reuse(self):
         cnts = torch._dynamo.testing.CompileCounter()
