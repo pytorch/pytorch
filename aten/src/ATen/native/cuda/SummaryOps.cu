@@ -13,6 +13,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/bincount_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/histc_native.h>
@@ -262,19 +263,21 @@ Tensor _bincount_cuda_template(
         kCUDA,
         std::nullopt /* pin_memory */);
   }
-  if (self.dim() != 1 ||
-      (!std::is_same_v<input_t, uint8_t> &&
-       *self.min().cpu().const_data_ptr<input_t>() < 0)) {
-    TORCH_CHECK(false, "bincount only supports 1-d non-negative integral inputs.");
-  }
+  TORCH_CHECK(self.dim() == 1, "bincount only supports 1-d non-negative integral inputs.");
 
   bool has_weights = weights.defined();
   if (has_weights && (weights.dim() != 1 || weights.size(0) != self.size(0))) {
     TORCH_CHECK(false, "weights should be 1-d and have the same length as input");
   }
 
+  auto [self_min, self_max] = at::aminmax(self);
+  if constexpr (!std::is_same_v<input_t, uint8_t>) {
+    TORCH_CHECK(*self_min.cpu().const_data_ptr<input_t>() >= 0,
+                "bincount only supports 1-d non-negative integral inputs.");
+  }
+
   const int64_t nbins =
-      std::max(self.max().item<input_t>() + (int64_t)1, minlength);
+      std::max(self_max.item<input_t>() + (int64_t)1, minlength);
 
   // we are using acc_type for the bounds, in particular int64_t for integers
   // in order to avoid overflows (e.g. using 256 bins for dtype uint8)

@@ -298,7 +298,7 @@ def silu(self: Tensor) -> Tensor:
 @out_wrapper("grad_input")
 @pw_cast_for_opmath
 def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
-    sigmoid = 1 / (1 + torch.exp(-self))
+    sigmoid = torch.sigmoid(self)
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 
@@ -1140,18 +1140,103 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
 def unfold_backward(
     grad: Tensor, input_size: list[int], dimension: int, size: int, step: int
 ) -> Tensor:
+    torch._check_value(step > 0, lambda: f"step is {step} but must be > 0")
     if len(input_size) == 0:
         return torch.squeeze_copy(grad, 0)
     dim = utils.canonicalize_dim(len(input_size), dimension)
-    idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
-    idx = idx.unfold(0, size, step).flatten()
-    grad = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
-    # nb. At the moment this generates two kernels in triton
-    # It could potentially be fused into one call to scatter_reduce,
-    # in the case step <= size provided scatter_reduce generates 1 kernel
     grad_input = grad.new_zeros(input_size)
-    index = (None,) * dim + (idx,)
-    return aten._unsafe_index_put(grad_input, index, grad, accumulate=True).contiguous()
+
+    def _vectorized_index_put() -> Tensor:
+        idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
+        idx = idx.unfold(0, size, step).flatten()
+        source = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
+        index = (None,) * dim + (idx,)
+        return aten._unsafe_index_put(
+            grad_input, index, source, accumulate=True
+        ).contiguous()
+
+    if step >= size:
+        return _vectorized_index_put()
+
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    def _is_canonical_grad_shape() -> bool:
+        if grad.dim() != len(input_size) + 1:
+            return False
+        if not statically_known_true(grad.size(-1) == size):
+            return False
+
+        n_folds = (input_size[dim] - size) // step + 1
+        if not statically_known_true(grad.size(dim) == n_folds):
+            return False
+
+        return all(
+            source_dim == dim
+            or statically_known_true(grad.size(source_dim) == dim_size)
+            for source_dim, dim_size in enumerate(input_size)
+        )
+
+    if _is_canonical_grad_shape():
+        return _vectorized_index_put()
+
+    def _sym_min_if_needed(a, b):
+        if statically_known_true(a <= b):
+            return a
+        if statically_known_true(b <= a):
+            return b
+        return torch.sym_min(a, b)
+
+    def _sym_max_if_needed(a, b):
+        if statically_known_true(a >= b):
+            return a
+        if statically_known_true(b >= a):
+            return b
+        return torch.sym_max(a, b)
+
+    def _reshape_source(source: Tensor, target_shape: list[int]) -> Tensor:
+        ndim = len(target_shape)
+        source_ndim = source.dim()
+        if source_ndim > ndim:
+            return source.expand(target_shape)
+
+        dim_offset = ndim - source_ndim
+        view_shape = [1] * ndim
+        for source_dim in range(source_ndim):
+            target_dim = dim if source_dim == dim else source_dim + dim_offset
+            if target_dim < 0 or target_dim >= ndim:
+                return source.expand(target_shape)
+            if statically_known_true(view_shape[target_dim] == 1):
+                view_shape[target_dim] = source.shape[source_dim]
+            else:
+                # Multiple grad dimensions may align to the unfolded input
+                # dimension after select(); only singleton collisions can
+                # still be reshaped and broadcast to the target shape.
+                torch._check(
+                    source.shape[source_dim] == 1,
+                    lambda: "unfold_backward grad shape is not broadcastable "
+                    "to input_size",
+                )
+
+        return source.reshape(view_shape).expand(target_shape)
+
+    input_dim_size = input_size[dim]
+    grad_dim_size = grad.size(dim)
+    # Descending offsets make each grad_input element accumulate overlapping
+    # windows in increasing fold-index order, matching native numerics.
+    for offset in reversed(range(size)):
+        max_valid_len = _sym_max_if_needed(
+            (input_dim_size - offset + step - 1) // step, 0
+        )
+        valid_len = _sym_min_if_needed(grad_dim_size, max_valid_len)
+        idx = torch.arange(valid_len, device=grad.device, dtype=torch.int32)
+        idx = idx * step + offset
+        source = grad.select(-1, offset).narrow(dim, 0, valid_len)
+        source_shape = list(input_size)
+        source_shape[dim] = valid_len
+        source = _reshape_source(source, source_shape)
+        grad_input = aten.index_add(grad_input, dim, idx, source)
+
+    return grad_input.contiguous()
 
 
 @register_decomposition(aten.logit_backward.default)
@@ -1295,21 +1380,25 @@ def embedding_dense_backward(
     )
     grad_output = grad_output.to(computation_dtype)
     indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
+    valid_indices = (indices >= 0) & (indices < num_weights)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
-        counts = aten._unsafe_index_put(counts, [indices], ones, accumulate=True)
-        grad_weights_scale = counts[indices]
+        counts = aten._unsafe_masked_index_put_accumulate(
+            counts, valid_indices, [indices], ones
+        )
+        grad_weights_scale = aten._unsafe_masked_index(
+            counts, valid_indices, [indices], 1
+        )
         grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
-    mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
-    grad = grad_output.masked_fill(mask, 0)
+    mask = _unsqueeze_to_dim(valid_indices & (indices != padding_idx), grad_output.ndim)
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return aten._unsafe_index_put(grad_weight, [indices], grad, accumulate=True).to(
-        result_dtype
-    )
+    return aten._unsafe_masked_index_put_accumulate(
+        grad_weight, mask, [indices], grad_output
+    ).to(result_dtype)
 
 
 def prod(x: list[int]):
@@ -1446,10 +1535,17 @@ def unsafe_split_with_sizes(
 def split(self: Tensor, split_size: int, dim: int = 0) -> tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
+    torch._check(
+        split_size >= 0,
+        lambda: f"split expects split_size be non-negative, but got split_size={split_size}",
+    )
     if dim_size == 0:
         return (self.detach(),)
-    if split_size == 0:
-        raise AssertionError(f"split_size is 0 but dim_size is {dim_size}, expected 0")
+    torch._check(
+        split_size > 0,
+        lambda: "split_size can only be 0 if dimension size is 0, "
+        f"but got dimension size of {dim_size}",
+    )
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level
@@ -3168,7 +3264,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     out = sequences[0].new_full(out_dims, padding_value)
     dim_paddings = (0, 0) * len(trailing_dims)
     for i in range(sequences_size):
-        currseq = sequences[i]
+        currseq = sequences[i].to(dtype=out.dtype)
         pad_amount = max_len - currseq.size(0)
         if padding_side == "right":
             row = aten.constant_pad_nd(
@@ -4721,6 +4817,16 @@ def _grid_sampler_2d(
             f"grid last dimension must be 2 (for x,y coords), got {two}"
         )
 
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
+
+    int32_max = torch.iinfo(torch.int32).max
+    # CUDA/XPU codegen can keep bounded coordinate indices in int32.  CPU keeps
+    # the historical int64 path, and dynamic shapes fall back if we cannot guard.
+    use_32bit_indices = a.device.type in ("cuda", "xpu") and guard_or_false(
+        sym_and(iH <= int32_max, iW <= int32_max)
+    )
+    index_dtype = torch.int32 if use_32bit_indices else torch.int64
+
     if _expand_grid:
         # Let's expand grid to [N, C, oH, oW, 2]
         # This allows to generate a single triton cuda kernel instead of two kernels.
@@ -4746,7 +4852,7 @@ def _grid_sampler_2d(
         c = C if _expand_grid else 1
         return tuple(
             torch.where(cond, t, 0).view(N, c, oH, oW)
-            for t in (xs.to(dtype=torch.int64), ys.to(dtype=torch.int64), ws)
+            for t in (xs.to(dtype=index_dtype), ys.to(dtype=index_dtype), ws)
         )
 
     def get_summand(ix: Tensor, iy: Tensor, w) -> Tensor:
@@ -5212,8 +5318,20 @@ def _reflection_or_replication_pad(
         idx[i + nc_dim] = idx_fn(padding_left[i], inp_shape[i], padding_right[i])
         result = aten._unsafe_index(result, idx)
 
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(result)
+    # Convert output to correct memory format, if necessary.
+    # Use the original input (a), not result, because _unsafe_index can
+    # produce non-standard strides — so suggest_memory_format(result) may
+    # not reflect the desired output format.
+    #
+    # CPU vs CUDA/XPU/MPS eager behavior differs:
+    #   CPU:  allocates output via at::empty_like with suggest_memory_format,
+    #         preserving the input's format (e.g. channels_last).
+    #   CUDA/XPU/MPS: kernel writes to a flat contiguous buffer with linear indexing,
+    #         always producing contiguous output regardless of input format.
+    if a.device.type in ("cuda", "mps", "xpu"):
+        memory_format = torch.contiguous_format
+    else:
+        memory_format = utils.suggest_memory_format(a)
     result = result.contiguous(memory_format=memory_format)
     return result
 
