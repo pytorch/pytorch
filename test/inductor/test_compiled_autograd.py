@@ -37,6 +37,8 @@ from torch.overrides import BaseTorchFunctionMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
+    skipOps,
+    xfail,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -5531,6 +5533,9 @@ if torch.distributed.is_available() and HAS_GPU_AND_TRITON:
     )
 
 xfail_hops = {"local_map_hop"}
+hop_test_hops_in_bwd_failures = {
+    xfail("register_hook", "simple"),
+}
 
 
 class TestCompiledAutogradOpInfo(TestCase):
@@ -5546,6 +5551,7 @@ class TestCompiledAutogradOpInfo(TestCase):
         list(filter(lambda op: op.name not in xfail_hops, hop_db)),
         allowed_dtypes=(torch.float,),
     )
+    @skipOps(hop_test_hops_in_bwd_failures)
     def test_hops_in_bwd(self, device, dtype, op):
         def create_bwd_fn_closure(op_args, op_kwargs):
             op_out_ref = []
