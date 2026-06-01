@@ -298,7 +298,7 @@ def silu(self: Tensor) -> Tensor:
 @out_wrapper("grad_input")
 @pw_cast_for_opmath
 def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
-    sigmoid = 1 / (1 + torch.exp(-self))
+    sigmoid = torch.sigmoid(self)
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 

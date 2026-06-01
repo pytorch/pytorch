@@ -163,13 +163,15 @@ class LocalSource(Source):
     # Set from ``co_flags & CO_VARARGS`` at frame-entry time. Element accesses
     # like ``args[N]`` produce a ``GetItemSource`` whose base has this flag.
     # Useful for distinguishing ``*args`` from a regular list-typed input.
-    is_varargs: bool = False
+    # ``repr=False`` so the vast majority of locals (which are not varargs) do
+    # not get a noisy ``is_varargs=False`` in every debug string.
+    is_varargs: bool = dataclasses.field(default=False, repr=False)
 
     # Whether this local is the function's varkw (``**kwargs``) parameter.
     # Set from ``co_flags & CO_VARKEYWORDS`` at frame-entry time. Element
     # accesses like ``kwargs["k"]`` produce a ``DictGetItemSource`` whose base
-    # has this flag.
-    is_varkw: bool = False
+    # has this flag. ``repr=False`` for the same reason as ``is_varargs``.
+    is_varkw: bool = dataclasses.field(default=False, repr=False)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_derefed_cell_contents:

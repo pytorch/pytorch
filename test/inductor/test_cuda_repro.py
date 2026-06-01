@@ -1641,6 +1641,7 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180948")
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     @config.patch(
@@ -1799,6 +1800,7 @@ class CudaReproTests(TestCase):
                     atol=1e-3,
                 )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163765")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_mean_ratio_chain(self):
         torch.manual_seed(12345)
@@ -2707,6 +2709,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163701")
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         counters.clear()
@@ -2928,6 +2931,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(eager_out, compile_out)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163689")
     @skipIfXpu(
         msg="Explicit attn_mask should not be set when is_causal=True - torch-xpu-ops: 2802"
     )
