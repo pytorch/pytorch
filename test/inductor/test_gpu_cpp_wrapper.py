@@ -59,6 +59,13 @@ class GpuWrapperTemplate:
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
 
+    def _assert_cpp_wrapper_debug_sync_code(self, code):
+        self.assertRegex(
+            code,
+            r"AOTI_RUNTIME_CUDA_CHECK\((cuda|hip)DeviceSynchronize\(\)\);",
+        )
+        self.assertNotIn("torch.cuda.synchronize()", code)
+
     def test_aoti_debug_printer_works_on_constants(self):
         batch_size = 32
         seq_length = 50
@@ -94,8 +101,9 @@ class TestGpuWrapper(InductorTestCase):
         )(test_fn)
         x = torch.randn(8, device=self.device)
         with torch.utils._device.DeviceContext(self.device):
-            result = compiled(x)
+            result, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
         self.assertEqual(result, x * 2)
+        self._assert_cpp_wrapper_debug_sync_code(code)
 
     def test_debug_sync_kernel(self):
         if not RUN_GPU:
@@ -111,8 +119,9 @@ class TestGpuWrapper(InductorTestCase):
         )(test_fn)
         x = torch.randn(8, device=self.device)
         with torch.utils._device.DeviceContext(self.device):
-            result = compiled(x)
+            result, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
         self.assertEqual(result, x * 2)
+        self._assert_cpp_wrapper_debug_sync_code(code)
 
     def test_non_tensor_args_wrapped_on_cpu(self):
         if not RUN_GPU:
@@ -376,6 +385,21 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("kernel_src = (", code)
         self.assertIn("needs_vec_isa=False", code)
         self.assertIn("kernel_needs_vec_isa=True", code)
+
+    def test_map_fullgraph_cpp_wrapper(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def body_fn(x):
+            return torch.nn.functional.gelu(x)
+
+        def fn(xs):
+            return torch._higher_order_ops.map(body_fn, xs).sum()
+
+        xs = torch.randn(8, 64, device=self.device)
+        expected = fn(xs)
+        opt_fn = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})
+        self.assertEqual(opt_fn(xs), expected)
 
 
 instantiate_parametrized_tests(TestGpuWrapper)
