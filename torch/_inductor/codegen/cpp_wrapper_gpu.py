@@ -1248,7 +1248,6 @@ static inline void ensure_triton_kernel_compiles_started() {{
         raw_args=None,
         triton_meta=None,
         inductor_meta=None,
-        triton_autotune_seed_infos=None,
         graph_name="",
         original_fxnode_name=None,
         current_stream_idx=None,
@@ -1272,7 +1271,6 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 raw_args=raw_args,
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
-                triton_autotune_seed_infos=triton_autotune_seed_infos,
             )
 
         if (
@@ -1292,7 +1290,6 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 raw_args=raw_args,
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
-                triton_autotune_seed_infos=triton_autotune_seed_infos,
                 original_fxnode_name=original_fxnode_name,
             )
 

@@ -708,7 +708,6 @@ class KernelCallLine(WrapperLine):
     triton: bool
     triton_meta: dict[str, Any]
     inductor_meta: dict[str, Any] | None
-    triton_autotune_seed_infos: list[tuple[str, list[Any], list[Any]]] | None
     device: torch.device
     graph_name: str
     original_fxnode_name: str
@@ -724,7 +723,6 @@ class KernelCallLine(WrapperLine):
             raw_args=self.raw_args,
             triton_meta=self.triton_meta,
             inductor_meta=self.inductor_meta,
-            triton_autotune_seed_infos=self.triton_autotune_seed_infos,
             device=self.device,
             graph_name=self.graph_name,
             original_fxnode_name=self.original_fxnode_name,
@@ -1534,12 +1532,7 @@ class PythonWrapperCodegen(CodeGen):
         import_str = f"""
             import triton
             import triton.language as tl
-            from {triton_heuristics.__name__} import (
-                combo_seeds_need_tuning,
-                end_graph,
-                start_combo_kernel_standalone_autotune,
-                start_graph,
-            )
+            from {triton_heuristics.__name__} import start_graph, end_graph
             """
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
@@ -3409,7 +3402,6 @@ class PythonWrapperCodegen(CodeGen):
         raw_args=None,
         triton_meta=None,
         inductor_meta=None,
-        triton_autotune_seed_infos=None,
         original_fxnode_name=None,
     ):
         """
@@ -3428,21 +3420,6 @@ class PythonWrapperCodegen(CodeGen):
                 if isinstance(arg, str)
             }
         )
-        if triton_autotune_seed_infos:
-            seed_args_to_buffers = {}
-            for (
-                _seed_name,
-                seed_call_args,
-                _seed_arg_types,
-            ) in triton_autotune_seed_infos:
-                seed_args_to_buffers.update(
-                    {
-                        arg: V.graph.try_get_buffer(arg)
-                        for arg in seed_call_args
-                        if isinstance(arg, str)
-                    }
-                )
-            self.args_to_buffers.update(seed_args_to_buffers)
 
         device = device or V.graph.get_current_device_or_throw()
         current_stream_idx = V.graph.scheduler.current_stream_idx
@@ -3461,7 +3438,6 @@ class PythonWrapperCodegen(CodeGen):
                 # pyrefly: ignore [bad-argument-type]
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
-                triton_autotune_seed_infos=triton_autotune_seed_infos,
                 device=device,
                 graph_name=V.graph.name,
                 # pyrefly: ignore [bad-argument-type]
@@ -3482,7 +3458,6 @@ class PythonWrapperCodegen(CodeGen):
         raw_args=None,
         triton_meta=None,
         inductor_meta=None,
-        triton_autotune_seed_infos=None,
         graph_name="",
         original_fxnode_name=None,
         current_stream_idx=None,
@@ -3582,7 +3557,6 @@ class PythonWrapperCodegen(CodeGen):
                 return False
 
             all_args = []
-            autotune_arg_values_by_name = {}
             tensor_arg_strs = []  # used only when _per_kernel is True
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
@@ -3646,72 +3620,13 @@ class PythonWrapperCodegen(CodeGen):
 
                 if isinstance(arg, str) and should_unwrap_unspec_arg(arg):
                     arg_str += ".item()"
-                if isinstance(arg, str):
-                    autotune_arg_values_by_name[arg] = arg_str
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
-
-            def tuple_call_args(args: list[str]) -> str:
-                if len(args) == 1:
-                    return f"({args[0]},)"
-                return f"({', '.join(args)})"
-
-            def generate_seed_autotune_arg(arg, arg_type):
-                if isinstance(arg, str) and "=" in str(arg):
-                    _, arg = arg.split("=")
-
-                if isinstance(arg_type, torch_dtype):
-                    if re.match(r"^(workspace|semaphore)", arg):
-                        arg_str = arg
-                    elif _per_kernel:
-                        arg_str = self.generate_example_arg_value(arg, arg_type)
-                        tensor_arg_strs.append(arg_str)
-                    elif arg not in self.kernel_autotune_example_args:
-                        arg_str = self.generate_example_arg_value(arg, arg_type)
-                        self.kernel_autotune_example_args[arg] = (
-                            arg_str,
-                            kernel_name,
-                        )
-                    else:
-                        arg_str = self.kernel_autotune_example_args[arg][0]
-                else:
-                    if isinstance(arg, str) and arg in autotune_arg_values_by_name:
-                        arg_str = autotune_arg_values_by_name[arg]
-                    else:
-                        arg_str = self.generate_example_arg_value(arg, arg_type)
-
-                if isinstance(arg, str) and should_unwrap_unspec_arg(arg):
-                    arg_str += ".item()"
-                return arg_str
-
-            autotune_seed_call = None
-            if triton_autotune_seed_infos:
-                seed_specs = []
-                for seed_info in triton_autotune_seed_infos:
-                    (
-                        seed_name,
-                        seed_call_args,
-                        seed_arg_types,
-                    ) = seed_info
-                    assert len(seed_call_args) == len(seed_arg_types), (
-                        "seed_call_args and seed_arg_types do not match"
-                    )
-                    seed_args = [
-                        generate_seed_autotune_arg(arg, arg_type)
-                        for arg, arg_type in zip(seed_call_args, seed_arg_types)
-                    ]
-                    seed_specs.append(f"({seed_name}, {tuple_call_args(seed_args)})")
-                autotune_seed_call = (
-                    f"start_combo_kernel_standalone_autotune("
-                    f"{kernel_name}, {tuple_call_args(seed_specs)})"
-                )
 
             # Make sure kernel launch under a device guard because models don't always run on device 0
             self.kernel_autotune_calls.writeline(
                 f"with {V.graph.device_ops.device_guard(device.index)}:"
             )
             self.kernel_autotune_calls.do_indent()
-            if autotune_seed_call is not None:
-                self.kernel_autotune_calls.writeline(autotune_seed_call)
             self.kernel_autotune_calls.writeline(
                 f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
             )
