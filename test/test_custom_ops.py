@@ -5509,7 +5509,7 @@ from torch.testing._internal.optests import opcheck
 op = torch.ops.aten.sin.default
 
 # If you rerun your test with PYTORCH_OPCHECK_PRINT_BETTER_REPRO=1
-# we will fill them in same (args, kwargs) as in your test
+# we will fill in the same (args, kwargs) as in your test
 args = ()  # args to the operator
 kwargs = {}  # kwargs to the operator
 opcheck(op, args, kwargs, test_utils="test_schema")
