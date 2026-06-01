@@ -12831,6 +12831,21 @@ class TestNNDeviceType(NNTestCase):
             test_helper(torch.nn.Hardtanh(), device, shape)
             test_helper(torch.nn.LeakyReLU(), device, shape)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float, torch.double)
+    def test_gelu_inf(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/185770
+        x = torch.tensor([float('inf'), float('-inf'), float('nan'), 0.0, 1.0],
+                         dtype=dtype, device=device)
+        for approx in ("none", "tanh"):
+            out = torch.nn.functional.gelu(x, approximate=approx)
+            self.assertEqual(out[0], torch.tensor(float('inf'), dtype=dtype))
+            self.assertEqual(out[1], torch.tensor(0.0, dtype=dtype))
+            self.assertTrue(out[2].isnan())
+            self.assertEqual(out[3], torch.tensor(0.0, dtype=dtype))
+            self.assertFalse(out[3].isnan())
+            self.assertFalse(out[4].isnan())
+
     @onlyCUDA
     def test_activations_bfloat16(self, device):
         _test_bfloat16_ops(self, torch.nn.ReLU(), device, inp_dims=(5), prec=1e-2)

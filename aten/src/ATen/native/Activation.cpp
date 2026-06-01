@@ -400,6 +400,13 @@ auto approximate_type = get_gelutype_enum(approximate);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+    // MKLDNN doesn't handle inf correctly: gelu(+inf)=+inf, gelu(-inf)=0
+    Tensor result_ref = result;
+    auto inf_mask = self.isinf();
+    if (inf_mask.any().item<bool>()) {
+      result_ref.masked_fill_(self == std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity());
+      result_ref.masked_fill_(self == -std::numeric_limits<double>::infinity(), 0.0);
+    }
 #ifdef __aarch64__
   } else if (use_mkldnn(self) && (approximate_type == GeluType::Tanh)) {
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
