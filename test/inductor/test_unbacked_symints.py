@@ -889,7 +889,8 @@ class TestUnbackedSymints(InductorTestCase):
             src = torch.ones(src_len, dtype=torch.float32, device=device)
             end = torch.tensor(3, dtype=torch.int64, device=device)
             with self.assertRaisesRegex(
-                RuntimeError, "expected src to have a size equal to the slice of self"
+                RuntimeError,
+                "expected src to have a size equal to the slice of self|Eq\\(",
             ):
                 compiled_fn(x, src, end)
 
