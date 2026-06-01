@@ -92,6 +92,38 @@ class CondOp(HigherOrderOperator):
 cond_op = CondOp()
 
 
+def _trace_branch_with_isolated_shape_env(fn, operands, name):
+    shape_env = _branch_shape_env(operands)
+    if shape_env is None:
+        return reenter_make_fx(fn)(*operands)
+
+    guard_start = len(shape_env.guards)
+    deferred_runtime_asserts_start = shape_env._snapshot_deferred_runtime_asserts()
+    with shape_env.isolate_branch_shape_env():
+        graph = reenter_make_fx(fn)(*operands)
+        shape_env.insert_branch_runtime_asserts(
+            graph,
+            name,
+            guard_start,
+            deferred_runtime_asserts_start,
+        )
+        return graph
+
+
+@contextlib.contextmanager
+def _maybe_isolate_branch_shape_env(shape_env):
+    if shape_env is None:
+        yield
+    else:
+        with shape_env.isolate_branch_shape_env():
+            yield
+
+
+def _branch_shape_env(operands):
+    fake_mode = torch._guards.detect_fake_mode(operands)
+    return fake_mode.shape_env if fake_mode is not None else None
+
+
 @exposed_in("torch")
 def cond(
     pred: bool | int | float | torch.Tensor,
@@ -252,8 +284,10 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
             f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
         )
 
-    true_graph = reenter_make_fx(true_fn)(*operands)
-    false_graph = reenter_make_fx(false_fn)(*operands)
+    true_graph = _trace_branch_with_isolated_shape_env(true_fn, operands, "cond_true")
+    false_graph = _trace_branch_with_isolated_shape_env(
+        false_fn, operands, "cond_false"
+    )
 
     true_outs = []
     false_outs = []
@@ -416,8 +450,10 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
 
     with mode, ignore_fresh_unbacked:
-        flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
-        flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
+        with _maybe_isolate_branch_shape_env(mode.shape_env):
+            flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
+        with _maybe_isolate_branch_shape_env(mode.shape_env):
+            flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
         if true_out_spec != false_out_spec:
             raise RuntimeError(
                 "Unmatched output spec from torch.cond branches: "

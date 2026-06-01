@@ -17,6 +17,7 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 import abc
 import atexit
 import collections
+import copy
 import dis
 import functools
 import glob
@@ -4622,6 +4623,136 @@ class ShapeEnv:
     def suppress_guards(self) -> _GeneratorContextManager[None]:
         """Context manager to ignore all guards generated inside."""
         return _suppress_guards(self)
+
+    def _snapshot_deferred_runtime_asserts(self) -> dict[sympy.Symbol | None, int]:
+        return {
+            symbol: len(asserts)
+            for symbol, asserts in self.deferred_runtime_asserts.items()
+        }
+
+    def insert_branch_runtime_asserts(
+        self,
+        gm: torch.fx.GraphModule,
+        name: str,
+        guard_start: int,
+        deferred_runtime_asserts_start: dict[sympy.Symbol | None, int],
+        *,
+        export: bool = False,
+    ) -> None:
+        from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+
+        branch_runtime_asserts = {
+            symbol: asserts[deferred_runtime_asserts_start.get(symbol, 0) :]
+            for symbol, asserts in self.deferred_runtime_asserts.items()
+            if len(asserts) > deferred_runtime_asserts_start.get(symbol, 0)
+        }
+        branch_runtime_asserts = {
+            symbol: list(asserts)
+            for symbol, asserts in branch_runtime_asserts.items()
+            if asserts
+        }
+        for guard in self.guards[guard_start:]:
+            branch_runtime_asserts.setdefault(None, []).append(
+                RuntimeAssert(
+                    guard.expr,
+                    f"{name}: {guard.expr}",
+                    CapturedTraceback.extract(skip=1),
+                )
+            )
+
+        if not branch_runtime_asserts:
+            return
+
+        saved_deferred_runtime_asserts = self.deferred_runtime_asserts
+        saved_num_deferred_runtime_asserts = self.num_deferred_runtime_asserts
+        try:
+            self.deferred_runtime_asserts = branch_runtime_asserts
+            self.num_deferred_runtime_asserts = sum(
+                len(asserts) for asserts in branch_runtime_asserts.values()
+            )
+            insert_deferred_runtime_asserts(gm, self, name, export=export)
+        finally:
+            self.deferred_runtime_asserts = saved_deferred_runtime_asserts
+            self.num_deferred_runtime_asserts = saved_num_deferred_runtime_asserts
+
+    def _clear_branch_isolation_caches(self) -> None:
+        # These plain lru_cache methods either depend on restored ShapeEnv
+        # state or perform side effects that must be replayed after restoration.
+        self.get_axioms.cache_clear()
+        self.size_hint.cache_clear()
+        self.guarding_hint_or_throw.cache_clear()
+        self.has_guarding_hint.cache_clear()
+        self._inner_evaluate_expr.cache_clear()
+        self._maybe_guard_rel.cache_clear()
+        self.guard_or_defer_runtime_assert.cache_clear()
+        self.constrain_symbol_range.cache_clear()
+
+        # ShapeEnv-aware caches should be invalidated by the version bump below,
+        # but clear the ones touched by branch isolation eagerly as well.
+        self._maybe_evaluate_static.cache_clear()
+        self._find.cache_clear()
+        self.replace.cache_clear()
+        self._update_divisible.cache_clear()
+        self.simplify.cache_clear()
+        self._simplify_floor_div.cache_clear()
+
+    @contextmanager
+    def isolate_branch_shape_env(self) -> Generator[None, None, None]:
+        """
+        Isolate guards and range refinements learned while tracing one branch
+        of a higher order op.
+
+        Branch tracing still allocates fresh symbols, and those symbols may be
+        needed to merge branch outputs later.  Preserve fresh symbol metadata
+        while restoring guard-like state for symbols that already belonged to
+        the parent graph.
+        """
+        existing_symbols = set(self.var_to_range)
+        saved_guards = list(self.guards)
+        saved_axioms = dict(self.axioms)
+        saved_var_to_range = dict(self.var_to_range)
+        saved_var_to_range_sloc = copy.deepcopy(self.var_to_range_sloc)
+        saved_replacements = dict(self.replacements)
+        saved_replacements_slocs = dict(self.replacements_slocs)
+        saved_divisible = set(self.divisible)
+        saved_deferred_runtime_asserts = {
+            k: list(v) for k, v in self.deferred_runtime_asserts.items()
+        }
+        saved_num_deferred_runtime_asserts = self.num_deferred_runtime_asserts
+        saved_symbol_guard_counter = copy.copy(self.symbol_guard_counter)
+        saved_size_like = set(self.size_like)
+
+        try:
+            yield
+        finally:
+            new_symbols = set(self.var_to_range) - existing_symbols
+            new_var_to_range = {
+                symbol: self.var_to_range[symbol] for symbol in new_symbols
+            }
+            new_var_to_range_sloc = {
+                symbol: self.var_to_range_sloc[symbol]
+                for symbol in new_symbols
+                if symbol in self.var_to_range_sloc
+            }
+            new_size_like = self.size_like - existing_symbols
+
+            self.guards = saved_guards
+            self.axioms = saved_axioms
+            self.var_to_range = saved_var_to_range
+            self.var_to_range.update(new_var_to_range)
+            self.var_to_range_sloc = saved_var_to_range_sloc
+            self.var_to_range_sloc.update(new_var_to_range_sloc)
+            self.replacements = saved_replacements
+            self.replacements_slocs = saved_replacements_slocs
+            self.divisible = saved_divisible
+            self.deferred_runtime_asserts = saved_deferred_runtime_asserts
+            self.num_deferred_runtime_asserts = saved_num_deferred_runtime_asserts
+            self.symbol_guard_counter = saved_symbol_guard_counter
+            self.size_like = saved_size_like | new_size_like
+            self.fake_tensor_cache.clear()
+            self._replacements_version_counter += 1
+            self._update_version_counter()
+            self._clear_branch_isolation_caches()
 
     @contextmanager
     def error_on_new_guards(self) -> Generator[None, None, None]:

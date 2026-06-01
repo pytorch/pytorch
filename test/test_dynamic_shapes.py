@@ -1093,6 +1093,45 @@ def forward(self, x_1):
         self.assertTrue(shape_env.evaluate_expr(test1))
         self.assertTrue(shape_env.evaluate_expr(test2))
 
+    def test_isolate_branch_shape_env_clears_runtime_assert_cache(self):
+        shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        a = shape_env.create_unbacked_symint()
+        expr = (a > 3).node.expr
+
+        with shape_env.isolate_branch_shape_env():
+            shape_env.guard_or_defer_runtime_assert(expr, "same check")
+            self.assertEqual(shape_env.num_deferred_runtime_asserts, 1)
+
+        self.assertEqual(shape_env.num_deferred_runtime_asserts, 0)
+
+        shape_env.guard_or_defer_runtime_assert(expr, "same check")
+        self.assertEqual(shape_env.num_deferred_runtime_asserts, 1)
+
+    def test_isolate_branch_shape_env_clears_axiom_cache(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 5)
+        expr = (a > 3).node.expr
+
+        with shape_env.isolate_branch_shape_env():
+            self.assertTrue(shape_env.evaluate_expr(expr))
+            self.assertEqual(len(shape_env.get_axioms()), 1)
+
+        self.assertEqual(len(shape_env.guards), 0)
+        self.assertEqual(shape_env.get_axioms(), ())
+
+    def test_isolate_branch_shape_env_clears_replace_cache(self):
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 5, duck=False).node.expr
+        b = create_symint(shape_env, 6, duck=False).node.expr
+
+        shape_env._set_replacement(a, b, "parent")
+        with shape_env.isolate_branch_shape_env():
+            shape_env._set_replacement(a, sympy.Integer(5), "branch")
+            self.assertEqual(shape_env.replace(a), sympy.Integer(5))
+
+        self.assertEqual(shape_env.replacements[a], b)
+        self.assertEqual(shape_env.replace(a), b)
+
     def test_sympy_optimized_add(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 2)

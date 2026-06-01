@@ -10154,6 +10154,78 @@ def forward(self, b_a_buffer, x):
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
 
+    def test_export_cond_branch_check_does_not_refine_outer_dim(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    _, sequence_length, _ = x.shape
+                    torch._check(sequence_length > 5)
+                    return x + 1
+
+                def false_fn(x):
+                    return x + 2
+
+                _, sequence_length, _ = x.shape
+                return torch.cond(sequence_length > 5, true_fn, false_fn, (x,))
+
+        m = M()
+        x = torch.randn(2, 700, 12)
+        batch_dim = torch.export.Dim("batch_size")
+        sequence_dim = torch.export.Dim("sequence_length")
+
+        ep = torch.export.export(
+            m,
+            (x,),
+            dynamic_shapes={"x": {0: batch_dim, 1: sequence_dim}},
+            strict=False,
+        )
+
+        true_branch_input = torch.randn(2, 6, 12)
+        false_branch_input = torch.randn(2, 4, 12)
+        self.assertTrue(
+            torch.allclose(ep.module()(true_branch_input), m(true_branch_input))
+        )
+        self.assertTrue(
+            torch.allclose(ep.module()(false_branch_input), m(false_branch_input))
+        )
+
+    def test_export_cond_branch_check_preserved_as_runtime_assert(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    _, sequence_length, _ = x.shape
+                    torch._check(sequence_length > 10)
+                    return x + 1
+
+                def false_fn(x):
+                    return x + 2
+
+                _, sequence_length, _ = x.shape
+                return torch.cond(sequence_length > 5, true_fn, false_fn, (x,))
+
+        m = M()
+        x = torch.randn(2, 700, 12)
+        batch_dim = torch.export.Dim("batch_size")
+        sequence_dim = torch.export.Dim("sequence_length")
+
+        ep = torch.export.export(
+            m,
+            (x,),
+            dynamic_shapes={"x": {0: batch_dim, 1: sequence_dim}},
+            strict=False,
+        )
+
+        true_branch_input = torch.randn(2, 11, 12)
+        false_branch_input = torch.randn(2, 4, 12)
+        self.assertTrue(
+            torch.allclose(ep.module()(true_branch_input), m(true_branch_input))
+        )
+        self.assertTrue(
+            torch.allclose(ep.module()(false_branch_input), m(false_branch_input))
+        )
+        with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
+            ep.module()(torch.randn(2, 6, 12))
+
     def test_ccode_python_mod(self):
         import sympy
 
