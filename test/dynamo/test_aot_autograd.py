@@ -1730,6 +1730,23 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(eager_no_sq, comp_ind_no_sq)
         self.assertEqual(eager_no_sq.stride(), comp_ind_no_sq.stride())
 
+    def test_autograd_grad_pow_python_int_exponent_dynamic(self):
+        def fn(x, exponent):
+            y = torch.pow(x, exponent)
+            (grad,) = torch.autograd.grad(y.sum(), x)
+            return y, grad
+
+        for backend in ("aot_eager", "inductor"):
+            compiled_fn = torch.compile(fn, backend=backend, dynamic=True)
+            for exponent in (0, 2):
+                x = torch.ones((1, 3), requires_grad=True)
+                expected = fn(x, exponent)
+
+                x = torch.ones((1, 3), requires_grad=True)
+                actual = compiled_fn(x, exponent)
+
+                self.assertEqual(actual, expected)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_unbacked_activation_specialized_in_inductor(self):
