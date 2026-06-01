@@ -14,7 +14,14 @@ from torch.utils._sympy.value_ranges import ValueRanges
 
 class TestOptimizeIndexing(TestCase):
     @staticmethod
-    def _make_loop_body(graph, bounds, indexing_exprs, replacement_vals, subgraphs=()):
+    def _make_loop_body(
+        graph,
+        bounds,
+        indexing_exprs,
+        replacement_vals,
+        subgraphs=(),
+        indirect_vars=(),
+    ):
         class FakeBounds:
             def __init__(self):
                 self.replacement_vals = replacement_vals
@@ -27,14 +34,13 @@ class TestOptimizeIndexing(TestCase):
                 self.graph = graph
 
         class FakeLoopBody:
-            indirect_vars = []
-
             def __init__(self):
                 self.root_block = FakeBlock(graph)
                 self.subblocks = {
                     f"masked_subblock{i}": FakeBlock(subgraph)
                     for i, subgraph in enumerate(subgraphs)
                 }
+                self.indirect_vars = list(indirect_vars)
                 self.indexing_exprs = indexing_exprs
                 self._bounds = FakeBounds()
 
@@ -81,7 +87,7 @@ class TestOptimizeIndexing(TestCase):
             torch.float64,
         )
 
-    def test_index_expr_unknown_value_use_stays_indexing(self):
+    def test_index_expr_unknown_value_use_converts_conservatively(self):
         graph = Graph()
         ops = graph.placeholder("ops")
         get_index = graph.call_module("get_index", ("i0",))
@@ -104,9 +110,9 @@ class TestOptimizeIndexing(TestCase):
 
         convert_index_expr_to_value_expr(loop_body)
 
-        self.assertEqual(index_expr.target, "index_expr")
+        self.assertEqual(index_expr.target, "value_expr")
 
-    def test_index_expr_load_barrier_stays_indexing(self):
+    def test_index_expr_load_index_stays_indexing(self):
         graph = Graph()
         ops = graph.placeholder("ops")
         get_index = graph.call_module("get_index", ("i0",))
@@ -134,6 +140,98 @@ class TestOptimizeIndexing(TestCase):
         self.assertEqual(index_expr.target, "index_expr")
         self.assertEqual(load.args[2], index_expr)
         self.assertEqual([], [n for n in graph.nodes if n.target == "value_expr"])
+
+    def test_index_expr_set_indirect_stays_indexing(self):
+        graph = Graph()
+        ops = graph.placeholder("ops")
+        get_index = graph.call_module("get_index", ("i0",))
+        index_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        graph.call_module("set_indirect0", (index_expr,))
+        load_index = graph.call_module("get_index", ("i1",))
+        load = graph.call_method("load", (ops, "arg0", load_index))
+        store_index = graph.call_module("get_index", ("i0",))
+        store = graph.call_method("store", (ops, "buf0", store_index, load, None))
+        graph.output(store)
+
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        indirect0 = sympy.Symbol("indirect0", integer=True)
+        loop_body = self._make_loop_body(
+            graph,
+            {
+                index_expr: ValueRanges(0, 2**40),
+                load: ValueRanges(0, 1),
+            },
+            {"i0": i0, "i1": indirect0},
+            {i0: ValueRanges(0, 1)},
+            indirect_vars=(indirect0,),
+        )
+
+        convert_index_expr_to_value_expr(loop_body)
+
+        self.assertEqual(index_expr.target, "index_expr")
+
+    def test_index_expr_set_indirect_value_use_converts(self):
+        graph = Graph()
+        ops = graph.placeholder("ops")
+        get_index = graph.call_module("get_index", ("i0",))
+        set_input = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        graph.call_module("set_indirect0", (set_input,))
+        value_get_index = graph.call_module("get_index", ("i1",))
+        value_index_expr = graph.call_method(
+            "index_expr", (ops, value_get_index, torch.int64)
+        )
+        store_index = graph.call_module("get_index", ("i0",))
+        store = graph.call_method(
+            "store", (ops, "buf0", store_index, value_index_expr, None)
+        )
+        graph.output(store)
+
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        indirect0 = sympy.Symbol("indirect0", integer=True)
+        loop_body = self._make_loop_body(
+            graph,
+            {
+                set_input: ValueRanges(0, 2**40),
+                value_index_expr: ValueRanges(0, 2**40),
+            },
+            {"i0": i0, "i1": indirect0 + 1},
+            {i0: ValueRanges(0, 1)},
+            indirect_vars=(indirect0,),
+        )
+
+        convert_index_expr_to_value_expr(loop_body)
+
+        self.assertEqual(set_input.target, "value_expr")
+        self.assertEqual(value_index_expr.target, "value_expr")
+
+    def test_index_expr_device_assert_async_stays_indexing(self):
+        graph = Graph()
+        ops = graph.placeholder("ops")
+        get_index = graph.call_module("get_index", ("i0",))
+        index_expr = graph.call_method("index_expr", (ops, get_index, torch.int64))
+        cond = graph.call_method("lt", (ops, index_expr, 16))
+        assert_result = graph.call_method("device_assert_async", (ops, cond, "msg"))
+        store_index = graph.call_module("get_index", ("i0",))
+        store_value = graph.call_method("constant", (ops, 0, torch.int64))
+        store = graph.call_method(
+            "store", (ops, "buf0", store_index, store_value, None)
+        )
+        graph.output((assert_result, store))
+
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        loop_body = self._make_loop_body(
+            graph,
+            {
+                index_expr: ValueRanges(0, 2**40),
+                cond: ValueRanges.unknown(),
+            },
+            {"i0": i0},
+            {i0: ValueRanges(0, 1)},
+        )
+
+        convert_index_expr_to_value_expr(loop_body)
+
+        self.assertEqual(index_expr.target, "index_expr")
 
     def test_index_expr_sort_and_scan_value_sinks(self):
         graph = Graph()
@@ -312,7 +410,48 @@ class TestOptimizeIndexing(TestCase):
         self.assertEqual(index_expr.target, "value_expr")
         self.assertEqual(index_expr.args[2], torch.float32)
 
-    def test_index_expr_masked_subblock_mixed_use_stays_indexing(self):
+    def test_index_expr_masked_subblock_index_use_stays_indexing(self):
+        graph = Graph()
+        ops = graph.placeholder("ops")
+        mask = graph.placeholder("mask")
+        other_get_index = graph.call_module("get_index", ("i0",))
+        other_index_expr = graph.call_method(
+            "index_expr", (ops, other_get_index, torch.int64)
+        )
+        masked = graph.call_module("masked_subblock0", (mask, other_index_expr))
+        load = graph.call_method("load", (ops, "arg0", masked))
+        store_index = graph.call_module("get_index", ("i0",))
+        store = graph.call_method("store", (ops, "buf0", store_index, load, None))
+        graph.output(store)
+
+        subgraph = Graph()
+        sub_ops = subgraph.placeholder("ops")
+        get_index = subgraph.call_module("get_index", ("i0",))
+        index_expr = subgraph.call_method(
+            "index_expr", (sub_ops, get_index, torch.int64)
+        )
+        subgraph.output(index_expr)
+
+        i0 = sympy.Symbol("i0", integer=True, nonnegative=True)
+        loop_body = self._make_loop_body(
+            graph,
+            {
+                other_index_expr: ValueRanges(0, 2**40),
+                masked: ValueRanges(0, 2**40),
+                load: ValueRanges(0, 1),
+                index_expr: ValueRanges(0, 2**40),
+            },
+            {"i0": i0},
+            {i0: ValueRanges(0, 1)},
+            subgraphs=(subgraph,),
+        )
+
+        convert_index_expr_to_value_expr(loop_body)
+
+        self.assertEqual(other_index_expr.target, "index_expr")
+        self.assertEqual(index_expr.target, "index_expr")
+
+    def test_index_expr_masked_subblock_mixed_use_converts_in_place(self):
         graph = Graph()
         ops = graph.placeholder("ops")
         mask = graph.placeholder("mask")
@@ -352,10 +491,10 @@ class TestOptimizeIndexing(TestCase):
 
         convert_index_expr_to_value_expr(loop_body)
 
-        # masked_subblock's other arg is a value sink, so the index_expr
-        # feeding it is converted even though the subblock result also
-        # feeds a load index.
+        # The subblock result has both indexing and value uses. We do not clone,
+        # so the value use makes both paths use value_expr.
         self.assertEqual(masked.args[1].target, "value_expr")
+        self.assertEqual(index_expr.target, "value_expr")
 
 
 if __name__ == "__main__":
