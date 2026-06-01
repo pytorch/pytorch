@@ -35,7 +35,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     munge_exc,
     parametrize,
-	skipIfXpu,
+    skipIfXpu,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
@@ -198,6 +198,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(cnt.op_count, expected_opcount)
                 graph = backend.graphs[0]
                 wrap_node = find_first_node(graph, wrap)
+
                 self.assertEqual(len(wrap_node.args), expected_num_wrap_args)
         # We always return/check the graph from the first run if return_graph = True
         if return_graph:

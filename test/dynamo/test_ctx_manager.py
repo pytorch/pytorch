@@ -3000,7 +3000,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
-	# autocast with float64 not support on XPU
+    # autocast with float64 not support on XPU
     @onlyCUDA
     def test_amp_autocast(self, device):
         device_type = torch.device(device).type
