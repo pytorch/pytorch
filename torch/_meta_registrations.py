@@ -1598,7 +1598,7 @@ def lu_unpack_meta(
     sizes = list(LU.shape)
     m = sizes[-2]
     n = sizes[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
     sizes[-1] = m
     if unpack_pivots:
         P = LU.new_empty(sizes)
@@ -1648,7 +1648,7 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
 
     m = A.shape[-2]
     n = A.shape[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
 
     if compute_q:
         Q_shape = list(A.shape)
@@ -4850,13 +4850,9 @@ def meta_bmm_dtype(self, mat2, out_dtype):
 
 
 def div_rtn(x, y):
-    q = x // y
-    r = x % y
-    # WARNING: explicit bool conversion here is necessary;
-    # would be fixed by SymBool
-    if r != 0 and (bool(r < 0) != bool(y < 0)):
-        q -= 1
-    return q
+    # Python // already floors toward negative infinity, so the
+    # remainder-sign adjustment from the original C++ port is unnecessary.
+    return x // y
 
 
 def pooling_output_shape_pad_lr(
@@ -4918,6 +4914,8 @@ def pool2d_shape_check(
     outputWidth,
     memory_format,
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
     ndim = input.dim()
     nOutputPlane = nInputPlane
 
@@ -4934,29 +4932,31 @@ def pool2d_shape_check(
         lambda: f"dilation should be greater than zero, but got dilationH: {dilationH}, dilationW: {dilationW}",
     )
 
-    valid_dims = input.size(1) != 0 and input.size(2) != 0
+    valid_dims = sym_and(input.size(1) != 0, input.size(2) != 0)
 
     if memory_format == torch.channels_last:
         torch._check(
-            ndim == 4 and valid_dims and input.size(3) != 0,
+            ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
             lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout"
             f" with optional 0 dim batch size for input, but got: {input.size()}",
         )
     else:
         torch._check(
-            (ndim == 3 and input.size(0) != 0 and valid_dims)
-            or (ndim == 4 and valid_dims and input.size(3) != 0),
+            sym_or(
+                ndim == 3 and sym_and(input.size(0) != 0, valid_dims),
+                ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
+            ),
             lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got: {input.size()}",
         )
 
     torch._check(
-        kW // 2 >= padW and kH // 2 >= padH,
+        sym_and(kW // 2 >= padW, kH // 2 >= padH),
         lambda: "pad should be smaller than or equal to half of kernel size, but got "
         f"padW = {padW}, padH = {padH}, kW = {kW}, kH = {kH}",
     )
 
     torch._check(
-        outputWidth >= 1 and outputHeight >= 1,
+        sym_and(outputWidth >= 1, outputHeight >= 1),
         lambda: f"Given input size: ({nInputPlane}x{inputHeight}x{inputWidth}). "
         f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). "
         "Output size is too small",
@@ -5028,9 +5028,11 @@ def pool3d_shape_check(
             ),
         )
 
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     if check_input_size:  # AveragePool3d
         torch._check(
-            itime >= kT and iheight >= kH and iwidth >= kW,
+            sym_and(itime >= kT, iheight >= kH, iwidth >= kW),
             lambda: (
                 f"input image (T: {itime} H: {iheight} W: {iwidth}) smaller than "
                 f"kernel size (kT: {kT} kH: {kH} kW: {kW})"
@@ -5038,7 +5040,7 @@ def pool3d_shape_check(
         )
 
     torch._check(
-        kT / 2 >= pT and kW / 2 >= pW and kH / 2 >= pH,
+        sym_and(kT / 2 >= pT, kW / 2 >= pW, kH / 2 >= pH),
         lambda: (
             f"pad should be smaller than or equal to half of kernel size, but got "
             f"kT: {kT} kW: {kW} kH: {kH} padT: {pT} padW: {pW} padH: {pH}"
@@ -5046,7 +5048,7 @@ def pool3d_shape_check(
     )
 
     torch._check(
-        otime >= 1 and owidth >= 1 and oheight >= 1,
+        sym_and(otime >= 1, owidth >= 1, oheight >= 1),
         lambda: (
             f"Given input size: ({nslices}x{itime}x{iheight}x{iwidth}). "
             f"Calculated output size: ({nslices}x{otime}x{oheight}x{owidth}). "
@@ -5849,6 +5851,11 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return _scatter_meta_output(self)
 
 
+@register_meta(aten.diagonal_scatter.default)
+def meta_diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
+    return _scatter_meta_output(self)
+
+
 def _scatter_meta_output(self):
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
@@ -6345,7 +6352,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
             max_seqlen_batch_q,
             num_heads,
         ),
-        dtype=torch.float,
+        dtype=utils.get_computation_dtype(query.dtype),
         device=query.device,
     ).transpose(1, 2)
     return (

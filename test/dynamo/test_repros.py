@@ -45,6 +45,7 @@ from torch import nn
 from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
@@ -78,6 +79,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
     skipIfHpu,
+    skipIfRocm,
     skipIfWindows,
     TEST_WITH_ROCM,
     xfailIfS390X,
@@ -1039,6 +1041,41 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(cloned_root.check(f_locals))
         if guard_manager_wrapper.diff_guard_root:
             self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
+
+    def test_linalg_inv_singular_aot_eager_raises(self):
+        def fn(x):
+            return torch.linalg.inv(x)
+
+        x = torch.zeros(2, 2)
+        msg = r"linalg\.inv: The diagonal element 1 is zero"
+
+        with self.assertRaisesRegex(torch._C._LinAlgError, msg):
+            fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(torch._C._LinAlgError, msg):
+            opt_fn(x)
+
+    def test_linalg_inv_check_errors_preserved_in_aot_graph(self):
+        def fn(x):
+            return torch.linalg.inv(x)
+
+        backend = AotEagerAndRecordGraphs()
+        x = torch.tensor([[2.0, 0.0], [0.0, 4.0]])
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(len(backend.fw_graphs), 1)
+
+        fw_graph = backend.fw_graphs[0]
+        self.assertTrue(
+            any(
+                node.target is torch.ops.higher_order.with_effects
+                and node.args[1] is torch.ops.aten._linalg_check_errors.default
+                for node in fw_graph.graph.nodes
+            ),
+            fw_graph.code,
+        )
 
     def test_swap_tensors_subclass_not_blocked_by_metaconverter_refcycle(self):
         """Checks that MetaConverter doesn't create refcycles of itself that blocks swap_tensor on subclass tensors"""
@@ -2936,6 +2973,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(a)
         self.assertTrue(same(ref, res))
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/184324")
     def test_tokenization(self):
         from collections import UserDict
 

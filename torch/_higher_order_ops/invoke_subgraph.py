@@ -264,11 +264,37 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             check_input_alias_and_mutation_return_outputs,
             materialize_as_graph,
         )
+        from torch._subclasses.functional_tensor import FunctionalTensor
 
         subgraph_decomp_table = _extract_nested_region_config(subgraph)
-        gm: torch.fx.GraphModule = materialize_as_graph(
-            subgraph, operands, subgraph_decomp_table=subgraph_decomp_table
+        # When the subgraph is a GraphModule whose captured buffers are
+        # already FunctionalTensors (produced by an enclosing
+        # FunctionalTensorMode, e.g. the non-strict export path or
+        # ``run_decompositions`` on an ExportedProgram that preserved an
+        # ``invoke_subgraph`` HOP), re-tracing through
+        # ``materialize_as_graph`` would pop that mode via
+        # ``_disable_current_modes`` and trigger "FunctionalTensor on its
+        # own" when the inner trace touches the captured constants. In that
+        # case the existing graph has already been functionalized by the
+        # outer pass, so reuse it for schema / mutation analysis.
+        gm: torch.fx.GraphModule | None = None
+        if isinstance(subgraph, FunctionalizeCtxWrapper):
+            candidate = subgraph.subgraph
+        elif isinstance(subgraph, torch.fx.GraphModule):
+            candidate = subgraph
+        else:
+            candidate = None
+        bufs = (
+            list(candidate.buffers())
+            if isinstance(candidate, torch.fx.GraphModule)
+            else []
         )
+        if bufs and all(isinstance(buf, FunctionalTensor) for buf in bufs):
+            gm = candidate
+        if gm is None:
+            gm = materialize_as_graph(
+                subgraph, operands, subgraph_decomp_table=subgraph_decomp_table
+            )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("subgraph", gm)
@@ -367,12 +393,14 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
     if torch.compiler.is_compiling():
         # For non-strict export tracing, we still want to go through Dynamo
 
-        def _invoke_subgraph_placeholder_wrapper(func, args):
-            return invoke_subgraph_placeholder(func, *args)
+        def _invoke_subgraph_placeholder_wrapper(func, args, kwargs):
+            return invoke_subgraph_placeholder(func, *args, **kwargs)
 
         from torch._higher_order_ops.utils import _hop_compile_and_call
 
-        return _hop_compile_and_call(_invoke_subgraph_placeholder_wrapper, (func, args))
+        return _hop_compile_and_call(
+            _invoke_subgraph_placeholder_wrapper, (func, args, kwargs)
+        )
 
     return func(*args, **kwargs)
 
