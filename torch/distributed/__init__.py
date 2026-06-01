@@ -174,3 +174,38 @@ else:
 
     sys.modules["torch.distributed"].GroupName = _Stub  # type: ignore[attr-defined]
     sys.modules["torch.distributed"].ProcessGroup = _Stub  # type: ignore[attr-defined]
+
+
+def __getattr__(name):
+    """Forward unknown function calls to the default ProcessGroup.
+
+    Enables custom collectives defined on a ProcessGroup subclass
+    to be called as ``dist.<fn>(..., group=pg)`` without modifying
+    this module.  ``group`` must be passed as a keyword argument;
+    defaults to WORLD.
+
+    Only active after ``init_process_group`` has been called, so
+    submodule imports (e.g., ``torch.distributed.fsdp``) are not
+    intercepted during startup.
+    """
+    try:
+        from .distributed_c10d import _get_default_group
+
+        default_pg = _get_default_group()
+    except (ValueError, ImportError):
+        raise AttributeError(
+            f"module 'torch.distributed' has no attribute '{name}'"
+        ) from None
+
+    def _forward(*args, group=None, **kwargs):
+        group = group or default_pg
+        pg_fn = getattr(group, name, None)
+        if pg_fn is None:
+            raise AttributeError(
+                f"'{type(group)}' process group has no attribute '{name}'"
+            )
+        return pg_fn(*args, **kwargs)
+
+    _forward.__name__ = name
+    _forward.__qualname__ = f"torch.distributed.{name}"
+    return _forward
