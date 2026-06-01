@@ -5,6 +5,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
@@ -20,6 +21,9 @@
 #include <torch/csrc/profiler/standalone/privateuse1_observer.h>
 #include <torch/csrc/profiler/util.h>
 
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <stdexcept>
 #include <utility>
 
@@ -570,14 +574,77 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   post_process_t eventPostProcessCb;
 };
 
+// Global RecordFunction callbacks (KINETO_ONDEMAND, or KINETO with
+// profile_all_threads) fire on every thread, including long-lived worker
+// threads (e.g. the DataLoader pin_memory thread). They access the profiler
+// state through a raw, non-owning pointer, while disableProfiler() frees that
+// state on another thread. To make teardown safe, disableProfiler() flips
+// `g_global_cb_active` to false and blocks until `g_global_cb_in_flight` drains
+// to zero before touching the record queue or freeing the state. The counter
+// stays lock-free on the per-op hot path; the mutex/condition_variable are only
+// touched on the rare teardown handoff. These are only used by the global
+// (use_global_state_ptr) callback path; the thread-local path is unaffected.
+std::atomic<bool> g_global_cb_active{false};
+std::atomic<int64_t> g_global_cb_in_flight{0};
+std::mutex g_global_cb_mutex;
+std::condition_variable g_global_cb_cv; // GUARDED_BY(g_global_cb_mutex)
+
+// Drop one in-flight global-callback reference. When this is the last in-flight
+// callback and teardown has already begun (active cleared), wake the
+// disableProfiler() thread blocked in the drain wait. During normal profiling
+// (active still set) this is a single lock-free decrement -- no lock, no
+// notify.
+void releaseGlobalCallbackInFlight() {
+  if (g_global_cb_in_flight.fetch_sub(1) == 1 && !g_global_cb_active.load()) {
+    std::lock_guard<std::mutex> lock(g_global_cb_mutex);
+    g_global_cb_cv.notify_all();
+  }
+}
+
 template <bool use_global_state_ptr = false>
 std::unique_ptr<at::ObserverContext> onFunctionEnter(
     const at::RecordFunction& fn) {
-  auto state_ptr = KinetoThreadLocalState::get(use_global_state_ptr);
-  if (!state_ptr) {
-    return nullptr;
+  if constexpr (use_global_state_ptr) {
+    // Fast bail once teardown has begun, before taking an in-flight ref. This
+    // keeps the drain in disableProfiler() converging: callbacks that arrive
+    // after teardown starts never pin the in-flight count.
+    if (!g_global_cb_active.load()) {
+      return nullptr;
+    }
+    // Take an in-flight ref, then re-check `active`. The re-check after the
+    // increment is what makes teardown safe: if disableProfiler() set `active`
+    // to false concurrently, its drain loop is guaranteed to observe our
+    // increment (and wait) iff we observe `active` still true here. Either we
+    // back out without touching the state, or the state is kept alive until our
+    // matching onFunctionExit releases the ref.
+    g_global_cb_in_flight.fetch_add(1);
+    // Release the ref on any early return or exception (e.g. begin_op throwing
+    // on allocation failure), unless ownership is handed to onFunctionExit by
+    // releasing the guard. Without this, a throw would leak the count and
+    // deadlock the next disableProfiler() drain.
+    auto in_flight_guard =
+        c10::make_scope_exit([] { releaseGlobalCallbackInFlight(); });
+    if (!g_global_cb_active.load()) {
+      return nullptr;
+    }
+    auto state_ptr = KinetoThreadLocalState::get(/*global=*/true);
+    if (!state_ptr) {
+      return nullptr;
+    }
+    auto ctx = state_ptr->recordQueue.getSubqueue()->begin_op(fn);
+    if (ctx) {
+      // The in-flight ref is now owned by the matching onFunctionExit (which
+      // releases it iff it receives a non-null context).
+      in_flight_guard.release();
+    }
+    return ctx;
+  } else {
+    auto state_ptr = KinetoThreadLocalState::get(use_global_state_ptr);
+    if (!state_ptr) {
+      return nullptr;
+    }
+    return state_ptr->recordQueue.getSubqueue()->begin_op(fn);
   }
-  return state_ptr->recordQueue.getSubqueue()->begin_op(fn);
 }
 
 // @lint-ignore CLANGTIDY clang-diagnostic-unused-parameter
@@ -585,6 +652,30 @@ template <bool use_global_state_ptr = false>
 void onFunctionExit(
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {
+  // Release the in-flight reference taken in onFunctionEnter for the global
+  // callback path, on every exit path (including exceptions). The ref is held
+  // only for ops that produced a context, so it is released iff ctx_ptr is
+  // non-null -- ops whose onFunctionEnter bailed (null context) were never
+  // counted. The thread-local instantiation compiles this to a no-op.
+  auto in_flight_guard = c10::make_scope_exit([&] {
+    if constexpr (use_global_state_ptr) {
+      if (ctx_ptr != nullptr) {
+        releaseGlobalCallbackInFlight();
+      }
+    }
+  });
+
+  if constexpr (use_global_state_ptr) {
+    // A global callback whose onFunctionEnter bailed (null context) never took
+    // an in-flight ref, so it must not touch the profiler state here -- a
+    // concurrent disableProfiler() may already be tearing it down. Return
+    // before reading the global state below. Only ops that produced a context
+    // (and thus hold an in-flight ref that blocks teardown) fall through.
+    if (ctx_ptr == nullptr) {
+      return;
+    }
+  }
+
   auto state_ptr = KinetoThreadLocalState::get(use_global_state_ptr);
   if (!state_ptr) {
     return;
@@ -647,6 +738,10 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           .scopes(scopes);
 
   if constexpr (use_global_callback) {
+    // Arm the in-flight drain gate before the global callback can fire on any
+    // thread. disableProfiler() relies on this to know it must drain.
+    g_global_cb_in_flight.store(0);
+    g_global_cb_active.store(true);
     registration_state_ptr->setCallbackHandle(
         at::addGlobalCallback(recordFunctionCallback));
   } else {
@@ -929,6 +1024,16 @@ void disableProfilerInChildThread() {
 std::unique_ptr<ProfilerResult> disableProfiler() {
   // releasing to inform child threads to stop profiling
   profiler_state_info_ptr = nullptr;
+
+  // If global callbacks were installed (KINETO_ONDEMAND, or KINETO with
+  // profile_all_threads), they may be running right now on other threads. Stop
+  // new callbacks from starting and wait for any in-flight ones to finish
+  // before we pop and free the profiler state below -- otherwise a callback on
+  // a worker thread can use the record queue after it is freed/torn down here.
+  if (g_global_cb_active.exchange(false)) {
+    std::unique_lock<std::mutex> lock(g_global_cb_mutex);
+    g_global_cb_cv.wait(lock, [] { return g_global_cb_in_flight == 0; });
+  }
 
   auto state_ptr = ProfilerStateBase::pop();
   if (!state_ptr) {
