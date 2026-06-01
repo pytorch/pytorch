@@ -34,20 +34,6 @@ class ComplexTensor(Tensor):
         real = real.contiguous()
         imag = imag.contiguous()
 
-        # NOTE conj/neg (hameerabbasi):
-        # All of the following follows from two rules (`!=` represents XOR):
-        # 1. `x.real.is_neg() := x.is_neg()`
-        # 2. `x.imag.is_neg() := (x.is_conj() != x.is_neg())`
-        #
-        # Or, in words:
-        # 1. The negative flag affects both the real and imaginary parts
-        # 2. The conjugate flag affects the only the imaginary part
-        #
-        # This is necessary to preserve aliasing semantics for `aten.conj` and `aten._neg_view`.
-        # See `test/test_dynamo/test_complex.py::{test_conj_alias, test_neg_alias}`.
-        neg_flag = real.is_neg()
-        conj_flag = neg_flag != imag.is_neg()
-
         # TODO (hameerabbasi):
         # What should we do with dtype?
         # We could convert to the complex type (float32 -> complex64), but we
@@ -100,9 +86,6 @@ class ComplexTensor(Tensor):
         )
         res._re = real.detach()
         res._im = imag.detach()
-        # See "NOTE conj/neg (hameerabbasi)"
-        torch._C._set_conj(res, conj_flag)
-        torch._C._set_neg(res, neg_flag)
 
         return res
 

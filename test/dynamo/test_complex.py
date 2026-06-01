@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -76,6 +77,20 @@ class ComplexTests(ComplexDynamoTestCase):
         fn_c = torch.compile(f, fullgraph=True)
         self.assertRaises(RuntimeError, fn_c, a)
 
+    @unittest.expectedFailure
+    def test_incorrect_aliasing_semantics(self):
+        # Once this succeeds, remove the xfail and the test above
+        def f(a):
+            out = torch.view_as_real(a)
+            a[...] = torch.zeros_like(a)
+            return out
+
+        a = torch.randn(2, 2, dtype=torch.complex64)
+        fn_c = torch.compile(f, fullgraph=True)
+        ref = f(a)
+        test = fn_c(a)
+        self.assertEqual(ref, test)
+
     def test_conj_alias(self):
         def f():
             a = torch.zeros(2, 2, dtype=torch.complex64)
@@ -107,6 +122,20 @@ class ComplexTests(ComplexDynamoTestCase):
         fn_c = torch.compile(f, fullgraph=True)
         self.assertRaises(RuntimeError, fn_c, a)
 
+    @unittest.expectedFailure
+    def test_complex_output_aliases_input(self):
+        # Once this succeeds, remove the xfail and the test above
+        def f(a):
+            return a
+
+        a = torch.randn(2, 2, dtype=torch.complex64)
+        fn_c = torch.compile(f, fullgraph=True)
+        ref = f(a)
+        test = fn_c(a)
+        self.assertEqual(ref, test)
+        a[...] = torch.zeros_like(a)
+        self.assertEqual(ref, test)
+
     def test_complex_input_mutation_raises(self):
         def f(a, b):
             a.mul_(b)
@@ -117,6 +146,23 @@ class ComplexTests(ComplexDynamoTestCase):
 
         fn_c = torch.compile(f, fullgraph=True)
         self.assertRaises(RuntimeError, fn_c, a, b)
+
+    @unittest.expectedFailure
+    def test_complex_input_mutation(self):
+        # Once this succeeds, remove the xfail and the test above
+        def f(a, b):
+            a.mul_(b)
+            return a.abs()
+
+        a = torch.randn(2, 2, dtype=torch.complex64)
+        b = torch.randn(2, 2, dtype=torch.complex64)
+
+        fn_c = torch.compile(f, fullgraph=True)
+
+        a_ref = a.clone()
+        a_test = a.clone()
+        self.assertEqual(f(a_test, b), fn_c(a_ref, b))
+        self.assertEqual(a_test, a_ref)
 
     def test_aliasing_semantics(self):
         def mutate():
