@@ -229,21 +229,9 @@ class ComboKernelTests(TestCase):
         out_eager = fn(*inps)
         fn_c = torch.compile(fn)
         out_compiled, code = run_and_get_code(fn_c, *inps)
-        if (
-            torch._inductor.config.combo_kernel_per_subkernel_blocks
-            and torch._inductor.config.combo_seed_autotune_at_compile_time
-        ):
-            # Inline bench at codegen consumes the seed kernels; the
-            # per-subkernel persistent-reduction size hints survive in
-            # combo_grid_meta as size_hints_0/1/... (slot 0 is the 16-col
-            # input, slot 1 is the 32-col input).
-            FileCheck().check("'heuristic_0': 'persistent_reduction'").check(
-                "'size_hints_1': {'x': 1024, 'r0_': 32}"
-            ).run(code[0])
-        else:
-            FileCheck().check("triton_heuristics.persistent_reduction").check(
-                "size_hints={'x': 1024, 'r0_': 32}"
-            ).run(code[0])
+        FileCheck().check("triton_heuristics.persistent_reduction").check(
+            "size_hints={'x': 1024, 'r0_': 32}"
+        ).run(code[0])
         self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
@@ -584,13 +572,10 @@ class ComboKernelTests(TestCase):
             triton_events = [
                 event
                 for event in trace_json["traceEvents"]
-                if "triton_poi_fused" in event["name"]
+                if "triton_poi_fused_0" in event["name"]
             ]
             if torch._inductor.config.combo_kernel_per_subkernel_blocks:
-                grid = triton_events[0]["args"]["grid"]
-                # With per-subkernel blocks the combo kernel dispatches
-                # sequentially; total blocks >= the standalone 3795.
-                self.assertGreaterEqual(grid[0], 3795)
+                self.assertEqual([3795, 1, 1], triton_events[0]["args"]["grid"])
             else:
                 self.assertEqual([791, 4096, 1], triton_events[0]["args"]["grid"])
 
@@ -791,12 +776,11 @@ class ComboKernelTests(TestCase):
             triton_events = [
                 event
                 for event in trace_json["traceEvents"]
-                if "triton_poi_fused" in event["name"]
+                if "triton_poi_fused_0" in event["name"]
             ]
 
             if torch._inductor.config.combo_kernel_per_subkernel_blocks:
-                grid = triton_events[0]["args"]["grid"]
-                self.assertGreaterEqual(grid[0], 83660)
+                self.assertEqual([83660, 1, 1], triton_events[0]["args"]["grid"])
             else:
                 self.assertEqual([4, 45260, 2], triton_events[0]["args"]["grid"])
 
@@ -1443,92 +1427,6 @@ class ComboKernelTestsMaxAutotune(TestCase):
         torch._inductor.metrics.reset()
         super().tearDown()
 
-    def _run_and_get_combo_seed_logs(self, fn, inps):
-        logger = logging.getLogger("torch._inductor.runtime.triton_heuristics")
-        with fresh_cache(), self.assertLogs(logger, level=logging.DEBUG) as cm:
-            out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
-        return out_compiled, " ".join(code), "\n".join(cm.output)
-
-    def _assert_combo_seed_launch_path(self, code, logs, seed_count):
-        # Inline bench at codegen consumes the seed kernels and bakes the
-        # winning configs into combo_grid_meta["prepicked_seed_configs"].
-        # The wrapper has no runtime seed call; the combo's precompile
-        # (driven by defer_combo_precompile loading the prepicked configs)
-        # stitches and compiles before first launch.
-        FileCheck().check("'prepicked_seed_configs':").check(".run(").run(code)
-        # Seed kernels are internal autotune artifacts and must not inflate
-        # generated_kernel_count. Only the combo kernel itself counts.
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
-        self.assertIn(
-            f"Combo standalone autotune seed: applying {seed_count} standalone configs",
-            logs,
-        )
-        self.assertTrue(
-            "Combo standalone autotune seed: selected stitched combo config" in logs
-            or "Combo standalone autotune seed: no combo field changes" in logs
-        )
-
-    @torch._inductor.config.patch("combo_seed_autotune_at_compile_time", False)
-    def test_combo_seed_infos_remapped_for_compile_time_autotune(self):
-        # This test specifically exercises the runtime-bench emission path;
-        # flip combo_seed_autotune_at_compile_time off so the runtime
-        # writeline is enabled.
-        from torch._inductor.codegen.common import InplacedBuffer
-        from torch._inductor.codegen.triton_combo_kernel import ComboKernel
-        from torch._inductor.virtualized import V
-
-        class FakeArgs:
-            inplace_buffers = {
-                "old_buf": InplacedBuffer("inner_buf", ["old_buf", "live_buf"])
-            }
-
-            def python_argdefs(self):
-                return [], ["combo_arg"], [], [torch.float32]
-
-        class FakeWrapper:
-            def __init__(self):
-                self.lines = []
-                self.generated_kernel_call = None
-
-            def prepare_triton_kernel_call(self, call_args):
-                return list(call_args)
-
-            def writeline(self, line):
-                self.lines.append(line)
-
-            def generate_kernel_call(self, *args, **kwargs):
-                self.generated_kernel_call = (args, kwargs)
-
-        wrapper = FakeWrapper()
-        graph = SimpleNamespace(
-            wrapper_code=wrapper,
-            removed_buffers={"old_buf"},
-            cpp_wrapper=False,
-        )
-        kernel = ComboKernel(object, enable_autotune=True)
-        kernel.args = FakeArgs()
-        kernel.dispatch_class = ComboKernel.SequentialDispatch
-        kernel.triton_meta = {}
-        kernel.inductor_meta = {}
-        kernel.standalone_autotune_seed_infos = [
-            ("seed_kernel", ["old_buf"], [torch.float32])
-        ]
-
-        with V.set_graph_handler(graph):
-            kernel.call_kernel("combo_kernel")
-
-        self.assertEqual(len(wrapper.lines), 2)
-        joined = "\n".join(wrapper.lines)
-        self.assertIn("combo_seeds_need_tuning", joined)
-        self.assertIn("live_buf", joined)
-        self.assertNotIn("old_buf", joined)
-        self.assertIsNotNone(wrapper.generated_kernel_call)
-        _, kwargs = wrapper.generated_kernel_call
-        self.assertEqual(
-            kwargs["triton_autotune_seed_infos"],
-            [("seed_kernel", ["live_buf"], [torch.float32])],
-        )
-
     @requires_gpu_and_triton
     def test_combo_kernel_max_autotune(self):
         def fn(a, b, c):
@@ -1544,25 +1442,19 @@ class ComboKernelTestsMaxAutotune(TestCase):
         ]
 
         out_eager = fn(*inps)
-        out_compiled, code, logs = self._run_and_get_combo_seed_logs(fn, inps)
-        self._assert_combo_seed_launch_path(code, logs, seed_count=3)
+        fn_c = torch.compile(fn)
+
+        logger = logging.getLogger("torch._inductor.runtime.triton_heuristics")
+        with self.assertLogs(logger, level=logging.DEBUG) as cm:
+            out_compiled, code = run_and_get_code(fn_c, *inps)
+        chained_logs = [msg for msg in cm.output if "Combo sequential autotune" in msg]
+        self.assertGreater(
+            len(chained_logs),
+            0,
+            "_combo_sequential_autotune was not invoked",
+        )
         self.assertEqual(out_eager, out_compiled)
-
-    @requires_gpu_and_triton
-    @torch._inductor.config.patch({"triton.autotune_at_compile_time": True})
-    def test_combo_kernel_seed_autotune_at_compile_time(self):
-        def fn(a, b):
-            return torch.relu(a), torch.sigmoid(b)
-
-        inps = [
-            torch.rand(32, 1024, device=GPU_TYPE),
-            torch.rand(64, 512, device=GPU_TYPE),
-        ]
-
-        out_eager = fn(*inps)
-        out_compiled, code, logs = self._run_and_get_combo_seed_logs(fn, inps)
-        self._assert_combo_seed_launch_path(code, logs, seed_count=2)
-        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
     def test_combo_kernel_max_autotune_with_reduction(self):
@@ -1575,9 +1467,19 @@ class ComboKernelTestsMaxAutotune(TestCase):
         ]
 
         out_eager = fn(*inps)
-        out_compiled, code, logs = self._run_and_get_combo_seed_logs(fn, inps)
-        self._assert_combo_seed_launch_path(code, logs, seed_count=2)
+        fn_c = torch.compile(fn)
+
+        logger = logging.getLogger("torch._inductor.runtime.triton_heuristics")
+        with self.assertLogs(logger, level=logging.DEBUG) as cm:
+            out_compiled, code = run_and_get_code(fn_c, *inps)
+        chained_logs = [msg for msg in cm.output if "Combo sequential autotune" in msg]
+        self.assertGreater(
+            len(chained_logs),
+            0,
+            "_combo_sequential_autotune was not invoked",
+        )
         self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
     def test_combo_autotune_many_subkernels(self):
@@ -1601,9 +1503,16 @@ class ComboKernelTestsMaxAutotune(TestCase):
         ]
 
         out_eager = fn(*inps)
-        out_compiled, code, logs = self._run_and_get_combo_seed_logs(fn, inps)
-        self._assert_combo_seed_launch_path(code, logs, seed_count=6)
+        fn_c = torch.compile(fn)
+
+        logger = logging.getLogger("torch._inductor.runtime.triton_heuristics")
+        with self.assertLogs(logger, level=logging.DEBUG) as cm:
+            out_compiled, code = run_and_get_code(fn_c, *inps)
+
+        chained_logs = [msg for msg in cm.output if "Combo sequential autotune" in msg]
+        self.assertGreater(len(chained_logs), 0)
         self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu_and_triton
     def test_combo_kernel_per_subkernel_reduction_hint(self):
@@ -1636,6 +1545,11 @@ class ComboKernelTestsMaxAutotune(TestCase):
         self.assertEqual(found_hints["reduction_hint_1"], "OUTER")
 
     @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernel_autotune_grouping": True,
+        }
+    )
     def test_combo_autotune_grouping(self):
         def fn(a, b, c, d):
             return a.cos(), b.sin(), c.exp(), d.neg()
@@ -1650,9 +1564,125 @@ class ComboKernelTestsMaxAutotune(TestCase):
         ]
 
         out_eager = fn(*inps)
-        out_compiled, code, logs = self._run_and_get_combo_seed_logs(fn, inps)
-        self._assert_combo_seed_launch_path(code, logs, seed_count=4)
+        fn_c = torch.compile(fn)
+
+        logger = logging.getLogger("torch._inductor.runtime.triton_heuristics")
+        with self.assertLogs(logger, level=logging.DEBUG) as cm:
+            out_compiled, code = run_and_get_code(fn_c, *inps)
+
+        # Parse "Phase 1 group N SK[...]" lines to check grouping
+        group_lines = [
+            msg for msg in cm.output if "Phase 1 group" in msg and "SK[" in msg
+        ]
+        group_indices = {
+            int(re.search(r"group (\d+)", line).group(1))
+            for line in group_lines
+            if re.search(r"group (\d+)", line)
+        }
+        # 4 sub-kernels in 2 size buckets (rnumel 65536 vs 8) with identical
+        # per-sub-kernel metadata within each bucket -> exactly 2 groups.
+        self.assertEqual(
+            len(group_indices),
+            2,
+            f"Expected 2 autotune groups, got {group_lines}",
+        )
         self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch("combo_kernel_autotune_grouping", True)
+    def test_combo_autotune_grouping_by_metadata_fingerprint(self):
+        """Sub-kernels share a group iff every per-sub-kernel heuristic input
+        is identical; any difference in the fingerprint separates them.
+        """
+        import triton
+
+        def _sub_meta(
+            num_load=1,
+            num_store=1,
+            num_reduction=1,
+            autotune_hints=None,
+            atomic_add_found=False,
+            no_x_dim=False,
+            tiling_scores=None,
+        ):
+            return {
+                "num_load": num_load,
+                "num_store": num_store,
+                "num_reduction": num_reduction,
+                "autotune_hints": autotune_hints if autotune_hints is not None else [],
+                "atomic_add_found": atomic_add_found,
+                "no_x_dim": no_x_dim,
+                "tiling_scores": tiling_scores
+                if tiling_scores is not None
+                else {"x": 1, "r0_": 8},
+            }
+
+        def base_combo_meta():
+            return {
+                "num_kernels": 2,
+                # Captured config — real combo_grid_meta() always sets this.
+                "autotune_grouping": True,
+                "heuristic_0": "reduction",
+                "heuristic_1": "reduction",
+                "size_hints_0": {"x": 2048, "r0_": 1024},
+                "size_hints_1": {"x": 2048, "r0_": 1024},
+                "reduction_hint_0": "INNER",
+                "reduction_hint_1": "INNER",
+                # Per-sub-kernel inductor_meta — the single source of truth
+                # for fields fed into _subkernel_fingerprint.
+                "inductor_meta_0": _sub_meta(),
+                "inductor_meta_1": _sub_meta(),
+            }
+
+        def reduction_configs(*args, **kwargs):
+            return [
+                triton.Config(
+                    {"XBLOCK": 8, "R0_BLOCK": 256}, num_warps=4, num_stages=1
+                ),
+            ]
+
+        # Each case mutates one field of sub-kernel 1 away from sub-kernel 0.
+        # `None` means no mutation -> expect groups to merge.
+        # For per-kernel fields, mutate inside inductor_meta_1 sub-dict.
+        cases = [
+            ("all identical merge", None, None, 1),
+            ("different r0_numel", ("size_hints_1",), {"x": 2048, "r0_": 512}, 2),
+            ("different num_load", ("inductor_meta_1", "num_load"), 12, 2),
+            (
+                "different tiling_scores",
+                ("inductor_meta_1", "tiling_scores"),
+                {"x": 8, "r0_": 1},
+                2,
+            ),
+        ]
+
+        for desc, path, value, expected_groups in cases:
+            with self.subTest(desc):
+                meta = base_combo_meta()
+                if path is not None:
+                    if len(path) == 1:
+                        meta[path[0]] = value
+                    else:
+                        meta[path[0]][path[1]] = value
+                inductor_meta = {"combo_grid_meta": meta}
+
+                with unittest.mock.patch(
+                    "torch._inductor.runtime.triton_heuristics.reduction",
+                    side_effect=reduction_configs,
+                ):
+                    torch._inductor.runtime.triton_heuristics._handle_combo_kernel_per_subkernel_blocks(
+                        {"x": 2048, "r0_": 1024},
+                        inductor_meta,
+                        triton_meta={},
+                    )
+
+                groups = inductor_meta["combo_tuning_groups"]
+                self.assertEqual(
+                    len(groups),
+                    expected_groups,
+                    f"{desc}: expected {expected_groups} group(s), got {len(groups)}",
+                )
 
     @requires_gpu_and_triton
     @parametrize("per_subkernel", [True, False])
