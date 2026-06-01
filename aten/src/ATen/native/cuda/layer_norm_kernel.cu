@@ -752,10 +752,16 @@ blockReduceGammaBetaBackwardsWithChecks(
 // block_dim_y is the number of threads in the y dimension per block.
 // rows_per_block_y is the size of the tile (number of data elements)
 // in the y dimension per block.
-// partial_reduction indicates whether we need to reduce across threads
-// or not. If set to true, we will not reduce across threads. This can
-// be faster in the M >> N case but requires another kernel to do a full
-// final reduction.
+// skip_block_reduction indicates whether we want to skip the block reduction
+// step.
+// Current usage:
+//   M >> N  (skip=true, block_dim_y==1, gridDim.y>1):
+//           It's faster to use two-pass process. Write partial sums and use
+//           another kernel to do a full final reduction.
+//   M < 64  (skip=true, block_dim_y==1, gridDim.y==1):
+//           Use 1 y-thread to sum each column. No need to further reduce.
+//   M >=64  (skip=false, block_dim_y>1, gridDim.y==1):
+//           Use multiple y-threads. Requires block reduce.
 // aligned_grid means the data size is a multiple of tile size. In that
 // case we don't need to check for boundary conditions which can provide
 // a further speedup by not needing instructions to check for edge cases
@@ -763,7 +769,7 @@ blockReduceGammaBetaBackwardsWithChecks(
 template <typename T, typename T_ACC,
 unsigned int block_dim_x, unsigned int block_dim_y,
 unsigned int rows_per_block_y,
-bool partial_reduction,
+bool skip_block_reduction,
 bool aligned_grid,
 bool rms_norm
 >
@@ -779,9 +785,15 @@ __launch_bounds__(block_dim_x * block_dim_y)
     const T_ACC* __restrict__ rstd,
     T* __restrict__ dg,
     T* __restrict__ db) {
+
   // This assert is a compile-time check only.
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
   static_assert(rows_per_thread_y <= C10_WARP_SIZE_LOWER_BOUND);
+
+  // skip_block_reduction must match (block_dim_y == 1).
+  // See the parameter comments above.
+  static_assert(skip_block_reduction == (block_dim_y == 1),
+                "skip_block_reduction must match (block_dim_y == 1)");
 
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
@@ -809,9 +821,12 @@ __launch_bounds__(block_dim_x * block_dim_y)
 
   int64_t thread_x = ((int64_t)blockIdx.x) * block_dim_x + threadIdx.x;
 
-  // When partial_reduction is requested, we don't reduce within a block.
-  // We also don't reduce if we are only a single block in the y dimension.
-  if (partial_reduction || (blockDim.y == 1 && gridDim.y == 1)) {
+  if constexpr (skip_block_reduction) {
+    // Direct write path (no block reduction needed):
+    //   gridDim.y == 1 (M < 64):   dg_sum is the final per-column total.
+    //   gridDim.y >  1 (M >> N):   dg_sum is a per-block partial; the launcher
+    //                              runs .sum(0) afterwards.
+    // Note, currently blockDim.y == 1 for both cases above.
     if (aligned_grid || thread_x < N) {
       int64_t thread_y = ((int64_t)blockIdx.y) * blockDim.y + threadIdx.y;
       if (dg) {
@@ -822,8 +837,9 @@ __launch_bounds__(block_dim_x * block_dim_y)
       }
     }
   } else {
-    // The caller requested a full reduction so we must reduce across
-    // warps using shared memory and warp shuffles.
+    // Block reduce path: block_dim_y > 1 means multiple y-threads share each
+    // column. Transpose through shmem so a warp holds an entire column, then
+    // warp shuffle reduce.
     static_assert(rows_per_thread_y <= C10_WARP_SIZE_LOWER_BOUND);
     alignas(sizeof(double)) extern __shared__ char s_data1[];
     T_ACC* s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
@@ -874,7 +890,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
 template<typename T, typename T_ACC,
 int block_dim_x, int block_dim_y,
 int rows_per_block_y,
-bool partial_reduction,
+bool skip_block_reduction,
 bool rms_norm>
 void LaunchAndCheckGammaBetaBackwardKernel(
   bool aligned_grid,
@@ -891,7 +907,7 @@ void LaunchAndCheckGammaBetaBackwardKernel(
   T* dgamma_data,
   T* dbeta_data) {
 if (aligned_grid) {
-    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, partial_reduction, true, rms_norm>
+    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, true, rms_norm>
         <<<blocks, threads, shmem_sz, cuda_stream>>>(
             M,
             N,
@@ -902,7 +918,7 @@ if (aligned_grid) {
             dgamma_data,
             dbeta_data);
   } else {
-    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, partial_reduction, false, rms_norm>
+    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, false, rms_norm>
         <<<blocks, threads, shmem_sz, cuda_stream>>>(
             M,
             N,
@@ -938,19 +954,25 @@ void ConfigureAndLaunchGammaBetaBackwardKernel(
   blocks.x = (N + block_dim_x - 1) / block_dim_x;
   blocks.y = 1;
   size_t shmem_sz = (block_dim_x + 1) * block_dim_y * sizeof(T_ACC) * 2;
-  if (blocks.y == 1 && threads.y == 1) {
-    // Optimization: since there is just one thread doing all the summation, we don't need a reduction
-    // across threads. So we set partial_reduction to true.
+  // Note, blocks.y is a fixed value of 1 (see above) meaning gridDim.y == 1.
+  // So block_dim_y alone decides whether we need to do block reduction.
+  if constexpr (block_dim_y == 1) {
+    // There is only 1 y-thread per column.
+    // The accumulated result is the full per column sum; skip the block reduction.
     LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true, rms_norm>(
       aligned_grid, blocks, threads, shmem_sz, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_data, dbeta_data);
   } else {
+    // block_dim_y > 1: multiple y-threads working on each column.
+    // Need to perform block reduction to get the final result.
     LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, false, rms_norm>(
       aligned_grid, blocks, threads, shmem_sz, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_data, dbeta_data);
   }
 
 }
 
-template<typename T, typename T_ACC, bool rms_norm>
+// Accept block_dim_x as a template parameter so ROCm can dispatch launch
+// shapes based on runtime warp size while preserving compile-time specialization.
+template<typename T, typename T_ACC, int block_dim_x, bool rms_norm>
 void LaunchGammaBetaBackwardCUDAKernel(
     const T* dY_data,
     const T* X_data,
@@ -961,17 +983,13 @@ void LaunchGammaBetaBackwardCUDAKernel(
     Tensor* dgamma,
     Tensor* dbeta,
     cudaStream_t cuda_stream) {
-#ifdef USE_ROCM
-  constexpr int block_dim_x = 64;
-#else
-  constexpr int block_dim_x = 32;
-#endif
   const int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   if (M > 64 * 1024 && N / block_dim_x < sm_count / 2) {
     // We have a situation where M >> N and N is small.
     // In this case we can speed up the computation by parallelizing in the M dimension.
     // We launch multiple blocks in the y-dimension, and compute partial sums for the
-    // gradient in the first pass. Then we do a .sum(0) to do a final reduction.
+    // gradient in the first pass (skip_block_reduction=true). Then we do a .sum(0) to
+    // do a final reduction.
     // Although we launch 2 kernels, we can get up to a 10x speedup for large M.
     constexpr int block_dim_y = 1;
     constexpr int rows_per_block_y = 32;
@@ -997,7 +1015,7 @@ void LaunchGammaBetaBackwardCUDAKernel(
       dbeta_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
       dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
     }
-    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true, rms_norm>(
+    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, /*skip_block_reduction=*/true, rms_norm>(
       aligned_grid, blocks, threads, 0, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_blocks_ptr, dbeta_blocks_ptr);
 
     if (dgamma_blocks.defined()) {
@@ -1021,9 +1039,18 @@ void LaunchGammaBetaBackwardCUDAKernel(
       ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 16, 128, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
     } else {
 #ifdef USE_ROCM
-      // Cap block_dim_y at 16 to keep total threads (64*16=1024) within GPU limits.
-      // rows_per_thread_y = 256/16 = 16, still within warp size constraint.
-      ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 16, 256, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      if constexpr (block_dim_x == 64) {
+        // GCN/CDNA devices use warp size 64 in ROCm.
+        // Cap block_dim_y at 16 to keep total threads (64*16=1024) within GPU limits.
+        // rows_per_thread_y = 256/16 = 16, still within warp size constraint.
+        ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 16, 256, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      } else {
+        static_assert(block_dim_x == 32);
+        // RDNA devices (gfx10, gfx11, gfx12) use warp size 32 in ROCm.
+        // Use block_dim_y = 32 to keep total threads at 32*32=1024 within GPU limits.
+        // rows_per_thread_y = 256/32 = 8, still within warp size constraint.
+        ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 32, 256, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      }
 #else
       ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 32, 256, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
 #endif
@@ -1634,15 +1661,25 @@ void LayerNormBackwardKernelImplInternal(
               dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      // Use the optimized tiled kernel adapted for wavefront-64.
+      // Use the optimized tiled kernel adapted for the current warp size.
       // This replaces the legacy two-pass cuComputePartGradGammaBeta +
       // cuComputeGradGammaBeta approach with a single-pass tiled reduction
       // that has coalesced memory access and adaptive tile sizing.
-      LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, rms_norm>(
-        dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      if (warp_size == 64) {
+        LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 64, rms_norm>(
+          dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      } else if (warp_size == 32) {
+        LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 32, rms_norm>(
+          dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Unexpected ROCm warp size: ",
+            warp_size);
+      }
     }
 #else
-    LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, rms_norm>(
+    LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 32, rms_norm>(
       dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
 #endif
   }

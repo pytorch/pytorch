@@ -347,7 +347,12 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(has_subgroup_2d_block_io)
 
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
+#if SYCL_COMPILER_VERSION >= 20260000
+      .def_readonly("is_integrated_gpu", &DeviceProp::is_integrated_gpu)
+#endif
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
+      // TODO: Expose cache size by level when available from SYCL
+      .def_readonly("last_level_cache_size", &DeviceProp::global_mem_cache_size)
       .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
       .def_property_readonly("architecture", get_device_architecture)
       .def_property_readonly("type", get_device_type)
@@ -368,6 +373,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024)
                    << "MB, local_mem_size=" << prop.local_mem_size / 1024ull
+                   << "KB, last_level_cache_size="
+                   << prop.global_mem_cache_size / 1024ull
                    << "KB, max_compute_units=" << prop.max_compute_units
                    << ", memory_clock_rate=" << prop.memory_clock_rate
                    << "MHz, memory_bus_width=" << prop.memory_bus_width
@@ -378,7 +385,11 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << ", sub_group_sizes=[" << prop.sub_group_sizes
                    << "], has_fp16=" << prop.has_fp16
                    << ", has_fp64=" << prop.has_fp64
-                   << ", has_atomic64=" << prop.has_atomic64 << ')';
+                   << ", has_atomic64=" << prop.has_atomic64
+#if SYCL_COMPILER_VERSION >= 20260000
+                   << ", is_integrated_gpu=" << prop.is_integrated_gpu
+#endif
+                   << ")";
             return stream.str();
           });
 }

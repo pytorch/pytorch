@@ -180,7 +180,9 @@ namespace c10::xpu {
 #define DEFINE_EXT_DEVICE_PROP(property, ...) \
   _DEFINE_SYCL_PROP(sycl::ext::intel::info::device, property, property)
 
-#define DEFINE_DEVICE_ASPECT(member) bool has_##member;
+#define DEFINE_DEVICE_ASPECT(member) bool member;
+
+#define DEFINE_DEVICE_HAS_ASPECT(member) bool has_##member;
 
 #define DEFINE_EXP_DEVICE_PROP(property) \
   _DEFINE_SYCL_PROP(                     \
@@ -195,11 +197,16 @@ struct C10_XPU_API DeviceProp{
     // ext properties.
     AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP)
 
+#if SYCL_COMPILER_VERSION >= 20260000
     // device aspects.
-    AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_ASPECT)
+    DEFINE_DEVICE_ASPECT(is_integrated_gpu)
+#endif
+
+    // device has aspects.
+    AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_HAS_ASPECT)
 
     // experimental device aspects.
-    AT_FORALL_XPU_EXP_CL_ASPECT(DEFINE_DEVICE_ASPECT)
+    AT_FORALL_XPU_EXP_CL_ASPECT(DEFINE_DEVICE_HAS_ASPECT)
 
     // experimental device properties.
     AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(DEFINE_EXP_DEVICE_PROP)
@@ -211,6 +218,7 @@ struct C10_XPU_API DeviceProp{
 #undef DEFINE_PLATFORM_PROP
 #undef DEFINE_EXT_DEVICE_PROP
 #undef DEFINE_DEVICE_ASPECT
+#undef DEFINE_DEVICE_HAS_ASPECT
 #undef DEFINE_EXP_DEVICE_PROP
 
 } // namespace c10::xpu
