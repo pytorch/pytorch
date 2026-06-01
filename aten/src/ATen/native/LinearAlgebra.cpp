@@ -1761,6 +1761,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     return (strides[2] == 1 && (sizes[1] == 1 || strides[1] >= sizes[2])) ||
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
+#if !defined(__aarch64__) || AT_MKLDNN_ENABLED()
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
   if (apply_heur && use_mkldnn_matmul(batch1, batch2, self_or_result)) {
     try {
@@ -1771,6 +1772,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
       at::globalContext().setUserEnabledMkldnn(false);
     }
   }
+#endif
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "bmm", [&] {
