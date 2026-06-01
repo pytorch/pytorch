@@ -203,6 +203,7 @@ class FakeProcessGroup : public Backend {
     assertNonEmptyInputTensorList(invalidArgument, inputTensors.size());
     assertAllgatherCoalescedOutputTensorLists(
         invalidArgument, outputTensorLists, inputTensors.size(), size_);
+    // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
     for (auto& outputTensorList : outputTensorLists) {
       for (size_t i = 0; i < inputTensors.size(); ++i) {
@@ -220,6 +221,7 @@ class FakeProcessGroup : public Backend {
       return delegate_->allgather_into_tensor_coalesced(outputs, inputs, opts);
     }
     checkCollectiveError();
+    // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputs.size(); ++i) {
       auto chunks = outputs[i].chunk(size_);
@@ -246,6 +248,7 @@ class FakeProcessGroup : public Backend {
 
     if (rank_ == opts.rootRank) {
       assertGatherOutputTensorList(invalidArgument, outputTensors, size_);
+      // See note in _allgather_base above.
       at::AutoDispatchBelowAutograd guard;
       for (auto& tensor : outputTensors[0]) {
         tensor.copy_(inputTensors[0]);
@@ -272,6 +275,7 @@ class FakeProcessGroup : public Backend {
 
     if (rank_ == opts.rootRank) {
       assertScatterInputTensorList(invalidArgument, inputTensors, size_);
+      // See note in _allgather_base above.
       at::AutoDispatchBelowAutograd guard;
       outputTensors[0].copy_(inputTensors[0][rank_]);
     } else {
@@ -300,6 +304,7 @@ class FakeProcessGroup : public Backend {
     };
     assertInputOutputTensorListsSameSize(
         invalidArgument, outputTensors.size(), inputTensors.size());
+    // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputTensors.size(); ++i) {
       assertInputTensorListSizeEqualsWorldSize(
@@ -327,6 +332,7 @@ class FakeProcessGroup : public Backend {
     TORCH_CHECK(
         inputBuffer.numel() == outputBuffer.numel() * size_,
         "input tensor must be the same size as output size times world size");
+    // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
     auto chunks = inputBuffer.chunk(size_);
     outputBuffer.copy_(chunks[rank_]);
@@ -354,6 +360,7 @@ class FakeProcessGroup : public Backend {
     };
     assertInputOutputTensorListsSameSize(
         invalidArgument, outputs.size(), inputs.size());
+    // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputs.size(); ++i) {
       TORCH_CHECK(
@@ -378,10 +385,14 @@ class FakeProcessGroup : public Backend {
     checkCollectiveError();
     c10d::checkSplitSizes(inputSplitSizes, inputBuffer, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputBuffer, size_);
+    // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
     if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
       outputBuffer.copy_(inputBuffer);
     } else {
+      // Approximation: rank j's inputSplitSizes are unavailable here, so
+      // each output slot is filled by repeating inputBuffer[0:slot]. The
+      // values are deterministic but arbitrary; do not assert on them.
       int64_t out_offset = 0;
       auto in_size = inputBuffer.size(0);
       for (int j = 0; j < size_; ++j) {
@@ -420,6 +431,7 @@ class FakeProcessGroup : public Backend {
     };
     assertAllToAllTensorListSizes(
         invalidArgument, outputTensors.size(), inputTensors.size(), size_);
+    // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
     for (size_t i = 0; i < outputTensors.size(); ++i) {
       outputTensors[i].copy_(inputTensors[i]);
