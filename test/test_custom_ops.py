@@ -5724,8 +5724,9 @@ class TestCustomOpFastPath(TestCase):
 
         x = torch.randn(3)
         y = MySub(torch.randn(3))
-        self.assertIs(fp_tl(x, [y]), sentinel)
-        self.assertIs(torch.ops._torch_testing.fp_tl(x, [y]), sentinel)
+        with self._assert_fast_path_not_taken(fp_tl):
+            self.assertIs(fp_tl(x, [y]), sentinel)
+            self.assertIs(torch.ops._torch_testing.fp_tl(x, [y]), sentinel)
 
     def test_fast_path_mutable_normal_tensor_under_inference_mode_bumps_version(self):
         @torch.library.custom_op("_torch_testing::fp_im_bump", mutates_args=("x",))
