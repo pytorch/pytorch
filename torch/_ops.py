@@ -34,6 +34,10 @@ _T = TypeVar("_T", default=Any)
 _P = ParamSpec("_P", default=...)
 
 
+# TLS holding the active redispatch chain entry: [op, chain, idx]
+# where op is the target OpOverload, chain is a tuple of callables
+# (autograd_impl, [adinplaceorview_impl,] backend_dispatch), and idx
+# is the next position to dispatch.
 _redispatch_chain_tls = threading.local()
 _fast_redispatch_count: int = 0
 
