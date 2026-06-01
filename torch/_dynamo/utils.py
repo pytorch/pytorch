@@ -77,6 +77,7 @@ from torch._C import (
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
+from torch._prims_common import compute_required_storage_length
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     justknobs_check,
@@ -2507,6 +2508,28 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
         copy_dynamo_tensor_attributes(x, y)
         return y
 
+    def finish_clone(y: torch.Tensor) -> torch.Tensor:
+        if x.is_leaf:
+            y.requires_grad_(x.requires_grad)
+        if x.is_leaf and x.grad is not None:
+            y.grad = clone_input(x.grad, dtype=dtype)
+        copy_dynamo_tensor_attributes(x, y)
+        return y
+
+    def clone_preserving_strides_and_storage() -> torch.Tensor:
+        storage_offset = cast(int, x.storage_offset())
+        needed_size = compute_required_storage_length(
+            x.size(), x.stride(), storage_offset
+        )
+        flat = torch.as_strided(x, (needed_size,), (1,), 0)
+        if dtype is not None and dtype != x.dtype:
+            flat = flat.to(dtype=dtype, copy=True)
+        else:
+            flat = flat.clone()
+        return finish_clone(
+            torch.as_strided(flat, x.size(), x.stride(), storage_offset)
+        )
+
     with torch.no_grad():
         if x.device.type == "xla":
             # Access data_ptr() for a xla tensor will cause crash
@@ -2539,6 +2562,11 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
             # torchao tests.
             return torch_clone(x)
 
+        if not x.is_quantized and (
+            x.storage_offset() != 0 or torch._debug_has_internal_overlap(x) == 1
+        ):
+            return clone_preserving_strides_and_storage()
+
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
         )
@@ -2554,17 +2582,16 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
         result.as_strided_(x.size(), x.stride(), cache_line_offset)
         try:
             result.copy_(x.clone())
-            if x.is_leaf:
-                result.requires_grad_(x.requires_grad)
-            if x.is_leaf and x.grad is not None:
-                result.grad = clone_input(x.grad, dtype=dtype)
-        except RuntimeError:
+        except RuntimeError as exc:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
-            return torch_clone(x)
-        copy_dynamo_tensor_attributes(x, result)
-        return result
+            if "more than one element of the written-to tensor" in str(exc):
+                if x.is_quantized:
+                    return torch_clone(x)
+                return clone_preserving_strides_and_storage()
+            raise
+        return finish_clone(result)
 
 
 @overload

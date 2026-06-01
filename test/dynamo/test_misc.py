@@ -6227,6 +6227,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 # Make sure sparse clone is successful.
                 self.assertEqual(sparse_input, sparse_copy)
 
+    def test_clone_input_preserves_expanded_input_stride(self):
+        x = torch.arange(2.0).view(2, 1).expand(2, 3)
+        cloned_x = torch._dynamo.utils.clone_input(x)
+
+        self.assertEqual(cloned_x, x)
+        self.assertEqual(cloned_x.stride(), x.stride())
+        self.assertEqual(cloned_x.storage_offset(), x.storage_offset())
+
     def test_tensor_is_contiguous(self):
         def fn(x):
             input = torch.randn((1, 16, 1, 1))
