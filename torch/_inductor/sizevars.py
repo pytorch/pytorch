@@ -1556,5 +1556,8 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     def index_expr(self, index, dtype):
         return self._inner.index_expr(self._simplify(index), dtype)
 
+    def value_expr(self, index, dtype):
+        return self._inner.value_expr(self._simplify(index), dtype)
+
     def check_bounds(self, index, size, lower, upper):
         return self._inner.check_bounds(self._simplify(index), size, lower, upper)
