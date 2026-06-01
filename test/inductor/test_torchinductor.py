@@ -8519,6 +8519,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertFalse(torch.signbit(actual_frac.cpu()[0]).item())
         self.assertEqual(actual_recip.cpu()[0].item(), float("inf"))
 
+    def test_neg_signed_zero(self):
+        # neg must preserve the IEEE sign bit of zero: -(+0.0) == -0.0. Triton
+        # lowers unary minus as `0 - x`, which flushes -0.0 to +0.0; that made
+        # atan2(x, -x) return 0 instead of pi at x=+0.0 (issue #185696).
+        def fn(x):
+            return torch.neg(x), torch.atan2(x, torch.neg(x))
+
+        x = torch.tensor([0.0, -0.0, 1.0, -1.0, 2.5], device=self.device)
+        expected_neg, expected_atan2 = fn(x)
+        actual_neg, actual_atan2 = torch.compile(fn, fullgraph=True)(x)
+
+        self.assertEqual(
+            actual_neg.cpu().view(torch.int32),
+            expected_neg.cpu().view(torch.int32),
+        )
+        self.assertEqual(actual_atan2, expected_atan2)
+
     @xfail_if_triton_cpu
     def test_fmod(self):
         def fn(a, b):
