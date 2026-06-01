@@ -6005,6 +6005,11 @@ class TestCustomOpFastPath(TestCase):
             with self.assertRaisesRegex(ValueError, "intentional error"):
                 fp_err(x)
 
+        # Subsequent call through the same op still takes the fast path
+        with self._assert_fast_path_taken(fp_err):
+            with self.assertRaisesRegex(ValueError, "intentional error"):
+                fp_err(x)
+
     def test_fast_path_multithreaded(self):
         import concurrent.futures
 
