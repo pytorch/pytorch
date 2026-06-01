@@ -593,9 +593,9 @@ def _get_device_count() -> int:
 
 
 def _get_numa_node_index_for_device_index(*, device_index: int) -> int:
-    acc = torch.accelerator.current_accelerator()
-    if acc is None:
+    if not torch.accelerator.is_available():
         raise RuntimeError("No accelerator available for NUMA binding")
+    acc = torch.accelerator.current_accelerator()
     device_module = torch.get_device_module(acc)
     device_properties = device_module.get_device_properties(device_index)
 
