@@ -168,8 +168,8 @@ elseif("${XPU_SYCL_COMPILER}" MATCHES "icx")
   find_library(
     SYCL_LIBRARY
     NAMES ${sycl_library_name}
-      HINTS ${SYCL_LIBRARY_DIR}
-      NO_DEFAULT_PATH
+    HINTS ${SYCL_LIBRARY_DIR}
+    NO_DEFAULT_PATH
   )
 endif()
 

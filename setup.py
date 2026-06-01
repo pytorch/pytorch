@@ -1078,17 +1078,20 @@ def configure_extension_build() -> tuple[
         # /NODEFAULTLIB makes sure we only link to DLL runtime
         # and matches the flags set for protobuf and ONNX
         extra_link_args: list[str] = ["/NODEFAULTLIB:LIBCMT.LIB"]
+
+        # compile flags common between debug and non-debug builds
+        # /EHsc is about standard C++ exception handling
+        extra_compile_args = ["/FS", "/EHsc"]
         if not build_type.is_debug():
             # /MD links against DLL runtime
             # and matches the flags set for protobuf and ONNX
-            # /EHsc is about standard C++ exception handling
-            extra_compile_args = ["/MD", "/FS", "/EHsc"]
+            extra_compile_args += ["/MD"]
         else:
-            # To align to Windows debug ABI on debug builds, use /MDd instead of /MD; additionally exclude the debug version
-            # of `LIBCMT.LIB` - `LIBCMTD.LIB`.
-            # Propagate /D_DEBUG so that pyconfig.h #pragma comment will be able to select proper debug version of the
-            # python.lib.
-            extra_compile_args: list[str] = ["/MDd", "/FS", "/EHsc", "/D_DEBUG"]
+            # To align to Windows debug ABI on debug builds, use /MDd instead of /MD;
+            # additionally exclude the debug version of `LIBCMT.LIB` - `LIBCMTD.LIB`.
+            # Propagate /D_DEBUG so that pyconfig.h #pragma comment will be able to select
+            # proper debug version of the python.lib
+            extra_compile_args += ["/MDd", "/D_DEBUG"]
             extra_link_args += ["/NODEFAULTLIB:LIBCMTD.LIB"]
     else:
         extra_link_args = []
