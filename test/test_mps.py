@@ -1626,6 +1626,41 @@ class TestMPS(TestCaseMPS):
         low.grad.zero_()
         high.grad.zero_()
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_dirichlet_grad(self, dtype):
+        def make(x_vals, alpha_vals, total_vals):
+            x = torch.tensor(x_vals, dtype=dtype, device='mps')
+            alpha = torch.tensor(alpha_vals, dtype=dtype, device='mps')
+            total = torch.tensor(total_vals, dtype=dtype, device='mps')
+            return x, alpha, total
+
+        N = 10_000_000
+
+        cases = [
+            # Test each of the four approximation regions in dirichlet_grad_one.
+            # region 1: x near 0 (boundary = total*x*(1-x) < 2.5, x <= 0.5)
+            make([0.01, 0.05, 0.1], [1.0, 2.0, 0.5], [3.0, 5.0, 2.0]),
+            # region 2: x near 1 (boundary < 0.75, x >= 0.5)
+            make([0.99, 0.95, 0.92], [1.0, 2.0, 0.5], [3.0, 5.0, 2.0]),
+            # region 3: large alpha (alpha > 6, beta > 6)
+            make([0.4, 0.5, 0.6], [10.0, 20.0, 15.0], [25.0, 40.0, 30.0]),
+            # region 4: moderate (everything else)
+            make([0.3, 0.5, 0.7], [2.0, 3.0, 4.0], [6.0, 8.0, 10.0]),
+
+            # Also test a large input
+            (0.2 + torch.rand(N, dtype=dtype, device='mps'), 0.2 + torch.rand(N, dtype=dtype, device='mps'), 2 + torch.rand(N, dtype=dtype, device='mps')),
+        ]
+
+        atol = 1e-4 if dtype == torch.float else 1e-2
+        rtol = atol
+
+        for x_mps, alpha_mps, total_mps in cases:
+            # Note: CPU impl only supports float32, not half-precision
+            x_cpu, alpha_cpu, total_cpu = [t.cpu().float() for t in [x_mps, alpha_mps, total_mps]]
+            out_cpu = torch._dirichlet_grad(x_cpu, alpha_cpu, total_cpu)
+            out_mps = torch._dirichlet_grad(x_mps, alpha_mps, total_mps)
+            self.assertEqual(out_mps.cpu().float(), out_cpu, atol=atol, rtol=rtol)
+
     @parametrize("num_alpha", [10, 1000, 10_000])
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.float16])
     def test_dirichlet(self, num_alpha, dtype):
