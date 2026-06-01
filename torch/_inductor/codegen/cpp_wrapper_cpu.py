@@ -2442,6 +2442,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
         )
 
+    def sync_d2h_copy(self, buffer_name: str) -> None:
+        # TODO: add AOTI C API for event-based D2H copy synchronization
+        pass
+
     def codegen_multi_output(self, node: ir.MultiOutput):
         # in the abi_compatible mode, outputs are retrieved by passing
         # output pointers, so we skip its codegen here.
@@ -2481,6 +2485,43 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # before (e.g., in the while_loop codegen)
                 self.writeline(f"{outer_output}.reset();")
             self.writeline(f"{outer_output} = {src};")
+
+    @staticmethod
+    def _get_while_loop_carried_output_names(while_loop):
+        mutation_output_names = {
+            mutation_name: mutation_output.get_name()
+            for mutation_output in while_loop.mutation_outputs
+            for mutation_name in mutation_output.get_mutation_names()
+        }
+
+        def resolve_mutation_output_name(name):
+            seen = OrderedSet()
+            while name in mutation_output_names:
+                assert name not in seen, "while_loop mutation outputs contain a cycle"
+                seen.add(name)
+                name = mutation_output_names[name]
+            return name
+
+        output_names = []
+        output_idx = 0
+        for carried_input in while_loop.carried_inputs:
+            carried_input_name = carried_input.get_name()
+            mutation_output_name = resolve_mutation_output_name(carried_input_name)
+            if mutation_output_name != carried_input_name:
+                output_names.append(mutation_output_name)
+                continue
+
+            assert output_idx < len(while_loop.outputs), (
+                "while_loop has fewer non-mutated outputs than carried inputs"
+            )
+            output_names.append(while_loop.outputs[output_idx].get_name())
+            output_idx += 1
+
+        assert output_idx == len(while_loop.outputs), (
+            "while_loop has unused non-mutated outputs"
+        )
+
+        return output_names
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
         raise NotImplementedError(
@@ -2553,6 +2594,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         outer_additional_inputs = [
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
+        carried_output_names = self._get_while_loop_carried_output_names(while_loop)
         cond_result_name = f"{name}_cond_result"
         if is_bool_pred:
             self.writeline(f"bool {cond_result_name};")
@@ -2560,12 +2602,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
 
         cond_outer_inputs = []
-        for inp, out in zip(outer_carried_inputs, while_loop.outputs):
+        for inp, out_name in zip(outer_carried_inputs, carried_output_names):
             # in ABI-compatible mode, the carried inputs are codegened
             # as buffers outside the while loop and set to the initial
             # values. at the end of each while_loop iteration, they
             # will be assigned the carried values.
-            out_name = out.get_name()
             self.writeline(f"AtenTensorHandle {out_name}_handle;")
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({inp}, &{out_name}_handle));"
