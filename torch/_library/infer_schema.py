@@ -142,6 +142,7 @@ def infer_schema(
     first_positional_arg_alias = None
     out_arg_aliases = []
     out_arg_names = []
+    maybe_out_arg_aliases = []
     for idx, (name, param) in enumerate(sig.parameters.items()):
         if not supported_param(param):
             error_fn("We do not support positional-only args, varargs, or varkwargs.")
@@ -204,6 +205,7 @@ def infer_schema(
             first_positional_arg_alias = f"a{idx}"
 
         is_mutated = False
+        is_optional_tensor = schema_type == "Tensor?"
         if type(mutates_args) is str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(
@@ -220,6 +222,8 @@ def infer_schema(
                     f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated"
                 )
             schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
+            if is_optional_tensor:
+                maybe_out_arg_aliases.append(f"a{idx}")
         if is_out and is_mutated:
             if param.kind != inspect.Parameter.KEYWORD_ONLY:
                 error_fn("torch.Tag.out requires mutable arguments to be keyword-only.")
@@ -286,6 +290,10 @@ def infer_schema(
         ret = _infer_out_return_schema(
             return_annotation, out_arg_aliases, out_arg_names, error_fn
         )
+    elif maybe_out_arg_aliases:
+        ret = _infer_maybe_out_return_schema(return_annotation, maybe_out_arg_aliases)
+        if ret is None:
+            ret = parse_return(return_annotation, error_fn)
     else:
         ret = parse_return(return_annotation, error_fn)
     if is_inplace:
@@ -437,6 +445,30 @@ def _infer_out_return_schema(
     aliased_returns = [f"Tensor({out_arg_alias}!)" for out_arg_alias in out_arg_aliases]
     if len(aliased_returns) == 1:
         return aliased_returns[0]
+    return f"({', '.join(aliased_returns)})"
+
+
+def _infer_maybe_out_return_schema(
+    return_annotation,
+    maybe_out_arg_aliases,
+):
+    if len(maybe_out_arg_aliases) == 1:
+        if return_annotation is Tensor:
+            return f"Tensor({maybe_out_arg_aliases[0]}!)"
+        return None
+
+    return_annotation_matches_maybe_out_args = typing.get_origin(
+        return_annotation
+    ) is tuple and typing.get_args(return_annotation) == (Tensor,) * len(
+        maybe_out_arg_aliases
+    )
+    if not return_annotation_matches_maybe_out_args:
+        return None
+
+    aliased_returns = [
+        f"Tensor({maybe_out_arg_alias}!)"
+        for maybe_out_arg_alias in maybe_out_arg_aliases
+    ]
     return f"({', '.join(aliased_returns)})"
 
 

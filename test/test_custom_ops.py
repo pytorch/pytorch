@@ -916,6 +916,19 @@ class TestCustomOp(CustomOpTestCaseBase):
             schema, "(Tensor x, *, Tensor(a1!) out) -> Tensor(a1!)"
         )
 
+        def maybe_out_fn(
+            x: torch.Tensor, out: Optional[torch.Tensor] = None
+        ) -> torch.Tensor:
+            return x if out is None else out
+
+        schema = torch.library.infer_schema(
+            maybe_out_fn,
+            mutates_args={"out"},
+        )
+        self.assertExpectedInline(
+            schema, "(Tensor x, Tensor(a1!)? out=None) -> Tensor(a1!)"
+        )
+
         # Ensure that a global in this file is properly found & evaluated.
         def stringy_fn(x: torch.Tensor) -> "MyList[torch.Tensor]":
             return [torch.randn_like(x)]
@@ -3876,6 +3889,155 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(out, x)
         self.assertGreater(out._version, version)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_mutated_optional_arg_maybe_out_aliasing(self):
+        @torch.library.custom_op("_torch_testing::maybe_out", mutates_args={"out"})
+        def maybe_out(x: Tensor, out: Optional[Tensor] = None) -> Tensor:
+            if out is None:
+                return x.sin()
+            return torch.sin(x, out=out)
+
+        schema = maybe_out._opoverload._schema
+        self.assertEqual(
+            schema.arguments[1].alias_info.before_set,
+            schema.returns[0].alias_info.before_set,
+        )
+
+        x = torch.randn(3)
+        result = maybe_out(x)
+        self.assertEqual(result, x.sin())
+        self.assertNotEqual(result.data_ptr(), x.data_ptr())
+
+        out = torch.empty_like(x)
+        version = out._version
+        result = maybe_out(x, out)
+        self.assertIs(result, out)
+        self.assertEqual(result, x.sin())
+        self.assertGreater(out._version, version)
+
+        out = torch.empty_like(x)
+        self.assertEqual(
+            torch.library.opcheck(maybe_out, (x, out), test_utils="test_schema"),
+            {"test_schema": "SUCCESS"},
+        )
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_mutated_optional_arg_multiple_maybe_out_aliasing(self):
+        @torch.library.custom_op(
+            "_torch_testing::multiple_maybe_out",
+            mutates_args={"add_out", "sub_out"},
+        )
+        def multiple_maybe_out(
+            x: Tensor,
+            y: Tensor,
+            add_out: Optional[Tensor] = None,
+            sub_out: Optional[Tensor] = None,
+        ) -> Tuple[Tensor, Tensor]:
+            add = x + y
+            sub = x - y
+            if add_out is None:
+                actual_add_out = add
+            else:
+                add_out.copy_(add)
+                actual_add_out = add_out
+            if sub_out is None:
+                actual_sub_out = sub
+            else:
+                sub_out.copy_(sub)
+                actual_sub_out = sub_out
+            return actual_add_out, actual_sub_out
+
+        schema = multiple_maybe_out._opoverload._schema
+        self.assertEqual(
+            schema.arguments[2].alias_info.before_set,
+            schema.returns[0].alias_info.before_set,
+        )
+        self.assertEqual(
+            schema.arguments[3].alias_info.before_set,
+            schema.returns[1].alias_info.before_set,
+        )
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        result = multiple_maybe_out(x, y)
+        self.assertEqual(result, (x + y, x - y))
+        self.assertNotEqual(result[0].data_ptr(), x.data_ptr())
+        self.assertNotEqual(result[1].data_ptr(), x.data_ptr())
+
+        add_out = torch.empty_like(x)
+        sub_out = torch.empty_like(x)
+        result = multiple_maybe_out(x, y, add_out, sub_out)
+        self.assertIs(result[0], add_out)
+        self.assertIs(result[1], sub_out)
+        self.assertEqual(add_out, x + y)
+        self.assertEqual(sub_out, x - y)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_mutated_optional_arg_return_alias_requires_donated_schema(self):
+        @torch.library.custom_op(
+            "_torch_testing::maybe_out_without_donated_schema",
+            mutates_args={"out"},
+            schema="(Tensor x, Tensor(a!)? out=None) -> Tensor",
+        )
+        def maybe_out_without_donated_schema(
+            x: Tensor, out: Optional[Tensor] = None
+        ) -> Tensor:
+            if out is None:
+                return x.sin()
+            return torch.sin(x, out=out)
+
+        x = torch.randn(3)
+        out = torch.empty_like(x)
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            maybe_out_without_donated_schema(x, out)
+
+        @torch.library.custom_op(
+            "_torch_testing::maybe_out_without_donated_return",
+            mutates_args={"out"},
+            schema="(Tensor x, Tensor(a!)? out=None) -> Tensor(a)",
+        )
+        def maybe_out_without_donated_return(
+            x: Tensor, out: Optional[Tensor] = None
+        ) -> Tensor:
+            if out is None:
+                return x.sin()
+            return torch.sin(x, out=out)
+
+        out = torch.empty_like(x)
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            maybe_out_without_donated_return(x, out)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_mutated_optional_arg_maybe_out_view_errors(self):
+        @torch.library.custom_op("_torch_testing::maybe_out_view", mutates_args={"out"})
+        def maybe_out_view(x: Tensor, out: Optional[Tensor] = None) -> Tensor:
+            if out is None:
+                return x.sin()
+            out.copy_(x)
+            return out[:2]
+
+        x = torch.randn(3)
+        out = torch.empty_like(x)
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            maybe_out_view(x, out)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_mutated_optional_arg_maybe_out_list_errors(self):
+        @torch.library.custom_op("_torch_testing::maybe_out_list", mutates_args={"out"})
+        def maybe_out_list(x: Tensor, out: Optional[Tensor] = None) -> List[Tensor]:
+            if out is None:
+                return [x.sin()]
+            out.copy_(x)
+            return [out]
+
+        x = torch.randn(3)
+        result = maybe_out_list(x)
+        self.assertEqual(result, [x.sin()])
+
+        out = torch.empty_like(x)
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            maybe_out_list(x, out)
+
     def test_mutated_no_warning(self):
         # Run in subprocess since the warning is emitted only once
         script = """\
@@ -4617,6 +4779,65 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(out, torch.nn.functional.linear(x, weight, bias))
         self.assertTrue(called_impl)
         self.assertTrue(called_abstract)
+
+    @requires_compile
+    def test_compile_maybe_out(self):
+        @torch.library.custom_op(
+            "_torch_testing::maybe_out_compile", mutates_args={"out"}
+        )
+        def maybe_out(x: Tensor, out: Optional[Tensor] = None) -> Tensor:
+            if out is None:
+                return x.sin()
+            return torch.sin(x, out=out)
+
+        @maybe_out.register_fake
+        def _(x, out=None):
+            if out is None:
+                return torch.empty_like(x)
+            return out
+
+        def functional(x):
+            return maybe_out(x)
+
+        def mutable(x, out):
+            return maybe_out(x, out)
+
+        x = torch.randn(3)
+        result = torch.compile(functional, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(result, x.sin())
+        self.assertNotEqual(result.data_ptr(), x.data_ptr())
+
+        out = torch.empty_like(x)
+        version = out._version
+        result = torch.compile(mutable, backend="aot_eager", fullgraph=True)(x, out)
+        self.assertTrue(torch._C._is_alias_of(result, out))
+        self.assertEqual(result, x.sin())
+        self.assertGreater(out._version, version)
+
+    @requires_compile
+    def test_compile_maybe_out_view_errors(self):
+        @torch.library.custom_op(
+            "_torch_testing::maybe_out_view_compile", mutates_args={"out"}
+        )
+        def maybe_out_view(x: Tensor, out: Optional[Tensor] = None) -> Tensor:
+            if out is None:
+                return x.sin()
+            out.copy_(x)
+            return out[:2]
+
+        @maybe_out_view.register_fake
+        def _(x, out=None):
+            if out is None:
+                return torch.empty_like(x)
+            return out[:2]
+
+        def mutable(x, out):
+            return maybe_out_view(x, out)
+
+        x = torch.randn(3)
+        out = torch.empty_like(x)
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            torch.compile(mutable, backend="aot_eager", fullgraph=True)(x, out)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_register_autograd_error_cases(self):
