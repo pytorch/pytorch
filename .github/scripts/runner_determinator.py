@@ -668,7 +668,18 @@ def get_runner_prefix(
             else:
                 prefixes.append(label)
 
-    # ARC experiment takes precedence: return a fixed label prefix
+    # LF fleet takes precedence over ARC (a.k.a. OSDC): when both are enabled
+    # (e.g. a user is opted into both), prefer LF and disable ARC. OSDC is not
+    # deployed on the LF fleet yet, so it must stay off whenever LF is the
+    # active fleet, until we deploy it there.
+    if use_arc and fleet_prefix:
+        log.info(
+            "Both the LF and ARC experiments are enabled; LF takes precedence. Disabling ARC."
+        )
+        use_arc = False
+
+    # ARC experiment takes precedence over the remaining experiments: return a
+    # fixed label prefix
     if use_arc:
         arc_prefix = (
             ARC_CANARY_LABEL_PREFIX + ARC_LABEL_PREFIX
