@@ -54,6 +54,7 @@ from .object_protocol import (
     pyindex_check,
     type_implements_nb_index,
     validate_sequence_index,
+    vt_is_iterable,
 )
 
 
@@ -1222,10 +1223,10 @@ class ListVariable(CommonListMethodsVariable):
                 # CPython list_ass_subscript runs PySequence_Fast on value
                 # before the step==1 branch, so this message applies to all
                 # slice forms.
-                if not value.has_force_unpack_var_sequence(tx):
+                if not vt_is_iterable(value):
                     raise_type_error(tx, "must assign iterable to extended slice")
 
-                value_unpack = value.force_unpack_var_sequence(tx)
+                value_unpack = unpack_iterable(tx, value)
                 try:
                     self.items[key_as_const] = value_unpack
                 except ValueError as exc:
@@ -1449,12 +1450,7 @@ class DequeVariable(CommonListMethodsVariable):
         else:
             slice_within_maxlen = None
 
-        if (
-            name == "extendleft"
-            and self.is_mutable()
-            and len(args) > 0
-            and args[0].has_force_unpack_var_sequence(tx)
-        ):
+        if name == "extendleft" and self.is_mutable() and len(args) > 0:
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
                     tx,
@@ -1464,8 +1460,8 @@ class DequeVariable(CommonListMethodsVariable):
                 )
             # NOTE this is inefficient, but the alternative is to represent self.items
             # as a deque, which is a more intrusive change.
-            args[0].force_apply_to_var_sequence(
-                tx, lambda item: self.call_method(tx, "appendleft", [item], {})
+            unpack_and_apply_fn(
+                tx, args[0], lambda item: self.call_method(tx, "appendleft", [item], {})
             )
             slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
@@ -2092,11 +2088,6 @@ class ListIteratorVariable(IteratorVariable):
             return []
         self.is_exhausted = True
         return list(self.items[self.index :])
-
-    def force_unpack_var_sequence(
-        self, tx: "InstructionTranslatorBase"
-    ) -> list[VariableTracker]:
-        return self.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
