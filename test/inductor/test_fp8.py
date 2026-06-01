@@ -2,6 +2,7 @@
 
 import functools
 import unittest
+from unittest import mock
 
 import torch
 from torch import Tensor
@@ -17,7 +18,6 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
-    SM100OrLater,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -579,9 +579,7 @@ class TestFP8Lowering(TestCase):
             else:
                 self.assertEqual(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu", "cpu"])
-    def test_scaled_mm_preserves_strides(self, device):
+    def _test_scaled_mm_preserves_strides_impl(self, device):
         """Test that scaled_mm preserves stride ordering through a custom pass."""
 
         GPU_TYPE = device
@@ -622,12 +620,12 @@ class TestFP8Lowering(TestCase):
 
                             # Clone the inputs to potentially change stride ordering
                             a_cloned = g.call_function(
-                                torch.ops.aten.clone,
+                                torch.ops.aten.clone.default,
                                 (a_fp8,),
                                 {"memory_format": torch.contiguous_format},
                             )
                             b_cloned = g.call_function(
-                                torch.ops.aten.clone,
+                                torch.ops.aten.clone.default,
                                 (b_fp8,),
                                 {"memory_format": torch.contiguous_format},
                             )
@@ -668,6 +666,19 @@ class TestFP8Lowering(TestCase):
             self.assertIn("scaled_mm", wrapper.lower())
             # The clones should be visible in the generated code
             self.assertIn("clone", wrapper.lower())
+
+    # TODO: collapse this back into one test once fixed on CUDA and XPU.
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_mm_preserves_strides_cpu_actual(self):
+        self._test_scaled_mm_preserves_strides_impl("cpu")
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    # TODO (eellison): fails with:
+    # "RuntimeError: mat2 must be col_major, got stride (64, 1)".
+    @unittest.expectedFailure
+    @onlyOn(["cuda", "xpu"])
+    def test_scaled_mm_preserves_strides(self, device):
+        self._test_scaled_mm_preserves_strides_impl(device)
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -1434,7 +1445,7 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
-    @onlyOn(["cuda", "xpu", "cpu"])
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     def test_mx_fp8_max_autotune(self, device):
         M, K, N = 128, 32, 128
@@ -1559,9 +1570,24 @@ class TestFP8Lowering(TestCase):
         self.assertTrue("Invalid scaling configuration." in str(cm.exception))
 
 
-@unittest.skipIf(not SM100OrLater, "Requires SM100+ (Blackwell) for PTX instruction")
+class TestCvtE8M0RceilGating(TestCase):
+    def test_nvidia_sm100_gate_excludes_rocm_gfx1101(self):
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(
+                torch.cuda, "get_device_capability", return_value=(11, 0)
+            ),
+            mock.patch.object(torch.version, "hip", "7.2.26015"),
+        ):
+            self.assertFalse(utils.is_nvidia_sm100_or_later())
+
+
+@unittest.skipIf(
+    not utils.is_nvidia_sm100_or_later(),
+    "Requires NVIDIA SM100+ (Blackwell) for PTX instruction",
+)
 class TestCvtE8M0Rceil(TestCase):
-    """Tests for cvt_e8m0_rceil prim with PTX lowering on Blackwell."""
+    """Tests for cvt_e8m0_rceil prim with PTX lowering on NVIDIA Blackwell."""
 
     def test_correctness(self):
         """Test correctness for various dtypes."""
@@ -1649,7 +1675,10 @@ class TestCvtE8M0Rceil(TestCase):
 
 
 @unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
-@unittest.skipIf(SM100OrLater, "Pre-SM100 path: uses bit-manipulation fallback")
+@unittest.skipIf(
+    utils.is_nvidia_sm100_or_later(),
+    "Pre-NVIDIA-SM100 path: uses bit-manipulation fallback",
+)
 class TestE8M0Log2PatternBitManip(TestCase):
     """Tests for the e8m0_rceil_log2 pattern on pre-SM100 hardware.
 

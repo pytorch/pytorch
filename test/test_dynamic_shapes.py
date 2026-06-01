@@ -1640,6 +1640,63 @@ class f(torch.nn.Module):
             A = torch.empty((m, n), device="meta")
             Q, R = torch.linalg.qr(A)
 
+    def _make_unbacked_size(self, shape_env):
+        return shape_env.create_unbacked_symint()
+
+    def test_avg_pool2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.avg_pool2d(x, [2, 2], [2, 2], [0, 0])
+
+    def test_max_pool2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.max_pool2d_with_indices(x, [2, 2], [2, 2])
+
+    def test_avg_pool3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.avg_pool3d(x, [2, 2, 2], [2, 2, 2])
+
+    def test_max_pool3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.max_pool3d_with_indices(x, [2, 2, 2], [2, 2, 2])
+
+    def test_avg_pool1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.avg_pool1d(x, [2], [2])
+
 
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
@@ -4124,6 +4181,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(cnt.frame_count, 2)
 
     @fresh_cache()
+    @skipIfTorchDynamo("test inspects inner torch.compile/AOT backend graph")
     def test_user_check_input_shape_bound_preserved_in_aot_graph(self):
         def f(x):
             torch._check(x.shape[0] <= 5, lambda: "custom shape check failed")
@@ -4147,6 +4205,18 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
         with self.assertRaisesRegex(RuntimeError, "custom shape check failed"):
             fw_graph(6, torch.ones(6))
+
+        def g(x):
+            def lazy_message():
+                raise RuntimeError("message should be lazy")
+
+            torch._check(x.shape[0] <= 5, lazy_message)
+            return x + 1
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_g = torch.compile(g, fullgraph=True, dynamic=True, backend=backend)
+        x = torch.ones(4)
+        self.assertEqual(compiled_g(x), g(x))
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)

@@ -526,6 +526,26 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         sample_input = torch.tensor([4, 4, 16, 32], dtype=torch.uint8)
         opt_fn(sample_input)
 
+    def test_lshift_scalar_dynamic(self):
+        def shift_left(x: int) -> int:
+            return 1 << x
+
+        opt_fn = torch.compile(
+            shift_left, fullgraph=True, dynamic=True, backend="eager"
+        )
+        self.assertEqual(opt_fn(1), 2)
+        self.assertEqual(opt_fn(5), 32)
+
+    def test_rshift_scalar_dynamic(self):
+        def shift_right(x: int) -> int:
+            return 64 >> x
+
+        opt_fn = torch.compile(
+            shift_right, fullgraph=True, dynamic=True, backend="eager"
+        )
+        self.assertEqual(opt_fn(2), 16)
+        self.assertEqual(opt_fn(4), 4)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_symfloat_to_tensor(self):
         def f1(v):
@@ -845,12 +865,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             f(torch.randn(80, 100), 80)
 
         out = "\n".join(log_stream.getvalue().strip().split("\n")[3:]).strip()
-        self.assertExpectedInline(
-            out,
-            """\
-def forward(self):
-        return ()""",
-        )
+        self.assertEqual(out.count("torch.ops.aten._assert_scalar.default"), 2)
+        self.assertIn("l_y_ + 5", out)
+        self.assertIn("l_x_.size(0)", out)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_split_aot_autograd(self):

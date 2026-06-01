@@ -1,3 +1,4 @@
+import dis
 import functools
 import logging
 import operator
@@ -258,6 +259,45 @@ def insert_deferred_runtime_asserts(
     def _assertion_message(
         node: fx.Node, cond: Any, assert_expr: Optional["sympy.Expr"]
     ) -> str:
+        def static_string_from_callable(fn: Callable[[], object]) -> str | None:
+            code = getattr(fn, "__code__", None)
+            if (
+                code is None
+                or code.co_argcount != 0
+                or code.co_posonlyargcount != 0
+                or code.co_kwonlyargcount != 0
+            ):
+                return None
+
+            # torch._check message callables are lazy. Preserve common constant
+            # string lambdas without executing arbitrary user code at compile time.
+            ignored_opnames = {
+                "CACHE",
+                "COPY_FREE_VARS",
+                "EXTENDED_ARG",
+                "NOP",
+                "RESUME",
+            }
+            instructions = [
+                inst
+                for inst in dis.get_instructions(fn)
+                if inst.opname not in ignored_opnames
+            ]
+            if (
+                len(instructions) == 1
+                and instructions[0].opname == "RETURN_CONST"
+                and isinstance(instructions[0].argval, str)
+            ):
+                return instructions[0].argval
+            if (
+                len(instructions) == 2
+                and instructions[0].opname == "LOAD_CONST"
+                and isinstance(instructions[0].argval, str)
+                and instructions[1].opname == "RETURN_VALUE"
+            ):
+                return instructions[0].argval
+            return None
+
         msg = None
         if len(node.args) > 1:
             msg = node.args[1]
@@ -275,7 +315,9 @@ def insert_deferred_runtime_asserts(
             for atom in msg.target.split("."):
                 attr = getattr(attr, atom)
             if callable(attr):
-                return str(attr())
+                static_msg = static_string_from_callable(attr)
+                if static_msg is not None:
+                    return static_msg
             if isinstance(attr, str):
                 return attr
         return f"Runtime assertion failed for expression {assert_expr} on node '{cond}'"
