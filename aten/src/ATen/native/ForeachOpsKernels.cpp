@@ -559,9 +559,7 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(
   return result;
 }
 
-std::vector<Tensor> _foreach_mm(
-    TensorList self,
-    TensorList mat2) {
+std::vector<Tensor> _foreach_mm(TensorList self, TensorList mat2) {
   TORCH_CHECK(self.size() > 0, "_foreach_mm requires non-empty tensor lists");
   TORCH_CHECK(
       self.size() == mat2.size(),

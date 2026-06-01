@@ -12,7 +12,7 @@ from numbers import Number
 import torch
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfXPU,
@@ -38,9 +38,11 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     serialTest,
+    skipIfNoNvmath,
     skipIfTorchDynamo,
     TEST_MULTIACCELERATOR,
     TEST_WITH_ROCM,
@@ -1944,11 +1946,9 @@ class TestForeachMM(TestCase):
         B = [torch.randn(K, N, dtype=dtype, device=device) for _, N, K in shapes]
         ref = [torch.mm(a, b) for a, b in zip(A, B)]
         out = torch._foreach_mm(A, B)
-        atol = 1e-4 if dtype == torch.float32 else 1.0
-        rtol = 1e-4 if dtype == torch.float32 else 0.1
+        self.assertEqual(len(out), len(ref))
         for i, (r, o) in enumerate(zip(ref, out)):
-            self.assertEqual(r.shape, o.shape)
-            self.assertTrue(torch.allclose(r, o, atol=atol, rtol=rtol), msg=f"at {i}")
+            self.assertEqual(o, r, msg=f"mismatch at group {i}")
 
     @parametrize(
         "label,shapes",
@@ -1972,7 +1972,8 @@ class TestForeachMM(TestCase):
         self._check([(256, 256, 256)] * 4, torch.float32, "cuda")
 
     def test_foreach_mm_gradcheck(self):
-        shapes = [(32, 32, 32)] * 4
+        G = 4
+        shapes = [(32, 32, 32)] * G
         A = [
             torch.randn(M, K, dtype=torch.float64, requires_grad=True)
             for M, _, K in shapes
@@ -1981,7 +1982,52 @@ class TestForeachMM(TestCase):
             torch.randn(K, N, dtype=torch.float64, requires_grad=True)
             for _, N, K in shapes
         ]
-        gradcheck(torch._foreach_mm, (A, B))
+
+        def fn(*tensors):
+            return torch._foreach_mm(list(tensors[:G]), list(tensors[G:]))
+
+        gradcheck(fn, (*A, *B))
+
+    @skipIfNoNvmath
+    @unittest.skipUnless(
+        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+    )
+    @parametrize(
+        "label,shapes",
+        [
+            # Non-aligned N (alignment=8 for bf16) — tests nvmath padding
+            ("unaligned_N_uniform", [(256, 253, 256)] * 8),
+            (
+                "unaligned_N_mixed",
+                [
+                    (256, 253, 256),
+                    (128, 67, 128),
+                    (64, 509, 64),
+                    (256, 127, 512),
+                ],
+            ),
+            # Large uniform
+            ("large_uniform", [(4096, 4096, 4096)] * 8),
+            # Mixed with wide range — stresses max-padded buffer allocation
+            (
+                "mixed_wide_range",
+                [
+                    (32, 32, 32),
+                    (1024, 1024, 1024),
+                    (128, 512, 64),
+                    (512, 64, 128),
+                ],
+            ),
+            # Many small groups
+            ("many_groups", [(128, 128, 128)] * 64),
+        ],
+        name_fn=lambda label, shapes: label,
+    )
+    def test_foreach_mm_nvmath(self, label, shapes):
+        self._check(shapes, torch.bfloat16, "cuda")
+
+
+instantiate_parametrized_tests(TestForeachMM)
 
 
 if __name__ == "__main__":

@@ -85,12 +85,16 @@ def _foreach_mm_cond(
             if (a.stride(-1) == 1) != first_a_rm or (b.stride(-1) == 1) != first_b_rm:
                 return False
 
-    # At dim >= 2048, individual cuBLAS mm calls saturate the GPU.
-    # Let the C++ CompositeImplicitAutograd loop handle it.
     M, K = first_a.shape
     N = first_b.size(1)
-    if min(M, N, K) >= 2048 and not _check_nvmath_cublaslt():
-        return False
+    if not _check_nvmath_cublaslt():
+        # _grouped_mm (CUTLASS) requires 16-byte aligned strides
+        elem_size = first_a.element_size()
+        if (K * elem_size) % 16 != 0 or (N * elem_size) % 16 != 0:
+            return False
+        # At dim >= 2048, individual mm calls saturate the GPU
+        if min(M, N, K) >= 2048:
+            return False
 
     return True
 
