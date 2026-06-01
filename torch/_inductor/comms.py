@@ -2248,6 +2248,14 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
         s: frozenset(d.name for d in s.unmet_dependencies if not _is_fake_dep(d))
         for s in snodes
     }
+    # Buffers mutated in-place (e.g., all_reduce_). A node that mutates buf0
+    # cannot be swapped past a node that reads buf0.
+    graph_mutated: frozenset[str] = frozenset(
+        getattr(V.graph, "mutated_buffers", OrderedSet())
+    )
+    mutations_of: dict[BaseSchedulerNode, frozenset[str]] = {
+        s: deps_of[s] & graph_mutated for s in snodes
+    }
 
     _prev, _next, _head = _initialize_double_linked_list(snodes)
     (
@@ -2259,37 +2267,47 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
         _cand_buf_map,
     ) = _initialize_memory_tracking(snodes, graph_inputs, graph_outputs)
 
-    def _delta(node: BaseSchedulerNode) -> int:
-        af = snodes_allocfree[node]
-        return af.size_alloc - af.size_free
-
     n_moved_colls = 0
     n_moved_waits = 0
 
     # Phase 1: move each collective earlier via adjacent swaps
+    # Swap [pred, coll] -> [coll, pred]: pred is the "candidate" (moves later)
     for coll in collectives:
         coll_deps = deps_of[coll]
+        coll_muts = mutations_of[coll]
         moved = False
 
         pred = _prev[coll]
         while pred is not None:
             if outputs_of[pred] & coll_deps:
                 break
+            if coll_muts & deps_of[pred]:
+                break
             if contains_async_collective(pred):
                 break
 
-            # Memory check: pred moves later, sees coll's allocation delta
-            if _curr_memory[pred][0] + _delta(coll) > peak_memory:
+            # Memory check using full liveness-aware tracking (reorder direction)
+            candidate_af = snodes_allocfree[pred]
+            candidate_delta = candidate_af.size_alloc - candidate_af.size_free
+            changed_bufs = _find_buffers_with_changed_last_use(
+                pred, [coll], _buf_last_use, _cand_buf_map
+            )
+            potential_peak, post_alloc_cache = _calculate_potential_peak_memory_reorder(
+                pred, [coll], coll, _curr_memory[coll][0],
+                candidate_delta, candidate_af, changed_bufs, _curr_memory,
+            )
+            if potential_peak > peak_memory:
                 break
 
             new_head = _swap_nodes(pred, coll, _prev, _next)
             if new_head is not None:
                 _head = new_head
 
-            # Update incremental memory state
-            cd, pd = _delta(coll), _delta(pred)
-            _curr_memory[coll] = tuple(v - pd for v in _curr_memory[coll])
-            _curr_memory[pred] = tuple(v + cd for v in _curr_memory[pred])
+            _update_memory_tracking_after_swap_reorder(
+                pred, [coll], coll, candidate_delta, candidate_af,
+                changed_bufs, post_alloc_cache,
+                _curr_memory, _buf_last_use, snodes_allocfree,
+            )
             moved = True
             pred = _prev[coll]
 
@@ -2297,28 +2315,49 @@ def simple_overlap(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
             n_moved_colls += 1
 
     # Phase 2: move each wait later via adjacent swaps
+    # Swap [wait, succ] -> [succ, wait]: succ is the "candidate" (moves earlier)
     for wait in waits:
         wait_outs = outputs_of[wait]
+        wait_muts = mutations_of[wait]
         moved = False
 
         succ = _next[wait]
         while succ is not None:
             if deps_of[succ] & wait_outs:
                 break
+            if mutations_of[succ] & deps_of[wait]:
+                break
+            if wait_muts & deps_of[succ]:
+                break
             if contains_wait(succ):
                 break
 
-            # Memory check: wait moves later, sees succ's allocation delta
-            if _curr_memory[wait][0] + _delta(succ) > peak_memory:
+            # Memory check using full liveness-aware tracking (sink_waits direction)
+            candidate_af = snodes_allocfree[succ]
+            candidate_delta = candidate_af.size_alloc - candidate_af.size_free
+            changed_bufs = _find_buffers_with_changed_last_use_sink_waits(
+                succ, [wait], _buf_last_use, _cand_buf_map
+            )
+            pre_wait_mem = _curr_memory[_prev[succ]][1] if _prev[succ] is not None else 0
+            potential_peak, post_alloc_cache, size_free_cache = (
+                _calculate_potential_peak_memory_sink_waits(
+                    succ, [wait], wait, _curr_memory[wait][0],
+                    candidate_delta, candidate_af, changed_bufs,
+                    _curr_memory, snodes_allocfree,
+                )
+            )
+            if potential_peak > peak_memory:
                 break
 
             new_head = _swap_nodes(wait, succ, _prev, _next)
             if new_head is not None:
                 _head = new_head
 
-            wd, sd = _delta(wait), _delta(succ)
-            _curr_memory[wait] = tuple(v + sd for v in _curr_memory[wait])
-            _curr_memory[succ] = tuple(v - wd for v in _curr_memory[succ])
+            _update_memory_tracking_after_swap_sink_waits(
+                succ, [wait], candidate_delta, candidate_af,
+                changed_bufs, post_alloc_cache, size_free_cache,
+                _curr_memory, snodes_allocfree,
+            )
             moved = True
             succ = _next[wait]
 
