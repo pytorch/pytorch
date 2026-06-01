@@ -364,6 +364,7 @@ extern "C"
 
 FLEX_ATTENTION_TEMPLATE = r"""
   bool need_pack = false;
+#if !defined(CPU_CAPABILITY_SVE256)
   // Whether pack is needed for BFloat16/Half
   if (is_reduced_type) {
     // check platform ability
@@ -382,6 +383,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
       need_pack = gemm_size_per_thread / pack_size >= 4;
     }
   }
+#endif
   // Pad is needed for packing when K is not even
   bool headSize_even = headSize % 2 == 0;
   int64_t eheadSize = need_pack && !headSize_even ? headSize + 1: headSize;
@@ -425,6 +427,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
   {{template.codegen_allocate_buffer("value_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*kv_padding_size*headSize_v")}}
   {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
   {{template.codegen_allocate_buffer("query_padding_ptr", "scalar_t", "num_thread*eqSplitSize*eheadSize")}}
+#if !defined(CPU_CAPABILITY_SVE256)
   if (need_pack) {
     // Pack K, V
     at::parallel_for(0, batchSize_k * num_head_k * kvSlice, 1, [&](int64_t begin, int64_t end) {
@@ -472,6 +475,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
       }
     });
   }
+#endif
   // Attention loop below
   at::parallel_for(0, batchSize * num_head * qSlice, 1, [&](int64_t begin, int64_t end) {
     int64_t i = 0, j = 0, k = 0;
@@ -680,10 +684,27 @@ FLEX_ATTENTION_TEMPLATE = r"""
         } else if (!need_pack) {
           auto k_addr =
               k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
+          auto q_addr =
+              q_data + i * qStrideB + j * qStrideH + m * qStrideM;
 
+#if defined(CPU_CAPABILITY_SVE256)
+          at::native::cpublas::gemm(
+              at::native::TransposeType::Transpose,
+              at::native::TransposeType::NoTranspose,
+              cur_kvSplitSize,
+              cur_qSplitSize,
+              headSize,
+              static_cast<accum_t>(1),
+              k_addr,
+              kStrideN,
+              q_addr,
+              qStrideM,
+              static_cast<accum_t>(0),
+              qk_data,
+              cur_kvSplitSize);
+#else
           {{kernel.kernel_name}}_kernel_micro_gemm_transpose_b<static_cast<bool>(false)>(
-              q_data + i * qStrideB + j * qStrideH +
-                  m * qStrideM,
+              q_addr,
               k_addr,
               qk_data,
               cur_qSplitSize,
@@ -692,6 +713,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
               qStrideM,
               kStrideN,
               cur_kvSplitSize);
+#endif
 
         } else {
           at::native::cpublas::brgemm(
@@ -1008,9 +1030,27 @@ FLEX_DECODING_TEMPLATE = r"""
 
         auto k_addr =
             k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
+        auto q_addr =
+            q_data + i * qStrideB + j * qStrideH;
 
+#if defined(CPU_CAPABILITY_SVE256)
+        at::native::cpublas::gemm(
+            at::native::TransposeType::Transpose,
+            at::native::TransposeType::NoTranspose,
+            cur_kvSplitSize,
+            cur_qSplitSize,
+            headSize,
+            static_cast<accum_t>(1),
+            k_addr,
+            kStrideN,
+            q_addr,
+            qStrideM,
+            static_cast<accum_t>(0),
+            logits + token_num,
+            cur_kvSplitSize);
+#else
         {{kernel.kernel_name}}_kernel_micro_gemm_transpose_b<false>(
-            q_data + i * qStrideB + j * qStrideH,
+            q_addr,
             k_addr,
             logits + token_num,
             cur_qSplitSize,
@@ -1019,6 +1059,7 @@ FLEX_DECODING_TEMPLATE = r"""
             qStrideM,
             kStrideN,
             cur_kvSplitSize);
+#endif
 
         {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(logits + token_num, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
 
@@ -1684,19 +1725,24 @@ class CppFlexAttentionTemplate(CppTemplate):
             parallel_num_threads,
         )
         from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
+        from torch._inductor.cpu_vec_isa import pick_vec_isa, VecSVE256
         from torch._inductor.virtualized import V
 
-        micro_gemm_trans = CppMicroGemmFP32Vec(
-            kernel_name + "_kernel_micro_gemm_transpose_b",
-            self.input_dtype,
-            self.input_dtype,
-            self.accumulate_dtype,
-            self.accumulate_dtype,
-            GemmBlocking(1, 16, 1),
-            1,
-            True,
-            True,
-        )
+        emit_transpose_b_micro_gemm = not isinstance(pick_vec_isa(), VecSVE256)
+
+        code_trans = ""
+        if emit_transpose_b_micro_gemm:
+            micro_gemm_trans = CppMicroGemmFP32Vec(
+                kernel_name + "_kernel_micro_gemm_transpose_b",
+                self.input_dtype,
+                self.input_dtype,
+                self.accumulate_dtype,
+                self.accumulate_dtype,
+                GemmBlocking(1, 16, 1),
+                1,
+                True,
+                True,
+            )
 
         micro_gemm = CppMicroGemmFP32Vec(
             kernel_name + "_kernel_micro_gemm",
@@ -1712,7 +1758,8 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         with V.set_graph_handler(V.graph):
             kernel = CppTemplateKernel("cpp_micro_gemm", parallel_num_threads())
-            code_trans = micro_gemm_trans.codegen_define(kernel)
+            if emit_transpose_b_micro_gemm:
+                code_trans = micro_gemm_trans.codegen_define(kernel)
             code = micro_gemm.codegen_define(kernel)
         return code + code_trans
 

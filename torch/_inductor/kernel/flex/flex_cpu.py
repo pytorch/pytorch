@@ -32,8 +32,12 @@ def check_cpu_supported():
     requires_avx2_on_cpu = (
         torch.cpu._is_avx2_supported() and os.getenv("ATEN_CPU_CAPABILITY") != "default"
     )
+    requires_sve256_on_cpu = (
+        torch.backends.cpu.get_cpu_capability() == "SVE256"
+        and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+    )
     supported = (
-        requires_avx2_on_cpu
+        (requires_avx2_on_cpu or requires_sve256_on_cpu)
         and not torch.xpu.is_available()
         and sys.platform != "darwin"
     )
@@ -67,7 +71,7 @@ def lower_cpu(
     score_mod_other_buffers,
     mask_mod_other_buffers,
 ):
-    """CPP based template for flex attention for x86 CPUs"""
+    """CPP based template for flex attention for x86 and AArch64 CPUs"""
     (
         _,  # q_length
         _,  # kv_length
