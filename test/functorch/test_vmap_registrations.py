@@ -154,7 +154,6 @@ xfail_not_implemented = {
     "aten::pdist",
     "aten::pin_memory",
     "aten::promote_types",
-    "aten::qr.Q",
     "aten::quantile",
     "aten::quantile.scalar",
     "aten::refine_names",
