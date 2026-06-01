@@ -35,7 +35,12 @@ from .common import (
     SizeArg,
     WorkspaceArg,
 )
-from .simd import NodeInfo, prefix_is_reduction, SIMDScheduling
+from .simd import (
+    _combo_subkernel_config_cap,
+    NodeInfo,
+    prefix_is_reduction,
+    SIMDScheduling,
+)
 from .simd_kernel_features import SIMDKernelFeatures
 from .triton import TritonKernel
 from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
@@ -1237,6 +1242,9 @@ class ComboKernel(Kernel):
                             sub_kernel.tiling_scores
                         ).name
                     )
+
+                if config.combo_kernels_seed_autotune_cap:
+                    meta[f"config_cap_{num}"] = _combo_subkernel_config_cap(sub_kernel)
 
             for tree in sub_kernel.range_trees:
                 if not tree.is_reduction:

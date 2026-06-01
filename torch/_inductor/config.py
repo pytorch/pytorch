@@ -1066,6 +1066,12 @@ combo_seed_autotune_at_compile_time = True
 combo_kernel_autotune_grouping = True
 # When True, only pointwise kernels are eligible for combo kernel fusion.
 combo_kernels_pointwise_only = False
+# When True, combo-kernel autotuning is size-bucketed: small subkernels cap to
+# 1 config, larger ones to 2. The per-subkernel cap is precomputed into
+# combo_grid_meta and applied by _handle_combo_kernel_per_subkernel_blocks.
+combo_kernels_seed_autotune_cap = True
+combo_kernels_seed_small_rnumel = 64
+combo_kernels_seed_small_pointwise_total = 4096
 # Memory-aware combo kernel gating.
 #   None: disable that threshold dimension
 #   0: allow no graph-peak increase
