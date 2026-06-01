@@ -1197,7 +1197,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         )
 
     def tp_iteritem_impl(
-        self, tx: Any, index: VariableTracker
+        self, tx: InstructionTranslatorBase, index: VariableTracker
     ) -> tuple[VariableTracker, VariableTracker]:
         """
         Implements the 3.15 _tp_iteritem slot used by the virtual-iterator
