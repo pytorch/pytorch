@@ -1420,6 +1420,15 @@ use_fast_triton_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER", "1") == "1"
 )
 
+# Use the Level 0 launch_metadata_schema from CompiledKernel.bin
+# (versioned, stable contract) instead of hasattr probing of
+# CompiledKernel internals in save_gpu_kernel().
+# When True (default), prefers schema["entry_name"]/["num_warps"]/["shared_mem"].
+# When False, forces the legacy hasattr fallback path.
+use_launch_metadata_schema: bool = (
+    os.environ.get("TORCHINDUCTOR_USE_LAUNCH_METADATA_SCHEMA", "1") == "1"
+)
+
 # gemm autotuning global cache dir
 global_cache_dir: str | None
 if is_fbcode():
@@ -1851,6 +1860,11 @@ class triton:
     # not incurring large memory overhead
     reorder_for_reducing_graph_partitions: bool = True
 
+    # Memory budget multiplier for cudagraph partition reordering.
+    # When reordering nodes to minimize partitions, the reordering is only
+    # applied if the peak memory increase is within this budget.
+    cudagraph_partition_memory_budget: float = 1.1
+
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
 
@@ -2177,6 +2191,9 @@ class aot_inductor:
     enable_frame_pointer = (
         os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "1") == "1"
     )
+
+    # Enable lightweight line tables for profiling tools (e.g. strobelight)
+    enable_line_tables = os.environ.get("AOT_INDUCTOR_ENABLE_LINE_TABLES", "1") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
@@ -2675,7 +2692,17 @@ class halide:
 
 
 # create a directory containing lots of debug information
+def _get_debug_graph_format(format_env_name: str, legacy_svg_env_name: str) -> str:
+    if format_env_name in os.environ:
+        return os.environ[format_env_name]
+    if os.environ.get(legacy_svg_env_name, "0") == "1":
+        return "svg"
+    return os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
+
+
 class trace:
+    """Configuration for torch.compile debug trace artifacts."""
+
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
@@ -2707,11 +2734,39 @@ class trace:
     # Copy generated code to trace dir
     output_code = True
 
-    # SVG figure showing post-fusion graph
-    graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+    # Diagram showing post-fusion graph. INDUCTOR_POST_FUSION_SVG is the
+    # legacy spelling for SVG output; INDUCTOR_POST_FUSION_GRAPH enables the
+    # same dump for any graph_diagram_format.
+    graph_diagram = (
+        os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+        or os.environ.get("INDUCTOR_POST_FUSION_GRAPH", "0") == "1"
+    )
 
-    # SVG figure showing fx with fusion
-    draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+    # Output format for post-fusion graph_diagram dumps.  Defaults to svg when
+    # the legacy INDUCTOR_POST_FUSION_SVG flag is used; otherwise defaults to
+    # the shared torch.compile graph format. Set to "dot" to dump raw DOT text
+    # without invoking Graphviz layout.
+    graph_diagram_format = _get_debug_graph_format(
+        "INDUCTOR_POST_FUSION_GRAPH_FORMAT",
+        "INDUCTOR_POST_FUSION_SVG",
+    )
+
+    # Diagram showing FX with fusion. INDUCTOR_ORIG_FX_SVG is the legacy
+    # spelling for SVG output; INDUCTOR_ORIG_FX_GRAPH enables the same dump for
+    # any orig_fx_graph_diagram_format.
+    draw_orig_fx_graph = (
+        os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+        or os.environ.get("INDUCTOR_ORIG_FX_GRAPH", "0") == "1"
+    )
+
+    # Output format for original FX graph dumps.  Defaults to svg when the
+    # legacy INDUCTOR_ORIG_FX_SVG flag is used; otherwise defaults to the
+    # shared torch.compile graph format. Set to "dot" to dump raw DOT text
+    # without invoking Graphviz layout.
+    orig_fx_graph_diagram_format = _get_debug_graph_format(
+        "INDUCTOR_ORIG_FX_GRAPH_FORMAT",
+        "INDUCTOR_ORIG_FX_SVG",
+    )
 
     # We draw our fx graphs with the "record" shape attribute by default.
     # Sometimes, when the graph is very complex, we may hit dot errors like below:
@@ -2840,6 +2895,7 @@ class test_configs:
     force_no_impl_grouping: bool = False
 
     max_mm_configs: int | None = None
+    max_flex_configs: int | None = None
 
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False

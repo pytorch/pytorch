@@ -965,6 +965,14 @@ def _partial_softmax_pattern(linear_func, reverse=False, to_dtype=False):
     return CallFunction(aten.sub.Tensor, scaled, amax)
 
 
+def _preserve_scaled_softmax_nonfinite_semantics(scaled, stable, dim, keepdim):
+    # This pattern also matches the raw scaled - amax(scaled) expression.  Only
+    # use the stable form when it preserves that expression's nonfinite behavior.
+    original = scaled - torch.amax(scaled, dim=dim, keepdim=keepdim)
+    finite_scaled = torch.all(torch.isfinite(scaled), dim=dim, keepdim=True)
+    return torch.where(finite_scaled, stable, original)
+
+
 def _other_is_broadcasted_in_dim(match):
     # Check that the scaling factor is constant across the reduction dim,
     # so scaling doesn't change which index corresponds to the maximum value
@@ -1004,7 +1012,9 @@ def _other_is_broadcasted_in_dim(match):
 
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
+        scaled = inp * other
         if dtype is not None:
+            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -1017,7 +1027,10 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
 
-        return (inp - max_) * (sign * other)
+        stable = (inp - max_) * (sign * other)
+        return _preserve_scaled_softmax_nonfinite_semantics(
+            scaled, stable, dim, keepdim
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
@@ -1034,7 +1047,9 @@ for reverse, to_dtype in itertools.product((False, True), repeat=2):
 
 def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
+        scaled = inp / other
         if dtype is not None:
+            scaled = scaled.to(dtype)
             inp = inp.to(dtype)
 
         sign: int | float | torch.Tensor
@@ -1047,7 +1062,10 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
 
-        return (inp - max_) / (sign * other)
+        stable = (inp - max_) / (sign * other)
+        return _preserve_scaled_softmax_nonfinite_semantics(
+            scaled, stable, dim, keepdim
+        )
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])

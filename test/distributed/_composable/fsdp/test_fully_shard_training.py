@@ -60,6 +60,8 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     MI200_ARCH,
     run_tests,
+    skipIfRocm,
+    skipIfTorchInductor,
     TEST_CUDA_GRAPH,
     TEST_HPU,
     TEST_XPU,
@@ -139,6 +141,23 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         self.assertEqual(ys[0].device, torch.device("cpu"))
         self.assertEqual(ys[1].device, torch.device("cpu"))
         model(x, ys)
+
+    def test_root_no_forward_inputs(self):
+        device = torch.device(device_type.type, 0)
+
+        class ParameterOnlyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4, 4, device=device))
+
+            def forward(self):
+                return self.weight @ self.weight
+
+        model = ParameterOnlyModule()
+        fully_shard(model)
+        out = model()
+        self.assertEqual(out.shape, (4, 4))
+        out.sum().backward()
 
 
 class TestFullyShardRegisteredParams(FSDPTestMultiThread):
@@ -413,6 +432,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/148901")
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     @unittest.skipIf(TEST_HPU or TEST_XPU, "sleep kernel not supported on HPU/XPU")
     def test_train_parity_multi_group_cpu_offload_eager(self):
@@ -2633,6 +2653,7 @@ class TestFullyShardCudaGraph(FSDPTest):
     def world_size(self) -> int:
         return 2
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/173761")
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

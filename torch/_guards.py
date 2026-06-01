@@ -210,7 +210,7 @@ class GuardSource(enum.Enum):
 Base class for a "GuardBuilder" role.
 
 The GuardBuilderBase role is to represent a scope within which to build a guard. The name is a little
-confusing, as its not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
+confusing, as it's not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
 to torchdynamo's GuardBuilder.
 
 Note: create_fn is invoked with a GuardBuilderBase and a Guard. A GuardBuilder is chosen based
@@ -713,7 +713,7 @@ class GuardsSet:
 
 """
 A GuardsContext is a checkpointable representation of all the guards in the current tracing
-context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
+context. Its lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
 directly outside of it. For passing around internal state representations of this object,
 prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 """
@@ -764,6 +764,16 @@ class HopSubgraphCache:
 
     @abstractmethod
     def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None: ...
+
+    @abstractmethod
+    def add_functionalize_schema_entry(
+        self, key: object, schema: torch._C.FunctionSchema
+    ) -> None: ...
+
+    @abstractmethod
+    def get_functionalize_schema_entry(
+        self, key: object
+    ) -> torch._C.FunctionSchema | None: ...
 
     @abstractmethod
     def add_lazy_bwd_entry(
@@ -836,6 +846,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
+        self.functionalize_schema_cache: dict[object, torch._C.FunctionSchema] = {}
         self.dynamo_installed_submodules: dict[CodeType, list[str]] = defaultdict(list)
         self.lazy_bwd_cache: dict[
             str, dict[tuple[object], tuple[torch.fx.GraphModule, int]]
@@ -874,6 +885,16 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None:
         return self.proxy_dispatch_cache.get(identifier, None)
+
+    def add_functionalize_schema_entry(
+        self, key: object, schema: torch._C.FunctionSchema
+    ) -> None:
+        self.functionalize_schema_cache[key] = schema
+
+    def get_functionalize_schema_entry(
+        self, key: object
+    ) -> torch._C.FunctionSchema | None:
+        return self.functionalize_schema_cache.get(key, None)
 
     def add_lazy_bwd_entry(
         self,

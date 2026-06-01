@@ -52,6 +52,8 @@ from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
     Identity,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
 )
@@ -83,7 +85,9 @@ from .utils import (
     decode_device,
     is_dynamic,
     is_gpu,
+    is_nvidia_sm100_or_later,
     is_pointwise_use,
+    is_triton_fp8_dtype_supported,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
@@ -1492,10 +1496,10 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             return 0
         elif fn(sympy.Ge(index, 0)):
             # If index >= 0, the resolved index is at most min(index, size).
-            return sympy.Min(index, size)
+            return Min(index, size)
         elif fn(sympy.Lt(index, 0)):
             # If index < 0, wrap and clamp: the resolved index is at least 0.
-            return sympy.Max(index + size, 0)
+            return Max(index + size, 0)
         return None
 
     start_index, end_index = None, None
@@ -1564,11 +1568,27 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     new_strides = list(x.get_stride())
     new_sizes[dim] = sym_size
     new_strides[dim] *= step
-    return as_strided(x, new_sizes, new_strides, new_storage_offset)
+    return as_strided(
+        x,
+        new_sizes,
+        new_strides,
+        new_storage_offset,
+        storage_offset_relative_to_input_storage=False,
+    )
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
-def as_strided(x, size, stride, storage_offset=None):
+def as_strided(
+    x,
+    size,
+    stride,
+    storage_offset=None,
+    *,
+    storage_offset_relative_to_input_storage=True,
+):
+    explicit_storage_offset = (
+        storage_offset is not None and storage_offset_relative_to_input_storage
+    )
     new_device = None
     new_dtype = None
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
@@ -1588,12 +1608,23 @@ def as_strided(x, size, stride, storage_offset=None):
     if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
     storage, old_layout = ir.as_storage_and_layout(x)
+    storage_offset = (
+        convert_symint_to_expr(storage_offset) if storage_offset is not None else 0
+    )
+    storage_data = storage.data if isinstance(storage, ir.StorageBox) else storage
+    if explicit_storage_offset and isinstance(storage_data, ir.InputBuffer):
+        # Runtime graph input pointers already include the input tensor's
+        # storage_offset(), but explicit as_strided offsets are storage-relative.
+        storage_offset = sympy.expand(
+            storage_offset
+            - V.graph.graph_input_storage_offsets.get(storage_data.get_name(), 0)
+        )
     new_layout = ir.FixedLayout(
         new_device if new_device else old_layout.device,
         new_dtype if new_dtype else old_layout.dtype,
         [sympy.expand(s) for s in size],
         [sympy.expand(s) for s in stride],
-        sympy.expand(storage_offset or 0),
+        sympy.expand(storage_offset),
     )
     return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
@@ -2337,7 +2368,13 @@ def select(x, dim, idx):
 
             del new_size[dim]
             del new_stride[dim]
-            return as_strided(x, new_size, new_stride, new_storage_offset)
+            return as_strided(
+                x,
+                new_size,
+                new_stride,
+                new_storage_offset,
+                storage_offset_relative_to_input_storage=False,
+            )
         else:
             # no need to clamp, this function handles negative indexing itself
             slice_result = slice_(x, dim, actual_index, actual_index + 1, clamp=False)
@@ -2372,7 +2409,13 @@ def select(x, dim, idx):
 
     del new_size[dim]
     del new_stride[dim]
-    return as_strided(x, new_size, new_stride, new_storage_offset)
+    return as_strided(
+        x,
+        new_size,
+        new_stride,
+        new_storage_offset,
+        storage_offset_relative_to_input_storage=False,
+    )
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
@@ -2383,8 +2426,23 @@ def split(x, sizes, dim=0):
     # If sizes is an integer (or a SymInt), we turn it into a list of sizes
     # by computing what the actual size of each chunk should be.
     if not isinstance(sizes, (list, tuple)):
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_lt(sizes, 0):
+            raise RuntimeError(
+                f"split expects split_size be non-negative, but got split_size={sizes}"
+            )
+
         x_size = x.get_size()[dim]
-        chunks = V.graph.sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
+        if sizevars.statically_known_equals(x_size, 0):
+            return [slice_(x, dim, 0, 0, clamp=False)]
+
+        if sizevars.statically_known_equals(sizes, 0):
+            raise RuntimeError(
+                "split_size can only be 0 if dimension size is 0, "
+                f"but got dimension size of {x_size}"
+            )
+
+        chunks = sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
         sizes_ = [sizes] * chunks
         # The last chunk might have a smaller size than the rest.
         sizes_[-1] = x_size - (chunks - 1) * sizes
@@ -2519,6 +2577,9 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         return True
 
     if t.is_sparse:
+        return True
+
+    if not is_triton_fp8_dtype_supported(t.dtype, t.device):
         return True
 
     if t.dtype == torch.float8_e8m0fnu:
@@ -2761,6 +2822,7 @@ make_fallback(aten.randint)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
+make_fallback(aten.rrelu_with_noise_functional)
 
 # TODO: mlazos reevaluate if we want to codegen something different
 make_fallback(torch.ops.streams.record_event.default)
@@ -2791,7 +2853,7 @@ def randn(*args, **kwargs):
 
 @register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
 def inductor_force_stride_order(input_tensor, stride):
-    stride_order = ir.get_stride_order(stride)
+    stride_order = ir.get_stride_order(stride, V.graph.sizevars.shape_env)
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
@@ -3183,9 +3245,14 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
 
 
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
+    def get_fake_val(fx_arg):
+        if isinstance(fx_arg, torch.fx.Node):
+            return fx_arg.meta.get("val")
+        return fx_arg
+
     def apply_constraint(arg, fx_arg):
+        fake_val = get_fake_val(fx_arg)
         if _is_tensor_irnode(arg):
-            fake_val = fx_arg.meta.get("val")
             if not isinstance(fake_val, torch.Tensor):
                 return arg
             stride_order = ir.get_stride_order(
@@ -3193,7 +3260,15 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
-            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg}
+            if not isinstance(fake_val, dict):
+                return arg
+            return {key: apply_constraint(arg[key], fake_val[key]) for key in arg}
+        if isinstance(arg, (tuple, list)):
+            if not isinstance(fake_val, (tuple, list)):
+                return arg
+            return type(arg)(
+                apply_constraint(a, fx_a) for a, fx_a in zip(arg, fake_val)
+            )
         return arg
 
     args = tuple(
@@ -3828,6 +3903,9 @@ def _unwrap(x):
 
 @register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
+    # Match eager/meta scalar_tensor behavior; NJT handles scalar broadcasting.
+    if layout == torch.jagged:
+        layout = torch.strided
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
@@ -5051,6 +5129,7 @@ def inplace_constant_pad_nd(
         padded_size,
         layout.stride,
         layout.offset,
+        storage_offset_relative_to_input_storage=False,
     )
 
     sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad, clamp=False)
@@ -6294,10 +6373,10 @@ def _avg_poolnd(
             divide_factors = []
             for i in range(dim):
                 hstart = bh[i] * stride[i] - padding[i]
-                hend = sympy.Min(hstart + kernel_size[i], h[i] + padding[i])
+                hend = Min(hstart + kernel_size[i], h[i] + padding[i])
                 if not count_include_pad:
-                    hstart = sympy.Max(hstart, 0)
-                    hend = sympy.Min(hend, h[i])
+                    hstart = Max(hstart, 0)
+                    hend = Min(hend, h[i])
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             return functools.reduce(ops.mul, divide_factors)
@@ -6733,7 +6812,15 @@ def _make_reduction_inner(
         ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
     )
     if (
-        reduction_type in ("argmax", "argmin")
+        reduction_type
+        in (
+            "argmax",
+            "argmin",
+            "argmax_value",
+            "argmin_value",
+            "argmax_with_value",
+            "argmin_with_value",
+        )
         and len(reduced_sizes) > 1
         and supports_logical_index_argreduce
     ):
@@ -6760,7 +6847,7 @@ def _make_reduction_inner(
             new_index[idx] = var
         value = inner_loader(new_index)
 
-        # For argmax/argmin, return tuple with logical linear index if needed
+        # For argmax/argmin reductions, return tuple with logical linear index if needed
         if should_compute_logical_index:
             rindex = [sympy.expand(i) for i in reduction_index]
 
@@ -6824,6 +6911,25 @@ def make_reduction(
     return inner
 
 
+def make_arg_with_value_reduction(
+    reduction_type: ReductionType,
+) -> Callable[..., Sequence[TensorBox]]:
+    def inner(x, axis=None, keepdims=False) -> Sequence[TensorBox]:
+        kwargs = _make_reduction_inner(
+            x,
+            axis=axis,
+            keepdims=keepdims,
+            dtype=None,
+            override_return_dtype=x.get_dtype(),
+            reduction_type=reduction_type,
+        )
+        return ir.ArgReduction.create(
+            reduction_type=reduction_type, input_node=x, **kwargs
+        )
+
+    return inner
+
+
 def _make_scan_inner(x, *, axis, dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
@@ -6870,7 +6976,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
     denom = sympy_product(size[i] for i in axis)
     if correction:
-        denom = sympy.Max(denom - correction, 0)
+        denom = Max(denom - correction, 0)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
@@ -7391,6 +7497,27 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
+def _current_node_uses_all_tuple_outputs(indices: tuple[int, ...]) -> bool:
+    current_node = V.graph.current_node
+    if current_node is None:
+        return True
+
+    used_indices: OrderedSet[int] = OrderedSet()
+    for user in current_node.users:
+        if (
+            user.op == "call_function"
+            and user.target is operator.getitem
+            and len(user.args) >= 2
+            and isinstance(user.args[1], int)
+        ):
+            if len(user.users) > 0:
+                used_indices.add(user.args[1])
+        else:
+            return True
+
+    return all(index in used_indices for index in indices)
+
+
 @register_lowering(aten.any)
 def reduce_any(x, dim=None, keepdim=False):
     x = to_dtype(x, torch.bool)
@@ -7400,6 +7527,13 @@ def reduce_any(x, dim=None, keepdim=False):
 @register_lowering(aten.max, type_promotion_kind=None)
 def reduce_max(x, dim=None, keepdim=False):
     if dim is not None:
+        if is_triton(x) and x.get_dtype() != torch.bool:
+            if _current_node_uses_all_tuple_outputs((0, 1)):
+                return reduce_argmax_with_value(x, axis=dim, keepdims=keepdim)
+            return (
+                reduce_argmax_value(x, axis=dim, keepdims=keepdim),
+                reduce_argmax(x, axis=dim, keepdims=keepdim),
+            )
         return (
             reduce_amax(x, axis=dim, keepdims=keepdim),
             reduce_argmax(x, axis=dim, keepdims=keepdim),
@@ -7411,6 +7545,13 @@ def reduce_max(x, dim=None, keepdim=False):
 @register_lowering(aten.min, type_promotion_kind=None)
 def reduce_min(x, dim=None, keepdim=False):
     if dim is not None:
+        if is_triton(x) and x.get_dtype() != torch.bool:
+            if _current_node_uses_all_tuple_outputs((0, 1)):
+                return reduce_argmin_with_value(x, axis=dim, keepdims=keepdim)
+            return (
+                reduce_argmin_value(x, axis=dim, keepdims=keepdim),
+                reduce_argmin(x, axis=dim, keepdims=keepdim),
+            )
         return (
             reduce_amin(x, axis=dim, keepdims=keepdim),
             reduce_argmin(x, axis=dim, keepdims=keepdim),
@@ -7428,6 +7569,10 @@ reduce_argmax = register_lowering(aten.argmax)(
 reduce_argmin = register_lowering(aten.argmin)(
     make_reduction("argmin", override_return_dtype=torch.int64)
 )
+reduce_argmax_value = make_reduction("argmax_value")
+reduce_argmin_value = make_reduction("argmin_value")
+reduce_argmax_with_value = make_arg_with_value_reduction("argmax_with_value")
+reduce_argmin_with_value = make_arg_with_value_reduction("argmin_with_value")
 
 add = register_pointwise(
     aten.add,
@@ -8670,58 +8815,33 @@ register_symm_mem_lowerings()
 @register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
 def prepare_softmax_online(x, dim):
     """
-    Lowering inductor_prims.prepare_softmax_online to compute max/sum in one pass if no split is needed.
+    Lowering inductor_prims.prepare_softmax_online to compute max/sum with
+    online softmax reductions when profitable.
     """
     kwargs = _make_reduction_inner(
         x, axis=dim, keepdims=True, dtype=None, override_return_dtype=None
     )
 
-    reduction_ranges = kwargs["reduction_ranges"]
-    rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
-    hint, num_split = ir.Reduction.num_splits(
-        **kwargs,
-        reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
-        reduction_numel=rnumel,
-    )
+    rnumel = V.graph.sizevars.simplify(sympy_product(kwargs["reduction_ranges"]))
 
-    if num_split == 1 and V.graph.sizevars.statically_known_geq(
+    if V.graph.sizevars.statically_known_geq(
         rnumel, config.unroll_reductions_threshold
     ):
         max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
-            input_node=x, num_output=2, reduction_hint=hint, **kwargs
+            input_node=x, num_output=2, **kwargs
         )
         return max_tensor, sum_tensor
     else:
-        # Note: [Split online_softmax_reduce]
-        # We don't split reduction for online_softmax_reduce for now.
-        # On one hand, supporting split reduction makes things complex since
-        # the split out reuctions requires 2 inputs rather than one.
-        # On the other hand, during training the online_softmax_reduce should
-        # usually don't requires a split due to large batch size
-        # (more specifically batch size times sequence length).
-        # We should support split reduction if we find legit use cases to
-        # motivate the work.
-        #
-        # TODO: does inference need split online_softmax_reduce?
-
-        log.debug(
-            "Online softmax is disabled on the fly since Inductor decides to split the reduction."
-        )
         amax = reduce_amax(x, dim, keepdims=True)
         exp = lowerings[aten.exp](sub(x, amax))
         xsum = sum_(exp, dim, keepdims=True)
         return amax, xsum
 
 
-def _is_sm100_or_later():
-    """Check if we're on SM100+ hardware (Blackwell)."""
-    return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0)
-
-
 @register_lowering(inductor_prims.cvt_e8m0_rceil, type_promotion_kind=None)
 def cvt_e8m0_rceil_lowering(inp):
     """
-    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on SM100+.
+    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on NVIDIA SM100+.
 
     The PTX instruction takes 2 float32 and outputs 2 e8m0 packed in uint16.
     Currently we pass 0.0 as the second input and only use the low byte result.
@@ -8729,9 +8849,9 @@ def cvt_e8m0_rceil_lowering(inp):
     # TODO: Optimize to process pairs (pack=2) by creating a custom Pointwise
     # that loads adjacent elements, applies PTX to both, and uses a follow-up
     # kernel to extract the packed uint16 results as uint8.
-    if not _is_sm100_or_later():
+    if not is_nvidia_sm100_or_later():
         raise NotImplementedError(
-            "cvt_e8m0_rceil requires SM100+ (Blackwell) for PTX instruction support"
+            "cvt_e8m0_rceil requires NVIDIA SM100+ (Blackwell) for PTX instruction support"
         )
 
     dtype = inp.get_dtype()
