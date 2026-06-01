@@ -41,6 +41,7 @@ Below is an example that uses switch to select between multiple operations based
 
 ```{code-cell}
 import torch
+from torch._higher_order_ops.switch import switch
 
 def branch0(x: torch.Tensor):
     return x.cos()
@@ -60,7 +61,7 @@ class BasicSwitch(torch.nn.Module):
         super().__init__()
 
     def forward(self, index: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-        return torch.switch(index, [branch0, branch1, branch2], (x,))
+        return switch(index, [branch0, branch1, branch2], (x,))
 
 switch_mod = BasicSwitch()
 ```
@@ -115,7 +116,7 @@ class DataDependentSwitch(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Select branch based on the sign of the sum
         index = torch.clamp((x.sum() > 0).long() + (x.sum() > 5).long(), 0, 2)
-        return torch.switch(index, [branch0, branch1, branch2], (x,))
+        return switch(index, [branch0, branch1, branch2], (x,))
 
 x = torch.randn(4, 3)
 ep = torch.export.export(

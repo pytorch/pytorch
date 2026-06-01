@@ -173,8 +173,10 @@ def sample_inputs_switch(opinfo, device, dtype, requires_grad, **kwargs):
 def simple_switch(x):
     # Tensor index so the HOP is actually captured (Python-constant indices
     # would specialize away in dynamo).
+    from torch._higher_order_ops.switch import switch
+
     idx = (x.sum() > 2).long()
-    return torch.switch(
+    return switch(
         idx,
         (lambda x: (x.cos(),), lambda x: (x.sin(),), lambda x: (x.abs(),)),
         [x],
