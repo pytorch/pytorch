@@ -421,18 +421,10 @@ class DeferredTritonCallWrapper:
             prefix.splice(
                 maybe_hipify_code_wrapper(
                     f"""\
-                {device_ptr_type} {var} = 0;
+                int64_t {var}_numel = {size_expr} * {grid_extent};
                 RAIIAtenTensorHandle {var}_tensor;
-                if ({size_expr} > 0) {{
-                    int64_t {var}_size[] = {{{size_expr} * {grid_extent}}};
-                    int64_t {var}_stride[] = {{1}};
-                    AtenTensorHandle {var}_handle;
-                    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
-                        1, {var}_size, {var}_stride, {dtype_str},
-                        {device_type}, device_idx_, &{var}_handle));
-                    {var}_tensor = RAIIAtenTensorHandle({var}_handle);
-                    {var} = reinterpret_cast<{device_ptr_type}>({var}_tensor.data_ptr());
-                }}
+                {device_ptr_type} {var} = allocate_scratch_tensor<{device_ptr_type}>(
+                    {var}_numel, {dtype_str}, {device_type}, device_idx_, {var}_tensor);
             """
                 )
             )
@@ -645,6 +637,14 @@ class DeferredTritonCallWrapper:
                     "cubin_dir_",
                 ]
 
+            # In AOTI mode on CUDA/HIP, pass the loaded_modules_ vector so
+            # CUmodule handles are tracked and can be unloaded on destruction,
+            # preventing GPU code object leaks. XPU is excluded because its
+            # loadKernel returns std::unique_ptr<sycl::kernel> and manages
+            # cleanup via RAII.
+            if V.graph.aot_mode and V.graph.device_type != "xpu":
+                load_kernel_args = load_kernel_args + ["&kernels_.loaded_modules_"]
+
             prefix.writeline(
                 f"{kernel_var_name} = loadKernel({', '.join(load_kernel_args)}); "
             )
@@ -682,13 +682,15 @@ class DeferredTritonCallWrapper:
             scratch_spaces=scratch_spaces,
         )
         prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
+        num_warps = str(params["num_warps"])
+        shared_mem = str(params["shared_mem"])
         launch_kernel_args = [
             kernel_var_name,
             "grid_0",
             "grid_1",
             "grid_2",
-            str(params["num_warps"]),
-            str(params["shared_mem"]),
+            num_warps,
+            shared_mem,
             "kernel_args_",
             "stream_",
         ]
@@ -698,139 +700,162 @@ class DeferredTritonCallWrapper:
             "win32",
         ]
         if enable_kernel_profile:
-            normalized_kernel_name = re.sub(r"[^a-zA-Z0-9_]", "_", f"{kernel_var_name}")
-            prefix.writeline("{")
-            with prefix.indent():
+            self.generate_profiled_launch_kernel(
+                prefix,
+                kernel_var_name,
+                call_args,
+                arg_types,
+                arg_signatures,
+                launch_kernel_args,
+                num_warps=num_warps,
+                shared_mem=shared_mem,
+            )
+        else:
+            prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
+
+    def generate_profiled_launch_kernel(
+        self,
+        prefix: IndentedBuffer,
+        kernel_var_name: str,
+        call_args: list[str],
+        arg_types: list[Any],
+        arg_signatures: list[str | None],
+        launch_kernel_args: list[str],
+        num_warps: str,
+        shared_mem: str,
+    ) -> None:
+        """Wrap a kernel launch in an AOTI record_function profiling scope."""
+        normalized_kernel_name = re.sub(r"[^a-zA-Z0-9_]", "_", kernel_var_name)
+        prefix.writeline("{")
+        with prefix.indent():
+            prefix.writelines(
+                [
+                    f"std::unordered_map<std::string, C10IValueHandle> kwargs_{normalized_kernel_name};",
+                    "",
+                ]
+            )
+            # Add launch args info
+            record_launch_kernel_args = [
+                ("grid_0", "grid_0"),
+                ("grid_1", "grid_1"),
+                ("grid_2", "grid_2"),
+                ("num_warps", num_warps),
+                ("shared_mem", shared_mem),
+            ]
+            for k, v in record_launch_kernel_args:
+                arg_name = f"{normalized_kernel_name}_{k}"
                 prefix.writelines(
                     [
-                        f"std::unordered_map<std::string, C10IValueHandle> kwargs_{normalized_kernel_name};",
-                        "",
+                        f"// Create c10::IValue for {k}",
+                        f"C10IValueHandle tmp_{arg_name};",
+                        f"aoti_torch_int64_to_ivalue({v}, &tmp_{arg_name});",
+                        f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
+                        f'kwargs_{normalized_kernel_name}.emplace("{k}", RAII_{arg_name});',
                     ]
                 )
-                # Add launch args info
-                record_launch_kernel_args = [
-                    ("grid_0", "grid_0"),
-                    ("grid_1", "grid_1"),
-                    ("grid_2", "grid_2"),
-                    ("num_warps", str(params["num_warps"])),
-                    ("shared_mem", str(params["shared_mem"])),
-                ]
-                for k, v in record_launch_kernel_args:
-                    arg_name = f"{normalized_kernel_name}_{k}"
-                    prefix.writelines(
-                        [
-                            f"// Create c10::IValue for {k}",
-                            f"C10IValueHandle tmp_{arg_name};",
-                            f"aoti_torch_int64_to_ivalue({v}, &tmp_{arg_name});",
-                            f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
-                            f'kwargs_{normalized_kernel_name}.emplace("{k}", RAII_{arg_name});',
-                        ]
-                    )
 
-                # Add input info (This copies the logic from args_decl)
-                curr_arg_id = -1
-                total_args = []
-                ordered_argsname = []
+            # Add input info (This copies the logic from args_decl)
+            curr_arg_id = -1
+            total_args = []
+            ordered_argsname = []
 
-                def write_dummy_scalar_ivalue(arg_name):
-                    # We only care about the shape, therefore we create a dummy scalar here.
+            def write_dummy_scalar_ivalue(arg_name):
+                # We only care about the shape, therefore we create a dummy scalar here.
+                prefix.writelines(
+                    [
+                        f"// Create c10::IValue for arg_{curr_arg_id}",
+                        f"C10IValueHandle tmp_{arg_name};",
+                        f"aoti_torch_int64_to_ivalue(0, &tmp_{arg_name});",
+                        f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
+                    ]
+                )
+                # pyrefly: ignore [bad-argument-type]
+                total_args.append(f"tmp_{arg_name}")
+
+            def process_args_for_input_shape(arg, arg_type, arg_signature=None):
+                nonlocal curr_arg_id
+                curr_arg_id += 1
+                arg_name = f"{normalized_kernel_name}_arg_{curr_arg_id}"
+                # ignore tma descriptors, as host-side TMA descriptors need
+                # to be passed to the compiled Triton kernel by value
+                if isinstance(arg_type, UnwrapUnspecArg) and not signature_is_tma_desc(
+                    arg_signature
+                ):
+                    write_dummy_scalar_ivalue(arg_name)
+                elif isinstance(arg_type, torch_dtype) and not signature_is_tma_desc(
+                    arg_signature
+                ):
+                    # This is an at::Tensor.
                     prefix.writelines(
                         [
                             f"// Create c10::IValue for arg_{curr_arg_id}",
                             f"C10IValueHandle tmp_{arg_name};",
-                            f"aoti_torch_int64_to_ivalue(0, &tmp_{arg_name});",
+                            f"aoti_torch_tensor_to_ivalue({arg}, &tmp_{arg_name});",
                             f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
                         ]
                     )
                     # pyrefly: ignore [bad-argument-type]
                     total_args.append(f"tmp_{arg_name}")
+                elif (
+                    isinstance(arg_type, type(SymbolicCallArg))
+                    and arg_signature is not None
+                    and arg_signature in TRITON_SIGNATURE_TO_CPP
+                ) or arg_type in (sympy.Integer, int, sympy.Float, float):
+                    write_dummy_scalar_ivalue(arg_name)
+                elif arg_signature and arg_signature.startswith("tensordesc<"):
+                    # Skip tma related args
+                    pass
+                else:
+                    write_dummy_scalar_ivalue(arg_name)
 
-                def process_args_for_input_shape(arg, arg_type, arg_signature=None):
-                    nonlocal curr_arg_id
-                    curr_arg_id += 1
-                    arg_name = f"{normalized_kernel_name}_arg_{curr_arg_id}"
-                    # ignore tma descriptors, as host-side TMA descriptors need
-                    # to be passed to the compiled Triton kernel by value
-                    if isinstance(
-                        arg_type, UnwrapUnspecArg
-                    ) and not signature_is_tma_desc(arg_signature):
-                        write_dummy_scalar_ivalue(arg_name)
-                    elif isinstance(
-                        arg_type, torch_dtype
-                    ) and not signature_is_tma_desc(arg_signature):
-                        # This is an at::Tensor.
-                        prefix.writelines(
-                            [
-                                f"// Create c10::IValue for arg_{curr_arg_id}",
-                                f"C10IValueHandle tmp_{arg_name};",
-                                f"aoti_torch_tensor_to_ivalue({arg}, &tmp_{arg_name});",
-                                f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
-                            ]
-                        )
-                        # pyrefly: ignore [bad-argument-type]
-                        total_args.append(f"tmp_{arg_name}")
-                    elif (
-                        isinstance(arg_type, type(SymbolicCallArg))
-                        and arg_signature is not None
-                        and arg_signature in TRITON_SIGNATURE_TO_CPP
-                    ) or arg_type in (sympy.Integer, int, sympy.Float, float):
-                        write_dummy_scalar_ivalue(arg_name)
-                    elif arg_signature and arg_signature.startswith("tensordesc<"):
-                        # Skip tma related args
-                        pass
-                    else:
-                        write_dummy_scalar_ivalue(arg_name)
+            # Add input name and shape information
+            for arg, arg_type, arg_signature in zip_longest(
+                call_args, arg_types, arg_signatures
+            ):
+                # pyrefly: ignore [bad-argument-type]
+                ordered_argsname.append(f'"{arg}"')
+                process_args_for_input_shape(arg, arg_type, arg_signature)
 
-                # Add input name and shape information
-                for arg, arg_type, arg_signature in zip_longest(
-                    call_args, arg_types, arg_signatures
-                ):
-                    # pyrefly: ignore [bad-argument-type]
-                    ordered_argsname.append(f'"{arg}"')
-                    process_args_for_input_shape(arg, arg_type, arg_signature)
+            # Add input name into kwargs
+            name_var = f"{normalized_kernel_name}_input_names"
+            prefix.writelines(
+                [
+                    "// Create c10::IValue for input names",
+                    f"C10IValueHandle tmp_{name_var};",
+                    f"std::vector<const char*> {name_var}({{{', '.join(ordered_argsname)}}});",
+                    f"aoti_torch_strlist_to_ivalue({name_var}.data(), {len(ordered_argsname)}, &tmp_{name_var});",
+                    f"RAIIC10IValueHandle RAII_{name_var}(tmp_{name_var});",
+                    f'kwargs_{normalized_kernel_name}.emplace("Input Args", RAII_{name_var});',
+                ]
+            )
 
-                # Add input name into kwargs
-                name_var = f"{normalized_kernel_name}_input_names"
-                prefix.writelines(
-                    [
-                        "// Create c10::IValue for input names",
-                        f"C10IValueHandle tmp_{name_var};",
-                        f"std::vector<const char*> {name_var}({{{', '.join(ordered_argsname)}}});",
-                        f"aoti_torch_strlist_to_ivalue({name_var}.data(), {len(ordered_argsname)}, &tmp_{name_var});",
-                        f"RAIIC10IValueHandle RAII_{name_var}(tmp_{name_var});",
-                        f'kwargs_{normalized_kernel_name}.emplace("Input Args", RAII_{name_var});',
-                    ]
-                )
+            inputs_info_ = f"{normalized_kernel_name}_inputs_info_"
+            # We pass in the non-RAII handles, since C10 doesn't automatically free them.
+            # The RAII will make sure they get freed when they are out of scope.
+            tmp_args = ",".join(total_args)
+            prefix.writelines(
+                [
+                    "// Aggregate all c10::IValue for inputs",
+                    f"std::vector<C10IValueHandle> {inputs_info_}({{{tmp_args}}});",
+                ]
+            )
 
-                inputs_info_ = f"{normalized_kernel_name}_inputs_info_"
-                # We pass in the non-RAII handles, since C10 doesn't automatically free them.
-                # The RAII will make sure they get freed when they are out of scope.
-                tmp_args = ",".join(total_args)
-                prefix.writelines(
-                    [
-                        "// Aggregate all c10::IValue for inputs",
-                        f"std::vector<C10IValueHandle> {inputs_info_}({{{tmp_args}}});",
-                    ]
-                )
-
-                # Start recording Function
-                prefix.writelines(
-                    [
-                        "",
-                        (
-                            "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
-                            f"record_{normalized_kernel_name}_"
-                            f'("{kernel_var_name}", '
-                            f"reinterpret_cast<IValueMapHandle>(&kwargs_{normalized_kernel_name}), "
-                            f"{inputs_info_});"
-                        ),
-                        "",
-                        f"launchKernel({', '.join(launch_kernel_args)});",
-                    ]
-                )
-            prefix.writeline("}")
-        else:
-            prefix.writeline(f"launchKernel({', '.join(launch_kernel_args)});")
+            # Start recording Function
+            prefix.writelines(
+                [
+                    "",
+                    (
+                        "torch::aot_inductor::RAIIAtenRecordFunctionHandle "
+                        f"record_{normalized_kernel_name}_"
+                        f'("{kernel_var_name}", '
+                        f"reinterpret_cast<IValueMapHandle>(&kwargs_{normalized_kernel_name}), "
+                        f"{inputs_info_});"
+                    ),
+                    "",
+                    f"launchKernel({', '.join(launch_kernel_args)});",
+                ]
+            )
+        prefix.writeline("}")
 
 
 class CppWrapperGpu(CppWrapperCpu):
@@ -847,19 +872,6 @@ class CppWrapperGpu(CppWrapperCpu):
         self._triton_call_wrappers: dict[str, DeferredTritonCallWrapper] = {}
         self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
         self._lazy_kernel_names: list[str] = []
-
-    def generate_debug_sync(self, buffer):
-        if self.device == "cuda":
-            buffer.writeline(
-                maybe_hipify_code_wrapper(
-                    "AOTI_RUNTIME_CUDA_CHECK(cudaDeviceSynchronize());"
-                )
-            )
-            return
-
-        raise NotImplementedError(
-            f"triton debug sync is not supported with {self.device} cpp_wrapper"
-        )
 
     @staticmethod
     def create(
