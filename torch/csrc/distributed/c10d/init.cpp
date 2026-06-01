@@ -4027,7 +4027,14 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           py::arg("options") =
               c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
       .def_property_readonly(
-          "options", &::c10d::FakeProcessGroup::getBackendOptions);
+          "options", &::c10d::FakeProcessGroup::getBackendOptions)
+      .def(
+          "set_delegate",
+          &::c10d::FakeProcessGroup::setDelegate,
+          py::arg("delegate"),
+          py::call_guard<py::gil_scoped_release>())
+      .def_property_readonly(
+          "delegate", &::c10d::FakeProcessGroup::getDelegate);
   auto fakeWork =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
           module, "FakeWork", work)

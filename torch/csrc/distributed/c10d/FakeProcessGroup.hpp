@@ -2,6 +2,7 @@
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/utils.h>
 
@@ -29,7 +30,6 @@ class FakeProcessGroup : public Backend {
     int fake_option = 0;
     bool error_on_collective = false;
   };
-
   // Static factory method for official APIs
   static c10::intrusive_ptr<FakeProcessGroup> _create_internal(
       int rank,
@@ -47,38 +47,101 @@ class FakeProcessGroup : public Backend {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
   }
 
+  // Forward collectives to a real backend when set.
+  void setDelegate(c10::intrusive_ptr<Backend> delegate) {
+    TORCH_CHECK(
+        delegate != nullptr,
+        "FakeProcessGroup::setDelegate: delegate must not be null");
+    TORCH_CHECK(
+        delegate->getRank() == rank_ && delegate->getSize() == size_,
+        "FakeProcessGroup::setDelegate: rank/size mismatch: delegate (",
+        delegate->getRank(),
+        "/",
+        delegate->getSize(),
+        ") vs fake (",
+        rank_,
+        "/",
+        size_,
+        ")");
+    delegate_ = std::move(delegate);
+  }
+
+  c10::intrusive_ptr<Backend> getDelegate() const {
+    return delegate_;
+  }
+
+
   c10::intrusive_ptr<Work> broadcast(
-      std::vector<at::Tensor>& /* tensors */,
-      const BroadcastOptions& /* opts */ = BroadcastOptions()) override {
+      std::vector<at::Tensor>& tensors,
+      const BroadcastOptions& opts = BroadcastOptions()) override {
+    if (delegate_) {
+      return delegate_->broadcast(tensors, opts);
+    }
     checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> allreduce(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceOptions& /* opts */ = AllreduceOptions()) override {
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override {
+    if (delegate_) {
+      AllreduceOptions d_opts = opts;
+      auto factor = extractPremulFactor(d_opts.reduceOp);
+      auto work = delegate_->allreduce(tensors, d_opts);
+      if (factor.has_value()) {
+        postMultiply(tensors, *factor);
+      }
+      return work;
+    }
     checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> allreduce_sparse(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceOptions& /* opts */ = AllreduceOptions()) override {
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override {
+    if (delegate_) {
+      AllreduceOptions d_opts = opts;
+      auto factor = extractPremulFactor(d_opts.reduceOp);
+      auto work = delegate_->allreduce_sparse(tensors, d_opts);
+      if (factor.has_value()) {
+        postMultiply(tensors, *factor);
+      }
+      return work;
+    }
     checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> allreduce_coalesced(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceCoalescedOptions& /* opts */ =
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override {
+    if (delegate_) {
+      AllreduceCoalescedOptions d_opts = opts;
+      auto factor = extractPremulFactor(d_opts.reduceOp);
+      auto work = delegate_->allreduce_coalesced(tensors, d_opts);
+      if (factor.has_value()) {
+        postMultiply(tensors, *factor);
+      }
+      return work;
+    }
     checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce(
-      std::vector<at::Tensor>& /* tensors */,
-      const ReduceOptions& /* opts */ = ReduceOptions()) override {
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) override {
+    if (delegate_) {
+      ReduceOptions d_opts = opts;
+      auto factor = extractPremulFactor(d_opts.reduceOp);
+      auto work = delegate_->reduce(tensors, d_opts);
+      if (factor.has_value()) {
+        postMultiply(tensors, *factor);
+      }
+      return work;
+    }
     checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
@@ -92,7 +155,10 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
-      const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
+      const AllgatherOptions& opts = AllgatherOptions()) override {
+    if (delegate_) {
+      return delegate_->allgather(outputTensors, inputTensors, opts);
+    }
     checkCollectiveError();
     // See note in _allgather_base below.
     at::AutoDispatchBelowAutograd guard;
@@ -105,7 +171,10 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> _allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
-      const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
+      const AllgatherOptions& opts = AllgatherOptions()) override {
+    if (delegate_) {
+      return delegate_->_allgather_base(outputBuffer, inputBuffer, opts);
+    }
     checkCollectiveError();
     // Real collective backends (e.g. NCCL) write into the output from C++
     // kernels that autograd never sees. We emulate that here: chunk() produces
@@ -122,7 +191,11 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
-      const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
+      const AllgatherOptions& opts = AllgatherOptions()) override {
+    if (delegate_) {
+      return delegate_->allgather_coalesced(
+          outputTensorLists, inputTensors, opts);
+    }
     checkCollectiveError();
     auto invalidArgument = [](const std::string& msg) {
       TORCH_CHECK(false, "FakeProcessGroup::allgather_coalesced: ", msg);
@@ -143,7 +216,10 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
-      const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
+      const AllgatherOptions& opts = AllgatherOptions()) override {
+    if (delegate_) {
+      return delegate_->allgather_into_tensor_coalesced(outputs, inputs, opts);
+    }
     checkCollectiveError();
     // See note in _allgather_base above.
     at::AutoDispatchBelowAutograd guard;
@@ -160,6 +236,9 @@ class FakeProcessGroup : public Backend {
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override {
+    if (delegate_) {
+      return delegate_->gather(outputTensors, inputTensors, opts);
+    }
     checkCollectiveError();
     auto invalidArgument = [](const std::string& msg) {
       TORCH_CHECK(false, "FakeProcessGroup::gather: ", msg);
@@ -184,6 +263,9 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override {
+    if (delegate_) {
+      return delegate_->scatter(outputTensors, inputTensors, opts);
+    }
     checkCollectiveError();
     auto invalidArgument = [](const std::string& msg) {
       TORCH_CHECK(false, "FakeProcessGroup::scatter: ", msg);
@@ -205,8 +287,17 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ReduceScatterOptions& /* opts */ =
-          ReduceScatterOptions()) override {
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
+    if (delegate_) {
+      ReduceScatterOptions d_opts = opts;
+      auto factor = extractPremulFactor(d_opts.reduceOp);
+      auto work =
+          delegate_->reduce_scatter(outputTensors, inputTensors, d_opts);
+      if (factor.has_value()) {
+        postMultiply(outputTensors, *factor);
+      }
+      return work;
+    }
     checkCollectiveError();
     auto invalidArgument = [](const std::string& msg) {
       TORCH_CHECK(false, "FakeProcessGroup::reduce_scatter: ", msg);
@@ -226,8 +317,17 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> _reduce_scatter_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
-      const ReduceScatterOptions& /* opts */ =
-          ReduceScatterOptions()) override {
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
+    if (delegate_) {
+      ReduceScatterOptions d_opts = opts;
+      auto factor = extractPremulFactor(d_opts.reduceOp);
+      auto work =
+          delegate_->_reduce_scatter_base(outputBuffer, inputBuffer, d_opts);
+      if (factor.has_value()) {
+        postMultiply(outputBuffer, *factor);
+      }
+      return work;
+    }
     checkCollectiveError();
     TORCH_CHECK(
         inputBuffer.numel() == outputBuffer.numel() * size_,
@@ -242,8 +342,17 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
-      const ReduceScatterOptions& /* opts */ =
-          ReduceScatterOptions()) override {
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
+    if (delegate_) {
+      ReduceScatterOptions d_opts = opts;
+      auto factor = extractPremulFactor(d_opts.reduceOp);
+      auto work =
+          delegate_->reduce_scatter_tensor_coalesced(outputs, inputs, d_opts);
+      if (factor.has_value()) {
+        postMultiply(outputs, *factor);
+      }
+      return work;
+    }
     checkCollectiveError();
     auto invalidArgument = [](const std::string& msg) {
       TORCH_CHECK(
@@ -268,7 +377,11 @@ class FakeProcessGroup : public Backend {
       at::Tensor& inputBuffer,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
-      const AllToAllOptions& /* opts */ = AllToAllOptions()) override {
+      const AllToAllOptions& opts = AllToAllOptions()) override {
+    if (delegate_) {
+      return delegate_->alltoall_base(
+          outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
+    }
     checkCollectiveError();
     c10d::checkSplitSizes(inputSplitSizes, inputBuffer, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputBuffer, size_);
@@ -308,7 +421,10 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> alltoall(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
-      const AllToAllOptions& /* opts */ = AllToAllOptions()) override {
+      const AllToAllOptions& opts = AllToAllOptions()) override {
+    if (delegate_) {
+      return delegate_->alltoall(outputTensors, inputTensors, opts);
+    }
     checkCollectiveError();
     auto invalidArgument = [](const std::string& msg) {
       TORCH_CHECK(false, "FakeProcessGroup::alltoall: ", msg);
@@ -324,45 +440,66 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> send(
-      std::vector<at::Tensor>& /* tensors */,
-      int /* dstRank */,
-      int /* tag */) override {
+      std::vector<at::Tensor>& tensors,
+      int dstRank,
+      int tag) override {
+    if (delegate_) {
+      return delegate_->send(tensors, dstRank, tag);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> recv(
-      std::vector<at::Tensor>& /* tensors */,
-      int /* srcRank */,
-      int /* tag */) override {
+      std::vector<at::Tensor>& tensors,
+      int srcRank,
+      int tag) override {
+    if (delegate_) {
+      return delegate_->recv(tensors, srcRank, tag);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> recvAnysource(
-      std::vector<at::Tensor>& /* tensors */,
-      int /* tag */) override {
+      std::vector<at::Tensor>& tensors,
+      int tag) override {
+    if (delegate_) {
+      return delegate_->recvAnysource(tensors, tag);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
   void startCoalescing() override {
+    if (delegate_) {
+      delegate_->startCoalescing();
+      return;
+    }
     // No-op
   }
 
-  c10::intrusive_ptr<Work> endCoalescing(OpType /* optype */) {
+  c10::intrusive_ptr<Work> endCoalescing(OpType optype) {
+    if (delegate_) {
+      return delegate_->endCoalescing();
+    }
     checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> endCoalescing() override {
+    if (delegate_) {
+      return delegate_->endCoalescing();
+    }
     checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> barrier(
-      const BarrierOptions& /* opts */ = BarrierOptions()) override {
+      const BarrierOptions& opts = BarrierOptions()) override {
+    if (delegate_) {
+      return delegate_->barrier(opts);
+    }
     checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
-
   // Private constructor used by official APIs
   FakeProcessGroup(int rank, int size, c10::intrusive_ptr<Options> options)
       : Backend(rank, size), options_(std::move(options)) {
@@ -377,10 +514,41 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Options> options_;
 
  private:
+  c10::intrusive_ptr<Backend> delegate_;
+
   void checkCollectiveError() {
     TORCH_CHECK(
         !options_ || !options_->error_on_collective,
         "FakeProcessGroup collective operation error (error_on_collective=true)");
+  }
+
+  // PREMUL_SUM decomposition: extract the scalar factor, change op to SUM.
+  // Returns nullopt if the op is not PREMUL_SUM.
+  static std::optional<double> extractPremulFactor(ReduceOp& reduceOp) {
+    if (reduceOp.op_ != ReduceOp::PREMUL_SUM) {
+      return std::nullopt;
+    }
+    TORCH_CHECK(reduceOp.supplement_, "PREMUL_SUM ReduceOp has no supplement");
+    auto* supplement =
+        dynamic_cast<PreMulSumSupplement*>(reduceOp.supplement_.get());
+    TORCH_CHECK(supplement, "PREMUL_SUM supplement has unexpected type");
+    double factor = supplement->tensor_factor.defined()
+        ? supplement->tensor_factor.item<double>()
+        : supplement->double_factor;
+    reduceOp = ReduceOp(ReduceOp::SUM);
+    return factor;
+  }
+
+  static void postMultiply(std::vector<at::Tensor>& tensors, double factor) {
+    at::AutoDispatchBelowAutograd guard;
+    for (auto& t : tensors) {
+      t.mul_(factor);
+    }
+  }
+
+  static void postMultiply(at::Tensor& tensor, double factor) {
+    at::AutoDispatchBelowAutograd guard;
+    tensor.mul_(factor);
   }
 };
 
