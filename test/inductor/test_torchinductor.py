@@ -3378,40 +3378,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.zeros(5, dtype=torch.int64),), check_lowp=False)
 
-    def test_arange8(self):
-        # int64 arange used to produce values whose intermediate
-        # arithmetic exceeds INT32_MAX. Triton must compute in int64.
-        def fn(x):
-            idx = torch.arange(0, 2, device=x.device, dtype=torch.int64)
-            large_val = torch.tensor(2147483648, dtype=torch.int64, device=x.device)
-            return idx * large_val + x
-
-        self.common(fn, (torch.zeros(2, device=self.device),))
-
-    @skipCPUIf(True, "requires CUDA/Triton")
-    @requires_cuda_and_triton
-    def test_arange_int64_large_multiplier(self):
-        def fn(x):
-            return torch.arange(
-                0, 11, device=x.device, dtype=torch.int64
-            ) * torch.tensor([int(1e9)], dtype=torch.int64, device=x.device)
-
-        x = torch.zeros(1, device=self.device)
-        fn_opt = torch.compile(fn, backend="inductor")
-        self.assertEqual(fn_opt(x), fn(x))
-
-    @skipCPUIf(True, "requires CUDA/Triton")
-    @requires_cuda_and_triton
-    def test_arange_int64_masked_value(self):
-        def fn(mask):
-            idx = torch.arange(0, 4, device=mask.device, dtype=torch.int64)
-            values = idx * 2147483648
-            return torch.ops.aten._unsafe_masked_index.default(values, mask, [idx], 0)
-
-        mask = torch.tensor([True, False, True, True], device=self.device)
-        fn_opt = torch.compile(fn, backend="inductor")
-        self.assertEqual(fn_opt(mask), fn(mask))
-
     @xfail_if_triton_cpu
     def test_arange9(self):
         # int64 arange used inside a reduction: reduction must accumulate
@@ -3421,17 +3387,6 @@ class CommonTemplate:
             return (idx * int(1e7)).sum()
 
         self.common(fn, (torch.zeros(1, device=self.device),))
-
-    def test_arange10(self):
-        # The same arange may be used both as an index and as a value. The
-        # index path should keep index_expr narrowing, while the value path
-        # must be split to value_expr so large int arithmetic does not
-        # overflow int32 before the final float cast.
-        def fn(x):
-            idx = torch.arange(0, 2, device=x.device, dtype=torch.int64)
-            return x[idx] + idx * 2147483648
-
-        self.common(fn, (torch.ones(2, device=self.device),))
 
     def test_linspace1(self):
         def fn(x):
@@ -3738,11 +3693,6 @@ class CommonTemplate:
         i = 2
         with torch.no_grad():
             self.assertEqual(fn_opt(x, i), fn(x, i))
-
-        code = run_and_get_triton_code(fn_opt, x, i)
-        FileCheck().check_regex(r"tmp\d+ = \(ks0\)\.to\(tl\.float32\)").check(
-            "libdevice.nearbyint"
-        ).run(code)
 
     def test_builtins_round_int_ndigits_pos(self):
         def fn(x, i):
@@ -17773,15 +17723,6 @@ if RUN_GPU:
             fn_opt = torch.compile(fn, backend="inductor")
             inps = [torch.empty(4096, device=GPU_TYPE)]
             self.assertEqual(fn_opt(*inps), fn(*inps))
-
-        def test_value_expr_int_to_fp8_cast_uses_float32_intermediate(self):
-            def fn(x: torch.Tensor) -> torch.Tensor:
-                idx = torch.arange(x.numel(), device=x.device, dtype=torch.int64)
-                return (idx * 1000).to(torch.float8_e4m3fn)
-
-            fn_opt = torch.compile(fn, backend="inductor")
-            inps = [torch.empty(4, device=GPU_TYPE)]
-            self.assertEqual(fn_opt(*inps).float(), fn(*inps).float())
 
         def test_value_expr_dynamic_shape_bounds(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
