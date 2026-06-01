@@ -1310,6 +1310,22 @@ class TestLinalg(TestCase):
         for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
             run_test_case(a_shape, b_shape)
 
+        # Regression test: non-contiguous inputs (e.g. transposed tensors) must work.
+        # Previously, at::_unsafe_view was called on non-contiguous tensors, which
+        # raised "view size is not compatible with input tensor's size and stride".
+        a = torch.rand(3, 4, dtype=dtype, device=device)
+        b = torch.rand(4, 3, dtype=dtype, device=device).t()  # non-contiguous
+        expected = np.kron(a.cpu().numpy(), b.cpu().contiguous().numpy())
+        result = torch.kron(a, b)
+        self.assertEqual(result, expected)
+
+        # both inputs non-contiguous
+        a_nc = torch.rand(4, 3, dtype=dtype, device=device).t()
+        b_nc = torch.rand(4, 3, dtype=dtype, device=device).t()
+        expected_nc = np.kron(a_nc.cpu().contiguous().numpy(), b_nc.cpu().contiguous().numpy())
+        result_nc = torch.kron(a_nc, b_nc)
+        self.assertEqual(result_nc, expected_nc)
+
     @dtypes(*floating_and_complex_types())
     def test_kron_empty(self, device, dtype):
 

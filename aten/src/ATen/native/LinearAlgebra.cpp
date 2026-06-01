@@ -3514,8 +3514,8 @@ struct KronImpl final {
         b_reshape[2 * i + 1] = (i >= pad_other ? other.sizes()[i - pad_other] : 1);
         result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1];
       }
-      self_view = at::_unsafe_view(self, a_reshape);
-      other_view = at::_unsafe_view(other, b_reshape);
+      self_view = at::_unsafe_view(self.contiguous(), a_reshape);
+      other_view = at::_unsafe_view(other.contiguous(), b_reshape);
     }
 
     Tensor& kron_out(Tensor& result) const {
