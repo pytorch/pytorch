@@ -1868,7 +1868,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.channel_shuffle",
         "torch.cholesky_inverse",
         "torch.cholesky_solve",
-        "torch.cholesky",
         "torch.choose_qparams_optimized",
         "torch.chunk",
         "torch.clamp_",
