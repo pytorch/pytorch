@@ -7871,6 +7871,42 @@ class CommonTemplate:
             (torch.ones([0]),),
         )
 
+    def test_cat_empty_1d_negative_dim(self):
+        def fn(cache, new_keys):
+            return torch.cat([cache, new_keys], dim=-2)
+
+        self.common(
+            fn,
+            (
+                torch.tensor([], dtype=torch.bfloat16),
+                torch.randn(1, 8, 5, 78, dtype=torch.bfloat16),
+            ),
+        )
+
+    def test_cat_empty_1d_negative_dim_zero_output(self):
+        def fn(cache, new_keys):
+            return torch.cat([cache, new_keys], dim=-2)
+
+        self.common(
+            fn,
+            (
+                torch.tensor([], dtype=torch.bfloat16),
+                torch.randn(1, 8, 0, 78, dtype=torch.bfloat16),
+            ),
+        )
+
+        # Covers the early-return path when all inputs are skipped as 1-D empty
+        def fn_all_empty(a, b):
+            return torch.cat([a, b], dim=0)
+
+        self.common(
+            fn_all_empty,
+            (
+                torch.tensor([], dtype=torch.float32),
+                torch.tensor([], dtype=torch.float32),
+            ),
+        )
+
     def test_cat_upcasting(self):
         def fn(arg4_1, slice_7):
             cat_1 = aten.cat.default([arg4_1, slice_7], 1)
