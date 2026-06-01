@@ -915,6 +915,19 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_program = self.export(Model(), (x,))
         onnx_testing.assert_onnx_program(onnx_program)
 
+    def test_adaptive_max_pool1d_evenly_divisible(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pool = torch.nn.AdaptiveMaxPool1d(2)
+
+            def forward(self, x):
+                return self.pool(x)
+
+        x = torch.randn(1, 3, 4)
+        onnx_program = self.export(Model(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
 
 @common_utils.instantiate_parametrized_tests
 class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
