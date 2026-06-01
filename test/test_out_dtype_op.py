@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, _get_torch_cuda_version
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -162,57 +163,6 @@ class TestOutDtypeOp(TestCase):
             loss = out - torch.ones(out.shape)
             loss.backward()
 
-    @unittest.skipIf(IS_WINDOWS, "_int_mm unavailable")
-    @unittest.skipIf(not SM80OrLater, "_int_mm unavailable")
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @unittest.skipIf(_get_torch_cuda_version() >= (11, 7), "_int_mm unavailable")
-    @unittest.skipIf(not TEST_CUDA, "_int_mm unavailable")
-    @skipIfNoDynamoSupport
-    def test_out_dtype_inductor_decomp(self) -> None:
-        def func(x, w):
-            return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
-
-        w = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda")
-        x = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda")
-
-        ref = torch._int_mm(x, w)
-        test_out = func(x, w)
-        func_comp = torch.compile(func, fullgraph=True, mode="max-autotune")
-        test_out_c = func_comp(x, w)
-        self.assertTrue(torch.allclose(ref, test_out))
-        self.assertTrue(torch.allclose(ref, test_out_c))
-
-    @unittest.skipIf(not TEST_CUDA, "cuda only")
-    def test_out_dtype_inductor_decomp_trace(self) -> None:
-        def func(x, w):
-            return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
-
-        w = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda")
-        x = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda")
-
-        # Check that make_fx with inductor decomps produces _int_mm
-        decomp_table = torch._inductor.decomposition.select_decomp_table()
-        gm = make_fx(func, decomp_table, tracing_mode="symbolic")(x, w)
-        self.assertExpectedInline(gm.code.strip(), """\
-def forward(self, x_1, w_1):
-    _int_mm = torch.ops.aten._int_mm.default(x_1, w_1);  x_1 = w_1 = None
-    return _int_mm""")
-
-    @unittest.skipIf(not TEST_CUDA, "cuda only")
-    def test_out_dtype_int_mm_default_trace(self) -> None:
-        def func(x, w):
-            return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
-
-        w = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda")
-        x = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda")
-
-        # By default, out_dtype is preserved in the trace
-        gm = make_fx(func, tracing_mode="symbolic")(x, w)
-        self.assertExpectedInline(gm.code.strip(), """\
-def forward(self, x_1, w_1):
-    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, x_1, w_1);  x_1 = w_1 = None
-    return out_dtype""")
-
     def test_out_dtype_wrong_output(self) -> None:
         def multiple_out(x):
             return out_dtype(
@@ -231,6 +181,61 @@ def forward(self, x_1, w_1):
 
         with self.assertRaisesRegex(ValueError, "out_dtype's can only apply to ops that return a single tensor"):
             singleton_list_out(*inp)
+
+@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
+class TestOutDtypeOpCUDA(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "_int_mm unavailable")
+    @unittest.skipIf(not SM80OrLater, "_int_mm unavailable")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(_get_torch_cuda_version() >= (11, 7), "_int_mm unavailable")
+    @skipIfNoDynamoSupport
+    def test_out_dtype_inductor_decomp(self, device) -> None:
+        def func(x, w):
+            return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
+
+        w = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=device)
+        x = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=device)
+
+        ref = torch._int_mm(x, w)
+        test_out = func(x, w)
+        func_comp = torch.compile(func, fullgraph=True, mode="max-autotune")
+        test_out_c = func_comp(x, w)
+        self.assertTrue(torch.allclose(ref, test_out))
+        self.assertTrue(torch.allclose(ref, test_out_c))
+
+    @unittest.skipIf(not TEST_CUDA, "cuda only")
+    def test_out_dtype_inductor_decomp_trace(self, device) -> None:
+        def func(x, w):
+            return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
+
+        w = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=device)
+        x = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=device)
+
+        # Check that make_fx with inductor decomps produces _int_mm
+        decomp_table = torch._inductor.decomposition.select_decomp_table()
+        gm = make_fx(func, decomp_table, tracing_mode="symbolic")(x, w)
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1, w_1):
+    _int_mm = torch.ops.aten._int_mm.default(x_1, w_1);  x_1 = w_1 = None
+    return _int_mm""")
+
+    @unittest.skipIf(not TEST_CUDA, "cuda only")
+    def test_out_dtype_int_mm_default_trace(self, device) -> None:
+        def func(x, w):
+            return out_dtype(torch.ops.aten.mm.default, torch.int32, x, w)
+
+        w = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=device)
+        x = torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=device)
+
+        # By default, out_dtype is preserved in the trace
+        gm = make_fx(func, tracing_mode="symbolic")(x, w)
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1, w_1):
+    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, x_1, w_1);  x_1 = w_1 = None
+    return out_dtype""")
+
+
+instantiate_device_type_tests(TestOutDtypeOpCUDA, globals(), only_for="cuda")
 
 if __name__ == '__main__':
     run_tests()
