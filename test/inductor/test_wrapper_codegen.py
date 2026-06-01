@@ -21,6 +21,12 @@ class TestPythonWrapperCodegen(TestCase):
         wrapper.prefix = IndentedBuffer()
         return wrapper
 
+    def _graph_with_sizevars(self, **kwargs):
+        return SimpleNamespace(
+            sizevars=SimpleNamespace(simplify=lambda x: x),
+            **kwargs,
+        )
+
     def _new_cpp_wrapper(self):
         wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
         wrapper.prefix = IndentedBuffer()
@@ -31,10 +37,25 @@ class TestPythonWrapperCodegen(TestCase):
         bound_vars = OrderedSet()
         s0 = sympy.Symbol("s0")
 
-        wrapper.codegen_input_symbol_assignment("arg0_1", s0, bound_vars)
+        with V.set_graph_handler(self._graph_with_sizevars()):
+            wrapper.codegen_input_symbol_assignment("arg0_1", s0, bound_vars)
 
         self.assertEqual(wrapper.prefix.getvalue().strip(), "s0 = arg0_1")
         self.assertEqual(list(bound_vars), [s0])
+
+    def test_explicit_symbol_input_assignment_uses_canonical_symbol(self):
+        wrapper = self._new_wrapper()
+        bound_vars = OrderedSet()
+        s0 = sympy.Symbol("s0")
+        s1 = sympy.Symbol("s1")
+        graph = self._graph_with_sizevars()
+        graph.sizevars.simplify = lambda x: x.xreplace({s0: s1})
+
+        with V.set_graph_handler(graph):
+            wrapper.codegen_input_symbol_assignment("arg0_1", s0, bound_vars)
+
+        self.assertEqual(wrapper.prefix.getvalue().strip(), "s1 = arg0_1")
+        self.assertEqual(list(bound_vars), [s1])
 
     def test_tensor_input_does_not_bind_size_or_stride_symbols(self):
         wrapper = self._new_wrapper()
@@ -142,7 +163,7 @@ class TestPythonWrapperCodegen(TestCase):
                 ),
             )
         )
-        graph = SimpleNamespace(
+        graph = self._graph_with_sizevars(
             graph_inputs={"arg0_1": tensor},
             graph_input_names=["arg0_1"],
             symbolic_input_sources={s0: ("arg0_1", "size", 0)},
@@ -167,7 +188,7 @@ class TestPythonWrapperCodegen(TestCase):
                 ),
             )
         )
-        graph = SimpleNamespace(
+        graph = self._graph_with_sizevars(
             graph_inputs={"arg0_1": tensor},
             graph_input_names=["arg0_1"],
             symbolic_input_sources={},

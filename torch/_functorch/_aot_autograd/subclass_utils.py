@@ -88,7 +88,7 @@ def get_subclass_typing_container(
 ) -> dict[type[torch.Tensor], list[type[torch.Tensor]]]:
     """
     Given a subclass, returns a recursive dictionary mapping each
-    inner tensors to its' subclass types.
+    inner tensors to its subclass types.
     """
 
     def _get_types_for_subclass(tensor_subclass: torch.Tensor) -> None:

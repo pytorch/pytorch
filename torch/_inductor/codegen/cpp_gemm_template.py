@@ -1374,7 +1374,7 @@ class CppGemmTemplate(CppTemplate):
                 vnni_view_size = list(new_size)
                 vnni_view_size[-2] = k // vnni_size
                 vnni_view_size.insert(-1, vnni_size)
-                W = W.view(vnni_view_size).transpose(-1, -2).contiguous().view(new_size)
+                W = W.view(vnni_view_size).transpose(-1, -2).reshape(new_size)
             # normalize stride to be "contiguous_strides" per size
             # this avoids the problems in L.view during template codegen
             new_stride = [1]

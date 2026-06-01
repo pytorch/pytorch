@@ -778,20 +778,21 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     }
   }
 
-  // Get current CUDA/ROCm work stream
+  // Get current CUDA/ROCm or XPU work stream
   static int CurrentWorkStream(
       DLDeviceType device_type,
       int32_t device_id,
       void** out_stream) {
     try {
-#ifdef USE_CUDA
-      if (device_type == kDLCUDA || device_type == kDLROCM) {
-        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+      *out_stream = nullptr;
+      const auto acc_type = at::accelerator::getAccelerator(false);
+      if (!acc_type) {
         return 0;
       }
-#endif
-      // For CPU and other devices, return NULL (no stream concept)
-      *out_stream = nullptr;
+      if (at::torchDeviceToDLDevice(*acc_type).device_type == device_type) {
+        *out_stream =
+            at::accelerator::getCurrentStream(device_id).native_handle();
+      }
       return 0;
     } catch (const std::exception& e) {
       PyErr_SetString(PyExc_RuntimeError, e.what());
@@ -2901,7 +2902,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "SWIZZLE_32_4_4",
           at::blas::SwizzleType::SWIZZLE_32_4_4,
-          "Blackwell-stype 32x4x4 swizzle");
+          "Blackwell-style 32x4x4 swizzle");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
