@@ -21,9 +21,10 @@ from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler, OpsHandler, WrapperHandler
 from .utils import (
     cache_on_self,
+    decompose_index,
+    flatten_index,
     reduction_num_outputs,
     sympy_index_symbol_with_prefix,
-    sympy_product,
     sympy_subs,
 )
 from .virtualized import ops, V
@@ -108,6 +109,13 @@ class LoopBody:
     # defined only temporarily
     indexing_exprs_name: dict[sympy.Expr, str]
 
+    @staticmethod
+    def _wrap_int_to_sympy_integer(expr):
+        # Static sizes can enter indexing expressions as Python ints.
+        if type(expr) is int:
+            return sympy.Integer(expr)
+        return expr
+
     def __init__(
         self,
         fn,
@@ -178,7 +186,9 @@ class LoopBody:
         """
         indexing_exprs = other.indexing_from_args(args, allow_same_symbol_in_index)
         self.indexing_exprs = {
-            name: V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges)
+            name: self._wrap_int_to_sympy_integer(
+                V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges)
+            )
             for name, expr in indexing_exprs.items()
         }
         self.subblocks = {k: v.clone(self) for k, v in other.subblocks.items()}
@@ -298,8 +308,6 @@ class LoopBody:
         The old iteration vars are expressed as functions of the new vars via
         FloorDiv and ModularIndexing on the flat index.
         """
-        from torch.utils._sympy.functions import ModularIndexing
-
         old_body = self
         old_iter_sizes = self.sizes[0]
         reduce_sizes = self.sizes[1]
@@ -315,15 +323,8 @@ class LoopBody:
             index = [*itertools.chain.from_iterable(indices)]
             new_iter_idx = index[: len(new_iter_sizes)]
             reduce_idx = index[len(new_iter_sizes) :]
-            # Build flat index from new iter vars
-            flat = sympy.S.Zero
-            for v, s in zip(new_iter_idx, new_iter_sizes):
-                flat = flat * s + v
-            # Express old iter vars from flat index
-            old_iter_idx: list[sympy.Expr] = []
-            for i, old_size in enumerate(old_iter_sizes):
-                tail = sympy_product(old_iter_sizes[i + 1 :])
-                old_iter_idx.append(ModularIndexing(flat, tail, old_size))
+            flat = flatten_index(new_iter_idx, new_iter_sizes)
+            old_iter_idx = decompose_index(flat, old_iter_sizes)
             return old_body(old_iter_idx, list(reduce_idx))
 
         loop_body = LoopBody(
@@ -486,6 +487,7 @@ class LoopBody:
         buffer_name: str | None = None,
         mode: str | None = None,
     ):
+        expr = self._wrap_int_to_sympy_integer(expr)
         name = self.indexing_exprs_name.get(expr)
         if not name:
             name = f"index{len(self.indexing_exprs)}"
@@ -740,6 +742,7 @@ class CaptureIndexing(WrapperHandler):
     def check_bounds(self, index, size, lower, upper):
         index = self._simplify(index)
         index = self._add_index(index, MemoryUsageType.CHECK_BOUNDS)
+        size = self.body._wrap_int_to_sympy_integer(size)
         size = self._add_index(size, MemoryUsageType.CHECK_BOUNDS)
         return self._inner.check_bounds(index, size, lower, upper)
 

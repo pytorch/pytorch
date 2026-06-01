@@ -1791,6 +1791,13 @@ class TorchFunctionMetadataMode(TorchFunctionMode):
         # pyrefly: ignore [bad-assignment]
         self.tracer.torch_fn_metadata = func
         self.tracer.torch_fn_counts[func] = self.tracer.torch_fn_counts.get(func, 0) + 1
+        if (
+            func is torch.ops.aten.size.default
+            and len(args) == 1
+            and isinstance(args[0], Tensor)
+            and any(isinstance(s, py_sym_types) for s in args[0].size())
+        ):
+            return torch.ops.aten.sym_size.default(*args, **kwargs)
         return func(*args, **kwargs)
 
 

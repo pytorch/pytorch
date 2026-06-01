@@ -78,6 +78,7 @@ from torch._inductor.output_code import (
     CompiledAOTI,
     CompiledFxGraph,
     CompiledFxGraphConstantsWithGm,
+    copy_strided_storage_,
     get_expanded_dims,
     index_expanded_dims,
     OutputCode,
@@ -119,7 +120,6 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
-from .output_code import complex_memory_overlap  # noqa: F401
 from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
@@ -1120,9 +1120,10 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
+        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
-            metadata=cache_info or {},
+            metadata=cache_event_metadata,
             time_ns=start_time,
         )
         # Add event data about cache hits/miss
@@ -1937,9 +1938,15 @@ def index_expanded_dims_and_copy_(
     expanded_dims: list[int],
 ) -> None:
     "Index into expanded dimensions of both dst and src then copy_"
-    dst = index_expanded_dims(dst, expanded_dims)
-    src = index_expanded_dims(src, expanded_dims)
-    dst.copy_(src)
+    indexed_dst = index_expanded_dims(dst, expanded_dims)
+    if torch._debug_has_internal_overlap(indexed_dst) != 0:
+        # dst still self-overlaps after dropping expanded dims (rare). A regular
+        # copy_ would have ambiguous semantics; bytewise-copy the strided extent
+        # instead so dst's overlap pattern is reproduced verbatim.
+        copy_strided_storage_(dst, src)
+        return
+    indexed_src = index_expanded_dims(src, expanded_dims)
+    indexed_dst.copy_(indexed_src)
 
 
 def cudagraphify_impl(
@@ -3123,7 +3130,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         from torch._dynamo.exc import SkipFrame
 
         assert device is not None
-
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
         warnings.warn(
@@ -3141,8 +3147,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
             or node.get_dtype() != torch.bfloat16
         ):
             continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
         device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return

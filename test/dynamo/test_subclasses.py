@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import abc
 import functools
 import itertools
 import unittest
@@ -27,6 +28,7 @@ from torch.nested._internal.nested_tensor import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    make_dynamo_test,
     NestedTensorTestCase,
     parametrize,
     subtest,
@@ -1229,6 +1231,110 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
 
+    def test_redispatch_function_with_dynamo(self):
+        from torch.overrides import (
+            handle_torch_function,
+            has_torch_function,
+            redispatch_function,
+        )
+
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
+        class SimpleTFTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return redispatch_function(func, types, args, kwargs)
+
+        def my_func(a, b):
+            if has_torch_function((a, b)):
+                return handle_torch_function(my_func, (a, b), a, b)
+            return a + b
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x, y):
+            return my_func(x, y)
+
+        x = torch.tensor([1.0]).as_subclass(SimpleTFTensor)
+        y = torch.tensor([2.0]).as_subclass(SimpleTFTensor)
+        result = fn(x, y)
+        self.assertEqual(result, torch.tensor([3.0]))
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
+    def test_redispatch_function_graph_break(self):
+        from torch.overrides import (
+            handle_torch_function,
+            has_torch_function,
+            redispatch_function,
+        )
+
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
+        class SimpleTFTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return redispatch_function(func, types, args, kwargs)
+
+        def my_func(a, b):
+            if has_torch_function((a, b)):
+                return handle_torch_function(my_func, (a, b), a, b)
+            torch._dynamo.graph_break()
+            return a + b
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x, y):
+            return my_func(x, y)
+
+        x = torch.tensor([1.0]).as_subclass(SimpleTFTensor)
+        y = torch.tensor([2.0]).as_subclass(SimpleTFTensor)
+        result = fn(x, y)
+        self.assertEqual(result, torch.tensor([3.0]))
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
+    def test_redispatch_function_graph_break_before_has_torch_function(self):
+        from torch.overrides import (
+            handle_torch_function,
+            has_torch_function,
+            redispatch_function,
+        )
+
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
+        class SimpleTFTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return redispatch_function(func, types, args, kwargs)
+
+        def my_func(a, b):
+            # Graph break BEFORE has_torch_function — this tests the case
+            # where skip_next is set by _skip_one_hop_torch_function but
+            # not yet consumed when the graph break fires.
+            torch._dynamo.graph_break()
+            if has_torch_function((a, b)):
+                return handle_torch_function(my_func, (a, b), a, b)
+            return a + b
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x, y):
+            return my_func(x, y)
+
+        x = torch.tensor([1.0]).as_subclass(SimpleTFTensor)
+        y = torch.tensor([2.0]).as_subclass(SimpleTFTensor)
+        result = fn(x, y)
+        self.assertEqual(result, torch.tensor([3.0]))
+        self.assertFalse(torch._C._peek_should_skip_torch_function())
+
     def test_parameter_subclass_custom_torch_func_and_dynamic_attr(self):
         # This is a slight variation of
         # https://github.com/huggingface/diffusers/blob/fbf6b856cc61fd22ad8635547bff4aafe05723f3/src/diffusers/quantizers/gguf/utils.py#L398-L435
@@ -2272,8 +2378,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(out_ref, out_test)
 
     def test_support_bases(self):
-        import abc
-
         import torch.fx._symbolic_trace
 
         class Meta(abc.ABCMeta, torch.fx._symbolic_trace.ProxyableClassMeta):
@@ -3527,8 +3631,243 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(shell._data, data)
         self.assertEqual(shell._scale, 2.0)
 
+    def test_tensor_subclass_super_new(self):
+        # super().__new__(cls, tensor) should be traceable in Tensor subclasses
+        class MyTensor(torch.Tensor):
+            def __new__(cls, x):
+                return super().__new__(cls, x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def forward(x):
+            return MyTensor(x)
+
+        x = torch.randn(4, 10)
+        result = forward(x)
+        self.assertIsInstance(result, MyTensor)
+        self.assertEqual(result, x)
+
 
 instantiate_parametrized_tests(SubclassTests)
+
+
+# Tests for the issubclass() builtin
+# Mirrors CPython's object_issubclass algorithm in Objects/abstract.c.
+
+
+class _IssubclassBase:
+    pass
+
+
+class _IssubclassSub(_IssubclassBase):
+    pass
+
+
+class _IssubclassSubSub(_IssubclassSub):
+    pass
+
+
+class _IssubclassOther:
+    pass
+
+
+# Records every __subclasscheck__ call made on _IssubclassMetaWithCheck so
+# tests can verify the metaclass method was actually traced (not silently
+# constant-folded by generic_issubclass).
+_issubclass_metacheck_calls: list = []
+
+
+class _IssubclassMetaWithCheck(type):
+    def __subclasscheck__(cls, subclass):
+        _issubclass_metacheck_calls.append(subclass)
+        return True
+
+
+class _IssubclassClassWithMeta(metaclass=_IssubclassMetaWithCheck):
+    pass
+
+
+class _IssubclassMetaNonBool(type):
+    def __subclasscheck__(cls, subclass):
+        # Non-bool return; CPython coerces via PyObject_IsTrue.
+        return 42
+
+
+class _IssubclassClassWithNonBoolMeta(metaclass=_IssubclassMetaNonBool):
+    pass
+
+
+class _IssubclassMyABC(metaclass=abc.ABCMeta):  # noqa: B024
+    pass
+
+
+class _IssubclassRegisteredViaABC:
+    pass
+
+
+_IssubclassMyABC.register(_IssubclassRegisteredViaABC)
+
+
+@torch._dynamo.config.patch(enable_trace_unittest=True)
+class TestIssubclass(torch._dynamo.test_case.TestCase):
+    # --- Built-in types ---
+
+    @make_dynamo_test
+    def test_int_is_int(self):
+        self.assertTrue(issubclass(int, int))
+
+    @make_dynamo_test
+    def test_bool_is_int(self):
+        self.assertTrue(issubclass(bool, int))
+
+    @make_dynamo_test
+    def test_int_not_str(self):
+        self.assertFalse(issubclass(int, str))
+
+    @make_dynamo_test
+    def test_object_supertype(self):
+        self.assertTrue(issubclass(int, object))
+        self.assertTrue(issubclass(str, object))
+
+    # --- User-defined classes ---
+
+    @make_dynamo_test
+    def test_sub_of_base(self):
+        self.assertTrue(issubclass(_IssubclassSub, _IssubclassBase))
+
+    @make_dynamo_test
+    def test_subsub_of_base(self):
+        self.assertTrue(issubclass(_IssubclassSubSub, _IssubclassBase))
+
+    @make_dynamo_test
+    def test_subsub_of_sub(self):
+        self.assertTrue(issubclass(_IssubclassSubSub, _IssubclassSub))
+
+    @make_dynamo_test
+    def test_base_not_sub(self):
+        self.assertFalse(issubclass(_IssubclassBase, _IssubclassSub))
+
+    @make_dynamo_test
+    def test_unrelated_classes(self):
+        self.assertFalse(issubclass(_IssubclassSub, _IssubclassOther))
+        self.assertFalse(issubclass(_IssubclassOther, _IssubclassSub))
+
+    # --- Tuple of classes ---
+
+    @make_dynamo_test
+    def test_tuple_hit_first(self):
+        self.assertTrue(issubclass(int, (int, str)))
+
+    @make_dynamo_test
+    def test_tuple_hit_second(self):
+        self.assertTrue(issubclass(int, (str, int)))
+
+    @make_dynamo_test
+    def test_tuple_miss(self):
+        self.assertFalse(issubclass(int, (str, float)))
+
+    @make_dynamo_test
+    def test_tuple_empty(self):
+        self.assertFalse(issubclass(int, ()))
+
+    @make_dynamo_test
+    def test_tuple_with_user_classes(self):
+        self.assertTrue(issubclass(_IssubclassSub, (_IssubclassOther, _IssubclassBase)))
+        self.assertFalse(
+            issubclass(_IssubclassOther, (_IssubclassBase, _IssubclassSub))
+        )
+
+    # --- PEP 604 Union (X | Y) ---
+
+    @make_dynamo_test
+    def test_union_hit(self):
+        self.assertTrue(issubclass(int, int | str))
+
+    @make_dynamo_test
+    def test_union_miss(self):
+        self.assertFalse(issubclass(int, str | bytes))
+
+    @make_dynamo_test
+    def test_union_with_user_classes(self):
+        self.assertTrue(issubclass(_IssubclassSub, _IssubclassOther | _IssubclassBase))
+
+    # --- Metaclass with __subclasscheck__ ---
+
+    def test_custom_metaclass_subclasscheck(self):
+        _issubclass_metacheck_calls.clear()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                issubclass(int, _IssubclassClassWithMeta),
+                issubclass(str, _IssubclassClassWithMeta),
+            )
+
+        self.assertEqual(fn(), (True, True))
+        self.assertEqual(_issubclass_metacheck_calls, [int, str])
+
+    @make_dynamo_test
+    def test_custom_metaclass_subclasscheck_non_bool(self):
+        # __subclasscheck__ returning a non-bool should be coerced via
+        # PyObject_IsTrue (abstract.c L2812) — exercises the generic_bool
+        # branch at the bottom of generic_issubclass.
+        result = issubclass(int, _IssubclassClassWithNonBoolMeta)
+        self.assertIs(result, True)
+
+    # --- abc.ABCMeta ---
+    # ABCMeta.__subclasscheck__ lives in <frozen abc> which Dynamo skips; we
+    # constant-fold via Python's issubclass when both args are concrete.
+
+    @make_dynamo_test
+    def test_abc_register(self):
+        self.assertTrue(issubclass(_IssubclassRegisteredViaABC, _IssubclassMyABC))
+
+    @make_dynamo_test
+    def test_abc_not_registered(self):
+        self.assertFalse(issubclass(_IssubclassOther, _IssubclassMyABC))
+
+    # --- TypeError cases ---
+
+    @make_dynamo_test
+    def test_non_class_arg2_doesnt_raise(self):
+        self.assertTrue(issubclass(int, (int, 1)))
+
+    @make_dynamo_test
+    def test_non_class_arg1_raises(self):
+        with self.assertRaisesRegex(TypeError, r"issubclass\(\) arg 1 must be a class"):
+            issubclass(1, int)
+
+    @make_dynamo_test
+    def test_non_class_arg2_raises(self):
+        with self.assertRaisesRegex(
+            TypeError,
+            r"issubclass\(\) arg 2 must be a class, a tuple of classes, or a union",
+        ):
+            issubclass(int, 1)
+
+    @make_dynamo_test
+    def test_non_class_in_tuple_raises(self):
+        # CPython: TypeError when a tuple element isn't a class.
+        with self.assertRaises(TypeError):
+            issubclass(int, (1, str))
+
+    # --- Identity ---
+
+    @make_dynamo_test
+    def test_class_is_subclass_of_itself(self):
+        self.assertTrue(issubclass(_IssubclassSub, _IssubclassSub))
+
+    # --- Graph break path ---
+
+    def test_invalid_args_graph_break(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return issubclass(t, int)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "issubclass.*unsupported",
+        ):
+            fn(torch.randn(3))
 
 
 class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):

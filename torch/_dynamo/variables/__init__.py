@@ -22,8 +22,10 @@ from .builtin import (
     BuiltinVariable,
     DictBuiltinVariable,
     GetAttrBuiltinVariable,
+    HasAttrBuiltinVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
+    SetAttrBuiltinVariable,
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
@@ -57,6 +59,7 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
+    DictViewVariable,
     DunderDictVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
@@ -65,7 +68,6 @@ from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
     BaseUserFunctionVariable,
     BoundBuiltinMethodVariable,
-    BuiltinMethodVariable,
     ClassMethodDescriptorVariable,
     ClassMethodVariable,
     CollectionsNamedTupleFunction,
@@ -73,13 +75,16 @@ from .functions import (
     CreateTMADescriptorStableVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
+    GetSetDescriptorVariable,
     InspectSignatureVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
+    MemberDescriptorVariable,
     MethodDescriptorVariable,
     MethodWrapperVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    PropertyVariable,
     PyTreeGetNodeTypeFunctionVariable,
     PyTreeTreeIsLeafFunctionVariable,
     SkipFunctionVariable,
@@ -88,6 +93,7 @@ from .functions import (
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
     TritonSetAllocatorVariable,
+    TupleGetterVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperDescriptorVariable,
@@ -112,6 +118,7 @@ from .iter import (
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    DequeVariable,
     ListIteratorVariable,
     ListVariable,
     RangeVariable,
@@ -123,7 +130,6 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     CellVariable,
-    ConstantMethodWrapperVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
@@ -225,6 +231,7 @@ __all__ = [
     "GetAttrBuiltinVariable",
     "GetAttrVariable",
     "GradModeVariable",
+    "HasAttrBuiltinVariable",
     "InspectSignatureVariable",
     "InspectVariable",
     "IterBuiltinVariable",
@@ -252,6 +259,7 @@ __all__ = [
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",
+    "SetAttrBuiltinVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",

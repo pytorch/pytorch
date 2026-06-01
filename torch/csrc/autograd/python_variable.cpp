@@ -1350,14 +1350,14 @@ static bool is_random_op(const c10::OperatorHandle& op) {
       memcmp(op_name.name.data(), "aten::", aten_namespace_prefix_len) != 0) {
     return false;
   }
-  static constexpr std::array<std::string_view, 6> random_names = {{
+  static constexpr auto random_names = std::to_array<std::string_view>({
       "native_dropout",
       "normal_",
       "rand_like",
       "randn_like",
       "uniform_",
       "bernoulli",
-  }};
+  });
   std::string_view name_without_namespace(
       op_name.name.c_str() + aten_namespace_prefix_len,
       op_name.name.size() - aten_namespace_prefix_len);
@@ -2929,8 +2929,7 @@ static PyObject* THPVariable_get_names(PyObject* self, void* unused) {
       // - https://docs.python.org/3/c-api/tuple.html#c.PyTuple_SetItem
       // -
       // https://stackoverflow.com/questions/16400600/how-to-return-a-tuple-containing-a-none-value-from-the-c-api
-      Py_INCREF(Py_None);
-      str = Py_None;
+      str = Py_NewRef(Py_None);
     } else {
       str = THPUtils_packString(dimnames[i].symbol().toUnqualString());
       if (!str)
@@ -3010,8 +3009,7 @@ static PyObject* THPVariable_get_backwards_hooks(
     return handle_torch_function_getter(self, "_backward_hooks");
   }
   if (self->backward_hooks) {
-    Py_INCREF(self->backward_hooks);
-    return self->backward_hooks;
+    return Py_NewRef(self->backward_hooks);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -3050,8 +3048,7 @@ static PyObject* THPVariable_get_post_accumulate_grad_hooks(
     return handle_torch_function_getter(self, "_post_accumulate_grad_hooks");
   }
   if (self->post_accumulate_grad_hooks) {
-    Py_INCREF(self->post_accumulate_grad_hooks);
-    return self->post_accumulate_grad_hooks;
+    return Py_NewRef(self->post_accumulate_grad_hooks);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -3935,21 +3932,21 @@ static void initTensorImplConversion(PyObject* module) {
 
 bool THPVariable_initModule(PyObject* module) {
   THPVariableMetaType.tp_base = &PyType_Type;
-  if (PyType_Ready(&THPVariableMetaType) < 0)
+  if (PyModule_AddType(module, &THPVariableMetaType) < 0)
     return false;
-  Py_INCREF(&THPVariableMetaType);
-  PyModule_AddObject(module, "_TensorMeta", (PyObject*)&THPVariableMetaType);
 
   static std::vector<PyMethodDef> methods;
   THPUtils_addPyMethodDefs(methods, torch::autograd::variable_methods);
   THPUtils_addPyMethodDefs(methods, extra_methods);
   THPVariableType.tp_methods = methods.data();
-  if (PyType_Ready(&THPVariableType) < 0)
+  if (PyModule_AddType(module, &THPVariableType) < 0)
     return false;
   Py_INCREF(&THPVariableType);
-  PyModule_AddObject(module, "TensorBase", (PyObject*)&THPVariableType);
-  Py_INCREF(&THPVariableType);
-  PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
+  if (PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType) <
+      0) {
+    Py_DECREF(&THPVariableType);
+    return false;
+  }
 #ifdef USE_DISTRIBUTED
   PyModule_AddObject(
       module,

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from typing import NamedTuple
 
 import torch
@@ -17,12 +18,15 @@ from torch._inductor.utils import IndentedBuffer
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
     slowTest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
+from torch.utils._triton import has_triton_tensor_descriptor_host_tma
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 try:
     try:
@@ -274,6 +278,86 @@ class TestGpuWrapper(InductorTestCase):
         result = opt_fn(x, output_grad)
         self.assertEqual(result.shape, x.shape)
 
+    def test_cuda_cpp_wrapper_skips_vec_isa_for_device_only_code(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            return (x.sin() + 1).cos()
+
+        x = torch.randn(128, device=self.device)
+        expected = fn(x)
+        compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+        actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("needs_vec_isa=False", code)
+
+    def test_cuda_cpp_wrapper_keeps_vec_isa_for_host_vectorized_code(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.to(device=self.device)
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            return x
+
+        x = torch.randn(2, 2, 10)
+        expected = fn(x)
+        compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+        actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("at::vec::", code)
+        self.assertIn("needs_vec_isa=True", code)
+
+    def test_cuda_cpp_wrapper_build_separate_splits_vec_isa_requirements(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def fn(x):
+            x = x + 1
+            x = x + 2
+            x = x.to(device=self.device)
+            x = x + 3
+            x = x + 4
+            x = x.cpu()
+            x = x + 5
+            x = x + 6
+            return x
+
+        x = torch.randn(2, 2, 10)
+        expected = fn(x)
+        with config.patch({"cpp_wrapper_build_separate": True}):
+            compiled = torch.compile(options={"cpp_wrapper": True})(fn)
+            actual, code = test_torchinductor.run_and_get_cpp_code(compiled, x)
+
+        self.assertEqual(actual, expected)
+        self.assertIn("kernel_src = (", code)
+        self.assertIn("needs_vec_isa=False", code)
+        self.assertIn("kernel_needs_vec_isa=True", code)
+
+    def test_map_fullgraph_cpp_wrapper(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def body_fn(x):
+            return torch.nn.functional.gelu(x)
+
+        def fn(xs):
+            return torch._higher_order_ops.map(body_fn, xs).sum()
+
+        xs = torch.randn(8, 64, device=self.device)
+        expected = fn(xs)
+        opt_fn = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})
+        self.assertEqual(opt_fn(xs), expected)
+
 
 instantiate_parametrized_tests(TestGpuWrapper)
 
@@ -339,6 +423,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             r1 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
                 capture_output=True,
+                cwd=cache_dir,
                 text=True,
                 env=env,
             )
@@ -347,10 +432,215 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             r2 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
                 capture_output=True,
+                cwd=cache_dir,
                 text=True,
                 env=env,
             )
             self.assertEqual(r2.returncode, 0, f"Warm run failed:\n{r2.stderr[-2000:]}")
+
+
+# Helper script for test_static_init_dlopen_does_not_deadlock
+_STATIC_INIT_DEADLOCK_SCRIPT = """\
+import torch
+from torch.testing._internal.inductor_utils import GPU_TYPE
+
+from torch._inductor import config
+
+config.compile_threads = 1
+config.cpp_wrapper = True
+config.triton.autotune_at_compile_time = False
+
+
+def fn(x):
+    return (x * 2 + 1).sum()
+
+
+compiled = torch.compile(fn)
+x = torch.randn(128, device=GPU_TYPE)
+compiled(x)
+"""
+
+
+class TestCppWrapperStaticInitDeadlock(InductorTestCase):
+    device = GPU_TYPE
+
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184496")
+    def test_static_init_dlopen_does_not_deadlock(self):
+        """The cpp_wrapper-generated .so must not trigger Triton kernel
+        compilation from a static initializer (dlopen-time): doing so
+        runs Triton -> mlir::verify -> llvm::StdThreadPool, whose workers
+        contend for the dynamic linker's global init lock and deadlock
+        the main thread inside dlopen.
+        """
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        with tempfile.TemporaryDirectory() as cache_dir:
+            env = {
+                **os.environ,
+                "TORCHINDUCTOR_CACHE_DIR": cache_dir,
+            }
+            try:
+                r = subprocess.run(
+                    [sys.executable, "-c", _STATIC_INIT_DEADLOCK_SCRIPT],
+                    capture_output=True,
+                    cwd=cache_dir,
+                    text=True,
+                    env=env,
+                    timeout=60,
+                )
+            except subprocess.TimeoutExpired:
+                self.fail(
+                    "cpp_wrapper subprocess timed out after 60s -- likely "
+                    "deadlocked in dlopen / static-init Triton kernel compile."
+                )
+        self.assertEqual(
+            r.returncode,
+            0,
+            f"Subprocess failed:\nstderr:\n{r.stderr[-2000:]}\nstdout:\n{r.stdout[-2000:]}",
+        )
+
+
+# Helper script for test_lazy_tma_global_scratch_scales_with_launch_grid
+# Run this repro in a subprocess because the regression can poison the CUDA context.
+_LAZY_TMA_GLOBAL_SCRATCH_SCRIPT = """\
+import torch
+import triton
+import triton.language as tl
+
+from torch._library import capture_triton
+
+
+M = 1048576
+N = 16
+BLOCK_M = 16
+BLOCK_N = 16
+
+
+def _alloc_scratch(size, alignment, stream):
+    return torch.empty(size, device="cuda", dtype=torch.uint8)
+
+
+triton.set_allocator(_alloc_scratch)
+
+
+@triton.jit
+def _tma_copy_kernel(
+    in_ptr,
+    out_ptr,
+    M: tl.constexpr,
+    N: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    pid = tl.program_id(axis=0)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
+    pid_m = pid // num_pid_n
+    pid_n = pid % num_pid_n
+
+    # Each CTA builds a different descriptor so one shared scratch slot is corrupt.
+    in_desc = tl.make_tensor_descriptor(
+        in_ptr + pid * BLOCK_M * N,
+        shape=[BLOCK_M, N],
+        strides=[N, 1],
+        block_shape=[BLOCK_M, BLOCK_N],
+    )
+    tile = in_desc.load([0, 0])
+
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    tl.store(out_ptr + offs_m[:, None] * N + offs_n[None, :], tile)
+
+
+@torch.library.triton_op("test_inductor::lazy_tma_scratch_copy", mutates_args={})
+def _tma_copy(x: torch.Tensor) -> torch.Tensor:
+    y = torch.empty_like(x)
+    grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
+    capture_triton(_tma_copy_kernel)[grid](
+        x,
+        y,
+        M,
+        N,
+        BLOCK_M=BLOCK_M,
+        BLOCK_N=BLOCK_N,
+        num_warps=8,
+        num_stages=4,
+    )
+    return y
+
+
+def run():
+    x = (torch.arange(M * N, device="cuda", dtype=torch.float32) % 100).to(
+        torch.float16
+    )
+    x = x.reshape(M, N)
+
+    def fn(x):
+        return _tma_copy(x)
+
+    eager = fn(x)
+    torch.cuda.synchronize()
+    torch.testing.assert_close(eager, x)
+
+    compiled = torch.compile(
+        fn,
+        fullgraph=True,
+        options={
+            "cpp_wrapper": True,
+            "triton.autotune_at_compile_time": False,
+        },
+    )
+    warmup = compiled(x)
+    torch.cuda.synchronize()
+    torch.testing.assert_close(warmup, x)
+    # The warmup lazy-compiles through Python; the second call uses the cached C++ launch.
+    out = compiled(x)
+    torch.cuda.synchronize()
+    torch.testing.assert_close(out, x)
+
+
+run()
+"""
+
+
+class TestLazyTmaGlobalScratch(InductorTestCase):
+    device = GPU_TYPE
+
+    def test_lazy_tma_global_scratch_scales_with_launch_grid(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+        if GPU_TYPE != "cuda" or torch.version.hip:
+            self.skipTest("requires CUDA")
+        if torch.cuda.get_device_capability()[0] < 9:
+            self.skipTest("requires Hopper or newer for TMA")
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires Triton TensorDescriptor TMA support")
+
+        with tempfile.TemporaryDirectory() as cache_dir:
+            script_path = Path(cache_dir) / "lazy_tma_global_scratch_repro.py"
+            script_path.write_text(_LAZY_TMA_GLOBAL_SCRATCH_SCRIPT, encoding="utf-8")
+            env = {
+                **os.environ,
+                "CUDA_LAUNCH_BLOCKING": "1",
+                "TORCHINDUCTOR_CACHE_DIR": cache_dir,
+            }
+            result = subprocess.run(
+                [sys.executable, str(script_path)],
+                capture_output=True,
+                cwd=cache_dir,
+                text=True,
+                env=env,
+                timeout=180,
+            )
+
+        stderr_tail = "\n".join(result.stderr.splitlines()[-80:])
+        self.assertEqual(
+            result.returncode,
+            0,
+            "lazy TMA scratch regression subprocess failed:\n"
+            f"returncode: {result.returncode}\n"
+            f"stderr tail:\n{stderr_tail}",
+        )
 
 
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
@@ -384,20 +674,6 @@ test_failures_gpu_wrapper = {
         ("gpu_wrapper",), is_skip=True
     ),
 }
-
-# XPU: complex add decomposition can return NotImplemented in cpp_wrapper path,
-# which currently surfaces as InductorError in test_add_complex4_xpu_gpu_wrapper.
-# Keep this targeted skip to XPU only.
-if device_type == "xpu":
-    test_failures_gpu_wrapper["test_add_complex4_xpu"] = test_torchinductor.TestFailure(
-        ("gpu_wrapper",), is_skip=True
-    )
-    test_failures_gpu_wrapper["test_add_complex_xpu"] = test_torchinductor.TestFailure(
-        ("gpu_wrapper",), is_skip=True
-    )
-    test_failures_gpu_wrapper["test_adding_tensor_offsets_xpu"] = (
-        test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
-    )
 
 # Skip only on CUDA as wrapper dynamic shapes passes on ROCm.
 # Per https://github.com/pytorch/pytorch/pull/172780
