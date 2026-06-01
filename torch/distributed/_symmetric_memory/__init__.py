@@ -112,7 +112,10 @@ def get_symm_mem_workspace(
     tensor = _group_name_to_workspace_tensor.get(group_name)
     size = tensor.numel() * tensor.element_size() if tensor is not None else 0
     if tensor is None or size < min_size:
-        if torch.accelerator.is_available() and torch.accelerator.current_stream().is_capturing():
+        if (
+            torch.accelerator.is_available()
+            and torch.accelerator.current_stream().is_capturing()
+        ):
             curr_size = 0 if tensor is None else tensor.numel() * tensor.element_size()
             raise RuntimeError(
                 f"get_symm_mem_workspace(): the requested size ({min_size} bytes) "
