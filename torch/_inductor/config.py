@@ -2972,5 +2972,13 @@ emulate_precision_casts: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
 )
 
+# Targeted variant of emulate_precision_casts for saved low-precision outputs.
+# When a low-precision pointwise result is saved for backward and also used by
+# later forward math, this inserts a downcast-upcast at the saved value so
+# forward and backward consume the same precision.
+emulate_precision_casts_on_saved_tensors: bool = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS_ON_SAVED_TENSORS", "1") == "1"
+)
+
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
