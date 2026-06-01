@@ -12633,9 +12633,8 @@ op_db: list[OpInfo] = [
                             dtypes=(torch.float32, torch.complex64)),
                # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               # RuntimeError: Composite compliance check failed with the above error.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-           )),
+            ),
+           ),
     OpInfo('arange',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
@@ -14426,8 +14425,8 @@ op_db: list[OpInfo] = [
                # grad is computed improperly (probably for weights tensor)
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad'),
                # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           )),
+            ),
+           ),
     UnaryUfuncInfo('floor',
                    ref=np.floor,
                    dtypes=all_types_and(torch.half, torch.bfloat16),
@@ -14488,9 +14487,7 @@ op_db: list[OpInfo] = [
                # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
                # RuntimeError: Sparse CSR tensors do not have strides
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),
                # RuntimeError: Sparse CSR tensors do not have strides
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
                # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                # RuntimeError: Sparse CSR tensors do not have strides
@@ -14533,9 +14530,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
                # RuntimeError: Sparse CSR tensors do not have strides
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),
                # RuntimeError: Sparse CSR tensors do not have strides
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
                # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                # RuntimeError: Sparse CSR tensors do not have strides
@@ -16016,8 +16011,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # https://github.com/pytorch/pytorch/issues/85960
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
-                            "TestCompositeCompliance", "test_forward_ad"),
                # AssertionError: The values for attribute 'shape' do not match: torch.Size([5, 5, 5]) != torch.Size([0]).
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
                # AssertionError: The values for attribute 'shape' do not match: torch.Size([5, 5, 5]) != torch.Size([5, 5, 6]).
@@ -16047,8 +16040,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # https://github.com/pytorch/pytorch/issues/85960
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
-                            "TestCompositeCompliance", "test_forward_ad"),
                # The following dtypes worked in forward but are not listed by
                # the OpInfo: {torch.uint8, torch.bool, torch.int8, torch.int16,
                # torch.int32}.
@@ -16079,8 +16070,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
-                            "TestCompositeCompliance", "test_forward_ad"),
                # _batch_norm_with_update expects contiguous inputs for cudnn and miopen
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type="cuda"),
                DecorateInfo(unittest.expectedFailure,
@@ -17426,7 +17415,6 @@ op_db: list[OpInfo] = [
                             active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick_core_backward'),
            )),
     OpInfo('nn.functional.max_unpool2d',
@@ -17470,7 +17458,6 @@ op_db: list[OpInfo] = [
                             active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick_core_backward'),
            )),
     OpInfo('nn.functional.max_unpool3d',
@@ -18500,9 +18487,6 @@ op_db: list[OpInfo] = [
            error_inputs_func=partial(error_inputs_narrow_narrow_copy, is_narrow=True, is_ref=False),
            skips=(
                # Use of .item()
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
            )),
@@ -19347,12 +19331,6 @@ op_db: list[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-           ),
            sample_inputs_func=sample_inputs_tensor_split,),
     OpInfo('hsplit',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.bfloat16, torch.float16),
@@ -19750,8 +19728,8 @@ op_db: list[OpInfo] = [
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
                DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
                             dtypes=(torch.complex64, torch.complex128)),
-               DecorateInfo(slowTest, 'TestCompositeCompliance', 'test_forward_ad'),
-           )),
+            ),
+           ),
     OpInfo('pca_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
                lambda a, b, **kwargs: torch.pca_lowrank(a @ b.mT, **kwargs),
@@ -20467,8 +20445,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_complex_half_reference_testing'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
-               DecorateInfo(unittest.skip("Expected: empty_like is not comparable"), 'TestCompositeCompliance',
-                            'test_operator'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('zeros_like',
@@ -20708,8 +20684,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
-               DecorateInfo(unittest.skip("Expected: new_empty is not comparable"), 'TestCompositeCompliance',
-                            'test_operator'),
                DecorateInfo(unittest.skip("Expected: new_empty is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
@@ -20743,8 +20717,6 @@ op_db: list[OpInfo] = [
                             'TestCommon', 'test_non_standard_bool_values'),
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
-               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
-                            'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
                             'TestDecomp', 'test_comprehensive'),
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
@@ -20781,7 +20753,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
-               DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestCompositeCompliance', 'test_operator'),
                # Lazy tensor failures
                DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestLazyOpInfo'),
                # RuntimeError: unsupported operation: more than one element of the written-to tensor refers to a single
@@ -20815,8 +20786,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
-               DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestCompositeCompliance',
-                            'test_operator'),
                # requires_grad doesn't exist in the jit schema
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
@@ -20885,8 +20854,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
-               DecorateInfo(unittest.skip("Expected: empty_permuted is not comparable"), 'TestCompositeCompliance',
-                            'test_operator'),
                # requires_grad doesn't exist in the jit schema
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                DecorateInfo(unittest.skip("Expected: empty_permuted is not comparable"),
@@ -20994,7 +20961,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients'),
@@ -21398,8 +21364,7 @@ op_db: list[OpInfo] = [
                # Cannot resize variables that require grad
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               DecorateInfo(unittest.skip("Allowed exception"), 'TestCompositeCompliance', 'test_operator'),
-           ),
+            ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('resize_as_',
            op=lambda x, other: torch.resize_as_(x.clone(), other),
@@ -21411,8 +21376,7 @@ op_db: list[OpInfo] = [
            skips=(
                # Cannot resize variables that require grad
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
-               DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
-           ),
+            ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('take_along_dim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -21746,8 +21710,6 @@ op_db: list[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # Allowed exception: sparse tensors don't have strides
-               DecorateInfo(unittest.skip("Allowed exception"), 'TestCompositeCompliance', 'test_operator'),
-               DecorateInfo(unittest.skip("Allowed exception"), 'TestCompositeCompliance', 'test_backward'),
                # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
                DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
                             'TestSparseCSR', 'test_sparse_csr_consistency'),
@@ -22069,7 +22031,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
             # Jiterator ops doesn't support CompositeCompliantTensor
             # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
-            DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Skip reference_numerics tests for bool type, as the defined function doesn't work for bool
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                          dtypes=[torch.bool]),
@@ -22111,7 +22072,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
             # Jiterator ops doesn't support CompositeCompliantTensor
             # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
-            DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_binary is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
@@ -22136,7 +22096,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
             # Jiterator ops doesn't support CompositeCompliantTensor
             # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
-            DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
@@ -22167,7 +22126,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
             # Jiterator ops doesn't support CompositeCompliantTensor
             # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
-            DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
@@ -22198,7 +22156,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
             # Jiterator ops doesn't support CompositeCompliantTensor
             # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
-            DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
@@ -22512,7 +22469,6 @@ op_db: list[OpInfo] = [
             # Reference: https://github.com/pytorch/pytorch/issues/67084
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
             # Not a problem: embedding does weird stuff to its input (it renormalizes)
-            DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
             # Fails due to non-determinism (see issue #74679)
             # TODO: Investigate why more granular skips in the test don't work in CI
             DecorateInfo(unittest.skip('Skipped!'),
@@ -22538,7 +22494,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # Not a problem: embedding_bag does weird stuff to its input (it renormalizes)
-            DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=0.006, rtol=0.047)}),
                          'TestConsistency', 'test_output_grad_match', device_type='mps'),
         ),
@@ -22568,8 +22523,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # tests running very slowly break slow tests, so we skip them instead of using `slowTest`.
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),
             DecorateInfo(
                 unittest.skip("Skipped - baddbmm decomp does not have enough precision for 16-bit float"),
                 'TestDecomp',
@@ -23265,10 +23218,7 @@ op_db: list[OpInfo] = [
         error_inputs_func=error_inputs_gaussian_nll_loss,
         skips=(
             # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
             # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             # JIT does not support variadic tensors.
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
@@ -23634,8 +23584,6 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
             ),
             # Triton kernels take raw pointers and can't dispatch through tensor
             # subclasses (CompositeCompliantTensor, CrossRefFakeMode, etc.).
-            DecorateInfo(unittest.skip("Triton kernel incompatible with tensor subclasses"),
-                         "TestCompositeCompliance"),
             DecorateInfo(unittest.skip("Triton kernel not introspectable for conjugate/negate views"),
                          "TestMathBits"),
             # Sample generator only targets the primary CUDA device.
