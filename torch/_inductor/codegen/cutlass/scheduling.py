@@ -198,7 +198,7 @@ class CUTLASSScheduling(BaseScheduling):
 
     @staticmethod
     def _is_compatible_reshape(
-        template_size: list[sympy.Expr], node_size: list[sympy.Expr]
+        template_size: Sequence[sympy.Expr], node_size: Sequence[sympy.Expr]
     ) -> bool:
         """
         Check if node_size is a compatible reshape of template_size.
