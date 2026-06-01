@@ -4,6 +4,7 @@ import functools
 import os
 import sys
 import tempfile
+import types
 import unittest
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch
@@ -61,6 +62,7 @@ from torch._inductor.runtime.triton_heuristics import (
     triton_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import fresh_cache
 
 
 @triton.jit
@@ -416,6 +418,43 @@ class TestTritonHeuristics(TestCase):
             )
             self.assertEqual(len(configs), expected_count)
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_compile_time_autotune_not_repeated_at_runtime(self):
+        def fn(x):
+            return (x + 1).sum(dim=1)
+
+        x = torch.randn(2048, 2048, device=GPU_TYPE)
+        benchmark_calls = []
+
+        def fake_benchmark_all_configs(autotuner, *args, **kwargs):
+            benchmark_calls.append(autotuner.inductor_meta.get("kernel_name"))
+            return {
+                launcher: float(idx) for idx, launcher in enumerate(autotuner.launchers)
+            }
+
+        torch._dynamo.reset()
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "triton.autotune_at_compile_time": True,
+                    "max_autotune_pointwise": True,
+                    "compile_threads": 1,
+                }
+            ),
+            patch.object(
+                CachingAutotuner,
+                "benchmark_all_configs",
+                fake_benchmark_all_configs,
+            ),
+        ):
+            compiled = torch.compile(fn, backend="inductor")
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(len(benchmark_calls), 1)
+
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(len(benchmark_calls), 1)
+
 
 _PLUGIN_FACTORY_PATH = (
     "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins"
@@ -485,460 +524,6 @@ class TestCachingAutotunerPlugin(TestCase):
 
         self.assertIs(result, sentinel)
         mock_autotune.assert_not_called()
-
-    def test_no_launch_autotune_uses_default_autotune_path(self):
-        seen = []
-
-        class _Plugin(CachingAutotunerPlugin):
-            def pre_autotune(self, autotuner, *args, stream, **kwargs):
-                seen.append("pre_autotune")
-                return object()
-
-        autotuner = self._make_autotuner([_Plugin()])
-        launcher_a = MagicMock()
-        launcher_a.config = triton_config({"x": 16}, 64)
-        launcher_b = MagicMock()
-        launcher_b.config = triton_config({"x": 256}, 64)
-        autotuner.launchers = [launcher_a, launcher_b]
-
-        def autotune_to_launcher_a(*args, **kwargs):
-            autotuner.launchers = [launcher_a]
-
-        with patch.object(
-            autotuner,
-            "autotune_to_one_config",
-            side_effect=autotune_to_launcher_a,
-        ) as mock_autotune:
-            result = autotuner.autotune_to_one_config_no_launch(
-                *self._make_kernel_inputs(), stream=self._get_stream()
-            )
-
-        self.assertIs(result, launcher_a.config)
-        self.assertEqual(seen, [])
-        mock_autotune.assert_called_once()
-
-    def test_no_launch_autotune_skips_seed_coordesc(self):
-        autotuner = self._make_autotuner([])
-        autotuner.inductor_meta["coordinate_descent_tuning"] = True
-        launcher = MagicMock()
-        launcher.config = triton_config({"x": 16}, 64)
-        autotuner.launchers = [launcher]
-
-        with patch.object(autotuner, "coordinate_descent_tuning") as mock_coordesc:
-            result = autotuner.autotune_to_one_config_no_launch(
-                *self._make_kernel_inputs(), stream=self._get_stream()
-            )
-
-        self.assertIs(result, launcher.config)
-        mock_coordesc.assert_not_called()
-
-    def test_combo_seed_start_skips_cached_combo_autotune_config(self):
-        from torch._inductor.runtime.triton_heuristics import (
-            start_combo_kernel_standalone_autotune,
-        )
-
-        cached_config = triton_config({"x": 16}, 64)
-        cached_config.found_by_combo_autotune = True
-
-        def with_configs(autotuner):
-            autotuner.configs = [cached_config]
-
-        def with_launchers(autotuner):
-            launcher = MagicMock()
-            launcher.config = cached_config
-            autotuner.configs = []
-            autotuner.launchers = [launcher]
-
-        def with_compile_results(autotuner):
-            compile_result = MagicMock()
-            compile_result.config = cached_config
-            autotuner.configs = []
-            autotuner.launchers = []
-            autotuner.compile_results = [compile_result]
-
-        for setup in (with_configs, with_launchers, with_compile_results):
-            with self.subTest(setup=setup.__name__):
-                autotuner = self._make_autotuner([])
-                autotuner.inductor_meta["combo_grid_meta"] = {
-                    "num_kernels": 1,
-                    "heuristic_0": "pointwise",
-                    "size_hints_0": {"x": 1024},
-                }
-                setup(autotuner)
-
-                with patch(
-                    "torch._inductor.autotune_process.PrecompileThreadPool.get_instance"
-                ) as mock_get_pool:
-                    start_combo_kernel_standalone_autotune(
-                        autotuner, ((MagicMock(), ()),)
-                    )
-
-                mock_get_pool.assert_not_called()
-
-    def test_coordinate_descent_save_preserves_combo_autotune_marker(self):
-        autotuner = self._make_autotuner([])
-        autotuner.save_cache_hook = MagicMock()
-        launcher = MagicMock()
-        launcher.config = triton_config({"x": 16}, 64)
-        launcher.config.found_by_combo_autotune = True
-        launcher.cache_hash = "test_hash"
-
-        autotuner.coordesc_tuner.autotune = MagicMock(return_value=launcher.config)
-
-        with patch.object(autotuner, "_ensure_kernel_loaded"):
-            autotuner._coordinate_descent_tuning(launcher, *self._make_kernel_inputs())
-
-        self.assertTrue(launcher.config.found_by_coordesc)
-        self.assertTrue(launcher.config.found_by_combo_autotune)
-        autotuner.save_cache_hook.assert_called_once()
-        self.assertTrue(
-            autotuner.save_cache_hook.call_args.kwargs["found_by_combo_autotune"]
-        )
-
-    def _make_combo_seed_launcher(self, cfg):
-        launcher = MagicMock()
-        launcher.config = cfg
-        return launcher
-
-    def _make_combo_seed_precompile(self, candidate_launchers):
-        def precompile_config(cfg):
-            launcher = self._make_combo_seed_launcher(cfg)
-            compile_result = MagicMock()
-            compile_result.make_launcher.return_value = launcher
-            candidate_launchers.append(launcher)
-            return compile_result
-
-        return precompile_config
-
-    def test_update_combo_kernel_kwargs_only_suffixes_block_keys(self):
-        """`_update_combo_kernel_kwargs` should only write block-suffixed keys.
-
-        Non-suffixed backend kwargs (e.g. `waves_per_eu`) are now handled by
-        the apply phase via cross-seed voting -- the per-seed `_update_*`
-        call should never write them into `kwargs`.
-        """
-        from torch._inductor.runtime.triton_heuristics import (
-            _update_combo_kernel_kwargs,
-        )
-        from torch.utils._ordered_set import OrderedSet
-
-        signature_keys = OrderedSet(["XBLOCK_0", "XBLOCK_1"])
-        kwargs = {}
-        _update_combo_kernel_kwargs(
-            kwargs, {"XBLOCK": 16, "waves_per_eu": 1}, 0, False, signature_keys
-        )
-        _update_combo_kernel_kwargs(
-            kwargs, {"XBLOCK": 32, "waves_per_eu": 2}, 1, False, signature_keys
-        )
-        self.assertEqual(kwargs, {"XBLOCK_0": 16, "XBLOCK_1": 32})
-
-    def test_combo_seed_votes_on_num_warps_stages(self):
-        """Apply phase aggregates seed-chosen (num_warps, num_stages) via
-        most-common vote, since combo only has one kernel-level value.
-        """
-        from torch.utils._ordered_set import OrderedSet
-
-        autotuner = self._make_autotuner([])
-        current_launcher = self._make_combo_seed_launcher(
-            triton.Config(
-                {"XBLOCK_0": 16, "XBLOCK_1": 16, "XBLOCK_2": 16},
-                num_warps=4,
-                num_stages=1,
-            )
-        )
-        # Three seeds: (4,1), (8,1), (8,1) -- (8,1) wins the vote.
-        seeds = [
-            triton.Config({"XBLOCK": 32}, num_warps=4, num_stages=1),
-            triton.Config({"XBLOCK": 64}, num_warps=8, num_stages=1),
-            triton.Config({"XBLOCK": 64}, num_warps=8, num_stages=1),
-        ]
-        futures = []
-        for cfg in seeds:
-            f = MagicMock()
-            f.result.return_value = cfg
-            futures.append(f)
-        autotuner.combo_standalone_autotune_seed_configs = [
-            f.result.return_value for f in futures
-        ]
-
-        candidate_launchers = []
-        with (
-            patch.object(autotuner, "_ensure_kernel_loaded"),
-            patch.object(
-                autotuner,
-                "_precompile_config",
-                side_effect=self._make_combo_seed_precompile(candidate_launchers),
-            ),
-            patch.object(autotuner, "bench") as mock_bench,
-        ):
-            result = autotuner._apply_combo_standalone_autotune_seed(
-                current_launcher,
-                OrderedSet(["XBLOCK_0", "XBLOCK_1", "XBLOCK_2"]),
-                {
-                    "num_kernels": 3,
-                    "heuristic_0": "pointwise",
-                    "size_hints_0": {"x": 1024},
-                    "heuristic_1": "pointwise",
-                    "size_hints_1": {"x": 1024},
-                    "heuristic_2": "pointwise",
-                    "size_hints_2": {"x": 1024},
-                },
-                *self._make_kernel_inputs(),
-            )
-
-        self.assertEqual(result.config.num_warps, 8)
-        self.assertEqual(result.config.num_stages, 1)
-        mock_bench.assert_not_called()
-
-    def test_combo_seed_votes_on_shared_backend_kwarg(self):
-        """Shared (non-suffixed) backend kwargs are aggregated by
-        Counter.most_common across seeds.
-        """
-        from torch.utils._ordered_set import OrderedSet
-
-        autotuner = self._make_autotuner([])
-        current_launcher = self._make_combo_seed_launcher(
-            triton.Config(
-                {"XBLOCK_0": 16, "XBLOCK_1": 16, "XBLOCK_2": 16},
-                num_warps=4,
-                num_stages=1,
-            )
-        )
-        # Three seeds with disagreeing waves_per_eu (2,4,4); 4 wins.
-        seeds = [
-            triton.Config({"XBLOCK": 32, "waves_per_eu": 2}, num_warps=4, num_stages=1),
-            triton.Config({"XBLOCK": 32, "waves_per_eu": 4}, num_warps=4, num_stages=1),
-            triton.Config({"XBLOCK": 32, "waves_per_eu": 4}, num_warps=4, num_stages=1),
-        ]
-        futures = []
-        for cfg in seeds:
-            f = MagicMock()
-            f.result.return_value = cfg
-            futures.append(f)
-        autotuner.combo_standalone_autotune_seed_configs = [
-            f.result.return_value for f in futures
-        ]
-
-        candidate_launchers = []
-        with (
-            patch.object(autotuner, "_ensure_kernel_loaded"),
-            patch.object(
-                autotuner,
-                "_precompile_config",
-                side_effect=self._make_combo_seed_precompile(candidate_launchers),
-            ),
-            patch.object(autotuner, "bench"),
-        ):
-            result = autotuner._apply_combo_standalone_autotune_seed(
-                current_launcher,
-                OrderedSet(["XBLOCK_0", "XBLOCK_1", "XBLOCK_2"]),
-                {
-                    "num_kernels": 3,
-                    "heuristic_0": "pointwise",
-                    "size_hints_0": {"x": 1024},
-                    "heuristic_1": "pointwise",
-                    "size_hints_1": {"x": 1024},
-                    "heuristic_2": "pointwise",
-                    "size_hints_2": {"x": 1024},
-                },
-                *self._make_kernel_inputs(),
-            )
-
-        self.assertEqual(result.config.kwargs.get("waves_per_eu"), 4)
-
-    def test_combo_seed_applies_warp_stage_only_change(self):
-        """Even when block kwargs are unchanged, a seed-voted warp/stage that
-        differs from the base config still triggers a stitched compile.
-        """
-        from torch.utils._ordered_set import OrderedSet
-
-        autotuner = self._make_autotuner([])
-        current_launcher = self._make_combo_seed_launcher(
-            triton.Config({"XBLOCK_0": 16}, num_warps=4, num_stages=1)
-        )
-        seed_config = triton.Config({"XBLOCK": 16}, num_warps=8, num_stages=1)
-        future = MagicMock()
-        future.result.return_value = seed_config
-        autotuner.combo_standalone_autotune_seed_configs = [seed_config]
-
-        candidate_launchers = []
-        with (
-            patch.object(autotuner, "_ensure_kernel_loaded"),
-            patch.object(
-                autotuner,
-                "_precompile_config",
-                side_effect=self._make_combo_seed_precompile(candidate_launchers),
-            ),
-            patch.object(autotuner, "bench") as mock_bench,
-        ):
-            result = autotuner._apply_combo_standalone_autotune_seed(
-                current_launcher,
-                OrderedSet(["XBLOCK_0"]),
-                {
-                    "num_kernels": 1,
-                    "heuristic_0": "pointwise",
-                    "size_hints_0": {"x": 1024},
-                },
-                *self._make_kernel_inputs(),
-            )
-
-        # Block kwargs unchanged but seed warps differ -> stitched config
-        # built with seed-voted num_warps.
-        self.assertEqual(result.config.num_warps, 8)
-        self.assertEqual(result.config.num_stages, 1)
-        mock_bench.assert_not_called()
-
-    def test_combo_seed_run_does_not_stamp_unchanged_launcher(self):
-        autotuner = self._make_autotuner([])
-        current_launcher = MagicMock(return_value="ok")
-        current_launcher.config = triton.Config(
-            {"XBLOCK_0": 16}, num_warps=4, num_stages=1
-        )
-        current_launcher.cache_hash = "hash"
-        current_launcher.store_cubin = False
-        autotuner.launchers = [current_launcher]
-        autotuner.triton_meta["signature"]["XBLOCK_0"] = "constexpr"
-        autotuner.inductor_meta["combo_grid_meta"] = {
-            "num_kernels": 1,
-            "heuristic_0": "pointwise",
-            "size_hints_0": {"x": 1024},
-        }
-        seed_cfg = triton.Config({"XBLOCK": 16}, num_warps=4, num_stages=1)
-        autotuner.combo_standalone_autotune_seed_configs = [seed_cfg]
-        autotuner.save_cache_hook = MagicMock()
-
-        with (
-            patch.object(autotuner, "_pre_launch"),
-            patch.object(autotuner, "_post_launch"),
-            patch("torch._inductor.runtime.triton_heuristics.TritonBundler"),
-        ):
-            result = autotuner.run(
-                *self._make_kernel_inputs(), stream=self._get_stream()
-            )
-
-        self.assertEqual(result, "ok")
-        self.assertFalse(
-            getattr(current_launcher.config, "found_by_combo_autotune", False)
-        )
-        self.assertIsNone(autotuner.combo_standalone_autotune_seed_configs)
-        autotuner.save_cache_hook.assert_not_called()
-
-    def test_combo_seed_applies_block_only_seed(self):
-        from torch.utils._ordered_set import OrderedSet
-
-        autotuner = self._make_autotuner([])
-        current_launcher = self._make_combo_seed_launcher(
-            triton.Config({"XBLOCK_0": 16}, num_warps=4, num_stages=1)
-        )
-        seed_config = triton.Config({"XBLOCK": 32}, num_warps=4, num_stages=1)
-        future = MagicMock()
-        future.result.return_value = seed_config
-        autotuner.combo_standalone_autotune_seed_configs = [seed_config]
-
-        candidate_launchers = []
-        with (
-            patch.object(autotuner, "_ensure_kernel_loaded") as mock_ensure,
-            patch.object(
-                autotuner,
-                "_precompile_config",
-                side_effect=self._make_combo_seed_precompile(candidate_launchers),
-            ),
-            patch.object(autotuner, "bench") as mock_bench,
-        ):
-            result = autotuner._apply_combo_standalone_autotune_seed(
-                current_launcher,
-                OrderedSet(["XBLOCK_0"]),
-                {
-                    "num_kernels": 1,
-                    "heuristic_0": "pointwise",
-                    "size_hints_0": {"x": 1024},
-                },
-                *self._make_kernel_inputs(),
-            )
-
-        self.assertIs(result, candidate_launchers[0])
-        self.assertEqual(result.config.kwargs["XBLOCK_0"], 32)
-        self.assertEqual(result.config.num_warps, 4)
-        self.assertEqual(result.config.num_stages, 1)
-        mock_ensure.assert_called_once()
-        mock_bench.assert_not_called()
-
-    def test_combo_seed_returns_input_when_seed_does_not_change_config(self):
-        from torch.utils._ordered_set import OrderedSet
-
-        autotuner = self._make_autotuner([])
-        current_launcher = self._make_combo_seed_launcher(
-            triton.Config({"XBLOCK_0": 16}, num_warps=4, num_stages=1)
-        )
-        seed_config = triton.Config({"XBLOCK": 16}, num_warps=4, num_stages=1)
-        future = MagicMock()
-        future.result.return_value = seed_config
-        autotuner.combo_standalone_autotune_seed_configs = [seed_config]
-
-        with (
-            patch.object(autotuner, "_ensure_kernel_loaded") as mock_ensure,
-            patch.object(autotuner, "_precompile_config") as mock_precompile,
-            patch.object(autotuner, "bench") as mock_bench,
-        ):
-            result = autotuner._apply_combo_standalone_autotune_seed(
-                current_launcher,
-                OrderedSet(["XBLOCK_0"]),
-                {
-                    "num_kernels": 1,
-                    "heuristic_0": "pointwise",
-                    "size_hints_0": {"x": 1024},
-                },
-                *self._make_kernel_inputs(),
-            )
-
-        self.assertIs(result, current_launcher)
-        mock_ensure.assert_not_called()
-        mock_precompile.assert_not_called()
-        mock_bench.assert_not_called()
-
-    def test_combo_seed_uses_seed_voted_warp_stage(self):
-        """The stitched combo config inherits seed-voted (num_warps,
-        num_stages) -- a single seed's choice wins by default.
-        """
-        from torch.utils._ordered_set import OrderedSet
-
-        autotuner = self._make_autotuner([])
-        current_launcher = self._make_combo_seed_launcher(
-            triton.Config({"XBLOCK_0": 16}, num_warps=8, num_stages=1)
-        )
-        seed_config = triton.Config({"XBLOCK": 32}, num_warps=16, num_stages=1)
-        future = MagicMock()
-        future.result.return_value = seed_config
-        autotuner.combo_standalone_autotune_seed_configs = [seed_config]
-
-        candidate_launchers = []
-        with (
-            patch.object(autotuner, "_ensure_kernel_loaded") as mock_ensure,
-            patch.object(
-                autotuner,
-                "_precompile_config",
-                side_effect=self._make_combo_seed_precompile(candidate_launchers),
-            ),
-            patch.object(autotuner, "bench") as mock_bench,
-        ):
-            result = autotuner._apply_combo_standalone_autotune_seed(
-                current_launcher,
-                OrderedSet(["XBLOCK_0"]),
-                {
-                    "num_kernels": 1,
-                    "heuristic_0": "pointwise",
-                    "size_hints_0": {"x": 1024},
-                },
-                *self._make_kernel_inputs(),
-            )
-
-        self.assertIs(result, candidate_launchers[0])
-        self.assertEqual(result.config.kwargs["XBLOCK_0"], 32)
-        # Seed voted 16 warps; the single-seed vote wins, not the base's 8.
-        self.assertEqual(result.config.num_warps, 16)
-        self.assertEqual(result.config.num_stages, 1)
-        mock_ensure.assert_called_once()
-        mock_bench.assert_not_called()
 
     def test_hooks_fire_in_registration_order(self):
         sentinel = object()
@@ -1350,30 +935,6 @@ class TestRecheckAutotuneCache(TestCase):
         self.assertFalse(autotuner.compile_results[0].config.found_by_coordesc)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_recheck_propagates_found_by_combo_autotune(self):
-        """
-        When the cached best config was already tuned from standalone
-        subkernel seeds, the marker must survive static autotuner reload.
-        """
-        cfg = triton_config({"x": 16}, 64)
-        cfg.found_by_combo_autotune = False
-        compile_result = self._make_compile_result(cfg)
-
-        autotuner = self._make_autotuner_with_results([cfg], [compile_result])
-
-        cached_cfg = triton_config({"x": 16}, 64)
-        cached_cfg.found_by_combo_autotune = True
-
-        with patch(
-            "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
-            return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}),
-        ):
-            autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
-
-        self.assertEqual(len(autotuner.compile_results), 1)
-        self.assertTrue(autotuner.compile_results[0].config.found_by_combo_autotune)
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_recheck_no_cache_hit_leaves_results_unchanged(self):
         """
         When there's no autotune cache hit, compile_results should not change.
@@ -1528,6 +1089,70 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertGreaterEqual(y * z, 131070)
 
 
+class TestFastLauncherDeviceSupport(TestCase):
+    @staticmethod
+    def _make_autotuner(device_type):
+        def triton_():
+            pass
+
+        device = DeviceProperties(
+            type=device_type,
+            index=0,
+            multi_processor_count=1,
+            cc=0,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+        triton_meta = {
+            "signature": {},
+            "device": device,
+            "constants": {},
+            "configs": [],
+        }
+        return CachingAutotuner(
+            fn=triton_,
+            triton_meta=triton_meta,
+            configs=[triton_config({"x": 1}, 1)],
+            save_cache_hook=False,
+            mutated_arg_names=[],
+            reset_to_zero_arg_names=[],
+            optimize_mem=False,
+            heuristic_type=HeuristicType.POINTWISE,
+            inductor_meta={"use_fast_triton_launcher": True},
+        )
+
+    @staticmethod
+    def _make_static_launcher():
+        class Kernel:
+            function = 1
+            num_warps = 4
+            shared = 0
+            arg_tys = ""
+            has_global_scratch = False
+            has_profile_scratch = False
+
+            def run(self):
+                pass
+
+        def launcher_template():
+            pass
+
+        kernel = Kernel()
+        launcher = types.FunctionType(
+            launcher_template.__code__, {"runner": kernel.run}, "launcher"
+        )
+        launcher._is_static = True
+        return launcher
+
+    def test_fast_launcher_not_built_for_xpu(self):
+        autotuner = self._make_autotuner("xpu")
+        launcher = self._make_static_launcher()
+
+        with patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
+            self.assertIsNone(autotuner._build_fast_launcher(launcher))
+            fast_launcher.assert_not_called()
+
+
 class TestDynamicScaleRblockCacheInteraction(TestCase):
     """Tests for _dynamic_scale_rblock + autotune cache interaction.
 
@@ -1660,49 +1285,7 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         )
 
         self.assertIsNotNone(result)
-        # Loader copies the matched config before any setattr, so the result is
-        # a fresh Config equivalent to cfg_b (not the same object).
-        self.assertIsNot(result, cfg_b)
-        self.assertEqual(result.kwargs, cfg_b.kwargs)
-        self.assertEqual(result.num_warps, cfg_b.num_warps)
-        self.assertEqual(result.num_stages, cfg_b.num_stages)
-        self.assertFalse(hasattr(cfg_b, "found_by_combo_autotune"))
-
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_load_cached_autotuning_restores_combo_autotune_marker(self):
-        """
-        A combo-autotuned cache hit must not run combo seed tuning again.
-        """
-        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
-        from torch._inductor.runtime.triton_heuristics import hash_configs
-
-        cfg = triton_config({"x": 8}, 4, num_stages=1)
-        original_configs = [cfg]
-        configs_hash = hash_configs(original_configs)
-
-        best_config_data = {
-            **cfg.kwargs,
-            "num_warps": cfg.num_warps,
-            "num_stages": cfg.num_stages,
-            "configs_hash": configs_hash,
-            "found_by_combo_autotune": True,
-        }
-
-        result = _load_cached_autotuning(
-            best_config_data,
-            configs_hash,
-            original_configs,
-            {"combo_grid_meta": {"num_kernels": 1, "heuristic_0": "pointwise"}},
-        )
-
-        # Loader copies the matched config; provenance lives on the copy, not
-        # on the shared heuristic-owned list entry.
-        self.assertIsNot(result, cfg)
-        self.assertEqual(result.kwargs, cfg.kwargs)
-        self.assertEqual(result.num_warps, cfg.num_warps)
-        self.assertEqual(result.num_stages, cfg.num_stages)
-        self.assertTrue(result.found_by_combo_autotune)
-        self.assertFalse(hasattr(cfg, "found_by_combo_autotune"))
+        self.assertIs(result, cfg_b)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_rejects_hash_mismatch(self):
@@ -1764,6 +1347,73 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 
         self.assertEqual(len(autotuner.compile_results), 1)
         mock_precompile.assert_called_once_with(dynamic_cfg)
+
+
+class TestCheckLauncherCallArgs(TestCase):
+    """Unit tests for CachingAutotuner._check_launcher_call_args.
+
+    These tests are pure-Python (no GPU / Triton compilation) and guard
+    against regressions in the improved arg-mismatch error path.
+    """
+
+    def _make_autotuner(self):
+        """Return a CachingAutotuner configured with the cos kernel fixture."""
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        return CachingAutotuner(**args)
+
+    def _make_launcher(self, n_positional: int):
+        """Return a minimal callable that looks like a generated launcher.
+
+        The only attribute _check_launcher_call_args inspects is
+        ``_expected_positional_count``, so we don't need real Triton machinery.
+        """
+
+        def launcher(*args, stream=None):
+            pass
+
+        launcher._expected_positional_count = n_positional
+        return launcher
+
+    def test_correct_arg_count_passes_silently(self):
+        """No exception when args exactly matches _expected_positional_count."""
+        autotuner = self._make_autotuner()
+        launcher = self._make_launcher(n_positional=3)
+        # Pass exactly 3 positional args - should be a no-op.
+        autotuner._check_launcher_call_args(launcher, (1, 2, 3))
+
+    def test_too_many_args_raises_type_error(self):
+        """TypeError with a helpful message when too many positional args are passed."""
+        autotuner = self._make_autotuner()
+        launcher = self._make_launcher(n_positional=3)
+        # Simulate the 'stream' being passed positionally (4 args, expected 3).
+        with self.assertRaises(TypeError) as cm:
+            autotuner._check_launcher_call_args(launcher, (1, 2, 3, 4))
+        self.assertIn("stream", str(cm.exception).lower())
+        self.assertIn("keyword", str(cm.exception).lower())
+
+    def test_error_message_includes_kernel_name(self):
+        """The TypeError message should include the kernel name from inductor_meta."""
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"] = {
+            "kernel_name": "my_custom_kernel",
+            "grid_type": "Grid1D",
+        }
+        autotuner = CachingAutotuner(**args)
+        launcher = self._make_launcher(n_positional=2)
+        with self.assertRaises(TypeError) as cm:
+            autotuner._check_launcher_call_args(launcher, (1, 2, 3))
+        self.assertIn("my_custom_kernel", str(cm.exception))
+
+    def test_launcher_without_expected_count_is_skipped(self):
+        """Launchers without the generated metadata are skipped gracefully."""
+
+        def raw_launcher(*args, stream=None):
+            pass
+
+        # No _expected_positional_count attribute set.
+        autotuner = self._make_autotuner()
+        # Should not raise, even with many args.
+        autotuner._check_launcher_call_args(raw_launcher, (1, 2, 3, 4, 5))
 
 
 if __name__ == "__main__":
