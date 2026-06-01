@@ -4946,7 +4946,7 @@ class TestSDPAXpuOnly(NNTestCase):
             tol = Tolerances(5e-2, 5e-2)
         if dtype is torch.float16:
             tol = Tolerances(1e-2, 1e-2)
-        
+
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
 
         if enable_gqa:
@@ -4968,7 +4968,7 @@ class TestSDPAXpuOnly(NNTestCase):
             q = q.contiguous()
             k = k.contiguous()
             v = v.contiguous()
-        
+
         q2, k2, v2 = q.clone(), k.clone(), v.clone()
         q2, k2, v2 = q2.float(), k2.float(), v2.float()
 
