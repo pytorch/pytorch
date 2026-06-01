@@ -1120,9 +1120,10 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
+        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
-            metadata=cache_info or {},
+            metadata=cache_event_metadata,
             time_ns=start_time,
         )
         # Add event data about cache hits/miss
@@ -3129,7 +3130,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         from torch._dynamo.exc import SkipFrame
 
         assert device is not None
-
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
         warnings.warn(
@@ -3147,8 +3147,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
             or node.get_dtype() != torch.bfloat16
         ):
             continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
         device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return
