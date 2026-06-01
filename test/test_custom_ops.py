@@ -5647,7 +5647,7 @@ class TestCustomOpFastPath(TestCase):
                 result = fp_im(x)
         self.assertEqual(result, x)
 
-    def test_fast_path_falls_back_for_autocast(self):
+    def test_fast_path_with_autocast(self):
         @torch.library.custom_op("_torch_testing::fp_ac", mutates_args=())
         def fp_ac(x: Tensor) -> Tensor:
             return x.clone()
@@ -5655,15 +5655,17 @@ class TestCustomOpFastPath(TestCase):
         fp_ac.register_autocast("cpu", torch.float16)
 
         x = torch.randn(3, dtype=torch.float32)
-        with self._assert_fast_path_not_taken(fp_ac):
+        with self._assert_fast_path_taken(fp_ac):
             with torch.autocast("cpu", dtype=torch.float16):
                 r_direct = fp_ac(x)
+        with self._assert_fast_path_taken(fp_ac):
+            with torch.autocast("cpu", dtype=torch.float16):
                 r_packet = torch.ops._torch_testing.fp_ac(x)
         self.assertEqual(r_direct.dtype, torch.float16)
         self.assertEqual(r_packet.dtype, torch.float16)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_fast_path_falls_back_for_autocast_cuda(self):
+    def test_fast_path_with_autocast_cuda(self):
         @torch.library.custom_op("_torch_testing::fp_ac_cuda", mutates_args=())
         def fp_ac_cuda(x: Tensor) -> Tensor:
             return x.clone()
@@ -5671,9 +5673,11 @@ class TestCustomOpFastPath(TestCase):
         fp_ac_cuda.register_autocast("cuda", torch.float16)
 
         x = torch.randn(3, dtype=torch.float32, device="cuda")
-        with self._assert_fast_path_not_taken(fp_ac_cuda):
+        with self._assert_fast_path_taken(fp_ac_cuda):
             with torch.autocast("cuda", dtype=torch.float16):
                 r_direct = fp_ac_cuda(x)
+        with self._assert_fast_path_taken(fp_ac_cuda):
+            with torch.autocast("cuda", dtype=torch.float16):
                 r_packet = torch.ops._torch_testing.fp_ac_cuda(x)
         self.assertEqual(r_direct.dtype, torch.float16)
         self.assertEqual(r_packet.dtype, torch.float16)
