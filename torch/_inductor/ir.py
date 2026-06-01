@@ -8392,6 +8392,8 @@ class DeviceCopy(ExternKernelOut):
             )
         else:
             wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+        if isinstance(self.layout, Layout) and self.layout.is_pinned:
+            wrapper.sync_d2h_copy(self.get_name())
 
 
 class DynamicSelectStorageOffset(ExternKernel):
