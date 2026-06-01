@@ -42,6 +42,9 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
+from torch._higher_order_ops.cudagraph_conditional_nodes import (
+    cuda_graph_conditional_nodes_supported,
+)
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
 from torch._library.fake_class_registry import FakeScriptObject
@@ -10321,6 +10324,61 @@ class WhileLoop(ExternKernel):
         if self.body_subgraph:
             subgraphs.append(self.body_subgraph)
         return subgraphs
+
+    @staticmethod
+    def _subgraph_can_codegen_cuda_graph(subgraph: Subgraph) -> bool:
+        if subgraph.graph is None:
+            return False
+
+        from .utils import is_cudagraph_unsafe_op
+
+        return not any(is_cudagraph_unsafe_op(op) for op in subgraph.graph.operations)
+
+    def can_codegen_cuda_graph(self) -> bool:
+        if not cuda_graph_conditional_nodes_supported():
+            return False
+        if self.stack_output or getattr(self, "mutation_outputs", None):
+            return False
+        assert self.carried_inputs is not None
+        for inp in self.carried_inputs:
+            if isinstance(inp, ShapeAsConstantBuffer):
+                return False
+            inp_device = inp.get_device()
+            if inp_device is None or inp_device.type != "cuda":
+                return False
+        assert self.additional_inputs is not None
+        for inp in self.additional_inputs:
+            if isinstance(inp, ShapeAsConstantBuffer):
+                continue
+            inp_device = inp.get_device()
+            if inp_device is None or inp_device.type != "cuda":
+                return False
+        if (
+            self.cond_subgraph is None
+            or self.cond_subgraph.graph is None
+            or self.body_subgraph is None
+            or self.body_subgraph.graph is None
+        ):
+            return False
+        for subgraph in (self.cond_subgraph, self.body_subgraph):
+            if not self._subgraph_can_codegen_cuda_graph(subgraph):
+                return False
+
+        cond_outputs = self.cond_subgraph.graph.graph_outputs
+        if len(cond_outputs) != 1:
+            return False
+
+        pred = cond_outputs[0]
+        if isinstance(pred, ShapeAsConstantBuffer):
+            return False
+
+        pred_device = pred.get_device()
+        return (
+            pred.get_dtype() == torch.bool
+            and len(pred.get_size()) == 0
+            and pred_device is not None
+            and pred_device.type == "cuda"
+        )
 
     # Accidental aliasing can be created due to cse, where the empty buffers we
     # allocated for backward to use gets csed into the same buffer in function fx_graph_cse.

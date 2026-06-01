@@ -7,6 +7,42 @@ import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
+def cuda_graph_conditional_nodes_supported() -> bool:
+    cuda_version = torch.version.cuda
+    if not torch.backends.cuda.is_built() or cuda_version is None:
+        return False
+
+    try:
+        version_parts = cuda_version.split(".")
+        major = int(version_parts[0])
+        minor = int(version_parts[1]) if len(version_parts) > 1 else 0
+    except ValueError:
+        return False
+
+    return major > 12 or (major == 12 and minor >= 4)
+
+
+def _can_capture_while_loop(args, kwargs) -> bool:
+    if not cuda_graph_conditional_nodes_supported():
+        return False
+    if kwargs.get("mutated_arg_indices"):
+        return False
+    if len(args) < 4:
+        return False
+
+    carried_inputs = args[2]
+    additional_inputs = args[3]
+    if not isinstance(carried_inputs, (tuple, list)):
+        return False
+    if not all(isinstance(inp, torch.Tensor) and inp.is_cuda for inp in carried_inputs):
+        return False
+    if not isinstance(additional_inputs, (tuple, list)):
+        return False
+    return all(
+        not isinstance(inp, torch.Tensor) or inp.is_cuda for inp in additional_inputs
+    )
+
+
 class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
     @classmethod
     def ignore_compile_internals(cls) -> bool:
@@ -25,11 +61,17 @@ class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
         args=(),
         kwargs=None,
     ):
+        kwargs = {} if kwargs is None else kwargs
         if func is torch.ops.higher_order.cond:
             # Re-enter the mode to support nested conditionals
             with self:
-                return if_else_node(*args)
-        kwargs = {} if kwargs is None else kwargs
+                return if_else_node(*args, **kwargs)
+        if func is torch.ops.higher_order.while_loop and _can_capture_while_loop(
+            args, kwargs
+        ):
+            # Re-enter the mode to support nested control flow.
+            with self:
+                return while_loop_node(*args, **kwargs)
         return func(*args, **kwargs)
 
 
@@ -87,6 +129,25 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
                     if_else_node(*args)
 
                 return func(*args, **kwargs)
+        elif func is torch.ops.higher_order.while_loop and _can_capture_while_loop(
+            args, kwargs
+        ):
+            if torch.cuda.is_current_stream_capturing():
+                with self:
+                    return while_loop_node(*args, **kwargs)
+            else:
+                with (
+                    torch.cuda.graph(
+                        torch.cuda.CUDAGraph(),
+                        pool=None,
+                        stream=self.capture_stream,
+                        capture_error_mode="relaxed",
+                    ),
+                    self,
+                ):
+                    while_loop_node(*args, **kwargs)
+
+                return func(*args, **kwargs)
         else:
             return func(*args, **kwargs)
 
@@ -101,11 +162,35 @@ def _if_body(pred: torch.Tensor) -> Generator[None, None, None]:
         current_cuda_graph.end_capture_to_conditional_node()
 
 
-def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
-    if not pred.is_cuda:
-        raise ValueError(
-            "Conditions must be on a cuda device to use conditional node in cuda graphs"
+@contextmanager
+def _while_body(pred: torch.Tensor) -> Generator[None, None, None]:
+    if not cuda_graph_conditional_nodes_supported():
+        raise RuntimeError(
+            "CUDA graph conditional nodes require a CUDA 12.4+ non-ROCm build"
         )
+    current_cuda_graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+    current_cuda_graph.begin_capture_to_while_node(pred)
+    try:
+        yield
+    finally:
+        current_cuda_graph.end_capture_to_conditional_node()
+
+
+def _validate_cuda_bool_pred(pred: torch.Tensor) -> None:
+    if (
+        not isinstance(pred, torch.Tensor)
+        or not pred.is_cuda
+        or pred.size() != torch.Size([])
+        or pred.dtype != torch.bool
+    ):
+        raise ValueError(
+            "Conditions must be boolean scalar tensors on a cuda device "
+            "to use conditional nodes in cuda graphs"
+        )
+
+
+def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
+    _validate_cuda_bool_pred(pred)
     # if-else is not supported until CUDA 12.8. Therefore, we use two
     # if conditions, where one evaluates !pred
     outs = []
@@ -128,3 +213,94 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
                 ):
                     if_out.copy_(else_out)
     return outs[0]
+
+
+def _clone_loop_state(carried_inputs):
+    return tuple(
+        inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in carried_inputs
+    )
+
+
+def _copy_loop_state(dst, src) -> None:
+    if len(dst) != len(src):
+        raise RuntimeError(
+            "body_fn must return the same number of elements as carried_inputs"
+        )
+
+    for dst_t, src_t in zip(dst, src):
+        if not isinstance(dst_t, torch.Tensor) or not isinstance(src_t, torch.Tensor):
+            raise RuntimeError(
+                "CUDA graph while_loop only supports tensor carried inputs"
+            )
+        dst_t.copy_(src_t)
+
+
+def while_loop_node(
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+    *,
+    mutated_arg_indices: str = "",
+):
+    if mutated_arg_indices:
+        raise RuntimeError("CUDA graph while_loop does not support mutated inputs yet")
+
+    state = _clone_loop_state(carried_inputs)
+
+    def operands():
+        # _copy_loop_state mutates the cloned state tensors in-place, so each
+        # condition/body call observes the latest loop-carried values.
+        return (*state, *additional_inputs)
+
+    pred = cond_fn(*operands())
+    _validate_cuda_bool_pred(pred)
+
+    with _while_body(pred):
+        body_out = body_fn(*operands())
+        if not isinstance(body_out, tuple):
+            raise RuntimeError(
+                f"body_fn should return a tuple but got {type(body_out)}"
+            )
+        _copy_loop_state(state, body_out)
+        pred = cond_fn(*operands())
+        _validate_cuda_bool_pred(pred)
+        current_cuda_graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+        current_cuda_graph.set_current_conditional_node_condition(pred)
+
+    return state
+
+
+def inductor_while_loop_use_cuda_graph(inputs, stack_output: bool) -> bool:
+    return (
+        not stack_output
+        and cuda_graph_conditional_nodes_supported()
+        and torch.cuda.is_available()
+        and torch.cuda.is_current_stream_capturing()
+        and all(not isinstance(inp, torch.Tensor) or inp.is_cuda for inp in inputs)
+    )
+
+
+def inductor_while_loop_cuda_graph(
+    cond_graph,
+    body_graph,
+    carried_inputs,
+    additional_inputs,
+):
+    state = _clone_loop_state(carried_inputs)
+
+    def operands():
+        return [*state, *additional_inputs]
+
+    (pred,) = cond_graph(operands())
+    _validate_cuda_bool_pred(pred)
+
+    with _while_body(pred):
+        body_out = body_graph(operands())
+        _copy_loop_state(state, body_out)
+        (pred,) = cond_graph(operands())
+        _validate_cuda_bool_pred(pred)
+        current_cuda_graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+        current_cuda_graph.set_current_conditional_node_condition(pred)
+
+    return list(state)

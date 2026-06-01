@@ -499,6 +499,22 @@ class WrapperLine:
         raise NotImplementedError(f"FX codegen not yet supported for type {type(self)}")
 
 
+class EnterBlockLine(WrapperLine):
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_indent()
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_enter_block
+
+
+class ExitBlockLine(WrapperLine):
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_unindent()
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_exit_block
+
+
 @dataclasses.dataclass
 class EnterSubgraphLine(WrapperLine):
     wrapper: PythonWrapperCodegen
@@ -1408,6 +1424,10 @@ class PythonWrapperCodegen(CodeGen):
                 from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
                 from torch._inductor.codegen.memory_planning import _align as align
+                from torch._higher_order_ops.cudagraph_conditional_nodes import (
+                    inductor_while_loop_cuda_graph,
+                    inductor_while_loop_use_cuda_graph,
+                )
                 from torch import device, empty_strided
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
@@ -4247,80 +4267,114 @@ class PythonWrapperCodegen(CodeGen):
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
 
-        ckp_offset = len(outer_carried_inputs)
-        self.writeline(f"{name} = [None] * {len(outer_carried_inputs)}")
-        if stack_output:
-            self.writeline(
-                f"{name}.extend([[] for _ in range({len(outer_carried_inputs)})])"
+        def codegen_host_while_loop():
+            ckp_offset = len(outer_carried_inputs)
+            self.writeline(f"{name} = [None] * {len(outer_carried_inputs)}")
+            if stack_output:
+                self.writeline(
+                    f"{name}.extend([[] for _ in range({len(outer_carried_inputs)})])"
+                )
+
+            for i, carried_input in enumerate(outer_carried_inputs):
+                # set the initial state before the loop
+                self.writeline(f"{name}[{i}] = {carried_input}")
+
+            cond_outer_inputs = [
+                *[f"{name}[{i}]" for i in range(len(outer_carried_inputs))],
+                *outer_additional_inputs,
+            ]
+            cond_outer_outputs = [f"{name}_cond_result"]
+            body_outer_inputs = list(
+                cond_outer_inputs
+            )  # same inputs for cond_fn and body_fn
+            # Carry over the state from body_fn. Note: We only carry over
+            # the carried_inputs part of the inputs, the additional ones
+            # are passed in as they're before.
+            body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
+            # Check condition at the beginning and set up flag
+            codegen_subgraph(
+                while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
             )
+            self.writeline(f"should_loop = {cond_outer_outputs[0]}")
+            self.writeline("if not should_loop:")
+            if stack_output:
+                # Handle the case when loop never executes
+                for i, carried_input in enumerate(outer_carried_inputs):
+                    self.writeline(
+                        EnterSubgraphLine(self, while_loop.body_subgraph.graph)
+                    )
+                    self.writeline(
+                        f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()"
+                    )
+                    self.writeline(ExitSubgraphLine(self))
+            else:
+                for i, carried_input in enumerate(outer_carried_inputs):
+                    self.writeline(
+                        EnterSubgraphLine(self, while_loop.body_subgraph.graph)
+                    )
+                    self.writeline(f"{name}[{i}] = {carried_input}.clone()")
+                    self.writeline(ExitSubgraphLine(self))
 
-        for i, inp in enumerate(outer_carried_inputs):
-            # set the initial state before the loop
-            self.writeline(f"{name}[{i}] = {inp}")
-
-        cond_outer_inputs = [
-            *[f"{name}[{i}]" for i in range(len(outer_carried_inputs))],
-            *outer_additional_inputs,
-        ]
-        cond_outer_outputs = [f"{name}_cond_result"]
-        body_outer_inputs = list(
-            cond_outer_inputs
-        )  # same inputs for cond_fn and body_fn
-        # Carry over the state from body_fn. Note: We only carry over
-        # the carried_inputs part of the inputs, the additional ones
-        # are passed in as they're before.
-        body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
-        # Check condition at the beginning and set up flag
-        codegen_subgraph(
-            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
-        )
-        self.writeline(f"should_loop = {cond_outer_outputs[0]}")
-        self.writeline("if not should_loop:")
-        if stack_output:
-            # Handle the case when loop never executes
-            for i, carried_input in enumerate(outer_carried_inputs):
-                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-                self.writeline(f"{name}[{i}] = {carried_input}.unsqueeze(0).clone()")
-                self.writeline(ExitSubgraphLine(self))
-        else:
-            for i, carried_input in enumerate(outer_carried_inputs):
-                self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-                self.writeline(f"{name}[{i}] = {carried_input}.clone()")
-                self.writeline(ExitSubgraphLine(self))
-
-        self.writeline("while should_loop:")
-        # Body execution
-        self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-        codegen_subgraph(
-            while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
-        )
-        self.writeline(ExitSubgraphLine(self))
-
-        # Collect outputs if enabled
-        if stack_output:
+            self.writeline("while should_loop:")
+            # Body execution
             self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-            for i in range(len(outer_carried_inputs)):
-                self.writeline(f"{name}[{i + ckp_offset}].append({name}[{i}])")
+            codegen_subgraph(
+                while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+            )
             self.writeline(ExitSubgraphLine(self))
 
-        # Condition check at end of loop
-        self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
-        codegen_subgraph(
-            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
-        )
-        self.writeline(ExitSubgraphLine(self))
-        self.writeline(f"    should_loop = {cond_outer_outputs[0]}")
-
-        # Stack outputs after loop completion
-        if stack_output:
-            self.writeline("# Stack outputs after loop completion")
-            for i in range(len(outer_carried_inputs)):
-                self.writeline(f"if len({name}[{i + ckp_offset}]) > 0:")
+            # Collect outputs if enabled
+            if stack_output:
                 self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-                self.writeline(
-                    f"{name}[{i}] = torch.stack({name}[{i + ckp_offset}], dim=0)"
-                )
+                for i in range(len(outer_carried_inputs)):
+                    self.writeline(f"{name}[{i + ckp_offset}].append({name}[{i}])")
                 self.writeline(ExitSubgraphLine(self))
+
+            # Condition check at end of loop
+            self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
+            codegen_subgraph(
+                while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+            )
+            self.writeline(ExitSubgraphLine(self))
+            self.writeline(f"    should_loop = {cond_outer_outputs[0]}")
+
+            # Stack outputs after loop completion
+            if stack_output:
+                self.writeline("# Stack outputs after loop completion")
+                for i in range(len(outer_carried_inputs)):
+                    self.writeline(f"if len({name}[{i + ckp_offset}]) > 0:")
+                    self.writeline(
+                        EnterSubgraphLine(self, while_loop.body_subgraph.graph)
+                    )
+                    self.writeline(
+                        f"{name}[{i}] = torch.stack({name}[{i + ckp_offset}], dim=0)"
+                    )
+                    self.writeline(ExitSubgraphLine(self))
+
+        if not V.graph.aot_mode and while_loop.can_codegen_cuda_graph():
+            self.codegen_subgraph_common(while_loop.cond_subgraph)
+            self.codegen_subgraph_common(while_loop.body_subgraph)
+            all_outer_inputs = [*outer_carried_inputs, *outer_additional_inputs]
+            all_outer_inputs_list = f"[{', '.join(all_outer_inputs)}]"
+            self.writeline(
+                "if inductor_while_loop_use_cuda_graph("
+                f"{all_outer_inputs_list}, {stack_output}):"
+            )
+            self.writeline(EnterBlockLine())
+            self.writeline(
+                f"{name} = inductor_while_loop_cuda_graph("
+                f"{while_loop.cond_subgraph.graph.name}, "
+                f"{while_loop.body_subgraph.graph.name}, "
+                f"[{', '.join(outer_carried_inputs)}], "
+                f"[{', '.join(outer_additional_inputs)}])"
+            )
+            self.writeline(ExitBlockLine())
+            self.writeline("else:")
+            self.writeline(EnterBlockLine())
+            codegen_host_while_loop()
+            self.writeline(ExitBlockLine())
+        else:
+            codegen_host_while_loop()
 
     @staticmethod
     def statically_known_int_or_none(x):

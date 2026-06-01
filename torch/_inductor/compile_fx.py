@@ -2348,6 +2348,40 @@ def cudagraph_annotation_context(
     return contextlib.nullcontext()
 
 
+def _contains_auto_cudagraph_while_loop(gm: GraphModule | GmWrapper) -> bool:
+    if not isinstance(gm, GraphModule):
+        return False
+
+    from torch._higher_order_ops.cudagraph_conditional_nodes import (
+        cuda_graph_conditional_nodes_supported,
+    )
+
+    if not cuda_graph_conditional_nodes_supported():
+        return False
+
+    # Full static eligibility is known only after Inductor lowers the while_loop
+    # subgraphs. Keep default auto-enable narrow to the scalar-loop pattern from
+    # #169672, while explicit cudagraph requests continue to cover broader loops.
+    for node in gm.graph.nodes:
+        if (
+            node.op != "call_function"
+            or node.target is not torch.ops.higher_order.while_loop
+        ):
+            continue
+
+        carried_inputs = node.args[2]
+        additional_inputs = node.args[3]
+        if (
+            isinstance(carried_inputs, (tuple, list))
+            and len(carried_inputs) == 2
+            and isinstance(additional_inputs, (tuple, list))
+            and len(additional_inputs) == 0
+            and len(node.users) == 1
+        ):
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class CompilerConfigExtra:
     cudagraphs: BoxedBool
@@ -2361,6 +2395,7 @@ def create_compiler_config_extra(
     gm: GraphModule | GmWrapper,
 ) -> CompilerConfigExtra:
     gm_meta = gm.meta if isinstance(gm, GraphModule) else None
+    annotation = gm_meta.get("cudagraph_annotation") if gm_meta is not None else None
 
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
@@ -2373,10 +2408,7 @@ def create_compiler_config_extra(
     # Override cudagraphs BoxedBool based on override_cudagraphs annotation.
     # Disabling fwd disables bwd (copying activations isn't profitable),
     # so cudagraphs_bwd_override is only needed for fwd=True / bwd=False.
-    if (
-        gm_meta is not None
-        and (annotation := gm_meta.get("cudagraph_annotation")) is not None
-    ):
+    if annotation is not None:
         if annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
             cudagraphs = BoxedBool(annotation.fwd)
             if annotation.fwd:
@@ -2388,13 +2420,27 @@ def create_compiler_config_extra(
                     "disabling cudagraphs due to override_cudagraphs annotation"
                 )
 
-        # bwd override only matters when fwd enables cudagraphs but bwd
-        # explicitly disables them.
-        if cudagraphs.value and annotation.bwd is not None and not annotation.bwd:
-            cudagraphs_bwd_override = annotation.bwd
-            log_cudagraph_skip_and_bump_counter(
-                "disabling cudagraphs for backward due to override_cudagraphs annotation"
-            )
+    if (
+        not cudagraphs.value
+        and (annotation is None or annotation.fwd is None)
+        and _contains_auto_cudagraph_while_loop(gm)
+    ):
+        cudagraphs = BoxedBool(True)
+        cudagraphs_log.info(
+            "enabling cudagraphs for torch.while_loop with CUDA graph conditional nodes"
+        )
+
+    # bwd override matters whenever the final forward decision enables cudagraphs.
+    if (
+        cudagraphs.value
+        and annotation is not None
+        and annotation.bwd is not None
+        and not annotation.bwd
+    ):
+        cudagraphs_bwd_override = annotation.bwd
+        log_cudagraph_skip_and_bump_counter(
+            "disabling cudagraphs for backward due to override_cudagraphs annotation"
+        )
 
     # TODO: The modern style is to use CompileId from TracingContext to
     # identify Inductor compilation.  However, this CompileId cannot

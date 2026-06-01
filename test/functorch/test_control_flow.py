@@ -5670,6 +5670,26 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
+    def test_while_loop_traced_cudagraphs(self):
+        def f(x, iters):
+            def cond_fn(i, acc):
+                return i > 0
+
+            def body_fn(i, acc):
+                return i - 1, acc.sin() + 1
+
+            return while_loop(cond_fn, body_fn, (iters, x))[1]
+
+        x = torch.randn(4, device="cuda")
+        iters = torch.tensor(5, device="cuda")
+
+        _check_compile_cudagraph_backend(self, f, [x, iters])
+        _check_compile_many_backends_with_cudagraph(self, f, [x, iters])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
     def test_cond_traced_record_stream_reuse(self):
         torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:True"

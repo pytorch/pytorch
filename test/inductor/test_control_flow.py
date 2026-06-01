@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     parametrize,
+    TEST_CUDA_GRAPH_CONDITIONAL_NODES,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
@@ -1331,6 +1332,45 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
             autograd=autograd,
         )
+
+    @requires_gpu
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_while_loop_cuda_tensor_predicate_cudagraph_no_sync(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, iters):
+                def cond_fn(i, acc):
+                    return i > 0
+
+                def body_fn(i, acc):
+                    return i - 1, acc + 1
+
+                return torch.while_loop(cond_fn, body_fn, (iters, x))[1]
+
+        x = torch.tensor(0.0, device=GPU_TYPE)
+        iters = torch.tensor(5, device=GPU_TYPE)
+        compiled = torch.compile(Mod(), fullgraph=True)
+
+        for _ in range(3):
+            torch.compiler.cudagraph_mark_step_begin()
+            self.assertEqual(compiled(x, iters), torch.tensor(5.0, device=GPU_TYPE))
+
+        torch.cuda.synchronize()
+        torch.cuda.set_sync_debug_mode("error")
+        outputs = []
+        try:
+            for count in (2, 7):
+                iters.fill_(count)
+                torch.compiler.cudagraph_mark_step_begin()
+                outputs.append(compiled(x, iters).clone())
+        finally:
+            torch.cuda.set_sync_debug_mode("default")
+
+        torch.cuda.synchronize()
+        self.assertEqual(outputs[0], torch.tensor(2.0, device=GPU_TYPE))
+        self.assertEqual(outputs[1], torch.tensor(7.0, device=GPU_TYPE))
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
