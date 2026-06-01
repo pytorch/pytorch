@@ -817,6 +817,13 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, con
   const Tensor& running_mean = running_mean_opt.value_or(Tensor());
   const Tensor& running_var = running_var_opt.value_or(Tensor());
 
+  if (running_mean.defined()) {
+    check_dims_match_num_input_features("running_mean", self.size(1), running_mean.numel());
+  }
+  if (running_var.defined()) {
+    check_dims_match_num_input_features("running_var", self.size(1), running_var.numel());
+  }
+
   checkBackend("batch_norm_cpu_out", {self, weight, bias, running_mean, running_var}, Backend::CPU);
   // Resize out
   at::native::resize_output(out, self.sizes());
