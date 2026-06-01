@@ -33,6 +33,11 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
+    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED as TEST_ON_CPU,
+    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
+    IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
+    skipCPUIf,
+    skipCUDAIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
@@ -57,45 +62,64 @@ else:
 index = torch.ops.aten.index
 Tensor = torch.Tensor
 
-TEST_ON_CUDA = (
-    torch.cuda.is_available()
-    and torch.utils._triton.has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0)
-)
-TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
+DeviceConfig = namedtuple("DeviceConfig", ["dtypes", "dtypes_fast"])
+device_configs = {
+    "cuda": DeviceConfig(
+        dtypes=(
+            [torch.float32, torch.bfloat16, torch.float16]
+            if PLATFORM_SUPPORTS_BF16
+            else [torch.float16, torch.float32]
+        ),
+        dtypes_fast=[torch.float16],
+    ),
+    "xpu": DeviceConfig(
+        dtypes=[torch.float32, torch.bfloat16, torch.float16],
+        dtypes_fast=[torch.float16],
+    ),
+    "cpu": DeviceConfig(
+        dtypes=(
+            [torch.float32, torch.bfloat16, torch.float16]
+            if torch.backends.mkldnn.is_available()
+            and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+            else [torch.float32]
+        ),
+        dtypes_fast=[torch.float32],
+    ),
+}
 
+test_device = ("cpu",)
 if TEST_ON_CUDA:
-    test_device = ("cuda",)
-    test_dtypes = (
-        [torch.float32, torch.bfloat16, torch.float16]
-        if PLATFORM_SUPPORTS_BF16
-        else [torch.float16, torch.float32]
-    )
-    test_dtypes_fast = [torch.float16]
-    SKIP_UT_ON_CPU = False
+    test_device = ("cuda", "cpu") if TEST_ON_CPU else ("cuda",)
 elif TEST_ON_XPU:
     torch._C._set_onednn_allow_tf32(True)
     test_device = ("xpu",)
-    test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
-    test_dtypes_fast = [torch.float16]
-    SKIP_UT_ON_CPU = False
-else:
-    test_device = ("cpu",)
-    torch_config_string = torch.__config__.show()
-    SKIP_UT_ON_CPU = True
-    LONG_COMPILATION_ON_CPU = False
-    if "CLANG" in torch_config_string.upper():
-        # if the compiler is clang, skip UT for CPU due to long compilation time found in CI
-        # TODO: check reason of long compile time
-        LONG_COMPILATION_ON_CPU = True
 
-    test_dtypes = (
-        [torch.float32, torch.bfloat16]
-        if torch.backends.mkldnn.is_available()
-        and torch.ops.mkldnn._is_mkldnn_bf16_supported()
-        else [torch.float32]
-    )
-    test_dtypes_fast = [torch.float32]
+torch_config_string = torch.__config__.show()
+LONG_COMPILATION_ON_CPU = False
+if "CLANG" in torch_config_string.upper():
+    # if the compiler is clang, skip UT for CPU due to long compilation time found in CI
+    # TODO: check reason of long compile time
+    LONG_COMPILATION_ON_CPU = True
+
+
+# Keep the existing dtype-in-name suffixes while selecting dtype coverage per device.
+class parametrize_device_dtype(common_utils.parametrize):
+    def __init__(self, dtypes_attr):
+        super().__init__("dtype", ())
+        self.dtypes_attr = dtypes_attr
+
+    def _parametrize_test(self, test, generic_cls, device_cls):
+        dtypes = getattr(device_configs[device_cls.device_type], self.dtypes_attr)
+        for idx, dtype in enumerate(dtypes):
+            values = [dtype]
+            test_name = self._get_subtest_name(idx, values)
+            yield (test, test_name, {"dtype": dtype}, lambda _: [])
+
+
+def skip_on_cpu(test_func):
+    """Decorator to skip tests that are not supported on CPU."""
+    decorated_func = skipCPUIf(True, "Not supported on CPU")(test_func)
+    return decorated_func
 
 
 def skip_on_xpu(test_func):
@@ -142,8 +166,8 @@ def _generate_windowed(offset):
     return _windowed
 
 
-def _get_windowed_sdpa_mask(Mq, Mkv, offset):
-    return torch.tril(torch.ones(Mkv, Mkv, dtype=torch.bool, device=test_device[0]))[
+def _get_windowed_sdpa_mask(Mq, Mkv, offset, device):
+    return torch.tril(torch.ones(Mkv, Mkv, dtype=torch.bool, device=device))[
         offset : offset + Mq
     ]
 
@@ -196,9 +220,9 @@ def _squared(score, b, h, m, n):
     return score * score
 
 
-def _head_offset(dtype: torch.dtype):
+def _head_offset(dtype: torch.dtype, device: str):
     """Captured Buffer"""
-    head_offset = torch.rand(Hq, device=test_device[0], dtype=dtype)
+    head_offset = torch.rand(Hq, device=device, dtype=dtype)
 
     def score_mod(score, b, h, m, n):
         return score * head_offset[h]
@@ -314,7 +338,7 @@ class TestFlexDecoding(InductorTestCase):
     def setUp(self):
         super().setUp()
         self.test_inference_only = False
-        if test_device[0] == "cpu":
+        if self.device_type == "cpu":
             if LONG_COMPILATION_ON_CPU:
                 self.skipTest(
                     "skip UT for CPU due to long compilation time found in CI"
@@ -584,6 +608,7 @@ class TestFlexDecoding(InductorTestCase):
         v: Tensor,
         dtype: torch.dtype = torch.float16,
         block_mask: BlockMask | None = None,
+        kernel_options: dict | None = None,
         device="cuda",
     ):
         Q_B, Q_H, KV_H = q.shape[0], q.shape[1], k.shape[1]
@@ -614,6 +639,7 @@ class TestFlexDecoding(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(Q_H != KV_H),
+                kernel_options=kernel_options,
             )
         else:
             compiled_lse = None
@@ -625,6 +651,7 @@ class TestFlexDecoding(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(Q_H != KV_H),
+                kernel_options=kernel_options,
             )
         return compiled_out, compiled_lse
 
@@ -641,6 +668,7 @@ class TestFlexDecoding(InductorTestCase):
         KV_S: int = S,
         V_D: int = D,
         block_mask: BlockMask | None = None,
+        kernel_options: dict | None = None,
         device="cuda",
     ):
         if Q_H % KV_H != 0:
@@ -678,7 +706,14 @@ class TestFlexDecoding(InductorTestCase):
         ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
 
         compiled_out, compiled_lse = self.run_paged_attention(
-            score_mod, q, k, v, dtype, block_mask, device
+            score_mod,
+            q,
+            k,
+            v,
+            dtype,
+            block_mask,
+            device=device,
+            kernel_options=kernel_options,
         )
 
         self._check_out(
@@ -745,7 +780,7 @@ class TestFlexDecoding(InductorTestCase):
             block_mask = create_block_mask(noop_mask, Q_B, 1, Q_S, KV_S, device=device)
 
         compiled_out, _ = self.run_paged_attention(
-            score_mod, q, k, v, dtype, block_mask, device
+            score_mod, q, k, v, dtype, block_mask, device=device
         )
 
         self._check_out(
@@ -756,8 +791,8 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @expectedFailure  # tl.dot does not support embedding size less than 16
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @skip_on_cpu
+    @parametrize_device_dtype("dtypes_fast")
     def test_bw_decoding_fails(self, device, dtype):
         make_kv = functools.partial(
             torch.randn,
@@ -786,7 +821,7 @@ class TestFlexDecoding(InductorTestCase):
         output.backward(backward_grad)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
+    @parametrize_device_dtype("dtypes")
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @with_tf32_off
@@ -804,7 +839,7 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @common_utils.parametrize("page_size", test_page_sizes)
@@ -848,7 +883,7 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
+    @parametrize_device_dtype("dtypes")
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("BLOCK_SIZE", test_block_size)
     def test_builtin_score_mods_different_block_size(
@@ -864,7 +899,8 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test(score_mod, dtype, block_mask=block_mask, device=device)
 
     @unittest.skipIf(not has_triton_tma_device(), "Skip when TMA is not available")
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @skip_on_cpu
+    @parametrize_device_dtype("dtypes_fast")
     def test_tma_decoding(self, device, dtype: torch.dtype):
         n_heads, head_dim, seq_len = 4, 16, 128
 
@@ -886,7 +922,7 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     @common_utils.parametrize("k_s", test_input_strides)
     @common_utils.parametrize("v_s", test_input_strides)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
@@ -949,7 +985,7 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)
     @common_utils.parametrize("score_mod", test_score_mods)
@@ -980,7 +1016,7 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
+    @parametrize_device_dtype("dtypes")
     def test_skip_odd_keys(self, device, dtype: torch.dtype):
         def score_mod(score, b, h, q, kv):
             return torch.where(kv % 2 == 0, score, float("-inf"))
@@ -989,7 +1025,7 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test_with_paged_attention(score_mod, dtype, device=device)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
+    @parametrize_device_dtype("dtypes")
     def test_function_composition(self, device, dtype: torch.dtype):
         def score_mod_1(score, b, h, m, n):
             return score + (m - n)
@@ -1004,7 +1040,7 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test_with_paged_attention(composed_score_mod, dtype, device=device)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
+    @parametrize_device_dtype("dtypes")
     def test_captured_buffers(self, device, dtype: torch.dtype):
         head_offset = torch.rand(Hq, device=device, dtype=dtype)
 
@@ -1015,7 +1051,7 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test_with_paged_attention(score_mod, dtype, device=device)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
+    @parametrize_device_dtype("dtypes")
     def test_captured_buffers_all_dims(self, device, dtype: torch.dtype):
         head_scale = torch.randn(Hq, device=device)
         batch_scale = torch.randn(B, device=device)
@@ -1033,7 +1069,7 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test_with_paged_attention(all_bias, dtype, device=device)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     def test_seq_masking(self, device, dtype):
         seq_idx = torch.zeros(S, device=device, dtype=torch.bool)
         seq_idx[S // 2 :] = 1
@@ -1085,7 +1121,7 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test(Q_S=Q_S, KV_S=KV_S, block_mask=block_mask, device=device)
 
     @supported_platform
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    @skip_on_cpu
     def test_non_divisible_multi_token_offset_mask_with_captured_buffer(self, device):
         KV_S = S - 3
         Q_S = 3
@@ -1109,7 +1145,7 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     def test_load_from_bias_seq_only(self, device, dtype):
         bias = torch.randn(1, S, device=device, dtype=dtype)
 
@@ -1120,7 +1156,7 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test_with_paged_attention(bias_mod, dtype, device=device)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     def test_load_from_bias_seq_batch(self, device, dtype):
         bias = torch.randn(B, 1, S, device=device, dtype=dtype)
 
@@ -1131,7 +1167,7 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test_with_paged_attention(bias_mod, dtype, device=device)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     def test_load_from_bias_head_seq_batch(self, device, dtype):
         bias = torch.randn(
             B,
@@ -1150,7 +1186,7 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
-    @common_utils.parametrize("dtype", test_dtypes)
+    @parametrize_device_dtype("dtypes")
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     @with_tf32_off
     def test_non_equal_head_dims(self, device, dtype, score_mod, head_dims):
@@ -1163,7 +1199,7 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     def test_head_dependent_mask_mod(
@@ -1200,7 +1236,7 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     def test_subgraph_respect_decompostion(self, device, dtype):
         from torch._decomp import core_aten_decompositions
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -1251,7 +1287,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     def test_silu_on_score(self, device, dtype):
         def silu_score(score, b, h, q, kv):
             return torch.nn.functional.silu(score)
@@ -1260,7 +1296,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(silu_score, dtype, device=device)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     def test_padded_dense_causal(self, device, dtype):
         seq_len = torch.arange(B, device=device, dtype=torch.int32) + 1
 
@@ -1278,7 +1314,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(causal_njt, dtype, device=device)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     def test_captured_scale(self, device, dtype):
         scale = torch.ones((), device=device, dtype=torch.int32)
 
@@ -1289,7 +1325,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(score_mod_scale, dtype, device=device)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     def test_recompile_changed_score_mod(self, device, dtype):
         scale = torch.ones((), device=device, dtype=torch.int32)
         ADD = True
@@ -1309,7 +1345,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("head_dim", [17, 24, 94, 121])
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     @common_utils.serialTest()
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         # Use Q_S=1 (decode path) by not passing Q_S parameter - it defaults to 1
@@ -1329,7 +1365,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @expectedFailure  # If we capture a tensor then we can perform a reduction on it, and that shouldn't be allowed
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     def test_captured_reduction(self, device, dtype):
         scale = torch.randn((B, 8), device=device)
 
@@ -1583,7 +1619,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes)
+    @parametrize_device_dtype("dtypes")
     def test_njt_causal(self, device, dtype):
         offsets = torch.tensor(
             [0, 1024, 1024 + 512, S], device=device, dtype=torch.int32
@@ -1606,7 +1642,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(causal_njt, dtype, device=device)
 
     @supported_platform
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    @skip_on_cpu
     def test_mixed_dtypes(self, device):
         dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
         dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
@@ -1625,7 +1661,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(out.dtype, query.dtype)
 
     @supported_platform
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    @skip_on_cpu
     @unittest.skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
     def test_mixed_dtypes_sqnr_per_tensor(self, device):
         query_ref = torch.testing.make_tensor(
@@ -1663,7 +1699,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertGreater(sqnr, 10)
 
     @supported_platform
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    @skip_on_cpu
     @unittest.skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
     def test_mixed_dtypes_sqnr_per_head(self, device):
         query_ref = torch.testing.make_tensor(
@@ -1706,7 +1742,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertGreater(sqnr, 10)
 
     @supported_platform
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    @skip_on_cpu
     def test_mixed_dtype_backwards(self, device):
         dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
         dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
@@ -1740,6 +1776,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 compiled_fn(q, k, v, _identity, kernel_options=kernel_options)
             ).mean()
             out_mixed.backward()
+
+    @supported_platform
+    @skipCUDAIf(True, "Not supported on CUDA")
+    @skipXPUIf(True, "Not supported on XPU")
+    @parametrize_device_dtype("dtypes")
+    @common_utils.parametrize("partition_size", [64, 128, 256, 1024])
+    def test_flash_decoding_partition_size(self, device, dtype, partition_size):
+        def score_mod(score, b, h, m, n):
+            return score * 2
+
+        self.run_test_with_paged_attention(
+            score_mod,
+            dtype,
+            KV_S=64,
+            device=device,
+            kernel_options={"PARTITION_SIZE": partition_size},
+        )
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -1841,7 +1894,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         score_mod = _generate_windowed(1000)
         attention = functools.partial(flex_attention, score_mod=score_mod)
 
-        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000, device)
 
         sdpa_attention = functools.partial(
             torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
@@ -1863,7 +1916,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             flex_attention, block_mask=block_mask, score_mod=score_mod
         )
 
-        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000, device)
         sdpa_attention = functools.partial(
             torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
         )
@@ -1880,7 +1933,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         block_mask = create_block_mask(mask_mod, 1, 1, 8, S, device=device)
         attention = functools.partial(flex_attention, block_mask=block_mask)
 
-        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000, device)
         sdpa_attention = functools.partial(
             torch.nn.functional.scaled_dot_product_attention, attn_mask=sdpa_mask
         )
@@ -1893,7 +1946,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_windowed_no_mask_vs_sdpa_paged_attention(self, device):
         score_mod = _generate_windowed(1000)
 
-        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000, device)
 
         self.run_test_with_call_paged_attention(
             score_mod, None, sdpa_mask, Q_H=16, KV_H=16, Q_S=8, device=device
@@ -1905,7 +1958,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return q + 1000 >= kv
 
         score_mod = _generate_windowed(1000)
-        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000, device)
         self.run_test_with_call_paged_attention(
             score_mod, mask_mod, sdpa_mask, Q_H=16, KV_H=16, Q_S=8, device=device
         )
@@ -1915,15 +1968,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             return q + 1000 >= kv
 
-        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000)
+        sdpa_mask = _get_windowed_sdpa_mask(8, S, 1000, device)
 
         self.run_test_with_call_paged_attention(
             None, mask_mod, sdpa_mask, Q_H=16, KV_H=16, Q_S=8, device=device
         )
 
     @supported_platform
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
-    @common_utils.parametrize("dtype", test_dtypes)
+    @skip_on_cpu
+    @parametrize_device_dtype("dtypes")
     @common_utils.parametrize("score_mod", [_identity, _causal])
     def test_logsumexp_correctness(self, device, dtype, score_mod):
         make_kv = functools.partial(
@@ -1976,7 +2029,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    @skip_on_cpu
     def test_not_pw_of_two(self, device):
         query = torch.randn(1, 12, 1, 16, device=device)
         key = torch.randn(1, 2, 128, 16, device=device)
@@ -1986,7 +2039,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         flex_compiled(query, key, value, enable_gqa=True)
 
     @supported_platform
-    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    @skip_on_cpu
     def test_logsumexp_only_return(self, device):
         make_q = functools.partial(
             torch.randn,
@@ -2123,7 +2176,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
     @supported_platform
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     def test_larger_block_mask_bug(self, device, dtype):
         def mask_mod(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
@@ -2149,7 +2202,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = flex_attention_compiled(q, k, v, block_mask=mask_2)
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
-    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @parametrize_device_dtype("dtypes_fast")
     @common_utils.parametrize("score_mod", test_score_mods)
     @supported_platform
     def test_decode_at_different_input_position(
