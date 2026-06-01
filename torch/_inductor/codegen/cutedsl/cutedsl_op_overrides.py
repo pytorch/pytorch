@@ -324,6 +324,10 @@ class CuteDSLOpOverrides(OpOverrides):
         return result
 
     @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> CuteDSLArg:
+        return CuteDSLOpOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def add(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
         return CuteDSLOpOverrides._apply_binary_op(
             a, b, "({a} + {b})", lambda a_expr, b_expr: a_expr + b_expr
