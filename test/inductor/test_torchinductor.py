@@ -7622,6 +7622,23 @@ class CommonTemplate:
                 ),
             )
 
+    def test_pow_backward_dynamic_symint_exponent(self):
+        # Under dynamic=True the integer exponent becomes a symbolic scalar;
+        # pow's backward formula compared it with Scalar::equal, which was NYI
+        # for symbolic scalars. Issue #185715.
+        def fn(x, exponent):
+            y = torch.pow(x, exponent)
+            (grad,) = torch.autograd.grad(y.sum(), x)
+            return y, grad
+
+        x = torch.ones(
+            (1, 3), device=self.device, dtype=torch.bfloat16, requires_grad=True
+        )
+        x_c = x.detach().clone().requires_grad_(True)
+        eager = fn(x, 0)
+        compiled = torch.compile(fn, dynamic=True)(x_c, 0)
+        self.assertEqual(eager, compiled)
+
     @xfail_if_triton_cpu
     def test_pow_symfloat(self):
         def fn(x):

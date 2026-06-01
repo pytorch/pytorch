@@ -535,7 +535,14 @@ Tensor linalg_vector_norm_backward(
 }
 
 Tensor pow_backward(Tensor grad, const Tensor& self, const Scalar& exponent) {
-  if (exponent.equal(0.0)) {
+  // Under dynamic shapes the exponent can be a symbolic scalar, which
+  // Scalar::equal does not support. Materialize it first; the backward formula
+  // genuinely branches on whether the exponent is zero, so specializing on its
+  // concrete value here is required.
+  const bool exponent_is_zero = exponent.isSymbolic()
+      ? (exponent.toDouble() == 0.0)
+      : exponent.equal(0.0);
+  if (exponent_is_zero) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     auto grad_lambda = [&](auto exp) {
