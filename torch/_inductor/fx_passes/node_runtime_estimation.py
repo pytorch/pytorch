@@ -150,22 +150,27 @@ def _benchmark_collective_with_cuda_events_impl(
     """
     from torch._dynamo.testing import rand_strided
 
-    # Convert FakeTensors to real tensors before benchmarking
-    def to_real(t: torch.Tensor) -> torch.Tensor:
-        shape = [get_hint(dim) for dim in t.shape]
-        stride = [get_hint(s) for s in t.stride()]
+    # Convert FakeTensors to real tensors, and scalar SymInt args (e.g. the
+    # split sizes of all_to_all_single under dynamic shapes) to concrete ints,
+    # before calling the eager collective which expects plain ints.
+    def to_real(x: Any) -> Any:
+        if isinstance(x, torch.SymInt):
+            hint = get_hint(x)
+            if hint is None:
+                raise ValueError("Cannot benchmark collective with symbolic SymInt arg")
+            return hint
+        if not isinstance(x, torch.Tensor):
+            return x
+        shape = [get_hint(dim) for dim in x.shape]
+        stride = [get_hint(s) for s in x.stride()]
 
         if any(s is None for s in itertools.chain(shape, stride)):
             # This should not happen, as can_benhcmark_collective checks for unbacked
             raise ValueError("Cannot convert tensor with symbolic dimensions")
 
-        return rand_strided(shape, stride, device=t.device, dtype=t.dtype)  # type: ignore[arg-type]
+        return rand_strided(shape, stride, device=x.device, dtype=x.dtype)  # type: ignore[arg-type]
 
-    args, kwargs = torch.utils._pytree.tree_map_only(
-        torch.Tensor,
-        to_real,
-        (args, kwargs),
-    )
+    args, kwargs = torch.utils._pytree.tree_map(to_real, (args, kwargs))
 
     # Warmup: call collective once and wait
     torch.cuda.synchronize()
