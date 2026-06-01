@@ -13,11 +13,9 @@ Environment variables:
 
 import argparse
 import os
-import re
 import subprocess
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
 
@@ -26,6 +24,9 @@ from pathlib import Path
 WIN_CI_DIR = Path(__file__).resolve().parent
 # Repo root contains pyproject.toml; spin needs to run from there.
 PYTORCH_ROOT = WIN_CI_DIR.parent.parent.parent
+
+sys.path.insert(0, str(WIN_CI_DIR))
+from _common import download, write_env_exports  # noqa: E402
 
 
 # Pin numpy by Python version. Matches the legacy table in setup_build.bat.
@@ -79,44 +80,6 @@ def numpy_pin() -> str:
         if tag.startswith(prefix):
             return version
     return DEFAULT_NUMPY
-
-
-def shell_quote(value: str) -> str:
-    if value and all(c.isalnum() or c in "_-./:=" for c in value):
-        return value
-    return "'" + value.replace("'", "'\\''") + "'"
-
-
-_BASH_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def write_env_exports(env: dict[str, str], path: Path | None) -> None:
-    # Skip keys that aren't valid bash identifiers; see the matching
-    # filter in build_env_setup.py for context (bash function exports
-    # like BASH_FUNC_retry%% can't be re-exported via `export NAME=...`).
-    if path is None:
-        return
-    lines = [
-        f"export {k}={shell_quote(v)}"
-        for k, v in env.items()
-        if _BASH_IDENT_RE.match(k)
-    ]
-    path.write_text("\n".join(lines) + "\n")
-
-
-def download(url: str, dest: Path, attempts: int = 5) -> None:
-    """Stream `url` to `dest`, retrying with backoff on failure."""
-    for attempt in range(1, attempts + 1):
-        try:
-            print(f"Downloading {url} -> {dest} (attempt {attempt}/{attempts})")
-            with urllib.request.urlopen(url) as response, open(dest, "wb") as out:
-                while chunk := response.read(1 << 20):
-                    out.write(chunk)
-            return
-        except Exception as exc:
-            if attempt == attempts:
-                sys.exit(f"Failed to download {url}: {exc}")
-            time.sleep(2**attempt)
 
 
 def install_libuv(workdir: Path, python_prefix: Path) -> Path:
