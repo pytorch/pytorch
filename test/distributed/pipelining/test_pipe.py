@@ -120,6 +120,35 @@ class PipeTests(TestCase):
             """)
         print("Qualname check passed")
 
+    def test_pipeline_with_non_float_inputs(self):
+        """Test that pipeline() handles non-float tensors crossing stage boundaries."""
+    
+        class EmbeddingModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed = torch.nn.Embedding(100, 64)
+                self.linear = torch.nn.Linear(64, 64)
+    
+            def forward(self, input_ids, mask):
+                x = self.embed(input_ids)
+                pipe_split()
+                x = self.linear(x)
+                x = x * mask.unsqueeze(-1).float()
+                return x
+    
+        model = EmbeddingModel()
+        input_ids = torch.randint(0, 100, (2, 16))
+        mask = torch.ones(2, 16, dtype=torch.bool)
+    
+        # This should not raise "only Tensors of floating point dtype can require gradients"
+        pipe = pipeline(model, mb_args=(input_ids, mask))
+        self.assertEqual(pipe.num_stages, 2)
+    
+        # Verify non-float tensors don't have requires_grad in metadata
+        ref_out = model(input_ids, mask)
+        out = pipe(input_ids, mask)[0]
+        torch.testing.assert_close(out, ref_out)
+
 
 instantiate_parametrized_tests(PipeTests)
 
