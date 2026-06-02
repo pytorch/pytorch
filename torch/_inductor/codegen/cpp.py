@@ -974,6 +974,8 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def value_expr(expr, dtype):
+        # C++ index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
         return CppOverrides.index_expr(expr, dtype)
 
     @staticmethod
@@ -1809,6 +1811,8 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def value_expr(expr, dtype):
+        # C++ index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
         return CppVecOverrides.index_expr(expr, dtype)
 
     @staticmethod
@@ -1949,6 +1953,8 @@ class CppTile2DOverrides(CppVecOverrides):
 
     @staticmethod
     def value_expr(expr, dtype):
+        # C++ index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
         return CppTile2DOverrides.index_expr(expr, dtype)
 
 

@@ -131,6 +131,12 @@ def indexing_dtype_strength_reduction(loop_body: LoopBody) -> None:
 
 @dataclass(frozen=True)
 class _ValueUseRule:
+    # These fields are op arguments, so Any covers FX nodes, SymPy exprs,
+    # scalars, and nested tuples/lists. value_sinks seed the backward walk
+    # unconditionally. value_inputs propagate value demand only when the op's
+    # result is already value-reachable. indexing_inputs block propagation
+    # because they only affect addresses, bounds, masks, or other indexing-only
+    # state.
     value_inputs: tuple[Any, ...] = ()
     value_sinks: tuple[Any, ...] = ()
     indexing_inputs: tuple[Any, ...] = ()
@@ -396,9 +402,12 @@ def convert_index_expr_to_value_expr(loop_body: LoopBody) -> None:
     ``get_index`` expressions through any referenced ``indirect*`` symbols back
     to the corresponding ``set_indirect*`` input.
 
-    TODO: if mixed use (same index_expr used for both indexing and value)
-    ever occurs in practice, the node should be cloned so the indexing path
-    keeps the original index_expr. This hasn't been observed so far.
+    Mixed-use policy: if the same ``index_expr`` feeds both an indexing use and
+    a value use, rewrite it in-place to ``value_expr``. This is conservative and
+    correct because the indexing path may compute at a wider dtype than needed,
+    but the value path cannot lose precision. Cloning would preserve the
+    narrower indexing path, but the mixed-use case is rare and the simpler
+    in-place rewrite avoids extra CSE/register pressure.
     """
     if _ValueUseAnalysis(loop_body).run():
         LoopBody.get_nodes.clear_cache(loop_body)

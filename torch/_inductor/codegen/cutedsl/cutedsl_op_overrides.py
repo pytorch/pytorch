@@ -325,6 +325,8 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> CuteDSLArg:
+        # CuteDSL index_expr already emits the requested dtype, so value_expr
+        # has the same lowering here.
         return CuteDSLOpOverrides.index_expr(expr, dtype)
 
     @staticmethod

@@ -317,6 +317,8 @@ class PallasKernelOverrides(OpOverrides):
 
     @staticmethod
     def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        # Pallas index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
         return PallasKernelOverrides.index_expr(expr, dtype)
 
     @staticmethod

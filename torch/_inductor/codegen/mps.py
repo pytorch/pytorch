@@ -221,6 +221,8 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        # Metal index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
         return MetalOverrides.index_expr(expr, dtype)
 
     @staticmethod
