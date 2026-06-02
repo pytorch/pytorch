@@ -16726,9 +16726,6 @@ op_db: list[OpInfo] = [
                    "test_comprehensive",
                    device_type="cpu"
                ),
-               # MPS supports int8/uint8 but CPU does not, so consistency test cannot run
-               DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_match',
-                            device_type='mps', dtypes=(torch.int8, torch.uint8)),
            ],
            sample_inputs_func=sample_inputs_group_norm,
            reference_inputs_func=reference_inputs_group_norm,
