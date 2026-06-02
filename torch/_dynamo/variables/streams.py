@@ -336,7 +336,6 @@ class StreamContextVariable(ContextWrappingVariable):
 
     def __init__(self, stream: Optional["StreamVariable"], **kwargs: Any) -> None:
         self.stream = stream
-        stream_idx = self.get_stream().user_object_index
         super().__init__(
             target_values=(),
             initial_values=None,
