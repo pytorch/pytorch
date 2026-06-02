@@ -725,6 +725,15 @@ def _get_dtype_from_loopbodies(loop_bodies):
 def template_fusion_with_epilogues_supported(
     template: BaseSchedulerNode, epilogues: list[BaseSchedulerNode]
 ) -> tuple[bool, bool]:
+    def _template_supports_reindexed_epilogues() -> bool:
+        template_ir_node = template.node
+        if not isinstance(template_ir_node, ir.CppTemplateBuffer):
+            return False
+        return any(
+            cls.__name__ == "CppGemmTemplate"
+            for cls in type(template_ir_node.template).__mro__
+        )
+
     def _get_indexes_of_template_buf_read(
         epilogue_node: ir.Operation, template_buf_names: list[str]
     ) -> list[sympy.Expr]:
@@ -749,9 +758,10 @@ def template_fusion_with_epilogues_supported(
         elif num_indexes == 1:
             iotbr = index_of_template_buf_read[0]
             same_index = all(write.index == iotbr for write in epilogue_writes)
-            # TODO: Add support of fusion when the read of template buffer and the write of epilogue output
-            # in the epilogue node don't have the same index and change supported to True
-            supported = same_index
+            # GEMM template codegen can reindex epilogue stores to the 2D
+            # template buffer layout.  The scheduler only needs to reject
+            # epilogues with ambiguous reads from the template output.
+            supported = same_index or _template_supports_reindexed_epilogues()
         else:
             raise AssertionError("Should not reach here")
 
