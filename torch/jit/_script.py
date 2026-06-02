@@ -1001,6 +1001,7 @@ if _enabled:
         "_save_to_state_dict",
         "load_state_dict",
         "_load_from_state_dict",
+        "_postprocess_load_state_dict_incompatible_keys",
         "_named_members",
         "parameters",
         "named_parameters",
