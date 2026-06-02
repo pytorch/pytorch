@@ -5034,14 +5034,16 @@ class TestAOTExport(AOTTestCase):
         ):
             aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
 
-        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=False)
+        gm, graph_sig = aot_export_module(
+            mod, [inp], trace_joint=False, pre_dispatch=False
+        )
+        self.assertEqual(graph_sig.user_inputs_to_mutate, {"add": "arg1_1"})
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    return (add,)""",
+    add = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
+    return (add, add)""",
         )
 
         fw_graph_cell = [None]
@@ -5061,9 +5063,8 @@ def forward(self, arg0_1, arg1_1):
             str(fw_graph.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    return (add,)""",
+    add = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
+    return (add, add)""",
         )
 
     def test_aot_export_predispatch_func_simple(self):
