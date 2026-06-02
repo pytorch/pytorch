@@ -2597,12 +2597,12 @@ class CUDAGraphTreeManager:
     def try_end_curr_warmup(self, function_id: FunctionID) -> None:
         if self.can_start_new_generation():
             self.dealloc_current_path_weakrefs()
-            self.current_node = None
+            self.clear_current_path_state_and_set_to_none()
             return
 
         assert self.current_node is not None
         if self.current_node.all_outputs_are_dead():
-            self.current_node = None
+            self.clear_current_path_state_and_set_to_none()
             return
 
         self.check_warn_on_unable_to_start_executing(function_id)
@@ -2728,8 +2728,12 @@ class CUDAGraphTreeManager:
                 torch._C._set_storage_data_ptr_access_error_msg(_storage_deref, msg)
 
     def clear_current_path_state_and_set_to_none(self) -> None:
-        assert isinstance(self.current_node, CUDAGraphNode)
-        self.current_node.clear_path_state()
+        assert self.current_node is not None
+        if isinstance(self.current_node, CUDAGraphNode):
+            self.current_node.clear_path_state()
+        # If the current path is dead or has been explicitly invalidated, it
+        # cannot have a pending backward that CUDAGraph Trees should preserve.
+        self.running_forwards_with_pending_backwards = False
         self.current_node = None
 
     def apply_checkpoint_execution_state_in_allocator(self) -> None:
