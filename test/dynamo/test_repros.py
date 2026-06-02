@@ -1111,6 +1111,46 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 gc.enable()
             gc.collect()
 
+    def test_swap_tensors_after_custom_backend_graph_break(self):
+        def backend(gm, example_inputs):
+            return gm.forward
+
+        x = torch.randn(5, requires_grad=True)
+
+        @torch.compile(backend=backend)
+        def f(x):
+            y = x.to(dtype=torch.bfloat16)
+            torch.utils.swap_tensors(x, y)
+            return x.dtype
+
+        with torch._dynamo.config.patch(invalidate_compile_context_weakrefs=None):
+            self.assertEqual(f(x), torch.bfloat16)
+        self.assertEqual(x.dtype, torch.bfloat16)
+        self.assertEqual(len(weakref.getweakrefs(x)), 0)
+
+    def test_swap_module_params_on_conversion_after_custom_backend_graph_break(self):
+        def backend(gm, example_inputs):
+            return gm.forward
+
+        @torch.compile(backend=backend)
+        def use_emb():
+            emb = nn.Embedding(16, 8)
+            emb.weight.grad = torch.randn_like(emb.weight)
+
+            emb.to(dtype=torch.bfloat16)
+            return emb.weight.dtype, emb.weight.grad.dtype
+
+        prior = torch.__future__.get_swap_module_params_on_conversion()
+        torch.__future__.set_swap_module_params_on_conversion(True)
+        try:
+            with torch._dynamo.config.patch(invalidate_compile_context_weakrefs=None):
+                self.assertEqual(
+                    use_emb(),
+                    (torch.bfloat16, torch.bfloat16),
+                )
+        finally:
+            torch.__future__.set_swap_module_params_on_conversion(prior)
+
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()

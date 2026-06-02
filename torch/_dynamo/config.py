@@ -917,8 +917,9 @@ inline_single_use_invoke_subgraph: bool = True
 # Clear WeakIdRef entries from TracingContext.tensor_to_context and
 # MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
 # can block torch.utils.swap_tensors from working after compile.
-# - None (default): clear for registered backends (inductor, eager, etc.),
-#   don't clear for custom backends (to support standalone_compile, etc.)
+# - None (default): clear for registered backends (inductor, eager, etc.) and
+#   custom backend graph breaks, but don't clear full custom backend compiles
+#   (to support standalone_compile, etc.)
 # - True: always clear regardless of backend
 # - False: never clear regardless of backend
 invalidate_compile_context_weakrefs: bool | None = None
