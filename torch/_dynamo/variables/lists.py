@@ -488,6 +488,19 @@ class BaseListVariable(VariableTracker):
             else:
                 self.items += args[0].items  # type: ignore[attr-defined]
                 return self
+        elif name == "__reversed__":
+            # list/tuple/namedtuple __reversed__: reverse iterator over items.
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return ListIteratorVariable(
+                list(reversed(self.items)),
+                mutation_type=ValueMutationNew(),
+            )
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -812,6 +825,22 @@ class RangeVariable(BaseListVariable):
 
         if name == "count":
             return SourcelessBuilder.create(tx, self.range_count(*args))
+        elif name == "__reversed__":
+            # range.__reversed__: range_iterator with reversed bounds.
+            # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c (range_reverse)
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            length = self.range_length()
+            start = self.start()
+            step = self.step()
+            new_start = start + (length - 1) * step
+            new_step = -step
+            return RangeIteratorVariable(new_start, 0, new_step, length)
         elif name == "index":
             x = args[0].as_python_constant()
             start, stop, step = self.start(), self.stop(), self.step()
