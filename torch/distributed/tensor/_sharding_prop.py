@@ -37,6 +37,7 @@ from torch.distributed.tensor._utils import (
     try_find_mesh_from_args,
 )
 from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 from torch.utils._pytree import tree_map
 
 
@@ -535,7 +536,7 @@ class ShardingPropagator:
         # This is a nullcontext by default.
         with ShardingPropagator._fake_mode_lock:
             fake_mode = detect_fake_mode() or FakeTensorMode()
-            with fake_mode:
+            with fake_mode, disable_proxy_modes_tracing():
                 fake_args = op_schema.gen_fake_args()
                 fake_kwargs = op_schema.gen_fake_kwargs()
                 fake_out = op_schema.op(*fake_args, **fake_kwargs)
