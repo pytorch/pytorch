@@ -235,10 +235,13 @@ class ReplicateTest(MultiProcContinuousTest):
         ).to(device)
         for i, layer in enumerate(model):
             replicate(layer, mp_policy=mp_same if i < 2 else mp_mixed)
-        replicate(model, all_reduce_buffer_window=2)
+        replicate(model)
+        model.set_all_reduce_buffer_window(2)
 
         pop_counts: list[int] = []
-        orig_pop = _fsdp_param_group.FSDPCommContext.pop_all_reduce_states_for_window
+        orig_pop = (
+            _fsdp_param_group.FSDPCommContext.take_releasable_all_reduce_buffer_states
+        )
 
         def tracking_pop(comm_ctx):
             states = orig_pop(comm_ctx)
@@ -253,7 +256,7 @@ class ReplicateTest(MultiProcContinuousTest):
         )
         with mock.patch.object(
             _fsdp_param_group.FSDPCommContext,
-            "pop_all_reduce_states_for_window",
+            "take_releasable_all_reduce_buffer_states",
             tracking_pop,
         ):
             model(inp).sum().backward()

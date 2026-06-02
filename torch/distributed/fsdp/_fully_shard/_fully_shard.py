@@ -66,7 +66,6 @@ def fully_shard(
     *,
     mesh: DeviceMesh | None = ...,
     reshard_after_forward: bool | int | None = ...,
-    all_reduce_buffer_window: int | None = ...,
     shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
@@ -82,7 +81,6 @@ def fully_shard(
     *,
     mesh: DeviceMesh | None = ...,
     reshard_after_forward: bool | int | None = ...,
-    all_reduce_buffer_window: int | None = ...,
     shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
@@ -102,7 +100,6 @@ def fully_shard(
     *,
     mesh: DeviceMesh | None = None,
     reshard_after_forward: bool | int | None = None,
-    all_reduce_buffer_window: int | None = None,
     shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
@@ -204,17 +201,6 @@ def fully_shard(
               between forward and backward, the registered parameters must be
               the sharded parameters. For ``False`` or an ``int``, this can be
               done by manually resharding via :meth:`reshard`.
-        all_reduce_buffer_window (Optional[int]): This controls how many
-            extra mixed-dtype all-reduce input buffers may remain outstanding
-            per shared communication context during backward. ``None``
-            preserves the legacy behavior of holding each buffer on its
-            parameter group until backward finalization. An integer ``k >= 1``
-            releases a mixed-dtype buffer once it is ``k`` native all-reduce
-            layers behind the current all-reduce, reducing peak memory at the
-            cost of additional stream ordering. The setting is scoped to the
-            root FSDP module/shared communication context; for separately
-            rooted FSDP modules, use :func:`share_comm_ctx` if the window
-            should apply across those roots.
         shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard | ShardPlacementResult]]]):
             This callable can be used to override the sharding placement and/or
             mesh for a parameter. It can return:
@@ -252,13 +238,6 @@ def fully_shard(
         FSDPModule: The module with FSDP applied (in-place).
     """
     torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
-    if all_reduce_buffer_window is not None and (
-        isinstance(all_reduce_buffer_window, bool) or all_reduce_buffer_window < 1
-    ):
-        raise ValueError(
-            "all_reduce_buffer_window must be None or an integer >= 1, "
-            f"but got {all_reduce_buffer_window}"
-        )
     _validate_module(module, "fully_shard")
     mesh = mesh or _init_default_mesh()
     _validate_mesh(mesh, dp_mesh_dims)
@@ -293,7 +272,6 @@ def fully_shard(
         device,
         mp_policy,
         auto_reshard_after_forward,
-        all_reduce_buffer_window,
     )
 
     _init_param_group(
@@ -476,6 +454,47 @@ class FSDPModule:
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
+
+    def set_all_reduce_buffer_window(
+        self, window: int | None, *, recurse: bool = True
+    ) -> None:
+        """
+        Sets how many extra mixed-dtype all-reduce input buffers may remain
+        outstanding per shared communication context during backward.
+
+        ``None`` holds each mixed-dtype buffer until backward finalization. An
+        integer ``k >= 1`` releases a mixed-dtype buffer once it is ``k`` native
+        all-reduce layers behind the current all-reduce, reducing peak memory at
+        the cost of additional stream ordering. Only mixed-dtype reductions
+        (``reduce_dtype != param dtype``) allocate these buffers; same-dtype
+        reductions reuse ``param.grad`` and are unaffected.
+
+        The window is scoped to the root FSDP module / shared communication
+        context; for separately rooted FSDP modules sharing a context via
+        :func:`share_comm_ctx`, set the same value on each root.
+
+        Args:
+            window (Optional[int]): ``None`` or an integer ``>= 1``.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        if window is not None and (isinstance(window, bool) or window < 1):
+            raise ValueError(
+                f"all_reduce_buffer_window must be None or an integer >= 1, "
+                f"but got {window}"
+            )
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                state._all_reduce_buffer_window = window
+                # Before lazy init the per-state value above is read in
+                # `_init_shared_state`; once initialized the communication
+                # context is shared and live, so update it directly to take
+                # effect without waiting for re-initialization.
+                if state._is_root is not None:
+                    state._comm_ctx.all_reduce_buffer_release_window = window
 
     def set_reshard_after_forward(
         self, reshard_after_forward: bool, recurse: bool = True

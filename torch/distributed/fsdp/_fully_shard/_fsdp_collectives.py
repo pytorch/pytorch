@@ -540,6 +540,7 @@ def foreach_reduce(
 ) -> tuple[
     torch.Tensor,
     torch.Event,
+    torch.Stream,
     torch.Event,
     torch.Tensor | None,
     torch.Event | None,
@@ -642,6 +643,7 @@ def foreach_reduce(
                 return (
                     reduce_scatter_input,
                     reduce_scatter_event,
+                    post_reduce_stream,
                     post_reduce_stream.record_event(),
                     all_reduce_input,
                     all_reduce_event,
@@ -782,6 +784,7 @@ def foreach_reduce(
     return (
         reduce_scatter_input,
         reduce_scatter_event,
+        post_reduce_stream,
         post_reduce_event,
         all_reduce_input,
         all_reduce_event,
