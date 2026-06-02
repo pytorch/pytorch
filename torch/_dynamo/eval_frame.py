@@ -723,6 +723,63 @@ def set_enable_dynamic(enable: bool) -> Generator[None, None, None]:
         cleanup()
 
 
+_distribution_validation_lock = threading.Lock()
+_distribution_validation_depth = 0
+_distribution_validation_prior: bool | None = None
+
+
+def _disable_distribution_validation() -> Callable[[], None]:
+    global _distribution_validation_depth
+    global _distribution_validation_prior
+
+    with _distribution_validation_lock:
+        if _distribution_validation_depth == 0:
+            _distribution_validation_prior = (
+                torch.distributions.Distribution._validate_args
+            )
+            torch.distributions.Distribution.set_default_validate_args(False)
+        _distribution_validation_depth += 1
+
+    active = True
+
+    def cleanup() -> None:
+        nonlocal active
+        global _distribution_validation_depth
+        global _distribution_validation_prior
+
+        with _distribution_validation_lock:
+            if not active:
+                raise AssertionError("distribution validation scope exited twice")
+            active = False
+
+            if _distribution_validation_depth <= 0:
+                raise AssertionError("distribution validation scope underflow")
+            _distribution_validation_depth -= 1
+            if _distribution_validation_depth == 0:
+                if _distribution_validation_prior is None:
+                    raise AssertionError("missing distribution validation prior state")
+                torch.distributions.Distribution.set_default_validate_args(
+                    _distribution_validation_prior
+                )
+                _distribution_validation_prior = None
+
+    return cleanup
+
+
+def _run_cleanup_fns(cleanups: list[Callable[[], Any]]) -> None:
+    first_exception: BaseException | None = None
+    first_traceback: types.TracebackType | None = None
+    for cleanup in cleanups:
+        try:
+            cleanup()
+        except BaseException as exc:
+            if first_exception is None:
+                first_exception = exc
+                first_traceback = sys.exc_info()[2]
+    if first_exception is not None:
+        raise first_exception.with_traceback(first_traceback)
+
+
 # A thread local storage that serves to store information as Dynamo traces
 # through a user provided function.
 class DynamoTLS(threading.local):
@@ -904,11 +961,14 @@ class _TorchDynamoContext:
             raise AssertionError("__exit__ called without matching __enter__")
         set_eval_frame(None)
         set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
-        for cleanup in self.cleanup_fns:
-            cleanup()
-        self.cleanup_fns.clear()
-        _maybe_set_eval_frame(_callback_from_stance(self.prior))
-        self.prior = unset
+        try:
+            try:
+                _run_cleanup_fns(self.cleanup_fns)
+            finally:
+                self.cleanup_fns.clear()
+        finally:
+            _maybe_set_eval_frame(_callback_from_stance(self.prior))
+            self.prior = unset
         return None
 
     def __call__(self, fn: Any) -> Any:
@@ -1184,6 +1244,7 @@ class _TorchDynamoContext:
                     finally:
                         # Restore the dynamic layer stack depth if necessary.
                         set_eval_frame(None)
+                        fullgraph_count_error: RuntimeError | None = None
                         if fullgraph_count_enabled and call_succeeded:
                             count = set_fullgraph_compiled_frame_count(-1)
                             if count == 0 and _stance.stance == "default":
@@ -1199,7 +1260,7 @@ class _TorchDynamoContext:
                                         " Compilation was not attempted and no cached compiled"
                                         " code was found."
                                     )
-                                raise RuntimeError(msg)
+                                fullgraph_count_error = RuntimeError(msg)
                         if prior_error_on_graph_break is not None:
                             _set_error_on_graph_break(prior_error_on_graph_break)
                         if prior_error_on_nested_compile is not None:
@@ -1214,8 +1275,9 @@ class _TorchDynamoContext:
                         set_eval_frame_isolate_recompiles_id(
                             prior_isolate_recompiles_id
                         )
-                        for cleanup in cleanups:
-                            cleanup()
+                        _run_cleanup_fns(cleanups)
+                        if fullgraph_count_error is not None:
+                            raise fullgraph_count_error
                 return result
             finally:
                 if fullgraph_count_enabled:
@@ -1349,6 +1411,8 @@ class OptimizeContext(_TorchDynamoContext):
                 return functools.partial(ctx.__exit__, None, None, None)
 
             self.enter_exit_hooks.append(call_compiled_autograd)
+
+        self.enter_exit_hooks.append(_disable_distribution_validation)
 
     def __call__(self, fn: Any) -> Any:
         result = super().__call__(fn)
@@ -2739,8 +2803,6 @@ class TorchPatcher:
             torch.fx._symbolic_trace.Tracer.trace,
             reason="tracing into FX not fully supported",
         )
-        torch.distributions.Distribution.set_default_validate_args(False)
-
         from torch.optim import (
             adadelta,
             adagrad,

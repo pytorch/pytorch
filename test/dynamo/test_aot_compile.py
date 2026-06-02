@@ -608,6 +608,127 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_scopes_distribution_validation(self):
+        prior = torch.distributions.Distribution._validate_args
+        self.addCleanup(
+            torch.distributions.Distribution.set_default_validate_args, prior
+        )
+        torch.distributions.Distribution.set_default_validate_args(True)
+
+        def fn(x):
+            distribution = torch.distributions.Gamma(
+                concentration=torch.tensor(2.0),
+                rate=torch.tensor(1.0),
+            )
+            return distribution.log_prob(x)
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        inputs = (torch.ones(3),)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend=backend).aot_compile(
+            (inputs, {})
+        )
+
+        self.assertTrue(torch.distributions.Distribution._validate_args)
+        self.assertEqual(fn(*inputs), compiled_fn(*inputs))
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
+            torch.distributions.Normal(0.0, -1.0)
+
+    def test_aot_compile_fullgraph_scopes_distribution_validation(self):
+        from torch._dynamo.hooks import Hooks
+
+        prior = torch.distributions.Distribution._validate_args
+        self.addCleanup(
+            torch.distributions.Distribution.set_default_validate_args, prior
+        )
+        torch.distributions.Distribution.set_default_validate_args(True)
+
+        def fn(x):
+            distribution = torch.distributions.Gamma(
+                concentration=torch.tensor(2.0),
+                rate=torch.tensor(1.0),
+            )
+            return distribution.log_prob(x)
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        inputs = (torch.ones(3),)
+        compiled_fn = torch._dynamo.aot_compile.aot_compile_fullgraph(
+            fn,
+            (inputs, {}),
+            Hooks(),
+            backend,
+        )
+
+        self.assertTrue(torch.distributions.Distribution._validate_args)
+        self.assertEqual(fn(*inputs), compiled_fn(*inputs))
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
+            torch.distributions.Normal(0.0, -1.0)
+
+    def test_aot_compile_fullgraph_with_existing_guard_filter_fn(self):
+        from torch._dynamo.hooks import Hooks
+
+        def fn(x):
+            return x + 1
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        def guard_filter_fn(guard_entries):
+            return [False for _ in guard_entries]
+
+        inputs = (torch.ones(3),)
+        compiled_fn = torch._dynamo.aot_compile.aot_compile_fullgraph(
+            fn,
+            (inputs, {}),
+            Hooks(guard_filter_fn=guard_filter_fn),
+            backend,
+        )
+
+        self.assertEqual(fn(*inputs), compiled_fn(*inputs))
+
+    def test_aot_compile_module_scopes_distribution_validation(self):
+        from torch._dynamo.hooks import Hooks
+
+        prior = torch.distributions.Distribution._validate_args
+        self.addCleanup(
+            torch.distributions.Distribution.set_default_validate_args, prior
+        )
+        torch.distributions.Distribution.set_default_validate_args(True)
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                distribution = torch.distributions.Gamma(
+                    concentration=torch.tensor(2.0),
+                    rate=torch.tensor(1.0),
+                )
+                return distribution.log_prob(x)
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        mod = Module()
+        inputs = (torch.ones(3),)
+        compiled_mod = torch._dynamo.aot_compile.aot_compile_module(
+            mod,
+            [ModelInput(inputs, {}, [])],
+            Hooks(),
+            backend,
+        )
+
+        self.assertTrue(torch.distributions.Distribution._validate_args)
+        self.assertEqual(mod(*inputs), compiled_mod(*inputs))
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
+            torch.distributions.Normal(0.0, -1.0)
+
     def test_aot_compile_basic_forward(self):
         mod = SimpleLinearModule()
 
