@@ -1476,7 +1476,12 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def expm1(x):
-        return f"libdevice.expm1({x})"
+        # libdevice.expm1 flushes float32 subnormals to +0 with default FTZ.
+        # In this range expm1(x) rounds back to x, preserving eager's sign bit.
+        min_normal_f32 = (
+            "tl.full([], 0x00800000, tl.uint32).to(tl.float32, bitcast=True)"
+        )
+        return f"tl.where(tl.abs({x}) < {min_normal_f32}, {x}, libdevice.expm1({x}))"
 
     @staticmethod
     @maybe_upcast_float32()

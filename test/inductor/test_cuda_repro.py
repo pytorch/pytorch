@@ -3075,6 +3075,32 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(compile_decimal, Decimal(0))
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not SM80OrLater, "requires native CUDA bf16")
+    @skipIfRocm(msg="CUDA-specific bf16 subnormal regression")
+    @skipIfXpu(msg="CUDA-specific bf16 subnormal regression")
+    def test_elu_celu_bfloat16_subnormal_preserves_signbit(self):
+        x = torch.tensor(
+            [-32767, -32768, 0, 1], dtype=torch.int16, device=device_type
+        ).view(torch.bfloat16)
+
+        for op in (F.celu, F.elu):
+            with self.subTest(op=op.__name__):
+
+                def fn(x):
+                    return op(x)
+
+                actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+                expected = fn(x)
+
+                self.assertEqual(actual.dtype, torch.bfloat16)
+                self.assertEqual(
+                    actual.cpu().view(torch.int16),
+                    expected.cpu().view(torch.int16),
+                )
+                self.assertFalse(bool((actual[0] == 0).item()))
+                self.assertTrue(bool(torch.signbit(actual[0].float()).item()))
+
     @skipIfXpu(msg="AssertionError: torch-xpu-ops: #3006")
     @config.patch(
         {"triton.use_block_ptr": True, "triton.codegen_upcast_to_fp32": False}
