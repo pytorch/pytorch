@@ -5186,7 +5186,10 @@ class SourcelessBuilder:
         handlers[types.MemberDescriptorType] = (
             lambda tx, value: MemberDescriptorVariable(value)
         )
-        handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
+        handlers[inspect.Signature] = lambda tx, value: InspectVariable(
+            value, mutation_type=ValueMutationNew()
+        )
+        handlers[inspect.Parameter] = lambda tx, value: InspectVariable(
             value, mutation_type=ValueMutationNew()
         )
         handlers[random.Random] = lambda tx, value: RandomClassVariable()

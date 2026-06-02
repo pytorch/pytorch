@@ -461,6 +461,11 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_function(self) -> types.FunctionType:
         raise NotImplementedError
 
+    def get_function_for_signature(
+        self, _converting: set[int] | None = None, follow_wrapped: bool = True
+    ) -> types.FunctionType:
+        return self.get_function()
+
     def get_module(self) -> str:
         return self.get_globals()["__name__"]
 
@@ -1046,12 +1051,20 @@ class InspectSignatureVariable(UserFunctionVariable):
     not change across different calls to the same function.
     """
 
+    _NESTED_FUNCTION_KWARGS = frozenset(
+        {"follow_wrapped", "globals", "locals", "eval_str"}
+    )
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        target_arg, signature_kwargs = self._signature_target(args, kwargs)
+        if isinstance(target_arg, NestedUserFunctionVariable):
+            return self._call_nested_signature(tx, target_arg, signature_kwargs)
+
         # Fast path: cache results for repeated calls on the same function
         if len(args) == 1 and not kwargs:
             target_arg = args[0]
@@ -1069,6 +1082,78 @@ class InspectSignatureVariable(UserFunctionVariable):
                 return result
 
         return super().call_function(tx, args, kwargs)
+
+    @staticmethod
+    def _signature_target(
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> tuple[VariableTracker | None, dict[str, VariableTracker]]:
+        if len(args) == 1 and "obj" not in kwargs:
+            return args[0], kwargs
+        if not args and "obj" in kwargs:
+            signature_kwargs = dict(kwargs)
+            return signature_kwargs.pop("obj"), signature_kwargs
+        return None, kwargs
+
+    def _call_nested_signature(
+        self,
+        tx: "InstructionTranslatorBase",
+        target_arg: "NestedUserFunctionVariable",
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        signature_kwargs: dict[str, Any] = {}
+        for name, value in kwargs.items():
+            if name not in self._NESTED_FUNCTION_KWARGS:
+                unimplemented(
+                    gb_type="inspect.signature on nested function with unsupported kwargs",
+                    context=f"inspect.signature({target_arg.get_name()}, {name}=...)",
+                    explanation=(
+                        f"Dynamo does not support the inspect.signature kwarg "
+                        f"{name!r} for nested functions."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            try:
+                signature_kwargs[name] = value.as_python_constant()
+            except NotImplementedError as e:
+                unimplemented(
+                    gb_type="inspect.signature on nested function with non-constant kwargs",
+                    context=f"inspect.signature({target_arg.get_name()}, {name}=...)",
+                    explanation=(
+                        "Dynamo requires inspect.signature kwargs for nested "
+                        "functions to be Python constants."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    from_exc=e,
+                )
+        try:
+            if signature_kwargs.get("eval_str", False):
+                unimplemented(
+                    gb_type="inspect.signature on nested function with eval_str=True",
+                    context=f"inspect.signature({target_arg.get_name()}, eval_str=True)",
+                    explanation=(
+                        "Dynamo does not evaluate string annotations for "
+                        "nested functions during inspect.signature tracing."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            signature_target = target_arg.get_function_for_signature(
+                follow_wrapped=bool(signature_kwargs.get("follow_wrapped", True))
+            )
+        except NotImplementedError as e:
+            unimplemented(
+                gb_type="inspect.signature on nested function with non-constant signature metadata",
+                context=f"inspect.signature({target_arg.get_name()})",
+                explanation=(
+                    "Dynamo could not statically construct signature "
+                    "metadata for this nested function."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+                from_exc=e,
+            )
+        return VariableTracker.build(
+            tx, inspect.signature(signature_target, **signature_kwargs)
+        )
 
 
 class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
@@ -1874,6 +1959,42 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def self_args(self) -> list[VariableTracker]:
         return []
 
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        try:
+            attr_name = args[0].as_python_constant() if args else None
+        except NotImplementedError:
+            attr_name = None
+        if not kwargs and attr_name in ("__defaults__", "__kwdefaults__"):
+            if name == "__setattr__" and len(args) == 2:
+                value = args[1]
+                if value.is_python_constant() and value.as_python_constant() is None:
+                    value = None
+                elif attr_name == "__defaults__":
+                    if not isinstance(value, variables.TupleVariable):
+                        raise_type_error(
+                            tx, "__defaults__ must be set to a tuple object"
+                        )
+                elif not isinstance(value, variables.ConstDictVariable):
+                    raise_type_error(tx, "__kwdefaults__ must be set to a dict object")
+                if attr_name == "__defaults__":
+                    self.defaults = value
+                else:
+                    self.kwdefaults = value
+                return ConstantVariable.create(None)
+            if name == "__delattr__" and len(args) == 1:
+                if attr_name == "__defaults__":
+                    self.defaults = None
+                else:
+                    self.kwdefaults = None
+                return ConstantVariable.create(None)
+        return super().call_method(tx, name, args, kwargs)
+
     def as_python_constant(self) -> types.FunctionType:
         return self.get_function()
 
@@ -1958,13 +2079,52 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 cells.append(make_cell(value))
             closure_cells = tuple(cells)
 
-        func = types.FunctionType(
+        return self._make_function(closure_cells)
+
+    def get_function_for_signature(
+        self, _converting: set[int] | None = None, follow_wrapped: bool = True
+    ) -> types.FunctionType:
+        self_id = id(self)
+        if _converting is None:
+            _converting = set()
+        if self_id in _converting:
+            raise ClosureConversionError(
+                "cycle detected while converting nested function for inspect.signature"
+            )
+        _converting.add(self_id)
+        try:
+            closure_cells = None
+            code = self.get_code()
+            if code.co_freevars:
+                closure_cells = tuple(make_cell(None) for _ in code.co_freevars)
+            return self._make_function_for_signature(
+                closure_cells,
+                _converting=_converting,
+                follow_wrapped=follow_wrapped,
+            )
+        finally:
+            _converting.discard(self_id)
+
+    def _make_function(
+        self,
+        closure_cells: tuple[CellType, ...] | None,
+    ) -> types.FunctionType:
+        func = self._make_bare_function(closure_cells)
+        self._set_function_body_attrs(func)
+        return func
+
+    def _make_bare_function(
+        self, closure_cells: tuple[CellType, ...] | None
+    ) -> types.FunctionType:
+        return types.FunctionType(
             self.code.as_python_constant(),
             self.f_globals,
             self.fn_name.as_python_constant(),
             argdefs=None,
             closure=closure_cells,
         )
+
+    def _set_function_body_attrs(self, func: types.FunctionType) -> None:
         if self.defaults:
             func.__defaults__ = self.defaults.as_python_constant()
         if self.kwdefaults:
@@ -1982,7 +2142,171 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                     f"annotations must be a dict, got {type(annotations)}"
                 )
             func.__annotations__ = annotations
+
+    def _make_function_for_signature(
+        self,
+        closure_cells: tuple[CellType, ...] | None,
+        *,
+        _converting: set[int] | None,
+        follow_wrapped: bool,
+    ) -> types.FunctionType:
+        func = self._make_bare_function(closure_cells)
+        if not self.dict_vt:
+            self._check_signature_body_attrs_safe()
+            self._set_function_body_attrs(func)
+            return func
+
+        if self.dict_vt.contains("__signature__"):
+            signature = self._signature_attr_as_python_constant(
+                "__signature__",
+                self.dict_vt.getitem("__signature__"),
+                _converting,
+            )
+            func.__signature__ = signature  # type: ignore[attr-defined]
+            if signature is not None:
+                return func
+            follow_wrapped = False
+
+        if follow_wrapped and self.dict_vt.contains("__wrapped__"):
+            func.__wrapped__ = self._signature_attr_as_python_constant(  # type: ignore[attr-defined]
+                "__wrapped__",
+                self.dict_vt.getitem("__wrapped__"),
+                _converting,
+            )
+            return func
+
+        partialmethod_attr = (
+            "__partialmethod__" if sys.version_info >= (3, 13) else "_partialmethod"
+        )
+        if self.dict_vt.contains(partialmethod_attr):
+            partialmethod = self._signature_attr_as_python_constant(
+                partialmethod_attr,
+                self.dict_vt.getitem(partialmethod_attr),
+                _converting,
+            )
+            if isinstance(partialmethod, functools.partialmethod):
+                setattr(func, partialmethod_attr, partialmethod)
+                return func
+
+        if self.dict_vt.contains("__text_signature__"):
+            text_signature = self._signature_attr_as_python_constant(
+                "__text_signature__",
+                self.dict_vt.getitem("__text_signature__"),
+                _converting,
+            )
+            if text_signature:
+                func.__text_signature__ = text_signature  # type: ignore[attr-defined]
+                return func
+
+        self._check_signature_body_attrs_safe()
+        self._set_function_body_attrs(func)
         return func
+
+    def _check_signature_body_attrs_safe(self) -> None:
+        if self.defaults is not None:
+            if not isinstance(self.defaults, variables.TupleVariable):
+                raise ClosureConversionError(
+                    "__defaults__ metadata is not safely supported"
+                )
+            for value in self.defaults.items:
+                self._check_safe_signature_literal("__defaults__", value)
+
+        if self.kwdefaults is not None:
+            if not isinstance(self.kwdefaults, variables.ConstDictVariable):
+                raise ClosureConversionError(
+                    "__kwdefaults__ metadata is not safely supported"
+                )
+            for value in self.kwdefaults.items.values():
+                self._check_safe_signature_literal("__kwdefaults__", value)
+
+        if self.dict_vt and self.dict_vt.contains("__annotations__"):
+            annotations = self.dict_vt.getitem("__annotations__")
+            if isinstance(annotations, variables.ConstDictVariable):
+                for value in annotations.items.values():
+                    self._check_safe_signature_literal("__annotations__", value)
+            elif isinstance(annotations, variables.TupleVariable):
+                for value in annotations.items[1::2]:
+                    self._check_safe_signature_literal("__annotations__", value)
+            else:
+                raise ClosureConversionError(
+                    "__annotations__ metadata is not safely supported"
+                )
+
+    @staticmethod
+    def _check_safe_signature_literal(name: str, value: VariableTracker) -> None:
+        try:
+            constant = value.as_python_constant()
+        except NotImplementedError as e:
+            raise ClosureConversionError(
+                f"{name} metadata is not safely supported"
+            ) from e
+        safe_literal_types = (
+            type(None),
+            bool,
+            int,
+            float,
+            complex,
+            str,
+            bytes,
+            type(Ellipsis),
+            type(NotImplemented),
+        )
+        if not isinstance(constant, type) and type(constant) not in safe_literal_types:
+            raise ClosureConversionError(f"{name} metadata is not safely supported")
+
+    def _signature_attr_as_python_constant(
+        self,
+        name: str,
+        value: VariableTracker,
+        _converting: set[int] | None,
+    ) -> object:
+        if name == "__signature__" and isinstance(value, BaseUserFunctionVariable):
+            raise ClosureConversionError(
+                "callable __signature__ metadata is not safely supported"
+            )
+        if isinstance(value, NestedUserFunctionVariable):
+            return value.get_function_for_signature(_converting)
+        if isinstance(value, UserMethodVariable):
+            raise ClosureConversionError(
+                f"inspect.signature metadata {name} is a user method"
+            )
+        if isinstance(value, UserFunctionVariable):
+            if value.source is not None:
+                raise ClosureConversionError(
+                    f"source-backed inspect.signature metadata {name} is not safely supported"
+                )
+            return value.get_function_for_signature(_converting)
+
+        if isinstance(value, variables.InspectVariable) and isinstance(
+            value.value, (inspect.Signature, inspect.Parameter)
+        ):
+            if name == "__signature__":
+                if value.source is not None:
+                    raise ClosureConversionError(
+                        "source-backed __signature__ metadata is not safely supported"
+                    )
+                if isinstance(value.value, inspect.Signature) and not hasattr(
+                    value.value, "_parameters"
+                ):
+                    raise ClosureConversionError(
+                        "incomplete __signature__ metadata is not safely supported"
+                    )
+            return value.value
+        result = value.as_python_constant()
+        if name in ("__signature__", "__text_signature__") and isinstance(result, str):
+            raise ClosureConversionError(
+                f"string inspect.signature metadata {name} is not safely supported"
+            )
+        if (
+            name == "__signature__"
+            and result is not None
+            and not isinstance(result, (inspect.Signature, str))
+            and callable(result)
+        ):
+            raise ClosureConversionError(
+                "callable __signature__ metadata is not safely supported"
+            )
+        return result
 
     def var_getattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -2000,7 +2324,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             return super().var_getattr(tx, name)
         if name == "__defaults__":
             d = getattr(self, "defaults", None)
-            return d.as_python_constant() if d else ConstantVariable.create(None)
+            return d if d else ConstantVariable.create(None)
+        if name == "__kwdefaults__":
+            d = getattr(self, "kwdefaults", None)
+            return d if d else ConstantVariable.create(None)
         elif name in cmp_name_to_op_mapping:
             return variables.GetAttrVariable(
                 self, name, py_type=type(getattr(types.FunctionType, name))
