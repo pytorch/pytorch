@@ -2671,34 +2671,6 @@ class TestBinaryUfuncsDevice(TestCase):
                     a, torch.tensor([case], device=device, dtype=dtypes[1])
                 )
 
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_copysign_nan_sign(self, device, dtype):
-        # Regression test for https://github.com/pytorch/pytorch/issues/181804
-        # Create NaN with explicit sign bits via bit manipulation to avoid
-        # relying on negation preserving NaN sign across all GPU architectures.
-        if dtype == torch.float16:
-            pos_nan_bits = torch.tensor([0x7E00, 0x7E00], dtype=torch.int16)
-            neg_nan_bits = torch.tensor(
-                [0xFE00 - 0x10000, 0xFE00 - 0x10000], dtype=torch.int16
-            )
-        else:
-            pos_nan_bits = torch.tensor([0x7FC0, 0x7FC0], dtype=torch.int16)
-            neg_nan_bits = torch.tensor(
-                [0xFFC0 - 0x10000, 0xFFC0 - 0x10000], dtype=torch.int16
-            )
-        pos_nan = pos_nan_bits.view(dtype).to(device)
-        neg_nan = neg_nan_bits.view(dtype).to(device)
-        mag = torch.tensor([1.0, 1.0], dtype=dtype, device=device)
-
-        result_pos = torch.copysign(mag, pos_nan)
-        result_neg = torch.copysign(mag, neg_nan)
-        self.assertEqual(
-            result_pos, torch.tensor([1.0, 1.0], dtype=dtype, device=device)
-        )
-        self.assertEqual(
-            result_neg, torch.tensor([-1.0, -1.0], dtype=dtype, device=device)
-        )
-
     @dtypes(
         *product(
             floating_types_and(torch.half, torch.bfloat16),
@@ -4618,6 +4590,36 @@ class TestBinaryUfuncsDevice(TestCase):
         self.assertEqual(x * 2.5, x * torch.tensor(2.5, device=device, dtype=dtype))
 
 
+class TestBinaryUfuncsCUDA(TestCase):
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_copysign_nan_sign(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181804
+        # Create NaN with explicit sign bits via bit manipulation to avoid
+        # relying on negation preserving NaN sign across all GPU architectures.
+        if dtype == torch.float16:
+            pos_nan_bits = torch.tensor([0x7E00, 0x7E00], dtype=torch.int16)
+            neg_nan_bits = torch.tensor(
+                [0xFE00 - 0x10000, 0xFE00 - 0x10000], dtype=torch.int16
+            )
+        else:
+            pos_nan_bits = torch.tensor([0x7FC0, 0x7FC0], dtype=torch.int16)
+            neg_nan_bits = torch.tensor(
+                [0xFFC0 - 0x10000, 0xFFC0 - 0x10000], dtype=torch.int16
+            )
+        pos_nan = pos_nan_bits.view(dtype).to(device)
+        neg_nan = neg_nan_bits.view(dtype).to(device)
+        mag = torch.tensor([1.0, 1.0], dtype=dtype, device=device)
+
+        result_pos = torch.copysign(mag, pos_nan)
+        result_neg = torch.copysign(mag, neg_nan)
+        self.assertEqual(
+            result_pos, torch.tensor([1.0, 1.0], dtype=dtype, device=device)
+        )
+        self.assertEqual(
+            result_neg, torch.tensor([-1.0, -1.0], dtype=dtype, device=device)
+        )
+
+
 tensor_binary_ops = [
     "__lt__",
     "__le__",
@@ -4708,8 +4710,9 @@ def generate_not_implemented_tests(cls):
 
 generate_not_implemented_tests(TestBinaryUfuncsDevice)
 instantiate_device_type_tests(
-    TestBinaryUfuncsDevice, globals(), allow_mps=True, allow_xpu=True, except_for="cpu"
+    TestBinaryUfuncsDevice, globals(), allow_xpu=True, except_for="cpu"
 )
+instantiate_device_type_tests(TestBinaryUfuncsCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
