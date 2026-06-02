@@ -2836,7 +2836,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             inspect.getattr_static(self.value, "__setattr__", None)
         ) and not isinstance(self.value, threading.local)
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         return unpack_iterable(tx, self)
 
     def is_supported_random(self) -> bool:
@@ -4949,10 +4951,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
             #
             # TODO this duplicates the logic in `BuiltinVariable(tuple)`
-            if tx is None:
-                from torch._dynamo.symbolic_convert import InstructionTranslator
-
-                tx = InstructionTranslator.current_tx()
             elems = unpack_iterable(tx, init_args[0])
             self._base_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
         else:
