@@ -3646,6 +3646,76 @@ class TestIssubclass(torch._dynamo.test_case.TestCase):
         ):
             fn(torch.randn(3))
 
+    def test_wrapper_subclass_vmap_compile(self):
+        class TransparentTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @staticmethod
+            def __new__(cls, data):
+                if isinstance(data, cls):
+                    return data
+                if not isinstance(data, torch.Tensor):
+                    data = torch.as_tensor(data)
+                kwargs = {}
+                if data.layout == torch.strided:
+                    kwargs["strides"] = data.stride()
+                    kwargs["storage_offset"] = data.storage_offset()
+                r = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.shape,
+                    dtype=data.dtype,
+                    layout=data.layout,
+                    device=data.device,
+                    requires_grad=data.requires_grad,
+                    **kwargs,
+                )
+                r._data = data
+                return r
+
+            def __tensor_flatten__(self):
+                return ["_data"], {}
+
+            @classmethod
+            def __tensor_unflatten__(
+                cls, inner_tensors, metadata, outer_size, outer_stride
+            ):
+                return cls(inner_tensors["_data"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                def unwrap(x):
+                    if isinstance(x, TransparentTensor):
+                        return x._data
+                    if isinstance(x, (list, tuple)):
+                        return type(x)(unwrap(a) for a in x)
+                    return x
+
+                result = func(*unwrap(args), **unwrap(kwargs))
+                if isinstance(result, torch.Tensor):
+                    return cls(result)
+                if isinstance(result, (tuple, list)):
+                    return type(result)(
+                        cls(r) if isinstance(r, torch.Tensor) else r for r in result
+                    )
+                return result
+
+        def fn(x, tag):
+            return x + tag
+
+        vmapped = torch.vmap(fn, in_dims=(0, None))
+
+        x = torch.randn(8, 4)
+        tag = TransparentTensor(torch.tensor([1.0, 2.0, 3.0, 4.0]))
+
+        result_eager = vmapped(x, tag)
+
+        compiled = torch.compile(vmapped, backend="eager", fullgraph=True)
+        result_compiled = compiled(x, tag)
+        self.assertEqual(result_eager, result_compiled)
+
 
 class TestNestedTensor(
     _SubclassCompileCheckMixin,
