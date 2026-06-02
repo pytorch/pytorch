@@ -37,6 +37,9 @@ GEMM_EPILOGUE_OPS = {
     ),
     torch.ops.aten._scaled_mm.default: GemmEpilogueOpInfo("scaled_mm", 0, 1),
     torch.ops.aten._scaled_mm_v2.default: GemmEpilogueOpInfo("scaled_mm", 0, 1),
+    torch.ops.aten._scaled_grouped_mm.default: GemmEpilogueOpInfo(
+        "scaled_grouped_mm", 0, 1, supports_quack=False
+    ),
     torch.ops.aten._grouped_mm.default: GemmEpilogueOpInfo("grouped_mm", 0, 1),
 }
 _GEMM_EPILOGUE_OP_ALIASES = {
@@ -45,9 +48,10 @@ _GEMM_EPILOGUE_OP_ALIASES = {
     torch.bmm: torch.ops.aten.bmm.default,
     torch.baddbmm: torch.ops.aten.baddbmm.default,
     torch._grouped_mm: torch.ops.aten._grouped_mm.default,
+    torch._scaled_grouped_mm: torch.ops.aten._scaled_grouped_mm.default,
 }
 _SUPPORTED_BACKENDS = {"TRITON", "QUACK"}
-_SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_scaled_mm_v2/_grouped_mm"
+_SUPPORTED_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_scaled_mm_v2/_scaled_grouped_mm/_grouped_mm"
 
 
 @torch.library.custom_op("flex_gemm::mx_e8m0_scale", mutates_args=())

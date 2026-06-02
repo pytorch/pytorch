@@ -27,6 +27,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
 )
 from torch.testing._internal.common_quantized import (
@@ -1515,6 +1516,108 @@ class GemmEpilogueFusionTests(TestCase):
             checks=checks,
             check_nots=(*check_nots, "extern_kernels._scaled_mm"),
         )
+
+    def test_scaled_grouped_mm_epilogue_hop_accepts_supported_op(self):
+        def fn(a, b, scale_a, scale_b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_grouped_mm.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={"out_dtype": torch.bfloat16},
+            )
+
+        a = torch.empty(16, 64, device="cpu", dtype=torch.float8_e4m3fn)
+        b = torch.empty(32, 64, device="cpu", dtype=torch.float8_e4m3fn).t()
+        scale_a = torch.empty(16, device="cpu", dtype=torch.float32)
+        scale_b = torch.empty(32, device="cpu", dtype=torch.float32)
+
+        with self.assertRaisesRegex(NotImplementedError, "aten::_scaled_grouped_mm"):
+            fn(a, b, scale_a, scale_b)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_scaled_grouped_mm_epilogue_fuses(self):
+        if not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM:
+            self.skipTest("FP8 grouped GEMM is not supported")
+
+        def fn(a, b, scale_a, scale_b, offs, row_bias, col_scale, tile_bias):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_grouped_mm.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: torch.where(
+                    acc.float() + tile_bias > row_bias,
+                    F.silu(acc.float() * col_scale),
+                    row_bias - tile_bias,
+                ),
+                gemm_kwargs={
+                    "offs": offs,
+                    "out_dtype": torch.bfloat16,
+                    "use_fast_accum": False,
+                },
+            )
+
+        groups, m, n, k = 2, 64, 128, 64
+        a = torch.randn(m * groups, k, device="cuda", dtype=torch.bfloat16).to(
+            torch.float8_e4m3fn
+        )
+        b = torch.randn(groups, n, k, device="cuda", dtype=torch.bfloat16).to(
+            torch.float8_e4m3fn
+        ).transpose(-2, -1)
+        scale_a = torch.rand(m * groups, device="cuda", dtype=torch.float32)
+        scale_b = torch.rand(groups, n, device="cuda", dtype=torch.float32)
+        offs = torch.arange(m, m * groups + 1, m, device="cuda", dtype=torch.int32)
+        row_bias = torch.randn(m * groups, 1, device="cuda", dtype=torch.float32) * 0.1
+        col_scale = torch.randn(1, n, device="cuda", dtype=torch.float32) * 0.1
+        tile_bias = torch.randn(m * groups, n, device="cuda", dtype=torch.float32) * 0.1
+
+        self._assert_compiled_matches(
+            fn,
+            a,
+            b,
+            scale_a,
+            scale_b,
+            offs,
+            row_bias,
+            col_scale,
+            tile_bias,
+            atol=2e-1,
+            rtol=5e-2,
+            checks=("triton_", "scaled_grouped_mm"),
+            check_nots=("extern_kernels._scaled_grouped_mm",),
+        )
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_scaled_grouped_mm_epilogue(self):
+        if not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM:
+            self.skipTest("FP8 grouped GEMM is not supported")
+
+        def fn(a, b, scale_a, scale_b, offs):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_grouped_mm.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={
+                    "offs": offs,
+                    "out_dtype": torch.bfloat16,
+                    "use_fast_accum": False,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        groups, m, n, k = 2, 64, 128, 64
+        a = torch.randn(m * groups, k, device="cuda", dtype=torch.bfloat16).to(
+            torch.float8_e4m3fn
+        )
+        b = torch.randn(groups, n, k, device="cuda", dtype=torch.bfloat16).to(
+            torch.float8_e4m3fn
+        ).transpose(-2, -1)
+        scale_a = torch.rand(m * groups, device="cuda", dtype=torch.float32)
+        scale_b = torch.rand(groups, n, device="cuda", dtype=torch.float32)
+        offs = torch.arange(m, m * groups + 1, m, device="cuda", dtype=torch.int32)
+
+        with self.assertRaisesRegex(NotImplementedError, "QUACK GEMM epilogue"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                a, b, scale_a, scale_b, offs
+            )
 
     @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_scaled_mm_v2_fuzzes_main_epilogues(self):
