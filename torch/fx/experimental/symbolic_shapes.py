@@ -8233,6 +8233,42 @@ class ShapeEnv:
             extra,
         )
 
+    def _maybe_evaluate_bool_short_circuit(
+        self,
+        expr: sympy.Basic,
+        *,
+        size_oblivious: bool,
+        forcing_spec: bool,
+    ) -> sympy.Basic | None:
+        if isinstance(expr, sympy.Or):
+            target = sympy.true
+            target_bool = True
+            fallback = False
+        elif isinstance(expr, sympy.And):
+            target = sympy.false
+            target_bool = False
+            fallback = True
+        else:
+            return None
+
+        for arg in expr.args:
+            with self.suppress_guards():
+                result = self.evaluate_expr(
+                    arg,
+                    size_oblivious=size_oblivious,
+                    fallback_value=fallback,
+                    forcing_spec=forcing_spec,
+                )
+            if result is target or result is target_bool:
+                self.evaluate_expr(
+                    arg,
+                    size_oblivious=size_oblivious,
+                    forcing_spec=forcing_spec,
+                )
+                return target
+
+        return None
+
     def _evaluate_expr(
         self,
         orig_expr: sympy.Basic,
@@ -8396,6 +8432,14 @@ class ShapeEnv:
 
             concrete_val = None
             if not (expr.free_symbols <= self.backed_var_to_val.keys()):
+                short_circuit_result = self._maybe_evaluate_bool_short_circuit(
+                    expr,
+                    size_oblivious=size_oblivious,
+                    forcing_spec=forcing_spec,
+                )
+                if short_circuit_result is not None:
+                    return short_circuit_result
+
                 # TODO: dedupe this with _maybe_evaluate_static
                 # Attempt to eliminate the unbacked SymInt
                 new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)

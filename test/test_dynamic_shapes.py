@@ -3529,6 +3529,47 @@ class TestGuardsExpressions(TestCase):
             self.assertEqual(func3(a, b), b * 10)
             self.assertEqual(compiled(a, b), b * 20)
 
+    def test_bool_short_circuit_with_unbacked_term(self):
+        from torch.fx.experimental.symbolic_shapes import (
+            guard_or_false,
+            guard_or_true,
+            sym_and,
+            sym_or,
+        )
+
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 5, duck=False)
+        u0 = shape_env.create_unbacked_symint()
+        expr = sym_or(s0 > 3, u0 > 200)
+        self.assertTrue(bool(expr))
+        self.assertTrue(guard_or_false(expr))
+
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 5, duck=False)
+        u0 = shape_env.create_unbacked_symint()
+        expr = sym_and(s0 < 3, u0 > 200)
+        self.assertFalse(bool(expr))
+        self.assertFalse(guard_or_true(expr))
+
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+        self.assertFalse(guard_or_false(sym_or(u0 == 2, u0 == 3)))
+
+    @skipIfTorchDynamo("Test uses torch.compile")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_sym_or_size_hint_short_circuits_unbacked_scalar(self):
+        from torch.fx.experimental.symbolic_shapes import sym_or
+
+        @torch.compile(dynamic=True, fullgraph=True, backend="eager")
+        def func(x, y):
+            if sym_or(x.size()[0] > 3, y.item() > 200):
+                return x * 100
+            return x * 200
+
+        x = torch.tensor([1, 2, 3, 4, 5])
+        self.assertEqual(func(x, torch.tensor([1])), x * 100)
+
     def test_guards_float_div(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 8)
