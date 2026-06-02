@@ -2995,6 +2995,25 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
 
+    def test_neg_signed_zero(self):
+        # neg must preserve the IEEE sign bit of zero: -(+0.0) == -0.0. Triton
+        # lowers unary minus as `0 - x`, which flushes -0.0 to +0.0; that made
+        # atan2(x, -x) return 0 instead of pi at x=+0.0 (issue #185696).
+        def fn(x):
+            return torch.neg(x), torch.atan2(x, torch.neg(x))
+
+        x = torch.tensor([0.0, -0.0, 1.0, -1.0, 2.5], device=device_type)
+        expected_neg, expected_atan2 = fn(x)
+        actual_neg, actual_atan2 = torch.compile(
+            fn, backend="inductor", fullgraph=True
+        )(x)
+
+        self.assertEqual(
+            actual_neg.cpu().view(torch.int32),
+            expected_neg.cpu().view(torch.int32),
+        )
+        self.assertEqual(actual_atan2, expected_atan2)
+
     @config.patch({"eager_numerics.division_rounding": True})
     def test_truediv_emulate_division_rounding(self):
         from decimal import Decimal
