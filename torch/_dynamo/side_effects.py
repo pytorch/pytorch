@@ -23,6 +23,7 @@ while enabling optimizations where safe.
 
 import collections
 import contextlib
+import enum
 import inspect
 import logging
 import textwrap
@@ -49,7 +50,13 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
 from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
-from .utils import is_frozen_dataclass, is_namedtuple_cls, nn_module_new, object_new
+from .utils import (
+    is_frozen_dataclass,
+    is_namedtuple_cls,
+    is_pybind11_enum_member,
+    nn_module_new,
+    object_new,
+)
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -1003,13 +1010,12 @@ class SideEffects:
             ) and not self.has_pending_mutation(var):
                 continue
 
-            # Sourceless enum members (and similar python constants) registered
-            # with AttributeMutationNew don't need __new__-based tempvar
-            # reconstruction -- they are reconstructible as constants.
-            if (
-                isinstance(var, variables.UserDefinedObjectVariable)
-                and isinstance(var.mutation_type, AttributeMutationNew)
-                and var.is_python_constant()
+            # Sourceless enum members registered with AttributeMutationNew
+            # don't need __new__-based tempvar reconstruction -- they are
+            # reconstructible as constants.
+            if var.is_python_constant() and isinstance(var.mutation_type, AttributeMutationNew) and (
+                isinstance(var.value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType))
+                or is_pybind11_enum_member(var.value)
             ):
                 continue
 
@@ -1449,10 +1455,9 @@ class SideEffects:
 
                 # Sourceless enum members: mutations (like _inverted_ caching)
                 # already happened on the real object during tracing.
-                if (
-                    isinstance(var, variables.UserDefinedObjectVariable)
-                    and isinstance(var.mutation_type, AttributeMutationNew)
-                    and var.is_python_constant()
+                if var.is_python_constant() and isinstance(var.mutation_type, AttributeMutationNew) and (
+                    isinstance(var.value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType))
+                    or is_pybind11_enum_member(var.value)
                 ):
                     continue
 
