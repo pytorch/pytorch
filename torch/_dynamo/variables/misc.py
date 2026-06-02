@@ -2450,6 +2450,8 @@ class StringFormatVariable(VariableTracker):
     def _debug_format_arg(arg: VariableTracker) -> object:
         if isinstance(arg, StringFormatVariable):
             return arg._debug_render()
+        if isinstance(arg, StringFormatStripVariable):
+            return arg.debug_repr()
         try:
             return arg.as_python_constant()
         except Exception:
