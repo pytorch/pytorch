@@ -10,6 +10,7 @@
 #include <c10/util/complex.h>
 #include <c10/util/overflows.h>
 
+#include <limits>
 #include <type_traits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -57,13 +58,36 @@ struct maybe_bool<true, src_t> {
   }
 };
 
-// Float -> integer is UB on out-of-range/NaN values; we keep the
-// platform-defined result for NumPy compatibility and suppress UBSan only
-// here, so the dispatching template below stays UBSan-clean.
+// Float -> integer is UB on out-of-range/NaN values. For standard floating
+// sources and signed integer destinations, out-of-range values saturate and NaN
+// maps to 0 before casting below. Unsigned destinations and reduced floating
+// source types keep the platform-defined result for NumPy compatibility.
+// Suppress UBSan only here, so the dispatching template below stays
+// UBSan-clean.
 template <typename dest_t, typename src_t>
 C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t
 unchecked_cast_to_int(src_t src) {
   return static_cast<dest_t>(src);
+}
+
+template <typename dest_t, typename src_t>
+C10_HOST_DEVICE static inline dest_t saturated_cast_to_signed_int(src_t src) {
+  static_assert(std::is_floating_point_v<src_t>);
+  static_assert(std::is_integral_v<dest_t>);
+  static_assert(std::is_signed_v<dest_t>);
+  constexpr auto min =
+      static_cast<src_t>(std::numeric_limits<dest_t>::lowest());
+  constexpr auto max = static_cast<src_t>(std::numeric_limits<dest_t>::max());
+  if (src != src) {
+    return static_cast<dest_t>(0);
+  }
+  if (src < min) {
+    return std::numeric_limits<dest_t>::lowest();
+  }
+  if (src >= max) {
+    return std::numeric_limits<dest_t>::max();
+  }
+  return unchecked_cast_to_int<dest_t>(src);
 }
 
 template <typename dest_t, typename src_t>
@@ -72,6 +96,10 @@ struct static_cast_with_inter_type {
     constexpr bool real = needs_real<dest_t, src_t>::value;
     auto r = maybe_real<real, src_t>::apply(src);
     if constexpr (
+        std::is_integral_v<dest_t> && std::is_signed_v<dest_t> &&
+        std::is_floating_point_v<decltype(r)>) {
+      return saturated_cast_to_signed_int<dest_t>(r);
+    } else if constexpr (
         std::is_integral_v<dest_t> && !std::is_integral_v<decltype(r)>) {
       return unchecked_cast_to_int<dest_t>(r);
     } else {

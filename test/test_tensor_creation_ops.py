@@ -1066,9 +1066,9 @@ class TestTensorCreation(TestCase):
     # Checks that float->integer casts don't produce undefined behavior errors.
     # Note: In C++, casting from a floating value to an integral dtype
     # is undefined if the floating point value is not within the integral
-    # dtype's dynamic range. This can (and should) cause undefined behavior
-    # errors with UBSAN. These casts are deliberate in PyTorch, however, and
-    # NumPy may have the same behavior.
+    # dtype's dynamic range. CPU signed integer casts from float32/float64
+    # saturate for infinities and out-of-range finite values, and convert NaN
+    # to 0.
     @onlyNativeDeviceTypes
     @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
@@ -1091,14 +1091,13 @@ class TestTensorCreation(TestCase):
             # Note: numpy -2.0 or -1.5 -> uint8 conversion is undefined
             #       see https://github.com/pytorch/pytorch/issues/97794
             refs = (0, 254, 255, 0, 0, 0, 1, 2)
-        elif dtype == torch.int16:
-            # CPU min and max float -> int16 conversion is divergent.
-            vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
+        elif dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            info = torch.iinfo(dtype)
+            refs = (info.min, -2, -1, 0, 0, 0, 1, 2, info.max)
 
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     # Note: CUDA will fail this test on most dtypes, often dramatically.
-    # Note: This test validates undefined behavior consistency in float-to-ints casts
     # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
     # nondeterministically fails, warning "invalid value encountered in cast"
     @onlyCPU
@@ -1109,15 +1108,38 @@ class TestTensorCreation(TestCase):
 
         if dtype == torch.bool:
             refs = (True, True, True)
+        elif dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            info = torch.iinfo(dtype)
+            refs = (info.min, info.max, 0)
         elif IS_ARM64:
-            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max, 0)
-            if dtype in (torch.int8, torch.int16):
-                refs = (0, -1, 0)
+            # Unsigned casts intentionally keep their existing platform behavior.
+            refs = (0, torch.iinfo(dtype).max, 0)
         else:
             refs = (0, 0, 0)
-            if dtype in (torch.int32, torch.int64):
-                refs = (torch.iinfo(dtype).min, ) * 3
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
+
+    @onlyCPU
+    def test_float_to_signed_int_nan_zero(self, device):
+        for src_dtype in (torch.float32, torch.float64):
+            for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+                x = torch.tensor([float("nan")], device=device, dtype=src_dtype)
+                self.assertEqual(x.to(dtype), torch.tensor([0], device=device, dtype=dtype))
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64)
+    def test_nan_to_num_to_int64_saturates(self, device, dtype):
+        info = torch.iinfo(torch.int64)
+        x = torch.tensor(
+            [[float("inf")], [float("-inf")], [float("nan")]],
+            device=device,
+            dtype=dtype)
+        actual = torch.nan_to_num(
+            x,
+            nan=0,
+            posinf=info.max,
+            neginf=info.min).long()
+        expected = torch.tensor([[info.max], [info.min], [0]], device=device)
+        self.assertEqual(actual, expected)
 
     @onlyNativeDeviceTypes
     def test_complex_type_conversions(self, device):
