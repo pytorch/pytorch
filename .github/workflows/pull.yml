@@ -69,7 +69,7 @@ jobs:
   # ╠══════════════════════════════════════════════════════════════════════╣
 
   linux-jammy-py3_10-gcc11-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11 ') || contains(needs.job-filter.outputs.jobs, ' linux-docs ') }}
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11 ') }}
     name: linux-jammy-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -220,27 +220,9 @@ jobs:
       compiler: clang18
     secrets: inherit
 
-  # ╠══════════════════════════════════════════════════════════════════════╣
-  # ║ linux-docs                                                           ║
-  # ╠══════════════════════════════════════════════════════════════════════╣
-
-  linux-docs:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-docs ') }}
-    name: linux-docs
-    uses: ./.github/workflows/_docs.yml
-    needs:
-      - linux-jammy-py3_10-gcc11-build
-      - job-filter
-      - get-label-type
-    with:
-      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
-      run-doxygen: true
-      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      python-version: "3.10"
-      compiler: gcc11
-    secrets: inherit
+  # Docs are built and the preview is published by docs-build.yml so the
+  # preview can go up as soon as the docs finish, without waiting for the rest
+  # of this workflow to conclude.
 
   # ╠══════════════════════════════════════════════════════════════════════╣
   # ║ linux-jammy-py3.10-gcc11-no-ops (build only)                         ║
