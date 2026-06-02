@@ -52,10 +52,20 @@ struct PyNode : public Node {
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
 
+  c10::ArrayRef<uint32_t> next_edges_order() const noexcept override {
+    return next_edges_order_;
+  }
+
+  void set_next_edges_order(std::vector<uint32_t> order) {
+    next_edges_order_ = std::move(order);
+  }
+
   // Returns the THPFunction Python object for this node.
   PyObject* pyobj() const noexcept {
     return pyobj_slot()->load_pyobj();
   }
+
+  std::vector<uint32_t> next_edges_order_;
 };
 
 /**

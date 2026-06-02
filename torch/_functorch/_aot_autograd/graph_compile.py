@@ -18,8 +18,9 @@ import threading
 import time
 import traceback
 from collections import defaultdict
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager, nullcontext
+from functools import cmp_to_key
 from typing import Any
 
 import torch
@@ -84,6 +85,8 @@ from .schemas import (
     FlatFn,
     FxValue,
     MutationType,
+    PlainTensorMeta,
+    SubclassCreationMeta,
     SubclassMeta,
     ViewAndMutationMeta,
 )
@@ -131,6 +134,236 @@ def maybe_skip_decompose(aot_config: AOTConfig) -> Generator[AOTConfig, None, No
         yield dataclasses.replace(aot_config, decompositions={})
     else:
         yield aot_config
+
+
+def _get_backward_output_order(
+    bw_module: GraphModule,
+    bw_outs: Any,
+    leaf_input_grads: Sequence[bool] | None = None,
+) -> list[int] | None:
+    PASSTHROUGH_PRIORITY = 3
+    SEQ_NR_PRIORITY = 2
+    TOPOLOGY_PRIORITY = 1
+    STABLE_PRIORITY = 0
+
+    topo_orders: dict[int, dict[torch.fx.Node, int]] = {}
+
+    def get_topo_order(module: GraphModule) -> dict[torch.fx.Node, int]:
+        module_id = id(module)
+        topo_order = topo_orders.get(module_id)
+        if topo_order is None:
+            topo_order = {node: idx for idx, node in enumerate(module.graph.nodes)}
+            topo_orders[module_id] = topo_order
+        return topo_order
+
+    def unwrap_getitems(value: Any) -> tuple[Any, tuple[int, ...]]:
+        path = []
+        while isinstance(value, torch.fx.Node):
+            if (
+                value.op != "call_function"
+                or value.target is not operator.getitem
+                or len(value.args) < 2
+                or not isinstance(value.args[0], torch.fx.Node)
+                or not isinstance(value.args[1], int)
+            ):
+                break
+            path.append(value.args[1])
+            value = value.args[0]
+        path.reverse()
+        return value, tuple(path)
+
+    def is_tangent_placeholder(value: torch.fx.Node) -> bool:
+        if value.op != "placeholder":
+            return False
+        name = value.name
+        if name.startswith("tangents_"):
+            return name.removeprefix("tangents_").isdigit()
+        if "_tangents_" not in name:
+            return False
+        return name.rsplit("_tangents_", 1)[1].isdigit()
+
+    def is_leaf_tangent_placeholder(
+        value: torch.fx.Node, bw_out_idx: int | None
+    ) -> bool:
+        return (
+            leaf_input_grads is not None
+            and bw_out_idx is not None
+            and bw_out_idx < len(leaf_input_grads)
+            and leaf_input_grads[bw_out_idx]
+            and is_tangent_placeholder(value)
+        )
+
+    def get_invoke_subgraph_module(
+        module: GraphModule, value: torch.fx.Node
+    ) -> GraphModule | None:
+        if (
+            value.op != "call_function"
+            or value.target is not torch._higher_order_ops.invoke_subgraph
+            or not value.args
+            or not isinstance(value.args[0], torch.fx.Node)
+            or value.args[0].op != "get_attr"
+            or not isinstance(value.args[0].target, str)
+        ):
+            return None
+
+        submodule = module.get_submodule(value.args[0].target)
+        return submodule if isinstance(submodule, GraphModule) else None
+
+    def resolve_graph_output(
+        module: GraphModule, path: tuple[int, ...]
+    ) -> tuple[Any, tuple[int, ...]] | None:
+        output_node = next(reversed(module.graph.find_nodes(op="output")))
+        current = output_node.args[0]
+        if not path:
+            if isinstance(current, Sequence) and not isinstance(current, (str, bytes)):
+                if len(current) != 1:
+                    return None
+                current = current[0]
+            return current, ()
+
+        remaining = list(path)
+        while (
+            remaining
+            and isinstance(current, Sequence)
+            and not isinstance(current, (str, bytes))
+        ):
+            index = remaining.pop(0)
+            if index < -len(current) or index >= len(current):
+                return None
+            current = current[index]
+
+        return current, tuple(remaining)
+
+    def build_priority(
+        module: GraphModule,
+        value: Any,
+        remaining_path: tuple[int, ...] = (),
+        bw_out_idx: int | None = None,
+    ) -> tuple[tuple[int, int, int], ...]:
+        source, path = unwrap_getitems(value)
+        full_path = path + remaining_path
+        if not isinstance(source, torch.fx.Node):
+            return ()
+
+        seq_nr = source.meta.get("seq_nr")
+        has_seq_nr = isinstance(seq_nr, int)
+        topo_idx = get_topo_order(module)[source]
+        if is_leaf_tangent_placeholder(source, bw_out_idx):
+            priority_kind = PASSTHROUGH_PRIORITY
+        elif has_seq_nr:
+            priority_kind = SEQ_NR_PRIORITY
+        elif source.op not in ("placeholder", "get_attr"):
+            priority_kind = TOPOLOGY_PRIORITY
+        else:
+            priority_kind = STABLE_PRIORITY
+        priority = (
+            (
+                priority_kind,
+                seq_nr if has_seq_nr else 0,
+                topo_idx
+                if priority_kind in (SEQ_NR_PRIORITY, TOPOLOGY_PRIORITY)
+                else 0,
+            ),
+        )
+
+        submodule = get_invoke_subgraph_module(module, source)
+        if submodule is None:
+            return priority
+
+        inner_output = resolve_graph_output(submodule, full_path)
+        if inner_output is None:
+            return priority
+
+        inner_value, inner_path = inner_output
+        return priority + build_priority(submodule, inner_value, inner_path, bw_out_idx)
+
+    def compare_priority(
+        lhs: tuple[tuple[int, int, int], ...],
+        rhs: tuple[tuple[int, int, int], ...],
+    ) -> int:
+        shared_levels = min(len(lhs), len(rhs))
+        for i in range(shared_levels):
+            lhs_kind, lhs_seq_nr, lhs_topo_idx = lhs[i]
+            rhs_kind, rhs_seq_nr, rhs_topo_idx = rhs[i]
+            if lhs_kind != rhs_kind:
+                return -1 if lhs_kind > rhs_kind else 1
+            if lhs_kind == SEQ_NR_PRIORITY:
+                if lhs_seq_nr != rhs_seq_nr:
+                    return -1 if lhs_seq_nr > rhs_seq_nr else 1
+                if lhs_topo_idx != rhs_topo_idx:
+                    return -1 if lhs_topo_idx > rhs_topo_idx else 1
+            elif lhs_kind == TOPOLOGY_PRIORITY and lhs_topo_idx != rhs_topo_idx:
+                return -1 if lhs_topo_idx > rhs_topo_idx else 1
+        if len(lhs) != len(rhs):
+            extra = lhs[shared_levels:] if len(lhs) > len(rhs) else rhs[shared_levels:]
+            if (
+                any(priority_kind != STABLE_PRIORITY for priority_kind, _, _ in extra)
+                or shared_levels == 0
+            ):
+                return -1 if len(lhs) > len(rhs) else 1
+        return 0
+
+    priorities = [
+        build_priority(bw_module, bw_out, bw_out_idx=bw_out_idx)
+        for bw_out_idx, bw_out in enumerate(bw_outs)
+    ]
+    order = sorted(
+        range(len(bw_outs)),
+        key=cmp_to_key(
+            lambda lhs, rhs: compare_priority(priorities[lhs], priorities[rhs])
+        ),
+    )
+    return None if order == list(range(len(bw_outs))) else order
+
+
+def _remap_backward_output_order_to_outer_inputs(
+    inner_order: list[int] | None,
+    outer_meta: ViewAndMutationMeta,
+    inner_meta: ViewAndMutationMeta,
+) -> list[int] | None:
+    if not outer_meta.subclass_inp_meta:
+        return inner_order
+
+    inner_to_outer: list[int] = []
+    for outer_idx, inp_meta in enumerate(outer_meta.subclass_inp_meta):
+        if isinstance(inp_meta, PlainTensorMeta):
+            inner_to_outer.append(outer_idx)
+        elif isinstance(inp_meta, SubclassCreationMeta):
+            inner_to_outer.extend([outer_idx] * inp_meta.arg_count)
+        else:
+            raise AssertionError(f"unexpected subclass input metadata: {inp_meta}")
+
+    if len(inner_to_outer) != len(inner_meta.input_info):
+        raise AssertionError(
+            f"expected len(inner_to_outer) == {len(inner_meta.input_info)}, "
+            f"got {len(inner_to_outer)}"
+        )
+
+    if inner_order is None:
+        inner_order = list(range(len(inner_meta.input_info)))
+
+    outer_order: list[int] = []
+    seen: set[int] = set()
+    for inner_idx in inner_order:
+        outer_idx = inner_to_outer[inner_idx]
+        if outer_idx in seen:
+            continue
+        seen.add(outer_idx)
+        outer_order.append(outer_idx)
+
+    for outer_idx in range(len(outer_meta.input_info)):
+        if outer_idx not in seen:
+            outer_order.append(outer_idx)
+
+    if len(outer_order) != len(outer_meta.input_info):
+        raise AssertionError(
+            f"expected len(outer_order) == {len(outer_meta.input_info)}, "
+            f"got {len(outer_order)}"
+        )
+
+    return (
+        None if outer_order == list(range(len(outer_meta.input_info))) else outer_order
+    )
 
 
 # Saved tensor hooks context
@@ -2102,16 +2335,6 @@ def _compute_indices_of_inps_to_detach(
     inner_meta: ViewAndMutationMeta,
     fw_metadata: ViewAndMutationMeta,
 ) -> list[int]:
-    # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
-    # optimization even if we have subclass inputs/outputs (we do not handle this today).
-    # Computing which our our inputs get None gradients is a bit more complicated,
-    # if any of our inputs are subclasses. Why?
-    # (a) we need to make sure that we call .detach() on the input subclasses, since autograd sees subclasses.
-    # (b) The grad_outputs that we AOT computed in our backward graph are the desugared tensor tensors,
-    #     so we need to figure out which subclass fw inputs they map to.
-    if maybe_subclass_meta is not None:
-        return []
-
     indices_of_inps_to_detach: list[int] = []
 
     # reversed() since we expect output at end of graph
@@ -2120,7 +2343,7 @@ def _compute_indices_of_inps_to_detach(
 
     num_backward_tokens = inner_meta.num_backward_tokens
     expected_bw_outs = (
-        len(fw_metadata.input_info)
+        len(inner_meta.input_info)
         + inner_meta.num_outputs_rng_offset
         + num_backward_tokens
     )
@@ -2134,11 +2357,36 @@ def _compute_indices_of_inps_to_detach(
         bw_outs_no_rng_no_tokens = bw_outs[
             : -(inner_meta.num_outputs_rng_offset + num_backward_tokens)
         ]
-    if len(bw_outs_no_rng_no_tokens) != len(fw_metadata.input_info):
+    if len(bw_outs_no_rng_no_tokens) != len(inner_meta.input_info):
         raise AssertionError(
-            f"expected len(bw_outs_no_rng_no_tokens) == {len(fw_metadata.input_info)}, "
+            f"expected len(bw_outs_no_rng_no_tokens) == {len(inner_meta.input_info)}, "
             f"got {len(bw_outs_no_rng_no_tokens)}"
         )
+    inner_backward_output_order = _get_backward_output_order(
+        bw_module,
+        bw_outs_no_rng_no_tokens,
+        leaf_input_grads=[
+            input_info.is_leaf and input_info.requires_grad
+            for input_info in inner_meta.input_info
+        ],
+    )
+    fw_metadata.backward_output_order = (
+        _remap_backward_output_order_to_outer_inputs(
+            inner_backward_output_order, fw_metadata, inner_meta
+        )
+        if maybe_subclass_meta is not None
+        else inner_backward_output_order
+    )
+
+    # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
+    # optimization even if we have subclass inputs/outputs (we do not handle this today).
+    # Computing which our our inputs get None gradients is a bit more complicated,
+    # if any of our inputs are subclasses. Why?
+    # (a) we need to make sure that we call .detach() on the input subclasses, since autograd sees subclasses.
+    # (b) The grad_outputs that we AOT computed in our backward graph are the desugared tensor tensors,
+    #     so we need to figure out which subclass fw inputs they map to.
+    if maybe_subclass_meta is not None:
+        return []
 
     for i, bw_out in enumerate(bw_outs_no_rng_no_tokens):
         # If our input experiences a metadata mutation inside the graph (e.g. set_()),

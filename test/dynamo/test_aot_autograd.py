@@ -1,8 +1,10 @@
 # Owner(s): ["module: dynamo"]
 import copy
+import operator
 import re
 import unittest
 from textwrap import dedent
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
@@ -17,6 +19,11 @@ from torch._dynamo.testing import (
     expectedFailureDynamic,
     rand_strided,
 )
+from torch._functorch._aot_autograd.graph_compile import (
+    _get_backward_output_order,
+    _remap_backward_output_order_to_outer_inputs,
+)
+from torch._functorch._aot_autograd.schemas import PlainTensorMeta, SubclassCreationMeta
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
 from torch._guards import CompileContext, StorageOverlap, TracingContext
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -47,6 +54,103 @@ lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
 
 
 class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
+    def test_get_backward_output_order_unwraps_nested_getitems(self):
+        graph = torch.fx.Graph()
+        grad = graph.placeholder("grad")
+        low_priority = graph.call_function(operator.neg, args=(grad,))
+        low_priority.meta["seq_nr"] = 1
+        high_priority = graph.call_function(operator.mul, args=(grad, grad))
+        high_priority.meta["seq_nr"] = 2
+        outer_getitem = graph.call_function(operator.getitem, args=(high_priority, 0))
+        nested_getitem = graph.call_function(operator.getitem, args=(outer_getitem, 0))
+        graph.output((low_priority, nested_getitem))
+
+        bw_module = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(
+            _get_backward_output_order(bw_module, [low_priority, nested_getitem]),
+            [1, 0],
+        )
+
+    def test_get_backward_output_order_uses_topology_without_seq_nr(self):
+        graph = torch.fx.Graph()
+        grad = graph.placeholder("grad")
+        low_priority = graph.call_function(operator.neg, args=(grad,))
+        high_priority = graph.call_function(operator.mul, args=(low_priority, grad))
+        graph.output((low_priority, high_priority))
+
+        bw_module = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(
+            _get_backward_output_order(bw_module, [low_priority, high_priority]),
+            [1, 0],
+        )
+
+    def test_get_backward_output_order_prioritizes_passthrough_leaf_grads(self):
+        graph = torch.fx.Graph()
+        grad = graph.placeholder("tangents_0")
+        passthrough_grad = graph.placeholder("tangents_1")
+        computed_grad = graph.call_function(operator.neg, args=(grad,))
+        computed_grad.meta["seq_nr"] = 1
+        graph.output((computed_grad, passthrough_grad))
+
+        bw_module = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(
+            _get_backward_output_order(
+                bw_module,
+                [computed_grad, passthrough_grad],
+                leaf_input_grads=[False, True],
+            ),
+            [1, 0],
+        )
+
+    def test_get_backward_output_order_does_not_prioritize_non_leaf_tangents(self):
+        graph = torch.fx.Graph()
+        grad = graph.placeholder("tangents_0")
+        activation_grad = graph.placeholder("tangents_1")
+        computed_grad = graph.call_function(operator.neg, args=(grad,))
+        computed_grad.meta["seq_nr"] = 1
+        graph.output((computed_grad, activation_grad))
+
+        bw_module = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertIsNone(
+            _get_backward_output_order(
+                bw_module,
+                [computed_grad, activation_grad],
+                leaf_input_grads=[True, False],
+            )
+        )
+
+    def test_remap_backward_output_order_to_outer_subclass_inputs(self):
+        with FakeTensorMode() as fake_mode:
+            fake_subclass = fake_mode.from_tensor(torch.ones(()))
+
+        outer_meta = SimpleNamespace(
+            input_info=[object(), object(), object()],
+            subclass_inp_meta=[
+                PlainTensorMeta(0),
+                SubclassCreationMeta(
+                    flat_tensor_start_idx=1,
+                    arg_count=2,
+                    included_subclass_symints=False,
+                    attrs={},
+                    outer_size=(),
+                    outer_stride=(),
+                    meta=None,
+                    original_subclass=fake_subclass,
+                ),
+                PlainTensorMeta(3),
+            ],
+        )
+        inner_meta = SimpleNamespace(
+            input_info=[object(), object(), object(), object()]
+        )
+
+        self.assertEqual(
+            _remap_backward_output_order_to_outer_inputs(
+                [2, 0, 3, 1], outer_meta, inner_meta
+            ),
+            [1, 0, 2],
+        )
+
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):

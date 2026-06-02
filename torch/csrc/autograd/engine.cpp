@@ -462,15 +462,17 @@ std::vector<Node*> get_current_graph_task_execution_order() {
     heap.pop();
 
     out.push_back(fn);
-    for (const auto& edge : fn->next_edges()) {
+    const auto output_order = fn->next_edges_order();
+    auto add_next_fn = [&](const size_t i) {
+      const auto& edge = fn->next_edge(i);
       Node* next_ptr = edge.function.get();
       if (!next_ptr) {
-        continue;
+        return;
       }
       if (check_exec_info) {
         auto it = task->exec_info_.find(next_ptr);
         if (it == task->exec_info_.end() || !it->second.should_execute()) {
-          continue;
+          return;
         }
       }
       auto it = dependencies.find(edge.function.get());
@@ -478,6 +480,17 @@ std::vector<Node*> get_current_graph_task_execution_order() {
       if (--it->second == 0) {
         dependencies.erase(it);
         heap.push(next_ptr);
+      }
+    };
+    if (output_order.empty()) {
+      for (const auto i : c10::irange(fn->next_edges().size())) {
+        add_next_fn(i);
+      }
+    } else {
+      TORCH_INTERNAL_ASSERT(output_order.size() == fn->next_edges().size());
+      for (const auto i : output_order) {
+        TORCH_INTERNAL_ASSERT(i < fn->next_edges().size());
+        add_next_fn(i);
       }
     }
   }
@@ -1173,12 +1186,13 @@ void Engine::evaluate_function(
   // Lock mutex for the accesses to GraphTask dependencies_, not_ready_ and
   // cpu_ready_queue_ below
   std::lock_guard<std::mutex> lock(graph_task->mutex_);
-  for (const auto i : c10::irange(num_outputs)) {
+  const auto output_order = fn.next_edges_order();
+  auto handle_output = [&](const size_t i) {
     auto& output = outputs[i];
     const auto& next = fn.next_edge(i);
 
     if (!next.is_valid())
-      continue;
+      return;
 
     // Check if the next function is ready to be computed
     bool is_ready = false;
@@ -1200,7 +1214,7 @@ void Engine::evaluate_function(
       if (!exec_info_.empty()) {
         auto it = exec_info_.find(next.function.get());
         if (it == exec_info_.end() || !it->second.should_execute()) {
-          continue;
+          return;
         }
       }
       // No buffers have been allocated for the function
@@ -1236,6 +1250,18 @@ void Engine::evaluate_function(
             NodeTask(graph_task, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
       }
+    }
+  };
+
+  if (output_order.empty()) {
+    for (const auto i : c10::irange(num_outputs)) {
+      handle_output(i);
+    }
+  } else {
+    TORCH_INTERNAL_ASSERT(output_order.size() == num_outputs);
+    for (const auto i : output_order) {
+      TORCH_INTERNAL_ASSERT(i < num_outputs);
+      handle_output(i);
     }
   }
 }

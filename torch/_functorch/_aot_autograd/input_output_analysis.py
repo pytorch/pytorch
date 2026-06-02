@@ -41,6 +41,32 @@ from .utils import strict_zip
 zip = strict_zip
 
 
+def remap_backward_output_order(
+    backward_output_order: list[int] | None,
+    keep_arg_mask: list[bool],
+    add_dupe_map: list[int],
+) -> list[int] | None:
+    if backward_output_order is None:
+        return None
+
+    num_inputs = sum(keep_arg_mask)
+    remapped: list[int] = []
+    seen: set[int] = set()
+    for input_idx in backward_output_order:
+        deduped_idx = add_dupe_map[input_idx]
+        if deduped_idx in seen:
+            continue
+        seen.add(deduped_idx)
+        remapped.append(deduped_idx)
+
+    if len(remapped) != num_inputs:
+        raise AssertionError(
+            f"expected len(remapped) == {num_inputs}, got {len(remapped)}"
+        )
+
+    return None if remapped == list(range(num_inputs)) else remapped
+
+
 def remove_dupe_metadata(
     m: ViewAndMutationMeta,
     keep_arg_mask: list[bool],
@@ -110,6 +136,9 @@ def remove_dupe_metadata(
         subclass_inp_meta=[],
         subclass_fw_graph_out_meta=[],
         subclass_tangent_meta=subclass_tangent_meta,
+        backward_output_order=remap_backward_output_order(
+            m.backward_output_order, keep_arg_mask, add_dupe_map
+        ),
     )
 
 

@@ -3542,6 +3542,11 @@ class _AOTDispatchAutogradFunctionFactory:
                     disable_amp=disable_amp,
                 )
 
+        if CompiledFunction.metadata.backward_output_order is not None:
+            CompiledFunction._backward_next_edges_order = (  # type: ignore[attr-defined]
+                CompiledFunction.metadata.backward_output_order
+            )
+
         return CompiledFunction
 
 
