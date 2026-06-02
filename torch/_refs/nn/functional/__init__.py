@@ -929,10 +929,6 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.threshold)
 @_inplace_wrapper
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("a",),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def threshold(
     a: TensorLikeType,
     threshold: NumberType,
@@ -946,7 +942,14 @@ def threshold(
     if inplace:
         raise NotImplementedError
 
-    return torch.where(a <= threshold, value, a)
+    cmp = a
+    cmp_threshold = threshold
+    if a.device.type == "cuda" and utils.is_low_precision_dtype(a.dtype):
+        # CUDA threshold kernels cast the scalar threshold to the input dtype.
+        cmp_threshold = torch.scalar_tensor(threshold, dtype=a.dtype, device=a.device)
+    elif utils.is_low_precision_dtype(a.dtype):
+        cmp = prims.convert_element_type(a, torch.float32)
+    return torch.where(cmp <= cmp_threshold, value, a)
 
 
 # CompositeImplicitAutograd - don't register decomp
