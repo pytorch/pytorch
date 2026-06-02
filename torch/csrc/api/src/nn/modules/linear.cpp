@@ -2,6 +2,8 @@
 #include <torch/nn/init.h>
 #include <torch/nn/modules/linear.h>
 
+#include <fmt/ranges.h>
+
 #include <cmath>
 #include <cstdint>
 
@@ -86,11 +88,7 @@ void UnflattenImpl::pretty_print(std::ostream& stream) const {
          << ", unflattened_size={";
   auto sizes = options.sizes();
   TORCH_CHECK(!sizes.empty(), "Unflatten requires non-empty sizes");
-  size_t i = 0;
-  for (; i < sizes.size() - 1; ++i) {
-    stream << sizes[i] << ", ";
-  }
-  stream << sizes[i] << "})";
+  stream << fmt::format("{}", fmt::join(sizes, ", ")) << "})";
 }
 
 Tensor UnflattenImpl::forward(const Tensor& input) {
