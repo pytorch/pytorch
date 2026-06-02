@@ -2,6 +2,7 @@
 #include <torch/nn/init.h>
 #include <torch/nn/modules/linear.h>
 
+#include <fmt/ostream.h>
 #include <fmt/ranges.h>
 
 #include <cmath>
@@ -51,10 +52,12 @@ void LinearImpl::reset_parameters() {
 }
 
 void LinearImpl::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha
-         << "torch::nn::Linear(in_features=" << options.in_features()
-         << ", out_features=" << options.out_features()
-         << ", bias=" << options.bias() << ')';
+  fmt::print(
+      stream,
+      "torch::nn::Linear(in_features={}, out_features={}, bias={})",
+      options.in_features(),
+      options.out_features(),
+      options.bias());
 }
 
 Tensor LinearImpl::forward(const Tensor& input) {
@@ -68,8 +71,11 @@ FlattenImpl::FlattenImpl(const FlattenOptions& options_) : options(options_) {}
 void FlattenImpl::reset() {}
 
 void FlattenImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Flatten(start_dim=" << options.start_dim()
-         << ", end_dim=" << options.end_dim() << ')';
+  fmt::print(
+      stream,
+      "torch::nn::Flatten(start_dim={}, end_dim={})",
+      options.start_dim(),
+      options.end_dim());
 }
 
 Tensor FlattenImpl::forward(const Tensor& input) {
@@ -84,11 +90,13 @@ UnflattenImpl::UnflattenImpl(UnflattenOptions options_)
 void UnflattenImpl::reset() {}
 
 void UnflattenImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Unflatten(dim=" << options.dim()
-         << ", unflattened_size={";
   auto sizes = options.sizes();
   TORCH_CHECK(!sizes.empty(), "Unflatten requires non-empty sizes");
-  stream << fmt::format("{}", fmt::join(sizes, ", ")) << "})";
+  fmt::print(
+      stream,
+      "torch::nn::Unflatten(dim={}, unflattened_size={{{}}})",
+      options.dim(),
+      fmt::join(sizes, ", "));
 }
 
 Tensor UnflattenImpl::forward(const Tensor& input) {
@@ -127,11 +135,13 @@ void BilinearImpl::reset_parameters() {
 }
 
 void BilinearImpl::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha
-         << "torch::nn::Bilinear(in1_features=" << options.in1_features()
-         << ", in2_features=" << options.in2_features()
-         << ", out_features=" << options.out_features()
-         << ", bias=" << options.bias() << ')';
+  fmt::print(
+      stream,
+      "torch::nn::Bilinear(in1_features={}, in2_features={}, out_features={}, bias={})",
+      options.in1_features(),
+      options.in2_features(),
+      options.out_features(),
+      options.bias());
 }
 
 Tensor BilinearImpl::forward(const Tensor& input1, const Tensor& input2) {
