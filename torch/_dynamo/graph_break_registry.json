@@ -2910,6 +2910,14 @@
   "GB0207": [
     {
       "Gb_type": "sort with non-constant keys",
+      "Context": "str(self.key)",
+      "Explanation": "Cannot perform sort whose key comparison is not a compile-time constant. Key type: {self.key.python_type()}. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.",
+      "Hints": [
+        "Use something else as the key."
+      ]
+    },
+    {
+      "Gb_type": "sort with non-constant keys",
       "Context": "str(first_non_constant_key)",
       "Explanation": "Cannot perform sort with non-constant key. First non-constant key type: {python_type}. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.",
       "Hints": [
