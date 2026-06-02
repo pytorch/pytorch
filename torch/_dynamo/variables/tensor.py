@@ -1836,7 +1836,7 @@ class TensorVariable(VariableTracker):
 
         return ConstantVariable.create(None)
 
-    def method_resize_(
+    def method_resize_(</s
         self,
         tx: "InstructionTranslatorBase",
         *args: VariableTracker,
