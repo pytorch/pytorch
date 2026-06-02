@@ -1511,6 +1511,43 @@ class TestDeserialize(TestCase):
         inp = (torch.ones(3, 3), torch.ones(3, 3), torch.tensor(2))
         self.check_graph(Mod(), inp, use_pre_dispatch=False)
 
+    def test_hoo_tuple_input(self):
+        class Mod(torch.nn.Module):
+            def forward(self, ci, a, b):
+                def cond_fn(i, x, y):
+                    return i > 0
+
+                def body_fn(i, x, y):
+                    return i - 1, x + y, y - x
+
+                return torch._higher_order_ops.while_loop(cond_fn, body_fn, (ci, a, b))
+
+        def get_while_loop_node(ep):
+            return next(
+                node
+                for node in ep.graph.nodes
+                if node.op == "call_function"
+                and node.target == torch.ops.higher_order.while_loop
+            )
+
+        inp = (
+            torch.tensor(1),
+            torch.randn(10, 20),
+            torch.randn(10, 20),
+        )
+        ep = torch.export.export(Mod(), inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+
+        node = get_while_loop_node(ep)
+        loaded_node = get_while_loop_node(loaded_ep)
+        self.assertEqual(type(node.args[2]), tuple)
+        self.assertEqual(type(loaded_node.args[2]), tuple)
+        self.assertEqual(type(loaded_node.args[3]), tuple)
+        self.assertEqual(loaded_ep.module()(*inp), Mod()(*inp))
+
     def test_none_input(self):
         """
         Testing a backwards-compatibility breakage where old models do not have
