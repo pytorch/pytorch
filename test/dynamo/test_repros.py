@@ -7751,6 +7751,106 @@ SavedForBackwardsAOTOutput(idx=5)""",
         with torch._dynamo.config.patch(error_on_recompile=True):
             linear(torch.randn(1, 2, device="cpu"))
 
+    def test_nested_compile_in_tensor_subclass_handling(self):
+        def dequantize_impl(int4_data, scales):
+            int8_data = torch.stack([int4_data << 4 >> 4, int4_data >> 4], dim=-1)
+            fp32_data = int8_data.float().view(*scales.shape, -1) * scales.unsqueeze(-1)
+            return fp32_data.flatten(-2).to(scales.dtype)
+
+        dequantize = torch.compile(dequantize_impl, backend="aot_eager")
+
+        class MyEmbedding(nn.Module):
+            def __init__(self, num_embeds, embed_dim):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(num_embeds, embed_dim))
+
+            def forward(self, x):
+                return F.embedding(x, self.weight)
+
+        class Int4Tensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, int4_data, scales):
+                shape = int4_data.shape
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    shape[:-1] + (shape[-1] * 2,),
+                    dtype=scales.dtype,
+                    device=scales.device,
+                )
+
+            def __init__(self, int4_data, scales):
+                self.int4_data = int4_data
+                self.scales = scales
+
+            def __tensor_flatten__(self):
+                return ["int4_data", "scales"], []
+
+            def __repr__(self):
+                return f"Int4Tensor(shape={tuple(self.shape)}, device={self.device})"
+
+            @classmethod
+            def __tensor_unflatten__(
+                cls, tensor_data_dict, tensor_attributes, outer_size, outer_stride
+            ):
+                return cls(tensor_data_dict["int4_data"], tensor_data_dict["scales"])
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func is F.embedding:
+                    input = args[0]
+                    weight = args[1]
+                    return dequantize(
+                        F.embedding(input, weight.int4_data),
+                        F.embedding(input, weight.scales),
+                    )
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **kwargs)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                kwargs = kwargs or {}
+                if func is torch.ops.aten.detach.default:
+                    x = args[0]
+                    return Int4Tensor(x.int4_data, x.scales)
+                raise NotImplementedError(func)
+
+        indices = torch.tensor([3, 17])
+        int4_data = torch.randint(-128, 127, size=(100, 16), dtype=torch.int8)
+        scales = torch.randn(100, 1)
+        embedding = MyEmbedding(100, 32)
+        embedding.weight = nn.Parameter(Int4Tensor(int4_data, scales))
+
+        compiled = torch.compile(embedding, backend="aot_eager")
+        result = compiled(indices)
+        expected = dequantize_impl(
+            F.embedding(indices, int4_data), F.embedding(indices, scales)
+        )
+
+        self.assertEqual(result, expected)
+
+    def test_nested_compile_allowed_in_custom_aot_fw_compiler(self):
+        from functorch.compile import aot_function
+
+        inner_backend = EagerAndRecordGraphs()
+
+        def inner_fn(x):
+            return x.sin() + 1
+
+        def fw_compiler(gm, example_inputs):
+            torch.compile(inner_fn, backend=inner_backend, fullgraph=True)(
+                torch.randn(4)
+            )
+            return gm
+
+        def f(x):
+            return x.cos() + 1
+
+        compiled = aot_function(f, fw_compiler=fw_compiler)
+        compiled(torch.randn(4))
+
+        self.assertEqual(len(inner_backend.graphs), 1)
+
     def test_property_setter_with_dict_get_176608(self):
         """
         Test that property setters work correctly with __dict__.get() in compiled functions.
