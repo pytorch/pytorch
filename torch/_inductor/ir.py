@@ -318,13 +318,32 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
+def _get_shape_env_for_symbolic_stride_order(
+    seq: Sequence[int | torch.SymInt | Expr],
+) -> ShapeEnv | None:
+    for s in seq:
+        if isinstance(s, torch.SymInt):
+            return s.node.shape_env
+
+    graph = V.graph
+    sizevars = getattr(graph, "sizevars", None)
+    shape_env = getattr(sizevars, "shape_env", None)
+    if shape_env is None:
+        shape_env = getattr(graph, "_shape_env", None)
+    return shape_env
+
+
 def get_fill_order(
     seq: Sequence[int | torch.SymInt | Expr], shape_env: ShapeEnv | None = None
 ) -> Sequence[int]:
     """
     Convert strides to fill order (argsort)
     """
-    if shape_env is None or all(isinstance(s, (int, sympy.Integer)) for s in seq):
+    has_only_static_strides = all(isinstance(s, (int, sympy.Integer)) for s in seq)
+    if shape_env is None and not has_only_static_strides:
+        shape_env = _get_shape_env_for_symbolic_stride_order(seq)
+
+    if shape_env is None or has_only_static_strides:
         sorted_idx: Sequence[int] = argsort(seq)
     else:
         # argsort_sym handles unbacked symints (with the help of the shape_env)
