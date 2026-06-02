@@ -3,6 +3,7 @@ import gc
 import re
 import unittest
 import weakref
+from typing import Any
 from unittest.mock import patch
 
 import torch
@@ -265,6 +266,27 @@ class <lambda>(torch.nn.Module):
             f"inside 'with torch.cuda.stream(s):', got {len(fw_graphs)} "
             f"-- the post-break body was likely dropped",
         )
+
+        # Both halves of the round-trip should carry a stream annotation
+        # referring to the one and only stream `s` entered via
+        # `with torch.cuda.stream(s):`.  We do not pin the exact index, only
+        # that both adds are annotated with the same stream (i.e. `s`).
+        def add_node_stream(gm) -> int:
+            adds: list[torch.fx.Node] = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target is torch.ops.aten.add.Tensor
+            ]
+            self.assertEqual(len(adds), 1)
+            custom: dict[str, Any] = adds[0].meta.get("custom", {})
+            self.assertIn("stream", custom)
+            return custom["stream"]
+
+        pre_break_stream = add_node_stream(fw_graphs[0])
+        post_break_stream = add_node_stream(fw_graphs[1])
+        # The same stream `s` annotates the add on both sides of the break.
+        self.assertEqual(pre_break_stream, post_break_stream)
 
     @requires_cuda
     def test_stream_input(self):
