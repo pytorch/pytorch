@@ -21,6 +21,17 @@ inline void convertImpl(
   }
 }
 
+template <typename from_type, typename to_type>
+inline void convertFloatingToSignedIntImpl(
+    const from_type* __restrict src,
+    to_type* __restrict dst,
+    int64_t n) {
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    dst[i] = c10::convert<to_type>(src[i]);
+  }
+}
+
 template <typename to_type>
 inline void convertFromBool(
     const bool* __restrict src,
@@ -49,6 +60,12 @@ inline void convertToBool(
   template <>                                                          \
   inline void convert(const from_type* src, to_type* dst, int64_t n) { \
     return convertImpl<from_type, to_type>(src, dst, n);               \
+  }
+
+#define CONVERT_FLOATING_TO_SIGNED_INT_TEMPLATE(from_type, to_type)         \
+  template <>                                                               \
+  inline void convert(const from_type* src, to_type* dst, int64_t n) {      \
+    return convertFloatingToSignedIntImpl<from_type, to_type>(src, dst, n); \
   }
 
 #define CONVERT_FROM_BOOL_TEMPLATE(to_type)                       \
@@ -102,18 +119,18 @@ CONVERT_TEMPLATE(int64_t, float)
 CONVERT_TEMPLATE(int64_t, double)
 CONVERT_TO_BOOL_TEMPLATE(int64_t)
 CONVERT_TEMPLATE(float, uint8_t)
-CONVERT_TEMPLATE(float, int8_t)
-CONVERT_TEMPLATE(float, int16_t)
-CONVERT_TEMPLATE(float, int32_t)
-CONVERT_TEMPLATE(float, int64_t)
+CONVERT_FLOATING_TO_SIGNED_INT_TEMPLATE(float, int8_t)
+CONVERT_FLOATING_TO_SIGNED_INT_TEMPLATE(float, int16_t)
+CONVERT_FLOATING_TO_SIGNED_INT_TEMPLATE(float, int32_t)
+CONVERT_FLOATING_TO_SIGNED_INT_TEMPLATE(float, int64_t)
 CONVERT_TEMPLATE(float, float)
 CONVERT_TEMPLATE(float, double)
 CONVERT_TO_BOOL_TEMPLATE(float)
 CONVERT_TEMPLATE(double, uint8_t)
-CONVERT_TEMPLATE(double, int8_t)
-CONVERT_TEMPLATE(double, int16_t)
-CONVERT_TEMPLATE(double, int32_t)
-CONVERT_TEMPLATE(double, int64_t)
+CONVERT_FLOATING_TO_SIGNED_INT_TEMPLATE(double, int8_t)
+CONVERT_FLOATING_TO_SIGNED_INT_TEMPLATE(double, int16_t)
+CONVERT_FLOATING_TO_SIGNED_INT_TEMPLATE(double, int32_t)
+CONVERT_FLOATING_TO_SIGNED_INT_TEMPLATE(double, int64_t)
 CONVERT_TEMPLATE(double, float)
 CONVERT_TEMPLATE(double, double)
 CONVERT_TO_BOOL_TEMPLATE(double)
