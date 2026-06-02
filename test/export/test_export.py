@@ -1331,6 +1331,23 @@ graph():
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
 
+    def test_export_allows_aten_hardtanh_with_inverted_bounds(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.hardtanh(x, min_val=2, max_val=0)
+
+        model = M()
+        x = torch.randn(3)
+        ep = export(model, (x,), strict=True)
+        self.assertEqual(ep.module()(x), model(x))
+        self.assertTrue(
+            any(
+                node.op == "call_function"
+                and node.target == torch.ops.aten.hardtanh.default
+                for node in ep.graph_module.graph.nodes
+            )
+        )
+
     def test_symint_output(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
