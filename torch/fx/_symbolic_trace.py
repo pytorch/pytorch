@@ -61,20 +61,22 @@ def is_fx_tracing_warning() -> None:
         "or torch.compiler.is_compiling() for specifically torch.export/compile."
     )
 
+
 def _set_is_fx_tracing(value: bool) -> None:
     _is_fx_tracing_tls.flag = value
 
+
 def _get_is_fx_tracing() -> bool:
     return getattr(_is_fx_tracing_tls, "flag", False)
+
 
 def is_fx_tracing() -> bool:
     is_fx_tracing_warning()
     return _get_is_fx_tracing()
 
+
 def is_fx_symbolic_tracing() -> bool:
-    return (
-        _get_is_fx_tracing() and not torch.compiler.is_compiling()
-    )
+    return _get_is_fx_tracing() and not torch.compiler.is_compiling()
 
 
 @compatibility(is_backward_compatible=True)
