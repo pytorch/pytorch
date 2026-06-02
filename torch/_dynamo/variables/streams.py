@@ -21,7 +21,7 @@ from ..graph_bytecode_inputs import (
 from ..source import CurrentStreamSource
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .ctx_manager import FxTracebackAnnotateVariable
+from .ctx_manager import ContextWrappingVariable
 from .lazy import LazyVariableTracker
 
 
@@ -320,7 +320,7 @@ class SymbolicStreamState:
         return id(stream.value)
 
 
-class StreamContextVariable(FxTracebackAnnotateVariable):
+class StreamContextVariable(ContextWrappingVariable):
     """This represents torch.cuda.StreamContext"""
 
     @staticmethod
@@ -351,12 +351,8 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         # we are entering the target, and leaving the initial stream
         tx.symbolic_stream_state.enter_stream(strm)
 
-        # Eagerly annotate + preserve_node_meta; this ensures the captured
+        # annotate + preserve_node_meta: this ensures the captured
         # nodes have appropriate node.meta["custom"]["stream"] annotations.
-        # We inlined this part of FxTracebackAnnotateVariable because
-        # FxTracebackAnnotateVariable uses self.target_values for the
-        # annotation and for us target_values is a tuple of args---and it must
-        # remain a tuple of args for reconstruct_type.
         assert strm.user_object_index is not None, "stream not registered"
         stream_idx: int = strm.user_object_index
         annotation: dict[str, Any] = {"stream": stream_idx}
@@ -381,12 +377,9 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         return True
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
-        # Bypass FxTracebackAnnotateVariable.reconstruct_type's
-        # unconditional Unsupported("annotate escaped from compiled
-        # region") raise (it would otherwise fire via
-        # WithExitFunctionVariable.reconstruct -> self.ctx.reconstruct_type
-        # on every graph break inside with torch.cuda.stream(s): and
-        # silently drop the post-break body).
+        # Override our parent's reconstruct_type, as that implementation tries
+        # to access "torch._C.fn_name()" which does not exist. Unfortunately we
+        # cannot just directly reference the stream in the generated code.
         #
         # Instead, push a 0-arg callable that returns the ctx mgr value
         # at runtime: functools.partial(torch.cuda.stream, <Stream>).
