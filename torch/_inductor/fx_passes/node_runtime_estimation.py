@@ -411,9 +411,11 @@ def _log_collective_benchmarks(
         if benchmarked_medians is not None:
             benchmarked_ms = benchmarked_medians[i]
             benchmarked_float = float(benchmarked_ms)
-            nccl_diff_pct = (nccl_ms / benchmarked_ms) if benchmarked_float > 0 else 0
+            nccl_float = float(nccl_ms)
+            inductor_float = float(inductor_ms)
+            nccl_diff_pct = (nccl_float / benchmarked_float) if benchmarked_float > 0 else 0
             inductor_diff_pct = (
-                (inductor_ms / benchmarked_ms) if benchmarked_float > 0 else 0
+                (inductor_float / benchmarked_float) if benchmarked_float > 0 else 0
             )
             rows.append(
                 [
