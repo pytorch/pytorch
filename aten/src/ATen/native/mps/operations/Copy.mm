@@ -56,7 +56,9 @@ static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
       : needs_conj                             ? "copy_conj"
                                                : "copy_identity";
   auto iter = build_iter(dst_view);
-  lib.exec_unary_kernel(iter, std::string(name), std::nullopt, std::nullopt, /*ilp_threshold=*/0u);
+  // ILP castout only wins past ~128K elements; smaller copies underfill the GPU and
+  // run faster through the plain (non-ILP) castout kernel.
+  lib.exec_unary_kernel(iter, std::string(name), std::nullopt, std::nullopt, /*ilp_threshold=*/131072u);
 }
 
 static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
