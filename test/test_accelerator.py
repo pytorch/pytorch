@@ -89,6 +89,17 @@ class TestAccelerator(TestCase):
         ):
             torch.accelerator.current_stream(other_device)
 
+    def test_default_stream_query(self):
+        s = torch.accelerator.default_stream()
+        self.assertEqual(torch.accelerator.default_stream(s.device), s)
+        self.assertEqual(torch.accelerator.default_stream(s.device.index), s)
+        self.assertEqual(torch.accelerator.default_stream(str(s.device)), s)
+        other_device = torch.device("cpu")
+        with self.assertRaisesRegex(
+            ValueError, "doesn't match the current accelerator"
+        ):
+            torch.accelerator.default_stream(other_device)
+
     def test_device_context_manager(self):
         prev_device = torch.accelerator.current_device_index()
         with torch.accelerator.device_index(None):

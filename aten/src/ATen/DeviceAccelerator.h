@@ -61,6 +61,9 @@ TORCH_API void setCurrentStream(c10::Stream stream);
 // Get the current stream of the given device index.
 TORCH_API c10::Stream getCurrentStream(c10::DeviceIndex device_index);
 
+// Get the default stream of the given device index.
+TORCH_API c10::Stream getDefaultStream(c10::DeviceIndex device_index);
+
 // Wait (by blocking the calling thread) until all the work previously enqueued
 // on the given device index has been completed.
 TORCH_API void synchronizeDevice(c10::DeviceIndex device_index);

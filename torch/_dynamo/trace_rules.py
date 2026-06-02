@@ -2491,6 +2491,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.accelerator.current_accelerator",
         "torch.accelerator.current_device_index",
         "torch.accelerator.current_stream",
+        "torch.accelerator.default_stream",
         "torch.accelerator.device_count",
         "torch.accelerator.is_available",
         "torch.accelerator.set_stream",

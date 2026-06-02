@@ -31,6 +31,7 @@ __all__ = [
     "current_device_index",
     "get_device_capability",
     "current_stream",
+    "default_stream",
     "device_count",
     "device_index",
     "empty_cache",
@@ -230,6 +231,21 @@ def current_stream(device: _device_t = None, /) -> torch.Stream:
     """
     device_index = _get_device_index(device, optional=True)
     return torch._C._accelerator_getStream(device_index)
+
+
+def default_stream(device: _device_t = None, /) -> torch.Stream:
+    r"""Return the default stream for a given device.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): a given device that must match the current
+            :ref:`accelerator<accelerators>` device type. If not given,
+            use :func:`torch.accelerator.current_device_index` by default.
+
+    Returns:
+        torch.Stream: the default stream for a given device.
+    """
+    device_index = _get_device_index(device, optional=True)
+    return torch._C._accelerator_getDefaultStream(device_index)
 
 
 def set_stream(stream: torch.Stream) -> None:
