@@ -4,193 +4,206 @@ import unittest
 
 import torch
 from torch.testing._internal.autocast_test_lists import (
-    AutocastCPUTestLists,
     TestAutocast,
+    get_autocast_test_lists,
 )
 from torch.testing._internal.common_device_type import (
     DeviceTypeTestBase,
     instantiate_device_type_tests,
     onlyAccelerator,
+    skipMPS,
 )
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-class TestAutocastCPU(TestAutocast):
+class TestAutocastOps(TestAutocast, DeviceTypeTestBase):
+    """Device-agnostic autocast op-level tests.
+
+    Runs cast-policy tests (low-precision, fp32, promote) for all devices
+    that have a registered test list in autocast_test_lists.py.
+    New backends register via register_autocast_test_lists() to get these
+    tests automatically.
+    """
+
     def setUp(self):
         super().setUp()
-        self.autocast_lists = AutocastCPUTestLists(torch.device("cpu"))
+        dev = torch.device(self.device_type)
+        self.autocast_lists = get_autocast_test_lists(self.device_type, dev)
+        if self.autocast_lists is None:
+            self.skipTest(
+                f"No autocast test lists registered for {self.device_type}"
+            )
+        self.amp_dtype = torch.get_autocast_dtype(device_type=self.device_type)
 
     def tearDown(self):
-        del self.autocast_lists
+        if hasattr(self, "autocast_lists") and self.autocast_lists is not None:
+            del self.autocast_lists
         super().tearDown()
 
     @skipIfTorchDynamo()
-    def test_autocast_torch_expect_builtin_promote(self):
-        for (
-            op,
-            args1,
-            args2,
-            out_type,
-        ) in self.autocast_lists.torch_expect_builtin_promote:
-            self._run_autocast_outofplace(
-                op, args1, torch.float32, device="cpu", out_type=out_type
-            )
-            self._run_autocast_outofplace(
-                op,
-                args2,
-                torch.float32,
-                device="cpu",
-                out_type=out_type,
-                amp_dtype=torch.float16,
-            )
+    def test_autocast_torch_expect_builtin_promote(self, device):
+        for item in self.autocast_lists.torch_expect_builtin_promote:
+            if len(item) == 4:
+                op, args1, args2, out_type = item
+                self._run_autocast_outofplace(
+                    op, args1, torch.float32, device=self.device_type,
+                    out_type=out_type
+                )
+                self._run_autocast_outofplace(
+                    op, args2, torch.float32, device=self.device_type,
+                    out_type=out_type, amp_dtype=torch.float16,
+                )
+            else:
+                op, args, out_type = item
+                self._run_autocast_outofplace(
+                    op, args, torch.float32, device=self.device_type,
+                    out_type=out_type, amp_dtype=self.amp_dtype,
+                )
 
     @skipIfTorchDynamo()
-    def test_autocast_methods_expect_builtin_promote(self):
-        for (
-            op,
-            args1,
-            args2,
-            out_type,
-        ) in self.autocast_lists.methods_expect_builtin_promote:
-            self._run_autocast_outofplace(
-                op, args1, torch.float32, device="cpu", module=None, out_type=out_type
-            )
-            self._run_autocast_outofplace(
-                op,
-                args2,
-                torch.float32,
-                device="cpu",
-                module=None,
-                out_type=out_type,
-                amp_dtype=torch.float16,
-            )
+    def test_autocast_methods_expect_builtin_promote(self, device):
+        if not hasattr(self.autocast_lists, "methods_expect_builtin_promote"):
+            self.skipTest("No methods_expect_builtin_promote list")
+        for item in self.autocast_lists.methods_expect_builtin_promote:
+            if len(item) == 4:
+                op, args1, args2, out_type = item
+                self._run_autocast_outofplace(
+                    op, args1, torch.float32, device=self.device_type,
+                    module=None, out_type=out_type,
+                )
+                self._run_autocast_outofplace(
+                    op, args2, torch.float32, device=self.device_type,
+                    module=None, out_type=out_type, amp_dtype=torch.float16,
+                )
+            else:
+                op, args, out_type = item
+                self._run_autocast_outofplace(
+                    op, args, torch.float32, device=self.device_type,
+                    module=None, out_type=out_type, amp_dtype=self.amp_dtype,
+                )
 
     @skipIfTorchDynamo()
-    def test_autocast_torch_16(self):
+    def test_autocast_torch_low_precision(self, device):
+        if not hasattr(self.autocast_lists, "torch_16"):
+            self.skipTest("No torch_16 list")
         for op_with_args in self.autocast_lists.torch_16:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
             self._run_autocast_outofplace(
-                op, args, torch.bfloat16, device="cpu", add_kwargs=maybe_kwargs
-            )
-            self._run_autocast_outofplace(
-                op,
-                args,
-                torch.float16,
-                device="cpu",
-                add_kwargs=maybe_kwargs,
-                amp_dtype=torch.float16,
+                op, args, self.amp_dtype, device=self.device_type,
+                add_kwargs=maybe_kwargs, amp_dtype=self.amp_dtype,
             )
 
     @skipIfTorchDynamo()
-    def test_autocast_nn_16(self):
+    def test_autocast_nn_low_precision(self, device):
+        if not hasattr(self.autocast_lists, "nn_16"):
+            self.skipTest("No nn_16 list")
         for op_with_args in self.autocast_lists.nn_16:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
             self._run_autocast_outofplace(
-                op,
-                args,
-                torch.bfloat16,
-                device="cpu",
-                module=torch._C._nn,
-                add_kwargs=maybe_kwargs,
-            )
-            self._run_autocast_outofplace(
-                op,
-                args,
-                torch.float16,
-                device="cpu",
-                module=torch._C._nn,
-                add_kwargs=maybe_kwargs,
-                amp_dtype=torch.float16,
+                op, args, self.amp_dtype, device=self.device_type,
+                module=torch._C._nn, add_kwargs=maybe_kwargs,
+                amp_dtype=self.amp_dtype,
             )
 
     @skipIfTorchDynamo()
-    def test_autocast_torch_fp32(self):
+    def test_autocast_torch_fp32(self, device):
+        if not hasattr(self.autocast_lists, "torch_fp32"):
+            self.skipTest("No torch_fp32 list")
         for op_with_args in self.autocast_lists.torch_fp32:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
             self._run_autocast_outofplace(
-                op, args, torch.float32, device="cpu", add_kwargs=maybe_kwargs
-            )
-            self._run_autocast_outofplace(
-                op,
-                args,
-                torch.float32,
-                device="cpu",
-                add_kwargs=maybe_kwargs,
-                amp_dtype=torch.float16,
+                op, args, torch.float32, device=self.device_type,
+                add_kwargs=maybe_kwargs, amp_dtype=self.amp_dtype,
             )
 
     @skipIfTorchDynamo()
-    def test_autocast_nn_fp32(self):
+    def test_autocast_nn_fp32(self, device):
+        if not hasattr(self.autocast_lists, "nn_fp32"):
+            self.skipTest("No nn_fp32 list")
         for op_with_args in self.autocast_lists.nn_fp32:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
             self._run_autocast_outofplace(
-                op,
-                args,
-                torch.float32,
-                device="cpu",
-                module=torch._C._nn,
-                add_kwargs=maybe_kwargs,
-            )
-            self._run_autocast_outofplace(
-                op,
-                args,
-                torch.float32,
-                device="cpu",
-                module=torch._C._nn,
-                add_kwargs=maybe_kwargs,
-                amp_dtype=torch.float16,
+                op, args, torch.float32, device=self.device_type,
+                module=torch._C._nn, add_kwargs=maybe_kwargs,
+                amp_dtype=self.amp_dtype,
             )
 
     @skipIfTorchDynamo()
-    def test_autocast_torch_need_autocast_promote(self):
-        for op, args1, args2 in self.autocast_lists.torch_need_autocast_promote:
-            self._run_autocast_outofplace(op, args1, torch.float32, device="cpu")
-            self._run_autocast_outofplace(
-                op, args2, torch.float32, device="cpu", amp_dtype=torch.float16
-            )
+    def test_autocast_torch_need_autocast_promote(self, device):
+        if not hasattr(self.autocast_lists, "torch_need_autocast_promote"):
+            self.skipTest("No torch_need_autocast_promote list")
+        for item in self.autocast_lists.torch_need_autocast_promote:
+            if len(item) == 3:
+                op, args1, args2 = item
+                self._run_autocast_outofplace(
+                    op, args1, torch.float32, device=self.device_type
+                )
+                self._run_autocast_outofplace(
+                    op, args2, torch.float32, device=self.device_type,
+                    amp_dtype=torch.float16,
+                )
+            else:
+                op, args = item
+                self._run_autocast_outofplace(
+                    op, args, torch.float32, device=self.device_type,
+                    amp_dtype=self.amp_dtype,
+                )
 
-    def test_autocast_rnn(self):
-        if (
+    def test_autocast_rnn(self, device):
+        if self.device_type != "cpu":
+            self.skipTest("RNN autocast test is CPU-specific (MKLDNN)")
+        if not (
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported()
         ):
-            x = torch.randn(1, 2, 1)
-            hx = torch.randn(2, 2, 1)
-            cx = torch.randn(2, 2, 1)
+            self.skipTest("MKLDNN bf16 not supported")
 
-            m = torch.nn.LSTM(1, 1, 2).to(torch.bfloat16)
+        x = torch.randn(1, 2, 1)
+        hx = torch.randn(2, 2, 1)
+        cx = torch.randn(2, 2, 1)
 
-            # Raise ValueError when autocast is not enabled
-            with self.assertRaisesRegex(
-                ValueError, r"RNN input dtype .* does not match weight dtype"
-            ):
-                m(x, (hx, cx))
+        m = torch.nn.LSTM(1, 1, 2).to(torch.bfloat16)
 
-            # Should be able to run the below case with autocast
-            with torch.amp.autocast(device_type="cpu"):
-                m(x, (hx, cx))
+        with self.assertRaisesRegex(
+            ValueError, r"RNN input dtype .* does not match weight dtype"
+        ):
+            m(x, (hx, cx))
 
-    def test_autocast_disabled_with_fp32_dtype(self):
-        with torch.autocast(device_type="cpu", dtype=torch.float32, enabled=False):
+        with torch.amp.autocast(device_type="cpu"):
+            m(x, (hx, cx))
+
+    def test_autocast_disabled_with_fp32_dtype(self, device):
+        with torch.autocast(
+            device_type=self.device_type, dtype=torch.float32, enabled=False
+        ):
             _ = torch.ones(10)
 
-    def test_generic_autocast(self):
+    def test_generic_autocast(self, device):
+        if not hasattr(self.autocast_lists, "torch_16"):
+            self.skipTest("No torch_16 list")
         for op_with_args in self.autocast_lists.torch_16:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
-            with torch.amp.autocast(device_type="cpu"):
-                generic_autocast_output = getattr(torch, op)(*args, **maybe_kwargs)
-            with torch.amp.autocast(device_type="cpu"):
-                cpu_autocast_output = getattr(torch, op)(*args, **maybe_kwargs)
-            self.assertEqual(generic_autocast_output, cpu_autocast_output)
+            with torch.amp.autocast(device_type=self.device_type):
+                output1 = getattr(torch, op)(*args, **maybe_kwargs)
+            with torch.amp.autocast(device_type=self.device_type):
+                output2 = getattr(torch, op)(*args, **maybe_kwargs)
+            self.assertEqual(output1, output2)
 
-    def test_cpu_autocast_deprecated_warning(self):
+    def test_cpu_autocast_deprecated_warning(self, device):
+        if self.device_type != "cpu":
+            self.skipTest("CPU-specific deprecated API test")
         with self.assertWarnsRegex(
             FutureWarning,
             r"`torch.cpu.amp.autocast\(args...\)` is deprecated. Please use `torch.amp.autocast\('cpu', args...\)` instead.",
         ):
             with torch.cpu.amp.autocast():
                 _ = torch.ones(10)
+
+
+instantiate_device_type_tests(
+    TestAutocastOps, globals(), allow_mps=True, allow_xpu=True
+)
 
 
 class CustomLinear(torch.autograd.Function):
@@ -242,6 +255,7 @@ class TestAutocastDeviceType(DeviceTypeTestBase):
         return torch.get_autocast_dtype(device_type=self.device_type)
 
     @onlyAccelerator
+    @skipMPS  # MPS doesn't support cache-clearing mock; see TestAutocastMPS
     def test_cast_cache_is_global(self, device):
         """
         Verifies that the autocast cache is global. This is done by
@@ -262,6 +276,7 @@ class TestAutocastDeviceType(DeviceTypeTestBase):
         self.assertEqual(mode.dtype_cast_counter, 1)
 
     @onlyAccelerator
+    @skipMPS  # MPS doesn't support cache-clearing mock; see TestAutocastMPS
     def test_cache_disabled(self, device):
         """
         Verifies that when a weight is marked as a cached tensor,
