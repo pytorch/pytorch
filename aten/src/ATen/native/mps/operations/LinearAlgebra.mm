@@ -18,34 +18,47 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_cholesky_solve_helper_native.h>
+#include <ATen/ops/_linalg_eigh.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr_native.h>
+#include <ATen/ops/all.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/cholesky_native.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/eye.h>
 #include <ATen/ops/eye_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
 #include <ATen/ops/linalg_inv_ex_native.h>
+#include <ATen/ops/linalg_lstsq_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_lu_native.h>
 #include <ATen/ops/linalg_qr.h>
 #include <ATen/ops/linalg_qr_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
+#include <ATen/ops/linalg_svd.h>
+#include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/lu_unpack.h>
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/matmul.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/orgqr_native.h>
+#include <ATen/ops/real.h>
 #include <ATen/ops/slice.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/triangular_solve_native.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 #include <c10/util/env.h>
 #include <algorithm>
+#include <string>
+#include <unordered_set>
 
 namespace at::native {
 namespace mps {
@@ -1456,6 +1469,255 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
   return self;
 }
 
+// Orthonormal basis for the complement of Q's columns (Gram-Schmidt on proj =
+// I - Q Q^H; complex-capable, unlike float-only linalg_qr). Batched.
+static Tensor mps_orthonormal_complement(const Tensor& proj, int64_t want) {
+  const int64_t dim = proj.size(-1);
+  auto bsh = proj.sizes().slice(0, proj.dim() - 2).vec();
+  std::vector<int64_t> out_sh = bsh;
+  out_sh.push_back(dim);
+  out_sh.push_back(want);
+  Tensor out = at::zeros(out_sh, proj.options());
+  int64_t got = 0;
+  for (int64_t c = 0; c < dim && got < want; ++c) {
+    Tensor v = proj.narrow(-1, c, 1);
+    if (got > 0) {
+      Tensor Qc = out.narrow(-1, 0, got);
+      Tensor coeff = Qc.mH().matmul(v);
+      v = v.sub(Qc.matmul(coeff));
+    }
+    Tensor nrm = at::linalg_vector_norm(v, 2, {-2}, true);
+    Tensor safe = nrm.clamp_min(1e-12);
+    Tensor vn = v.div(safe.to(v.dtype()));
+    out.narrow(-1, got, 1).copy_(vn);
+    got += 1;
+  }
+  return out;
+}
+
+static void svd_kernel_mps(const Tensor& A,
+                           const bool full_matrices,
+                           const bool compute_uv,
+                           const std::optional<std::string_view>& driver,
+                           const Tensor& U,
+                           const Tensor& S,
+                           const Tensor& Vh,
+                           const Tensor& info) {
+  using namespace mps;
+  // Metal has no float64; only float32 / complex64 run on GPU.
+  TORCH_CHECK(A.scalar_type() == kFloat || A.scalar_type() == kComplexFloat,
+              "linalg.svd: the MPS backend supports only float32 and complex64. Got ",
+              A.scalar_type(),
+              ". Move the tensor to CPU for other dtypes.");
+  TORCH_CHECK(!driver.has_value(), "linalg.svd: driver= is not supported on MPS.");
+
+  if (A.numel() == 0) {
+    return;
+  }
+
+  const int64_t m = A.size(-2);
+  const int64_t n = A.size(-1);
+  const int64_t k = std::min(m, n);
+  const int64_t batch = c10::multiply_integers(A.sizes().slice(0, A.dim() - 2));
+
+  // Staging the wm x k matrix must fit the threadgroup-memory limit, else CPU.
+  const int64_t elem_size = A.element_size();
+  const int64_t wmax = std::max(m, n);
+  const int64_t staging_bytes = wmax * k * elem_size;
+  const int64_t tg_limit = static_cast<int64_t>([MPSDevice::getInstance()->device() maxThreadgroupMemoryLength]);
+  // Stage the V accumulator too when A+V fit (avoids re-streaming V from DRAM).
+  const int64_t v_staging_bytes = k * k * elem_size;
+  const bool stage_v = compute_uv && (staging_bytes + v_staging_bytes <= tg_limit);
+  if (staging_bytes > tg_limit) {
+    TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
+                    staging_bytes,
+                    " > ",
+                    tg_limit,
+                    " bytes); falling back to CPU.");
+    auto [U_cpu, S_cpu, Vh_cpu] = at::linalg_svd(A.to(at::kCPU), full_matrices, driver);
+    if (compute_uv) {
+      const_cast<Tensor&>(U).copy_(U_cpu.to(at::kMPS));
+      const_cast<Tensor&>(Vh).copy_(Vh_cpu.to(at::kMPS));
+    }
+    const_cast<Tensor&>(S).copy_(S_cpu.to(at::kMPS));
+    return;
+  }
+
+  const bool transposed = m < n;
+  // Kernel needs rows >= cols. For m<n run it on A^H: SVD(A^H)=(V,S,U^H), and
+  // params.transposed tells the kernel to swap left/right into the right outputs.
+  const int64_t wm = transposed ? n : m;
+  Tensor in = (transposed ? A.mH() : A).contiguous().reshape({batch, wm, k});
+
+  auto opts = A.options();
+  Tensor S_k = at::empty({batch, k}, opts.dtype(c10::toRealValueType(A.scalar_type())));
+  // Device-memory accumulator only when V is not staged; tiny placeholder otherwise.
+  Tensor Vacc_k = stage_v ? at::empty({1}, opts) : at::empty({batch, k, k}, opts);
+  Tensor info_b = at::zeros({batch}, opts.dtype(kInt));
+  // svdvals: U/Vh empty, so bind scratch for the kernel's (still-run) U writeback.
+  Tensor U_scratch, Vh_scratch;
+  if (!compute_uv) {
+    U_scratch = at::empty({batch, wm, wm}, opts);
+    Vh_scratch = at::empty({batch, wm, wm}, opts);
+  }
+
+  // Kernel writes straight into the column-major U/Vh outputs (first k cols/rows;
+  // full_matrices fills the rest below).
+  const int64_t u_ld = compute_uv ? U.size(-2) : wm;
+  const int64_t u_bs = compute_uv ? U.size(-2) * U.size(-1) : wm * wm;
+  const int64_t v_ld = compute_uv ? Vh.size(-2) : wm;
+  const int64_t v_bs = compute_uv ? Vh.size(-2) * Vh.size(-1) : wm * wm;
+
+  SvdParams params{static_cast<uint32_t>(wm),
+                   static_cast<uint32_t>(k),
+                   /*max_sweeps=*/30u,
+                   static_cast<uint32_t>(compute_uv ? 1 : 0),
+                   /*tol=*/1e-6f,
+                   static_cast<uint32_t>(u_ld),
+                   static_cast<uint32_t>(u_bs),
+                   static_cast<uint32_t>(v_ld),
+                   static_cast<uint32_t>(v_bs),
+                   static_cast<uint32_t>(transposed ? 1 : 0),
+                   static_cast<uint32_t>(stage_v ? 1 : 0)};
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(fmt::format("svd_jacobi_{}", scalarToMetalTypeString(A)));
+      getMPSProfiler().beginProfileKernel(pso, "svd_jacobi", {A});
+      [enc setComputePipelineState:pso];
+      Tensor Ubind = compute_uv ? U : U_scratch;
+      Tensor Vbind = compute_uv ? Vh : Vh_scratch;
+      mtl_setArgs(enc, in, Ubind, S_k, Vbind, Vacc_k, info_b, params);
+      [enc setThreadgroupMemoryLength:wm * k * elem_size atIndex:0];
+      [enc setThreadgroupMemoryLength:(stage_v ? k * k * elem_size : elem_size) atIndex:1];
+      // One threadgroup per batch matrix; cap at 32 SIMD-groups (1024 threads).
+      const NSUInteger simd = 32;
+      const NSUInteger kMaxSimdGroups = 32;
+      const NSUInteger maxThreads = pso.maxTotalThreadsPerThreadgroup;
+      const NSUInteger nPairs = (k + 1) / 2;
+      const NSUInteger wantSG = std::min<NSUInteger>(std::max<NSUInteger>(nPairs, 1), kMaxSimdGroups);
+      NSUInteger tgs = std::min<NSUInteger>(maxThreads, wantSG * simd);
+      [enc dispatchThreads:MTLSizeMake(tgs * batch, 1, 1) threadsPerThreadgroup:MTLSizeMake(tgs, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+
+  const_cast<Tensor&>(S).copy_(S_k.reshape(S.sizes()));
+  const_cast<Tensor&>(info).copy_(info_b.reshape(info.sizes()));
+
+  if (compute_uv && full_matrices && (m != k || n != k)) {
+    // full_matrices: complete cols k.. via an orthonormal basis of (I - Q Q^H).
+    auto complete = [](Tensor M, int64_t kk) {
+      const int64_t dim = M.size(-1);
+      if (kk == dim)
+        return;
+      Tensor Q = M.narrow(-1, 0, kk);
+      std::vector<int64_t> ish = M.sizes().slice(0, M.dim() - 2).vec();
+      ish.push_back(dim);
+      ish.push_back(dim);
+      Tensor I = at::eye(dim, M.options()).expand(ish);
+      Tensor proj = I.sub(Q.matmul(Q.mH()));
+      // linalg_qr is float-only on MPS, so complex goes through Gram-Schmidt.
+      Tensor comp;
+      if (c10::isComplexType(proj.scalar_type())) {
+        comp = mps_orthonormal_complement(proj, dim - kk);
+      } else {
+        comp = std::get<0>(at::linalg_qr(proj, "reduced")).narrow(-1, 0, dim - kk);
+      }
+      M.narrow(-1, kk, dim - kk).copy_(comp);
+    };
+    if (m > k)
+      complete(const_cast<Tensor&>(U), k);
+    if (n > k)
+      complete(const_cast<Tensor&>(Vh).mH(), k); // V = Vh^H
+  }
+}
+
+// Native MPS symmetric/Hermitian eigensolver (two-sided block-Jacobi). On entry
+// `eigenvectors` holds A column-major (the structured wrapper already copied it).
+static void eigh_kernel_mps(const Tensor& eigenvalues,
+                            const Tensor& eigenvectors,
+                            const Tensor& infos,
+                            bool upper,
+                            bool compute_eigenvectors) {
+  using namespace mps;
+
+  if (eigenvectors.numel() == 0) {
+    return;
+  }
+
+  const auto dtype = eigenvectors.scalar_type();
+  const int64_t n = eigenvectors.size(-1);
+  const int64_t batch = c10::multiply_integers(eigenvectors.sizes().slice(0, eigenvectors.dim() - 2));
+  const int64_t elem_size = eigenvectors.element_size();
+  const int64_t staging_bytes = n * n * elem_size;
+  const int64_t tg_limit = static_cast<int64_t>([MPSDevice::getInstance()->device() maxThreadgroupMemoryLength]);
+  const bool fits = (2 * staging_bytes) <= tg_limit; // stage A and Q
+
+  // CPU fallback: no Metal double, or staged matrices exceed the tg-memory limit.
+  if (dtype != kFloat && dtype != kComplexFloat) {
+    auto [L_cpu, V_cpu] = at::_linalg_eigh(eigenvectors.to(at::kCPU), upper ? "U" : "L", compute_eigenvectors);
+    const_cast<Tensor&>(eigenvalues).copy_(L_cpu);
+    if (compute_eigenvectors) {
+      const_cast<Tensor&>(eigenvectors).copy_(V_cpu);
+    }
+    const_cast<Tensor&>(infos).zero_();
+    return;
+  }
+  if (!fits) {
+    TORCH_WARN_ONCE("linalg.eigh: matrix too large to stage in MPS threadgroup memory (",
+                    2 * staging_bytes,
+                    " > ",
+                    tg_limit,
+                    " bytes); falling back to CPU.");
+    auto [L_cpu, V_cpu] = at::_linalg_eigh(eigenvectors.to(at::kCPU), upper ? "U" : "L", compute_eigenvectors);
+    const_cast<Tensor&>(eigenvalues).copy_(L_cpu);
+    if (compute_eigenvectors) {
+      const_cast<Tensor&>(eigenvectors).copy_(V_cpu);
+    }
+    const_cast<Tensor&>(infos).zero_();
+    return;
+  }
+
+  Tensor V = eigenvectors.reshape({batch, n, n});
+  Tensor W = at::empty({batch, n}, eigenvectors.options().dtype(c10::toRealValueType(dtype)));
+  Tensor info_b = at::zeros({batch}, eigenvectors.options().dtype(kInt));
+
+  EighParams params{static_cast<uint32_t>(n),
+                    /*max_sweeps=*/80u,
+                    static_cast<uint32_t>(compute_eigenvectors ? 1 : 0),
+                    static_cast<uint32_t>(upper ? 1 : 0),
+                    /*tol=*/1e-6f};
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> enc = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(fmt::format("eigh_jacobi_{}", scalarToMetalTypeString(eigenvectors)));
+      getMPSProfiler().beginProfileKernel(pso, "eigh_jacobi", {eigenvectors});
+      [enc setComputePipelineState:pso];
+      // V binds to both A (in) and Q (out): safe since all reads stage into
+      // threadgroup memory before any device writeback.
+      mtl_setArgs(enc, V, W, V, info_b, params);
+      [enc setThreadgroupMemoryLength:n * n * elem_size atIndex:0];
+      [enc setThreadgroupMemoryLength:n * n * elem_size atIndex:1];
+      const NSUInteger simd = 32;
+      const NSUInteger kMaxSimdGroups = 16;
+      const NSUInteger maxThreads = pso.maxTotalThreadsPerThreadgroup;
+      const NSUInteger nPairs = (n + 1) / 2;
+      const NSUInteger wantSG = std::min<NSUInteger>(std::max<NSUInteger>(nPairs, 1), kMaxSimdGroups);
+      NSUInteger tgs = std::min<NSUInteger>(maxThreads, wantSG * simd);
+      [enc dispatchThreads:MTLSizeMake(tgs * batch, 1, 1) threadsPerThreadgroup:MTLSizeMake(tgs, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+
+  const_cast<Tensor&>(eigenvalues).copy_(W.reshape(eigenvalues.sizes()));
+  const_cast<Tensor&>(infos).copy_(info_b.reshape(infos.sizes()));
+}
+
 static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, bool upper) {
   using namespace mps;
   TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
@@ -1837,9 +2099,140 @@ TORCH_IMPL_FUNC(linalg_qr_out_mps)(const Tensor& A, c10::string_view mode, const
   mps::linalg_qr_out_impl_mps(A, Q, R, mode);
 }
 
+// SVD-based least-squares (x = V Sigma^+ U^H b); reproduces the per-driver output
+// rules (gels: neither rank nor sv; gelsy: rank; gelsd/gelss: both) to match LAPACK.
+std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq_mps(const Tensor& input,
+                                                            const Tensor& other,
+                                                            std::optional<double> rcond,
+                                                            std::optional<std::string_view> driver) {
+  TORCH_CHECK(input.dim() >= 2, "torch.linalg.lstsq: input must have at least 2 dimensions.");
+  TORCH_CHECK(other.dim() >= 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
+  TORCH_CHECK(input.scalar_type() == other.scalar_type(),
+              "torch.linalg.lstsq: Expected input and other to have the same dtype, but got input's dtype ",
+              input.scalar_type(),
+              " and other's dtype ",
+              other.scalar_type());
+  auto dim_diff = input.dim() - other.dim();
+  TORCH_CHECK(
+      0 <= dim_diff && dim_diff <= 1,
+      "torch.linalg.lstsq: input.dim() must be greater or equal to other.dim() and (input.dim() - other.dim()) <= 1");
+
+  std::string driver_name;
+  if (driver.has_value()) {
+    driver_name = std::string(driver.value());
+    std::transform(
+        driver_name.begin(), driver_name.end(), driver_name.begin(), [](unsigned char c) { return std::tolower(c); });
+    static const std::unordered_set<std::string_view> allowed_drivers = {"gels", "gelsy", "gelsd", "gelss"};
+    TORCH_CHECK(allowed_drivers.find(driver_name) != allowed_drivers.end(),
+                "torch.linalg.lstsq: parameter `driver` should be one of (gels, gelsy, gelsd, gelss)");
+  } else {
+    driver_name = "gelsd";
+  }
+
+  const bool sets_rank = (driver_name != "gels");
+  const bool sets_singular_values = (driver_name == "gelsd" || driver_name == "gelss");
+
+  const auto scalar_type = input.scalar_type();
+  const auto real_dtype = c10::toRealValueType(scalar_type);
+
+  bool vector_case = linalg_solve_is_vector_rhs(input, other);
+  Tensor other_2d = vector_case ? other.unsqueeze(-1) : other;
+  TORCH_CHECK(input.size(-2) == other_2d.size(-2),
+              vector_case ? "torch.linalg.lstsq: input.size(-2) should match other.size(-1)"
+                          : "torch.linalg.lstsq: input.size(-2) should match other.size(-2)");
+
+  const auto m = input.size(-2);
+  const auto n = input.size(-1);
+  const auto k = std::min(m, n);
+
+  double rcond_value =
+      rcond.has_value() ? rcond.value() : _get_epsilon(real_dtype) * static_cast<double>(std::max<int64_t>(m, n));
+
+  Tensor U, S, Vh;
+  std::tie(U, S, Vh) = at::linalg_svd(input, /*full_matrices=*/false);
+
+  Tensor s_max = std::get<0>(S.max(/*dim=*/-1, /*keepdim=*/true));
+  Tensor threshold = s_max.mul(rcond_value);
+  Tensor above = S.gt(threshold);
+
+  Tensor s_inv = at::where(above, S.reciprocal(), at::zeros({}, S.options()));
+
+  Tensor tmp = at::matmul(U.mH(), other_2d);
+  tmp = tmp.mul(s_inv.unsqueeze(-1));
+  Tensor solution = at::matmul(Vh.mH(), tmp);
+
+  Tensor rank;
+  if (sets_rank) {
+    rank = above.sum(/*dim=*/-1).to(at::kLong);
+  } else {
+    rank = at::empty({0}, input.options().dtype(at::kLong));
+  }
+
+  Tensor singular_values;
+  if (sets_singular_values) {
+    singular_values = S.to(real_dtype).contiguous();
+  } else {
+    singular_values = at::empty({0}, input.options().dtype(real_dtype));
+  }
+
+  Tensor residuals = at::empty({0}, input.options().dtype(real_dtype));
+  if (m > n && driver_name != "gelsy") {
+    bool compute_residuals = true;
+    if (driver_name == "gelss" || driver_name == "gelsd") {
+      compute_residuals = at::all(rank.eq(n)).item().toBool();
+    }
+    if (compute_residuals) {
+      Tensor resid = at::matmul(input, solution).sub(other_2d);
+      if (resid.is_complex()) {
+        residuals = at::real(resid.mul(resid.conj())).sum(/*dim=*/-2, /*keepdim=*/false).to(real_dtype);
+      } else {
+        residuals = resid.pow(2).sum(/*dim=*/-2, /*keepdim=*/false).to(real_dtype);
+      }
+    }
+  }
+
+  if (m == 0) {
+    solution.zero_();
+  }
+
+  if (vector_case) {
+    solution = solution.squeeze(-1);
+  }
+  solution = solution.contiguous();
+
+  return std::make_tuple(std::move(solution), std::move(residuals), std::move(rank), std::move(singular_values));
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out_mps(const Tensor& input,
+                                                                    const Tensor& other,
+                                                                    std::optional<double> rcond,
+                                                                    std::optional<std::string_view> driver,
+                                                                    Tensor& solution,
+                                                                    Tensor& residuals,
+                                                                    Tensor& rank,
+                                                                    Tensor& singular_values) {
+  auto [solution_tmp, residuals_tmp, rank_tmp, singular_values_tmp] = linalg_lstsq_mps(input, other, rcond, driver);
+
+  at::native::resize_output(solution, solution_tmp.sizes());
+  solution.copy_(solution_tmp);
+
+  at::native::resize_output(residuals, residuals_tmp.sizes());
+  residuals.copy_(residuals_tmp);
+
+  at::native::resize_output(rank, rank_tmp.sizes());
+  rank.copy_(rank_tmp);
+
+  at::native::resize_output(singular_values, singular_values_tmp.sizes());
+  singular_values.copy_(singular_values_tmp);
+
+  return std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>(solution, residuals, rank, singular_values);
+}
+
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
 REGISTER_DISPATCH(unpack_pivots_stub, mps::unpack_pivots_stub_impl)
 REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
 REGISTER_DISPATCH(cholesky_inverse_stub, mps::cholesky_inverse_kernel_impl_mps);
+REGISTER_DISPATCH(svd_stub, mps::svd_kernel_mps);
+REGISTER_DISPATCH(linalg_eigh_stub, mps::eigh_kernel_mps);
 
 } // namespace at::native
