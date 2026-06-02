@@ -191,9 +191,12 @@ def remove_no_ops(
                 val = n.meta.get("val")
                 if isinstance(val, torch.Tensor) and val.device.type == "meta":
                     with graph.inserting_before(output_node):
-                        # size/stride may contain symbolic values under dynamic
-                        # shapes; materialize them into FX nodes so we never pass
-                        # raw SymInts as call_function args.
+                        # size/stride may be symbolic under dynamic shapes;
+                        # materialize them so we never pass raw SymInts as args.
+                        # Use materialize_symints (roots backed sizes on input
+                        # placeholders) rather than create_size_node(n, d), which
+                        # would query `n` and pin it alive, blocking the
+                        # eliminate_dead_code() that removes this meta tensor.
                         size = graph.materialize_symints(val.size())
                         stride = graph.materialize_symints(val.stride())
                         n.replace_all_uses_with(
