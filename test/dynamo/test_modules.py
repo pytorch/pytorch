@@ -1858,6 +1858,43 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_module_dict_item_methods(self):
+        mod = torch.nn.ModuleDict({"a": torch.nn.Linear(1, 1)})
+        opt_mod = torch.compile(mod, backend="eager")
+
+        self.assertIs(opt_mod["a"], mod["a"])
+        self.assertEqual(len(opt_mod), 1)
+        self.assertEqual(list(opt_mod), ["a"])
+        self.assertIn("a", opt_mod)
+        self.assertNotIn("b", opt_mod)
+
+        b = torch.nn.Linear(1, 1)
+        opt_mod["b"] = b
+        self.assertIs(mod["b"], b)
+        self.assertIs(opt_mod["b"], b)
+        self.assertEqual(list(opt_mod), ["a", "b"])
+        self.assertIn("b", opt_mod)
+
+        del opt_mod["b"]
+        self.assertNotIn("b", mod)
+        self.assertEqual(list(opt_mod), ["a"])
+        self.assertNotIn("b", opt_mod)
+        with self.assertRaisesRegex(KeyError, "b"):
+            opt_mod["b"]
+
+    def test_non_container_module_protocol_errors(self):
+        mod = torch.nn.Linear(1, 1)
+        opt_mod = torch.compile(mod, backend="eager")
+
+        with self.assertRaisesRegex(TypeError, "object is not iterable"):
+            iter(opt_mod)
+
+        with self.assertRaisesRegex(TypeError, "not subscriptable"):
+            opt_mod["a"]
+
+        with self.assertRaisesRegex(TypeError, r"not (?:a container or )?iterable"):
+            self.assertIn("a", opt_mod)
+
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_attr_precedence(self):
         class Mod(torch.nn.Module):
