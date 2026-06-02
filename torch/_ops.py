@@ -399,6 +399,28 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
+    def _get_overloaded_args(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[torch.Tensor, ...]:
+        # Default HOP behavior matches handle_torch_function_no_python_arg_parser
+        # in torch/csrc/utils/python_arg_parser.cpp.
+        overloaded_args: list[torch.Tensor] = []
+
+        def has_python_key(tensor):
+            return torch._C._dispatch_keys(tensor).has("Python")
+
+        def check_overloaded(arg):
+            if isinstance(arg, torch.Tensor) and has_python_key(arg):
+                overloaded_args.append(arg)
+
+        for arg in (*args, *kwargs.values()):
+            check_overloaded(arg)
+            if isinstance(arg, (list, tuple)):
+                for a in arg:
+                    check_overloaded(a)
+
+        return tuple(overloaded_args)
+
     # Use positional-only argument to avoid naming collide with custom ops arguments
     # that are named "self".
     def dispatch(self, /, dispatch_key, *args, **kwargs):
@@ -414,25 +436,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             return dispatch_functorch(self, args, kwargs)
 
         if dispatch_key == DispatchKey.Python:
-            # Keep the following 1:1 with handle_torch_function_no_python_arg_parser
-            # in torch/csrc/utils/python_arg_parser.cpp
-
-            overloaded_args_list = []
-
-            def has_python_key(tensor):
-                return torch._C._dispatch_keys(tensor).has("Python")
-
-            def check_overloaded(arg):
-                if isinstance(arg, torch.Tensor) and has_python_key(arg):
-                    overloaded_args_list.append(arg)
-
-            for arg in (*args, *kwargs.values()):
-                check_overloaded(arg)
-                if isinstance(arg, (list, tuple)):
-                    for a in arg:
-                        check_overloaded(a)
-
-            overloaded_args = tuple(overloaded_args_list)
+            overloaded_args = self._get_overloaded_args(args, kwargs)
 
             # Step 1: dispatch on any user TorchDispatchModes
             from torch.utils._python_dispatch import _pop_mode_temporarily
