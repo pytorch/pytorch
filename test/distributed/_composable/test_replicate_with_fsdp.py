@@ -4,6 +4,7 @@ import copy
 import functools
 import sys
 from copy import deepcopy
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -15,7 +16,7 @@ from torch.distributed._composable.replicate_with_fsdp import (
     replicate,
 )
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
-from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_init import _get_managed_modules
 from torch.distributed.tensor import Replicate, Shard
 from torch.testing._internal.common_distributed import (
@@ -214,6 +215,55 @@ class ReplicateTest(MultiProcContinuousTest):
             for parameter in layer.parameters():
                 self.assertEqual(parameter.device_mesh.shape, (2,))
                 self.assertEqual(parameter.placements, (Replicate(),))
+
+    @skip_if_lt_x_gpu(4)
+    def test_replicate_all_reduce_buffer_window(self):
+        from torch.distributed.fsdp._fully_shard import _fsdp_param_group
+
+        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+        mp_mixed = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+        )
+        mp_same = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.bfloat16,
+        )
+        dim = 64
+        model = nn.Sequential(
+            *[nn.Linear(dim, dim, bias=False, dtype=torch.bfloat16) for _ in range(4)]
+        ).to(device)
+        for i, layer in enumerate(model):
+            replicate(layer, mp_policy=mp_same if i < 2 else mp_mixed)
+        replicate(model)
+        model.set_all_reduce_buffer_window(2)
+
+        pop_counts: list[int] = []
+        orig_pop = (
+            _fsdp_param_group.FSDPCommContext.take_releasable_all_reduce_buffer_states
+        )
+
+        def tracking_pop(comm_ctx):
+            states = orig_pop(comm_ctx)
+            pop_counts.append(len(states))
+            return states
+
+        inp = torch.randn(
+            2,
+            dim,
+            device=device,
+            dtype=torch.bfloat16,
+        )
+        with mock.patch.object(
+            _fsdp_param_group.FSDPCommContext,
+            "take_releasable_all_reduce_buffer_states",
+            tracking_pop,
+        ):
+            model(inp).sum().backward()
+
+        self.assertEqual(sum(pop_counts), 2)
+        self.assertEqual(pop_counts.count(1), 2)
+        self.assertEqual(len(replicate.state(model)._comm_ctx.all_reduce_states), 0)
 
     @skip_if_lt_x_gpu(4)
     def test_train_replicate_fsdp(self):

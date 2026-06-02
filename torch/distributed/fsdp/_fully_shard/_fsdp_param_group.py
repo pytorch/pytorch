@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from collections import deque
 from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
@@ -72,6 +73,20 @@ reference to avoid holding onto memory after forward.
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
+    def __init__(self) -> None:
+        self.all_reduce_buffer_release_window: int | None = None
+        # Sole owner of in-flight all-reduce input buffers across param groups.
+        # Each entry's live Python ref keeps an AR buffer off the caching
+        # allocator's free list until its all-reduce completes, so the next
+        # layer's reduce-scatter cannot reuse the block mid-flight. Held for
+        # both mixed-dtype buffers (distinct from the cast-down grad) and
+        # same-dtype buffers: when accumulating into a pre-existing grad
+        # (set_to_none=False) param.grad does not alias the reduce buffer, so
+        # nothing else keeps it alive. Released by the release window, else
+        # flushed at backward end / reset.
+        # See AllReduceState docstring and regression test PR #180900.
+        self.all_reduce_states: deque[AllReduceState] = deque()
+
     def lazy_init(self, device: torch.device):
         self.device_handle = _get_device_handle(device.type)
         # Setting the all-gather/reduce-scatter streams to be higher priority
@@ -108,6 +123,37 @@ class FSDPCommContext:
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: list[FSDPParamGroup] = []  # will cause ref cycles
 
+    def set_all_reduce_buffer_release_window(self, window: int | None) -> None:
+        existing_window = self.all_reduce_buffer_release_window
+        # None means "don't care": it never conflicts and is upgraded to any
+        # concrete window. Only two roots requesting different concrete windows
+        # for the one shared release queue is an error.
+        if window is None or existing_window == window:
+            return
+        if existing_window is None:
+            self.all_reduce_buffer_release_window = window
+            return
+        raise ValueError(
+            "All roots sharing a communication context must use the "
+            "same all_reduce_buffer_window value. "
+            f"Existing value: {existing_window}; new value: {window}."
+        )
+
+    def take_releasable_all_reduce_buffer_states(self) -> list[AllReduceState]:
+        window = self.all_reduce_buffer_release_window
+        if window is None:
+            return []
+        states: list[AllReduceState] = []
+        while len(self.all_reduce_states) >= window:
+            states.append(self.all_reduce_states.popleft())
+        return states
+
+    def flush_all_reduce_buffer_states(self, stream: torch.Stream) -> None:
+        for all_reduce_state in self.all_reduce_states:
+            if all_reduce_state.event is not None:
+                stream.wait_event(all_reduce_state.event)
+        self.all_reduce_states.clear()
+
     def get_all_gather_streams(
         self, async_op: bool, training_state: TrainingState
     ) -> tuple[torch.Stream, torch.Stream]:
@@ -139,7 +185,9 @@ class AllReduceState(NamedTuple):
     # RS can reuse the same physical block before this layer's AR finishes
     # under slow AR, causing gradient aliasing. See PR #140044, PR #180900.
     all_reduce_input: torch.Tensor
-    event: torch.Event | None  # all-reduce event
+    # Event after the final stream use of all_reduce_input. This is usually the
+    # AR event, but it is a post-cast release event for queued mixed-dtype ARs.
+    event: torch.Event | None
 
 
 class FSDPParamGroup:
@@ -249,14 +297,6 @@ class FSDPParamGroup:
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: torch.Tensor | None = None
-        # Holds the reduce-dtype AR buffer + completion event across
-        # layers in HSDP+AR with reduce_dtype != orig_dtype (e.g., bf16
-        # reduce + fp32 params). Structural invariant: the live Python
-        # ref keeps the buffer off the caching allocator's free list,
-        # preventing the next layer's RS from reusing the same physical
-        # block while this layer's AR is still in flight. See
-        # AllReduceState docstring and regression test PR #180900.
-        self._all_reduce_state: AllReduceState | None = None
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -511,12 +551,6 @@ class FSDPParamGroup:
         if self._post_reduce_event is not None:
             current_stream.wait_event(self._post_reduce_event)
             self._post_reduce_event = None
-        if (
-            self._all_reduce_state is not None
-            and self._all_reduce_state.event is not None
-        ):
-            current_stream.wait_event(self._all_reduce_state.event)
-        self._all_reduce_state = None
         if self._reshard_after_forward_event is not None:
             self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
@@ -656,6 +690,38 @@ class FSDPParamGroup:
                 all_reduce_stream = self.comm_ctx.all_reduce_stream
 
             self._wait_for_post_backward()
+            effective_reduce_dtype = self._reduce_dtype or unsharded_grads[0].dtype
+            # A mixed-dtype all-reduce produces a distinct reduce-dtype buffer
+            # (the cast-down grad does not alias it), so it must be held off the
+            # allocator free list until the AR completes.
+            is_mixed_dtype_all_reduce = (
+                all_reduce_pg is not None
+                and self.all_reduce_grads
+                and effective_reduce_dtype != self._orig_dtype
+            )
+            # The release window is measured in native all-reduce layers. Same-
+            # dtype layers append None slots since param.grad owns their output.
+            use_all_reduce_state_queue = (
+                self.comm_ctx.all_reduce_buffer_release_window is not None
+                and all_reduce_pg is not None
+                and self.all_reduce_grads
+            )
+            # Only the windowed mixed-dtype path frees the buffer early (after
+            # the cast), so only it needs the post-cast release event; otherwise
+            # the buffer is held until flush and the AR event suffices.
+            record_all_reduce_input_release_event = (
+                use_all_reduce_state_queue and is_mixed_dtype_all_reduce
+            )
+            prev_all_reduce_states = (
+                self.comm_ctx.take_releasable_all_reduce_buffer_states()
+                if use_all_reduce_state_queue
+                else []
+            )
+            prev_all_reduce_release_events = [
+                all_reduce_state.event
+                for all_reduce_state in prev_all_reduce_states
+                if all_reduce_state.event is not None
+            ]
             (
                 reduce_scatter_input,
                 reduce_scatter_event,
@@ -689,10 +755,16 @@ class FSDPParamGroup:
                 self._partial_reduce_output,
                 self._all_reduce_hook,
                 self.force_sum_reduction_for_comms,
+                prev_all_reduce_release_events,
+                record_all_reduce_input_release_event,
             )
             self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                 self._post_reduce_event
             )
+            # Keep popped tensors live through current RS. foreach_reduce()
+            # has already queued waits for later RS work, so clearing here
+            # can return the old blocks to the allocator.
+            prev_all_reduce_states.clear()
             self.comm_ctx.reduce_scatter_states.append(
                 ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
             )
@@ -735,8 +807,14 @@ class FSDPParamGroup:
                         raise AssertionError(
                             "Expected all_reduce_event to be set for non-CPU device"
                         )
-                self._all_reduce_state = AllReduceState(
-                    all_reduce_input, all_reduce_event
+                # Hold the AR buffer off the allocator free list until its AR
+                # completes; the comm-ctx queue is the sole owner (released by
+                # the window, else flushed at backward end). Held regardless of
+                # dtype: when accumulating into a pre-existing grad
+                # (set_to_none=False) param.grad does not alias this buffer, so
+                # nothing else keeps it alive even in the same-dtype case.
+                self.comm_ctx.all_reduce_states.append(
+                    AllReduceState(all_reduce_input, all_reduce_event)
                 )
 
     def finalize_backward(self):
@@ -744,7 +822,9 @@ class FSDPParamGroup:
             self.device_handle.current_stream().wait_event(event)
         self.comm_ctx._last_post_reduce_events = dict()
         self._post_reduce_event = None
-        self._all_reduce_state = None
+        self.comm_ctx.flush_all_reduce_buffer_states(
+            self.device_handle.current_stream()
+        )
         for fsdp_param in self.fsdp_params:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
@@ -764,12 +844,6 @@ class FSDPParamGroup:
         if self._post_reduce_event is not None:
             self.device_handle.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
-        if (
-            self._all_reduce_state is not None
-            and self._all_reduce_state.event is not None
-        ):
-            self.device_handle.current_stream().wait_event(self._all_reduce_state.event)
-        self._all_reduce_state = None
 
     def _backward_prefetch(self) -> None:
         if self._training_state == TrainingState.PRE_BACKWARD:

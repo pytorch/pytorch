@@ -76,7 +76,12 @@ class _ReplicateState(FSDPState):
         mp_policy: MixedPrecisionPolicy,
         auto_reshard_after_forward: bool = False,
     ) -> None:
-        super().init(modules, device, mp_policy, auto_reshard_after_forward)
+        super().init(
+            modules,
+            device,
+            mp_policy,
+            auto_reshard_after_forward,
+        )
 
 
 @overload
@@ -153,7 +158,11 @@ def replicate(
         get_state_fn=_get_module_replicate_state,
     )
     state = replicate.state(modules[0])  # type: ignore[attr-defined]
-    state.init(modules, device, mp_policy)
+    state.init(
+        modules,
+        device,
+        mp_policy,
+    )
 
     _init_param_group(
         state,
