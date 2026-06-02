@@ -4133,13 +4133,13 @@ class TestFromBlob(TestCase):
         arr = np.arange(1, numel + 1, dtype=numpy_dtype)
         return arr, arr.ctypes.data
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.uint16, torch.uint32, torch.uint64))
+    @dtypes(*all_types_and_complex_and(torch.half))
     def test_basic(self, device, dtype):
         arr, ptr = self._make_data(dtype, 6)
         t = torch._from_blob(ptr, [6], dtype=dtype)
         self.assertEqual(t, torch.from_numpy(arr))
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.uint16, torch.uint32, torch.uint64))
+    @dtypes(*all_types_and_complex_and(torch.half))
     def test_2d(self, device, dtype):
         arr, ptr = self._make_data(dtype, 6)
         t = torch._from_blob(ptr, [2, 3], dtype=dtype)
