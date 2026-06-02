@@ -1671,6 +1671,23 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         mod = LazyGraphModuleForwardCall()
         check_fullgraph(mod, mod.lazy_gm, x)
 
+        from torch._dynamo.utils import materialize_lazy_graph_module
+
+        lazy_gm = make_lazy_graph_module()
+        lazy_gm.register_forward_hook(lambda mod, inp, out: out + 100)
+        lazy_forward = lazy_gm.forward
+        self.assertEqual(materialize_lazy_graph_module(lazy_forward)(x), graph(x) + 100)
+
+        lazy_gm = make_lazy_graph_module()
+        lazy_gm.register_forward_hook(lambda mod, inp, out: out + 100)
+        lazy_forward = lazy_gm.forward
+        self.assertEqual(
+            materialize_lazy_graph_module(
+                lazy_forward, preserve_lazy_forward_call_semantics=False
+            )(x),
+            graph(x),
+        )
+
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
     def test_lazy_module2(self):
