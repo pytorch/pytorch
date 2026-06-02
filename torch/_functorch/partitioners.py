@@ -2257,6 +2257,8 @@ def solve_min_cut(
         cannot_save_reason is None for finite weights, or a string explaining
         why the node cannot be saved for infinite weights.
         """
+        if node.meta.get("aot_mutated_input_requires_grad", False):
+            return math.inf, "mutated input requiring grad"
         if (
             config.treat_parameters_as_free_to_save
             and node in static_lifetime_input_nodes

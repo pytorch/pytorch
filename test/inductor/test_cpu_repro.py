@@ -143,6 +143,72 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    def _check_interpolate_mutated_input_backward(self, fn):
+        torch.manual_seed(0)
+        base = torch.randn(1, 3, 16, 16)
+        mean = torch.randn(3, 1, 1)
+        std = torch.randn(3, 1, 1).abs().add(0.5)
+
+        def make_args():
+            base_arg = base.detach().clone().requires_grad_(True)
+            x_arg = (base_arg * 1.0).squeeze(0)
+            mean_arg = mean.detach().clone().requires_grad_(True)
+            std_arg = std.detach().clone().requires_grad_(True)
+            return base_arg, x_arg, mean_arg, std_arg
+
+        def run(fn_to_run):
+            base_arg, x_arg, mean_arg, std_arg = make_args()
+            y, z = fn_to_run(x_arg, mean_arg, std_arg)
+            (y.sum() + z.sum()).backward()
+            return y.detach(), z.detach(), base_arg.grad, mean_arg.grad, std_arg.grad
+
+        expected = run(fn)
+        actual = run(torch.compile(fn, backend="inductor", fullgraph=True))
+        self.assertEqual(actual, expected)
+
+    def test_interpolate_mutated_input_backward(self):
+        def fn(x, mean, std):
+            y = F.interpolate(
+                x[:, :8, :8].unsqueeze(0),
+                size=(4, 4),
+                mode="bilinear",
+                align_corners=False,
+            )
+            x.sub_(mean).div_(std)
+            return y, x
+
+        self._check_interpolate_mutated_input_backward(fn)
+
+    def test_interpolate_mutated_input_backward_with_effect_token(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::_issue185497_effect", mutates_args=())
+        def effect(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @effect.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effect, EffectType.ORDERED)
+
+        try:
+            def fn(x, mean, std):
+                torch.ops.test._issue185497_effect(x)
+                y = F.interpolate(
+                    x[:, :8, :8].unsqueeze(0),
+                    size=(4, 4),
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                x.sub_(mean).div_(std)
+                return y, x
+
+            self._check_interpolate_mutated_input_backward(fn)
+        finally:
+            handle.destroy()
+
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
         def fn(x):
