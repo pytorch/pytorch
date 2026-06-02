@@ -2849,6 +2849,41 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         torch._dynamo.reset()
         _ = torch.compile(f, backend=backend)(x)
 
+    @requires_cuda_and_triton
+    @config.patch({"fx_graph_cache": False})
+    def test_standalone_compile_fallback_output_unbacked_symbol_binding(self):
+        from torch._subclasses.fake_tensor import FakeTensor
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(counts, x):
+            idx = torch.repeat_interleave(counts)
+            return x[idx].sin()
+
+        counts = torch.tensor([1, 2, 1, 0], device="cuda", dtype=torch.int64)
+        x = torch.randn(4, 8, device="cuda")
+        torch._dynamo.mark_dynamic(counts, 0, min=1, max=8)
+
+        gm = make_fx(fn, tracing_mode="symbolic")(counts, x)
+        fake_mode = next(
+            node.meta["val"].fake_mode
+            for node in gm.graph.nodes
+            if isinstance(node.meta.get("val"), FakeTensor)
+        )
+
+        with (
+            fresh_cache(),
+            torch._guards.tracing(torch._guards.TracingContext(fake_mode)),
+            fake_mode.shape_env.ignore_fresh_unbacked_symbols(),
+        ):
+            compiled = torch._inductor.standalone_compile(
+                gm,
+                [counts, x],
+                dynamic_shapes="from_tracing_context",
+                options={},
+            )
+
+        torch.testing.assert_close(compiled(counts, x), fn(counts, x))
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
