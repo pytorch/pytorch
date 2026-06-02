@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     MACOS_VERSION,
     make_fullrank_matrices_with_distinct_singular_values,
+    skipIfNoNvmath,
     skipIfSlowGradcheckEnv,
     slowTest,
     TEST_WITH_ROCM,
@@ -1122,6 +1123,18 @@ def sample_inputs_linalg_qr_geqrf(
         yield SampleInput(make_arg(*shape))
 
 
+def sample_inputs_linalg_polar(op_info, device, dtype, requires_grad=False, **kwargs):
+    # The polar decomposition A = U @ H is defined for m >= n (tall or square).
+    make_arg = partial(
+        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+    )
+    batches = [(), (0,), (2,), (1, 1)]
+    # (m, n) with m >= n, including the n == 0 degenerate case.
+    sizes = [(5, 5), (5, 3), (2, 2), (3, 0)]
+    for batch, (m, n) in product(batches, sizes):
+        yield SampleInput(make_arg(*(batch + (m, n)), low=-2, high=2))
+
+
 def sample_inputs_tensorsolve(op_info, device, dtype, requires_grad, **kwargs):
     a_shapes = [(2, 3, 6), (3, 4, 4, 3)]
     # Zero-dim tensors are not supported in NumPy, so we skip them for now.
@@ -1962,6 +1975,24 @@ op_db: list[OpInfo] = [
         check_batched_gradgrad=False,
         sample_inputs_func=sample_inputs_linalg_qr_geqrf,
         decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
+    ),
+    OpInfo(
+        "linalg.polar",
+        aten_name="linalg_polar",
+        op=torch.linalg.polar,
+        dtypes=floating_and_complex_types(),
+        # Forward op only; autograd is a follow-up.
+        supports_autograd=False,
+        sample_inputs_func=sample_inputs_linalg_polar,
+        decorators=[
+            skipCUDAIfNoCusolver,
+            skipCPUIfNoLapack,
+            # On CUDA the cuSOLVER QDWH override is the path under test; without
+            # nvmath it would silently exercise only the SVD fallback. Require
+            # nvmath on CUDA so coverage is meaningful (CPU still runs the SVD
+            # kernel, hence the skip is scoped to CUDA only).
+            DecorateInfo(skipIfNoNvmath, device_type="cuda"),
+        ],
     ),
     OpInfo(
         "linalg.slogdet",

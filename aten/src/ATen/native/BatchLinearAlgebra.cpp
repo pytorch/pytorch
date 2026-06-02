@@ -738,22 +738,28 @@ TORCH_META_FUNC(linalg_polar)(const Tensor& A) {
   at::native::checkIsMatrix(A, "linalg.polar");
   at::native::checkFloatingOrComplex(A, "linalg.polar");
 
-  auto A_shape = A.sizes().vec();
-  const auto m = A_shape.cend()[-2];
-  const auto n = A_shape.cend()[-1];
-  TORCH_CHECK(
-      m >= n,
+  // Use a symbolic comparison for the shape check so a dynamic (exported /
+  // compiled) row dimension is not specialized to a constant here. Output
+  // allocation below uses the concrete sizes, matching linalg_qr / _linalg_svd.
+  const auto sym_m = A.sym_size(-2);
+  const auto sym_n = A.sym_size(-1);
+  TORCH_SYM_CHECK(
+      sym_m.sym_ge(sym_n),
       "linalg.polar: input must have at least as many rows as columns, but got ",
-      m, " by ", n, " matrices");
+      sym_m, " by ", sym_n, " matrices");
+
+  auto A_shape = A.sizes().vec();
+  const auto n = A_shape.cend()[-1];
 
   // U has the same shape as A; H is the (n x n) symmetric/Hermitian factor.
-  auto U_strides = at::native::batched_matrix_contiguous_strides(A_shape, /*f-contig*/true);
-  set_output_strided(0, A_shape, U_strides, A.options(), {});
+  // Both are row-major contiguous: the SVD-based kernel and the CUDA override
+  // both materialize contiguous outputs, so the meta must promise the same
+  // layout (otherwise compiled/exported graphs would assume the wrong strides).
+  set_output_contiguous(0, A_shape, A.options());
 
   auto H_shape = std::move(A_shape);
   H_shape.end()[-2] = n;
-  auto H_strides = at::native::batched_matrix_contiguous_strides(H_shape, /*f-contig*/true);
-  set_output_strided(1, H_shape, H_strides, A.options(), {});
+  set_output_contiguous(1, H_shape, A.options());
 }
 
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
@@ -2527,15 +2533,19 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
 TORCH_IMPL_FUNC(linalg_polar_out)(const Tensor& A,
                                   const Tensor& U,
                                   const Tensor& H) {
-  // The polar decomposition is provided through the Python native-op override
-  // (cuSOLVER QDWH/Xpolar via nvmath-python, with an SVD-based fallback for CPU
-  // / when nvmath is unavailable). This kernel is the backstop for backends and
-  // dtypes the override does not match.
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false,
-      "linalg.polar: no native kernel is registered for this backend. The polar "
-      "decomposition is provided by a Python override on CPU and CUDA; install "
-      "nvmath-python for the cuSOLVER QDWH path on CUDA.");
+  // Polar decomposition A = U @ H via the (reduced) SVD A = Up diag(S) Vh:
+  //   U = Up @ Vh           (orthonormal columns)
+  //   H = Vh^H diag(S) Vh   (symmetric/Hermitian positive-semidefinite)
+  // This is the portable backend kernel. On CUDA a Python native-op override
+  // (cuSOLVER QDWH/Xpolar via nvmath-python) intercepts the functional op for
+  // supported inputs and only falls through to here when unavailable, so this
+  // path also serves as the CUDA fallback and the CPU/compile/out= path.
+  auto [Up, S, Vh] = at::linalg_svd(A, /*full_matrices=*/false);
+  auto Hsym = Vh.mH().matmul(S.unsqueeze(-1) * Vh);
+  // Symmetrize/Hermitianize to remove round-off asymmetry.
+  Hsym = 0.5 * (Hsym + Hsym.mH());
+  U.copy_(Up.matmul(Vh));
+  H.copy_(Hsym);
 }
 
 

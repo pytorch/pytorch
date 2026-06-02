@@ -1667,6 +1667,34 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
     return Q, R
 
 
+@register_meta([aten.linalg_polar.default, aten.linalg_polar.out])
+@out_wrapper("U", "H")
+def linalg_polar_meta(A: Tensor) -> tuple[Tensor, Tensor]:
+    checkIsMatrix(A, "linalg.polar")
+    checkFloatingOrComplex(A, "linalg.polar")
+
+    m = A.shape[-2]
+    n = A.shape[-1]
+    # Symbolic-safe comparison so a dynamic row dimension is not specialized.
+    torch._check(
+        m >= n,
+        lambda: f"linalg.polar: input must have at least as many rows as "
+        f"columns, but got {m} by {n} matrices",
+    )
+
+    # U matches A's shape; H is (n, n). Both row-major contiguous, matching the
+    # SVD-based C++ kernel and the CUDA override.
+    U_shape = list(A.shape)
+    U = A.new_empty(U_shape)
+    U.as_strided_(U_shape, make_contiguous_strides_for(U_shape))
+
+    H_shape = list(A.shape)
+    H_shape[-2] = n
+    H = A.new_empty(H_shape)
+    H.as_strided_(H_shape, make_contiguous_strides_for(H_shape))
+    return U, H
+
+
 @register_meta([aten._linalg_slogdet.default, aten._linalg_slogdet.sign])
 @out_wrapper("sign", "logabsdet", "LU", "pivots")
 def _linalg_slogdet(A: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:

@@ -10,7 +10,9 @@ import torch
 # rejected and UPPER silently reads only a triangle, yielding wrong factors.
 _CUBLAS_FILL_MODE_FULL = 2
 
-# One cuSOLVER handle per device, reused for the process lifetime.
+# One cuSOLVER handle per device, reused for the process lifetime. Handles are
+# bound to the CUDA device that is current when cusolverDnCreate runs, so the
+# handle must be created -- and later used -- with its device active.
 _handles: dict[torch.device, int] = {}
 
 
@@ -19,7 +21,9 @@ def _get_handle(device: torch.device) -> int:
 
     handle = _handles.get(device)
     if handle is None:
-        handle = cs.create()
+        # Create under the target device so the handle is bound to it.
+        with torch.cuda.device(device):
+            handle = cs.create()
         _handles[device] = handle
     return handle
 
@@ -51,8 +55,18 @@ def _polar_2d(
     dtype = A.dtype
     device = A.device
 
-    handle = _get_handle(device)
-    params = cs.create_params()
+    # cuSOLVER handles are device-bound; run everything (handle lookup, workspace
+    # allocation, and the xpolar call) with A's device current so a non-default
+    # device (e.g. cuda:1) doesn't trigger an illegal memory access.
+    with torch.cuda.device(device):
+        handle = _get_handle(device)
+        params = cs.create_params()
+        return _polar_2d_impl(A, m, n, dtype, device, handle, params, return_residual)
+
+
+def _polar_2d_impl(A, m, n, dtype, device, handle, params, return_residual):
+    from nvmath.bindings import cusolverDn as cs  # pyrefly: ignore[missing-import]
+
     try:
         cs.set_stream(handle, torch.cuda.current_stream(device).cuda_stream)
 
@@ -147,28 +161,16 @@ def _polar_2d(
 def polar_xpolar(
     A: torch.Tensor, *, return_residual: bool = False
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-    """Polar decomposition A = U @ H via cuSOLVER Xpolar (QDWH).
+    """Polar decomposition A = U @ H of a single 2-D matrix via cuSOLVER Xpolar.
 
     Fully asynchronous: issues work on the current CUDA stream and never
     synchronizes. When ``return_residual`` is True, also returns the relative
-    residual ``||A - U*H||_F / ||A||_F`` as a device scalar (per 2-D matrix,
-    stacked over the batch) for callers that want to validate convergence.
+    residual ``||A - U*H||_F / ||A||_F`` as a device scalar for callers that
+    want to validate convergence.
+
+    cuSOLVER Xpolar has no batched API, so only 2-D inputs are supported; the
+    dispatch override declines batched inputs (they take the batched SVD
+    kernel instead of a slower per-matrix loop).
     """
-    if A.dim() == 2:
-        return _polar_2d(A, return_residual=return_residual)
-    # cuSOLVER Xpolar is 2-D; loop over the flattened batch.
-    *batch, m, n = A.shape
-    A_flat = A.reshape(-1, m, n)
-    Us, Hs, residuals = [], [], []
-    for i in range(A_flat.size(0)):
-        U_i, H_i, res_i = _polar_2d(A_flat[i], return_residual=return_residual)
-        Us.append(U_i)
-        Hs.append(H_i)
-        if res_i is not None:
-            residuals.append(res_i)
-    U = torch.stack(Us).reshape(*batch, m, n)
-    H = torch.stack(Hs).reshape(*batch, n, n)
-    residual = (
-        torch.stack(residuals).reshape(batch) if return_residual and residuals else None
-    )
-    return U, H, residual
+    torch._check(A.dim() == 2, lambda: "polar_xpolar expects a 2-D matrix")
+    return _polar_2d(A, return_residual=return_residual)

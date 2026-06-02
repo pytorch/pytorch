@@ -2961,10 +2961,13 @@ algorithm via cuSOLVER when `nvmath-python <https://pypi.org/project/nvmath-pyth
 is installed and the cuSOLVER runtime is >= 12.2 (CUDA 13.2, which introduces
 the required ``cusolverDnXpolar`` routine); otherwise (and on CPU) it falls back
 to an SVD-based computation.
+
+.. note::
+    This function is not differentiable. Calling it on a tensor that requires
+    grad and backpropagating raises an error; an autograd formula may be added
+    in a future release.
 """
     + rf"""
-.. note:: {common_notes["sync_note"]}
-
 .. warning:: {common_notes["experimental_warning"]}
 """
     + r"""
