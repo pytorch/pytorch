@@ -46,7 +46,7 @@ def get_rng_state() -> torch.Tensor:
     return default_generator.get_state()
 
 
-def manual_seed(seed) -> torch._C.Generator:
+def manual_seed(seed: int) -> torch._C.Generator:
     r"""Sets the seed for generating random numbers on all devices. Returns a
     `torch.Generator` object.
 
