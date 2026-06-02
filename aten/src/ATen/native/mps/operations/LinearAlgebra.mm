@@ -10,6 +10,7 @@
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <ATen/native/mps/operations/GemmMetal.h>
 
 #include <fmt/format.h>
 
@@ -674,9 +675,6 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
-  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
-
-  using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
   TORCH_CHECK(self.dtype() == other.dtype(),
               "expected mat1 and mat2 to have the same dtype, but got: ",
@@ -689,51 +687,18 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   TORCH_CHECK(output.is_mps());
 
   // Edge case behaviors must match _int_mm_out_cpu CPU implementation
-  // Transpose inputs if needed
   // Outer or inner dimension is 0
   if (output.numel() == 0 || self.size(1) == 0) {
     return output.zero_();
   }
 
-  // MPS matmul returns silently incorrect results if one of the matrix dimensions is greater than 2**15
-  // And crashes if its a view of matrix with dimensions larger than 2**15
-  // See https://github.com/pytorch/pytorch/issues/116769#issuecomment-1888302095
-  // In such cases, fallback to naive but accurate metal shader
-  if (use_metal_mm(self, other, output)) {
+  // Integral / complex types (and a few legacy float edge cases caught by
+  // use_metal_mm) use the naive-metal kernel; float/half/bfloat run the
+  // hand-written GEMM kernels.
+  if (!gemm_supported_dtype(self.scalar_type()) || use_metal_mm(self, other, output)) {
     return do_metal_mm(self, other, output);
   }
-
-  @autoreleasepool {
-    std::string key = "mm_out_mps_impl" + getTensorsStringKey({self, other});
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      std::tie(newCachedGraph->inputTensor_, newCachedGraph->otherTensor_, newCachedGraph->outputTensor_) =
-          do_mm(mpsGraph, self, other);
-    });
-    // MPS TODO:
-    // Strided API doesn't play nice with complex data types (at least not in case of matmul).
-    // MPSGraph's matrixMultiplication produces incorrect results with stride-0 NDArray
-    // inputs on macOS < 26.4 (only every 16th row is computed). Contiguify such tensors
-    // by disabling the strided API so they go through the gather/clone path first.
-    // See https://github.com/pytorch/pytorch/issues/180201
-    static const bool is_macOS_26_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_4_PLUS);
-    auto hasZeroStride = [](const Tensor& t) {
-      return std::ranges::any_of(t.strides(), [](auto s) { return s == 0; });
-    };
-    auto useStridedSelf = !isComplexType(self.scalar_type()) && (is_macOS_26_4_or_newer || !hasZeroStride(self));
-    auto useStridedOther = !isComplexType(other.scalar_type()) && (is_macOS_26_4_or_newer || !hasZeroStride(other));
-    auto selfPlaceholder = self.numel() != 0
-        ? Placeholder(cachedGraph->inputTensor_, self, nil, true, MPSDataTypeInvalid, useStridedSelf)
-        : Placeholder();
-    auto otherPlaceholder = other.numel() != 0
-        ? Placeholder(cachedGraph->otherTensor_, other, nil, true, MPSDataTypeInvalid, useStridedOther)
-        : Placeholder();
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-
-    auto feeds = self.numel() != 0 ? dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder) : nil;
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
+  mps_gemm(self, other, output, std::nullopt, /*alpha=*/1, /*beta=*/0, at_gemm::GemmEpilogue::None);
   return output;
 }
 
@@ -788,6 +753,12 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
   // Use Metal kernels for integer and complex types
   if (c10::isIntegralType(batch1.scalar_type(), true) || c10::isComplexType(batch1.scalar_type())) {
     return do_metal_addbmm_or_baddbmm(input, batch1, batch2, alpha, beta, result, opType == BADDBMM_OP_TYPE);
+  }
+  // baddbmm applies a per-batch epilogue and maps directly onto the GEMM kernel.
+  // addbmm reduces over the batch dim, so it stays on the MPSGraph path below.
+  if (opType == BADDBMM_OP_TYPE && gemm_supported_dtype(batch1.scalar_type())) {
+    mps_gemm(batch1, batch2, result, input, alpha, beta, at_gemm::GemmEpilogue::AlphaBeta);
+    return result;
   }
 
   MPSStream* stream = getCurrentMPSStream();
@@ -905,6 +876,10 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 
   if (use_metal_mm(self, other, output)) {
     return do_metal_addmm(self, other, output, alpha, beta, *bias_);
+  }
+  if (gemm_supported_dtype(self.scalar_type())) {
+    mps_gemm(self, other, output, *bias_, alpha, beta, at_gemm::GemmEpilogue::AlphaBeta);
+    return output;
   }
 
   bool is_beta_non_zero = beta.toDouble() != 0.0;
@@ -1153,6 +1128,10 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   if (resultSize > pow(2, 32)) {
     // Tiled path uses MPSNDArray directly, so resolve conjugate views upfront
     result = tiled_bmm_out_mps_impl(batch1.resolve_conj(), batch2.resolve_conj(), result);
+    return result;
+  }
+  if (gemm_supported_dtype(batch1.scalar_type())) {
+    mps_gemm(batch1, batch2, result, std::nullopt, 1, 0, at_gemm::GemmEpilogue::None);
     return result;
   }
 

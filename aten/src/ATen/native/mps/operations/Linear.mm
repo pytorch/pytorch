@@ -4,6 +4,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/GemmMetal.h>
 #include <ATen/ops/linear_backward_native.h>
 #include <ATen/ops/linear_native.h>
 
@@ -126,6 +127,27 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   }
 
   const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());
+
+  // y = x @ weight.T (+ bias). The hand-written GEMM kernels handle the
+  // transpose / strides; flatten leading dims to a 2-D (M, K) x (K, N) problem.
+  if (!is_complex && gemm_supported_dtype(input.scalar_type())) {
+    auto input2d = input.dim() == 2 ? input : input.reshape({-1, input.size(-1)});
+    auto output2d = output.dim() == 2 ? output : output.reshape({-1, weight.size(0)});
+    // A 1-D bias (the usual (out_features,) case) fuses into the GEMM epilogue
+    // as a row broadcast. A higher-rank bias broadcasts over the input's leading
+    // dims, which the 2-D flatten breaks, so add it separately on the full shape.
+    if (is_bias_defined && bias.dim() <= 1) {
+      mps_gemm(input2d, weight.t(), output2d, bias, /*alpha=*/1, /*beta=*/1,
+               at_gemm::GemmEpilogue::AlphaBeta);
+    } else {
+      mps_gemm(input2d, weight.t(), output2d, std::nullopt, /*alpha=*/1, /*beta=*/0,
+               at_gemm::GemmEpilogue::None);
+      if (is_bias_defined) {
+        output.add_(bias);
+      }
+    }
+    return weight_arg.dim() != 1 ? output : output.squeeze(-1);
+  }
 
   // No-graph execution causes nonsense if these are non-contiguous.
   const bool is_contiguous = input.is_contiguous() && weight.is_contiguous() && bias.is_contiguous();
