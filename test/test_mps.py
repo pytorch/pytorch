@@ -6258,6 +6258,7 @@ class TestMPS(TestCaseMPS):
         x = x_cpu.detach().clone().to('mps')
         self.assertEqual(helper(x_cpu), helper(x))
 
+    @serialTest()
     def test_im2col_uint32_overflow(self):
         C, H, W = 65537, 256, 256
         x = torch.zeros(1, C, H, W, dtype=torch.bool)
