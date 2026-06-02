@@ -73,7 +73,8 @@ unchecked_cast_to_int(src_t src) {
 template <typename dest_t, typename src_t>
 C10_HOST_DEVICE static inline dest_t saturated_cast_to_signed_int(src_t src) {
   static_assert(std::is_floating_point_v<src_t>);
-  static_assert(std::is_integral_v<dest_t> && std::is_signed_v<dest_t>);
+  static_assert(std::is_integral_v<dest_t>);
+  static_assert(std::is_signed_v<dest_t>);
   constexpr auto min =
       static_cast<src_t>(std::numeric_limits<dest_t>::lowest());
   constexpr auto max = static_cast<src_t>(std::numeric_limits<dest_t>::max());
