@@ -8889,10 +8889,16 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     def test_large_reflect_pad(self, device):
         # https://github.com/pytorch/pytorch/issues/165861
-        x = torch.rand(2**16, 2, device="cuda")
-        c = F.pad(x, (1, 1), mode="reflect")
-        c_cpu = F.pad(x.cpu(), (1, 1), mode="reflect")
-        self.assertEqual(c, c_cpu)
+        for shape in ((2**16, 2), (2**16, 1, 2)):
+            x = torch.rand(*shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+            c = F.pad(x, (1, 1), mode="reflect")
+            c_cpu = F.pad(ref_x, (1, 1), mode="reflect")
+            self.assertEqual(c, c_cpu)
+            grad = torch.randn_like(c)
+            c.backward(grad)
+            c_cpu.backward(grad.cpu())
+            self.assertEqual(x.grad, ref_x.grad)
 
     @onlyCUDA
     @largeTensorTest("48GB", "cpu")
@@ -11902,6 +11908,23 @@ class TestNNDeviceType(NNTestCase):
         for bias in [True, False]:
             mod = torch.nn.LSTM(hsize, hsize, bias=bias).to(device).to(dtype)
             self._test_rnn_mod(mod, inp)
+
+    @skipMeta
+    @parametrize_test("dropout_p", [0.0, 0.5])
+    @parametrize_test("training", [True, False])
+    def test_LSTM_dropout_per_call_randomness(self, device, dropout_p, training):
+        # Consecutive forwards must produce different outputs if dropout > 0
+        # and training: each call should sample a fresh mask
+        torch.manual_seed(0)
+        rnn = nn.LSTM(8, 8, num_layers=2, dropout=dropout_p).to(device)
+        rnn.train(training)
+        x = torch.randn(5, 1, 8, device=device)
+        out1, _ = rnn(x)
+        out2, _ = rnn(x)
+        if dropout_p > 0 and training:
+            self.assertNotEqual(out1, out2)
+        else:
+            self.assertEqual(out1, out2)
 
     @skipMeta  # GRU cell reuses output which was resized
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64

@@ -39,9 +39,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
-    skipIfRocm,
     skipIfTorchDynamo,
-    skipIfTorchInductor,
     suppress_warnings,
     TEST_MKL,
     TEST_WITH_ASAN,
@@ -1222,13 +1220,6 @@ class TestInductorOpInfo(TestCase):
     check_model = check_model
     check_model_gpu = check_model_gpu
 
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/147047")
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/156514")
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/147058")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/147057")
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/140383")
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/137684")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/165296")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @skipCUDAMemoryLeakCheckIf(

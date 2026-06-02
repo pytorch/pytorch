@@ -7,6 +7,12 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 
 
+try:
+    from . import _test_nested_graph_breaks_helper
+except ImportError:
+    import _test_nested_graph_breaks_helper
+
+
 # for use in test_side_effects_globals
 global1, global2, global3, global4 = (torch.zeros(3),) * 4
 
@@ -536,11 +542,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 6)
 
     def test_side_effects_globals_different_module(self):
-        global f1, f2, _test_nested_graph_breaks_helper
-        try:
-            from . import _test_nested_graph_breaks_helper
-        except ImportError:
-            import _test_nested_graph_breaks_helper
+        global f1, f2
 
         def f1(x):
             x = x + 1
@@ -1039,11 +1041,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # frames get the correct f_globals. Without the factory fix,
         # MAKE_FUNCTION inherits the root frame's globals, so the resume
         # function for `inner` would not find HELPER_CONSTANT.
-        try:
-            from . import _test_nested_graph_breaks_helper
-        except ImportError:
-            import _test_nested_graph_breaks_helper
-
         def outer(x):
             return _test_nested_graph_breaks_helper.closure_with_graph_break(x) + 2
 
@@ -1483,7 +1480,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         the resume function must use that module's globals (not the caller's).
         This is handled by install_resume_function_global().
         """
-        from _test_nested_graph_breaks_helper import fn_with_module_global
+        fn_with_module_global = _test_nested_graph_breaks_helper.fn_with_module_global
 
         cnts = torch._dynamo.testing.CompileCounter()
 
