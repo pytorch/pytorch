@@ -3280,6 +3280,12 @@ class TestFxGraphCacheHashing(TestCase):
         ):
             cudnn_details = FxGraphHashDetails(None, [], {}, [])
 
+        with torch.nn.attention.sdpa_kernel([]):
+            no_backend_details = FxGraphHashDetails(None, [], {}, [])
+
+        with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.OVERRIDEABLE):
+            overrideable_details = FxGraphHashDetails(None, [], {}, [])
+
         with torch.nn.attention.sdpa_kernel(
             [
                 torch.nn.attention.SDPBackend.CUDNN_ATTENTION,
@@ -3307,8 +3313,26 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(cudnn_details),
         )
         self.assertNotEqual(
+            pickler.dumps(no_backend_details),
+            pickler.dumps(overrideable_details),
+        )
+        self.assertNotEqual(
             pickler.dumps(cudnn_then_flash_details),
             pickler.dumps(flash_then_cudnn_details),
+        )
+
+        old_fa3_enabled = torch._C._get_fa3_sdp_enabled()
+        try:
+            torch._C._set_sdp_use_fa3(False)
+            fa3_disabled_details = FxGraphHashDetails(None, [], {}, [])
+            torch._C._set_sdp_use_fa3(True)
+            fa3_enabled_details = FxGraphHashDetails(None, [], {}, [])
+        finally:
+            torch._C._set_sdp_use_fa3(old_fa3_enabled)
+
+        self.assertNotEqual(
+            pickler.dumps(fa3_disabled_details),
+            pickler.dumps(fa3_enabled_details),
         )
 
     def test_hash_private_config_changes(self):
