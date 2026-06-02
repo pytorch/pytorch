@@ -1572,6 +1572,56 @@ graph():
             ep_out_bigru_dynamic = ep_bigru.module()(x_, h0_bi)
             self.assertEqual(ep_out_bigru_dynamic, model_bigru(x_, h0_bi))
 
+    def test_dynamic_lstm_with_aliased_flat_weights(self):
+        from torch.export._patches import register_lstm_while_loop_decomposition
+
+        def share_flat_weight_storage(lstm):
+            flat_weight_names = lstm._flat_weights_names
+            old_weights = [getattr(lstm, name).detach() for name in flat_weight_names]
+            flat = torch.nn.Parameter(
+                torch.empty(
+                    sum(weight.numel() for weight in old_weights),
+                    device=old_weights[0].device,
+                    dtype=old_weights[0].dtype,
+                )
+            )
+            offset = 0
+            with torch.no_grad():
+                for name, old_weight in zip(flat_weight_names, old_weights):
+                    view = flat[offset : offset + old_weight.numel()].view_as(
+                        old_weight
+                    )
+                    view.copy_(old_weight)
+                    setattr(lstm, name, torch.nn.Parameter(view))
+                    offset += old_weight.numel()
+            lstm._init_flat_weights()
+
+        class BiLSTM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(4, 3, batch_first=True, bidirectional=True)
+                share_flat_weight_storage(self.lstm)
+
+            def forward(self, x):
+                out, _ = self.lstm(x)
+                return out
+
+        with torch.backends.mkldnn.flags(enabled=False):
+            model = BiLSTM()
+            storages = {
+                getattr(model.lstm, name).untyped_storage().data_ptr()
+                for name in model.lstm._flat_weights_names
+            }
+            self.assertEqual(len(storages), 1)
+
+            x = torch.randn(2, 5, 4)
+            dynamic_shapes = {"x": {1: Dim.DYNAMIC}}
+            with register_lstm_while_loop_decomposition():
+                ep = export(model, (x,), dynamic_shapes=dynamic_shapes)
+
+            x_dynamic = torch.randn(2, 7, 4)
+            self.assertEqual(ep.module()(x_dynamic), model(x_dynamic))
+
     @testing.expectedFailureStrictV2
     def test_no_tensor_computation(self):
         class Module(torch.nn.Module):
@@ -6311,9 +6361,13 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             # 4->2, 4->2, 3->3
             bad_args=(torch.randn(2), [torch.randn(2)], {"k": torch.randn(3)}),
             run_time_msg=escape(
-                "Guard failed: x.size()[0] >= 3"
+                "Guard failed: min(3, y[0].size()[0]) == 3"
             ),  # expected >= 3, but got 2
-            compile_time_msg="Expected input.*to be >= 3, but got 2",
+            compile_time_msg=escape(
+                "Expected additional input to satisfy the exported program, "
+                "but got runtime assertion error: Guard failed: "
+                "min(3, y[0].size()[0]) == 3"
+            ),
         )
 
         expect_error(
@@ -6331,7 +6385,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             run_time_msg=escape(
                 "Guard failed: z['k'].size()[0] == 3"
             ),  # expected 3, but got 4
-            compile_time_msg=r"You marked.*but your code specialized it to be a constant.*If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
+            compile_time_msg=r"Expected input.*shape\[0\] to be <= 3, but got 4",
         )
 
     def test_additional_inputs_constants(self):
@@ -6405,6 +6459,33 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             r"differing types, so they cannot be marked as dynamic: \(0, 0, False\)",
         ):
             torch.export.export(M(), input1, dynamic_shapes=ai)
+
+    def test_additional_inputs_verify_does_not_mutate(self):
+        class InputMutation(torch.nn.Module):
+            def forward(self, x):
+                x.add_(1)
+                return x
+
+        input1 = (torch.zeros(3),)
+        input2 = (torch.zeros(4),)
+        ai = torch.export.AdditionalInputs()
+        ai.add(input2)
+
+        torch.export.export(InputMutation(), input1, dynamic_shapes=ai)
+        self.assertEqual(input2[0], torch.zeros(4))
+
+        class BufferMutation(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(1))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return x + self.buf
+
+        mod = BufferMutation()
+        torch.export.export(mod, input1, dynamic_shapes=ai)
+        self.assertEqual(mod.buf, torch.zeros(1))
 
     def test_mismatched_dynamic_shapes(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC

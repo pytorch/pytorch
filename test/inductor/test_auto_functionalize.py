@@ -506,6 +506,62 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 self.assertEqual(aot_eager_ret, eager_ret)
                 self.assertEqual(inductor_ret, eager_ret)
 
+    def test_out_return_preserves_view_after_graph_break(self):
+        sz = 9
+
+        def f(data, other1, other2):
+            inp = data[:sz]
+            output = data[:sz]
+            torch._dynamo.graph_break()
+            expected = torch.empty_like(output)
+            torch.addcmul(
+                inp,
+                other1.view(inp.shape),
+                other2.view(inp.shape),
+                out=expected,
+            )
+            result = torch.addcmul(
+                inp,
+                other1.view(inp.shape),
+                other2.view(inp.shape),
+                out=output,
+            )
+            return output, result, expected
+
+        data = torch.randn(2 * sz, dtype=torch.float64)
+        other1 = torch.randn(sz, dtype=torch.float64)
+        other2 = torch.randn(sz, dtype=torch.float64)
+
+        output, result, expected = torch.compile(f, backend="aot_eager")(
+            data, other1, other2
+        )
+
+        self.assertEqual(output.shape, (sz,))
+        self.assertEqual(result.shape, (sz,))
+        self.assertEqual(expected.shape, (sz,))
+        self.assertEqual(result.data_ptr(), output.data_ptr())
+        self.assertEqual(output, expected)
+        self.assertEqual(result, expected)
+
+        def same_metadata_view(data, other):
+            inp = data.view(data.shape)
+            output = data.view(data.shape)
+            torch._dynamo.graph_break()
+            expected = torch.empty_like(output)
+            torch.add(inp, other, out=expected)
+            result = torch.add(inp, other, out=output)
+            return data, output, result, expected
+
+        base, output, result, expected = torch.compile(
+            same_metadata_view, backend="aot_eager"
+        )(torch.randn(sz), torch.randn(sz))
+
+        self.assertIs(output._base, base)
+        self.assertIs(result._base, base)
+        self.assertEqual(result.data_ptr(), output.data_ptr())
+        self.assertEqual(output, expected)
+        self.assertEqual(result, expected)
+
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_with_returns_v2(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -1077,6 +1133,46 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             f(x[1])
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_graph_input_view_storage_offset(self):
+        def f_as_strided(x):
+            return torch.as_strided(x, (2,), (1,), 0).clone()
+
+        opt_f_as_strided = torch.compile(
+            f_as_strided, fullgraph=True, dynamic=False, backend="inductor"
+        )
+        base = torch.arange(8, dtype=torch.float32)
+        self.assertEqual(opt_f_as_strided(base[2:4]), f_as_strided(base[2:4]))
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x):
+                x.add_(10)
+
+            def f(x):
+                a = x[0]
+                torch.ops.mylib.foo(a)
+                return x
+
+            opt_f = torch.compile(f, fullgraph=True, dynamic=False, backend="inductor")
+
+            eager_base = torch.arange(8, dtype=torch.float32).reshape(4, 2)
+            result_eager = f(eager_base[1])
+
+            inductor_base = torch.arange(8, dtype=torch.float32).reshape(4, 2)
+            result_inductor = opt_f(inductor_base[1])
+
+            self.assertEqual(inductor_base, eager_base)
+            self.assertEqual(result_inductor, result_eager)
+
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_alias(self, _dynamic=False):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -1338,13 +1434,18 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                         graph_aot,
                         """\
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, s77][s77, 1]cpu"):
+        slice_2: "f32[s77, Max(0, -Min(3, s77) + Min(4, s77))][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4)
+        sym_size_int_2: "Sym(Max(0, -Min(3, s77) + Min(4, s77)))" = torch.ops.aten.sym_size.int(slice_2, 1)
+        sym_storage_offset_default: "Sym(Min(3, s77))" = torch.ops.aten.sym_storage_offset.default(slice_2);  slice_2 = None
         floordiv: "Sym(0)" = 0 // arg0_1;  arg0_1 = None
         add_6: "Sym(2)" = floordiv + 2
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = floordiv, _x_slice_end = add_6, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = 3, _y_slice_end = 4, _all_bases = [arg1_1]);  floordiv = add_6 = None
+        floordiv_1: "Sym(Min(3, s77))" = sym_storage_offset_default // 1;  sym_storage_offset_default = None
+        add_7: "Sym(Max(0, -Min(3, s77) + Min(4, s77)) + Min(3, s77))" = floordiv_1 + sym_size_int_2;  sym_size_int_2 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.mylib.foo.default, _x_base_index = 0, _x_slice_dim = 0, _x_slice_start = floordiv, _x_slice_end = add_6, _y_base_index = 0, _y_slice_dim = 1, _y_slice_start = floordiv_1, _y_slice_end = add_7, _all_bases = [arg1_1]);  floordiv = add_6 = floordiv_1 = add_7 = None
         getitem_1: "f32[s77, s77][s77, 1]cpu" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
         copy_: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = copy_ = None
         slice_3: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 0, 0, 2)
-        slice_4: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 1, 3, 4);  getitem_1 = None
+        slice_4: "f32[s77, Max(0, -Min(3, s77) + Min(4, s77))][s77, 1]cpu" = torch.ops.aten.slice.Tensor(getitem_1, 1, 3, 4);  getitem_1 = None
         return (slice_3, slice_4)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
@@ -1373,12 +1474,17 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, s77][s77, 1]cpu"):
         floordiv: "Sym(0)" = 0 // arg0_1;  arg0_1 = None
         add_6: "Sym(2)" = floordiv + 2;  floordiv = add_6 = None
+        slice_2: "f32[s77, Max(0, -Min(3, s77) + Min(4, s77))][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4)
+        sym_storage_offset_default: "Sym(Min(3, s77))" = torch.ops.aten.sym_storage_offset.default(slice_2)
+        floordiv_1: "Sym(Min(3, s77))" = sym_storage_offset_default // 1;  sym_storage_offset_default = None
+        sym_size_int_2: "Sym(Max(0, -Min(3, s77) + Min(4, s77)))" = torch.ops.aten.sym_size.int(slice_2, 1);  slice_2 = None
+        add_7: "Sym(Max(0, -Min(3, s77) + Min(4, s77)) + Min(3, s77))" = floordiv_1 + sym_size_int_2;  sym_size_int_2 = None
         slice_tensor: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, 0, 2)
-        slice_tensor_1: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4)
+        slice_tensor_1: "f32[s77, Max(0, -Min(3, s77) + Min(4, s77))][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, floordiv_1, add_7);  floordiv_1 = add_7 = None
         foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None
         copy_: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.copy_.default(arg1_1, arg1_1);  copy_ = None
         slice_3: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, 0, 2)
-        slice_4: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4);  arg1_1 = None
+        slice_4: "f32[s77, Max(0, -Min(3, s77) + Min(4, s77))][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4);  arg1_1 = None
         return (slice_3, slice_4)""",
                         ignore_comments=True,
                         ignore_empty_lines=True,
