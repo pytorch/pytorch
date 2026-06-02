@@ -1818,6 +1818,7 @@ class TestFX(JitTestCase):
                 HasDescriptor, {"field": torch.tensor(1)}
             )
 
+    @skipIfTorchDynamo("Dynamo inspects class attributes on the test metaclass")
     def test_create_dataclass_instance_avoids_metaclass_getattribute(self):
         armed = False
 
@@ -1871,7 +1872,7 @@ class TestFX(JitTestCase):
             Pair, {"lhs": add, "rhs": y}
         )
         consume_node: torch.fx.Node = graph.call_function(consume, (pair_arg,))
-        graph.output(
+        output_node = graph.output(
             torch.fx.node._create_dataclass_instance(
                 Pair, {"lhs": consume_node, "rhs": add}
             )
@@ -1891,6 +1892,8 @@ class TestFX(JitTestCase):
 
         shape_prop.ShapeProp(gm).propagate(x_value, y_value)
         self.assertEqual(consume_node.meta["tensor_meta"].shape, torch.Size([2, 3]))
+        self.assertEqual(output_node.meta["tensor_meta"].lhs.shape, torch.Size([2, 3]))
+        self.assertEqual(output_node.meta["tensor_meta"].rhs.shape, torch.Size([2, 3]))
         self.assertEqual(post_init_calls, 0)
 
         transformed = Transformer(gm).transform()
