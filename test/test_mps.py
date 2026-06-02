@@ -9612,22 +9612,6 @@ class TestLargeTensors(TestCaseMPS):
         torch.mps.empty_cache()
 
     @serialTest()
-    def test_64bit_index_copy(self):
-        if torch.mps.recommended_max_memory() < 16_000_000_000:
-            raise unittest.SkipTest("Needs at least 16Gb of RAM")
-        m = (1 << 31) + 16
-        x = torch.zeros(2, m, dtype=torch.int8, device='mps')
-        src = torch.full((1, m), 7, dtype=torch.int8, device='mps')
-        x.index_copy_(0, torch.tensor([1], device='mps'), src)
-        self.assertEqual(x[1, 0].item(), 7)
-        self.assertEqual(x[1, m - 1].item(), 7)
-        self.assertEqual(x[0, 0].item(), 0)
-        self.assertEqual(x[0, m - 1].item(), 0)
-        del x, src
-        gc.collect()
-        torch.mps.empty_cache()
-
-    @serialTest()
     def test_rand_4b(self):
         # Used to crash with NDArray dimension length > INT_MAX on MPSGraph;
         # the Metal-kernel path decomposes via `iter.with_32bit_indexing()`.

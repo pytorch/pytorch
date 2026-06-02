@@ -311,7 +311,7 @@ function install_torchcomms() {
 
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
-  pip_install flash-attn-4==4.0.0b15
+  pip_install flash-attn-4==4.0.0b13
   echo "FlashAttention 4 installation complete."
 }
 
