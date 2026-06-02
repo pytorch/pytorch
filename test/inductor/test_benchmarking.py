@@ -393,34 +393,6 @@ class TestBenchmarker(TestCase):
         finally:
             _bench.set_gpu_benchmark_lock_context(previous)
 
-    def test_gpu_benchmark_lock_registered_context_is_reentrant(self):
-        from torch._inductor.runtime import benchmarking as _bench
-
-        calls = []
-        locked = False
-
-        @contextlib.contextmanager
-        def custom_context():
-            nonlocal locked
-            self.assertFalse(locked)
-            locked = True
-            calls.append("enter")
-            try:
-                yield
-            finally:
-                calls.append("exit")
-                locked = False
-
-        previous = _bench.set_gpu_benchmark_lock_context(custom_context)
-        try:
-            with _bench.maybe_gpu_benchmark_lock():
-                with _bench.maybe_gpu_benchmark_lock():
-                    calls.append("body")
-        finally:
-            _bench.set_gpu_benchmark_lock_context(previous)
-
-        self.assertEqual(calls, ["enter", "body", "exit"])
-
     def test_do_bench_using_profiling_uses_gpu_benchmark_lock(self):
         from torch._inductor import utils as inductor_utils
         from torch._inductor.runtime import benchmarking as _bench
@@ -491,9 +463,16 @@ class TestBenchmarker(TestCase):
 
         class FakeCUDAGraph:
             def replay(self):
-                pass
+                calls.append("replay")
 
-        benchmarker = Benchmarker()
+        class FakeBenchmarker(Benchmarker):
+            @_bench.gpu_benchmark_lock
+            def benchmark_gpu(self, _callable, **kwargs):
+                calls.append("benchmark_gpu")
+                _callable()
+                return 9.0
+
+        benchmarker = FakeBenchmarker()
         calls = []
 
         @contextlib.contextmanager
@@ -510,7 +489,6 @@ class TestBenchmarker(TestCase):
                 patch("torch.cuda.synchronize"),
                 patch("torch.cuda.CUDAGraph", FakeCUDAGraph),
                 patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
-                patch.object(Benchmarker, "benchmark_gpu", return_value=9.0),
             ):
                 result = benchmarker.benchmark_gpu_with_cuda_graph(
                     lambda: calls.append("call")
@@ -519,7 +497,19 @@ class TestBenchmarker(TestCase):
             _bench.set_gpu_benchmark_lock_context(previous)
 
         self.assertEqual(result, 9.0)
-        self.assertEqual(calls, ["enter", "call", "call", "exit"])
+        self.assertEqual(
+            calls,
+            [
+                "enter",
+                "call",
+                "call",
+                "enter",
+                "benchmark_gpu",
+                "replay",
+                "exit",
+                "exit",
+            ],
+        )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @parametrize(

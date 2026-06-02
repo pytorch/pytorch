@@ -1,7 +1,6 @@
 import contextlib
 import functools
 import inspect
-import threading
 import time
 from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
@@ -50,7 +49,6 @@ def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
 
 _GpuBenchmarkLockContext = Callable[[], contextlib.AbstractContextManager[None]]
 _gpu_benchmark_lock_context: _GpuBenchmarkLockContext | None = None
-_gpu_benchmark_lock_local = threading.local()
 
 
 def set_gpu_benchmark_lock_context(
@@ -58,9 +56,10 @@ def set_gpu_benchmark_lock_context(
 ) -> _GpuBenchmarkLockContext | None:
     """Override the process-local GPU benchmark lock context.
 
-    This lets benchmark harnesses provide the context used by Inductor internal
-    benchmark calls. Returning the previous context lets callers restore it in
-    tests.
+    This lets benchmark harnesses provide the context used by Inductor GPU
+    benchmark calls. Some benchmark helpers delegate to other benchmark
+    methods, so harness contexts should support nested entry from the same
+    thread. Returning the previous context lets callers restore it in tests.
     """
     global _gpu_benchmark_lock_context
     previous = _gpu_benchmark_lock_context
@@ -75,15 +74,8 @@ def maybe_gpu_benchmark_lock() -> Iterator[None]:
     if context_factory is None:
         yield
         return
-    if getattr(_gpu_benchmark_lock_local, "depth", 0) > 0:
+    with context_factory():
         yield
-        return
-    _gpu_benchmark_lock_local.depth = 1
-    try:
-        with context_factory():
-            yield
-    finally:
-        del _gpu_benchmark_lock_local.depth
 
 
 def gpu_benchmark_lock(fn: Callable[P, T]) -> Callable[P, T]:
