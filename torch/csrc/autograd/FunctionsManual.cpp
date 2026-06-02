@@ -1238,17 +1238,15 @@ Tensor clamp_backward(
     const Tensor& self,
     const std::optional<Scalar>& min,
     const std::optional<Scalar>& max) {
-  // clamp: gradients not defined on min and max, so we return the subgradient 1
-  // for these cases.
   if (max && min) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where((self >= *min).logical_and_(self <= *max), grad, zero);
+    return where((self > *min).logical_and_(self < *max), grad, zero);
   } else if (min) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self >= *min, grad, zero);
+    return where(self > *min, grad, zero);
   } else if (max) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self <= *max, grad, zero);
+    return where(self < *max, grad, zero);
   } else {
     return grad;
   }
@@ -1259,8 +1257,6 @@ Tensor clamp_backward(
     const Tensor& self,
     const Tensor& min,
     const Tensor& max) {
-  // clamp: gradients not defined on min and max, so we return the subgradient 1
-  // for these cases.
   if (max.defined() && min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
     const auto self_ge_min = self >= min;
@@ -1270,11 +1266,9 @@ Tensor clamp_backward(
         : self_ge_min.logical_and_(self_le_max);
     return where(pred, grad, zero);
   } else if (min.defined()) {
-    auto zero = at::scalar_tensor(0., grad.options());
-    return where(self >= min, grad, zero);
+    return at::where(self == min, grad / 2, grad).masked_fill_(self < min, 0);
   } else if (max.defined()) {
-    auto zero = at::scalar_tensor(0., grad.options());
-    return where(self <= max, grad, zero);
+    return at::where(self == max, grad / 2, grad).masked_fill_(self > max, 0);
   } else {
     return grad;
   }
@@ -1292,8 +1286,8 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
     return ret;
   }
 
-  auto zero = at::scalar_tensor(0., grad.options());
   if (max.defined() && min.defined()) {
+    auto zero = at::scalar_tensor(0., grad.options());
     if (grad_input_mask[0]) {
       const auto self_lt_min = self < min;
       const auto min_lt_max = min < max;
@@ -1311,9 +1305,11 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
       std::get<1>(ret) = where(pred, grad, zero);
     }
   } else if (min.defined() && grad_input_mask[0]) {
-    std::get<0>(ret) = where(self < min, grad, zero);
+    std::get<0>(ret) =
+        at::where(self == min, grad / 2, grad).masked_fill_(self > min, 0);
   } else if (max.defined() && grad_input_mask[1]) {
-    std::get<1>(ret) = where(self > max, grad, zero);
+    std::get<1>(ret) =
+        at::where(self == max, grad / 2, grad).masked_fill_(self < max, 0);
   }
   return ret;
 }
@@ -1331,9 +1327,19 @@ at::Tensor clamp_jvp(
         max_t,
         where(self_p < min_p, min_t, where(self_p > max_p, max_t, self_t)));
   } else if (min_p.defined()) {
-    return where(self_p > min_p, self_t, min_t);
+    return min_t +
+        where(
+            self_p == min_p,
+            at::scalar_tensor(0.5, self_t.options()),
+            (self_p > min_p).to(self_t.scalar_type())) *
+        (self_t - min_t);
   } else if (max_p.defined()) {
-    return where(self_p < max_p, self_t, max_t);
+    return max_t +
+        where(
+            self_p == max_p,
+            at::scalar_tensor(0.5, self_t.options()),
+            (self_p < max_p).to(self_t.scalar_type())) *
+        (self_t - max_t);
   } else {
     return self_t;
   }

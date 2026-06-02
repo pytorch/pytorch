@@ -12882,6 +12882,70 @@ class TestAutogradForwardMode(TestCase):
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
+    def test_clamp_boundary_subgradient(self, device):
+        def check(fn, inputs, expected_grads):
+            inputs = tuple(
+                torch.tensor(v, device=device, requires_grad=True) for v in inputs
+            )
+            fn(*inputs).backward()
+            for inp, expected_grad in zip(inputs, expected_grads):
+                self.assertEqual(inp.grad, torch.tensor(expected_grad, device=device))
+
+        check(lambda x: torch.clamp_min(x, 0.0), (0.0,), (0.0,))
+        check(lambda x: torch.clamp_max(x, 0.0), (0.0,), (0.0,))
+        check(lambda x: torch.clamp(x, min=0.0), (0.0,), (0.0,))
+        check(lambda x: torch.clamp(x, max=0.0), (0.0,), (0.0,))
+        check(lambda x: torch.clamp(x, min=0.0, max=1.0), (0.0,), (0.0,))
+        check(lambda x: torch.clamp(x, min=-1.0, max=0.0), (0.0,), (0.0,))
+
+        check(lambda x, y: torch.clamp_min(x, y), (0.0, 0.0), (0.5, 0.5))
+        check(lambda x, y: torch.clamp_max(x, y), (0.0, 0.0), (0.5, 0.5))
+        check(lambda x, y: torch.clamp(x, min=y), (0.0, 0.0), (0.5, 0.5))
+        check(lambda x, y: torch.clamp(x, max=y), (0.0, 0.0), (0.5, 0.5))
+
+        check(lambda x, y: torch.clamp_min(x, y), (nan, 0.0), (1.0, 1.0))
+        check(lambda x, y: torch.clamp_min(x, y), (0.0, nan), (1.0, 1.0))
+        check(lambda x, y: torch.clamp(x, max=y), (nan, 0.0), (1.0, 1.0))
+        check(lambda x, y: torch.clamp(x, max=y), (0.0, nan), (1.0, 1.0))
+
+    def test_clamp_boundary_jvp(self, device):
+        def check_scalar(fn):
+            x = torch.tensor(0.0, device=device)
+            x_t = torch.tensor(2.0, device=device)
+
+            with fwAD.dual_level():
+                x_dual = fwAD.make_dual(x, x_t)
+                primal, tangent = fwAD.unpack_dual(fn(x_dual))
+
+            self.assertEqual(primal, torch.tensor(0.0, device=device))
+            self.assertEqual(tangent, torch.tensor(0.0, device=device))
+
+        def check_tensor(fn):
+            x = torch.tensor(0.0, device=device)
+            y = torch.tensor(0.0, device=device)
+            x_t = torch.tensor(2.0, device=device)
+            y_t = torch.tensor(4.0, device=device)
+
+            with fwAD.dual_level():
+                x_dual = fwAD.make_dual(x, x_t)
+                y_dual = fwAD.make_dual(y, y_t)
+                primal, tangent = fwAD.unpack_dual(fn(x_dual, y_dual))
+
+            self.assertEqual(primal, torch.tensor(0.0, device=device))
+            self.assertEqual(tangent, torch.tensor(3.0, device=device))
+
+        check_scalar(lambda x: torch.clamp_min(x, 0.0))
+        check_scalar(lambda x: torch.clamp_max(x, 0.0))
+        check_scalar(lambda x: torch.clamp(x, min=0.0))
+        check_scalar(lambda x: torch.clamp(x, max=0.0))
+        check_scalar(lambda x: torch.clamp(x, min=0.0, max=1.0))
+        check_scalar(lambda x: torch.clamp(x, min=-1.0, max=0.0))
+
+        check_tensor(lambda x, y: torch.clamp_min(x, y))
+        check_tensor(lambda x, y: torch.clamp_max(x, y))
+        check_tensor(lambda x, y: torch.clamp(x, min=y))
+        check_tensor(lambda x, y: torch.clamp(x, max=y))
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
