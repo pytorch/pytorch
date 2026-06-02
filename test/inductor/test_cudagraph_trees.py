@@ -2367,6 +2367,29 @@ if HAS_CUDA_AND_TRITON:
             with self.assertRaisesRegex(Exception, "overwritten by a subsequent"):
                 out2 + out2
 
+        def test_dead_forward_does_not_block_later_inference_dealloc_error(self):
+            class MLP(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.ln = torch.nn.LayerNorm(6)
+
+                def forward(self, x):
+                    return self.ln(x)
+
+            compiled_model = torch.compile(mode="reduce-overhead")(MLP().cuda())
+            compiled_model(torch.randn([2, 6], device="cuda"))
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return torch.matmul(x, x)
+
+            inp = torch.randn(10, 10, device="cuda")
+            out = foo(inp)
+            out2 = foo(inp)
+
+            with self.assertRaisesRegex(Exception, "overwritten by a subsequent"):
+                out + out
+
         def test_error_on_dealloc_use2(self):
             @torch.compile()
             def foo(x):
