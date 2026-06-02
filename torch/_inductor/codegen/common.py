@@ -695,6 +695,7 @@ def deduce_output_dtype_by_name(
     elif op_name in (
         "to_dtype",
         "index_expr",
+        "value_expr",
     ):
         return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
