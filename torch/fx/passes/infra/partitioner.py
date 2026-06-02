@@ -141,7 +141,9 @@ class CapabilityBasedPartitioner:
                 for user_node in all_user_nodes:
                     visited_partition_ids = set()
 
-                    for path_node in self.dependency_viewer.downstreams_of(user_node):
+                    for path_node in itertools.chain(
+                        (user_node,), self.dependency_viewer.downstreams_of(user_node)
+                    ):
                         # If any of the nodes in the dfs path of this node are in the merged_nodes
                         # list then there is a cycle in the graph.
                         if path_node in self_nodes or path_node in other_nodes:

@@ -3,6 +3,7 @@
 import contextlib
 import os
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -228,6 +229,117 @@ class TestBenchmarker(TestCase):
             _bench._BENCHMARK_DISPATCH.clear()
             _bench._BENCHMARK_DISPATCH.update(orig)
 
+    def test_default_profiler_benchmarker_selection_supports_xpu_only(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        with (
+            patch.object(
+                _bench.inductor_config, "use_torch_profiler_benchmarker", True
+            ),
+            patch.object(_bench.inductor_config, "use_experimental_benchmarker", False),
+            patch.object(
+                _bench.torch.cuda,
+                "is_available",
+                side_effect=AssertionError("should not query CUDA availability"),
+            ),
+            patch.object(
+                _bench.torch.xpu,
+                "is_available",
+                side_effect=AssertionError("should not query XPU availability"),
+            ),
+            patch.object(
+                _bench.torch.mtia,
+                "is_available",
+                side_effect=AssertionError("should not query MTIA availability"),
+            ),
+        ):
+            self.assertIsInstance(
+                _bench._make_default_benchmarker(), TorchProfilerBenchmarker
+            )
+
+    def test_profiler_benchmarker_fallback_uses_correlated_device_events(self):
+        from torch._inductor.runtime import benchmarking as _bench
+        from torch.autograd import DeviceType
+
+        class FakeProfilerEvent:
+            def __init__(self, name, device_type, event_id, cpu_children=()):
+                self.name = name
+                self.device_type = device_type
+                self.id = event_id
+                self.cpu_children = list(cpu_children)
+
+        class FakeKinetoEvent:
+            def __init__(
+                self,
+                name,
+                device_type,
+                linked_correlation_id,
+                correlation_id,
+                activity_type,
+                start_ns,
+                end_ns,
+            ):
+                self._name = name
+                self._device_type = device_type
+                self._linked_correlation_id = linked_correlation_id
+                self._correlation_id = correlation_id
+                self._activity_type = activity_type
+                self._start_ns = start_ns
+                self._end_ns = end_ns
+
+            def name(self):
+                return self._name
+
+            def device_type(self):
+                return self._device_type
+
+            def linked_correlation_id(self):
+                return self._linked_correlation_id
+
+            def correlation_id(self):
+                return self._correlation_id
+
+            def activity_type(self):
+                return self._activity_type
+
+            def start_ns(self):
+                return self._start_ns
+
+            def end_ns(self):
+                return self._end_ns
+
+        child_event = FakeProfilerEvent("aten::sum", DeviceType.CPU, 11)
+        profiler_events = [
+            FakeProfilerEvent(
+                _bench._CALLABLE_PROFILE_EVENT_NAME,
+                DeviceType.CPU,
+                7,
+                (child_event,),
+            )
+        ]
+        kineto_events = [
+            FakeKinetoEvent("unrelated", DeviceType.XPU, 0, 99, "kernel", 0, 1000),
+            FakeKinetoEvent(
+                "xpu_kernel", DeviceType.XPU, 11, 101, "kernel", 1000, 6000
+            ),
+            FakeKinetoEvent(
+                _bench._CALLABLE_PROFILE_EVENT_NAME,
+                DeviceType.XPU,
+                7,
+                7,
+                "gpu_user_annotation",
+                1000,
+                9000,
+            ),
+        ]
+
+        self.assertEqual(
+            _bench._get_callable_device_kernel_time_us(
+                kineto_events, profiler_events, 1, DeviceType.XPU
+            ),
+            5.0,
+        )
+
     def test_gpu_benchmark_lock_uses_visible_cuda_device(self):
         try:
             import fcntl  # noqa: F401
@@ -281,6 +393,108 @@ class TestBenchmarker(TestCase):
 
             self.assertTrue(os.path.exists(os.path.join(lock_dir, "gpu_4.lock")))
             self.assertTrue(os.path.exists(os.path.join(lock_dir, "gpu_7.lock")))
+
+    def test_gpu_benchmark_lock_serializes_same_device_threads(self):
+        try:
+            import fcntl  # noqa: F401
+        except ImportError:
+            self.skipTest("requires fcntl")
+
+        from torch._inductor.runtime import benchmarking as _bench
+
+        thread_state = threading.local()
+        attempting = [threading.Event(), threading.Event()]
+        entered = [threading.Event(), threading.Event()]
+        release = threading.Event()
+        errors = []
+
+        def current_device():
+            return thread_state.device
+
+        def worker(index):
+            thread_state.device = 0
+            attempting[index].set()
+            try:
+                with _bench.maybe_gpu_benchmark_lock():
+                    entered[index].set()
+                    release.wait(timeout=5)
+            except Exception as e:
+                errors.append(e)
+
+        with tempfile.TemporaryDirectory() as lock_dir:
+            env = {
+                "INDUCTOR_GPU_BENCH_LOCK": "1",
+                "INDUCTOR_GPU_BENCH_LOCK_DIR": lock_dir,
+                "CUDA_VISIBLE_DEVICES": "4",
+            }
+            with (
+                patch.dict(os.environ, env),
+                patch("torch.cuda.current_device", side_effect=current_device),
+            ):
+                threads = [threading.Thread(target=worker, args=(i,)) for i in (0, 1)]
+                try:
+                    threads[0].start()
+                    self.assertTrue(entered[0].wait(timeout=5))
+                    threads[1].start()
+                    self.assertTrue(attempting[1].wait(timeout=5))
+                    self.assertFalse(entered[1].wait(timeout=0.1))
+                finally:
+                    release.set()
+                    for thread in threads:
+                        thread.join(timeout=5)
+
+        if errors:
+            raise errors[0]
+        self.assertTrue(entered[1].is_set())
+
+    def test_gpu_benchmark_lock_allows_different_device_threads(self):
+        try:
+            import fcntl  # noqa: F401
+        except ImportError:
+            self.skipTest("requires fcntl")
+
+        from torch._inductor.runtime import benchmarking as _bench
+
+        thread_state = threading.local()
+        entered = [threading.Event(), threading.Event()]
+        release = threading.Event()
+        errors = []
+
+        def current_device():
+            return thread_state.device
+
+        def worker(index):
+            thread_state.device = index
+            try:
+                with _bench.maybe_gpu_benchmark_lock():
+                    entered[index].set()
+                    release.wait(timeout=5)
+            except Exception as e:
+                errors.append(e)
+
+        with tempfile.TemporaryDirectory() as lock_dir:
+            env = {
+                "INDUCTOR_GPU_BENCH_LOCK": "1",
+                "INDUCTOR_GPU_BENCH_LOCK_DIR": lock_dir,
+                "CUDA_VISIBLE_DEVICES": "4,7",
+            }
+            with (
+                patch.dict(os.environ, env),
+                patch("torch.cuda.current_device", side_effect=current_device),
+            ):
+                threads = [threading.Thread(target=worker, args=(i,)) for i in (0, 1)]
+                try:
+                    threads[0].start()
+                    self.assertTrue(entered[0].wait(timeout=5))
+                    threads[1].start()
+                    self.assertTrue(entered[1].wait(timeout=5))
+                finally:
+                    release.set()
+                    for thread in threads:
+                        thread.join(timeout=5)
+
+        if errors:
+            raise errors[0]
 
     def test_gpu_benchmark_lock_prefers_hip_visible_devices_on_rocm(self):
         try:
@@ -337,7 +551,9 @@ class TestBenchmarker(TestCase):
             with patch.dict(os.environ, {"INDUCTOR_GPU_BENCH_LOCK": "1"}):
                 with patch(
                     "torch.cuda.current_device",
-                    side_effect=AssertionError("custom context should not query device"),
+                    side_effect=AssertionError(
+                        "custom context should not query device"
+                    ),
                 ):
                     with _bench.maybe_gpu_benchmark_lock():
                         calls.append("body")
@@ -345,6 +561,87 @@ class TestBenchmarker(TestCase):
             _bench.set_gpu_benchmark_lock_context(previous)
 
         self.assertEqual(calls, ["enter", "body", "exit"])
+
+    def test_gpu_benchmark_lock_registered_context_is_reentrant(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        calls = []
+        locked = False
+
+        @contextlib.contextmanager
+        def custom_context():
+            nonlocal locked
+            self.assertFalse(locked)
+            locked = True
+            calls.append("enter")
+            try:
+                yield
+            finally:
+                calls.append("exit")
+                locked = False
+
+        previous = _bench.set_gpu_benchmark_lock_context(custom_context)
+        try:
+            with patch.dict(os.environ, {"INDUCTOR_GPU_BENCH_LOCK": "1"}):
+                with _bench.maybe_gpu_benchmark_lock():
+                    with _bench.maybe_gpu_benchmark_lock():
+                        calls.append("body")
+        finally:
+            _bench.set_gpu_benchmark_lock_context(previous)
+
+        self.assertEqual(calls, ["enter", "body", "exit"])
+
+    def test_gpu_benchmark_lock_registered_context_can_upgrade_outer_context(self):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        mode = None
+        calls = []
+
+        @contextlib.contextmanager
+        def outer_context():
+            nonlocal mode
+            self.assertIsNone(mode)
+            mode = "shared"
+            calls.append("shared_enter")
+            try:
+                yield
+            finally:
+                calls.append(f"{mode}_exit")
+                mode = None
+
+        @contextlib.contextmanager
+        def custom_context():
+            nonlocal mode
+            self.assertEqual(mode, "shared")
+            mode = "exclusive"
+            calls.append("exclusive_enter")
+            try:
+                yield
+            finally:
+                calls.append("exclusive_exit")
+                mode = "shared"
+
+        previous = _bench.set_gpu_benchmark_lock_context(custom_context)
+        try:
+            with patch.dict(os.environ, {"INDUCTOR_GPU_BENCH_LOCK": "1"}):
+                with outer_context():
+                    with _bench.maybe_gpu_benchmark_lock():
+                        calls.append(mode)
+                    calls.append(mode)
+        finally:
+            _bench.set_gpu_benchmark_lock_context(previous)
+
+        self.assertEqual(
+            calls,
+            [
+                "shared_enter",
+                "exclusive_enter",
+                "exclusive",
+                "exclusive_exit",
+                "shared",
+                "shared_exit",
+            ],
+        )
 
     def test_do_bench_using_profiling_uses_gpu_benchmark_lock(self):
         try:
@@ -468,10 +765,12 @@ class TestBenchmarker(TestCase):
         _, _callable = self.make_params(device, size=16)
 
         captured_buffer_lengths = []
+        captured_buffer_devices = []
         original_empty = torch.empty
 
         def empty_spy(*args, **kwargs):
             captured_buffer_lengths.append(args[0])
+            captured_buffer_devices.append(kwargs["device"])
             return original_empty(*args, **kwargs)
 
         with patch.object(
@@ -492,9 +791,10 @@ class TestBenchmarker(TestCase):
                     )
 
         self.assertGreater(timing, 0)
-        mock_get_event_pairs.assert_called_once_with(1)
+        mock_get_event_pairs.assert_called_once_with(1, device_type=device)
         self.assertGreater(len(captured_buffer_lengths), 0)
         self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
+        self.assertEqual(captured_buffer_devices[0], device)
 
 
 if __name__ == "__main__":
