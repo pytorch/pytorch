@@ -60,7 +60,10 @@ from .object_protocol import (
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.symbolic_convert import (
+        InstructionTranslator,
+        InstructionTranslatorBase,
+    )
 
 
 def pytuple_checkexact(obj: VariableTracker) -> bool:
