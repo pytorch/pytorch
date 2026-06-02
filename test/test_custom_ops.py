@@ -6075,6 +6075,7 @@ class TestCustomOpFastPath(TestCase):
         import torch._library.custom_ops as co
 
         with unittest.mock.patch.object(co, "_FAST_CUSTOM_OPS_ENABLED", False):
+
             @torch.library.custom_op("_torch_testing::fp_disabled", mutates_args=())
             def fp_disabled(x: Tensor) -> Tensor:
                 return x.clone()
