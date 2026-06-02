@@ -6623,6 +6623,17 @@ class CommonTemplate:
 
         self.common(fn, (torch.arange(6, dtype=torch.float32),))
 
+    def test_as_strided_inplace_metadata_propagation(self):
+        # https://github.com/pytorch/pytorch/issues/185888
+        # as_strided_ is an in-place view mutation: the returned tensor and
+        # the original tensor should share the updated size/stride metadata.
+        def fn():
+            x = torch.arange(4.0, dtype=torch.float32)
+            y = x.as_strided_((2, 2), (2, 1))
+            return y, x.size(), y.size(), x.stride(), y.stride()
+
+        self.common(fn, (), reference_in_float=False)
+
     def test_repeat_interleave(self):
         def fn(x):
             return (
