@@ -2923,10 +2923,10 @@ Examples::
 """,
 )
 
-qdwh = _add_docstr(
-    _linalg.linalg_qdwh,
+polar = _add_docstr(
+    _linalg.linalg_polar,
     r"""
-linalg.qdwh(A, *, out=None) -> (Tensor, Tensor)
+linalg.polar(A, *, out=None) -> (Tensor, Tensor)
 
 Computes the polar decomposition of a matrix.
 
@@ -2945,6 +2945,12 @@ the real case and Hermitian positive-semidefinite in the complex case.
 The orthogonal factor :math:`U` is the closest matrix with orthonormal columns to
 :math:`A` in the Frobenius norm, which makes the polar decomposition a useful tool
 for orthogonalization.
+
+.. note::
+    :func:`torch.linalg.polar` computes the polar decomposition of a matrix, like
+    SciPy's `scipy.linalg.polar <https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.polar.html>`_.
+    It is not related to :func:`torch.polar`, which constructs a complex tensor
+    from absolute values and angles like C++'s `std::polar`.
 
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
@@ -2975,7 +2981,7 @@ Returns:
 Examples::
 
     >>> A = torch.randn(4, 3)
-    >>> U, H = torch.linalg.qdwh(A)
+    >>> U, H = torch.linalg.polar(A)
     >>> torch.dist(U @ H, A)
     tensor(7.1512e-07)
     >>> torch.dist(U.mT @ U, torch.eye(3))

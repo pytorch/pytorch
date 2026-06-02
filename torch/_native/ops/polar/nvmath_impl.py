@@ -42,7 +42,7 @@ def _empty_colmajor(m: int, n: int, A: torch.Tensor) -> torch.Tensor:
     return A.new_empty((n, m)).mT
 
 
-def _qdwh_2d(
+def _polar_2d(
     A: torch.Tensor, *, return_residual: bool = False
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     from nvmath.bindings import cusolverDn as cs  # pyrefly: ignore[missing-import]
@@ -144,7 +144,7 @@ def _qdwh_2d(
         cs.destroy_params(params)
 
 
-def qdwh_xpolar(
+def polar_xpolar(
     A: torch.Tensor, *, return_residual: bool = False
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Polar decomposition A = U @ H via cuSOLVER Xpolar (QDWH).
@@ -155,13 +155,13 @@ def qdwh_xpolar(
     stacked over the batch) for callers that want to validate convergence.
     """
     if A.dim() == 2:
-        return _qdwh_2d(A, return_residual=return_residual)
+        return _polar_2d(A, return_residual=return_residual)
     # cuSOLVER Xpolar is 2-D; loop over the flattened batch.
     *batch, m, n = A.shape
     A_flat = A.reshape(-1, m, n)
     Us, Hs, residuals = [], [], []
     for i in range(A_flat.size(0)):
-        U_i, H_i, res_i = _qdwh_2d(A_flat[i], return_residual=return_residual)
+        U_i, H_i, res_i = _polar_2d(A_flat[i], return_residual=return_residual)
         Us.append(U_i)
         Hs.append(H_i)
         if res_i is not None:

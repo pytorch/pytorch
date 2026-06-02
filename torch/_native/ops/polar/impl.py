@@ -1,5 +1,5 @@
 """
-Python override for aten::linalg_qdwh (polar decomposition A = U @ H).
+Python override for aten::linalg_polar (polar decomposition A = U @ H).
 
 Dispatch:
 
@@ -10,10 +10,11 @@ Dispatch:
   |
   |-- NO  --> SVD-based polar decomposition (runs on the input's device)
 
-The CPU override always uses the SVD path. The CUDA cond keys only on
-dtype/shape/device (never on nvmath availability) so the override still fires
-when nvmath is absent and the SVD fallback runs on the CUDA tensor; otherwise
-the router would fall through to the raising aten stub.
+The CPU override always uses the SVD path; the CUDA path uses cuSOLVER QDWH when
+available and otherwise SVD on the CUDA tensor. Both keys share a cond that
+matches only supported dtypes and m >= n matrices, so unsupported inputs fall
+through to the structured aten kernel (whose meta function raises the
+appropriate shape/dtype error) instead of silently running the SVD path.
 """
 
 import warnings
@@ -80,20 +81,17 @@ def _check_nvmath() -> bool:
     return _nvmath_available
 
 
-def _shape_is_supported(A: torch.Tensor) -> bool:
-    # cuSOLVER Xpolar and the SVD identity below require m >= n.
+def _polar_cond(A: torch.Tensor) -> bool:
+    # Match only inputs we support: 2-D+ matrices with m >= n and a supported
+    # dtype. On a mismatch the router falls through to the aten kernel, whose
+    # meta function raises the proper error (e.g. "must have at least as many
+    # rows as columns"). This keeps CPU and CUDA error behavior identical.
+    if A.dtype not in _SUPPORTED_DTYPES:
+        return False
     return A.dim() >= 2 and A.size(-2) >= A.size(-1)
 
 
-def _qdwh_cond_cuda(A: torch.Tensor) -> bool:
-    if A.device.type != "cuda":
-        return False
-    if A.dtype not in _SUPPORTED_DTYPES:
-        return False
-    return _shape_is_supported(A)
-
-
-def _qdwh_impl_svd(A: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _polar_impl_svd(A: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     # Polar decomposition from the (reduced) SVD: A = U_ diag(S) Vh, so the
     # orthogonal factor is U = U_ @ Vh and H = Vh^H diag(S) Vh (Hermitian PSD).
     U_, S, Vh = torch.linalg.svd(A, full_matrices=False)
@@ -104,13 +102,13 @@ def _qdwh_impl_svd(A: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     return U, H
 
 
-def _qdwh_impl_cuda(A: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _polar_impl_cuda(A: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     global _nvmath_available
     if A.dtype in _XPOLAR_DTYPES and _check_nvmath():
-        from .nvmath_impl import qdwh_xpolar
+        from .nvmath_impl import polar_xpolar
 
         try:
-            U, H, _ = qdwh_xpolar(A)
+            U, H, _ = polar_xpolar(A)
             return U, H
         except Exception:
             # Hard failure (missing symbol, bad runtime); stop trying Xpolar
@@ -126,28 +124,27 @@ def _qdwh_impl_cuda(A: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
                 "cuSOLVER >= 12.2 (CUDA 13.2) runtime with Xpolar not found"
             )
             warnings.warn(
-                f"linalg.qdwh: cuSOLVER QDWH path unavailable ({reason}), "
+                f"linalg.polar: cuSOLVER QDWH path unavailable ({reason}), "
                 f"using slower SVD-based fallback.",
                 stacklevel=3,
             )
-    return _qdwh_impl_svd(A)
+    return _polar_impl_svd(A)
 
 
 def register_to_dispatch() -> None:
     registry.register_op_override(
         "native",
         "aten",
-        "linalg_qdwh",
+        "linalg_polar",
         "CUDA",
-        cond=_qdwh_cond_cuda,
-        impl=_qdwh_impl_cuda,
+        cond=_polar_cond,
+        impl=_polar_impl_cuda,
     )
     registry.register_op_override(
         "native",
         "aten",
-        "linalg_qdwh",
+        "linalg_polar",
         "CPU",
-        cond=None,
-        impl=_qdwh_impl_svd,
-        unconditional_override=True,
+        cond=_polar_cond,
+        impl=_polar_impl_svd,
     )

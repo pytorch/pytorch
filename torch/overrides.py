@@ -879,7 +879,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
             lambda input, target, weight=None, size_average=None, ignore_index=-100, reduce=None, reduction="mean", label_smoothing=0.0: -1
         ),
         torch.nn.functional.linear_cross_entropy: (
-            lambda input, linear_weight, target, weight=None, reduction="mean", ignore_index=None, label_smoothing=0.0: -1
+            lambda input, linear_weight, target, weight=None, reduction="mean", ignore_index=None, label_smoothing=0.0, options=None: -1
         ),
         torch.nn.functional.ctc_loss: (
             lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction="mean", zero_infinity=False: -1
@@ -1053,7 +1053,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.q_zero_point: lambda input: -1,
         torch.qr: lambda input, some=True, out=None: -1,
         torch.linalg.qr: lambda input, mode="reduced", out=None: -1,
-        torch.linalg.qdwh: lambda A, out=None: -1,
+        torch.linalg.polar: lambda A, out=None: -1,
         torch.quantile: lambda input, q, dim=None, keepdim=False, interpolation="linear", out=None: -1,
         torch.nanquantile: lambda input, q, dim=None, keepdim=False, interpolation="linear", out=None: -1,
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,

@@ -88,9 +88,9 @@
 #include <ATen/ops/linalg_lu_solve.h>
 #include <ATen/ops/linalg_lu_solve_meta.h>
 #include <ATen/ops/linalg_lu_solve_native.h>
-#include <ATen/ops/linalg_qdwh.h>
-#include <ATen/ops/linalg_qdwh_meta.h>
-#include <ATen/ops/linalg_qdwh_native.h>
+#include <ATen/ops/linalg_polar.h>
+#include <ATen/ops/linalg_polar_meta.h>
+#include <ATen/ops/linalg_polar_native.h>
 #include <ATen/ops/linalg_qr.h>
 #include <ATen/ops/linalg_qr_meta.h>
 #include <ATen/ops/linalg_qr_native.h>
@@ -734,16 +734,16 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
   set_output_strided(1, R_shape, R_strides, A.options(), {});
 }
 
-TORCH_META_FUNC(linalg_qdwh)(const Tensor& A) {
-  at::native::checkIsMatrix(A, "linalg.qdwh");
-  at::native::checkFloatingOrComplex(A, "linalg.qdwh");
+TORCH_META_FUNC(linalg_polar)(const Tensor& A) {
+  at::native::checkIsMatrix(A, "linalg.polar");
+  at::native::checkFloatingOrComplex(A, "linalg.polar");
 
   auto A_shape = A.sizes().vec();
   const auto m = A_shape.cend()[-2];
   const auto n = A_shape.cend()[-1];
   TORCH_CHECK(
       m >= n,
-      "linalg.qdwh: input must have at least as many rows as columns, but got ",
+      "linalg.polar: input must have at least as many rows as columns, but got ",
       m, " by ", n, " matrices");
 
   // U has the same shape as A; H is the (n x n) symmetric/Hermitian factor.
@@ -2524,18 +2524,18 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
   }
 }
 
-TORCH_IMPL_FUNC(linalg_qdwh_out)(const Tensor& A,
-                                 const Tensor& U,
-                                 const Tensor& H) {
-  // The QDWH polar decomposition is provided through the Python native-op
-  // override (cuSOLVER Xpolar via nvmath-python, with an SVD-based fallback
-  // for CPU / when nvmath is unavailable). This kernel is the backstop for
-  // backends and dtypes the override does not match.
+TORCH_IMPL_FUNC(linalg_polar_out)(const Tensor& A,
+                                  const Tensor& U,
+                                  const Tensor& H) {
+  // The polar decomposition is provided through the Python native-op override
+  // (cuSOLVER QDWH/Xpolar via nvmath-python, with an SVD-based fallback for CPU
+  // / when nvmath is unavailable). This kernel is the backstop for backends and
+  // dtypes the override does not match.
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
-      "linalg.qdwh: no native kernel is registered for this backend. The QDWH "
-      "polar decomposition is provided by a Python override on CPU and CUDA; "
-      "install nvmath-python for the cuSOLVER QDWH path on CUDA.");
+      "linalg.polar: no native kernel is registered for this backend. The polar "
+      "decomposition is provided by a Python override on CPU and CUDA; install "
+      "nvmath-python for the cuSOLVER QDWH path on CUDA.");
 }
 
 
