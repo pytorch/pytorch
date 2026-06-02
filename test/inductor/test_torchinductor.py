@@ -12371,7 +12371,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @requires_cuda
     def test_max_min_bool(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
-        # max/min on boolean tensors returned incorrect indices in Triton
+        # and https://github.com/pytorch/pytorch/issues/184893
+        # max/min on boolean tensors returned incorrect indices on Triton and CPU.
         def fn(x):
             return (
                 x.max(0),
@@ -12380,17 +12381,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 x.min(1),
             )
 
-        # Unrolled reduction
-        t1 = torch.randint(2, size=(6, 6), dtype=torch.bool)
-        self.common(fn, (t1,))
+        # Use deterministic seeds since the exact index values depend on
+        # which duplicate True/False row is selected when ties are broken.
+        shapes = [
+            (2, 32),  # Minimal CPU repro from #184893
+            (7, 32),  # CPU repro from #184893
+            (6, 6),  # Unrolled reduction
+            (32, 32),  # Persistent reduction
+            (1028, 1028),  # Non-persistent reduction
+        ]
+        for i, shape in enumerate(shapes, start=2):
+            torch.manual_seed(i)
+            t1 = torch.randint(2, size=shape, dtype=torch.bool)
+            self.common(fn, (t1,))
 
-        # Persistent reduction
-        t1 = torch.randint(2, size=(32, 32), dtype=torch.bool)
-        self.common(fn, (t1,))
+    def test_max_min_bool_keepdim(self):
+        # keepdim=True variant -- second reproducer from #184893
+        def fn(x):
+            return x.min(1, keepdim=True)[1]
 
-        # Non-persistent reduction
-        t1 = torch.randint(2, size=(1028, 1028), dtype=torch.bool)
-        self.common(fn, (t1,))
+        torch.manual_seed(184893)
+        t = torch.randint(2, size=(4, 8, 32), dtype=torch.bool)
+        self.common(fn, (t,))
 
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
