@@ -352,7 +352,8 @@ class StreamContextVariable(ContextWrappingVariable):
 
         # annotate + preserve_node_meta: this ensures the captured
         # nodes have appropriate node.meta["custom"]["stream"] annotations.
-        assert strm.user_object_index is not None, "stream not registered"
+        if strm.user_object_index is None:
+            raise AssertionError("stream not registered")
         stream_idx: int = strm.user_object_index
         annotation: dict[str, Any] = {"stream": stream_idx}
         stack = contextlib.ExitStack()
