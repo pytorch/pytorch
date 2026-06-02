@@ -1836,7 +1836,34 @@ class TensorVariable(VariableTracker):
 
         return ConstantVariable.create(None)
 
-    def method_resize_(</s
+    def method_as_strided_(
+        self,
+        tx: "InstructionTranslatorBase",
+        size: VariableTracker,
+        stride: VariableTracker,
+        storage_offset: VariableTracker | None = None,
+    ) -> VariableTracker:
+        version_before = self._get_fake_version()
+        proxy = tx.output.create_proxy(
+            "call_function",
+            torch.ops.aten.as_strided_.default,
+            (self.as_proxy(), size.as_proxy(), stride.as_proxy())
+            + ((storage_offset.as_proxy(),) if storage_offset is not None else ()),
+            {},
+        )
+        with (
+            torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+            tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            if tx.fake_mode and tx.fake_mode.shape_env
+            else nullcontext(),
+        ):
+            get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
+        result = wrap_fx_proxy(tx, proxy)
+        self._sync_if_inplace_mutation(tx, version_before, False)
+        tx.output.check_input_mutation_on_current_stream(tx)
+        return result
+
+    def method_resize_(
         self,
         tx: "InstructionTranslatorBase",
         *args: VariableTracker,
