@@ -1581,6 +1581,113 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
 
+    def test_lazy_graph_module_fullgraph_call(self):
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        def graph(x):
+            return x + 10
+
+        def make_lazy_graph_module():
+            gm = torch.fx.symbolic_trace(graph)
+            return _LazyGraphModule.from_graphmodule(gm)
+
+        class LazyGraphModuleCall(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lazy_gm = make_lazy_graph_module()
+
+            def forward(self, x):
+                return self.lazy_gm(x)
+
+        class LazyGraphModuleForwardCall(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lazy_gm = make_lazy_graph_module()
+
+            def forward(self, x):
+                return self.lazy_gm.forward(x)
+
+        def check_fullgraph(fn, lazy_gm, x):
+            self.assertTrue(lazy_gm._needs_recompile())
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            self.assertEqual(opt_fn(x), graph(x))
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertFalse(lazy_gm._needs_recompile())
+
+        x = torch.randn(10, 10)
+
+        lazy_gm = make_lazy_graph_module()
+
+        def fn(x):
+            return lazy_gm(x)
+
+        check_fullgraph(fn, lazy_gm, x)
+
+        lazy_gm = make_lazy_graph_module()
+
+        def fn_forward(x):
+            return lazy_gm.forward(x)
+
+        check_fullgraph(fn_forward, lazy_gm, x)
+        lazy_gm = make_lazy_graph_module()
+        check_fullgraph(lazy_gm, lazy_gm, x)
+        lazy_gm = make_lazy_graph_module()
+        check_fullgraph(lazy_gm.forward, lazy_gm, x)
+        lazy_gm = make_lazy_graph_module()
+        lazy_forward = lazy_gm.forward
+
+        def fn_captured_forward(x):
+            return lazy_forward(x)
+
+        check_fullgraph(fn_captured_forward, lazy_gm, x)
+
+        lazy_gm = make_lazy_graph_module()
+        lazy_forward = lazy_gm.forward
+        lazy_gm.register_forward_hook(lambda mod, inp, out: out + 100)
+
+        def fn_captured_forward_with_hook(x):
+            return lazy_forward(x)
+
+        self.assertTrue(lazy_gm._needs_recompile())
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(
+            fn_captured_forward_with_hook, backend=cnt, fullgraph=True
+        )
+        self.assertEqual(opt_fn(x), graph(x) + 100)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertFalse(lazy_gm._needs_recompile())
+
+        for get_fn in (lambda gm: gm, lambda gm: gm.forward):
+            lazy_gm = make_lazy_graph_module()
+            with torch._dynamo.config.patch(caching_precompile=True):
+                opt_fn = torch.compile(get_fn(lazy_gm), backend="eager", fullgraph=True)
+                self.assertEqual(opt_fn(x), graph(x))
+            self.assertFalse(lazy_gm._needs_recompile())
+
+        mod = LazyGraphModuleCall()
+        check_fullgraph(mod, mod.lazy_gm, x)
+
+        mod = LazyGraphModuleForwardCall()
+        check_fullgraph(mod, mod.lazy_gm, x)
+
+        from torch._dynamo.utils import materialize_lazy_graph_module
+
+        lazy_gm = make_lazy_graph_module()
+        lazy_gm.register_forward_hook(lambda mod, inp, out: out + 100)
+        lazy_forward = lazy_gm.forward
+        self.assertEqual(materialize_lazy_graph_module(lazy_forward)(x), graph(x) + 100)
+
+        lazy_gm = make_lazy_graph_module()
+        lazy_gm.register_forward_hook(lambda mod, inp, out: out + 100)
+        lazy_forward = lazy_gm.forward
+        self.assertEqual(
+            materialize_lazy_graph_module(
+                lazy_forward, preserve_lazy_forward_call_semantics=False
+            )(x),
+            graph(x),
+        )
+
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
     def test_lazy_module2(self):

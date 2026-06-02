@@ -1485,6 +1485,41 @@ def is_lazy_module(mod: Any) -> bool:
     return isinstance(mod, LazyModuleMixin)
 
 
+def force_lazy_graph_module_recompile(gm: Any) -> None:
+    from torch.fx._lazy_graph_module import _LazyGraphModule
+
+    _LazyGraphModule.force_recompile(gm)
+
+
+def is_lazy_graph_module_forward(fn: Any) -> bool:
+    from torch.fx._lazy_graph_module import _LazyGraphModule
+
+    return (
+        isinstance(fn, types.MethodType)
+        and isinstance(fn.__self__, _LazyGraphModule)
+        and fn.__name__ == "_lazy_forward"
+    )
+
+
+def materialize_lazy_graph_module(
+    fn: Any, *, preserve_lazy_forward_call_semantics: bool = True
+) -> Any:
+    from torch.fx._lazy_graph_module import _LazyGraphModule
+
+    if isinstance(fn, _LazyGraphModule):
+        _LazyGraphModule.force_recompile(fn)
+        return fn
+
+    if is_lazy_graph_module_forward(fn):
+        lazy_gm = fn.__self__
+        _LazyGraphModule.force_recompile(lazy_gm)
+        if preserve_lazy_forward_call_semantics:
+            return lazy_gm
+        return lazy_gm.forward
+
+    return fn
+
+
 @functools.lru_cache(4096)
 def print_once(*args: Any) -> None:
     print(*args)

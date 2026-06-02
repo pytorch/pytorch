@@ -56,6 +56,7 @@ from ..source import (
 )
 from ..utils import (
     enumerate_items_with_dict_position,
+    force_lazy_graph_module_recompile,
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
@@ -384,6 +385,9 @@ class NNModuleVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
+        if name == "forward" and isinstance(base, torch.fx.GraphModule):
+            force_lazy_graph_module_recompile(base)
+
         # NB: We look up attributes in __dict__ directly, bypassing any custom
         # __getattribute__. Custom __getattribute__ is only traced through as a
         # fallback (via _custom_getattr_fallback) for attributes not found here.
@@ -590,6 +594,7 @@ class NNModuleVariable(VariableTracker):
                     # TODO: do we want to support __call__ for GM's?
                     # If so at least some changes are needed, we don't allow inlining
                     # the call_wrapped currently, and maybe other issues too
+                    force_lazy_graph_module_recompile(mod)
                     fn = mod.forward
                     fn_source = AttrSource(self.source, "forward")
                 else:
@@ -760,6 +765,8 @@ class NNModuleVariable(VariableTracker):
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function.
             # Dynamo puts `call_method` node in FX, doesn't trigger hooks.
+            if isinstance(module, torch.fx.GraphModule):
+                force_lazy_graph_module_recompile(module)
             with record_nn_module_stack(
                 self.module_key, self.get_nn_module_stack_source(), tx, module
             ):
@@ -1106,6 +1113,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 self.value_type = mod.cls_to_become  # type: ignore[attr-defined,assignment]
             initialize_lazy_module(tx, mod, args, kwargs)  # type: ignore[arg-type]
 
+        if isinstance(mod, torch.fx.GraphModule):
+            force_lazy_graph_module_recompile(mod)
+
         if not isinstance(mod, torch.fx.GraphModule):
             name = "__call__"
             fn = getattr(self.value_type, name)
@@ -1194,6 +1204,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name == "forward" and isinstance(self.value, torch.fx.GraphModule):
+            force_lazy_graph_module_recompile(self.value)
+
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
             if self.source:
@@ -1294,6 +1307,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def var_getattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        if name == "forward" and isinstance(self.value, torch.fx.GraphModule):
+            force_lazy_graph_module_recompile(self.value)
+
         # Allow skipping of empty hook dict guards on inbuilt nn modules
         if name in (
             "_backward_hooks",
