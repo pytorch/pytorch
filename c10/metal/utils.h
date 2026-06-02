@@ -315,6 +315,11 @@ template <
     typename U,
     ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
 inline common_dtype<T, U> div(const T x, const U y) {
+  // Purely real divisor: bypass the cross-term to avoid inf*0 / nan*0 = NaN
+  // tainting the imag part. Mathematically equivalent for finite y.x.
+  if (y.y == 0) {
+    return T(x.x / y.x, x.y / y.x);
+  }
   return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
 }
 

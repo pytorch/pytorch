@@ -189,17 +189,16 @@ class TestAutocast(TestCase):
 
 class TestDefaultDevice(TestCase):
     def test_compile_with_default_device(self):
-        self.addCleanup(lambda: torch.set_default_device(None))
-        torch.set_default_device("openreg")
+        with torch.device("openreg"):
 
-        @torch.compile(backend="openreg")
-        def fn(x):
-            y = torch.empty(4)
-            return x + y
+            @torch.compile(backend="openreg")
+            def fn(x):
+                y = torch.empty(4)
+                return x + y
 
-        x = torch.randn(4, device="openreg")
-        result = fn(x)
-        self.assertEqual(result.device.type, "openreg")
+            x = torch.randn(4, device="openreg")
+            result = fn(x)
+            self.assertEqual(result.device.type, "openreg")
 
 
 class TestDeviceInterface(TestCase):

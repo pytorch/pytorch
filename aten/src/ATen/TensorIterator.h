@@ -316,6 +316,17 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
         "Queried for invalid common dtype!");
     return common_dtype_;
   }
+  // common_dtype() is populated whenever TensorIterator could infer a single
+  // computation dtype -- this includes both the promotion flags and the
+  // simpler case where every input already shares a dtype. nullopt means
+  // "no single dtype was inferred", not "promotion was not requested".
+  // Callers that don't know whether a common dtype was inferred can use
+  // this predicate instead of catching the assertion above.
+  std::optional<ScalarType> maybe_common_dtype() const {
+    return common_dtype_ == ScalarType::Undefined
+        ? std::nullopt
+        : std::optional<ScalarType>(common_dtype_);
+  }
   ScalarType input_dtype(int64_t arg = 0) const {
     return operands_[num_outputs_ + arg].current_dtype;
   }
