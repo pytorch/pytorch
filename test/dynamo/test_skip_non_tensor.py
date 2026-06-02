@@ -4,6 +4,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.testing import CompileCounter
 
 
@@ -128,6 +129,121 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
         if counter.op_count != 0:
             raise AssertionError(f"Expected op_count 0, got {counter.op_count}")
+
+    def test_condition_dependent_graph_break_skip_does_not_poison_code(self):
+        def fn(x, n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+            if torch.compiler.is_compiling():
+                return x + 1
+            return x - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+        preexisting_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        }
+
+        self.assertEqual(opt_fn(x, 0), x - 1)
+        self.assertEqual(counter.frame_count, 0)
+        entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(entries), 1)
+        self.assertIsNot(entries[0].code, fn.__code__)
+        self.assertTrue(
+            entries[0].trace_annotation.startswith("Torch-Compiled Eager Fallback")
+        )
+
+        self.assertEqual(opt_fn(x, 0), x - 1)
+        self.assertEqual(counter.frame_count, 0)
+        self.assertEqual(len(_debug_get_cache_entry_list(fn.__code__)), 1)
+
+        self.assertEqual(opt_fn(x, 1), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+        entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(entries), 2)
+        self.assertTrue(any(entry.code is not fn.__code__ for entry in entries))
+        self.assertTrue(
+            any(
+                entry.trace_annotation.startswith("Torch-Compiled Eager Fallback")
+                for entry in entries
+            )
+        )
+
+        self.assertEqual(opt_fn(x, 0), x - 1)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(len(_debug_get_cache_entry_list(fn.__code__)), 2)
+
+        self.assertTrue(
+            {name for name in fn.__globals__ if name.startswith("__builtins_dict___")}
+            - preexisting_builtins_keys
+        )
+        torch._dynamo.reset()
+        self.assertEqual(
+            {name for name in fn.__globals__ if name.startswith("__builtins_dict___")},
+            preexisting_builtins_keys,
+        )
+
+    def test_condition_dependent_empty_graph_skip_does_not_poison_code(self):
+        def fn(x, flag):
+            if flag:
+                if torch.compiler.is_compiling():
+                    return x + 1
+                return x - 1
+            return x
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+
+        self.assertEqual(opt_fn(x, False), x)
+        self.assertEqual(counter.frame_count, 0)
+        entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(entries), 1)
+        self.assertIsNot(entries[0].code, fn.__code__)
+        self.assertTrue(
+            entries[0].trace_annotation.startswith("Torch-Compiled Eager Fallback")
+        )
+
+        self.assertEqual(opt_fn(x, True), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+        entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(entries), 2)
+        self.assertTrue(any(entry.code is not fn.__code__ for entry in entries))
+        self.assertTrue(
+            any(
+                entry.trace_annotation.startswith("Torch-Compiled Eager Fallback")
+                for entry in entries
+            )
+        )
+
+        self.assertEqual(opt_fn(x, False), x)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(len(_debug_get_cache_entry_list(fn.__code__)), 2)
+
+    def test_backend_skip_frame_preserves_fullgraph_failure(self):
+        def backend(gm, args):
+            raise torch._dynamo.exc.SkipFrame("backend skip")
+
+        def fn(x):
+            return x + 1
+
+        preexisting_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        }
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "torch.compile with fullgraph=True found no compiled frames"
+        ):
+            opt_fn(torch.ones(2))
+        self.assertEqual(len(_debug_get_cache_entry_list(fn.__code__)), 0)
+        self.assertEqual(
+            {name for name in fn.__globals__ if name.startswith("__builtins_dict___")},
+            preexisting_builtins_keys,
+        )
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_recursive_list(self):

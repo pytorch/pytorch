@@ -316,6 +316,86 @@ def log_dynamo_start(code: CodeType, skip: int = 0) -> list[str]:
     return stack_strings
 
 
+def _guarded_eager_fallback(
+    code: CodeType,
+    tracer_output: DynamoTracerOutput | None,
+    hooks: Hooks,
+    cache_entries: list[CacheEntry],
+    compile_id: CompileId,
+    skip_reason: str,
+    package: CompilePackage | None,
+) -> ConvertFrameReturn:
+    """
+    Cache a guarded eager fallback for frame skips discovered after tracing starts.
+
+    Some skips depend on frame locals (for example, a graph break under one branch
+    or a no-op return under one boolean value). In those cases, caching SKIP as a
+    code-object strategy makes later calls with different locals skip Dynamo before
+    guard evaluation. Instead, cache the original code object behind the guards
+    Dynamo already produced for this trace; guard misses can still compile.
+    """
+    if tracer_output is None:
+        return ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason)
+    if package is not None:
+        _cleanup_skipped_tracer_output(tracer_output)
+        return ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason)
+
+    output = tracer_output.output_graph
+    if output is None or output.guards is None:
+        _cleanup_skipped_tracer_output(tracer_output)
+        return ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason)
+
+    try:
+        build_guards_ctx = contextlib.ExitStack()
+        if torch_function_mode_stack_state_mgr.stack:
+            build_guards_ctx.enter_context(
+                torch_function_mode_stack_state_mgr.temp_restore_stack()
+            )
+        with (
+            dynamo_timed("build_guards", log_pt2_compile_event=True),
+            build_guards_ctx,
+        ):
+            check_fn = CheckFunctionManager(
+                code,
+                output,
+                cache_entries,
+                hooks.guard_fail_fn,
+                hooks.guard_filter_fn,
+            )
+
+        # Use a code object owned by the cache entry so CleanupManager hooks
+        # have the same lifetime as normal Dynamo cache-entry code objects.
+        fallback_code = code.replace(co_varnames=code.co_varnames)
+
+        if output.cleanups:
+            CleanupManager.instance[fallback_code] = output.cleanups
+
+        orig_code_map[fallback_code] = code
+        output_codes.add(fallback_code)
+        return ConvertFrameReturn(
+            frame_exec_strategy=FrameExecStrategy(
+                FrameAction.DEFAULT, FrameAction.DEFAULT
+            ),
+            guarded_code=GuardedCode(
+                fallback_code,
+                check_fn.guard_manager,  # type: ignore[arg-type]
+                compile_id,
+                "Torch-Compiled Eager Fallback: " + str(compile_id),
+            ),
+        )
+    finally:
+        tracer_output._cleanup_output_graph()
+
+
+def _cleanup_skipped_tracer_output(tracer_output: DynamoTracerOutput) -> None:
+    output = tracer_output.output_graph
+    if output is not None:
+        for cleanup in output.cleanups:
+            cleanup()
+        output.cleanups.clear()
+    tracer_output._cleanup_output_graph()
+
+
 def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     Context manager to:
@@ -963,8 +1043,16 @@ def trace_frame(
         propagate_inst_exn_table_entries(instructions)
         check_inst_exn_tab_entries_valid(instructions)
         instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+    except exc.SkipFrame as e:
+        e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer)  # type: ignore[attr-defined]
+        raise
     except Exception as e:
-        e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
+        preserve_output_graph = isinstance(e, (Unsupported, UserError)) and getattr(
+            e, "skip_frame", False
+        )
+        e._torch_dynamo_tracer_output = DynamoTracerOutput(  # type: ignore[attr-defined]
+            tracer, error=not preserve_output_graph
+        )
         raise
     return tracer_output
 
@@ -1623,10 +1711,6 @@ def compile_frame(  # type: ignore[return]
         except exc.SkipFrame as e:
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
-            # Clean up the failed tracer output's graph to break reference cycles
-            failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
-            if failed_tracer_output:
-                failed_tracer_output._cleanup_output_graph()
             raise
 
 
@@ -1766,9 +1850,22 @@ def _compile(
                 raise AssertionError(
                     "SkipFrame exception must have _torch_dynamo_tracer_output set"
                 ) from None
+            skip_reason = f"Dynamo decided to skip the frame while tracing: {e}"
+            if one_graph:
+                _cleanup_skipped_tracer_output(e._torch_dynamo_tracer_output)
+                return (
+                    ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason),
+                    e._torch_dynamo_tracer_output,
+                )
             return (
-                ConvertFrameReturn(
-                    skip_reason=f"Dynamo decided to skip the frame while tracing: {e}"
+                _guarded_eager_fallback(
+                    code,
+                    e._torch_dynamo_tracer_output,
+                    hooks,
+                    cache_entries,
+                    compile_id,
+                    skip_reason,
+                    package,
                 ),
                 e._torch_dynamo_tracer_output,
             )
@@ -2143,6 +2240,27 @@ def _compile(
                 e, compile_id
             )
             tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            error_on_graph_break = (
+                tracer_output.error_on_graph_break
+                if tracer_output
+                else _get_error_on_graph_break()
+            )
+            if (
+                isinstance(e, (Unsupported, UserError))
+                and getattr(e, "skip_frame", False)
+                and not one_graph
+                and not error_on_graph_break
+            ):
+                guarded_code = _guarded_eager_fallback(
+                    code,
+                    tracer_output,
+                    hooks,
+                    cache_entries,
+                    compile_id,
+                    f"Dynamo decided to skip the frame while tracing: {e}",
+                    package,
+                )
+                return guarded_code
             if isinstance(
                 e,
                 (
