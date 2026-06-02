@@ -3987,7 +3987,7 @@ def one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
 
     out = torch.cat(step_output, 0)
 
-    return out, (hx.squeeze(1), cx.squeeze(1))
+    return out, (hx.squeeze(0), cx.squeeze(0))
 
 
 def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=False):
@@ -4087,7 +4087,7 @@ def select_one_layer_lstm_function(input, hx, params):
             if dtype not in [torch.float, torch.bfloat16]:
                 return False
 
-        if input.requires_grad:
+        if torch.is_grad_enabled() and any(t.requires_grad for t in tensors):
             return False
 
         has_projections = hx[0].size(2) != hx[1].size(2)

@@ -754,6 +754,18 @@ class CPUReproTests(TestCase):
                     inps_var = [v_var]
                     self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
 
+    def test_lstm_compile_default_grad_enabled(self):
+        mod = LstmModule(4, 8, 1, batch_first=True).eval()
+        x = torch.randn(2, 3, 4)
+
+        fn_opt = torch.compile(mod, backend="inductor", fullgraph=True)
+
+        actual = fn_opt(x)
+        self.assertEqual(actual, mod(x))
+        actual[0].sum().backward()
+        for param in mod.parameters():
+            self.assertIsNotNone(param.grad)
+
     @parametrize(
         "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
         itertools.product(
