@@ -3485,8 +3485,7 @@ class _AOTDispatchAutogradFunctionFactory:
                 # tensors always have requires_grad=False. Fall back to
                 # metadata.input_info to detect create_graph=True.
                 return any(
-                    inp.requires_grad
-                    for inp in CompiledFunction.metadata.input_info
+                    inp.requires_grad for inp in CompiledFunction.metadata.input_info
                 )
 
             @staticmethod
