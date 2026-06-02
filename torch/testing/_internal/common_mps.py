@@ -415,7 +415,6 @@ if torch.backends.mps.is_available():
             ],
             "nn.functional.fractional_max_pool2d": None,
             "nn.functional.fractional_max_pool3d": None,
-            "nn.functional.group_norm": [torch.int16, torch.int32],
             "nn.functional.glu": [
                 torch.int32,
                 torch.uint8,
@@ -604,22 +603,6 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "var_meanunbiased": [
-                torch.uint8,
-                torch.int8,
-                torch.int32,
-                torch.int16,
-                torch.bool,
-            ],
-            "var_mean": [torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool],
-            "std_mean": [torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool],
-            "std_meanunbiased": [
-                torch.uint8,
-                torch.int8,
-                torch.int32,
-                torch.int16,
-                torch.bool,
-            ],
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
