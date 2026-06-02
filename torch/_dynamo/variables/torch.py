@@ -1648,6 +1648,115 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return None
 
+        @register(torch.logit, torch.special.logit)
+        def handle_logit(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if len(args) > 2 or any(k not in ("input", "eps", "out") for k in kwargs):
+                return None
+
+            if (args and "input" in kwargs) or (len(args) > 1 and "eps" in kwargs):
+                return None
+
+            input_arg = args[0] if args else kwargs.get("input")
+            eps_arg = args[1] if len(args) > 1 else kwargs.get("eps")
+            out_arg = kwargs.get("out")
+            if (
+                out_arg is not None
+                and out_arg.is_python_constant()
+                and out_arg.as_python_constant() is None
+            ):
+                out_arg = None
+
+            if (
+                input_arg is None
+                or eps_arg is None
+                or not input_arg.is_tensor()
+                or not eps_arg.is_tensor()
+                or (out_arg is not None and not out_arg.is_tensor())
+            ):
+                return None
+
+            fake_input = input_arg.as_proxy().node.meta.get("example_value")
+            fake_eps = eps_arg.as_proxy().node.meta.get("example_value")
+            if (
+                not isinstance(fake_input, torch.Tensor)
+                or not isinstance(fake_eps, torch.Tensor)
+                or fake_input.device.type != "cpu"
+                or fake_eps.device.type != "cpu"
+                or fake_eps.dim() != 0
+                or fake_eps.requires_grad
+            ):
+                return None
+
+            if fake_eps.dtype.is_complex:
+                return None
+
+            if fake_input.dtype.is_complex:
+                dtype_name = {
+                    torch.complex64: "ComplexFloat",
+                    torch.complex128: "ComplexDouble",
+                }.get(fake_input.dtype, str(fake_input.dtype))
+                raise_observed_exception(
+                    NotImplementedError,
+                    tx,
+                    args=[f"\"logit_cpu\" not implemented for '{dtype_name}'"],
+                )
+
+            if fake_input.dtype not in (torch.float32, torch.float64):
+                return None
+
+            if out_arg is not None:
+                fake_out = out_arg.as_proxy().node.meta.get("example_value")
+                if (
+                    not isinstance(fake_out, torch.Tensor)
+                    or fake_out.device.type != "cpu"
+                    or not (
+                        fake_out.dtype.is_floating_point or fake_out.dtype.is_complex
+                    )
+                ):
+                    return None
+                if torch.is_grad_enabled() and (
+                    fake_input.requires_grad or fake_out.requires_grad
+                ):
+                    raise_observed_exception(
+                        RuntimeError,
+                        tx,
+                        args=[
+                            "logit(): functions with out=... arguments don't support "
+                            "automatic differentiation, but one of the arguments "
+                            "requires grad."
+                        ],
+                    )
+                if fake_out.shape != fake_input.shape:
+                    unimplemented(
+                        gb_type="torch.logit with tensor eps and resizing out=",
+                        context=(
+                            f"input shape: {fake_input.shape}, "
+                            f"out shape: {fake_out.shape}"
+                        ),
+                        explanation=(
+                            "Dynamo's tensor-eps logit rewrite does not support "
+                            "resizing out= tensors."
+                        ),
+                        hints=[
+                            "Pass an out= tensor with the same shape as the input.",
+                            "Avoid passing eps as a tensor.",
+                        ],
+                    )
+
+            result = tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.logit_with_tensor_eps),
+                [input_arg, eps_arg],
+                {},
+            )
+            if out_arg is not None:
+                return out_arg.call_method(tx, "copy_", [result], {})
+            return result
+
         @register(torch.full)
         def handle_full(
             self,
