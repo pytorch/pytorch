@@ -16584,7 +16584,6 @@ op_db: list[OpInfo] = [
            aliases=('group_norm',),
            ref=reference_group_norm,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.int32, torch.int16, torch.int8, torch.uint8),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -16599,9 +16598,6 @@ op_db: list[OpInfo] = [
                    "test_comprehensive",
                    device_type="cpu"
                ),
-               # MPS supports int8/uint8 but CPU does not, so consistency test cannot run
-               DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_match',
-                            device_type='mps', dtypes=(torch.int8, torch.uint8)),
            ],
            sample_inputs_func=sample_inputs_group_norm,
            reference_inputs_func=reference_inputs_group_norm,
