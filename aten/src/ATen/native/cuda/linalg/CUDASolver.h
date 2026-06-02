@@ -2,8 +2,8 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-#if (defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11000) || defined(USE_ROCM)
-// cuSOLVER version >= 11000 includes 64-bit API; hipsolver on ROCm always provides the 64-bit API
+#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11000
+// cuSOLVER version >= 11000 includes 64-bit API
 #define USE_CUSOLVER_64_BIT
 #endif
 
@@ -412,8 +412,9 @@ template <>
 void ormqr<c10::complex<double>>(
     CUDASOLVER_ORMQR_ARGTYPES(c10::complex<double>));
 
-#ifdef USE_CUSOLVER_64_BIT
-
+#if defined(USE_CUSOLVER_64_BIT) || defined(USE_ROCM)
+// get_cusolver_datatype is needed on CUDA (for xpotrf/xgeqrf/xsyevd) and on
+// ROCm (for xsytrs used by ldl_solve), so keep it outside USE_CUSOLVER_64_BIT.
 template<class Dtype>
 cudaDataType get_cusolver_datatype() {
   static_assert(false&&sizeof(Dtype), "cusolver doesn't support data type");
@@ -423,6 +424,9 @@ template<> cudaDataType get_cusolver_datatype<float>();
 template<> cudaDataType get_cusolver_datatype<double>();
 template<> cudaDataType get_cusolver_datatype<c10::complex<float>>();
 template<> cudaDataType get_cusolver_datatype<c10::complex<double>>();
+#endif // defined(USE_CUSOLVER_64_BIT) || defined(USE_ROCM)
+
+#ifdef USE_CUSOLVER_64_BIT
 
 void xpotrf_buffersize(
     cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, cudaDataType dataTypeA, const void *A,

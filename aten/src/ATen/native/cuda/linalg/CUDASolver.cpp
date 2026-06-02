@@ -1031,12 +1031,14 @@ void ormqr<c10::complex<double>>(CUDASOLVER_ORMQR_ARGTYPES(c10::complex<double>)
       devInfo));
 }
 
-#ifdef USE_CUSOLVER_64_BIT
-
+#if defined(USE_CUSOLVER_64_BIT) || defined(USE_ROCM)
 template<> cudaDataType get_cusolver_datatype<float>() { return CUDA_R_32F; }
 template<> cudaDataType get_cusolver_datatype<double>() { return CUDA_R_64F; }
 template<> cudaDataType get_cusolver_datatype<c10::complex<float>>() { return CUDA_C_32F; }
 template<> cudaDataType get_cusolver_datatype<c10::complex<double>>() { return CUDA_C_64F; }
+#endif // defined(USE_CUSOLVER_64_BIT) || defined(USE_ROCM)
+
+#ifdef USE_CUSOLVER_64_BIT
 
 void xpotrf_buffersize(
     cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, cudaDataType dataTypeA, const void *A,
