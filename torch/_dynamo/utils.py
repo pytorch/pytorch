@@ -3015,6 +3015,18 @@ dict_keys: type[KeysView[Any]] = type({}.keys())
 dict_values: type[ValuesView[Any]] = type({}.values())
 dict_items: type[ItemsView[Any, Any]] = type({}.items())
 odict_values: type[ValuesView[Any]] = type(OrderedDict().values())
+
+
+def get_underlying_dict(obj: object) -> dict[Any, Any] | None:
+    if isinstance(obj, dict):
+        return obj
+
+    for referent in gc.get_referents(obj):
+        if isinstance(referent, dict):
+            return referent
+    return None
+
+
 # pyrefly: ignore [bad-assignment]
 tuple_iterator: type[Iterator[Any]] = type(iter(()))
 # pyrefly: ignore [bad-assignment]

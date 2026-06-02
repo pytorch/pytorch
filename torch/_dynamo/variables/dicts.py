@@ -36,6 +36,7 @@ from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    CallMethodNoArgsSource,
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
@@ -549,14 +550,24 @@ class ConstDictVariable(VariableTracker):
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
-            return DictItemsVariable(self)
+            backing_dict_id = tx.output.side_effects.dict_backing_id_for_variable(self)
+            return DictItemsVariable(
+                self,
+                source=self.source and CallMethodNoArgsSource(self.source, "items"),
+                backing_dict_id=backing_dict_id,
+            )
         elif name == "keys":
             if len(args):
                 raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
-            return DictKeysVariable(self)
+            backing_dict_id = tx.output.side_effects.dict_backing_id_for_variable(self)
+            return DictKeysVariable(
+                self,
+                source=self.source and CallMethodNoArgsSource(self.source, "keys"),
+                backing_dict_id=backing_dict_id,
+            )
         elif name == "values":
             if args or kwargs:
                 raise_args_mismatch(
@@ -570,7 +581,12 @@ class ConstDictVariable(VariableTracker):
                 tx.output.guard_on_key_order.add(self.source)
             if args or kwargs:
                 raise_observed_exception(TypeError, tx)
-            return DictValuesVariable(self)
+            backing_dict_id = tx.output.side_effects.dict_backing_id_for_variable(self)
+            return DictValuesVariable(
+                self,
+                source=self.source and CallMethodNoArgsSource(self.source, "values"),
+                backing_dict_id=backing_dict_id,
+            )
         elif name == "copy":
             self.install_dict_keys_match_guard()
             if args or kwargs:
@@ -835,13 +851,20 @@ class ConstDictVariable(VariableTracker):
 class MappingProxyVariable(VariableTracker):
     # PyDictProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c#L1995
     _cpython_type = types.MappingProxyType
+    _nonvar_fields = {"backing_dict_id", *VariableTracker._nonvar_fields}
 
     # proxies to the original dict_vt
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        dv_dict: ConstDictVariable,
+        backing_dict_id: int | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         if not isinstance(dv_dict, ConstDictVariable):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
+        self.backing_dict_id = backing_dict_id
 
     def python_type(self) -> type:
         return types.MappingProxyType
@@ -849,11 +872,13 @@ class MappingProxyVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # mappingproxy.__hash__ delegates to the underlying dict, which
         # raises TypeError. Mirror that behavior.
+        self._check_mutation_guard(tx)
         return self.dv_dict.hash_impl(tx)
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
+        self._check_mutation_guard(tx)
         return self.dv_dict.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -884,7 +909,17 @@ class MappingProxyVariable(VariableTracker):
         codegen.extend_output(create_call_function(1, False))
 
     def _check_mutation_guard(self, tx: "InstructionTranslatorBase") -> None:
-        if self.source and tx.output.side_effects.has_existing_dict_mutation():
+        if not self.source:
+            return
+
+        if self.backing_dict_id is not None:
+            mutation_detected = tx.output.side_effects.has_mutated_dict_backing_id(
+                self.backing_dict_id
+            )
+        else:
+            mutation_detected = tx.output.side_effects.has_existing_dict_mutation()
+
+        if mutation_detected:
             msg = (
                 "A dict has been modified while we have an existing mappingproxy object. "
                 "A mapping proxy object, as the name suggest, proxies a mapping "
@@ -923,18 +958,38 @@ class MappingProxyVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         self._check_mutation_guard(tx)
-        return self.dv_dict.call_method(tx, name, args, kwargs)
+        result = self.dv_dict.call_method(tx, name, args, kwargs)
+        if (
+            name in ("keys", "values", "items")
+            and not args
+            and not kwargs
+            and self.backing_dict_id is not None
+        ):
+            if isinstance(result, DictViewVariable):
+                result.backing_dict_id = self.backing_dict_id
+        if (
+            name in ("keys", "values", "items")
+            and not args
+            and not kwargs
+            and isinstance(result, DictViewVariable)
+            and self.source is not None
+        ):
+            result.source = CallMethodNoArgsSource(self.source, name)
+        return result
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation_guard(tx)
         return self.dv_dict.tp_iter_impl(tx)
 
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1087-L1095
+        self._check_mutation_guard(tx)
         return self.dv_dict.sq_contains(tx, item)
 
     def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation_guard(tx)
         return self.dv_dict.mp_length(tx)
 
     def richcompare_impl(self, tx, other, op):
@@ -942,6 +997,7 @@ class MappingProxyVariable(VariableTracker):
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/descrobject.c#L1436
         from .object_protocol import generic_richcompare
 
+        self._check_mutation_guard(tx)
         return generic_richcompare(tx, self.dv_dict, other, op)
 
     def call_obj_hasattr(
@@ -971,8 +1027,14 @@ class DictViewVariable(VariableTracker):
     """
 
     kv: str | None = None
+    _nonvar_fields = {"backing_dict_id", *VariableTracker._nonvar_fields}
 
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        dv_dict: ConstDictVariable,
+        backing_dict_id: int | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         if self.kv not in ("keys", "values", "items"):
             raise AssertionError(
@@ -981,6 +1043,19 @@ class DictViewVariable(VariableTracker):
         if not isinstance(dv_dict, ConstDictVariable):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
+        self.backing_dict_id = backing_dict_id
+
+    def _check_mutation_guard(self, tx: "InstructionTranslatorBase") -> None:
+        if tx.output.side_effects.has_mutated_dict_backing_id(self.backing_dict_id):
+            unimplemented(
+                gb_type="Dict view used after dictionary mutation",
+                context=f"Backing dict id: {self.backing_dict_id}",
+                explanation=(
+                    "Dynamo cannot safely trace use of a dict view after the "
+                    "dictionary it aliases was mutated."
+                ),
+                hints=graph_break_hints.SUPPORTABLE,
+            )
 
     @property
     def view_items(self) -> Any:
@@ -1005,11 +1080,15 @@ class DictViewVariable(VariableTracker):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
+        self._check_mutation_guard(tx)
         return self.view_items_vt
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.kv is None:
             raise AssertionError("kv must not be None for reconstruct")
+        if self.source is not None:
+            codegen(self.source)
+            return
         codegen(self.dv_dict)
         codegen.load_method(self.kv)
         codegen.call_method(0)
@@ -1024,6 +1103,7 @@ class DictViewVariable(VariableTracker):
         return ConstantVariable.create(False)
 
     def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_mutation_guard(tx)
         if self.kv == "keys":
             items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
             return VariableTracker.build(tx, f"dict_keys([{items}])")
@@ -1038,6 +1118,7 @@ class DictViewVariable(VariableTracker):
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for dict view objects."""
+        self._check_mutation_guard(tx)
         return VariableTracker.build(tx, len(self.view_items))
 
     def nb_or_impl(
@@ -1047,6 +1128,7 @@ class DictViewVariable(VariableTracker):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6142-L6155 (dictviews_or)
+        self._check_mutation_guard(tx)
         s = VariableTracker.build(tx, set).call_function(tx, [self], {})
         s.call_method(tx, "update", [other], {})
         return s
@@ -1058,6 +1140,7 @@ class DictViewVariable(VariableTracker):
         reverse: bool = False,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6036 (dictviews_sub)
+        self._check_mutation_guard(tx)
         self_, other_ = (other, self) if reverse else (self, other)
         s = VariableTracker.build(tx, set).call_function(tx, [self_], {})
         s.call_method(tx, "difference_update", [other_], {})
@@ -1085,6 +1168,7 @@ class DictKeysVariable(DictViewVariable):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictKeysIterator
 
+        self._check_mutation_guard(tx)
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictKeysIterator(self.dv_dict.items)
@@ -1103,6 +1187,7 @@ class DictKeysVariable(DictViewVariable):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
+        self._check_mutation_guard(tx)
         return self.dv_dict.sq_contains(tx, item)
 
     def richcompare_impl(self, tx, other, op):
@@ -1113,6 +1198,7 @@ class DictKeysVariable(DictViewVariable):
         # PySequence_Contains.
         from .builder import SourcelessBuilder
 
+        self._check_mutation_guard(tx)
         if not _is_set_or_dictview(other):
             return ConstantVariable.create(NotImplemented)
         return SourcelessBuilder.create(
@@ -1189,6 +1275,7 @@ class DictValuesVariable(DictViewVariable):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictValuesIterator
 
+        self._check_mutation_guard(tx)
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictValuesIterator(self.dv_dict.items)
@@ -1197,6 +1284,7 @@ class DictValuesVariable(DictViewVariable):
         # dict_values has no tp_richcompare (inherits object's).
         from .object_protocol import object_richcompare
 
+        self._check_mutation_guard(tx)
         return object_richcompare(self, tx, other, op)
 
     def debug_repr(self) -> str:
@@ -1248,6 +1336,7 @@ class DictItemsVariable(DictViewVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6433-L6451
         from ..utils import iter_contains
 
+        self._check_mutation_guard(tx)
         if not is_hashable(item):
             raise_type_error(tx, f"unhashable type: '{item.python_type_name()}'")
 
@@ -1270,6 +1359,7 @@ class DictItemsVariable(DictViewVariable):
         # PySequence_Contains.
         from .builder import SourcelessBuilder
 
+        self._check_mutation_guard(tx)
         if not _is_set_or_dictview(other):
             return ConstantVariable.create(NotImplemented)
         return SourcelessBuilder.create(
@@ -1287,6 +1377,7 @@ class DictItemsVariable(DictViewVariable):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictItemsIterator
 
+        self._check_mutation_guard(tx)
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictItemsIterator(self.dv_dict.items)

@@ -4352,6 +4352,22 @@
       ]
     }
   ],
+  "GB8368": [
+    {
+      "Gb_type": "Dictionary mutation when a dict view is live",
+      "Context": "Backing dict id: {backing_id}",
+      "Explanation": "Dynamo cannot safely trace a dictionary mutation while a live dict view that aliases the same dictionary may be observed later.",
+      "Hints": []
+    }
+  ],
+  "GB3641": [
+    {
+      "Gb_type": "Dict view used after dictionary mutation",
+      "Context": "Backing dict id: {self.backing_dict_id}",
+      "Explanation": "Dynamo cannot safely trace use of a dict view after the dictionary it aliases was mutated.",
+      "Hints": []
+    }
+  ],
   "GB2696": [
     {
       "Gb_type": "P2P compilation disabled for isend/irecv",
@@ -4465,6 +4481,14 @@
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
+    }
+  ],
+  "GB3251": [
+    {
+      "Gb_type": "Dict view loaded after dictionary mutation",
+      "Context": "Backing dict id: {backing_dict_id}",
+      "Explanation": "Dynamo cannot safely trace use of a dict view after the dictionary it aliases was mutated.",
+      "Hints": []
     }
   ],
   "GB0308": [

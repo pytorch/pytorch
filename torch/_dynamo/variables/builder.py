@@ -169,6 +169,7 @@ from ..utils import (
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
+    get_underlying_dict,
     is_frozen_dataclass,
     is_function,
     is_function_or_wrapper,
@@ -920,6 +921,7 @@ class VariableBuilder:
         # This might be suboptimal compared to dict guards. But mappingproxy is
         # not very common, so its ok to guard on all keys.
         self.install_guards(GuardBuilder.MAPPING_KEYS_CHECK)
+        backing_dict = get_underlying_dict(value)
         all_const = all(ConstantVariable.is_literal(k) for k in value)
 
         if not all_const:
@@ -945,7 +947,11 @@ class VariableBuilder:
 
         # Create a dict_vt to be used in the mapping proxy variable
         dict_vt = ConstDictVariable(items, source=None)
-        result = MappingProxyVariable(dict_vt, source=self.source)
+        result = MappingProxyVariable(
+            dict_vt,
+            source=self.source,
+            backing_dict_id=id(backing_dict) if backing_dict is not None else None,
+        )
         return self.tx.output.side_effects.track_mutable(value, result)
 
     @classmethod
@@ -2102,12 +2108,30 @@ class VariableBuilder:
                 # - If it is passed along with the dict, the dict object itself is already guarded.
                 # - If only the dict_keys object is passed, we add EQUALS_MATCH and SEQUENCE_LENGTH guards
                 #   to ensure it remains unchanged across multiple runs.
+                backing_dict = get_underlying_dict(value)
+                backing_dict_id = id(backing_dict) if backing_dict is not None else None
+                if self.tx.output.side_effects.has_mutated_dict_backing_id(
+                    backing_dict_id
+                ):
+                    unimplemented(
+                        gb_type="Dict view loaded after dictionary mutation",
+                        context=f"Backing dict id: {backing_dict_id}",
+                        explanation=(
+                            "Dynamo cannot safely trace use of a dict view after "
+                            "the dictionary it aliases was mutated."
+                        ),
+                        hints=graph_break_hints.SUPPORTABLE,
+                    )
                 items = [SourcelessBuilder.create(self.tx, v) for v in value]
                 install_guard(
                     self.get_source().make_guard(GuardBuilder.SEQUENCE_LENGTH),
                     self.get_source().make_guard(GuardBuilder.EQUALS_MATCH),
                 )
-                return DictKeySetVariable(items, source=self.source)
+                return DictKeySetVariable(
+                    items,
+                    source=self.source,
+                    backing_dict_id=backing_dict_id,
+                )
             else:
                 unimplemented(
                     gb_type="non-const keys in dict_keys",

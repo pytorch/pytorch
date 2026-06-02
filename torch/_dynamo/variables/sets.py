@@ -908,6 +908,17 @@ class FrozensetVariable(SetVariable):
 
 
 class DictKeySetVariable(SetVariable):
+    _nonvar_fields = {"backing_dict_id", *SetVariable._nonvar_fields}
+
+    def __init__(
+        self,
+        *args: Any,
+        backing_dict_id: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.backing_dict_id = backing_dict_id
+
     def debug_repr(self) -> str:
         if not self.items:
             return "dict_keys([])"
