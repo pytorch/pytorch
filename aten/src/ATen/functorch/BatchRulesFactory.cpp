@@ -114,7 +114,7 @@ static std::tuple<Tensor, std::optional<int64_t>> linspace_logspace_batch_rule_h
     std::optional<at::Device> device,
     std::optional<bool> pin_memory)
 {
-  auto batch_size = get_bdim_size2(start, start_bdim, end, end_bdim);
+  auto batch_size = get_bdim_size(start, start_bdim, end, end_bdim);
   auto start_ = ensure_has_bdim(start, start_bdim.has_value(), batch_size);
   auto end_ = ensure_has_bdim(end, end_bdim.has_value(), batch_size);
   start_ = moveBatchDimToFront(start_, start_bdim);

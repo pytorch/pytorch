@@ -417,53 +417,36 @@ Tensor& unary_inplace_batch_rule(Tensor& self, std::optional<int64_t> /*unused*/
   return self;
 }
 
-inline int64_t get_bdim_size4(
-    const Tensor& a_value, std::optional<int64_t> a_bdim,
-    const Tensor& b_value, std::optional<int64_t> b_bdim,
-    const Tensor& c_value, std::optional<int64_t> c_bdim,
-    const Tensor& d_value, std::optional<int64_t> d_bdim) {
-  if (a_bdim)
-    return a_value.size(*a_bdim);
-  if (b_bdim)
-    return b_value.size(*b_bdim);
-  if (c_bdim)
-    return c_value.size(*c_bdim);
-  if (d_bdim)
-    return d_value.size(*d_bdim);
-  TORCH_INTERNAL_ASSERT(false);
+template <typename... Args>
+inline int64_t get_bdim_size(
+    const Tensor& val,
+    const std::optional<int64_t>& bdim,
+    const Args&... args) {
+  if (bdim) {
+    return val.size(*bdim);
+  }
+
+  if constexpr (sizeof...(args)) {
+    return get_bdim_size(args...);
+  } else {
+    TORCH_INTERNAL_ASSERT(false);
+  }
 }
 
-inline int64_t get_bdim_size3(
-    const Tensor& a_value, std::optional<int64_t> a_bdim,
-    const Tensor& b_value, std::optional<int64_t> b_bdim,
-    const Tensor& c_value, std::optional<int64_t> c_bdim) {
-  if (a_bdim)
-    return a_value.size(*a_bdim);
-  if (b_bdim)
-    return b_value.size(*b_bdim);
-  if (c_bdim)
-    return c_value.size(*c_bdim);
-  TORCH_INTERNAL_ASSERT(false);
-}
+template <typename... Args>
+inline c10::SymInt get_bdim_size_symint(
+    const Tensor& val,
+    const std::optional<int64_t>& bdim,
+    const Args&... args) {
+  if (bdim) {
+    return val.sym_size(*bdim);
+  }
 
-inline int64_t get_bdim_size2(
-    const Tensor& a_value, std::optional<int64_t> a_bdim,
-    const Tensor& b_value, std::optional<int64_t> b_bdim) {
-  if (a_bdim)
-    return a_value.size(*a_bdim);
-  if (b_bdim)
-    return b_value.size(*b_bdim);
-  TORCH_INTERNAL_ASSERT(false);
-}
-
-inline c10::SymInt get_bdim_size2_symint(
-    const Tensor& a_value, std::optional<int64_t> a_bdim,
-    const Tensor& b_value, std::optional<int64_t> b_bdim) {
-  if (a_bdim)
-    return a_value.sym_size(*a_bdim);
-  if (b_bdim)
-    return b_value.sym_size(*b_bdim);
-  TORCH_INTERNAL_ASSERT(false);
+  if constexpr (sizeof...(args)) {
+    return get_bdim_size_symint(args...);
+  } else {
+    TORCH_INTERNAL_ASSERT(false);
+  }
 }
 
 // [start, start + 1, ..., stop - 1]

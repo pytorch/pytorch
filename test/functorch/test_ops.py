@@ -1067,8 +1067,6 @@ class TestOperators(TestCase):
         {
             xfail("as_strided", "partial_views"),
             xfail("as_strided_copy"),
-            # backward pass not yet vmapped
-            xfail("native_group_norm"),
         },
     )
     def test_vmapvjpvjp(self, device, dtype, op):
@@ -1228,8 +1226,6 @@ class TestOperators(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
-                # backward pass not yet vmapped
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -1543,8 +1539,6 @@ class TestOperators(TestCase):
                 xfail("t_copy"),
                 xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
-                # backward pass not yet vmapped
-                xfail("native_group_norm"),
             }
         ),
     )
@@ -1898,6 +1892,7 @@ class TestOperators(TestCase):
                 skip("broadcast_tensors"),
                 skip("linalg.lstsq"),
                 skip("nn.functional.bilinear"),
+                skip("native_group_norm"),
                 skip("native_layer_norm"),
                 skip("ormqr"),
                 # Not actually a problem
@@ -2036,8 +2031,6 @@ class TestOperators(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("native_dropout_backward"),
-                # backward pass not yet vmapped
-                xfail("native_group_norm"),
             }
         ),
     )

@@ -5219,27 +5219,27 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const std::optional<Tensor>& gamma,
-    c10::SymInt N,
+    const c10::SymInt& N,
     const c10::SymInt& C,
-    c10::SymInt HxW,
+    const c10::SymInt& HxW,
     int64_t group,
     std::array<bool, 3> grad_input_mask) {
-  const int64_t G = group;
-  const auto D = C / G;
+  int64_t G = group;
+  auto D = C / G;
   c10::SymFloat s = c10::SymFloat(1.0) / c10::SymFloat(D * HxW);
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;
-  const Tensor X_tensor = X.reshape_symint({N, G, D, HxW});
-  const Tensor mean_tensor = mean.reshape_symint({N, G, 1, 1});
-  const Tensor rstd_tensor = rstd.reshape_symint({N, G, 1, 1});
+  Tensor X_tensor = X.reshape_symint({N, G, D, HxW});
+  Tensor mean_tensor = mean.reshape_symint({N, G, 1, 1});
+  Tensor rstd_tensor = rstd.reshape_symint({N, G, 1, 1});
   Tensor dY_tensor;
   Tensor ds;
   Tensor db;
   if (dY.defined()) {
-    dY_tensor = dY.reshape_symint({N, G, D, std::move(HxW)});
-    ds = (dY_tensor * X_tensor).sum(3).unsqueeze_(-1);
-    db = dY_tensor.sum(3).unsqueeze_(-1);
+    dY_tensor = dY.reshape_symint({N, G, D, HxW});
+    ds = (dY_tensor * X_tensor).sum(3, true);
+    db = dY_tensor.sum(3, true);
   }
   if (grad_input_mask[0]) {
     Tensor gamma_tensor;
@@ -5253,21 +5253,18 @@ infinitely_differentiable_native_group_norm_backward(
       dvar = -0.5 * rstd_cube * drstd.view_symint({N, G, 1, 1});
     }
     if (dY.defined()) {
-      const Tensor a =
-          isDefined(gamma) ? rstd_tensor * gamma_tensor : rstd_tensor;
-      Tensor b = (isDefined(gamma) ? (ds * gamma_tensor).sum(2) : ds.sum(2))
-                     .unsqueeze_(-2);
-      Tensor c = (isDefined(gamma) ? (db * gamma_tensor).sum(2) : db.sum(2))
-                     .unsqueeze_(-2);
+      Tensor a = isDefined(gamma) ? rstd_tensor * gamma_tensor : rstd_tensor;
+      Tensor b = (isDefined(gamma) ? (ds * gamma_tensor) : ds).sum(2, true);
+      Tensor c = (isDefined(gamma) ? (db * gamma_tensor) : db).sum(2, true);
       b = (c * mean_tensor - b) * rstd_cube * s;
-      c = -b * mean_tensor - c * rstd_tensor * std::move(s);
+      c = -b * mean_tensor - c * rstd_tensor * s;
       dX = a * dY_tensor + b * X_tensor + c;
       if (dmean.defined() && drstd.defined()) {
-        dX += var_mean_backward(
+        dX = dX + var_mean_backward(
             dvar,
-            dmean.view_symint({std::move(N), G, 1, 1}),
+            dmean.view_symint({N, G, 1, 1}),
             X_tensor,
-            IntArrayRef{2, 3},
+            {2, 3},
             0,
             true);
       }
@@ -5275,9 +5272,9 @@ infinitely_differentiable_native_group_norm_backward(
     } else if (dmean.defined() && drstd.defined()) {
       dX = var_mean_backward(
                dvar,
-               dmean.view_symint({std::move(N), G, 1, 1}),
+               dmean.view_symint({N, G, 1, 1}),
                X_tensor,
-               IntArrayRef{2, 3},
+               {2, 3},
                0,
                true)
                .reshape_as(X);

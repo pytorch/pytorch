@@ -348,7 +348,7 @@ static std::tuple<Tensor, std::optional<int64_t>> searchsorted_batch_rule(
   if (sorter.has_value() && sorter->defined()) {
     auto sorter__ = moveBatchDimToFront(*sorter, sorter_bdim);
     if (sorted_sequence_bdim.has_value() != sorter_bdim.has_value()) {
-      auto bdim_size = get_bdim_size2(
+      auto bdim_size = get_bdim_size(
           sorted_sequence, sorted_sequence_bdim,
           sorter.value(), sorter_bdim);
       sorter__ = ensure_has_bdim(sorter__, sorter_bdim.has_value(), bdim_size);

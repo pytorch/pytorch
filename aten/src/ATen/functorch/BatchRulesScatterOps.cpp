@@ -620,7 +620,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_put_batch_rule(
   // find the batch_size
   c10::SymInt batch_size = 0;
   if (self_bdim || values_bdim) {
-    batch_size = get_bdim_size2_symint(self, self_bdim, values, values_bdim);
+    batch_size = get_bdim_size_symint(self, self_bdim, values, values_bdim);
   } else {
     // one or more of the indices is batched.
     for (size_t i = 0; i < indices.size(); i++) {
@@ -684,7 +684,7 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_batch_rule(
     const Scalar& value, Args... args) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
-  auto batch_size = get_bdim_size2(self, self_bdim, index, index_bdim);
+  auto batch_size = get_bdim_size(self, self_bdim, index, index_bdim);
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto index_ = moveBatchDimToFront(index, index_bdim);
@@ -717,7 +717,7 @@ inline std::tuple<Tensor, std::optional<int64_t>> scatter_batch_rule(
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
   auto src_logical_rank = rankWithoutBatchDim(src, src_bdim);
-  auto batch_size = get_bdim_size3(self, self_bdim, index, index_bdim, src, src_bdim);
+  auto batch_size = get_bdim_size(self, self_bdim, index, index_bdim, src, src_bdim);
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto index_ = moveBatchDimToFront(index, index_bdim);
@@ -845,7 +845,7 @@ std::tuple<Tensor, std::optional<int64_t>> gather_batch_rule(
     bool sparse_grad) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
-  auto batch_size = get_bdim_size2(self, self_bdim, index, index_bdim);
+  auto batch_size = get_bdim_size(self, self_bdim, index, index_bdim);
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto index_ = moveBatchDimToFront(index, index_bdim);
@@ -959,7 +959,7 @@ std::tuple<Tensor, std::optional<int64_t>> diagonal_scatter_batch_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto src_ = moveBatchDimToFront(src, src_bdim);
 
-  auto batch_size = get_bdim_size2(self, self_bdim, src, src_bdim);
+  auto batch_size = get_bdim_size(self, self_bdim, src, src_bdim);
 
   self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
   src_ = ensure_has_bdim(src_, src_bdim.has_value(), batch_size);
@@ -997,7 +997,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_add_batch_rule_impl(
     }
     dim = maybe_wrap_dim(dim, self_logical_rank);
 
-    const auto batch_size = get_bdim_size2(self, self_bdim, other, other_bdim);
+    const auto batch_size = get_bdim_size(self, self_bdim, other, other_bdim);
     self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
     other_ = ensure_has_bdim(other_, other_bdim.has_value(), batch_size);
 
@@ -1018,7 +1018,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_add_batch_rule_impl(
 
   // Index is batched. For-loop and stack is the best thing I can come up with
   // right now. We really want generalized index_add kernel in PyTorch
-  auto batch_size = get_bdim_size3(self, self_bdim, other, other_bdim, index, index_bdim);
+  auto batch_size = get_bdim_size(self, self_bdim, other, other_bdim, index, index_bdim);
   std::vector<Tensor> results;
   if (!inplace) {
     results.reserve(batch_size);
@@ -1161,7 +1161,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_fill_int_scalar_batch_rule_impl
     return std::make_tuple(self_, 0);
   }
 
-  auto batch_size = get_bdim_size2(self, self_bdim, index, index_bdim);
+  auto batch_size = get_bdim_size(self, self_bdim, index, index_bdim);
   self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
   index_ = ensure_has_bdim(index_, index_bdim.has_value(), batch_size);
 
@@ -1215,7 +1215,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_fill_int_tensor_batch_rule_impl
     return std::make_tuple(self_, 0);
   }
 
-  auto batch_size = get_bdim_size3(self, self_bdim, index, index_bdim, value, value_bdim);
+  auto batch_size = get_bdim_size(self, self_bdim, index, index_bdim, value, value_bdim);
   self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
   index_ = ensure_has_bdim(index_, index_bdim.has_value(), batch_size);
 
