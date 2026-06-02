@@ -133,14 +133,17 @@ class LaunchConfig:
         if self.logs_specs is None:
             self.logs_specs = DefaultLogsSpecs()
 
-        if (
-            self.numa_options is None
-            and torch.accelerator.is_available()
-            # We assume local_rank n uses accelerator device n.
-            and torch.accelerator.device_count() == self.nproc_per_node
-        ):
-            self.numa_options = get_default_numa_options()
-            logger.info("Using default numa options = %r", self.numa_options)
+        if self.numa_options is None:
+            try:
+                should_use_default_numa = (
+                    torch.accelerator.is_available()
+                    and torch.accelerator.device_count() == self.nproc_per_node
+                )
+            except RuntimeError:
+                should_use_default_numa = False
+            if should_use_default_numa:
+                self.numa_options = get_default_numa_options()
+                logger.info("Using default numa options = %r", self.numa_options)
 
         # Set shutdown_timeout from environment variable if not explicitly set
         if self.shutdown_timeout is None:
