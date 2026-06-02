@@ -166,6 +166,8 @@ class OpaqueMultiplier(OpaqueBase):
 
 
 class Counter(OpaqueBase):
+    _allow_opaque_reference_mid_trace_creation = True
+
     def __init__(self, start, end):
         self.start = start
         self.end = end
@@ -211,13 +213,8 @@ class NestedCounters(OpaqueBase):
 
     def __getitem__(self, idx):
         counter = self.c[idx]
-        # Create a new counter to match device mesh's __getitem__.
-        # Use unset_fake_temporarily as an escape hatch to allow creating
-        # a reference-type opaque mid-trace when we know the value is guarded.
-        from torch._subclasses.fake_tensor import unset_fake_temporarily
-
-        with unset_fake_temporarily():
-            return Counter(counter.start, counter.end)
+        # Create a new counter to match device mesh's __getitem__
+        return Counter(counter.start, counter.end)
 
 
 class AddModule(OpaqueBase, torch.nn.Module):
