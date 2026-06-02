@@ -132,6 +132,41 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
         self.assertEqual(len(codes), 2)
 
+    def test_list_output_region_left_eager_before_aot_compile(self):
+        from torch._guards import TracingContext
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode:
+            fake_input = torch.nonzero(torch.randn(4))
+            fake_output = torch.ops.aten.split.Tensor(fake_input, 1, 1)
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = fake_input
+        split = graph.call_function(torch.ops.aten.split.Tensor, (x, 1, 1))
+        split.meta["val"] = fake_output
+        split.meta["custom"] = {"compile_with_inductor": True}
+        graph.output((split,))
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        with torch._guards.tracing(TracingContext(fake_mode)):
+            compiled = regional_inductor(gm, fake_input)
+
+        regional_call_modules = [
+            node
+            for node in compiled.graph.nodes
+            if node.op == "call_module"
+            and node.target.startswith("__marked_inductor_submod")
+        ]
+        self.assertEqual(len(regional_call_modules), 1)
+
+        real_input = torch.arange(4).reshape(4, 1)
+        actual = compiled([real_input])
+        self.assertIsInstance(actual[0], list)
+        self.assertEqual(actual[0], [real_input])
+
     def test_boxed_calling_convention(self):
         def fn(x, y):
             sin = torch.sin(x)
