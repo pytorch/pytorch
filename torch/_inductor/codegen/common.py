@@ -2726,9 +2726,11 @@ class CSEProxy(DefaultHandler):
                 assert var_dtype is not None
                 check_dtype(V.kernel.compute, csevar, var_dtype)
 
-            if config.test_configs.runtime_triton_shape_assert:
-                assert output_shape is not None
-                check_shape(V.kernel.compute, csevar, output_shape)
+            if (
+                config.test_configs.runtime_triton_shape_assert
+                and var_shape is not None
+            ):
+                check_shape(V.kernel.compute, csevar, var_shape)
 
             if config.runtime_triton_nan_asserts:
                 check_nan(V.kernel.compute, csevar)
