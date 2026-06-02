@@ -161,6 +161,7 @@ from .utils import (
     istype,
     lazy_format_graph_code,
     LazyString,
+    materialize_lazy_graph_module,
     nn_module_proxy,
     same,
     set_example_value,
@@ -2879,28 +2880,11 @@ class OutputGraph(OutputGraphCommon):
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
 
-            from torch.fx._lazy_graph_module import _LazyGraphModule
-
-            if isinstance(compiled_fn, _LazyGraphModule) or (
-                isinstance(getattr(compiled_fn, "__self__", None), _LazyGraphModule)
-                and compiled_fn.__name__ == "_lazy_forward"  # type: ignore[attr-defined]
-            ):
-                # Since dynamo will run the forward method for the GraphModule shortly
-                # anyways, it does not hurt to do the real recompilation here if
-                # this is a _LazyGraphModule. This makes it easier for dynamo to
-                # optimize a _LazyGraphModule.
-
-                lazy_gm = (
-                    compiled_fn
-                    if isinstance(compiled_fn, _LazyGraphModule)
-                    else compiled_fn.__self__  # type: ignore[attr-defined]
-                )
-
-                _LazyGraphModule.force_recompile(lazy_gm)
-
-                if not isinstance(compiled_fn, _LazyGraphModule):
-                    # replace compiled_fn with the real forward method
-                    compiled_fn = lazy_gm.forward
+            # Since Dynamo will run the forward method for the GraphModule shortly
+            # anyway, materialize lazy graph modules before they reach Dynamo again.
+            compiled_fn = materialize_lazy_graph_module(
+                compiled_fn, preserve_lazy_forward_call_semantics=False
+            )
 
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
