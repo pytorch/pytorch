@@ -2319,6 +2319,17 @@
       ]
     }
   ],
+  "GB3331": [
+    {
+      "Gb_type": "Dynamic nn.Module hook registration",
+      "Context": "nn.Module.{name}",
+      "Explanation": "Dynamo does not support registering nn.Module execution hooks during tracing. Hooks registered before calling `torch.compile` are supported, but adding or removing hooks inside a compiled region mutates module state and is not modeled.",
+      "Hints": [
+        "Register hooks on the module before calling `torch.compile`.",
+        "Move hook registration outside the compiled function."
+      ]
+    }
+  ],
   "GB0569": [
     {
       "Gb_type": "repr() on tensor",

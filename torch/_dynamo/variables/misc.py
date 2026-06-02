@@ -211,6 +211,20 @@ class SuperVariable(VariableTracker):
         inner_fn, source = self._resolved_getattr_and_source(tx, name)
         if self.objvar is None:
             raise AssertionError("super() requires objvar to be set for method calls")
+        if isinstance(
+            self.objvar,
+            (variables.NNModuleVariable, variables.UnspecializedNNModuleVariable),
+        ):
+            # Local import avoids a module cycle: nn_module.py imports helpers
+            # from this file for other variable handling.
+            from .nn_module import (
+                is_unsupported_dynamic_module_hook_registration_method,
+                unsupported_dynamic_module_hook_registration,
+            )
+
+            if is_unsupported_dynamic_module_hook_registration_method(name, inner_fn):
+                unsupported_dynamic_module_hook_registration(name)
+
         # This essentially simulates CPython's `super_getattro`:
         # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L11138-L11168
         # where `inner_fn` is the VT for `res = _super_lookup_descr(...)`.
