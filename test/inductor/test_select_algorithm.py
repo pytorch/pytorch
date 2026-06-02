@@ -6,6 +6,8 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
+import sympy
+
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
@@ -33,7 +35,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplateKernel,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import is_big_gpu, run_and_get_kernels
+from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.testing import FileCheck
@@ -1023,6 +1025,14 @@ class TestGetInputsStorageSizeCheck(TestCase):
         mock_graph.sizevars.optimization_hint_with_override = (
             lambda expr, hint_override=None: int(expr)
         )
+        mock_graph.sizevars.upper_bounds_or_hints_with_override = (
+            lambda exprs, hint_override=None, fallback=None: tuple(
+                int(e) for e in exprs
+            )
+        )
+        mock_graph.sizevars.upper_bound_or_hint_with_override = (
+            lambda expr, hint_override=None, fallback=None: int(expr)
+        )
         mock_graph.sizevars.optimization_hint = (
             lambda expr, fallback=None: int(expr) if expr is not None else fallback
         )
@@ -1070,6 +1080,141 @@ class TestGetInputsStorageSizeCheck(TestCase):
             extern_inputs = autotune_args.extern.input_tensors
             self.assertEqual(len(extern_inputs), 1)
             self.assertEqual(extern_inputs[0].shape, torch.Size(node_size))
+
+
+class TestAutotuneDynamicMaxSize(TestCase):
+    def test_benchmark_inputs_use_dynamic_upper_bound(self):
+        from torch._inductor import ir
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch._inductor.template_heuristics.triton import (
+            BaseConfigHeuristic,
+            GemmConfig,
+        )
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        shape_env = ShapeEnv()
+        shape_env.var_to_range[s0] = ValueRanges(2, 64)
+        shape_env.backed_var_to_val[s0] = sympy.Integer(8)
+        sizevars = SizeVarAllocator(shape_env)
+
+        self.assertEqual(sizevars.optimization_hint(s0), 8)
+        self.assertEqual(sizevars.upper_bound_or_hint(s0), 64)
+
+        mock_graph = unittest.mock.MagicMock()
+        mock_graph.sizevars = sizevars
+        mock_graph.buffer_layout_constraints = {}
+        mock_graph.get_allocation_size = lambda node: node.get_size()
+
+        device = torch.device("cpu")
+        dtype = torch.float32
+        input_layout = ir.FixedLayout(device, dtype, size=[s0, 16], stride=[16, 1])
+        output_layout = ir.FixedLayout(device, dtype, size=[s0, 32], stride=[32, 1])
+        input_buf = ir.Buffer(name="dynamic_input", layout=input_layout)
+
+        with V.set_graph_handler(mock_graph):
+            meta = TensorMeta.from_irnodes(input_buf)
+            autotune_args = select_algorithm.AlgorithmSelectorCache.get_inputs(
+                choices=[],
+                input_nodes=[input_buf],
+                layout=output_layout,
+                input_gen_fns=None,
+            )
+            cache_key = select_algorithm.AlgorithmSelectorCache.key_of(input_buf)
+            heuristic = BaseConfigHeuristic()
+            scaled_config = heuristic._scale_mm_configs(
+                s0,
+                32,
+                16,
+                [GemmConfig(128, 128, 16, 1, 4)],
+                scale=1.0,
+                has_int8_tensor=False,
+                exclude=lambda m, n, k: False,
+            )[0]
+
+        self.assertEqual(meta.sizes, (64, 16))
+        self.assertEqual(
+            autotune_args.triton.input_tensors[0].shape, torch.Size([64, 16])
+        )
+        self.assertEqual(autotune_args.triton.output_tensor.shape, torch.Size([64, 32]))
+        self.assertIn(64, cache_key)
+        self.assertNotIn(8, cache_key)
+        self.assertEqual(scaled_config.block_m, 64)
+
+    def test_large_default_dynamic_upper_bound_uses_hint(self):
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        shape_env = ShapeEnv()
+        shape_env.var_to_range[s0] = ValueRanges(
+            2, SizeVarAllocator._MAX_AUTOTUNE_UPPER_BOUND + 1
+        )
+        shape_env.backed_var_to_val[s0] = sympy.Integer(8)
+        sizevars = SizeVarAllocator(shape_env)
+
+        self.assertEqual(sizevars.upper_bound_or_hint(s0), 8)
+
+    @requires_gpu()
+    @requires_triton()
+    def test_mm_compile_time_autotune_uses_dynamic_upper_bound(self):
+        def skip_cache(self, choices, name, key, benchmark, hint_override=None):
+            if benchmark is None:
+                return {}
+            return benchmark(choices)
+
+        records = []
+        orig_benchmark_example_value = (
+            select_algorithm.AlgorithmSelectorCache.benchmark_example_value
+        )
+
+        def capture_example_value(node, hint_override=None):
+            result = orig_benchmark_example_value(node, hint_override=hint_override)
+            get_name = getattr(node, "get_name", None)
+            records.append(
+                (
+                    get_name() if get_name is not None else type(node).__name__,
+                    tuple(result.shape),
+                )
+            )
+            return result
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        torch._dynamo.reset()
+        select_algorithm.get_algorithm_selector_cache().cache_clear()
+
+        a = torch.randn((8, 16), device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn((16, 32), device=GPU_TYPE, dtype=torch.float16)
+        torch._dynamo.mark_dynamic(a, 0, min=1, max=64)
+
+        with (
+            inductor_config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN,TRITON",
+                    "triton.native_matmul": False,
+                    "autotune_local_cache": False,
+                    "autotune_remote_cache": False,
+                    "bundled_autotune_remote_cache": False,
+                }
+            ),
+            patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", skip_cache),
+            patch.object(
+                select_algorithm.AlgorithmSelectorCache,
+                "benchmark_example_value",
+                staticmethod(capture_example_value),
+            ),
+            fresh_cache(),
+        ):
+            out = torch.compile(fn, dynamic=True)(a, b)
+
+        torch.testing.assert_close(out, fn(a, b))
+        self.assertIn((64, 16), [shape for _, shape in records])
+        self.assertIn((64, 32), [shape for _, shape in records])
 
 
 class TestTemplateRender(TestCase):
