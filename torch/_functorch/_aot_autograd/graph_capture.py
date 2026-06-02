@@ -22,6 +22,7 @@ from .. import config
 from .descriptors import AOTInput, BackwardTokenAOTInput
 from .functional_utils import (
     assert_functional_graph,
+    optimize_input_mutation_view_scatter,
     propagate_input_mutation_stacktraces,
 )
 from .graph_capture_wrappers import (
@@ -382,6 +383,7 @@ def aot_dispatch_base_graph(
         wrap_all_sync_nodes_with_control_deps(fw_module)
         # Populate fw_metadata with stream indices from the compiled graph
         populate_fw_metadata_with_stream_indices(fw_module, fw_metadata)
+        optimize_input_mutation_view_scatter(fw_module.graph)
         fw_module.graph.eliminate_dead_code()
         fw_module.recompile()
         copy_count2 = assert_functional_graph(fw_module.graph)
@@ -559,6 +561,7 @@ def aot_dispatch_autograd_graph(
     # Populate fw_metadata with stream indices from the compiled graph
     # NB: This needs to be done after the above stream assignments
     populate_fw_metadata_with_stream_indices(fx_g, fw_metadata)
+    optimize_input_mutation_view_scatter(fx_g.graph)
 
     # this helps users identify which forward output to call .detach() on.
     _extract_tangent_source_stack_traces(fx_g, fw_metadata)

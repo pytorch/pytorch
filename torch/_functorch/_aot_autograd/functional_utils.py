@@ -9,9 +9,10 @@ This file contains utilities related to functionalization in AOTAutograd:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypeGuard
+from typing import Any, cast, TypeGuard
 
 import torch
+import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import _functionalization
 from torch._logging import getArtifactLogger
@@ -20,6 +21,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq, SymIntEqByExpr
+from torch.fx.node import Argument
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -28,6 +30,266 @@ from torch.utils._python_dispatch import (
 
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
+
+
+_VIEW_SCATTER_TO_VIEW = {
+    torch.ops.aten.select_scatter.default: torch.ops.aten.select.int,
+    torch.ops.aten.slice_scatter.default: torch.ops.aten.slice.Tensor,
+}
+_VIEW_OPS = set(_VIEW_SCATTER_TO_VIEW.values())
+
+
+def _copy_is_non_blocking(node: torch.fx.Node) -> bool:
+    if len(node.args) >= 3:
+        return bool(node.args[2])
+    return bool(node.kwargs.get("non_blocking", False))
+
+
+def _is_matching_view(
+    node: object,
+    base: torch.fx.Node,
+    view_target: torch._ops.OpOverload,
+    view_args: tuple[Argument, ...],
+    view_kwargs: dict[str, Argument],
+) -> bool:
+    return (
+        isinstance(node, torch.fx.Node)
+        and node.op == "call_function"
+        and node.target is view_target
+        and len(node.args) >= 1
+        and node.args[0] is base
+        and node.args[1:] == view_args
+        and node.kwargs == view_kwargs
+    )
+
+
+def _is_same_view_value(
+    node: object,
+    base: torch.fx.Node,
+    view_target: torch._ops.OpOverload,
+    view_args: tuple[Argument, ...],
+    view_kwargs: dict[str, Argument],
+) -> bool:
+    if _is_matching_view(node, base, view_target, view_args, view_kwargs):
+        return True
+
+    if not (
+        isinstance(node, torch.fx.Node)
+        and node.op == "call_function"
+        and node.target is torch.ops.aten.copy.default
+        and not _copy_is_non_blocking(node)
+    ):
+        return False
+
+    return (
+        len(node.args) >= 2
+        and _is_matching_view(node.args[0], base, view_target, view_args, view_kwargs)
+        and _is_matching_view(node.args[1], base, view_target, view_args, view_kwargs)
+    )
+
+
+def _copy_default_targeting_view(
+    node: object,
+    dst_view: torch.fx.Node,
+) -> tuple[torch.fx.Node, tuple[Argument, ...], dict[str, Argument]] | None:
+    # Functionalization represents view assignment as copy.default(view, rhs)
+    # before scattering the updated view value back into its base.
+    if not (
+        isinstance(node, torch.fx.Node)
+        and node.op == "call_function"
+        and node.target is torch.ops.aten.copy.default
+        and len(node.args) >= 2
+        and node.args[0] is dst_view
+        and isinstance(node.args[1], torch.fx.Node)
+    ):
+        return None
+    return (
+        node.args[1],
+        cast(tuple[Argument, ...], node.args[2:]),
+        dict(node.kwargs),
+    )
+
+
+def _strip_noop_view_scatters(node: torch.fx.Node) -> torch.fx.Node:
+    while (
+        node.op == "call_function"
+        and isinstance(node.target, torch._ops.OpOverload)
+        and node.target in _VIEW_SCATTER_TO_VIEW
+        and len(node.args) >= 2
+        and isinstance(node.args[0], torch.fx.Node)
+    ):
+        base = node.args[0]
+        view_target = _VIEW_SCATTER_TO_VIEW[node.target]
+        view_args = node.args[2:]
+        view_kwargs = dict(node.kwargs)
+        if not _is_same_view_value(
+            node.args[1],
+            base,
+            view_target,
+            view_args,
+            view_kwargs,
+        ):
+            break
+        node = base
+    return node
+
+
+def _is_view_scatter_node(node: object) -> bool:
+    return (
+        isinstance(node, torch.fx.Node)
+        and node.op == "call_function"
+        and isinstance(node.target, torch._ops.OpOverload)
+        and node.target in _VIEW_SCATTER_TO_VIEW
+    )
+
+
+def _mutation_target_base(
+    node: torch.fx.Node, placeholders: set[torch.fx.Node]
+) -> torch.fx.Node | None:
+    while (
+        node.op == "call_function"
+        and isinstance(node.target, torch._ops.OpOverload)
+        and node.target in _VIEW_OPS
+        and len(node.args) >= 1
+        and isinstance(node.args[0], torch.fx.Node)
+    ):
+        node = node.args[0]
+
+    return node if node in placeholders else None
+
+
+def _copy_meta_from_node(dst: torch.fx.Node, src: torch.fx.Node) -> None:
+    dst.meta.update(src.meta)
+
+
+def _fake_view_value(
+    base: torch.fx.Node,
+    view_target: torch._ops.OpOverload,
+    view_args: tuple[Argument, ...],
+    view_kwargs: dict[str, Argument],
+) -> object:
+    fake_args, fake_kwargs = pytree.tree_map(
+        lambda x: x.meta["val"] if isinstance(x, torch.fx.Node) else x,
+        (view_args, view_kwargs),
+    )
+    return view_target(base.meta["val"], *fake_args, **fake_kwargs)
+
+
+def _find_or_create_view_of_input(
+    graph: torch.fx.Graph,
+    before_node: torch.fx.Node,
+    base: torch.fx.Node,
+    view_target: torch._ops.OpOverload,
+    view_args: tuple[Argument, ...],
+    view_kwargs: dict[str, Argument],
+) -> torch.fx.Node:
+    for node in graph.nodes:
+        if node is before_node:
+            break
+        if _is_matching_view(node, base, view_target, view_args, view_kwargs):
+            return node
+
+    with graph.inserting_before(before_node):
+        view = graph.call_function(
+            view_target, cast(tuple[Argument, ...], (base, *view_args)), view_kwargs
+        )
+    view.meta["val"] = _fake_view_value(base, view_target, view_args, view_kwargs)
+    return view
+
+
+def optimize_input_mutation_view_scatter(g: torch.fx.Graph) -> None:
+    """
+    Rewrite functionalized input mutations on simple views so the mutation is
+    applied to the view directly instead of copying a full updated input back.
+
+    AOTAutograd functionalization represents x[0].add_(1) as:
+
+        updated = aten.select_scatter(x, add, 0, 0)
+        out = aten.copy_(x, updated)
+
+    Inductor can lower the equivalent view copy much more directly:
+
+        view = aten.select(x, 0, 0)
+        aten.copy_(view, add)
+        out = x
+    """
+    g.eliminate_dead_code()
+    placeholders = {node for node in g.nodes if node.op == "placeholder"}
+    changed = True
+    while changed:
+        changed = False
+        for node in list(g.nodes):
+            if not (
+                node.op == "call_function"
+                and node.target is torch.ops.aten.copy_.default
+                and len(node.args) >= 2
+                and isinstance(node.args[0], torch.fx.Node)
+                and isinstance(node.args[1], torch.fx.Node)
+            ):
+                continue
+
+            dst = node.args[0]
+            copy_src_arg = node.args[1]
+            src = _strip_noop_view_scatters(copy_src_arg)
+            if not (
+                _mutation_target_base(dst, placeholders) is not None
+                and _is_view_scatter_node(src)
+                and len(src.args) >= 2
+                and src.args[0] is dst
+                and isinstance(src.args[1], torch.fx.Node)
+            ):
+                continue
+
+            src_target = cast(torch._ops.OpOverload, src.target)
+            view_target = _VIEW_SCATTER_TO_VIEW[src_target]
+            view_args = src.args[2:]
+            view_kwargs = dict(src.kwargs)
+            dst_view = _find_or_create_view_of_input(
+                g,
+                node,
+                dst,
+                view_target,
+                view_args,
+                view_kwargs,
+            )
+            copy_value = src.args[1]
+            copy_args = cast(tuple[Argument, ...], node.args[2:])
+            copy_kwargs = dict(node.kwargs)
+            copy_info = _copy_default_targeting_view(copy_value, dst_view)
+            if copy_info is None:
+                copy_src = copy_value
+            else:
+                copy_src, copy_args, copy_kwargs = copy_info
+            extra_users = [user for user in copy_src_arg.users if user is not node]
+            if extra_users:
+                if _is_view_scatter_node(copy_value):
+                    continue
+                if not all(
+                    _is_matching_view(
+                        user,
+                        copy_src_arg,
+                        view_target,
+                        view_args,
+                        view_kwargs,
+                    )
+                    for user in extra_users
+                ):
+                    continue
+                for user in extra_users:
+                    user.replace_all_uses_with(copy_value)
+            with g.inserting_before(node):
+                new_copy = g.call_function(
+                    torch.ops.aten.copy_.default,
+                    (dst_view, copy_src, *copy_args),
+                    copy_kwargs,
+                )
+            _copy_meta_from_node(new_copy, node)
+            if "val" in dst_view.meta:
+                new_copy.meta["val"] = dst_view.meta["val"]
+            node.replace_all_uses_with(dst)
+            g.erase_node(node)
+            changed = True
+            break
 
 
 def to_fun(t: object) -> Any:
@@ -576,11 +838,17 @@ def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[str | None, int]:
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
             if n.target in allowed_mutation_ops:
-                # Can only copy_/set_ into an input
+                # Can only copy_/set_ into an input. Optimized input-slice
+                # mutations may copy_ into a view of the input.
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    if n.args[0] not in placeholders:
+                    mutation_base = (
+                        _mutation_target_base(n.args[0], placeholders)
+                        if n.target is torch.ops.aten.copy_.default
+                        else n.args[0]
+                    )
+                    if mutation_base not in placeholders:
                         error = f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                 mutation_count += 1
             else:
@@ -603,13 +871,15 @@ def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
             if n.target is torch.ops.aten.copy_.default:
-                # Can only copy_ into an input, and can only do so once
+                # Can only copy_ into an input (or an input view), and can only
+                # do so once per mutated input.
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    if n.args[0] not in placeholders:
+                    mutation_base = _mutation_target_base(n.args[0], placeholders)
+                    if mutation_base is None:
                         raise AssertionError(
                             f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                         )
-                    placeholders.remove(n.args[0])
+                    placeholders.remove(mutation_base)
                 copy_from_node = n.args[1]
                 # Pre-condition: every node has a "stack_trace" field in its meta,
                 # but copy_() nodes do not (since we manually added them during functionalization).

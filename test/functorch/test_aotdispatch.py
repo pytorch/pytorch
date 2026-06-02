@@ -55,6 +55,9 @@ from torch._decomp import decomposition_table
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+from torch._functorch._aot_autograd.functional_utils import (
+    optimize_input_mutation_view_scatter,
+)
 from torch._functorch.aot_autograd import (
     _aot_export_function,
     aot_export_joint_simple,
@@ -1363,6 +1366,38 @@ def forward(self, arg0_1, arg1_1):
     copy_ = torch.ops.aten.copy_.default(arg1_1, sin);  arg1_1 = sin = None
     return (copy_,)""",
         )
+
+    def test_input_mutation_view_scatter_copy_options(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        x.meta["val"] = torch.empty((3, 4))
+        y.meta["val"] = torch.empty((4,))
+
+        select = graph.call_function(torch.ops.aten.select.int, (x, 0, 0))
+        select.meta["val"] = x.meta["val"].select(0, 0)
+        copy = graph.call_function(torch.ops.aten.copy.default, (select, y, True))
+        copy.meta["val"] = select.meta["val"]
+        select_scatter = graph.call_function(
+            torch.ops.aten.select_scatter.default,
+            (x, copy, 0, 0),
+        )
+        select_scatter.meta["val"] = x.meta["val"]
+        copy_ = graph.call_function(torch.ops.aten.copy_.default, (x, select_scatter))
+        copy_.meta["val"] = x.meta["val"]
+        graph.output((copy_,))
+
+        optimize_input_mutation_view_scatter(graph)
+        graph.eliminate_dead_code()
+        graph.lint()
+
+        copy_nodes = [
+            node for node in graph.nodes if node.target is torch.ops.aten.copy_.default
+        ]
+        self.assertEqual(len(copy_nodes), 1)
+        self.assertIs(copy_nodes[0].args[0], select)
+        self.assertIs(copy_nodes[0].args[1], y)
+        self.assertEqual(copy_nodes[0].args[2], True)
 
     def test_input_mutation_metadata(self):
         def f(a, b):
