@@ -480,7 +480,7 @@ def exception_handler(
         write_record_to_file(record_filename, e.exec_record)
         e.record_filename = record_filename  # type: ignore[attr-defined]
 
-    augment_exc_message(e, export=export)
+    augment_exc_message(e, export=export, frame=frame)
 
 
 FRAME_COUNTER = 0

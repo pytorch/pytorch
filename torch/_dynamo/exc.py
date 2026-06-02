@@ -692,12 +692,25 @@ def augment_exc_message_with_hop_name(exc: Exception, msg: str) -> str:
     return msg
 
 
-def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -> None:
+def augment_exc_message(
+    exc: Exception,
+    msg: str = "\n",
+    export: bool = False,
+    frame: DynamoFrameType | None = None,
+) -> None:
     import traceback
 
     exc.innermost_user_frame_summary = None  # type: ignore[attr-defined]
 
-    real_stack = get_real_stack(exc)
+    real_stack_frame = None
+    if frame is not None:
+        real_stack = getattr(exc, "real_stack", None)
+        if real_stack is not None:
+            filtered_real_stack = _filter_dynamo_synthetic_user_frames(real_stack)
+            if len(real_stack) > 0 and len(filtered_real_stack) == 0:
+                real_stack_frame = frame
+
+    real_stack = get_real_stack(exc, real_stack_frame)
     if real_stack is not None and len(real_stack) > 0:
         exc.innermost_user_frame_summary = real_stack[-1]  # type: ignore[attr-defined]
         msg += f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
@@ -788,12 +801,34 @@ def get_stack_above_dynamo() -> StackSummary:
     return filter_stack(_extract_stack_with_positions())
 
 
+def _is_dynamo_synthetic_user_frame(frame: FrameSummary) -> bool:
+    filename = frame.filename
+    if filename is None:
+        return False
+    normalized_filename = filename.replace("\\", "/")
+    return (
+        normalized_filename.endswith("/torch/_dynamo/external_utils.py")
+        and frame.name == "inner"
+    )
+
+
+def _filter_dynamo_synthetic_user_frames(stack: StackSummary) -> StackSummary:
+    user_stack = StackSummary()
+    for frame in stack:
+        if _is_dynamo_synthetic_user_frame(frame):
+            continue
+        user_stack.append(frame)
+    return user_stack
+
+
 def get_real_stack(
     exc: Exception, frame: DynamoFrameType | None = None
 ) -> StackSummary | None:
     real_stack = getattr(exc, "real_stack", None)
     if real_stack is None:
         return None
+
+    real_stack = _filter_dynamo_synthetic_user_frames(real_stack)
 
     # NB: it's possible for real_stack to be []; we still attempt to
     # report a stack anyway because the stack_above_dynamo may still
@@ -825,6 +860,8 @@ def filter_stack(stack: StackSummary) -> StackSummary:
     user_stack = StackSummary()
     for frame in stack:
         if frame.filename is None:
+            continue
+        if _is_dynamo_synthetic_user_frame(frame):
             continue
         if "convert_frame" in frame.filename:
             break
