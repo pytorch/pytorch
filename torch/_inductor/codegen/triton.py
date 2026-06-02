@@ -2396,7 +2396,9 @@ class TritonKernelOverrides(TritonOverrides):
         index dtype before emitting, and casting the result if needed.
         """
         real_index_dtype = V.kernel._index_dtype
-        V.kernel._index_dtype = dtype
+        V.kernel._index_dtype = (
+            dtype if dtype in (torch.int32, torch.int64) else torch.int64
+        )
         try:
             var = cls.index_expr(expr, dtype)
         finally:
