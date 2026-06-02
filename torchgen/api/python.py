@@ -289,7 +289,7 @@ class PythonArgument:
 
         # pyi merges the _out and functional variants into the same signature, with an optional out arg
         if name == "out" and not deprecated:
-            type_str = f"{type_str} | None".replace(" | None | None", " | None")
+            type_str = _append_optional_pyi(type_str)
 
         # pyi deprecated signatures don't get defaults for their out arg
         treat_as_no_default = (
@@ -470,8 +470,6 @@ class PythonSignature:
 
         # Below are the major changes in vararg vs. regular pyi signatures
         # vararg signatures also omit the asterix
-        if not isinstance(vararg_type, ListType):
-            raise AssertionError(f"Expected ListType, got {type(vararg_type)}")
         schema_formals[0] = (
             "*" + args[0].name + ": " + argument_type_str_pyi(vararg_type.elem)
         )
@@ -933,6 +931,11 @@ def structseq_fieldnames(returns: tuple[Return, ...]) -> list[str]:
         return [str(r.name) for r in returns]
 
 
+def _append_optional_pyi(type_str: str) -> str:
+    # Append `| None`, avoiding a doubled `| None` if the type is already optional.
+    return f"{type_str} | None".replace(" | None | None", " | None")
+
+
 def argument_type_str_pyi(t: Type) -> str:
     add_optional = False
     if isinstance(t, OptionalType):
@@ -1000,7 +1003,7 @@ def argument_type_str_pyi(t: Type) -> str:
         raise RuntimeError(f"unrecognized type {repr(t)}")
 
     if add_optional:
-        ret = f"{ret} | None".replace(" | None | None", " | None")
+        ret = _append_optional_pyi(ret)
 
     return ret
 
@@ -1011,7 +1014,7 @@ def return_type_str_pyi(t: Type) -> str:
 
     if isinstance(t, OptionalType):
         inner = return_type_str_pyi(t.elem)
-        return f"{inner} | None".replace(" | None | None", " | None")
+        return _append_optional_pyi(inner)
 
     if isinstance(t, BaseType):
         if t.name == BaseTy.Device:
