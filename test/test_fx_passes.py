@@ -254,6 +254,15 @@ class TestPartitionFunctions:
         add_1 = relu + c
         return add, add_1
 
+    @staticmethod
+    def forward21(a, b, c):
+        add = a + b
+        add_1 = c + c
+        relu = add_1.relu()
+        add_2 = add + relu
+        add_3 = add + add_1
+        return add_2, add_3
+
 @torch.fx.wrap
 def _nested_tuple_producer(x):
     """Returns a nested tuple structure: (x+1, (x+2, x+3))"""
@@ -392,6 +401,8 @@ class TestFXGraphPasses(JitTestCase):
             TestPartitionFunctions.forward12,
             [["add"], ["add_1", "add_3", "add_4"], ["add_2"]],
         ),
+        # Do not leave two vertical partitions with cross-partition cycles.
+        (TestPartitionFunctions.forward21, [["add_2"], ["add", "add_1", "add_3"]]),
         # Tuple producer/getitem chains still fuse with their data-dependent user.
         (TestPartitionFunctions.forward14, [["std_mean", "getitem", "getitem_1", "add"]]),
     ])
