@@ -6,7 +6,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-from torch._dynamo.utils import ChromiumEventLogger, dynamo_timed
+from torch._dynamo.utils import chromium_event_timed, ChromiumEventLogger, dynamo_timed
 from torch.profiler import record_function
 from torch.testing._internal.common_utils import TemporaryFileName
 
@@ -90,6 +90,64 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(
                 length, 1, f"Thread {thread_id} saw {length} entries instead of 1"
             )
+
+    def test_chromium_event_timed_scoped_reset_preserves_outer_event(self):
+        logger = ChromiumEventLogger()
+
+        with patch.object(torch._dynamo.utils, "CHROMIUM_EVENT_LOG", logger):
+            logger.log_event_start(
+                "outer", 0, {"outer_metadata": True}, log_pt2_compile_event=True
+            )
+            with self.assertNoLogs("torch._dynamo.utils", level="WARNING"):
+                with chromium_event_timed("inner", reset_event_log_on_exit=True):
+                    self.assertEqual(logger.get_stack(), ["outer", "inner"])
+
+                self.assertEqual(logger.get_stack(), ["outer"])
+                self.assertEqual(logger.get_pt2_compile_substack(), ["outer"])
+                self.assertIn("outer", logger.get_event_data())
+
+                logger.log_event_end(
+                    "outer",
+                    1,
+                    {},
+                    0,
+                    log_pt2_compile_event=True,
+                )
+
+            self.assertEqual(logger.get_stack(), [])
+            self.assertEqual(logger.get_pt2_compile_substack(), [])
+            self.assertEqual(logger.get_event_data(), {})
+
+    def test_chromium_event_timed_scoped_reset_preserves_outer_record_function(self):
+        logger = ChromiumEventLogger()
+
+        with (
+            patch.object(torch._dynamo.utils, "CHROMIUM_EVENT_LOG", logger),
+            torch.profiler.profile(with_stack=False) as prof,
+        ):
+            logger.log_event_start("outer", 0, {})
+            self.assertIn("outer", logger.get_record_functions())
+
+            with chromium_event_timed("inner", reset_event_log_on_exit=True):
+                self.assertIn("outer", logger.get_record_functions())
+                self.assertIn("inner", logger.get_record_functions())
+
+            self.assertEqual(logger.get_stack(), ["outer"])
+            self.assertIn("outer", logger.get_record_functions())
+            self.assertNotIn("inner", logger.get_record_functions())
+
+            logger.log_event_end(
+                "outer",
+                1,
+                {},
+                0,
+                log_pt2_compile_event=False,
+            )
+            self.assertEqual(logger.get_record_functions(), {})
+
+        event_names = [event.name for event in prof.events()]
+        self.assertIn("outer", event_names)
+        self.assertIn("inner", event_names)
 
     def test_nested_compilation_events_in_profiler(self):
         """Verify nested compilation events (dynamo→inductor) show hierarchy"""
