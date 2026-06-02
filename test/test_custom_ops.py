@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import enum
 import io
 import itertools
 import os
@@ -75,6 +76,12 @@ from torch._custom_op.impl import custom_op  # usort: skip
 # Needed by TestTypeConversion.test_string_type:
 MyList = list
 MyTensor = torch.Tensor
+
+
+class LibraryDefineMode(enum.Enum):
+    ADD = 1
+    SUB = -1
+
 
 device_type = (
     acc.type
@@ -2126,6 +2133,106 @@ Dynamic shape operator
                 lib.define(f"foo12({type_name} a) -> Tensor")
             finally:
                 torch._C._unregister_opaque_type(type_name)
+
+    def test_library_define_enum_subclass_schema_type(self):
+        lib = self.lib()
+        x = torch.ones(3)
+        mode_type = f"{LibraryDefineMode.__module__}.{LibraryDefineMode.__qualname__}"
+
+        torch.library.define(
+            f"{self.test_ns}::enum_qualified",
+            f"(Tensor x, {mode_type} mode) -> Tensor",
+            lib=lib,
+        )
+        lib.impl(
+            "enum_qualified",
+            lambda x, mode: x + mode.value,
+            "CompositeExplicitAutograd",
+        )
+        self.assertEqual(
+            self.ns().enum_qualified(x, LibraryDefineMode.ADD),
+            torch.full((3,), 2.0),
+        )
+
+        class PublicLocalLibraryDefineMode(enum.Enum):
+            ADD = 3
+            SUB = -3
+
+        torch.library.define(
+            f"{self.test_ns}::enum_public_unqualified",
+            "(Tensor x, PublicLocalLibraryDefineMode mode) -> Tensor",
+            lib=lib,
+        )
+        lib.impl(
+            "enum_public_unqualified",
+            lambda x, mode: x + mode.value,
+            "CompositeExplicitAutograd",
+        )
+        self.assertEqual(
+            self.ns().enum_public_unqualified(x, PublicLocalLibraryDefineMode.ADD),
+            torch.full((3,), 4.0),
+        )
+        self.assertFalse(
+            torch._C._is_opaque_type_registered("PublicLocalLibraryDefineMode")
+        )
+
+        class LocalLibraryDefineMode(enum.Enum):
+            ADD = 2
+            SUB = -2
+
+        lib.define("enum_unqualified(Tensor x, LocalLibraryDefineMode mode) -> Tensor")
+        lib.impl(
+            "enum_unqualified",
+            lambda x, mode: x + mode.value,
+            "CompositeExplicitAutograd",
+        )
+        self.assertEqual(
+            self.ns().enum_unqualified(x, LocalLibraryDefineMode.SUB),
+            torch.full((3,), -1.0),
+        )
+        self.assertFalse(torch._C._is_opaque_type_registered("LocalLibraryDefineMode"))
+
+    def test_library_define_does_not_accept_non_enum_python_type(self):
+        class NotAnEnum:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
+            self.lib().define("not_an_enum(Tensor x, NotAnEnum mode) -> Tensor")
+
+    def test_library_define_overload_name_not_resolved_as_type(self):
+        attr_accessed = False
+
+        class Probe:
+            @property
+            def overload(self):
+                nonlocal attr_accessed
+                attr_accessed = True
+                return object()
+
+        probe = Probe()
+        self.lib().define("probe.overload(Tensor x) -> Tensor")
+        self.assertFalse(attr_accessed)
+
+    def test_library_define_enum_registration_cleanup_on_lookup_error(self):
+        class LeakedLibraryDefineMode(enum.Enum):
+            ADD = 1
+
+        class Bomb:
+            @property
+            def prop(self):
+                raise RuntimeError("boom")
+
+        bomb = Bomb()
+        type_name = "LeakedLibraryDefineMode"
+        self.assertFalse(torch._C._is_opaque_type_registered(type_name))
+
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            self.lib().define(
+                "leak_cleanup(Tensor x, LeakedLibraryDefineMode mode, "
+                "bomb.prop value) -> Tensor"
+            )
+
+        self.assertFalse(torch._C._is_opaque_type_registered(type_name))
 
     def test_is_tensorlist_like_type(self):
         tensorlists = [
