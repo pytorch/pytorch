@@ -4190,7 +4190,6 @@ class TestTorchDeviceType(TestCase):
 
     # FIXME: move to an elementwise ternary test suite and make this an OpInfo test
     # https://github.com/pytorch/pytorch/issues/126474
-    @xfailIfTorchDynamo
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/126474")
     @dtypes(torch.double)
     def test_ternary_op_mem_overlap(self, device, dtype):

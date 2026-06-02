@@ -3301,19 +3301,65 @@ class ObjectPair(UnittestPair):
     CLS = object
 
 
-# This implements a variant of assertRaises/assertRaisesRegex where we first test
-# if the exception is NotImplementedError, and if so just skip the test instead
-# of failing it.
+def _maybe_unwrap_eager_noexcept_exception(
+    exc_type, exc_value, tb, expected, *, unwrap_not_implemented=False
+):
+    if exc_type is None or exc_value is None:
+        return exc_type, exc_value, tb
+
+    dynamo_exc = sys.modules.get("torch._dynamo.exc")
+    if dynamo_exc is None:
+        return exc_type, exc_value, tb
+    TorchDynamoException = dynamo_exc.TorchDynamoException
+    EAGER_NOEXCEPT_EXCEPTION_MSG = dynamo_exc.EAGER_NOEXCEPT_EXCEPTION_MSG
+
+    cause = exc_value.__cause__
+    cause_matches = cause is not None and (
+        isinstance(cause, expected)
+        or (unwrap_not_implemented and isinstance(cause, NotImplementedError))
+    )
+    if (
+        isinstance(exc_value, TorchDynamoException)
+        and str(exc_value) == EAGER_NOEXCEPT_EXCEPTION_MSG
+        and cause_matches
+    ):
+        return type(cause), cause, cause.__traceback__ or tb
+    return exc_type, exc_value, tb
+
+
+# This implements a variant of assertRaises/assertRaisesRegex that still lets
+# PYTORCH_TEST_WITH_DYNAMO's eager_noexcept backend wrap unexpected GraphModule
+# failures, while matching the wrapped cause for explicit expected exceptions.
 #
 # This is implemented by inheriting from the (private) implementation of
 # assertRaises from unittest.case, and slightly tweaking it for this new
 # behavior.  The year is 2021: this private class hierarchy hasn't changed since
 # 2010, seems low risk to inherit from.
-class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
+class AssertRaisesContext(unittest.case._AssertRaisesContext):
     def __exit__(self, exc_type, exc_value, tb):
+        exc_type, exc_value, tb = _maybe_unwrap_eager_noexcept_exception(
+            exc_type, exc_value, tb, self.expected
+        )
+        return super().__exit__(exc_type, exc_value, tb)
+
+
+# This implements a variant of assertRaises/assertRaisesRegex where we first test
+# if the exception is NotImplementedError, and if so just skip the test instead
+# of failing it.
+class AssertRaisesContextIgnoreNotImplementedError(AssertRaisesContext):
+    def __exit__(self, exc_type, exc_value, tb):
+        exc_type, exc_value, tb = _maybe_unwrap_eager_noexcept_exception(
+            exc_type,
+            exc_value,
+            tb,
+            self.expected,
+            unwrap_not_implemented=True,
+        )
         if exc_type is not None and issubclass(exc_type, NotImplementedError):
             self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
-        return super().__exit__(exc_type, exc_value, tb)
+        # The eager_noexcept unwrapping already happened above; call the base
+        # unittest implementation directly so the cause is not processed twice.
+        return unittest.case._AssertRaisesContext.__exit__(self, exc_type, exc_value, tb)
 
 
 @contextmanager
@@ -4602,7 +4648,14 @@ class TestCase(expecttest.TestCase):
                 # see https://bugs.python.org/issue23890
                 context = None
         else:
-            return super().assertRaises(expected_exception, *args, **kwargs)
+            context: AssertRaisesContext | None = AssertRaisesContext(
+                expected_exception, self
+            )
+            try:
+                return context.handle('assertRaises', args, kwargs)
+            finally:
+                # see https://bugs.python.org/issue23890
+                context = None
 
     # Reimplemented to provide special behavior when
     # _ignore_not_implemented_error is True
@@ -4624,7 +4677,10 @@ class TestCase(expecttest.TestCase):
                 expected_exception, self, expected_regex)
             return context.handle('assertRaisesRegex', args, kwargs)  # type: ignore[attr-defined, arg-type]
         else:
-            return super().assertRaisesRegex(expected_exception, expected_regex, *args, **kwargs)
+            context = AssertRaisesContext(
+                expected_exception, self, expected_regex
+            )
+            return context.handle('assertRaisesRegex', args, kwargs)
 
     # Verifies that no unraisable exceptions are raised by callable.  Unlike regular
     # exceptions, these do not actually propagate to the caller and are
