@@ -119,6 +119,22 @@ class UnsupportedFakeTensorException(RuntimeError):
     reason: str
 
 
+class FakeTensorDeviceMismatchError(RuntimeError):
+    def __init__(
+        self,
+        func: OpOverload,
+        common_device: torch.device,
+        device: torch.device,
+    ) -> None:
+        self.func = func
+        self.common_device = common_device
+        self.device = device
+        super().__init__(
+            "Expected all tensors to be on the same device, but found "
+            f"at least two devices, {common_device} and {device}!"
+        )
+
+
 @dataclass
 class DynamicOutputShapeException(RuntimeError):
     func: OpOverload
@@ -775,6 +791,18 @@ class FakeTensor(Tensor):
     # that have dispatch keys which are higher than the "meta" key:
     # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
 
+    # We don't support named tensors; graph break
+    @property
+    # pyrefly: ignore [bad-override]
+    def names(self) -> list[str]:
+        raise UnsupportedFakeTensorException(
+            "torch.compile doesn't support named tensors"
+        )
+
+    @names.setter
+    def names(self, _: list[str]) -> None:
+        raise NotImplementedError
+
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
         """Normalize device by initializing GPU context and setting device index."""
@@ -1057,9 +1085,7 @@ class FakeTensor(Tensor):
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
-            raise RuntimeError(
-                f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
-            )
+            raise FakeTensorDeviceMismatchError(func, common_device, t.device)
 
         for arg in flat_args:
             merge_devices(arg)
