@@ -128,6 +128,95 @@ def _set_invoke_subgraph_call_id(call_id: int):
         _invoke_subgraph_call_state.current = prev
 
 
+def warn_and_trace_duplicate_backward(
+    identifier: str | None,
+    suffix: int,
+    bw_graph: torch.fx.GraphModule,
+    num_primals: int,
+    tangents: tuple[Any, ...],
+) -> None:
+    if suffix == 0:
+        return
+
+    from torch._dynamo.utils import warn_once
+    from torch._logging import trace_structured
+
+    placeholders = [node for node in bw_graph.graph.nodes if node.op == "placeholder"]
+    tangent_summaries: list[dict[str, Any]] = []
+    for idx, tangent in enumerate(tangents):
+        summary: dict[str, Any] = {}
+        backward_input_idx = num_primals + idx
+        if backward_input_idx < len(placeholders):
+            summary["backward_input_name"] = placeholders[backward_input_idx].name
+
+        if not isinstance(tangent, torch.Tensor):
+            summary["type"] = "non-Tensor"
+            tangent_summaries.append(summary)
+            continue
+
+        summary.update(
+            {
+                "shape": [
+                    int(s) if isinstance(s, int) else str(s) for s in tangent.shape
+                ],
+                "stride": [
+                    int(s) if isinstance(s, int) else str(s) for s in tangent.stride()
+                ],
+                "dtype": str(tangent.dtype),
+                "device": str(tangent.device),
+            }
+        )
+        tangent_summaries.append(summary)
+
+    warn_once(
+        "invoke_subgraph traced multiple backward graphs for the same forward "
+        f"identifier {identifier!r}. This usually means the incoming backward "
+        "tangent metadata differs across backward invocations. This can happen "
+        "when upstream backward formulas produce gradients with different "
+        "layouts, aliases, or other tensor metadata. This can increase compile "
+        "time and code size. Use tlparse and look for the "
+        "invoke_subgraph_backward_duplicate artifact for tangent details."
+    )
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "invoke_subgraph_backward_duplicate",
+            "encoding": "json",
+        },
+        payload_fn=lambda: {
+            "forward_identifier": identifier,
+            "backward_identifier": f"bw_{identifier}_{suffix}",
+            "new_variant_suffix": suffix,
+            "num_variants_for_identifier": suffix + 1,
+            "new_variant": {
+                "backward_identifier": f"bw_{identifier}_{suffix}",
+                "tangents": tangent_summaries,
+            },
+            "explanation": (
+                "invoke_subgraph caches backward graphs by both the forward "
+                "identifier and tangent metadata. Multiple backward variants "
+                "for one forward identifier usually mean the backward tangents "
+                "have different tensor metadata, commonly stride."
+            ),
+            "common_cause": (
+                "This can happen when equivalent forward invocations receive backward "
+                "tangents from different upstream formulas, or from the same "
+                "formula with different input metadata. For example, an "
+                "upstream backward may return a view, alias, slice, expanded "
+                "tensor, or otherwise non-contiguous gradient whose metadata "
+                "does not match the tangent seen by another use."
+            ),
+            "suggested_action": (
+                "If the duplicate backward graph is undesirable, materialize a "
+                "consistent tangent layout before the nested region backward. "
+                "One model-level workaround is a custom autograd.Function whose "
+                "forward returns the input and whose backward returns "
+                "grad.contiguous()."
+            ),
+        },
+    )
+
+
 class InvokeSubgraphHOP(HigherOrderOperator):
     def __init__(self) -> None:
         # Invoke subgraph does not have any state, it is just a wrapper over a
@@ -175,11 +264,37 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             check_input_alias_and_mutation_return_outputs,
             materialize_as_graph,
         )
+        from torch._subclasses.functional_tensor import FunctionalTensor
 
         subgraph_decomp_table = _extract_nested_region_config(subgraph)
-        gm: torch.fx.GraphModule = materialize_as_graph(
-            subgraph, operands, subgraph_decomp_table=subgraph_decomp_table
+        # When the subgraph is a GraphModule whose captured buffers are
+        # already FunctionalTensors (produced by an enclosing
+        # FunctionalTensorMode, e.g. the non-strict export path or
+        # ``run_decompositions`` on an ExportedProgram that preserved an
+        # ``invoke_subgraph`` HOP), re-tracing through
+        # ``materialize_as_graph`` would pop that mode via
+        # ``_disable_current_modes`` and trigger "FunctionalTensor on its
+        # own" when the inner trace touches the captured constants. In that
+        # case the existing graph has already been functionalized by the
+        # outer pass, so reuse it for schema / mutation analysis.
+        gm: torch.fx.GraphModule | None = None
+        if isinstance(subgraph, FunctionalizeCtxWrapper):
+            candidate = subgraph.subgraph
+        elif isinstance(subgraph, torch.fx.GraphModule):
+            candidate = subgraph
+        else:
+            candidate = None
+        bufs = (
+            list(candidate.buffers())
+            if isinstance(candidate, torch.fx.GraphModule)
+            else []
         )
+        if bufs and all(isinstance(buf, FunctionalTensor) for buf in bufs):
+            gm = candidate
+        if gm is None:
+            gm = materialize_as_graph(
+                subgraph, operands, subgraph_decomp_table=subgraph_decomp_table
+            )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("subgraph", gm)
@@ -275,15 +390,17 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         # This is just a placeholder for Dynamo to replace with invoke_subgraph
         raise RuntimeError("invoke_subgraph should not be called directly in Dynamo")
 
-    if torch.compiler.is_compiling():
+    if torch.compiler.is_exporting():
         # For non-strict export tracing, we still want to go through Dynamo
 
-        def _invoke_subgraph_placeholder_wrapper(func, args):
-            return invoke_subgraph_placeholder(func, *args)
+        def _invoke_subgraph_placeholder_wrapper(func, args, kwargs):
+            return invoke_subgraph_placeholder(func, *args, **kwargs)
 
         from torch._higher_order_ops.utils import _hop_compile_and_call
 
-        return _hop_compile_and_call(_invoke_subgraph_placeholder_wrapper, (func, args))
+        return _hop_compile_and_call(
+            _invoke_subgraph_placeholder_wrapper, (func, args, kwargs)
+        )
 
     return func(*args, **kwargs)
 
@@ -821,6 +938,9 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             suffix = invoke_subgraph_cache.add_lazy_bwd_entry(
                 identifier, tangent_metadata, bw_graph
             )
+            warn_and_trace_duplicate_backward(
+                identifier, suffix, bw_graph, len(primals), filtered_grad_outs
+            )
 
         with _set_invoke_subgraph_call_id(ctx._call_id):
             grads = invoke_subgraph(
@@ -935,7 +1055,29 @@ def _(ctx, subgraph, identifier, *operands):
 
     unwrapped_operands = ctx.unwrap_tensors(operands)
 
-    hop_instance = HopInstance.create(invoke_subgraph, subgraph, identifier, *operands)
+    functionalize_schema = None
+    schema_cache_key = None
+    if invoke_subgraph_cache:
+        schema_cache_key = (
+            id(subgraph),
+            identifier,
+            tuple(type(operand) for operand in operands),
+        )
+        functionalize_schema = invoke_subgraph_cache.get_functionalize_schema_entry(
+            schema_cache_key
+        )
+
+    if functionalize_schema is None:
+        hop_instance = HopInstance.create(
+            invoke_subgraph, subgraph, identifier, *operands
+        )
+        if invoke_subgraph_cache and schema_cache_key is not None:
+            invoke_subgraph_cache.add_functionalize_schema_entry(
+                schema_cache_key, hop_instance._schema
+            )
+    else:
+        hop_instance = HopInstance(invoke_subgraph, functionalize_schema)
+
     if can_auto_functionalize(hop_instance):
         # NOTE: [auto_functionalize x invoke_subgraph caching]
         # We call auto_functionalized_v2 to support input mutation of invoke_subgraph.
