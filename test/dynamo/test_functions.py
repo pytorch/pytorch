@@ -210,6 +210,130 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a_copy = torch.tensor(a)
         return a_copy.addcdiv_(b, c, value=5.0)
 
+    def test_logit_with_tensor_eps(self):
+        for dtype in (torch.float32, torch.float64):
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(torch.logit, backend=cnt, fullgraph=True)
+
+            input = torch.tensor([0.1, 0.3, 0.95], dtype=dtype)
+            for eps_value in (0.9, 0.1):
+                eps = torch.tensor(eps_value, dtype=dtype)
+                self.assertEqual(opt_fn(input, eps), torch.logit(input, eps))
+
+            self.assertEqual(cnt.frame_count, 1)
+
+            eps = torch.tensor(0.1, dtype=dtype)
+            opt_special = torch.compile(
+                torch.special.logit,
+                backend="eager",
+                fullgraph=True,
+            )
+            self.assertEqual(opt_special(input, eps), torch.special.logit(input, eps))
+
+            opt_fn_out_none = torch.compile(
+                lambda x, e: torch.logit(x, e, out=None),
+                backend="eager",
+                fullgraph=True,
+            )
+            self.assertEqual(
+                opt_fn_out_none(input, eps), torch.logit(input, eps, out=None)
+            )
+
+            out = torch.empty_like(input)
+            expected_out = torch.empty_like(input)
+            opt_fn_out = torch.compile(
+                lambda x, e, o: torch.logit(x, e, out=o),
+                backend="eager",
+                fullgraph=True,
+            )
+            actual = opt_fn_out(input, eps, out)
+            expected = torch.logit(input, eps, out=expected_out)
+            self.assertEqual(actual, expected)
+            self.assertEqual(out, expected_out)
+
+            with torch.no_grad():
+                input_requires_grad = input.detach().clone().requires_grad_()
+                out_requires_grad = torch.empty_like(input, requires_grad=True)
+                opt_fn_out_no_grad = torch.compile(
+                    lambda x, e, o: torch.logit(x, e, out=o),
+                    backend="eager",
+                    fullgraph=True,
+                )
+                actual = opt_fn_out_no_grad(input_requires_grad, eps, out_requires_grad)
+                expected_out = torch.empty_like(input, requires_grad=True)
+                expected = torch.logit(input_requires_grad, eps, out=expected_out)
+                self.assertEqual(actual, expected)
+                self.assertEqual(out_requires_grad, expected_out)
+
+    def test_logit_with_tensor_eps_unsupported_cases(self):
+        input = torch.tensor([0.3 + 0.1j])
+        eps = torch.tensor(0.1)
+        with self.assertRaisesRegex(Unsupported, "logit_cpu.*ComplexFloat"):
+            torch.compile(torch.logit, backend="eager", fullgraph=True)(input, eps)
+
+        input = torch.tensor(0.3)
+        complex_eps = torch.tensor(0.1 + 0.2j)
+        with self.assertRaisesRegex(
+            Unsupported, "local_scalar_dense/item NYI for torch.complex64"
+        ):
+            torch.compile(torch.logit, backend="eager", fullgraph=True)(
+                input, complex_eps
+            )
+
+        with self.assertRaisesRegex(Unsupported, "unexpected keyword argument 'bogus'"):
+            torch.compile(
+                lambda x, e: torch.logit(x, e, bogus=1),
+                backend="eager",
+                fullgraph=True,
+            )(input, eps)
+        with self.assertRaisesRegex(Unsupported, "multiple values for argument 'eps'"):
+            torch.compile(
+                lambda x, e: torch.logit(x, e, eps=e),
+                backend="eager",
+                fullgraph=True,
+            )(input, eps)
+        with self.assertRaisesRegex(
+            Unsupported, "multiple values for argument 'input'"
+        ):
+            torch.compile(
+                lambda x, e: torch.logit(x, input=x, eps=e),
+                backend="eager",
+                fullgraph=True,
+            )(input, eps)
+        with self.assertRaisesRegex(
+            Unsupported, "takes from 1 to 2 positional arguments but 3 were given"
+        ):
+            torch.compile(
+                lambda x, e, o: torch.logit(x, e, o),
+                backend="eager",
+                fullgraph=True,
+            )(input, eps, torch.empty(()))
+        with self.assertRaisesRegex(Unsupported, "resizing out= tensors"):
+            torch.compile(
+                lambda x, e, o: torch.logit(x, e, out=o),
+                backend="eager",
+                fullgraph=True,
+            )(torch.tensor([0.1, 0.3]), eps, torch.empty(0))
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "out=\\.\\.\\. arguments don't support automatic differentiation",
+        ):
+            torch.compile(
+                lambda x, e, o: torch.logit(x, e, out=o),
+                backend="eager",
+                fullgraph=True,
+            )(torch.tensor(0.3, requires_grad=True), eps, torch.empty(()))
+        with self.assertRaisesRegex(
+            Unsupported,
+            "out=\\.\\.\\. arguments don't support automatic differentiation",
+        ):
+            torch.compile(
+                lambda x, e, o: torch.logit(x, e, out=o),
+                backend="eager",
+                fullgraph=True,
+            )(input, eps, torch.empty((), requires_grad=True))
+
     @make_test
     def test_is_not_null(a, b):
         if a is not None and b is not None:
