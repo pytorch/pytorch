@@ -475,6 +475,22 @@ class OptimizedModule(torch.nn.Module):
         # Mimic python's default behavior for objects without a length
         raise TypeError(f"{type(self._orig_mod).__name__} does not support len()")
 
+    def __getitem__(self, key: Any) -> Any:
+        # Special methods are resolved on the type, so __getattr__ cannot proxy these.
+        return self._orig_mod[key]  # type: ignore[index]
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        self._orig_mod[key] = value  # type: ignore[index]
+
+    def __delitem__(self, key: Any) -> None:
+        del self._orig_mod[key]  # type: ignore[index]
+
+    def __iter__(self) -> Any:
+        return iter(self._orig_mod)  # type: ignore[arg-type]
+
+    def __contains__(self, key: Any) -> bool:
+        return key in self._orig_mod  # type: ignore[operator]
+
     def _initialize(self) -> None:
         # Do this stuff in constructor to lower overhead slightly
         if isinstance(self.dynamo_ctx, DisableContext):
