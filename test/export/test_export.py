@@ -9394,6 +9394,18 @@ def forward(self, x):
     return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
 
+    def test_decomp_exported_broadcast_to(self):
+        class BroadcastTo(torch.nn.Module):
+            def forward(self, x):
+                return torch.broadcast_to(x, (2, 3)).clone()
+
+        ep = export(BroadcastTo(), (torch.randn(1, 3),), strict=True)
+        ep_with_prims = ep.run_decompositions(decomp_table=decomposition_table)
+        FileCheck().check("torch.ops.prims.broadcast_in_dim.default").run(
+            ep_with_prims.graph_module.code
+        )
+        ep_with_prims.run_decompositions({})
+
     def test_constrain_size_in_eager(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
