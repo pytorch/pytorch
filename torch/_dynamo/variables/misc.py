@@ -755,9 +755,15 @@ class DelayGraphBreakVariable(UnknownVariable):
     Used to insert a dummy variable in the stack to do the graph break at CALL_FUNCTION.
     """
 
-    def __init__(self, msg: str | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        msg: str | None = None,
+        hints: list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.msg = msg
+        self.hints = hints or []
 
     def call_function(
         self,
@@ -771,7 +777,7 @@ class DelayGraphBreakVariable(UnknownVariable):
             context=f"source: {self.source}",
             explanation="Dynamo determined that a graph break should occur "
             f"when calling `{name}`. Reason: {self.msg}",
-            hints=[],
+            hints=self.hints,
         )
 
 

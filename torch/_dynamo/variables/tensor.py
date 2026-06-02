@@ -688,6 +688,14 @@ class TensorVariable(VariableTracker):
                 return variables.misc.DelayGraphBreakVariable(
                     source=AttrSource(self.source, name),
                     msg="Getting an inplace view on a graph input is not supported",
+                    hints=[
+                        "Avoid mutating a graph input's tensor metadata with in-place view ops. "
+                        "If the mutation is only needed inside the compiled region, replace the in-place call "
+                        "with an out-of-place view, for example `x = x.transpose(1, 2)` instead of "
+                        "`x.transpose_(1, 2)`.",
+                        "If you need to mutate the input tensor's metadata, move the in-place view call outside "
+                        "`torch.compile`.",
+                    ],
                 )
 
         # For attributes (not methods) that were not caught in the special handling above,
