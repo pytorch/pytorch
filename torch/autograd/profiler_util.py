@@ -568,6 +568,8 @@ class EventMetadata(NamedTuple):
     graph_node_id: int | None
     stream: int | None
     context: int | None
+    channel: int | None
+    channel_type: int | None
     # Memory fields
     bytes: int | None
     bandwidth_gb_s: float | None
@@ -589,8 +591,6 @@ class EventMetadata(NamedTuple):
     dst_rank: int | None
     seq: int | None
     is_async: bool | None
-    channel: int | None
-    channel_type: int | None
 
 
 def _to_str(v: str) -> str:
