@@ -6258,6 +6258,16 @@ class TestMPS(TestCaseMPS):
         x = x_cpu.detach().clone().to('mps')
         self.assertEqual(helper(x_cpu), helper(x))
 
+    @serialTest()
+    def test_im2col_uint32_overflow(self):
+        C, H, W = 65537, 256, 256
+        x = torch.zeros(1, C, H, W, dtype=torch.bool)
+        x[0, C - 1, 0, 0] = True
+        args = ([1, 1], [1, 1], [0, 0], [H, W])
+        out_cpu = torch.ops.aten.im2col(x, *args)
+        out_mps = torch.ops.aten.im2col(x.to("mps"), *args).cpu()
+        self.assertEqual(out_cpu, out_mps)
+
     def test_col2im(self):
         def helper(shapes, output_size, kernel_size, padding, stride, contiguous, dtype=torch.float32, test_bool=False):
             atol = 1e-5 if dtype == torch.float else 1e-2
@@ -10427,6 +10437,53 @@ class TestNNMPS(NNTestCase):
         bn_mps = nn.BatchNorm2d(2).to("mps").eval()
         bn_mps.load_state_dict(bn.state_dict())
         self.assertEqual(bn(mps_slice.cpu()), bn_mps(mps_slice).cpu())
+
+    def test_conv2d_backward_channels_last_input(self):
+        grad_out = torch.randn(2, 64, 8, 8, device='mps')
+        x = torch.randn(2, 32, 8, 8, device='mps').to(memory_format=torch.channels_last)
+        w = torch.randn(64, 32, 3, 3, device='mps')
+        result = torch.ops.aten.convolution_backward.default(
+            grad_out, x, w, [0], [1, 1], [1, 1], [1, 1], False, [0, 0], 1, [True, True, False]
+        )
+        self.assertTrue(result[0].is_contiguous(memory_format=torch.channels_last))
+
+    def test_conv2d_backward_contiguous_input_stays_contiguous(self):
+        grad_out = torch.randn(2, 64, 8, 8, device='mps')
+        x = torch.randn(2, 32, 8, 8, device='mps')
+        w = torch.randn(64, 32, 3, 3, device='mps')
+        result = torch.ops.aten.convolution_backward.default(
+            grad_out, x, w, [0], [1, 1], [1, 1], [1, 1], False, [0, 0], 1, [True, True, False]
+        )
+        self.assertTrue(result[0].is_contiguous())
+
+    def test_conv2d_backward_both_channels_last(self):
+        grad_out = torch.randn(2, 64, 8, 8, device='mps').to(memory_format=torch.channels_last)
+        x = torch.randn(2, 32, 8, 8, device='mps').to(memory_format=torch.channels_last)
+        w = torch.randn(64, 32, 3, 3, device='mps')
+        result = torch.ops.aten.convolution_backward.default(
+            grad_out, x, w, [0], [1, 1], [1, 1], [1, 1], False, [0, 0], 1, [True, True, False]
+        )
+        self.assertTrue(result[0].is_contiguous(memory_format=torch.channels_last))
+
+    def test_conv2d_backward_grad_weight_channels_last_weight(self):
+        grad_out = torch.randn(2, 64, 8, 8)
+        x = torch.randn(2, 32, 8, 8)
+        w = torch.randn(64, 32, 3, 3).to(memory_format=torch.channels_last)
+        args = ([0], [1, 1], [1, 1], [1, 1], False, [0, 0], 1, [False, True, False])
+        cpu = torch.ops.aten.convolution_backward.default(grad_out, x, w, *args)
+        mps = torch.ops.aten.convolution_backward.default(
+            grad_out.to('mps'), x.to('mps'), w.to('mps'), *args
+        )
+        self.assertEqual(mps[1].cpu(), cpu[1])
+
+    def test_conv3d_backward_channels_last_3d_input(self):
+        x = torch.randn(2, 16, 8, 8, 8, device='mps').to(
+            memory_format=torch.channels_last_3d
+        ).detach().requires_grad_(True)
+        conv = nn.Conv3d(16, 32, 3, padding=1, device='mps')
+        y = conv(x)
+        y.backward(torch.randn_like(y))
+        self.assertTrue(x.grad.is_contiguous(memory_format=torch.channels_last_3d))
 
     # Regression test for https://github.com/pytorch/pytorch/issues/141471
     def test_conv3d_channels_last_3d(self):
