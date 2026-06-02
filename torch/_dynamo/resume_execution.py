@@ -644,7 +644,7 @@ class ContinueExecutionCache:
                     )
                 prefix.extend(
                     [
-                        # load __nested_frame_values[-1]
+                        # del __nested_frame_values[-1]
                         create_instruction("LOAD_FAST", argval="__nested_frame_values"),
                         create_instruction("LOAD_CONST", argval=-1),
                         create_instruction("DELETE_SUBSCR"),
