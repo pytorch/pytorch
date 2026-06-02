@@ -186,7 +186,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         """Test that to_tensor/to_dtensor don't set requires_grad on non-float dtypes."""
         self.init_pg()
         mesh = self._make_mesh()
-    
+
         # _TensorMeta: non-float with requires_grad=True in metadata should not crash
         for dtype in [torch.long, torch.int32, torch.bool]:
             meta = _TensorMeta(
@@ -198,7 +198,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             t = meta.to_tensor(self.device)
             self.assertEqual(t.dtype, dtype)
             self.assertFalse(t.requires_grad)
-    
+
         # _TensorMeta: float with requires_grad=True should still work
         float_meta = _TensorMeta(
             shape=torch.Size([4, 8]),
@@ -208,7 +208,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         )
         t = float_meta.to_tensor(self.device)
         self.assertTrue(t.requires_grad)
-    
+
         # _DTensorMeta: non-float with requires_grad=True should not crash
         for dtype in [torch.long, torch.int32]:
             dt_meta = _DTensorMeta(
