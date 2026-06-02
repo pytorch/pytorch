@@ -315,7 +315,7 @@ class DispatchKeySet final {
     return static_cast<bool>((repr_ & ks.repr_) != 0);
   }
   // Test if DispatchKeySet is a superset of ks.
-  bool isSupersetOf(DispatchKeySet ks) const {
+  bool isSupersetOf(DispatchKeySet ks) const noexcept {
     return (repr_ & ks.repr_) == ks.repr_;
   }
   // Perform set union
@@ -389,10 +389,10 @@ class DispatchKeySet final {
     return DispatchKeySet(repr_ & ~(DispatchKeySet(b).repr_));
   }
   // Is the set empty?  (AKA undefined tensor)
-  bool empty() const {
+  bool empty() const noexcept {
     return repr_ == 0;
   }
-  uint64_t raw_repr() const {
+  uint64_t raw_repr() const noexcept {
     return repr_;
   }
 
@@ -400,7 +400,7 @@ class DispatchKeySet final {
     return DispatchKeySet(RAW, x);
   }
 
-  DispatchKey highestFunctionalityKey() const {
+  DispatchKey highestFunctionalityKey() const noexcept {
     auto functionality_idx = indexOfHighestBit();
     // This means that none of the functionality bits were set.
     if (functionality_idx < num_backends)
@@ -416,7 +416,7 @@ class DispatchKeySet final {
   // here that can also handle "fake" backends like FPGA, because they need to
   // map to the AutogradOther key. For those backends, we return
   // BackendComponent::InvalidBit.
-  BackendComponent highestBackendKey() const {
+  BackendComponent highestBackendKey() const noexcept {
     // mask to mask out functionality bits
     auto backend_idx =
         DispatchKeySet(repr_ & full_backend_mask).indexOfHighestBit();
@@ -427,7 +427,7 @@ class DispatchKeySet final {
   }
 
   // returns the DispatchKey of highest priority in the set.
-  DispatchKey highestPriorityTypeId() const {
+  DispatchKey highestPriorityTypeId() const noexcept {
     auto functionality_k = highestFunctionalityKey();
     if (isPerBackendFunctionalityKey(functionality_k)) {
       return toRuntimePerBackendFunctionalityKey(
@@ -440,7 +440,7 @@ class DispatchKeySet final {
   // This is used to as part of the calculation into the operator table to get:
   // - the highest "functionality" bit in the keyset.
   // - the highest "backend" bit in the keyset.
-  uint8_t indexOfHighestBit() const {
+  uint8_t indexOfHighestBit() const noexcept {
     return 64 - llvm::countLeadingZeros(repr_);
   }
 
