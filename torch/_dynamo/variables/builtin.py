@@ -101,7 +101,6 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    RangeVariable,
     TupleIteratorVariable,
     TupleVariable,
 )
@@ -2456,7 +2455,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         return VariableTracker.build(tx, py_type, source)
 
     def call_reversed(
-        self, tx: "InstructionTranslator", obj: VariableTracker
+        self, tx: "InstructionTranslatorBase", obj: VariableTracker
     ) -> VariableTracker:
         # TODO(dynamo-team): Implement a reverse iterator + proper support for __reverse__
         items = list(reversed(unpack_iterable(tx, obj)))

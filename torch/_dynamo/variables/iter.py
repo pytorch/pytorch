@@ -473,7 +473,7 @@ class MapVariable(IteratorVariable):
     def python_type(self) -> type:
         return map
 
-    def tp_iternext_impl(self, tx: "InstructionTranslator") -> VariableTracker:
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L1409-L1450
         if not self.is_mutable():
             raise AssertionError("MapVariable must be mutable for next()")
