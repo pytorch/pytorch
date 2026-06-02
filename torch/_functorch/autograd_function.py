@@ -808,37 +808,49 @@ def autograd_function_forward_rewritten(
 
 _AUTOGRAD_FUNCTION_APPLY_STATE_UNSET = object()
 
-_AutogradFunctionApplyTemplateKey = tuple[
-    tuple[int, ...], tuple[int, ...], tuple[int, ...]
-]
-_AutogradFunctionApplyTemplateCache = dict[_AutogradFunctionApplyTemplateKey, type[Any]]
-_AUTOGRAD_FUNCTION_APPLY_TEMPLATE_CACHE: weakref.WeakKeyDictionary[
-    Any, weakref.WeakKeyDictionary[Any, _AutogradFunctionApplyTemplateCache]
+_AutogradFunctionApplyKey = tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]
+_AutogradFunctionApplyCache = dict[_AutogradFunctionApplyKey, int]
+_AUTOGRAD_FUNCTION_APPLY_CACHE: weakref.WeakKeyDictionary[
+    Any, weakref.WeakKeyDictionary[Any, _AutogradFunctionApplyCache]
 ] = weakref.WeakKeyDictionary()
+_AUTOGRAD_FUNCTION_APPLY_TEMPLATE: type[Any] | None = None
 
 
 class _AutogradFunctionApplyState:
-    def __init__(self, fwd: torch.fx.GraphModule, bwd: torch.fx.GraphModule) -> None:
+    def __init__(
+        self,
+        fwd: torch.fx.GraphModule,
+        bwd: torch.fx.GraphModule,
+        compiled_autograd_key: int,
+        dirty_idx: Iterable[int],
+        non_differentiable_idx: Iterable[int],
+        saved_for_backward_idx: Iterable[int],
+    ) -> None:
         self.fwd = fwd
         self.bwd = bwd
+        self.compiled_autograd_key = compiled_autograd_key
+        self.dirty_idx = tuple(dirty_idx)
+        self.dirty_idx_set = set(self.dirty_idx)
+        self.non_differentiable_idx = tuple(non_differentiable_idx)
+        self.saved_for_backward_idx_set = set(saved_for_backward_idx)
         self.saved_values: Any = _AUTOGRAD_FUNCTION_APPLY_STATE_UNSET
 
 
-def _get_autograd_function_apply_template(
+def _get_autograd_function_apply_key(
     fwd: torch.fx.GraphModule,
     bwd: torch.fx.GraphModule,
     dirty_idx: Iterable[int],
     non_differentiable_idx: Iterable[int],
     saved_for_backward_idx: Iterable[int],
-) -> type[torch.autograd.Function]:
+) -> int:
     dirty_idx = tuple(dirty_idx)
     non_differentiable_idx = tuple(non_differentiable_idx)
     saved_for_backward_idx = tuple(saved_for_backward_idx)
 
-    bwd_cache = _AUTOGRAD_FUNCTION_APPLY_TEMPLATE_CACHE.get(fwd)
+    bwd_cache = _AUTOGRAD_FUNCTION_APPLY_CACHE.get(fwd)
     if bwd_cache is None:
         bwd_cache = weakref.WeakKeyDictionary()
-        _AUTOGRAD_FUNCTION_APPLY_TEMPLATE_CACHE[fwd] = bwd_cache
+        _AUTOGRAD_FUNCTION_APPLY_CACHE[fwd] = bwd_cache
 
     cache = bwd_cache.get(bwd)
     if cache is None:
@@ -846,12 +858,22 @@ def _get_autograd_function_apply_template(
         bwd_cache[bwd] = cache
 
     cache_key = (dirty_idx, non_differentiable_idx, saved_for_backward_idx)
-    cached_template = cache.get(cache_key)
-    if cached_template is not None:
-        return cached_template
+    cached_key = cache.get(cache_key)
+    if cached_key is None:
+        # Local import avoids a circular import while sharing the same id space
+        # used by regular autograd.Function classes.
+        from torch.autograd.function import AUTOGRAD_FUNCTION_COUNTER
 
-    dirty_idx_set = set(dirty_idx)
-    saved_for_backward_idx_set = set(saved_for_backward_idx)
+        cached_key = next(AUTOGRAD_FUNCTION_COUNTER)
+        cache[cache_key] = cached_key
+    return cached_key
+
+
+def _get_autograd_function_apply_template() -> type[Any]:
+    global _AUTOGRAD_FUNCTION_APPLY_TEMPLATE
+
+    if _AUTOGRAD_FUNCTION_APPLY_TEMPLATE is not None:
+        return _AUTOGRAD_FUNCTION_APPLY_TEMPLATE
 
     class ApplyTemplate(torch.autograd.Function):
         @staticmethod
@@ -869,7 +891,7 @@ def _get_autograd_function_apply_template(
             from torch.fx.experimental.proxy_tensor import _get_proxies
 
             for idx, t in enumerate(saved_values):
-                if idx not in saved_for_backward_idx_set:
+                if idx not in state.saved_for_backward_idx_set:
                     for proxy in _get_proxies(t):
                         proxy.node.meta["saved_tensor_with_no_vc_check"] = True
 
@@ -889,12 +911,14 @@ def _get_autograd_function_apply_template(
                 return [output] if 0 in idx_set else []
 
             # If users call ctx.mark_dirty() in the original fwd function.
-            if len(dirty_idx) > 0:
-                ctx.mark_dirty(*selected_outputs(dirty_idx_set))
+            if len(state.dirty_idx) > 0:
+                ctx.mark_dirty(*selected_outputs(state.dirty_idx_set))
 
             # If users call ctx.mark_non_differentiable() in the original fwd function.
-            if len(non_differentiable_idx) > 0:
-                ctx.mark_non_differentiable(*selected_outputs(non_differentiable_idx))
+            if len(state.non_differentiable_idx) > 0:
+                ctx.mark_non_differentiable(
+                    *selected_outputs(state.non_differentiable_idx)
+                )
 
         @staticmethod
         def backward(ctx: Any, *grad: Any) -> Any:
@@ -911,7 +935,12 @@ def _get_autograd_function_apply_template(
                 grad_inputs = (grad_inputs,)
             return (None, *grad_inputs)
 
-    cache[cache_key] = ApplyTemplate
+        @staticmethod
+        def _compiled_autograd_key(ctx: Any) -> tuple[int]:
+            state = ctx._autograd_function_apply_state
+            return (state.compiled_autograd_key,)
+
+    _AUTOGRAD_FUNCTION_APPLY_TEMPLATE = ApplyTemplate
     return ApplyTemplate
 
 
@@ -929,11 +958,18 @@ class AutogradFunctionApply(HigherOrderOperator):
         dirty_idx = fwd_kwargs.get("dirty_idx", [])
         non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
         saved_for_backward_idx = fwd_kwargs["saved_for_backward_idx"]
-        ApplyTemplate = _get_autograd_function_apply_template(
+        compiled_autograd_key = _get_autograd_function_apply_key(
             fwd, bwd, dirty_idx, non_differentiable_idx, saved_for_backward_idx
         )
-        state = _AutogradFunctionApplyState(fwd, bwd)
-        return ApplyTemplate.apply(state, *fwd_args)
+        state = _AutogradFunctionApplyState(
+            fwd,
+            bwd,
+            compiled_autograd_key,
+            dirty_idx,
+            non_differentiable_idx,
+            saved_for_backward_idx,
+        )
+        return _get_autograd_function_apply_template().apply(state, *fwd_args)
 
 
 autograd_function_apply = AutogradFunctionApply()

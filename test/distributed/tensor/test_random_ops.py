@@ -941,6 +941,7 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/185520")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_multiple_random_ops(self):
