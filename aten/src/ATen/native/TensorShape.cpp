@@ -489,11 +489,23 @@ Tensor& set__symint(
 
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
-    return result.set__symint(
-        source.storage(),
-        source.sym_storage_offset(),
-        source.sym_sizes(),
-        source.sym_strides());
+    if (result.device() != source.device()) {
+      // Cross-device set_: bypass per-backend dispatch (which would route to
+      // the wrong backend) and directly swap storage + update device metadata.
+      auto* impl = result.unsafeGetTensorImpl();
+      impl->set_storage_keep_dtype(source.storage());
+      impl->_change_backend_component_keys(source.device());
+      impl->set_sizes_and_strides(
+          source.sym_sizes(),
+          source.sym_strides(),
+          source.sym_storage_offset());
+    } else {
+      result.set__symint(
+          source.storage(),
+          source.sym_storage_offset(),
+          source.sym_sizes(),
+          source.sym_strides());
+    }
   }
   return result;
 }

@@ -1356,7 +1356,27 @@ class _InProcessFxCompile(FxCompile):
                 # of autograd, so there should be no more autograd-related API's in the
                 # graph.
                 with torch.no_grad():
+                    # Save original example_inputs devices before
+                    # FakeTensorProp, which may mutate them via in-graph
+                    # set_() (e.g. cross-device tensor.data = ...).
+                    orig_input_devices = [
+                        inp.fake_device if hasattr(inp, "fake_device") else None
+                        for inp in example_inputs
+                    ]
+
                     fake_mode = fake_tensor_prop(gm, example_inputs)
+
+                    # Restore example_inputs devices that may have been
+                    # mutated by set_() during FakeTensorProp.
+                    for inp, orig_dev in zip(example_inputs, orig_input_devices):
+                        if (
+                            orig_dev is not None
+                            and hasattr(inp, "fake_device")
+                            and inp.fake_device != orig_dev
+                        ):
+                            inp.fake_device = (
+                                orig_dev  # pyrefly: ignore[missing-attribute]
+                            )
 
             _recursive_record_original_output_strides(gm)
 

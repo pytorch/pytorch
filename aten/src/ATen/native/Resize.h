@@ -184,12 +184,12 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
     TORCH_INTERNAL_ASSERT(storage);
     TORCH_INTERNAL_ASSERT(result.storage());
 
-    // We used to allow this, but this breaks device caching.
-    // Let's put an actual error message for this one.
-    TORCH_CHECK(result.storage().device() == storage.device(),
-                "Attempted to set the storage of a tensor on device \"", result.storage().device(),
-                "\" to a storage on different device \"", storage.device(),
-                "\".  This is no longer allowed; the devices must match.");
+    if (result.storage().device() != storage.device()) {
+      // Cross-device storage swap: update dispatch keys to match the
+      // new device so autocast/autograd dispatch correctly.
+      result.unsafeGetTensorImpl()->_change_backend_component_keys(
+          storage.device());
+    }
     result.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
   }
 }
