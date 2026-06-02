@@ -4737,6 +4737,10 @@ class TestProfilerEventsParity(TestCase):
             "ptr",
             "src",
             "dst",
+            # TODO: remove channel and channel_type from this list
+            #       once the changes from Kineto land here
+            "channel",
+            "channel_type",
         }
         supported_trace_keys = set(_EVENT_METADATA_KEYS).union(
             allowed_non_structured_trace_keys
