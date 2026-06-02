@@ -254,7 +254,7 @@ manual_torch_name_rule_map: dict[
     "torch.autograd.grad_mode._exit_inference_mode": TorchInGraphFunctionVariable,
     "torch.autograd.backward": SkipFunctionVariable,
     "torch.distributions.constraints.is_dependent": SkipFunctionVariable,
-    "torch.jit.isinstance": SkipFunctionVariable,
+    "torch.jit.isinstance": TorchInGraphFunctionVariable,
     "torch._C.set_anomaly_enabled": SkipFunctionVariable,
     "torch._C.set_autocast_cpu_dtype": SkipFunctionVariable,
     "torch._C.set_autocast_cpu_enabled": SkipFunctionVariable,
