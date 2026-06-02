@@ -3171,7 +3171,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # symbolic_shape guards. Mutating them destroys the information
         # prior to tracing, which is essential for creating right
         # guards. So save the shape now, and check later if it has
-        # changed. If it has, graph break.
+        # changed. If a graph input out= tensor changed shape, graph break.
         saved_out_shapes = None
         out_kwarg_vt = None
         if "out" in kwargs:
@@ -3193,19 +3193,74 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
 
+        def should_graph_break_on_out_shape_change(
+            out_tensor_vt: VariableTracker,
+            saved_out_shape: Any,
+            fake_out: torch.Tensor,
+            result_node: torch.fx.Node,
+        ) -> bool:
+            if not isinstance(out_tensor_vt, variables.TensorVariable):
+                raise AssertionError("Expected out= value to be a tensor")
+            if saved_out_shape == fake_out.shape:
+                return False
+
+            if out_tensor_vt.as_proxy().node.op == "placeholder":
+                # It's hard to get out variants with resizing on graph inputs
+                # working properly across dynamo/aot/inductor, just fall back.
+                return True
+
+            if fake_out._is_view() or fake_out._base is not None:
+                # Backends do not consistently preserve the view metadata needed
+                # to resize an internal out= view safely.
+                return True
+
+            def sync_same_object_aliases() -> None:
+                for vt in tx.output.current_tracer.tracked_proxyable_vt:
+                    if not isinstance(vt, variables.TensorVariable):
+                        continue
+                    vt_fake = vt.as_proxy().node.meta.get("example_value")
+                    if vt_fake is fake_out:
+                        vt.synchronize_attributes(tx)
+
+            out_node = out_tensor_vt.as_proxy().node
+            # pyrefly: ignore [missing-attribute]
+            is_alias_of = torch._C._is_alias_of
+            for node in tx.output.current_tracer.graph.nodes:
+                if node is result_node:
+                    break
+                if node is out_node:
+                    continue
+                other = node.meta.get("example_value")
+                if not isinstance(other, torch.Tensor):
+                    continue
+                if is_alias_of(fake_out, other) and (
+                    node.op == "placeholder" or other is not fake_out
+                ):
+                    # This catches non-view storage aliases like detach().
+                    return True
+
+            # The out= tensor was created inside the traced graph. The resize is
+            # represented by the out= op, but existing TensorVariables can cache
+            # size/stride from before fake propagation ran. Same-object aliases,
+            # e.g. no-op to(), share TensorImpl metadata in eager, so sync them
+            # together.
+            sync_same_object_aliases()
+            return False
+
         ctx = nullcontext
         if fn_ in ops_consuming_unbacked_scalars:
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
         with ctx():
+            result_proxy = tx.output.create_proxy(
+                "call_function",
+                fn_,
+                *proxy_args_kwargs(args, kwargs),
+            )
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
+                proxy=result_proxy,
             )
 
         # Handle e.g., `torch.ones(10, requires_grad=True)`
@@ -3254,9 +3309,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             "Expected out= list element to be a tensor"
                         )
                     fake_out = out_tensor_vt.proxy.node.meta["example_value"]
-                    if saved_out_shape != fake_out.shape:
-                        # It's hard to get out variants with resizing on graph inputs work
-                        # properly across dynamo/aot/inductor, just fall back.
+                    if should_graph_break_on_out_shape_change(
+                        out_tensor_vt,
+                        saved_out_shape,
+                        fake_out,
+                        result_proxy.node,
+                    ):
                         unimplemented(
                             gb_type="Shape mismatch with out= list of tensor variants",
                             context=f"fn={self.value}, args={args}, kwargs={kwargs}",
@@ -3289,9 +3347,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         "Expected out= kwarg proxy node to have example_value metadata"
                     )
                 fake_out = out_kwarg_vt.as_proxy().node.meta["example_value"]
-                if saved_out_shapes != fake_out.shape:
-                    # It's hard to get out variants with resizing on graph inputs work
-                    # properly across dynamo/aot/inductor, just fall back.
+                if should_graph_break_on_out_shape_change(
+                    out_kwarg_vt,
+                    saved_out_shapes,
+                    fake_out,
+                    result_proxy.node,
+                ):
                     unimplemented(
                         gb_type="Shape mismatch with out= tensor variant",
                         context=f"fn={self.value}, args={args}, kwargs={kwargs}",

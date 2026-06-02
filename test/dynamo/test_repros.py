@@ -2543,6 +2543,102 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         self.assertTrue(same(ref, res))
 
+    @parametrize("backend", ["eager", "inductor"])
+    def test_out_variant_resize_in_graph_tensor(self, backend):
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=torch.bool).to(input_tensor.device)
+            result = torch.all(input_tensor, dim=2, out=output_tensor)
+            return result, output_tensor.size(), output_tensor.stride(), output_tensor
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        expected = torch.all(input_tensor, dim=2)
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        result, output_size, output_stride, output_tensor = opt_fn(input_tensor)
+
+        self.assertTrue(same(result, expected))
+        self.assertEqual(output_size, torch.Size([2, 3]))
+        self.assertEqual(output_stride, (3, 1))
+        self.assertTrue(same(output_tensor, expected))
+
+    def test_out_variant_resize_graph_input(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(input_tensor, output_tensor):
+            return torch.all(input_tensor, dim=2, out=output_tensor)
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        output_tensor = torch.empty((0,), dtype=torch.bool)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Shape mismatch with out= tensor variant",
+        ):
+            fn(input_tensor, output_tensor)
+
+    @parametrize("backend", ["eager", "inductor"])
+    def test_out_variant_resize_in_graph_tensor_observable_to_alias(self, backend):
+        def fn(input_tensor):
+            orig = torch.empty((0,), dtype=torch.bool)
+            output_tensor = orig.to(input_tensor.device)
+            torch.all(input_tensor, dim=2, out=output_tensor)
+            return orig.size(), output_tensor.size()
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+        result = torch.compile(fn, backend=backend, fullgraph=True)(input_tensor)
+        self.assertEqual(result, (torch.Size([2, 3]), torch.Size([2, 3])))
+
+    @parametrize("backend", ["eager", "inductor"])
+    @parametrize("out_kind", ["view", "alias", "detach"])
+    def test_out_variant_resize_in_graph_tensor_view_alias_or_detach(
+        self, backend, out_kind
+    ):
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=torch.bool)
+            if out_kind == "view":
+                output_tensor = output_tensor.view(0)
+            elif out_kind == "alias":
+                output_tensor = torch.ops.aten.alias.default(output_tensor)
+            else:
+                output_tensor = output_tensor.detach()
+            return torch.all(input_tensor, dim=2, out=output_tensor)
+
+        input_tensor = torch.randint(0, 2, (2, 3, 4), dtype=torch.bool)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Shape mismatch with out= tensor variant",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(input_tensor)
+
+    @parametrize("backend", ["eager", "inductor"])
+    @parametrize("container_type", [tuple, list], name_fn=lambda t: t.__name__)
+    @parametrize("out_kind", ["view", "alias", "detach"])
+    def test_out_variant_resize_in_graph_tuple_list_view_alias_or_detach(
+        self, backend, container_type, out_kind
+    ):
+        def make_out(dtype):
+            output_tensor = torch.empty((0,), dtype=dtype)
+            if out_kind == "view":
+                return output_tensor.view(0)
+            elif out_kind == "alias":
+                return torch.ops.aten.alias.default(output_tensor)
+            else:
+                return output_tensor.detach()
+
+        def fn(input_tensor):
+            values = make_out(input_tensor.dtype)
+            indices = make_out(torch.long)
+            torch.sort(input_tensor, out=container_type((values, indices)))
+            return values, indices
+
+        input_tensor = torch.randn(3, 5)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Shape mismatch with out= list of tensor variants",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(input_tensor)
+
     def test_out_root_cell_shape_change(self):
         @torch.compile(backend="eager")
         def fn():
