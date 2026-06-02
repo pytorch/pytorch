@@ -3382,7 +3382,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.zeros(5, dtype=torch.int64),), check_lowp=False)
 
-    @xfail_if_triton_cpu
     def test_arange9(self):
         # int64 arange used inside a reduction: reduction must accumulate
         # at int64 precision even though each per-element value fits int32.
