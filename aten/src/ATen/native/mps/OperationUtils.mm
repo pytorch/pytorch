@@ -1004,11 +1004,12 @@ class BundledShaderLibrary : public MetalShaderLibrary {
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<c10::Scalar> alpha,
-                                           std::optional<c10::ScalarType> scalar_arg_type) {
+                                           std::optional<c10::ScalarType> scalar_arg_type,
+                                           std::optional<uint32_t> ilp_threshold) {
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_unary_kernel(sub_iter, name, alpha, scalar_arg_type);
+      exec_unary_kernel(sub_iter, name, alpha, scalar_arg_type, ilp_threshold);
     }
     return;
   }
@@ -1068,9 +1069,20 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   // semantics. Castout variants don't exist for alpha kernels, so skip the fallback when alpha is set (existing
   // TORCH_CHECK still fires for missing direct kernel).
   bool cast_needed = false;
+  bool cast_ilp = false;
   if (!alpha.has_value() && !hasFunction(kernel_name)) {
     cast_needed = true;
-    dense_suffix = is_contiguous ? "dense_castout" : "strided_castout";
+    // ILP castout is opt-in via caller-supplied ilp_threshold (mirrors exec_binary_kernel).
+    // Default is off because for general unary ops the runtime ScalarType switch in
+    // store_at_offs has variable cost. Copy-style call sites that know they're bandwidth-bound
+    // can pass ilp_threshold=0u (or a custom crossover) to force ILP whenever the launch shape
+    // and dtypes are compatible.
+    cast_ilp = is_contiguous && ilp_threshold.has_value() && length >= ilp_threshold.value();
+    if (cast_ilp) {
+      dense_suffix = "dense_castout_ilp";
+    } else {
+      dense_suffix = is_contiguous ? "dense_castout" : "strided_castout";
+    }
     dense_ilp = false;
     kernel_name = fmt::format("{}_{}_{}", name, dense_suffix, scalarToMetalTypeString(inputTensor));
   }
@@ -1097,7 +1109,13 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
         // {dense,strided}_castout take the output dtype at runtime via the ScalarType in the trailing constant buffer;
         // input is read at compile-time Tin.
         const auto out_type = static_cast<uint32_t>(outputTensor.scalar_type());
-        if (is_contiguous) {
+        if (cast_ilp) {
+          std::array<uint32_t, 3> size_outtype_numel = {
+              static_cast<uint32_t>(c10::elementSize(outputTensor.scalar_type())), out_type, length};
+          mtl_setBytes(computeEncoder, size_outtype_numel, 2);
+          mtl_dispatch1DJob(
+              computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
+        } else if (is_contiguous) {
           std::array<uint32_t, 2> size_outtype = {static_cast<uint32_t>(c10::elementSize(outputTensor.scalar_type())),
                                                   out_type};
           mtl_setBytes(computeEncoder, size_outtype, 2);
@@ -1126,6 +1144,47 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
         }
       }
 
+      getMPSProfiler().endProfileKernel(cplState);
+    });
+  }
+}
+
+void MetalShaderLibrary::exec_unary_kernel_raw(const std::string& name,
+                                               MTLBuffer_t src_buf,
+                                               uint32_t src_offs_bytes,
+                                               c10::ScalarType src_dtype,
+                                               MTLBuffer_t dst_buf,
+                                               uint32_t dst_offs_bytes,
+                                               c10::ScalarType dst_dtype,
+                                               uint32_t numel,
+                                               std::optional<uint32_t> ilp_threshold) {
+  if (numel == 0) {
+    return;
+  }
+  const bool use_ilp = ilp_threshold.has_value() && numel >= ilp_threshold.value();
+  const std::string_view suffix = use_ilp ? "dense_castout_ilp" : "dense_castout";
+  const auto kernel_name = fmt::format("{}_{}_{}", name, suffix, scalarToMetalTypeString(src_dtype));
+  @autoreleasepool {
+    auto cplState = getPipelineStateForFunc(kernel_name);
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      auto computeEncoder = mpsStream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(cplState, name, /*isGraph=*/false);
+      [computeEncoder setComputePipelineState:cplState];
+      [computeEncoder setBuffer:dst_buf offset:dst_offs_bytes atIndex:0];
+      [computeEncoder setBuffer:src_buf offset:src_offs_bytes atIndex:1];
+      const auto out_type = static_cast<uint32_t>(dst_dtype);
+      const auto elem_size = static_cast<uint32_t>(c10::elementSize(dst_dtype));
+      if (use_ilp) {
+        std::array<uint32_t, 3> size_outtype_numel = {elem_size, out_type, numel};
+        mtl_setBytes(computeEncoder, size_outtype_numel, 2);
+        mtl_dispatch1DJob(
+            computeEncoder, cplState, (numel + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
+      } else {
+        std::array<uint32_t, 2> size_outtype = {elem_size, out_type};
+        mtl_setBytes(computeEncoder, size_outtype, 2);
+        mtl_dispatch1DJob(computeEncoder, cplState, numel);
+      }
       getMPSProfiler().endProfileKernel(cplState);
     });
   }
