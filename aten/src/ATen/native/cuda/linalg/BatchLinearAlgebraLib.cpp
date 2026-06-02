@@ -622,7 +622,7 @@ std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_
 // batches 2, 3, 5  // or
 // batches 2, 3, 5, 7, 11 and other 65535 batches
 std::string _format_non_converging_batches(const std::vector<int64_t>& batches) {
-  const size_t too_long = 5;
+  constexpr size_t too_long = 5;
   if (batches.size() <= too_long) {
     return fmt::format("batches {}", fmt::join(batches, ", "));
   }
