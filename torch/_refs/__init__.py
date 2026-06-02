@@ -5348,12 +5348,14 @@ def arange(
         end = start
         start = 0
     torch._check(step != 0, lambda: "step must be nonzero")
-    if step > 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(step > 0):
         torch._check(
             end >= start,
             lambda: "upper bound and lower bound inconsistent with step sign",
         )
-    elif step < 0:
+    elif guard_or_false(step < 0):
         torch._check(
             end <= start,
             lambda: "upper bound and lower bound inconsistent with step sign",

@@ -6683,6 +6683,20 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
+    def test_export_arange_data_dependent_float_step(self):
+        class PositiveStep(torch.nn.Module):
+            def forward(self, x):
+                return torch.arange(0, 1 - 1e-6, 1 / x.sum())
+
+        class NegativeStep(torch.nn.Module):
+            def forward(self, x):
+                return torch.arange(1, 1e-6, -1 / x.sum())
+
+        x = torch.ones(3, 3)
+        for mod in (PositiveStep(), NegativeStep()):
+            ep = export(mod, (x,))
+            self.assertEqual(ep.module()(x), mod(x))
+
     def test_unbacked_infer_size(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -10375,6 +10389,62 @@ def forward(self, b_a_buffer, x):
         init, xs = torch.ones(3), ({"moo": torch.ones(3), "moo2": torch.ones(3)},)
         ep = export(M(), (init, xs))
         self.assertEqual(ep.module()(init, xs), M()(init, xs))
+
+    def test_export_scan_data_dependent_arange_float_step(self):
+        class M(torch.nn.Module):
+            def forward(self, xs):
+                def body(carry, x):
+                    y = torch.arange(0, 1 - 1e-6, 1 / x.sum())
+                    z = y.sum()
+                    return carry + z, z
+
+                return scan(body, xs.new_zeros(()), xs)
+
+        xs = torch.ones(4, 3, 3)
+        ep = export(M(), (xs,))
+        self.assertEqual(ep.module()(xs), M()(xs))
+
+    @testing.expectedFailureStrict
+    @testing.expectedFailureStrictV2
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureRetraceability
+    def test_export_direct_scan_empty_init_data_dependent_arange_item_step(self):
+        class M(torch.nn.Module):
+            def forward(self, patch_attention_mask, position_ids):
+                def body(p_attn_mask, position_ids_row):
+                    boundaries = (torch.arange(4).to(torch.float32) / 4)[1:-1]
+                    fractional_coords_h = torch.arange(
+                        0, 1 - 1e-6, 1 / p_attn_mask[:, 0].sum().item()
+                    )
+                    fractional_coords_w = torch.arange(
+                        0, 1 - 1e-6, 1 / p_attn_mask[0].sum().item()
+                    )
+                    bucket_coords_h = torch.bucketize(
+                        fractional_coords_h, boundaries, right=True
+                    )
+                    bucket_coords_w = torch.bucketize(
+                        fractional_coords_w, boundaries, right=True
+                    )
+                    pos_ids = (bucket_coords_h[:, None] * 3 + bucket_coords_w).flatten()
+                    row = position_ids_row.clone()
+                    row[p_attn_mask.view(-1)] = pos_ids
+                    return [row]
+
+                return torch.ops.higher_order.scan(
+                    body,
+                    [],
+                    [patch_attention_mask, position_ids],
+                    additional_inputs=[],
+                )[0]
+
+        patch_attention_mask = torch.ones(2, 2, 2, dtype=torch.bool)
+        position_ids = torch.zeros((2, 4), dtype=torch.int64)
+        ep = export(M(), (patch_attention_mask, position_ids))
+        self.assertEqual(
+            ep.module()(patch_attention_mask, position_ids),
+            M()(patch_attention_mask, position_ids),
+        )
 
     def test_map_buffers(self):
         class M1(torch.nn.Module):
