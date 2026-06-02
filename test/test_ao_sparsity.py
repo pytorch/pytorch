@@ -57,11 +57,9 @@ from ao.sparsity.test_data_sparsifier import (  # noqa: F401
 from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F401
 
 
-instantiate_device_type_tests(TestSaliencyPruner, globals(), only_for=("cpu",))
-instantiate_device_type_tests(
-    TestBaseStructuredSparsifier, globals(), only_for=("cpu", "cuda")
-)
-instantiate_device_type_tests(TestFPGMPruner, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(TestSaliencyPruner, globals())
+instantiate_device_type_tests(TestBaseStructuredSparsifier, globals())
+instantiate_device_type_tests(TestFPGMPruner, globals())
 
 
 if __name__ == "__main__":
