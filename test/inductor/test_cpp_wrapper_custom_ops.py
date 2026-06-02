@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import os
 import unittest
 
 import torch
@@ -49,7 +50,7 @@ class TestCppWrapperCustomOps(InductorTestCase):
         """
 
         load_inline(
-            name="issue153478_cpp_wrapper_ext",
+            name=f"issue153478_cpp_wrapper_ext_{os.getpid()}",
             cpp_sources=cpp_src,
             functions=[],
             extra_cflags=["-O0"],
