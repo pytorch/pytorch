@@ -37,7 +37,7 @@ from .external_utils import (
 from .utils import (
     _get_error_on_graph_break,
     _set_error_on_graph_break,
-    DYNAMO_ALLOW_LRU_CACHE_TRACE_ATTR,
+    allow_lru_cache_wrapper_trace_without_warning,
     is_function,
     is_lru_cache_wrapped_function,
 )
@@ -1493,7 +1493,7 @@ def _allow_lru_cache_trace_without_warning_for_einops() -> None:
         for attr_name in attr_names:
             obj = getattr(module, attr_name, None)
             if is_lru_cache_wrapped_function(obj):
-                setattr(obj, DYNAMO_ALLOW_LRU_CACHE_TRACE_ATTR, True)
+                allow_lru_cache_wrapper_trace_without_warning(obj)
 
 
 # Dynamo can trace through einops 0.8.2+ directly (no allow_in_graph needed).
@@ -1505,7 +1505,7 @@ def _allow_in_graph_einops() -> None:
         if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
             # trigger backend registration up front to avoid a later guard failure
             # that would otherwise cause a recompilation
-            einops.rearrange(torch.randn(1), "i -> i")
+            einops.rearrange(torch.empty(1), "i -> i")
         # einops uses lru_cache for pure library-internal recipe helpers. Mark
         # only those wrappers so general lru_cache warnings are unchanged.
         _allow_lru_cache_trace_without_warning_for_einops()

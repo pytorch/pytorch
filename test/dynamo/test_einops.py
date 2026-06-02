@@ -247,7 +247,7 @@ print(normalize_gm(graph.print_readable(print_output=False)))
 
     @parametrize(
         "method",
-        ["rearrange", "pack", "unpack"],
+        ["rearrange", "pack", "unpack", "einsum"],
         name_fn=lambda f: f,
     )
     def test_no_warning(self, method):
@@ -264,6 +264,8 @@ print(normalize_gm(graph.print_readable(print_output=False)))
             if method == "unpack":
                 x_packed, meta = einops.pack([x], "*")
                 return einops.unpack(x_packed, meta, "*")[0]
+            if method == "einsum":
+                return einops.einsum(x, "a b -> b a")
             self.fail(method)
 
         x = torch.randn(2, 3)
@@ -277,6 +279,15 @@ print(normalize_gm(graph.print_readable(print_output=False)))
             if "functools.lru_cache" in str(warning.message)
         ]
         self.assertEqual(lru_cache_warnings, [])
+
+    @unittest.skipUnless(
+        EINOPS_SUPPORTS_DYNAMO_TRACING, "Needs directly traceable einops"
+    )
+    def test_lazy_init_preserves_rng_state(self):
+        torch.manual_seed(1234)
+        before = torch.random.get_rng_state().clone()
+        torch._dynamo.decorators._allow_in_graph_einops()
+        self.assertEqual(torch.random.get_rng_state(), before)
 
 
 instantiate_parametrized_tests(
