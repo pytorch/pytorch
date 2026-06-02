@@ -213,21 +213,11 @@ def bind_args_cached(
     spec.update_defaults(func)
     ba = {}
     rem_kw = dict(kwargs)
+    guarded_pos_defaults_len = False
 
     # 1) Bind all positional (pos-only + pos-or-kw)
-    # 1.1) Apply pos-defaults first (maybe overridden later)
-    for name, idx in spec.pos_default_map.items():
-        default_source = None
-        if fn_source and not (
-            ConstantVariable.is_literal(spec.defaults[idx])
-            and config.skip_guards_on_constant_func_defaults
-        ):
-            default_source = DefaultsSource(fn_source, idx)
-        ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
-    # 1.2) Fill in provided positional args
     for i, name in enumerate(spec.all_pos_names):
         if i < len(args):
-            # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, args[i])
         elif name in rem_kw and (
             # `kwargs` can have the same key as a pos-only arg `name`.
@@ -238,9 +228,26 @@ def bind_args_cached(
             #   (1, {'a': 2})
             name not in spec.posonly_names
         ):
-            # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
-        elif name not in ba:
+        elif name in spec.pos_default_map:
+            idx = spec.pos_default_map[name]
+            if fn_source and not guarded_pos_defaults_len:
+                # The parameter-to-default mapping depends on __defaults__
+                # length; guard it without wrapping every default value.
+                install_guard(
+                    AttrSource(fn_source, "__defaults__").make_guard(
+                        GuardBuilder.SEQUENCE_LENGTH
+                    )
+                )
+                guarded_pos_defaults_len = True
+            default_source = None
+            if fn_source and not (
+                ConstantVariable.is_literal(spec.defaults[idx])
+                and config.skip_guards_on_constant_func_defaults
+            ):
+                default_source = DefaultsSource(fn_source, idx)
+            ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
+        else:
             raise TypeError(f"missing required positional argument: {name}")
 
     # 2) *args
@@ -2168,14 +2175,17 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             )
             return func
 
-        if self.dict_vt.contains("_partialmethod"):
+        partialmethod_attr = (
+            "__partialmethod__" if sys.version_info >= (3, 13) else "_partialmethod"
+        )
+        if self.dict_vt.contains(partialmethod_attr):
             partialmethod = self._signature_attr_as_python_constant(
-                "_partialmethod",
-                self.dict_vt.getitem("_partialmethod"),
+                partialmethod_attr,
+                self.dict_vt.getitem(partialmethod_attr),
                 _converting,
             )
             if isinstance(partialmethod, functools.partialmethod):
-                func._partialmethod = partialmethod  # type: ignore[attr-defined]
+                setattr(func, partialmethod_attr, partialmethod)
                 return func
 
         if self.dict_vt.contains("__text_signature__"):
@@ -2241,7 +2251,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             type(Ellipsis),
             type(NotImplemented),
         )
-        if type(constant) not in safe_literal_types:
+        if not isinstance(constant, type) and type(constant) not in safe_literal_types:
             raise ClosureConversionError(f"{name} metadata is not safely supported")
 
     def _signature_attr_as_python_constant(
