@@ -213,21 +213,11 @@ def bind_args_cached(
     spec.update_defaults(func)
     ba = {}
     rem_kw = dict(kwargs)
+    guarded_pos_defaults_len = False
 
     # 1) Bind all positional (pos-only + pos-or-kw)
-    # 1.1) Apply pos-defaults first (maybe overridden later)
-    for name, idx in spec.pos_default_map.items():
-        default_source = None
-        if fn_source and not (
-            ConstantVariable.is_literal(spec.defaults[idx])
-            and config.skip_guards_on_constant_func_defaults
-        ):
-            default_source = DefaultsSource(fn_source, idx)
-        ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
-    # 1.2) Fill in provided positional args
     for i, name in enumerate(spec.all_pos_names):
         if i < len(args):
-            # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, args[i])
         elif name in rem_kw and (
             # `kwargs` can have the same key as a pos-only arg `name`.
@@ -238,9 +228,26 @@ def bind_args_cached(
             #   (1, {'a': 2})
             name not in spec.posonly_names
         ):
-            # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
-        elif name not in ba:
+        elif name in spec.pos_default_map:
+            idx = spec.pos_default_map[name]
+            if fn_source and not guarded_pos_defaults_len:
+                # The parameter-to-default mapping depends on __defaults__
+                # length; guard it without wrapping every default value.
+                install_guard(
+                    AttrSource(fn_source, "__defaults__").make_guard(
+                        GuardBuilder.SEQUENCE_LENGTH
+                    )
+                )
+                guarded_pos_defaults_len = True
+            default_source = None
+            if fn_source and not (
+                ConstantVariable.is_literal(spec.defaults[idx])
+                and config.skip_guards_on_constant_func_defaults
+            ):
+                default_source = DefaultsSource(fn_source, idx)
+            ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
+        else:
             raise TypeError(f"missing required positional argument: {name}")
 
     # 2) *args
@@ -742,12 +749,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if (
-            args
-            and isinstance(
-                args[0],
-                (variables.NNModuleVariable, variables.UnspecializedNNModuleVariable),
-            )
+        name = getattr(self.fn, "__name__", None)
+        if name in (
+            "register_backward_hook",
+            "register_forward_hook",
+            "register_forward_pre_hook",
+            "register_full_backward_hook",
+            "register_full_backward_pre_hook",
         ):
             # Local import avoids a module cycle: nn_module.py imports helpers
             # from this file for other method-call handling.
@@ -756,10 +764,25 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 unsupported_dynamic_module_hook_registration,
             )
 
-            name = getattr(self.fn, "__name__", None)
-            if name and is_unsupported_dynamic_module_hook_registration_method(
-                name, self.fn
+            module_arg: VariableTracker | None = args[0] if args else None
+            if (
+                module_arg is not None
+                and isinstance(module_arg, variables.LazyVariableTracker)
+                and not module_arg.is_realized()
             ):
+                module_arg = (
+                    module_arg.realize()
+                    if issubclass(module_arg.peek_type(), torch.nn.Module)
+                    else None
+                )
+
+            if isinstance(
+                module_arg,
+                (
+                    variables.NNModuleVariable,
+                    variables.UnspecializedNNModuleVariable,
+                ),
+            ) and is_unsupported_dynamic_module_hook_registration_method(name, self.fn):
                 unsupported_dynamic_module_hook_registration(name)
 
         # Handle patch_dynamo_config call

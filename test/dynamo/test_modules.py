@@ -2347,9 +2347,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         class FullBackwardPreHookModule(torch.nn.Module):
             def forward(self, x):
-                self.register_full_backward_pre_hook(
-                    lambda module, grad_output: None
-                )
+                self.register_full_backward_pre_hook(lambda module, grad_output: None)
                 return x + 1
 
         class Base(torch.nn.Module):
