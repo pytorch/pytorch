@@ -71,6 +71,36 @@ AOTI_FILES: TypeAlias = list[str | Weights] | dict[str, list[str | Weights]]
 logger: logging.Logger = logging.getLogger(__name__)
 
 
+class AOTIPackageLoadError(RuntimeError):
+    pass
+
+
+def _validate_aoti_package_device(
+    file: str, model_name: str, *, allow_missing_metadata: bool = False
+) -> dict[str, str] | None:
+    try:
+        loaded_metadata = (
+            torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(  # type: ignore[attr-defined]
+                file, model_name
+            )
+        )
+    except RuntimeError as e:
+        if allow_missing_metadata and "Failed to find wrapper metadata" in str(e):
+            return None
+        raise
+
+    device = loaded_metadata["AOTI_DEVICE_KEY"]
+    if device == "cuda" and not torch.cuda.is_available():
+        backend = "ROCm" if torch.version.hip is not None else "CUDA"
+        raise AOTIPackageLoadError(
+            f"Cannot load AOTInductor package for device '{device}' because "
+            f"{backend} is not available in this process. Check that this host "
+            "or container has GPU access, or compile/package the model for CPU."
+        )
+
+    return loaded_metadata
+
+
 def is_pt2_package(serialized_model: bytes | str) -> bool:
     """
     Check if the serialized model is a PT2 Archive package.
@@ -1043,9 +1073,11 @@ def _load_aoti(
     num_runners: int,
     device_idx: int,
 ) -> AOTICompiledModel:
-    loaded_metadata = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(  # type: ignore[attr-defined]
-        file, model_name
-    )
+    loaded_metadata = _validate_aoti_package_device(file, model_name)
+    if loaded_metadata is None:
+        raise RuntimeError(
+            f"Failed to load AOTInductor package metadata for model '{model_name}'."
+        )
 
     device = loaded_metadata["AOTI_DEVICE_KEY"]
     from torch._inductor.codecache import get_device_information

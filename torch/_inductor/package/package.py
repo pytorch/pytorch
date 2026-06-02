@@ -9,8 +9,10 @@ import torch
 from torch._inductor import config
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export.pt2_archive._package import (
+    _validate_aoti_package_device,
     AOTI_FILES,
     AOTICompiledModel,
+    AOTIPackageLoadError,
     load_pt2,
     package_pt2,
 )
@@ -116,6 +118,8 @@ def load_package(
         if model_name not in pt2_contents.aoti_runners:
             raise RuntimeError(f"Model {model_name} not found in package")
         return pt2_contents.aoti_runners[model_name]
+    except AOTIPackageLoadError:
+        raise
     except RuntimeError:
         log.warning("Loading outdated pt2 file. Please regenerate your package.")
 
@@ -126,12 +130,16 @@ def load_package(
             path.seek(0)
             f.write(path.read())
             log.debug("Writing buffer to tmp file located at %s.", f.name)
+            _validate_aoti_package_device(
+                f.name, model_name, allow_missing_metadata=True
+            )
             loader = torch._C._aoti.AOTIModelPackageLoader(
                 f.name, model_name, run_single_threaded, num_runners, device_index
             )
             return AOTICompiledModel(loader)
 
     path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
+    _validate_aoti_package_device(path, model_name, allow_missing_metadata=True)
     loader = torch._C._aoti.AOTIModelPackageLoader(
         path, model_name, run_single_threaded, num_runners, device_index
     )

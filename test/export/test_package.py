@@ -1,10 +1,14 @@
 # Owner(s): ["oncall: export"]
+import io
 import unittest
+from unittest import mock
 
 import torch
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch._inductor.package import load_package
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
+from torch.export.pt2_archive._package import _load_aoti
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -88,6 +92,61 @@ class TestPackage(TestCase):
         self.assertEqual(exporter(x3), x3 + 2)
         self.assertEqual(len(package.methods), 1)
         self.assertEqual(len(package.methods["fn"].overloads), 3)
+
+
+class TestAOTIPackageDeviceValidation(TestCase):
+    def test_cuda_aoti_package_requires_cuda_available(self):
+        class FakeAOTIModelPackageLoader:
+            @staticmethod
+            def load_metadata_from_package(file, model_name):
+                return {"AOTI_DEVICE_KEY": "cuda"}
+
+            def __init__(self, *args, **kwargs):
+                raise AssertionError("AOTI loader should not be constructed")
+
+        with (
+            mock.patch.object(
+                torch._C._aoti, "AOTIModelPackageLoader", FakeAOTIModelPackageLoader
+            ),
+            mock.patch.object(torch.cuda, "is_available", return_value=False),
+            mock.patch("torch._inductor.codecache.get_device_information") as get_info,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot load AOTInductor package.*(CUDA|ROCm) is not available",
+            ):
+                _load_aoti("model.pt2", "model", False, 1, -1)
+
+            get_info.assert_not_called()
+
+    def test_load_package_fallback_validates_cuda_availability(self):
+        class FakeAOTIModelPackageLoader:
+            @staticmethod
+            def load_metadata_from_package(file, model_name):
+                return {"AOTI_DEVICE_KEY": "cuda"}
+
+            def __init__(self, *args, **kwargs):
+                raise AssertionError("AOTI loader should not be constructed")
+
+        for package_path in ("model.pt2", io.BytesIO(b"legacy package")):
+            with (
+                self.subTest(package_path=type(package_path).__name__),
+                mock.patch(
+                    "torch._inductor.package.package.load_pt2",
+                    side_effect=RuntimeError("fall back to direct AOTI loader"),
+                ),
+                mock.patch.object(
+                    torch._C._aoti,
+                    "AOTIModelPackageLoader",
+                    FakeAOTIModelPackageLoader,
+                ),
+                mock.patch.object(torch.cuda, "is_available", return_value=False),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Cannot load AOTInductor package.*(CUDA|ROCm) is not available",
+                ):
+                    load_package(package_path)
 
 
 if __name__ == "__main__":
