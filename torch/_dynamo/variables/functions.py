@@ -213,21 +213,11 @@ def bind_args_cached(
     spec.update_defaults(func)
     ba = {}
     rem_kw = dict(kwargs)
+    guarded_pos_defaults_len = False
 
     # 1) Bind all positional (pos-only + pos-or-kw)
-    # 1.1) Apply pos-defaults first (maybe overridden later)
-    for name, idx in spec.pos_default_map.items():
-        default_source = None
-        if fn_source and not (
-            ConstantVariable.is_literal(spec.defaults[idx])
-            and config.skip_guards_on_constant_func_defaults
-        ):
-            default_source = DefaultsSource(fn_source, idx)
-        ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
-    # 1.2) Fill in provided positional args
     for i, name in enumerate(spec.all_pos_names):
         if i < len(args):
-            # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, args[i])
         elif name in rem_kw and (
             # `kwargs` can have the same key as a pos-only arg `name`.
@@ -238,9 +228,26 @@ def bind_args_cached(
             #   (1, {'a': 2})
             name not in spec.posonly_names
         ):
-            # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
-        elif name not in ba:
+        elif name in spec.pos_default_map:
+            idx = spec.pos_default_map[name]
+            if fn_source and not guarded_pos_defaults_len:
+                # The parameter-to-default mapping depends on __defaults__
+                # length; guard it without wrapping every default value.
+                install_guard(
+                    AttrSource(fn_source, "__defaults__").make_guard(
+                        GuardBuilder.SEQUENCE_LENGTH
+                    )
+                )
+                guarded_pos_defaults_len = True
+            default_source = None
+            if fn_source and not (
+                ConstantVariable.is_literal(spec.defaults[idx])
+                and config.skip_guards_on_constant_func_defaults
+            ):
+                default_source = DefaultsSource(fn_source, idx)
+            ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
+        else:
             raise TypeError(f"missing required positional argument: {name}")
 
     # 2) *args
@@ -2274,10 +2281,8 @@ class SkipFunctionVariable(VariableTracker):
                 "This API disables compilation when used as a decorator or wrapper "
                 "outside the compiled region.",
                 hints=[
-                    "Move the `torch._dynamo.disable()` call outside the compiled function "
-                    "and apply it to the function that should run eagerly.",
-                    "Use `torch._dynamo.graph_break()` to intentionally insert a graph break "
-                    "at this point.",
+                    "Move the `torch._dynamo.disable()` call outside the compiled function and apply it to the function that should run eagerly.",
+                    "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.",
                 ],
             )
         elif self.value is torch.compiler.disable:
@@ -2288,10 +2293,8 @@ class SkipFunctionVariable(VariableTracker):
                 "This API disables compilation when used as a decorator or wrapper "
                 "outside the compiled region.",
                 hints=[
-                    "Move the `torch.compiler.disable()` call outside the compiled function "
-                    "and apply it to the function that should run eagerly.",
-                    "Use `torch._dynamo.graph_break()` to intentionally insert a graph break "
-                    "at this point.",
+                    "Move the `torch.compiler.disable()` call outside the compiled function and apply it to the function that should run eagerly.",
+                    "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.",
                 ],
             )
         elif inspect.getattr_static(self.value, "_torchdynamo_disable", False):
