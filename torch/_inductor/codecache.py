@@ -1057,6 +1057,9 @@ class CacheabilityValidator:
         if config._pre_fusion_custom_pass is not None:
             if not isinstance(config._pre_fusion_custom_pass, CustomSchedulerPass):
                 self.bypass("Unsupported _pre_fusion_custom_pass")
+        if config._post_fusion_custom_pass is not None:
+            if not isinstance(config._post_fusion_custom_pass, CustomSchedulerPass):
+                self.bypass("Unsupported _post_fusion_custom_pass")
         for p in config._fuse_ddp_communication_passes:
             if callable(p) and not isinstance(p, CustomGraphPass):
                 self.bypass("Unsupported _fuse_ddp_communication_pass")
@@ -1358,6 +1361,9 @@ class FxGraphHashDetails:
         self._pre_fusion_custom_pass = self._get_custom_pass_detail_unsafe(
             config._pre_fusion_custom_pass
         )
+        self._post_fusion_custom_pass = self._get_custom_pass_detail_unsafe(
+            config._post_fusion_custom_pass
+        )
         self._fuse_ddp_communication_passes = self._get_custom_pass_detail_unsafe(
             config._fuse_ddp_communication_passes
         )
@@ -1397,6 +1403,7 @@ class FxGraphHashDetails:
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
+    # - _post_fusion_custom_pass
     # - _fuse_ddp_communication_passes
     # Their types can be found in `torch/_inductor/config.py`, but:
     # - if they are string names, we can cache them safely (one is by default)
