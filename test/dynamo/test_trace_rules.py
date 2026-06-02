@@ -22,7 +22,7 @@ from torch._dynamo.trace_rules import (
     torch_c_binding_in_graph_functions,
     torch_non_c_binding_in_graph_functions,
 )
-from torch._dynamo.utils import hashable, is_safe_constant, istype
+from torch._dynamo.utils import hashable, is_compile_supported, is_safe_constant, istype
 from torch._dynamo.variables import (
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
@@ -415,6 +415,19 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
+
+    def test_is_compile_supported_constant(self):
+        def fn(x):
+            if is_compile_supported(x.device.type):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(3)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(backend=cnt, fullgraph=True)(fn)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_force_inline_custom_function(self):
         mod, func = create_dummy_module_and_function()
