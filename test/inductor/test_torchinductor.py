@@ -8,6 +8,7 @@ import functools
 import gc
 import importlib
 import itertools
+import logging
 import math
 import operator
 import os
@@ -14776,6 +14777,43 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return c
 
         self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_missing_op_info_log_is_lazy(self):
+        import torch._inductor.exc as exc
+
+        def foo(x):
+            return x.clone()
+
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        define_custom_op_for_test("foo_lazy_missing_op_log", foo, foo_meta)
+
+        def fn(x):
+            return torch.ops.test.foo_lazy_missing_op_log(x)
+
+        logger = logging.getLogger("torch._inductor.graph")
+        old_level = logger.level
+        logger.setLevel(logging.WARNING)
+        self.addCleanup(logger.setLevel, old_level)
+
+        operator_str_calls = 0
+        orig_operator_str = exc.MissingOperatorWithoutDecomp.operator_str
+
+        def counted_operator_str(target, args, kwargs):
+            nonlocal operator_str_calls
+            operator_str_calls += 1
+            return orig_operator_str(target, args, kwargs)
+
+        with patch.object(
+            exc.MissingOperatorWithoutDecomp,
+            "operator_str",
+            staticmethod(counted_operator_str),
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(torch.randn(4))
+
+        self.assertEqual(operator_str_calls, 0)
 
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_2(self):
