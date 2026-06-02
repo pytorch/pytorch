@@ -361,11 +361,8 @@ def _invoke_leaf_function_python(
         real_impl, fake_impl, captured_out_spec
     )
 
-    from torch._subclasses.fake_tensor import unset_fake_temporarily
-
-    with unset_fake_temporarily():
-        real_fn_callable = _LeafCallable(wrapped_real)
-        fake_fn_callable = _LeafCallable(wrapped_fake)
+    real_fn_callable = _LeafCallable(wrapped_real)
+    fake_fn_callable = _LeafCallable(wrapped_fake)
 
     if hook_fn is not None:
         real_fn_callable._leaf_hook_real_fn = hook_fn  # type: ignore[attr-defined]

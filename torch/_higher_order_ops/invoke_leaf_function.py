@@ -49,6 +49,8 @@ def reset_makefx_module_storage() -> None:
 
 
 class _LeafCallable(OpaqueBase):
+    _allow_opaque_reference_mid_trace_creation = True
+
     def __init__(self, fn: Callable) -> None:
         self._fn = fn
 
@@ -693,10 +695,7 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
                 for info in input_infos_for_fake
             )
 
-        from torch._subclasses.fake_tensor import unset_fake_temporarily
-
-        with unset_fake_temporarily():
-            new_real_fn_callable = _LeafCallable(real_forward)
+        new_real_fn_callable = _LeafCallable(real_forward)
 
         with torch._C._AutoDispatchBelowAutograd():
             fw_outputs = invoke_leaf_function(
@@ -751,11 +750,8 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def backward(ctx, *grads):
-        from torch._subclasses.fake_tensor import unset_fake_temporarily
-
-        with unset_fake_temporarily():
-            real_bw_callable = _LeafCallable(ctx.real_backward)
-            fake_bw_callable = _LeafCallable(ctx.fake_backward)
+        real_bw_callable = _LeafCallable(ctx.real_backward)
+        fake_bw_callable = _LeafCallable(ctx.fake_backward)
         _, bw_input_spec = pytree.tree_flatten((grads, {}))
         fw_grads = invoke_leaf_function(
             real_bw_callable, fake_bw_callable, bw_input_spec, "", *grads
