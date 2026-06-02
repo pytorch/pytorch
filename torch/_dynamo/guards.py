@@ -389,6 +389,11 @@ class GuardManagerWrapper:
         accessor is ``GetGenericDictGuardAccessor``—i.e., it only exposes its
         ``__dict__`` and nothing else that could mutate between runs.
 
+        A node with a relational guard that has no dedicated dict-tag fast path
+        is not tag safe. Relational guards carry state across multiple guarded
+        values, so skipping one side of the relation can turn a real failure
+        into a false positive.
+
         For every tag safe node, verifying the identity/tag of just the top-level
         dictionary is enough to guarantee the entire subtree is unchanged, enabling
         a *fast-path* guard check.
@@ -460,7 +465,7 @@ class GuardManagerWrapper:
                 if val_mgr:
                     is_subtree_tag_safe &= val_mgr.is_tag_safe()
 
-            if is_subtree_tag_safe:
+            if is_subtree_tag_safe and not node.has_unoptimized_relational_guard():
                 node.mark_tag_safe()
             return tag_safe_roots
 
@@ -474,6 +479,9 @@ class GuardManagerWrapper:
             tag_safe_roots = []
             for child_mgr in node.get_child_managers():
                 tag_safe_roots.extend(visit(child_mgr))
+
+            if node.has_unoptimized_relational_guard():
+                return tag_safe_roots
 
             if node.is_guarded_value_immutable():
                 # If the node guards a tensor, mark it tag safe only if there
