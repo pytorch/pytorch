@@ -2665,6 +2665,21 @@ def run_pre_grad_passes(
     return model_
 
 
+@dataclass(frozen=True)
+class _ConstantDecompTable:
+    """
+    Picklable wrapper around a user-supplied decomposition dict.
+
+    This module-level class is addressable as (module, qualname), so pickle can
+    serialize an instance by reducing its single field.
+    """
+
+    table: dict[OpOverload, Callable[..., Any]]
+
+    def __call__(self) -> dict[OpOverload, Callable[..., Any]]:
+        return self.table
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -2686,9 +2701,9 @@ def compile_fx(
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
     if decompositions is not None:
-
-        def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
-            return decompositions  # pyrefly: ignore[bad-return]
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = (
+            _ConstantDecompTable(decompositions)
+        )
     else:
         get_decomp_fn = select_decomp_table
 
