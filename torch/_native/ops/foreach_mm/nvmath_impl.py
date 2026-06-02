@@ -16,12 +16,8 @@ import torch
 _cublaslt_workspaces: dict[tuple, torch.Tensor] = {}
 
 
-def _get_cublaslt_workspace_size() -> int:
-    return torch.backends.cuda.cublaslt_workspace_size()
-
-
 def _get_cublaslt_workspace(device="cuda"):
-    ws_size = _get_cublaslt_workspace_size()
+    ws_size = torch.backends.cuda.cublaslt_workspace_size()
     key = (torch.device(device), ws_size)
     if key not in _cublaslt_workspaces:
         _cublaslt_workspaces[key] = torch.empty(
