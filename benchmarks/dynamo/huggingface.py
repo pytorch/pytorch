@@ -7,13 +7,13 @@ import os
 import re
 import subprocess
 import sys
-import types
 import warnings
 
 
 try:
     from .common import (
         BenchmarkRunner,
+        call_model_generate,
         download_retry_decorator,
         load_yaml_file,
         main,
@@ -22,6 +22,7 @@ try:
 except ImportError:
     from common import (
         BenchmarkRunner,
+        call_model_generate,
         download_retry_decorator,
         load_yaml_file,
         main,
@@ -407,6 +408,9 @@ class HuggingfaceRunner(BenchmarkRunner):
             model = model_cls(config)
         return model
 
+    def generate_llm(self, mod, example_inputs, collect_outputs=True):
+        return call_model_generate(mod, example_inputs, collect_outputs)
+
     def load_model(
         self,
         device,
@@ -447,11 +451,7 @@ class HuggingfaceRunner(BenchmarkRunner):
             # Set this flag so that when we test for speedup, we use
             # model.generate instead of using model.forward
             self.hf_llm = True
-
-            def generate(self, _, example_inputs, collect_outputs=True):
-                return model.generate(**example_inputs)
-
-            self.generate = types.MethodType(generate, self)
+            self.generate = self.generate_llm
 
         else:
             self.hf_llm = False
