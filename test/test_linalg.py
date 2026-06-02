@@ -1237,11 +1237,19 @@ class TestLinalg(TestCase):
 
             B_non_contig = B.t()
             self.assertFalse(B_non_contig.is_contiguous())
+            result1 = torch.kron(A, B_non_contig)
+            expected1 = torch.kron(A, B.contiguous())
+            self.assertEqual(result1, expected1)
 
-            result = torch.kron(A, B_non_contig)
+            A_non_contig = A.t()
+            self.assertFalse(A_non_contig.is_contiguous())
+            result2 = torch.kron(A_non_contig, B)
+            expected2 = torch.kron(A.contiguous(), B)
+            self.assertEqual(result2, expected2)
 
-            expected = torch.kron(A, B.contiguous())
-            self.assertEqual(result, expected)
+            result3 = torch.kron(A_non_contig, B_non_contig)
+            expected3 = torch.kron(A.contiguous(), B.contiguous())
+            self.assertEqual(result3, expected3)
 
     @dtypes(*floating_and_complex_types())
     def test_kron_empty(self, device, dtype):
