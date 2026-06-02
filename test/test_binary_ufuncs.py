@@ -1441,6 +1441,15 @@ class TestBinaryUfuncs(TestCase):
             res2[i] = pow(3, m1[i][4])
         self.assertEqual(res1, res2)
 
+    @onlyCUDA
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_pow_integral_negative_exponent_tensor(self, device, dtype):
+        base = torch.tensor([1, 2, 3, 4], device=device, dtype=dtype)
+        exp = torch.tensor(-1, dtype=dtype)
+        result = torch.pow(base, exp)
+        expected = torch.tensor([1, 0, 0, 0], device=device, dtype=dtype)
+        self.assertEqual(result, expected)
+
     # TODO: refactor all these tests using opinfos properly
     def _test_pow(self, base, exponent, np_exponent=None):
         if np_exponent is None:
