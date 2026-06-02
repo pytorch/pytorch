@@ -46,6 +46,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      check_experiments: arc,lf
 
   # ---- CUDA build for H100 / A100 (sm80) ----
   build-cuda:
@@ -54,6 +55,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
@@ -63,18 +65,22 @@ jobs:
           { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "${{ inputs.gpu == 'H100' && 'linux.aws.h100' || 'linux.aws.a100' }}" },
           { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "${{ inputs.gpu == 'H100' && 'linux.aws.h100' || 'linux.aws.a100' }}" }
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   test-cuda:
     if: github.repository_owner == 'pytorch' && (inputs.gpu == 'H100' || inputs.gpu == 'A100')
     name: test-cuda
     uses: ./.github/workflows/_linux-test.yml
-    needs: build-cuda
+    needs:
+      - build-cuda
+      - get-label-type
     with:
       timeout-minutes: 120
       build-environment: ${{ needs.build-cuda.outputs.build-environment }}
       docker-image: ${{ needs.build-cuda.outputs.docker-image }}
       test-matrix: ${{ needs.build-cuda.outputs.test-matrix }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
     secrets: inherit
 
   # ---- CUDA build for B200 (sm100) ----
