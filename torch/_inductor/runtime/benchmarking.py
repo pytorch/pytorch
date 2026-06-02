@@ -1,7 +1,8 @@
+import contextlib
 import functools
 import inspect
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
@@ -44,6 +45,46 @@ def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
     if isinstance(device_type, torch.device):
         return device_type.type
     return torch.device(device_type).type
+
+
+_GpuBenchmarkLockContext = Callable[[], contextlib.AbstractContextManager[None]]
+_gpu_benchmark_lock_context: _GpuBenchmarkLockContext | None = None
+
+
+def set_gpu_benchmark_lock_context(
+    context_factory: _GpuBenchmarkLockContext | None,
+) -> _GpuBenchmarkLockContext | None:
+    """Override the process-local GPU benchmark lock context.
+
+    This lets benchmark harnesses provide the context used by Inductor GPU
+    benchmark calls. Some benchmark helpers delegate to other benchmark
+    methods, so harness contexts should support nested entry from the same
+    thread. Returning the previous context lets callers restore it in tests.
+    """
+    global _gpu_benchmark_lock_context
+    previous = _gpu_benchmark_lock_context
+    _gpu_benchmark_lock_context = context_factory
+    return previous
+
+
+@contextlib.contextmanager
+def maybe_gpu_benchmark_lock() -> Iterator[None]:
+    """Optionally enter the registered GPU benchmark lock context."""
+    context_factory = _gpu_benchmark_lock_context
+    if context_factory is None:
+        yield
+        return
+    with context_factory():
+        yield
+
+
+def gpu_benchmark_lock(fn: Callable[P, T]) -> Callable[P, T]:
+    @wraps(fn)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        with maybe_gpu_benchmark_lock():
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 # Device-type → benchmarking function registry.
@@ -311,6 +352,7 @@ class Benchmarker:
         raise NotImplementedError
 
     @time_and_count
+    @gpu_benchmark_lock
     def benchmark_gpu_with_cuda_graph(
         self: Self,
         _callable: Callable[[], Any],
@@ -445,6 +487,7 @@ class TritonBenchmarker(Benchmarker):
 
     @may_distort_benchmarking_result
     @time_and_count
+    @gpu_benchmark_lock
     # pyrefly: ignore [bad-override]
     def benchmark_gpu(
         self: Self,
@@ -545,6 +588,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
     @may_distort_benchmarking_result
     @time_and_count
+    @gpu_benchmark_lock
     def benchmark_gpu(  # type: ignore[override]
         self: Self,
         _callable: Callable[[], Any],
@@ -673,6 +717,7 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
     """Benchmarker that uses torch.profiler for GPU kernel benchmarking."""
 
     @time_and_count
+    @gpu_benchmark_lock
     def benchmark_gpu(  # type: ignore[override]
         self: Self,
         _callable: Callable[[], Any],
