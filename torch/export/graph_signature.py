@@ -345,7 +345,7 @@ class ExportGraphSignature:
             elif isinstance(s.arg, ConstantArgument):
                 user_inputs.append(s.arg.value)
             else:
-                raise RuntimeError(f"{s.arg} is not a valid user input")
+                raise RuntimeError(f"{s.arg} is not a valid user inputs")
         return tuple(user_inputs)
 
     # Graph node names of pytree-flattened outputs of original program

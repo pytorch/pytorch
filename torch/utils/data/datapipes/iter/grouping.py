@@ -90,7 +90,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
 @functional_datapipe("unbatch")
 class UnBatcherIterDataPipe(IterDataPipe):
     r"""
-    Undoes batching of data (functional name: ``unbatch``).
+    Undos batching of data (functional name: ``unbatch``).
 
     In other words, it flattens the data up to the specified level within a batched DataPipe.
 

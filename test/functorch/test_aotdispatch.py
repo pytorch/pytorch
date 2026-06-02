@@ -7013,35 +7013,6 @@ def forward(self, primals_1, tangents_1):
         x = torch.randn(4, requires_grad=True)
         fn(x).sum().backward()
 
-    def test_disable_functionalization_ignores_effect_token_metadata(self):
-        def fn(args):
-            (x,) = args
-            return torch.linalg.inv(x)
-
-        compiled_fn = compiled_function(
-            fn,
-            nop,
-            nop,
-            partition_fn=default_partition,
-            keep_inference_input_mutations=True,
-            disable_functionalization=True,
-        )
-
-        x = torch.tensor(
-            [[2.0, 0.1, -0.2], [0.3, 1.7, 0.4], [-0.1, 0.2, 2.1]]
-        ).requires_grad_()
-        eager_x = x.detach().clone().requires_grad_()
-        compiled_x = x.detach().clone().requires_grad_()
-
-        eager_out = fn([eager_x])
-        (eager_grad,) = torch.autograd.grad(eager_out.sum(), eager_x)
-
-        compiled_out = compiled_fn([compiled_x])
-        (compiled_grad,) = torch.autograd.grad(compiled_out.sum(), compiled_x)
-
-        self.assertEqual(compiled_out, eager_out)
-        self.assertEqual(compiled_grad, eager_grad)
-
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_force_save_effectful_ops(self):
         """Test that effectful op outputs are saved, not recomputed.
@@ -11485,6 +11456,12 @@ symbolic_aot_autograd_failures = {
     skip(
         "nn.functional.batch_norm", ""
     ),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
+    xfail(
+        "nn.functional.cross_entropy", ""
+    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail(
+        "nn.functional.linear_cross_entropy", ""
+    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "nn.functional.ctc_loss", ""
     ),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/deco...

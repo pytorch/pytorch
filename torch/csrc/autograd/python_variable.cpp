@@ -1,5 +1,4 @@
 #include <ATen/DTensorState.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Resize.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/SymIntArrayRef.h>
@@ -1350,14 +1349,14 @@ static bool is_random_op(const c10::OperatorHandle& op) {
       memcmp(op_name.name.data(), "aten::", aten_namespace_prefix_len) != 0) {
     return false;
   }
-  static constexpr auto random_names = std::to_array<std::string_view>({
+  static constexpr std::array<std::string_view, 6> random_names = {{
       "native_dropout",
       "normal_",
       "rand_like",
       "randn_like",
       "uniform_",
       "bernoulli",
-  });
+  }};
   std::string_view name_without_namespace(
       op_name.name.c_str() + aten_namespace_prefix_len,
       op_name.name.size() - aten_namespace_prefix_len);
@@ -2084,7 +2083,6 @@ static std::pair<TensorFlavor, py::object> check_for_dtensor_or_tensor(
   // the try_replicate_spec_for_scalar_tensor stuff in our caller
   // specifically handles 1-element tensors.
 
-  torch::jit::guardAgainstNamedTensor<at::Tensor>(tensor);
   auto py_tensor = py::cast(tensor);
 
   const auto dtensor = get_dtensor_class();
@@ -2904,64 +2902,6 @@ static PyObject* THPVariable_get_ndim(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_get_names(PyObject* self, void* unused) {
-  HANDLE_TH_ERRORS
-  if (has_torch_function(self)) {
-    return handle_torch_function_getter((THPVariable*)self, "names");
-  }
-  // The long-term plan is to return a list of (python) torch.Dimname.
-  // However, for now, return a list of string.
-  const auto& tensor = THPVariable_Unpack(self);
-  auto size = tensor.dim();
-  THPObjectPtr tuple(PyTuple_New(size));
-  if (!tuple)
-    throw python_error();
-
-  const auto dimnames = tensor.names();
-  for (const auto i : c10::irange(size)) {
-    PyObject* str = nullptr;
-    if (dimnames[i].type() == at::NameType::WILDCARD) {
-      // PyTuple_SET_ITEM steals a reference to the object. When the tuple is
-      // deallocated, it'll decrement the refcount on Py_None, which is bad.
-      // To avoid this, we "create" a new reference to Py_None by increasing
-      // the refcount.
-      // Sources:
-      // - https://docs.python.org/3/c-api/tuple.html#c.PyTuple_SetItem
-      // -
-      // https://stackoverflow.com/questions/16400600/how-to-return-a-tuple-containing-a-none-value-from-the-c-api
-      str = Py_NewRef(Py_None);
-    } else {
-      str = THPUtils_packString(dimnames[i].symbol().toUnqualString());
-      if (!str)
-        throw python_error();
-    }
-    PyTuple_SET_ITEM(tuple.get(), i, str);
-  }
-  return tuple.release();
-  END_HANDLE_TH_ERRORS
-}
-
-static int THPVariable_set_names(
-    PyObject* self,
-    PyObject* names,
-    void* unused) {
-  HANDLE_TH_ERRORS
-  if (has_torch_function(self)) {
-    return handle_torch_function_setter((THPVariable*)self, "names", names);
-  }
-  const auto& var = THPVariable_Unpack(self);
-  if (Py_IsNone(names)) {
-    at::internal_set_names_inplace(var, std::nullopt);
-  } else {
-    TORCH_CHECK(
-        THPUtils_checkDimnameList(names),
-        "names must either be None or a tuple of dim names");
-    at::internal_set_names_inplace(var, torch::parseDimnameList(names));
-  }
-  return 0;
-  END_HANDLE_TH_ERRORS_RET(-1)
-}
-
 static int THPVariable_set_requires_grad(
     THPVariable* self,
     PyObject* obj,
@@ -3502,11 +3442,6 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
     {"nbytes", (getter)THPVariable_get_nbytes, nullptr, nullptr, nullptr},
     {"itemsize", (getter)THPVariable_get_itemsize, nullptr, nullptr, nullptr},
-    {"names",
-     (getter)THPVariable_get_names,
-     (setter)THPVariable_set_names,
-     nullptr,
-     nullptr},
     {"real",
      (getter)PropertyReal::getter,
      (setter)THPVariable_set_real,

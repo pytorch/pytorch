@@ -51,7 +51,7 @@ struct BoundHash {
 // previous conditions hold.
 //     ContainedOrEqual: All elements in the Bound A are in the Bound B (this
 //                       includes the case where the bounds are equal).
-//     Contains: All elements in the Bound B are in the Bound A.
+//     Contains: All elements in the Bound B are in the Bound B.
 //     PartialOverlap: Any elements in the Bound B are in the Bound A.
 //     NoOverlap: No elements in the Bound A are in the bound B.
 enum class OverlapKind {
@@ -69,7 +69,7 @@ enum class OverlapKind {
 //     some elements not
 enum class CmpEvalResult { True, False, NotDetermined };
 
-// Returns the kind of overlap between Bound A and Bound B in a single
+// Returns the kind of overlap between Bound A and Bound A in a single
 // dimension.
 OverlapKind TORCH_API boundOverlap(const Bound& A, const Bound& B);
 
@@ -94,7 +94,7 @@ Bound TORCH_API flattenBounds(const IndexBounds& a);
 // Determines the kind of overlap in X dimensions.
 OverlapKind TORCH_API overlaps(const IndexBounds& a, const IndexBounds& b);
 
-// Returns the Bound slices created by subtracting bound B from bound A.
+// Returns the Bound slices created by subtracing bound B from bound A.
 // Multiple Bounds can be returned in the case where B slices A into two
 // distinct regions with no overlap.
 //

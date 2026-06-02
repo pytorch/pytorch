@@ -867,24 +867,6 @@ from user code:
     return x + y""",
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_fx_node_error_cross_device(self):
-        linear = torch.nn.Linear(10, 20, device="cuda").eval()
-
-        def fn(x):
-            return linear(x)
-
-        with self.assertRaises(TorchRuntimeError) as cm:
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
-
-        msg = str(cm.exception)
-        self.assertIn("Tensor device mismatch", msg)
-        self.assertIn("Expected all tensors to be on the same device", msg)
-        self.assertIn("cpu", msg)
-        self.assertIn("cuda", msg)
-        self.assertNotIn("Dynamo failed to run FX node with fake tensors", msg)
-        self.assertNotIn("Unhandled FakeTensor Device Propagation", msg)
-
     def test_data_dependent_branching_fullgraph(self):
         def fn(x):
             if x.sum() > 0:

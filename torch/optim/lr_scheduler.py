@@ -1171,7 +1171,7 @@ class SequentialLR(LRScheduler):
 
     def recursive_undo(self, sched=None) -> None:
         """
-        Recursively undo any step performed by the initialization of
+        Recursively undo any step performed by the initialisation of
         schedulers.
         """
         scheds = self if sched is None else sched

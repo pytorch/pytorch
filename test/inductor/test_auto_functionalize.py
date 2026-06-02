@@ -1077,46 +1077,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
             f(x[1])
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
-    def test_graph_input_view_storage_offset(self):
-        def f_as_strided(x):
-            return torch.as_strided(x, (2,), (1,), 0).clone()
-
-        opt_f_as_strided = torch.compile(
-            f_as_strided, fullgraph=True, dynamic=False, backend="inductor"
-        )
-        base = torch.arange(8, dtype=torch.float32)
-        self.assertEqual(opt_f_as_strided(base[2:4]), f_as_strided(base[2:4]))
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define(
-                "mylib::foo",
-                "(Tensor(a!) x) -> ()",
-                tags=torch.Tag.pt2_compliant_tag,
-                lib=lib,
-            )
-
-            @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            @torch._dynamo.disable
-            def foo_impl(x):
-                x.add_(10)
-
-            def f(x):
-                a = x[0]
-                torch.ops.mylib.foo(a)
-                return x
-
-            opt_f = torch.compile(f, fullgraph=True, dynamic=False, backend="inductor")
-
-            eager_base = torch.arange(8, dtype=torch.float32).reshape(4, 2)
-            result_eager = f(eager_base[1])
-
-            inductor_base = torch.arange(8, dtype=torch.float32).reshape(4, 2)
-            result_inductor = opt_f(inductor_base[1])
-
-            self.assertEqual(inductor_base, eager_base)
-            self.assertEqual(result_inductor, result_eager)
-
-    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_alias(self, _dynamic=False):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(

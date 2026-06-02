@@ -6,8 +6,8 @@
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
+#include <oneapi/dnnl/dnnl.h>
 #include <oneapi/dnnl/dnnl.hpp>
-#include <oneapi/dnnl/dnnl_sycl.hpp>
 
 namespace std {
 
@@ -29,95 +29,219 @@ using namespace dnnl;
 namespace at::native::onednn {
 
 class primitive_ext : public primitive {
- public:
-  primitive_ext(primitive&& base)
-      : primitive(std::move(base)),
-        pd_(const_cast<dnnl_primitive_desc_t>(this->get_primitive_desc())) {}
+  static constexpr int max_args = 12;
 
-  memory::desc query_md(query what, int idx = 0) const {
-    return pd_.query_md(what, idx);
+ public:
+  primitive_ext(const primitive& base) : primitive(base) {}
+  primitive_ext(primitive&& base) : primitive(std::move(base)) {}
+
+  /// Returns a memory descriptor.
+  ///
+  /// @note
+  ///     There are also convenience methods
+  ///     #dnnl::primitive_desc_base::src_desc(),
+  ///     #dnnl::primitive_desc_base::dst_desc(), and others.
+  ///
+  /// @param what The kind of parameter to query; can be
+  ///     #dnnl::query::src_md, #dnnl::query::dst_md, etc.
+  /// @param idx Index of the parameter. For example, convolution bias can
+  ///     be queried with what = #dnnl::query::weights_md and idx = 1.
+  /// @returns The requested memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     parameter of the specified kind or index.
+  const_dnnl_memory_desc_t query_md(query what, int idx = 0) const {
+    std::vector<query> valid_q{
+        query::src_md,
+        query::diff_src_md,
+        query::weights_md,
+        query::diff_weights_md,
+        query::dst_md,
+        query::diff_dst_md,
+        query::workspace_md,
+        query::scratchpad_md,
+        query::exec_arg_md};
+    if (!std::any_of(valid_q.cbegin(), valid_q.cend(), [=](query q) {
+          return what == q;
+        }))
+      DNNL_THROW_ERROR(
+          dnnl_invalid_arguments, "memory descriptor query is invalid");
+
+    const_dnnl_memory_desc_t cdesc = dnnl_primitive_desc_query_md(
+        this->get_primitive_desc(), dnnl::convert_to_c(what), idx);
+
+    return cdesc ? cdesc : nullptr;
   }
 
-  memory::desc src_desc(int idx) const {
+  /// Returns a source memory descriptor.
+  /// @param idx Source index.
+  /// @returns Source memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     source parameter with index @p idx.
+  const_dnnl_memory_desc_t src_desc(int idx) const {
     return query_md(query::src_md, idx);
   }
 
-  memory::desc dst_desc(int idx) const {
+  /// Returns a destination memory descriptor.
+  /// @param idx Destination index.
+  /// @returns Destination memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     destination parameter with index @p idx.
+  const_dnnl_memory_desc_t dst_desc(int idx) const {
     return query_md(query::dst_md, idx);
   }
 
-  memory::desc weights_desc(int idx) const {
+  /// Returns a weights memory descriptor.
+  /// @param idx Weights index.
+  /// @returns Weights memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     weights parameter with index @p idx.
+  const_dnnl_memory_desc_t weights_desc(int idx) const {
     return query_md(query::weights_md, idx);
   }
 
-  memory::desc diff_src_desc(int idx) const {
+  /// Returns a diff source memory descriptor.
+  /// @param idx Diff source index.
+  /// @returns Diff source memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     diff source parameter with index @p idx.
+  const_dnnl_memory_desc_t diff_src_desc(int idx) const {
     return query_md(query::diff_src_md, idx);
   }
 
-  memory::desc diff_dst_desc(int idx) const {
+  /// Returns a diff destination memory descriptor.
+  /// @param idx Diff destination index.
+  /// @returns Diff destination memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     diff destination parameter with index @p idx.
+  const_dnnl_memory_desc_t diff_dst_desc(int idx) const {
     return query_md(query::diff_dst_md, idx);
   }
 
-  memory::desc diff_weights_desc(int idx) const {
+  /// Returns a diff weights memory descriptor.
+  /// @param idx Diff weights index.
+  /// @returns Diff weights memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     diff weights parameter with index @p idx.
+  const_dnnl_memory_desc_t diff_weights_desc(int idx) const {
     return query_md(query::diff_weights_md, idx);
   }
 
-  memory::desc exec_arg_desc(int idx) const {
+  const_dnnl_memory_desc_t exec_arg_desc(int idx) const {
     return query_md(query::exec_arg_md, idx);
   }
 
-  memory::desc src_desc() const {
+  // Separate versions without the index argument for documentation
+  // purposes.
+
+  /// Returns a source memory descriptor.
+  /// @returns Source memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     source parameter.
+  const_dnnl_memory_desc_t src_desc() const {
     return src_desc(0);
   }
-  memory::desc dst_desc() const {
+
+  /// Returns a destination memory descriptor.
+  /// @returns Destination memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     destination parameter.
+  const_dnnl_memory_desc_t dst_desc() const {
     return dst_desc(0);
   }
-  memory::desc weights_desc() const {
+
+  /// Returns a weights memory descriptor.
+  /// @returns Weights memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     weights parameter.
+  const_dnnl_memory_desc_t weights_desc() const {
     return weights_desc(0);
   }
-  memory::desc diff_src_desc() const {
+
+  /// Returns a diff source memory descriptor.
+  /// @returns Diff source memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     diff source memory with.
+  const_dnnl_memory_desc_t diff_src_desc() const {
     return diff_src_desc(0);
   }
-  memory::desc diff_dst_desc() const {
+
+  /// Returns a diff destination memory descriptor.
+  /// @returns Diff destination memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     diff destination parameter.
+  const_dnnl_memory_desc_t diff_dst_desc() const {
     return diff_dst_desc(0);
   }
-  memory::desc diff_weights_desc() const {
+
+  /// Returns a diff weights memory descriptor.
+  /// @returns Diff weights memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not have a
+  ///     diff weights parameter.
+  const_dnnl_memory_desc_t diff_weights_desc() const {
     return diff_weights_desc(0);
   }
-  memory::desc workspace_desc() const {
+
+  /// Returns the workspace memory descriptor.
+  /// @returns Workspace memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not require
+  ///     workspace parameter.
+  const_dnnl_memory_desc_t workspace_desc() const {
     return query_md(query::workspace_md, 0);
   }
-  memory::desc scratchpad_desc() const {
+
+  /// Returns the scratchpad memory descriptor.
+  /// @returns scratchpad memory descriptor.
+  /// @returns A zero memory descriptor if the primitive does not require
+  ///     scratchpad parameter.
+  /// @sa @ref dev_guide_attributes_scratchpad
+  const_dnnl_memory_desc_t scratchpad_desc() const {
     return query_md(query::scratchpad_md, 0);
   }
 
-  memory make_src(engine& aengine, void* handle = DNNL_MEMORY_ALLOCATE) const {
-    return make_onednn_memory(src_desc(), aengine, handle);
+  inline memory make_memory(
+      const_dnnl_memory_desc_t md_t,
+      const engine& aengine,
+      void* handle = DNNL_MEMORY_ALLOCATE) const {
+    sycl_interop::memory_kind kind = dnnl::sycl_interop::memory_kind::usm;
+    dnnl_memory_t c_memory;
+    error::wrap_c_api(
+        dnnl_sycl_interop_memory_create(
+            &c_memory, md_t, aengine.get(), convert_to_c(kind), handle),
+        "could not create a memory");
+    return memory(c_memory);
   }
 
-  memory make_weight(engine& aengine, void* handle = DNNL_MEMORY_ALLOCATE)
+  memory make_src(const engine& aengine, void* handle = DNNL_MEMORY_ALLOCATE)
       const {
-    return make_onednn_memory(weights_desc(), aengine, handle);
+    return make_memory(src_desc(), aengine, handle);
   }
 
-  memory make_bias(engine& aengine, void* handle = DNNL_MEMORY_ALLOCATE) const {
-    return make_onednn_memory(weights_desc(1), aengine, handle);
-  }
-
-  memory make_dst(engine& aengine, void* handle = DNNL_MEMORY_ALLOCATE) const {
-    return make_onednn_memory(dst_desc(), aengine, handle);
-  }
-
-  memory make_scratchpad(engine& aengine, void* handle = DNNL_MEMORY_ALLOCATE)
+  memory make_weight(const engine& aengine, void* handle = DNNL_MEMORY_ALLOCATE)
       const {
-    return make_onednn_memory(scratchpad_desc(), aengine, handle);
+    return make_memory(weights_desc(), aengine, handle);
+  }
+
+  memory make_bias(const engine& aengine, void* handle = DNNL_MEMORY_ALLOCATE)
+      const {
+    return make_memory(weights_desc(1), aengine, handle);
+  }
+
+  memory make_dst(const engine& aengine, void* handle = DNNL_MEMORY_ALLOCATE)
+      const {
+    return make_memory(dst_desc(), aengine, handle);
+  }
+
+  memory make_scratchpad(
+      const engine& aengine,
+      void* handle = DNNL_MEMORY_ALLOCATE) const {
+    return make_memory(scratchpad_desc(), aengine, handle);
   }
 
   size_t get_scratchpad_size() const {
-    return scratchpad_desc().get_size();
+    return dnnl_memory_desc_get_size(scratchpad_desc());
   }
 
-  memory make_args(int arg_class, engine& aengine, void* handle) const {
+  memory make_args(int arg_class, const engine& aengine, void* handle) const {
     switch (arg_class) {
       case DNNL_ARG_SRC:
         return make_src(aengine, handle);
@@ -136,31 +260,46 @@ class primitive_ext : public primitive {
   }
 
   template <typename M>
-  void set_attribute(int arg_class, void* handle, M constructor) {
-    auto it = args_cache_.find(arg_class);
-    if (it != args_cache_.end())
-      it->second.set_data_handle(handle);
-    else
-      args_cache_[arg_class] = constructor();
+  void set_attribute(int slot, int arg_class, void* handle, M constructor) {
+    if (mem_arg_cache[slot])
+      mem_arg_cache[slot].set_data_handle(handle);
+    else {
+      mem_arg_cache[slot] = constructor();
+      c_args[slot].arg = arg_class;
+      c_args[slot].memory = mem_arg_cache[slot].get();
+    }
   }
 
   sycl::event execute(
       const stream& astream,
-      engine& aengine,
-      std::vector<std::pair<int, void*>>&& handles) {
+      const engine& aengine,
+      std::vector<std::pair<int, void*>>&& handles,
+      int slot_off = 2) {
+    auto off = slot_off;
     for (const auto& p : handles) {
-      auto it = args_cache_.find(p.first);
-      if (it != args_cache_.end())
-        it->second.set_data_handle(p.second);
-      else
-        args_cache_[p.first] = make_args(p.first, aengine, p.second);
+      auto& m_arg = mem_arg_cache[off];
+      if (m_arg)
+        m_arg.set_data_handle(p.second);
+      else {
+        m_arg = make_args(p.first, aengine, p.second);
+        c_args[off].arg = p.first;
+        c_args[off].memory = m_arg.get();
+      }
+      ++off;
     }
-    return dnnl::sycl_interop::execute(*this, astream, args_cache_);
+
+    sycl::event return_event;
+    std::vector<sycl::event> deps{};
+    error::wrap_c_api(
+        dnnl_sycl_interop_primitive_execute(
+            this->get(), astream.get(), off, c_args, &deps, &return_event),
+        "could not execute a primitive");
+    return return_event;
   }
 
  private:
-  dnnl::matmul::primitive_desc pd_;
-  std::unordered_map<int, memory> args_cache_;
+  memory mem_arg_cache[max_args];
+  dnnl_exec_arg_t c_args[max_args];
 };
 
 // Specifies the combined data types of input and weight tensors.

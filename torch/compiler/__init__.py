@@ -59,11 +59,9 @@ def compile(*args, **kwargs):
 
 def reset() -> None:
     """
-    Reset the in-process compiler state.
-
-    This function clears Dynamo's in-memory compilation caches and related
-    process-local state used by :func:`torch.compile`. It does not delete
-    filesystem caches, such as Inductor's disk cache.
+    This function clears all compilation caches and restores the system to its initial state.
+    It is recommended to call this function, especially after using operations like `torch.compile(...)`
+    to ensure a clean state before another unrelated compilation
     """
     import torch._dynamo
 

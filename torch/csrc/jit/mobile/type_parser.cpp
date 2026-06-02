@@ -4,7 +4,6 @@
 #include <ATen/core/type_factory.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/custom_class.h>
-#include <array>
 #include <string_view>
 
 using torch::jit::valid_single_char_tokens;
@@ -247,8 +246,8 @@ TypePtr TypeParser::parseCustomType() {
 }
 
 TypePtr TypeParser::parseTorchbindClassType() {
-  static constexpr auto expected_atoms =
-      std::to_array<std::string_view>({"torch", ".", "classes", "."});
+  static constexpr std::array<const char*, 4> expected_atoms = {
+      "torch", ".", "classes", "."};
   for (const auto& atom : expected_atoms) {
     expect(atom);
   }
@@ -264,7 +263,7 @@ TypePtr TypeParser::parseTorchbindClassType() {
   return torch::getCustomClass(customClassName);
 }
 
-void TypeParser::expect(std::string_view s) {
+void TypeParser::expect(const char* s) {
   std::string_view token = cur();
   TORCH_CHECK(
       token == s,

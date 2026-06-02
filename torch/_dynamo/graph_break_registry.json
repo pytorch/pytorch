@@ -1307,16 +1307,6 @@
       ]
     }
   ],
-  "GB5173": [
-    {
-      "Gb_type": "Tensor device mismatch",
-      "Context": "{op} {node.target}",
-      "Explanation": "str(cause)",
-      "Hints": [
-        "Move inputs, parameters, and buffers to the same device."
-      ]
-    }
-  ],
   "GB0096": [
     {
       "Gb_type": "Should not compile partial graph (STORE_ATTR)",

@@ -92,19 +92,9 @@ def infer_schema(
     def convert_type_string(annotation_type: str):
         try:
             return eval(annotation_type, pf_globals, pf_locals)
-        except NameError as e:
+        except Exception:
             error_fn(
-                f"Unsupported type annotation {annotation_type}. It is not a type. "
-                f"({e}). "
-                f"If you are using 'from __future__ import annotations', note that "
-                f"annotations are evaluated lazily as strings; make sure all types "
-                f"referenced in annotations are importable at module scope, not only "
-                f"inside a local function."
-            )
-        except Exception as e:
-            error_fn(
-                f"Unsupported type annotation {annotation_type}. It is not a type. "
-                f"({type(e).__name__}: {e})"
+                f"Unsupported type annotation {annotation_type}. It is not a type."
             )
 
     def unstringify_types(

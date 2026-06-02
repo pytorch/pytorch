@@ -39,50 +39,6 @@ IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
 
 
-class TestCppExtensionImport(common.TestCase):
-    def test_cython_not_loaded_with_import_cpp_extension(self):
-        script = """
-import importlib.util
-import inspect
-import pathlib
-import sys
-import tempfile
-
-with tempfile.TemporaryDirectory() as tmpdir:
-    root = pathlib.Path(tmpdir)
-    (root / "Cython" / "Distutils").mkdir(parents=True)
-    (root / "Cython" / "Compiler").mkdir(parents=True)
-    (root / "Cython" / "__init__.py").write_text("")
-    (root / "Cython" / "Distutils" / "__init__.py").write_text("")
-    (root / "Cython" / "Compiler" / "__init__.py").write_text("")
-    (root / "Cython" / "Compiler" / "Main.py").write_text("")
-    (root / "Cython" / "Distutils" / "build_ext.py").write_text(
-        "from distutils.command.build_ext import build_ext\\n"
-    )
-
-    sys.path.insert(0, tmpdir)
-    assert importlib.util.find_spec("Cython") is not None  # noqa: S101
-    import torch.utils.cpp_extension
-
-    cython_modules = sorted(
-        name for name in sys.modules
-        if name == "Cython" or name.startswith("Cython.")
-    )
-    assert not cython_modules, cython_modules  # noqa: S101
-    build_extension_cls = torch.utils.cpp_extension.BuildExtension
-    assert isinstance(build_extension_cls, type)  # noqa: S101
-    assert build_extension_cls is torch.utils.cpp_extension.BuildExtension  # noqa: S101
-    build_extension_source = inspect.getsource(build_extension_cls)
-    assert "def build_extensions" in build_extension_source  # noqa: S101
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-
 # There's only one test that runs gradcheck, run slow mode manually
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionJIT(common.TestCase):

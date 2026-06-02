@@ -115,7 +115,7 @@ class ForkerIterDataPipe(IterDataPipe):
 
 
 class _ContainerTemplate(ABC):
-    r"""Abstract class for container ``DataPipes``. The following are three required methods."""
+    r"""Abstract class for container ``DataPipes``. The followings are three required methods."""
 
     @abstractmethod
     def get_next_element_by_instance(self, instance_id: int): ...
@@ -307,7 +307,7 @@ class _ChildDataPipe(IterDataPipe):
 
     Example:
         >>> # xdoctest: +REQUIRES(module:torchdata)
-        >>> # Single Iterator per IterDataPipe Invalidation
+        >>> # Singler Iterator per IteraDataPipe Invalidation
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> source_dp = IterableWrapper(range(10))
         >>> cdp1, cdp2 = source_dp.fork(num_instances=2)
@@ -433,7 +433,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
 
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
-        # like throwing Error when classification result is out of range
+        # like throwing Error when classification result is out of o range
         container = _DemultiplexerIterDataPipe(
             datapipe, num_instances, classifier_fn, drop_none, buffer_size
         )  # type: ignore[abstract]

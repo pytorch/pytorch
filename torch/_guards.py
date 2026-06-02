@@ -210,7 +210,7 @@ class GuardSource(enum.Enum):
 Base class for a "GuardBuilder" role.
 
 The GuardBuilderBase role is to represent a scope within which to build a guard. The name is a little
-confusing, as it's not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
+confusing, as its not a builder, but for the sake of avoiding a lot of renames and keeping the original reference
 to torchdynamo's GuardBuilder.
 
 Note: create_fn is invoked with a GuardBuilderBase and a Guard. A GuardBuilder is chosen based
@@ -713,7 +713,7 @@ class GuardsSet:
 
 """
 A GuardsContext is a checkpointable representation of all the guards in the current tracing
-context. Its lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
+context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
 directly outside of it. For passing around internal state representations of this object,
 prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 """
