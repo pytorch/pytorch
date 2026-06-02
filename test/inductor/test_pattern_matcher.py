@@ -3019,39 +3019,41 @@ class TestPatternMatcherLogging(LoggingTestCase):
     def test_gumbel_max_trick(self):
         counters.clear()
 
-        @torch.compile
-        def sample(logits, temperature):
-            logits = logits / max(temperature, 1e-5)
-            probs = torch.nn.functional.softmax(logits, dim=-1)
-            q = torch.empty_like(logits).exponential_(1)
-            return torch.argmax(probs / q, dim=-1, keepdim=True).to(dtype=torch.int)
+        with inductor_config.patch(fx_graph_cache=False):
 
-        N = 10
-        temperature = 0.8
-        row = (
-            torch.arange(1, N + 1, dtype=torch.float, device=GPU_TYPE).log()
-            * temperature
-        )
-        expected_distribution = []
-        tot_val = N * (N + 1) / 2
-        for i in range(1, N + 1):
-            expected_distribution.append(float(i) / tot_val)
+            @torch.compile
+            def sample(logits, temperature):
+                logits = logits / max(temperature, 1e-5)
+                probs = torch.nn.functional.softmax(logits, dim=-1)
+                q = torch.empty_like(logits).exponential_(1)
+                return torch.argmax(probs / q, dim=-1, keepdim=True).to(dtype=torch.int)
 
-        # Item 0 expect to appear M / (1 + 2 +...+ N) times. Make M large enough
-        # so the test is less flaky.
-        # If this is still flaky, either recduce N or increase M
-        M = 1000000
-        logits = row[None, :].repeat(M, 1)
-        output = sample(logits, temperature=temperature)
-        stat = (torch.bincount(output.flatten()) / M).tolist()
+            N = 10
+            temperature = 0.8
+            row = (
+                torch.arange(1, N + 1, dtype=torch.float, device=GPU_TYPE).log()
+                * temperature
+            )
+            expected_distribution = []
+            tot_val = N * (N + 1) / 2
+            for i in range(1, N + 1):
+                expected_distribution.append(float(i) / tot_val)
 
-        for expected, actual in zip(expected_distribution, stat):
-            tol = 0.1
-            ratio = actual / expected
+            # Item 0 expect to appear M / (1 + 2 +...+ N) times. Make M large enough
+            # so the test is less flaky.
+            # If this is still flaky, either recduce N or increase M
+            M = 1000000
+            logits = row[None, :].repeat(M, 1)
+            output = sample(logits, temperature=temperature)
+            stat = (torch.bincount(output.flatten()) / M).tolist()
 
-            self.assertTrue(abs(ratio - 1) < tol, f"{expected} v.s. {actual}")
+            for expected, actual in zip(expected_distribution, stat):
+                tol = 0.1
+                ratio = actual / expected
 
-        self.assertTrue(counters["inductor"]["apply_gumbel_max_trick"] == 1)
+                self.assertTrue(abs(ratio - 1) < tol, f"{expected} v.s. {actual}")
+
+            self.assertTrue(counters["inductor"]["apply_gumbel_max_trick"] == 1)
 
     def test_per_pattern_counter(self):
         """Test that per-pattern counters track individual pattern matches"""
