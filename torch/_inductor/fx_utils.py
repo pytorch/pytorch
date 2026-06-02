@@ -424,19 +424,22 @@ class FakeTensorUpdater:
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         self.processed_hashes = OrderedSet[_FxNodeHash]()
         self.gm = gm
-
-        # Import here to avoid circular import issues.
-        from torch._inductor.compile_fx import _get_subgraph_names
-
-        self.subgraph_updaters: dict[torch.fx.GraphModule, FakeTensorUpdater] = {
-            (subgraph := getattr(self.gm, subgraph_name)): FakeTensorUpdater(subgraph)
-            for subgraph_name in _get_subgraph_names(self.gm)
-        }
+        self.subgraph_updaters: dict[torch.fx.GraphModule, FakeTensorUpdater] = {}
+        self.refresh_subgraph_updaters()
 
         for node in self.gm.graph.nodes:
             is_valid, _, _ = get_fake_args_kwargs(node, self.gm)
             if is_valid:
                 self.processed_hashes.add(self.hash_node(node))
+
+    def refresh_subgraph_updaters(self) -> None:
+        # Import here to avoid circular import issues.
+        from torch._inductor.compile_fx import _get_subgraph_names
+
+        for subgraph_name in _get_subgraph_names(self.gm):
+            subgraph = getattr(self.gm, subgraph_name)
+            if subgraph not in self.subgraph_updaters:
+                self.subgraph_updaters[subgraph] = FakeTensorUpdater(subgraph)
 
     def hash_node(self, node: torch.fx.Node) -> _FxNodeHash:
         def get_hash_or_ids(n_iter: Iterable[Any]) -> tuple[int, ...]:
@@ -478,11 +481,10 @@ class FakeTensorUpdater:
                 return True
 
             return (
-                callable(node.target)
-                # node.target will called with FakeTensor arguments, which are not
-                # supported by Inductor lowerings. TODO: Investigate how to remove
-                # this. See https://github.com/pytorch/pytorch/issues/164920
-                and not hasattr(node.target, "_inductor_lowering_function")
+                isinstance(node.target, torch._ops.OpOverload)
+                or node.target is operator.getitem
+                or node.target
+                is torch._inductor.fx_passes.reinplace._generalized_scatter
             )
 
         def node_invokes_subgraph(
@@ -518,6 +520,7 @@ class FakeTensorUpdater:
         subgraph_nodes_to_process: dict[
             torch.fx.GraphModule, OrderedSet[torch.fx.Node]
         ] = {}
+        self.refresh_subgraph_updaters()
         for node in self.gm.graph.nodes:
             hash = self.hash_node(node)
             is_valid, args, kwargs = get_fake_args_kwargs(node, self.gm)
@@ -688,7 +691,7 @@ def get_fake(x: Any, gm: torch.fx.GraphModule | None) -> Any:
             return x.meta["example_value"]
         if gm is not None and x.op == "get_attr" and isinstance(x.target, str):
             attr = _get_attr(gm, x.target)
-            if isinstance(attr, torch.Tensor):
+            if pytree.tree_any_only(torch.Tensor, lambda _: True, attr):
                 return x
             return attr
         return x
