@@ -1560,6 +1560,31 @@ class GemmEpilogueFusionTests(TestCase):
                 lambda acc, row_bias, col_scale, tile_bias: F.gelu(acc + tile_bias)
                 + row_bias * col_scale,
             ),
+            (
+                "where_select",
+                lambda acc, row_bias, col_scale, tile_bias: torch.where(
+                    acc + tile_bias > row_bias,
+                    acc * col_scale,
+                    row_bias - tile_bias,
+                ),
+            ),
+            (
+                "fast_math_combo",
+                lambda acc, row_bias, col_scale, tile_bias: (
+                    torch.tanh(acc + row_bias)
+                    + torch.sigmoid(acc * col_scale)
+                    + F.softplus(tile_bias + acc.abs())
+                    + torch.log1p((acc + tile_bias).abs())
+                ),
+            ),
+            (
+                "cast_chain",
+                lambda acc, row_bias, col_scale, tile_bias: (
+                    (acc.to(torch.float32) + tile_bias).to(torch.bfloat16).float()
+                    * col_scale
+                    + row_bias
+                ).relu(),
+            ),
         )
 
         for seed, (name, epilogue) in enumerate(cases):
