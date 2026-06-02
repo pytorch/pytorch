@@ -122,6 +122,49 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_compiled_async_all_reduce_wait_graph(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def fn(tensor):
+            work = dist.all_reduce(tensor, async_op=True)
+            work.wait()
+            return tensor
+
+        fn(torch.ones(4))
+        self.assertEqual(len(backend.graphs), 1)
+        targets = [node.target for node in backend.graphs[0].graph.nodes]
+        all_reduce_targets = {
+            torch.ops._c10d_functional.all_reduce,
+            torch.ops._c10d_functional.all_reduce.default,
+        }
+        self.assertEqual(sum(target in all_reduce_targets for target in targets), 1)
+        wait_targets = {
+            wait_tensor,
+            torch.ops._c10d_functional.wait_tensor,
+            torch.ops._c10d_functional.wait_tensor.default,
+        }
+        self.assertTrue(any(target in wait_targets for target in targets))
+        self.assertEqual(targets.count("copy_"), 1)
+
+    def test_compiled_async_all_reduce_returned_work(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def fn(tensor):
+            return dist.all_reduce(tensor, async_op=True)
+
+        tensor = torch.ones(4)
+        work = fn(tensor)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertTrue(work.is_success())
+        self.assertIsNone(work.exception())
+        self.assertTrue(work.is_completed())
+        self.assertTrue(work.wait())
+        self.assertEqual(work.result(), [tensor])
+        self.assertEqual(work.get_future().wait(), [tensor])
+        self.assertEqual(work.get_future_result().wait(), 0)
+
     def test_all_gather_tensor_gather_dim_0(self):
         """all_gather_tensor with gather_dim=0 (no _maybe_view_chunk_cat call)."""
 

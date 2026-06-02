@@ -2733,7 +2733,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         kwargs = dict(signature.bind(*args, **kwargs).arguments)
         args = []
 
-        if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
+        async_op = "async_op" in kwargs and kwargs["async_op"].as_python_constant()
+        if async_op and self.fn is not dist.all_reduce:
             unimplemented(
                 gb_type="async_op=True for distributed collectives",
                 context=f"{self.fn}, {args=}, {kwargs=}",

@@ -17517,6 +17517,28 @@ def forward(self, x):
             self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
 
     @xfailIfDistributedNotSupported
+    def test_distributed_async_all_reduce_wait(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 3)
+
+            def forward(self, x):
+                y = self.linear(x).abs().clamp(max=1.0) * 2
+                work = torch.distributed.all_reduce(y, async_op=True)
+                work.wait()
+                return y
+
+        with self.distributed_env(world_size=2):
+            m = Foo()
+            ep = export(m, (torch.randn(4, 4),))
+            FileCheck().check("torch.ops._c10d_functional.all_reduce.default").check(
+                "torch.ops._c10d_functional.wait_tensor.default"
+            ).check("copy_").run(ep.graph_module.code)
+            inp = (torch.randn(4, 4),)
+            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+
+    @xfailIfDistributedNotSupported
     def test_distributed_all_gather(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
