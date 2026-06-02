@@ -1399,10 +1399,11 @@ class GraphLowering(torch.fx.Interpreter):
                     if get_decompositions([target])
                     else MissingOperatorWithoutDecomp
                 )
-                log.info(
-                    "Creating implicit fallback for:\n%s",
-                    error.operator_str(target, args, kwargs),
-                )
+                if log.isEnabledFor(logging.INFO):
+                    log.info(
+                        "Creating implicit fallback for:\n%s",
+                        error.operator_str(target, args, kwargs),
+                    )
 
                 tag: torch._C.Tag | None = get_layout_constraint_tag(
                     target, with_default=False
