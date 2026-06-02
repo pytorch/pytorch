@@ -769,6 +769,37 @@ class <lambda>(torch.nn.Module):
         )
 
     @requires_cuda
+    def test_recorded_cuda_events_append_runtime_objects(self):
+        events = []
+
+        def fn(x):
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+
+            start_event.record()
+            out = torch.matmul(x, x)
+            end_event.record()
+
+            events.append(start_event)
+            events.append(end_event)
+            return out
+
+        x = torch.randn(16, 16, device="cuda")
+        expected = fn(x)
+        torch.cuda.synchronize()
+        events[0].elapsed_time(events[1])
+        events.clear()
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch.cuda.synchronize()
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(len(events), 2)
+        self.assertIsInstance(events[0], torch.Event)
+        self.assertIsInstance(events[1], torch.Event)
+        self.assertGreaterEqual(events[0].elapsed_time(events[1]), 0.0)
+
+    @requires_cuda
     def test_run_opcheck_fork_join(self):
         from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
