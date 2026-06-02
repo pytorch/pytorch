@@ -117,6 +117,11 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # assert_size_stride would fail to compile.
         return
 
+    def write_assert_alignment(self, name: str, alignment: int, op_name: str) -> None:
+        # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
+        # assert_alignment would fail to compile.
+        return
+
     def _codegen_v2_raw_input_bindings(self, code: IndentedBuffer):
         for idx, (input_key, input_value) in enumerate(V.graph.graph_inputs.items()):
             input_cpp_type = CppWrapperCpuArrayRef.get_input_element_cpp_type(
@@ -250,7 +255,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 code.splice(
                     f"""
                     thread_local ThreadLocalCachedOutputArray<std::decay_t<decltype({output})>>
-                        {cached_output_name}({output});
+                        {cached_output_name}{{{output}}};
                     {cached_output_name}.copy_data_from({output});
                     using {output_arrayref_type} = std::tuple_element_t<{idx}, AOTInductorModelOutputs>;
                     using {output_element_type} = typename {output_arrayref_type}::value_type;
@@ -600,7 +605,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             cache_type = "Array" if arr_iface else "Tensor"
             self.wrapper_call.writeline(
                 f"thread_local ThreadLocalCachedOutput{cache_type}<std::decay_t<decltype({output})>> "
-                f"{cached_output_name}({output});"
+                f"{cached_output_name}{{{output}}};"
             )
             if arr_iface:
                 self.wrapper_call.writeline(
@@ -960,6 +965,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         outer_additional_inputs = [
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
+        carried_output_names = self._get_while_loop_carried_output_names(while_loop)
         cond_result_name = f"{name}_cond_result"
         if is_bool_pred:
             self.writeline(f"bool {cond_result_name};")
@@ -967,8 +973,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
 
         cond_outer_inputs = []
-        for inp, out in zip(outer_carried_inputs, while_loop.outputs):
-            out_name = out.get_name()
+        for inp, out_name in zip(outer_carried_inputs, carried_output_names):
             self.writeline(f"AtenTensorHandle {out_name}_handle;")
             self.writeline(
                 "AOTI_TORCH_ERROR_CODE_CHECK("

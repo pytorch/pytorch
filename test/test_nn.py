@@ -9102,10 +9102,16 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     def test_large_reflect_pad(self, device):
         # https://github.com/pytorch/pytorch/issues/165861
-        x = torch.rand(2**16, 2, device="cuda")
-        c = F.pad(x, (1, 1), mode="reflect")
-        c_cpu = F.pad(x.cpu(), (1, 1), mode="reflect")
-        self.assertEqual(c, c_cpu)
+        for shape in ((2**16, 2), (2**16, 1, 2)):
+            x = torch.rand(*shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+            c = F.pad(x, (1, 1), mode="reflect")
+            c_cpu = F.pad(ref_x, (1, 1), mode="reflect")
+            self.assertEqual(c, c_cpu)
+            grad = torch.randn_like(c)
+            c.backward(grad)
+            c_cpu.backward(grad.cpu())
+            self.assertEqual(x.grad, ref_x.grad)
 
     @onlyCUDA
     @largeTensorTest("48GB", "cpu")
