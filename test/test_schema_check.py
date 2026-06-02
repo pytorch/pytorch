@@ -7,7 +7,7 @@ import torch
 from torch.utils._pytree import tree_map
 import unittest
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import run_tests, TestCase, TEST_WITH_TORCHDYNAMO
 from torch.fx.operator_schemas import normalize_function
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -227,129 +227,6 @@ class TestSchemaCheck(JitTestCase):
             schema_check.aliasing
         )
 
-    # Tests that SchemaCheckMode wraps torch.Tensor
-    def test_schema_check_mode_functionality(self):
-        x = torch.rand((3, 3), requires_grad=True)
-        expected = x.relu().sin()
-        with SchemaCheckMode():
-            actual = x.relu().sin()
-        self.assertEqual(expected, actual)
-
-    # Tests that SchemaCheckMode wraps torch.Tensor when an argument's default is overridden
-    def test_schema_check_mode_functionality_default_replaced(self):
-        x = torch.rand((3, 3), requires_grad=True)
-        expected = x.add(x, alpha=2)
-        with SchemaCheckMode():
-            actual = x.add(x, alpha=2)
-        self.assertEqual(expected, actual)
-
-    # Tests that SchemaCheckMode wraps torch.Tensor when there is a Tensor[] argument
-    def test_schema_check_mode_functionality_list_input(self):
-        a = torch.rand((3, 3))
-        b = torch.rand((3, 3))
-        c = torch.rand((3, 3))
-        expected = torch.linalg.multi_dot([a, b, c])
-        with SchemaCheckMode():
-            actual = torch.linalg.multi_dot([a, b, c])
-        self.assertEqual(expected, actual)
-
-    # Tests that SchemaCheckMode wraps torch.Tensor with an op that has the (a -> *) notation
-    def test_schema_check_mode_functionality_wildcard_after(self):
-        x = torch.rand((3, 3))
-        expected = x.chunk(6)
-        with SchemaCheckMode():
-            actual = x.chunk(6)
-        self.assertEqual(expected, actual)
-
-    # Tests that SchemaCheckMode wraps torch.Tensor when there is a kwarg tensor input
-    @unittest.skipIf(not torch._C.has_spectral, "ATen not built with FFT.")
-    def test_schema_check_mode_functionality_kwarg_tensor(self):
-        x = torch.rand((3, 5))
-        w = torch.rand(4)
-        expected = torch.stft(x, 4, win_length=4, window=w, return_complex=True)
-        with SchemaCheckMode():
-            actual = torch.stft(x, 4, win_length=4, window=w, return_complex=True)
-        self.assertEqual(expected, actual)
-
-    # Tests that SchemaCheckMode wraps torch.Tensor with a mutable op
-    def test_schema_check_mode_functionality_mutable_inputs(self):
-        expected = torch.rand((3, 3), requires_grad=False)
-        actual = torch.clone(expected)
-        expected.sinh_()
-        with SchemaCheckMode():
-            actual.sinh_()
-        self.assertEqual(expected, actual)
-
-    # Tests that SchemaCheckMode wraps Torch.tensor when inputs alias
-    def test_schema_check_mode_functionality_aliasing_inputs(self):
-        expected = torch.rand((3, 3))
-        x = expected
-        actual = torch.clone(expected)
-        y = actual
-        expected.add_(x)
-        with SchemaCheckMode():
-            actual.add_(y)
-        self.assertEqual(expected, actual)
-
-    # Tests that SchemaCheckMode wraps Torch.tensor with multiple tensor outputs
-    def test_schema_check_mode_functionality_with_multiple_outputs(self):
-        x = torch.arange(9.)
-        m_expected, e_expected = torch.frexp(x)
-        m_actual = torch.arange(9.)
-        e_actual = torch.zeros([9], dtype=torch.int32)
-        with SchemaCheckMode():
-            torch.frexp(x, out=(m_actual, e_actual))
-        self.assertEqual(m_expected, m_actual)
-        self.assertEqual(e_expected, e_actual)
-
-    # Tests that SchemaCheckMode wraps Torch.tensor with aliasing outputs due to aliasing inputs
-    def test_schema_check_mode_functionality_with_multiple_outputs_aliasing(self):
-        x = torch.rand((3, 3))
-        actual = torch.zeros(3)
-        with SchemaCheckMode():
-            torch.aminmax(x, dim=0, out=[actual, actual])
-        self.assertEqual(torch.amax(x, dim=0), actual)
-
-    # Tests that SchemaCheckMode wraps Torch.tensor in ops with real Device input
-    def test_schema_check_mode_functionality_device_input(self):
-        with SchemaCheckMode():
-            x = torch.rand((3, 3), device="cpu", dtype=torch.double)
-            y = x + x
-        self.assertEqual(x + x, y)
-
-    # Tests that SchemaCheckMode wraps Torch.tensor in special training op edge case
-    def test_schema_check_mode_functionality_training_op(self):
-        x = torch.rand((3, 3), requires_grad=True)
-        batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
-        expected = batch(x)
-        with SchemaCheckMode():
-            actual = batch(x)
-        self.assertEqual(expected, actual)
-
-    # Tests that SchemaCheckMode wraps Torch.tensor with nested training op edge case
-    def test_schema_check_mode_functionality_nested_training_op(self):
-        actual = torch.rand((3, 3))
-        batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
-        expected = torch.clone(actual)
-        expected.sinh_()
-        expected.tanh_()
-        expected.relu_()
-        expected = batch(expected)
-
-        with SchemaCheckMode():
-            actual.sinh_()
-            actual.tanh_()
-            actual.relu_()
-            actual = batch(actual)
-        self.assertEqual(expected, actual)
-
-    # Tests that SchemaCheckMode wraps Torch.tensor with empty list input
-    def test_schema_check_mode_empty_list_input(self):
-        expected = torch.atleast_1d([])
-        with SchemaCheckMode():
-            actual = torch.atleast_1d([])
-        self.assertEqual(expected, actual)
-
     # Tests that an exception is raised for a mismatching mutation
     def test_mutation_check_fail(self):
         with self.assertRaisesRegex(RuntimeError, "Argument input is not defined as mutable but was mutated"):
@@ -496,6 +373,126 @@ class TestSchemaCheck(JitTestCase):
         with SchemaInfoBindTestMode(self) as schemaInfoCheck:
             x.add(x)
 
+class TestSchemaCheckFunctionality(TestCase):
+    """Tests that SchemaCheckMode preserves op correctness — device-agnostic."""
+
+    def setUp(self):
+        if TEST_WITH_TORCHDYNAMO:
+            self.skipTest("SchemaCheckMode is ignored by dynamo")
+        super().setUp()
+
+    def test_schema_check_mode_functionality(self, device):
+        x = torch.rand((3, 3), device=device, requires_grad=True)
+        expected = x.relu().sin()
+        with SchemaCheckMode():
+            actual = x.relu().sin()
+        self.assertEqual(expected, actual)
+
+    def test_schema_check_mode_functionality_default_replaced(self, device):
+        x = torch.rand((3, 3), device=device, requires_grad=True)
+        expected = x.add(x, alpha=2)
+        with SchemaCheckMode():
+            actual = x.add(x, alpha=2)
+        self.assertEqual(expected, actual)
+
+    def test_schema_check_mode_functionality_list_input(self, device):
+        a = torch.rand((3, 3), device=device)
+        b = torch.rand((3, 3), device=device)
+        c = torch.rand((3, 3), device=device)
+        expected = torch.linalg.multi_dot([a, b, c])
+        with SchemaCheckMode():
+            actual = torch.linalg.multi_dot([a, b, c])
+        self.assertEqual(expected, actual)
+
+    def test_schema_check_mode_functionality_wildcard_after(self, device):
+        x = torch.rand((3, 3), device=device)
+        expected = x.chunk(6)
+        with SchemaCheckMode():
+            actual = x.chunk(6)
+        self.assertEqual(expected, actual)
+
+    @unittest.skipIf(not torch._C.has_spectral, "ATen not built with FFT.")
+    def test_schema_check_mode_functionality_kwarg_tensor(self, device):
+        x = torch.rand((3, 5), device=device)
+        w = torch.rand(4, device=device)
+        expected = torch.stft(x, 4, win_length=4, window=w, return_complex=True)
+        with SchemaCheckMode():
+            actual = torch.stft(x, 4, win_length=4, window=w, return_complex=True)
+        self.assertEqual(expected, actual)
+
+    def test_schema_check_mode_functionality_mutable_inputs(self, device):
+        expected = torch.rand((3, 3), device=device, requires_grad=False)
+        actual = torch.clone(expected)
+        expected.sinh_()
+        with SchemaCheckMode():
+            actual.sinh_()
+        self.assertEqual(expected, actual)
+
+    def test_schema_check_mode_functionality_aliasing_inputs(self, device):
+        expected = torch.rand((3, 3), device=device)
+        x = expected
+        actual = torch.clone(expected)
+        y = actual
+        expected.add_(x)
+        with SchemaCheckMode():
+            actual.add_(y)
+        self.assertEqual(expected, actual)
+
+    def test_schema_check_mode_functionality_with_multiple_outputs(self, device):
+        x = torch.arange(9., device=device)
+        m_expected, e_expected = torch.frexp(x)
+        m_actual = torch.arange(9., device=device)
+        e_actual = torch.zeros([9], dtype=torch.int32, device=device)
+        with SchemaCheckMode():
+            torch.frexp(x, out=(m_actual, e_actual))
+        self.assertEqual(m_expected, m_actual)
+        self.assertEqual(e_expected, e_actual)
+
+    def test_schema_check_mode_functionality_with_multiple_outputs_aliasing(self, device):
+        x = torch.rand((3, 3), device=device)
+        actual = torch.zeros(3, device=device)
+        with SchemaCheckMode():
+            torch.aminmax(x, dim=0, out=[actual, actual])
+        self.assertEqual(torch.amax(x, dim=0), actual)
+
+    def test_schema_check_mode_functionality_device_input(self, device):
+        with SchemaCheckMode():
+            x = torch.rand((3, 3), device=device, dtype=torch.double)
+            y = x + x
+        self.assertEqual(x + x, y)
+
+    def test_schema_check_mode_functionality_training_op(self, device):
+        x = torch.rand((3, 3), device=device, requires_grad=True)
+        batch = torch.nn.BatchNorm1d(3, track_running_stats=True).to(device)
+        expected = batch(x)
+        with SchemaCheckMode():
+            actual = batch(x)
+        self.assertEqual(expected, actual)
+
+    def test_schema_check_mode_functionality_nested_training_op(self, device):
+        actual = torch.rand((3, 3), device=device)
+        batch = torch.nn.BatchNorm1d(3, track_running_stats=True).to(device)
+        expected = torch.clone(actual)
+        expected.sinh_()
+        expected.tanh_()
+        expected.relu_()
+        expected = batch(expected)
+
+        with SchemaCheckMode():
+            actual.sinh_()
+            actual.tanh_()
+            actual.relu_()
+            actual = batch(actual)
+        self.assertEqual(expected, actual)
+
+    def test_schema_check_mode_empty_list_input(self, device):
+        expected = torch.atleast_1d([])
+        with SchemaCheckMode():
+            actual = torch.atleast_1d([])
+        self.assertEqual(expected, actual)
+
+instantiate_device_type_tests(TestSchemaCheckFunctionality, globals())
+
 class TestSchemaCheckModeOpInfo(JitTestCase):
     @ops(op_db, dtypes=OpDTypes.supported)
     @slowTestIf(IS_WINDOWS)
@@ -508,7 +505,7 @@ class TestSchemaCheckModeOpInfo(JitTestCase):
             with SchemaCheckMode():
                 op(sample.input, *sample.args, **sample.kwargs)
 
-instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(TestSchemaCheckModeOpInfo, globals())
 
 if __name__ == '__main__':
     run_tests()
