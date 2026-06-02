@@ -1205,6 +1205,11 @@ def target_assert_size_stride_str(
     return f"{size_str}, {stride_str}"
 
 
+def target_assert_alignment_regex():
+    op_name_literal = r'"[^"]+"' if config.cpp_wrapper else r"'[^']+'"
+    return rf"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*{op_name_literal}\s*\)"
+
+
 @instantiate_parametrized_tests
 class CommonTemplate:
     def is_dtype_supported(self, dtype: torch.dtype) -> bool:
@@ -5798,6 +5803,7 @@ class CommonTemplate:
         ),
     )
     @parametrize("nhwc", (False, True))
+    @parametrize("nhwc_input", (False, True))
     @with_tf32_off
     def test_conv2d_backward_parametrized(
         self,
@@ -5807,6 +5813,7 @@ class CommonTemplate:
         padding: int,
         kernel: int,
         nhwc: bool,
+        nhwc_input: bool,
     ):
         in_channels = channels_groups[0]
         out_channels = channels_groups[1]
@@ -5855,11 +5862,14 @@ class CommonTemplate:
         weight = torch.randn([out_channels, in_channels // groups, kernel, kernel])
         if nhwc:
             weight = weight.to(memory_format=torch.channels_last)
+        inp = torch.randn([2, in_channels, input_h, input_w])
+        if nhwc_input:
+            inp = inp.to(memory_format=torch.channels_last)
         self.common(
             fn,
             (
                 torch.randn([2, out_channels, output_h, output_w]),
-                torch.randn([2, in_channels, input_h, input_w]),
+                inp,
                 weight,
             ),
             atol=atol,
@@ -10313,6 +10323,38 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
+
+    def test_index_ops_on_expanded_tensor(self):
+        def make_input(src):
+            return torch.zeros(1, src.size(1), device=src.device).expand(
+                src.size(0) + 1, -1
+            )
+
+        def check(fn):
+            idx = torch.tensor([0, 1, 0], device=self.device)
+            src = torch.ones(3, 8, device=self.device)
+            self.common(fn, (idx, src), check_lowp=False)
+
+        check(lambda idx, src: make_input(src).index_add(0, idx, src))
+        check(lambda idx, src: make_input(src).index_copy(0, idx[:2], src[:2]))
+        check(lambda idx, src: make_input(src).index_fill(0, idx[:2], 1.0))
+        check(lambda idx, src: make_input(src).index_put((idx,), src, accumulate=True))
+        check(
+            lambda idx, src: make_input(src).index_put(
+                (idx[:2],), src[:2], accumulate=False
+            )
+        )
+
+    def test_index_ops_on_expanded_tensor_dim1(self):
+        def fn(idx, src):
+            x = torch.zeros(src.size(0), 1, device=src.device).expand(
+                -1, src.size(1) + 5
+            )
+            return x.index_add(1, idx, src)
+
+        idx = torch.tensor([0, 2, 0], device=self.device)
+        src = torch.ones(4, 3, device=self.device)
+        self.common(fn, (idx, src), check_lowp=False)
 
     def test_adding_tensor_offsets(self):
         @torch.compile(fullgraph=True)
@@ -14872,9 +14914,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if not is_dynamic_shape_enabled():
             if code and len(code) > 0 and "assert_alignment(" in code[0]:
                 try:
-                    FileCheck().check_regex(
-                        r"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*'[^']+'\s*\)"
-                    ).run(code[0])
+                    FileCheck().check_regex(target_assert_alignment_regex()).run(
+                        code[0]
+                    )
                 except Exception as e:
                     print(f"Failed regex match for assert_alignment: {e}")
                     print(code[0])

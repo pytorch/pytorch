@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import warnings
 from abc import ABC, abstractmethod
@@ -1913,13 +1914,14 @@ def cudagraphify(
     else:
         cudagraphify_fn = cudagraphify_impl
 
-    compiled_fn = None
+    thread_local = threading.local()
 
     def run(new_inputs: Sequence[InputType]) -> Any:
-        nonlocal compiled_fn
+        compiled_fn = getattr(thread_local, "compiled_fn", None)
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
+            thread_local.compiled_fn = compiled_fn
         return compiled_fn(new_inputs)  # type: ignore[arg-type]
 
     return run
