@@ -1395,6 +1395,15 @@ class TritonOverrides(OpOverrides):
     def abs(x):
         return f"tl_math.abs({x})"
 
+    @staticmethod
+    def neg(x):
+        # Triton lowers unary minus to `0 - x`, which loses the sign of zero
+        # (-0.0 becomes +0.0). Multiplying by -1 preserves IEEE signed zero.
+        dtype = getattr(x, "dtype", None)
+        if dtype is not None and dtype.is_floating_point:
+            return f"{x} * -1"
+        return f"-{x}"
+
     # TODO - register these ops as having divergent dtype
     # output if doing graph pass to remove consecutive casts
 
