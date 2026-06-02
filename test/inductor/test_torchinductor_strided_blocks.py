@@ -1684,6 +1684,17 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         self.assertEqual(result, fn(x))
         self.assertIn("tl.load", code)
 
+    def test_slice_view_dtype_unaligned_buffer(self):
+        offset = 1
+
+        def f(x):
+            return x[2:].view(dtype=torch.float32) + 1
+
+        x = torch.randn((128 + offset) * 2, dtype=torch.bfloat16, device=GPU_TYPE)
+        expected = f(x)
+        actual = torch.compile(f)(x)
+        self.assertEqual(actual, expected)
+
 
 test_torchinductor.copy_tests(
     CommonTemplate,
