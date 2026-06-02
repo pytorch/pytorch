@@ -5628,5 +5628,27 @@
         "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
       ]
     }
+  ],
+  "GB0375": [
+    {
+      "Gb_type": "Call to `torch._dynamo.disable()`",
+      "Context": "Called `torch._dynamo.disable()` with args `{args}`, kwargs `{kwargs}`",
+      "Explanation": "`torch._dynamo.disable()` was called inside a compiled region. This API disables compilation when used as a decorator or wrapper outside the compiled region.",
+      "Hints": [
+        "Move the `torch._dynamo.disable()` call outside the compiled function and apply it to the function that should run eagerly.",
+        "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point."
+      ]
+    }
+  ],
+  "GB0376": [
+    {
+      "Gb_type": "Call to `torch.compiler.disable()`",
+      "Context": "Called `torch.compiler.disable()` with args `{args}`, kwargs `{kwargs}`",
+      "Explanation": "`torch.compiler.disable()` was called inside a compiled region. This API disables compilation when used as a decorator or wrapper outside the compiled region.",
+      "Hints": [
+        "Move the `torch.compiler.disable()` call outside the compiled function and apply it to the function that should run eagerly.",
+        "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point."
+      ]
+    }
   ]
 }
