@@ -715,6 +715,25 @@ class DecoratorTests(PytreeRegisteringTestCase):
         except torch._dynamo.exc.Unsupported as e:
             self.assertIn("Invalid input type for nonstrict_trace-ed function", str(e))
 
+    def test_nonstrict_trace_direct_compile_invalid_input_stack(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, items):
+            it = iter(items)
+            return next(it), x.sin()
+
+        opt_trace_me = torch.compile(trace_me, backend="eager", fullgraph=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Invalid input type for nonstrict_trace-ed function",
+        ) as cm:
+            opt_trace_me(torch.randn(3), {"a": 3, "b": 3}.items())
+
+        msg = str(cm.exception)
+        self.assertIn("from user code:", msg)
+        self.assertIn("in test_nonstrict_trace_direct_compile_invalid_input_stack", msg)
+        self.assertNotIn("external_utils.py", msg)
+
     def test_nonstrict_trace_nested_custom_class_error(self):
         class Point:
             x: torch.Tensor
