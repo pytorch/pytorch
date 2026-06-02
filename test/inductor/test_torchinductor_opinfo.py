@@ -530,6 +530,9 @@ inductor_override_kwargs["cuda"] = {
         "atol": 1e-4,
         "rtol": 7e-1,
     },
+    # The eager gradient for native_group_norm appears to be numerically unstable at low
+    # precisions; more investigation is needed.
+    ("native_group_norm", f16): {"check_gradient": False},
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -696,6 +699,9 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.interpolate.trilinear", f64): {
         "check_gradient": False,
     },
+    # The eager gradient for native_group_norm appears to be numerically unstable at low
+    # precisions; more investigation is needed.
+    ("native_group_norm", f16): {"check_gradient": False},
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(

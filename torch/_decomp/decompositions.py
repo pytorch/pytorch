@@ -298,7 +298,7 @@ def silu(self: Tensor) -> Tensor:
 @out_wrapper("grad_input")
 @pw_cast_for_opmath
 def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
-    sigmoid = 1 / (1 + torch.exp(-self))
+    sigmoid = torch.sigmoid(self)
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 
@@ -1380,21 +1380,25 @@ def embedding_dense_backward(
     )
     grad_output = grad_output.to(computation_dtype)
     indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
+    valid_indices = (indices >= 0) & (indices < num_weights)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
-        counts = aten._unsafe_index_put(counts, [indices], ones, accumulate=True)
-        grad_weights_scale = counts[indices]
+        counts = aten._unsafe_masked_index_put_accumulate(
+            counts, valid_indices, [indices], ones
+        )
+        grad_weights_scale = aten._unsafe_masked_index(
+            counts, valid_indices, [indices], 1
+        )
         grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
-    mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
-    grad = grad_output.masked_fill(mask, 0)
+    mask = _unsqueeze_to_dim(valid_indices & (indices != padding_idx), grad_output.ndim)
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return aten._unsafe_index_put(grad_weight, [indices], grad, accumulate=True).to(
-        result_dtype
-    )
+    return aten._unsafe_masked_index_put_accumulate(
+        grad_weight, mask, [indices], grad_output
+    ).to(result_dtype)
 
 
 def prod(x: list[int]):
@@ -1531,10 +1535,17 @@ def unsafe_split_with_sizes(
 def split(self: Tensor, split_size: int, dim: int = 0) -> tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
+    torch._check(
+        split_size >= 0,
+        lambda: f"split expects split_size be non-negative, but got split_size={split_size}",
+    )
     if dim_size == 0:
         return (self.detach(),)
-    if split_size == 0:
-        raise AssertionError(f"split_size is 0 but dim_size is {dim_size}, expected 0")
+    torch._check(
+        split_size > 0,
+        lambda: "split_size can only be 0 if dimension size is 0, "
+        f"but got dimension size of {dim_size}",
+    )
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level
@@ -3563,13 +3574,13 @@ def _upsample_nearest(
     indices = [None, None] + spatial_indices
     result = aten._unsafe_index(input, indices)
 
-    if result.ndim == 4:
+    if result.ndim in (4, 5):
         # convert output to correct memory format, if necessary
         memory_format = utils.suggest_memory_format(input)
 
         # following "heuristic: only use channels_last path when it's faster than the contiguous path"
         n_channels = input.shape[1]
-        if input.device.type == "cuda" and n_channels < 4:
+        if result.ndim == 4 and input.device.type == "cuda" and n_channels < 4:
             memory_format = torch.contiguous_format
 
         result = result.contiguous(memory_format=memory_format)
@@ -4806,6 +4817,16 @@ def _grid_sampler_2d(
             f"grid last dimension must be 2 (for x,y coords), got {two}"
         )
 
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
+
+    int32_max = torch.iinfo(torch.int32).max
+    # CUDA/XPU codegen can keep bounded coordinate indices in int32.  CPU keeps
+    # the historical int64 path, and dynamic shapes fall back if we cannot guard.
+    use_32bit_indices = a.device.type in ("cuda", "xpu") and guard_or_false(
+        sym_and(iH <= int32_max, iW <= int32_max)
+    )
+    index_dtype = torch.int32 if use_32bit_indices else torch.int64
+
     if _expand_grid:
         # Let's expand grid to [N, C, oH, oW, 2]
         # This allows to generate a single triton cuda kernel instead of two kernels.
@@ -4831,7 +4852,7 @@ def _grid_sampler_2d(
         c = C if _expand_grid else 1
         return tuple(
             torch.where(cond, t, 0).view(N, c, oH, oW)
-            for t in (xs.to(dtype=torch.int64), ys.to(dtype=torch.int64), ws)
+            for t in (xs.to(dtype=index_dtype), ys.to(dtype=index_dtype), ws)
         )
 
     def get_summand(ix: Tensor, iy: Tensor, w) -> Tensor:
