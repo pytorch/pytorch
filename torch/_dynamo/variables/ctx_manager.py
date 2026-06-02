@@ -220,6 +220,26 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return True
 
 
+class RecordFunctionVariable(GenericContextWrappingVariable):
+    def __init__(self, cm_obj: torch.profiler.record_function, **kwargs: Any) -> None:
+        super().__init__(cm_obj, **kwargs)
+        args = [variables.ConstantVariable.create(cm_obj.name)]
+        record_kwargs = {}
+        if cm_obj.args:
+            record_kwargs["args"] = variables.ConstantVariable.create(cm_obj.args)
+        self.record_fn = variables.torch.ProfilerRecordFunctionContextVariable.create(
+            func=type(self.cm_obj), record_args=args, record_kwargs=record_kwargs
+        )
+
+    def enter(self, tx):
+        tx.active_generic_context_managers.append(self)
+        return self.record_fn.enter(tx)
+
+    def exit(self, tx, *args):
+        tx.active_generic_context_managers.pop()
+        return self.record_fn.exit(tx, *args)
+
+
 class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
     def __init__(self, ctx_manager_vt: ContextWrappingVariable, mod: Any) -> None:
         self.cm_vt = ctx_manager_vt
@@ -1277,15 +1297,15 @@ class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
             name = (
                 record_args[0].as_python_constant()
                 if record_args
-                else kwargs.get(
+                else record_kwargs.get(
                     "name", variables.ConstantVariable.create("unknown")
                 ).as_python_constant()
             )
             record_args_const = None
             if len(record_args) > 1:
                 record_args_const = record_args[1].as_python_constant()
-            elif "args" in kwargs:
-                record_args_const = kwargs["args"].as_python_constant()
+            elif "args" in record_kwargs:
+                record_args_const = record_kwargs["args"].as_python_constant()
             target_values = [name, record_args_const]
         else:
             warning_once(log, "Profiler record function %s will be ignored", func)
