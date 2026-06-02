@@ -1517,6 +1517,53 @@ class GemmEpilogueFusionTests(TestCase):
             check_nots=(*check_nots, "extern_kernels._scaled_mm"),
         )
 
+    def test_scaled_grouped_mm_v2_epilogue_hop_accepts_supported_op(self):
+        def fn(a, b, scale_a, scale_b, offs):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_grouped_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={
+                    "scale_recipe_a": F.ScalingType.RowWise,
+                    "scale_recipe_b": F.ScalingType.RowWise,
+                    "offs": offs,
+                    "output_dtype": torch.bfloat16,
+                },
+            )
+
+        a = torch.empty(16, 64, device="cpu", dtype=torch.float8_e4m3fn)
+        b = torch.empty(32, 64, device="cpu", dtype=torch.float8_e4m3fn).t()
+        scale_a = torch.empty(16, device="cpu", dtype=torch.float32)
+        scale_b = torch.empty(32, device="cpu", dtype=torch.float32)
+        offs = torch.empty(1, device="cpu", dtype=torch.int32)
+
+        with self.assertRaisesRegex(NotImplementedError, "aten::_scaled_grouped_mm_v2"):
+            fn(a, b, scale_a, scale_b, offs)
+
+    def test_scaled_grouped_mm_v2_rejects_duplicate_kwarg_aliases(self):
+        def fn(a, b, scale_a, scale_b, offs):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_grouped_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={
+                    "out_dtype": torch.bfloat16,
+                    "output_dtype": torch.bfloat16,
+                    "scale_recipe_a": F.ScalingType.RowWise,
+                    "scale_recipe_b": F.ScalingType.RowWise,
+                    "offs": offs,
+                },
+            )
+
+        a = torch.empty(16, 64, device="cpu", dtype=torch.float8_e4m3fn)
+        b = torch.empty(32, 64, device="cpu", dtype=torch.float8_e4m3fn).t()
+        scale_a = torch.empty(16, device="cpu", dtype=torch.float32)
+        scale_b = torch.empty(32, device="cpu", dtype=torch.float32)
+        offs = torch.empty(1, device="cpu", dtype=torch.int32)
+
+        with self.assertRaisesRegex(RuntimeError, "cannot specify both"):
+            fn(a, b, scale_a, scale_b, offs)
+
     def test_scaled_grouped_mm_epilogue_hop_accepts_supported_op(self):
         def fn(a, b, scale_a, scale_b):
             return gemm_epilogue_fusion(
