@@ -2,6 +2,8 @@
 #include <torch/nn/init.h>
 #include <torch/nn/modules/linear.h>
 
+#include <fmt/ranges.h>
+
 #include <cmath>
 #include <cstdint>
 
@@ -95,13 +97,8 @@ void UnflattenImpl::pretty_print(std::ostream& stream) const {
            << std::get<1>(namedshape[i]) << "}})";
   } else {
     stream << "torch::nn::Unflatten(dim=" << options.dim()
-           << ", unflattened_size={";
-    auto sizes = options.sizes();
-    size_t i = 0;
-    for (; i < sizes.size() - 1; ++i) {
-      stream << sizes[i] << ", ";
-    }
-    stream << sizes[i] << "})";
+           << ", unflattened_size={"
+           << fmt::format("{}", fmt::join(options.sizes(), ", ")) << "})";
   }
 }
 

@@ -8,6 +8,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/irange.h>
 #include <caffe2/core/timer.h>
+#include <fmt/ranges.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/add_if_then_else.h>
@@ -1621,16 +1622,9 @@ float BlockRunner::benchmark_model(
 
 static bool display_ivalue(const IValue& iv) {
   if (iv.isTensor()) {
-    std::cout << "Tensor " << iv.toTensor().toString() << " {";
-    const auto dims = iv.toTensor().sizes();
-    const auto n_dims = static_cast<uint32_t>(dims.size());
-    for (const auto i : c10::irange(n_dims)) {
-      std::cout << iv.toTensor().sizes()[i];
-      if (n_dims > i + 1) {
-        std::cout << ", ";
-      }
-    }
-    std::cout << "}\n";
+    std::cout << "Tensor " << iv.toTensor().toString() << " {"
+              << fmt::format("{}", fmt::join(iv.toTensor().sizes(), ", "))
+              << "}\n";
     return true;
   } else if (iv.isTensorList()) {
     std::cout << "TensorList {" << iv.toTensorList().size() << "}\n";
