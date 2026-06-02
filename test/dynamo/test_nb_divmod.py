@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
 
@@ -142,6 +143,18 @@ class TestNbDivmod(torch._dynamo.test_case.TestCase):
 
         result = divmod(A(), B())
         self.assertEqual(result, "B.__rdivmod__ called")
+
+    # --- Tensor ---
+
+    def test_divmod_tensor_raises_type_error(self):
+        def fn(x, y):
+            return divmod(x, y)
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaises(TypeError):
+            opt_fn(x, y)
 
 
 if __name__ == "__main__":
