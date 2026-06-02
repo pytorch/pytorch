@@ -258,7 +258,6 @@ def _prepare_graph_capture_tracing(
                 trace_joint=trace_joint,
             )
         )
-
     return _GraphCaptureTracingResult(
         fn_to_trace=fn_to_trace,
         flat_args=updated_flat_args,
