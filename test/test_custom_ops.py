@@ -88,6 +88,19 @@ def requires_compile(fun):
     return fun
 
 
+@torch._dynamo.disable
+def assert_custom_op_call_annotations(test_case, custom_op, opoverload):
+    # Dynamo-wrapped test runs should not trace annotation introspection.
+    test_case.assertEqual(
+        custom_op.__call__.__annotations__,
+        custom_op._init_fn.__annotations__,
+    )
+    test_case.assertEqual(
+        opoverload.__call__.__annotations__,
+        custom_op._init_fn.__annotations__,
+    )
+
+
 class CustomOpTestCaseBase(TestCase):
     test_ns = "_test_custom_op"
 
@@ -3377,14 +3390,7 @@ class TestCustomOpAPI(TestCase):
             return torch.empty_like(x)
 
         scale_op = torch.ops._torch_testing.annotated_scale.default
-        self.assertEqual(
-            annotated_scale.__call__.__annotations__,
-            annotated_scale._init_fn.__annotations__,
-        )
-        self.assertEqual(
-            scale_op.__call__.__annotations__,
-            annotated_scale._init_fn.__annotations__,
-        )
+        assert_custom_op_call_annotations(self, annotated_scale, scale_op)
 
         @torch.library.custom_op("_torch_testing::annotated_shift", mutates_args=())
         def annotated_shift(x: Tensor, shift: int) -> Tensor:
@@ -3395,22 +3401,8 @@ class TestCustomOpAPI(TestCase):
             return torch.empty_like(x)
 
         shift_op = torch.ops._torch_testing.annotated_shift.default
-        self.assertEqual(
-            annotated_shift.__call__.__annotations__,
-            annotated_shift._init_fn.__annotations__,
-        )
-        self.assertEqual(
-            shift_op.__call__.__annotations__,
-            annotated_shift._init_fn.__annotations__,
-        )
-        self.assertEqual(
-            annotated_scale.__call__.__annotations__,
-            annotated_scale._init_fn.__annotations__,
-        )
-        self.assertEqual(
-            scale_op.__call__.__annotations__,
-            annotated_scale._init_fn.__annotations__,
-        )
+        assert_custom_op_call_annotations(self, annotated_shift, shift_op)
+        assert_custom_op_call_annotations(self, annotated_scale, scale_op)
 
         x = torch.ones(2)
         self.assertEqual(annotated_scale(x, 3.0), x * 3.0)
