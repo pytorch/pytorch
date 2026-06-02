@@ -10681,6 +10681,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         else:
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_input_slice_assignment_dtype_use_after_mutation(self):
+        def fn(x, y):
+            x[0] = y
+            return x[0] // 2
+
+        self.common(
+            fn,
+            (
+                torch.zeros((3, 4), device=self.device, dtype=torch.float32),
+                torch.arange(4, device=self.device, dtype=torch.int64),
+            ),
+        )
+
     def test_slice_scatter_dtype_consistency(self):
         # Test dtype consistency of slice_scatter
         def fn(x, y):

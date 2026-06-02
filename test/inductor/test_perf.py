@@ -515,6 +515,61 @@ class FusionTests(TestCase):
         inp = (T(10, 10), T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """500""")
 
+    @requires_gpu_and_triton
+    def test_input_slice_mutation_fusion(self):
+        def add_(x):
+            x[0].add_(1.0)
+            return x
+
+        def iadd(x):
+            x[0] += 1.0
+            return x
+
+        for fn in (add_, iadd):
+            x = T(10, 10)
+            expected_inp = x.clone()
+            expected = fn(expected_inp)
+            actual_inp = x.clone()
+
+            metrics.reset()
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), actual_inp
+            )
+
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_inp, expected_inp)
+            self.assertEqual(metrics.generated_kernel_count, 1)
+            self.assertEqual(code.count("empty_strided_cuda("), 0)
+            self.assertEqual(count_numel(fn, T(10, 10)), "110")
+
+    @requires_gpu_and_triton
+    def test_input_slice_mutation_fusion_autograd(self):
+        def fn(x, y):
+            x[0] += 1.0
+            return y + x[0]
+
+        x = T(10, 10)
+        y = T(10, grad=True)
+        expected_inp = x.clone()
+        expected_grad_inp = y.detach().clone().requires_grad_()
+        expected = fn(expected_inp, expected_grad_inp)
+        expected.sum().backward()
+
+        actual_inp = x.clone()
+        actual_grad_inp = y.detach().clone().requires_grad_()
+        metrics.reset()
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, fullgraph=True), actual_inp, actual_grad_inp
+        )
+        actual.sum().backward()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_inp, expected_inp)
+        self.assertEqual(actual_grad_inp.grad, expected_grad_inp.grad)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.assertNotIn("empty_strided_cuda((10, 10)", code)
+        self.assertNotIn("xnumel = 100", code)
+
     @skipIfXpu(msg="copy_(cat()) fusion not supported on XPU")
     @unittest.skipIf(TEST_WITH_ROCM, "copy_(cat()) fusion not supported on ROCm")
     # TODO(ivankobzarev): enable copy_(cat()) fusion for CUDA 13+

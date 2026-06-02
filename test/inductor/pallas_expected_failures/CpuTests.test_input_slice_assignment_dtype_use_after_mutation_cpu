@@ -1,0 +1,4 @@
+FAIL
+Pallas CPU mishandles the aliased input/output store for this view assignment
+case, returning stale values after x[0] = y. The regular CPU backend test
+covers the AOT view-mutation rewrite semantics.
