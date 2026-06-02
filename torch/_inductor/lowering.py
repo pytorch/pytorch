@@ -8738,6 +8738,43 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
             assert op_name is not None
             V.graph.additional_buffer_deps[op_name].add(dep_name)
 
+    # For void ops (e.g. wait_stream) that don't produce tensor outputs,
+    # passthrough args returned by control_deps are the same IR nodes as
+    # their inputs. This means downstream consumers have no scheduling
+    # dependency on the void op. Create MutationOutput entries to force
+    # the scheduler to order subsequent readers after the void op.
+    # Only apply this for wait_stream, which needs forward ordering on the
+    # waiting stream. Other sync ops (synchronize_stream, record_event) are
+    # full barriers or have event-based cross-sync tracking.
+    void_ops = [
+        op
+        for op in new_ops
+        if isinstance(op, ir.Buffer)
+        and op.name is not None
+        and isinstance(op.layout, ir.NoneLayout)
+        and not isinstance(op, ir.MutationOutput)
+    ]
+    if void_ops and args:
+        # Check if the subgraph contains a wait_stream call
+        has_wait_stream = any(
+            n.op == "call_function"
+            and n.target is torch.ops.streams.wait_stream.default
+            for n in subgraph_fn.graph_module.graph.nodes
+        )
+        if has_wait_stream:
+            for void_op in void_ops:
+                for arg in args:
+                    for arg_leaf in pytree.tree_leaves(arg):
+                        if not isinstance(arg_leaf, IRNode):
+                            continue
+                        device = arg_leaf.get_device()
+                        if device is None:
+                            continue
+                        mut_out = ir.MutationOutput(
+                            ir.NoneLayout(device=device), arg_leaf, void_op
+                        )
+                        void_op.mutation_outputs.append(mut_out)
+
     return output
 
 

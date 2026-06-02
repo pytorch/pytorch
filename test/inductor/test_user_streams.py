@@ -1299,6 +1299,56 @@ class TestUserStreamCompile(InductorTestCase):
         # wait_stream(0, 1) must come after wait_stream(1, 0)
         self.assertGreater(wait_0_1_pos, wait_1_0_pos)
 
+    def test_wait_stream_ordering_independent_inputs(self):
+        """wait_stream must order subsequent waiting-stream work even with independent inputs."""
+        from torch._inductor.utils import run_and_get_code
+
+        side = torch.cuda.Stream()
+
+        def fn(x, y):
+            a = x * 2
+            side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side):
+                b = y + 1
+            torch.cuda.current_stream().wait_stream(side)
+            return a + b
+
+        x = torch.randn(1024, device="cuda")
+        y = torch.randn(1024, device="cuda")
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x, y)
+        self.assertTrue(torch.allclose(result, expected, atol=1e-5, rtol=1e-5))
+
+        # Search within the call method only to avoid matching kernel
+        # definitions at the top of the generated file.
+        call_code = code[code.find("def call(") :]
+
+        # wait_stream(1, 0) must come BEFORE the add kernel on stream 1.
+        # This tests that even when the waiting-stream computation (y + 1)
+        # uses an independent input (y), it is still ordered after wait_stream.
+        wait_1_0_pos = call_code.find("wait_stream.default(1, 0)")
+        wait_0_1_pos = call_code.find("wait_stream.default(0, 1)")
+        self.assertGreater(wait_1_0_pos, -1, "wait_stream(1, 0) not found")
+        self.assertGreater(wait_0_1_pos, -1, "wait_stream(0, 1) not found")
+
+        # Find the stream1 add kernel call (fused_add*.run)
+        add_kernel_pos = call_code.find("fused_add")
+        self.assertGreater(add_kernel_pos, -1, "add kernel not found")
+
+        # Correct ordering: wait_stream(1,0) before add kernel (on stream 1),
+        # add kernel before wait_stream(0,1)
+        self.assertGreater(
+            add_kernel_pos,
+            wait_1_0_pos,
+            "add kernel (stream 1) must come after wait_stream(1, 0)",
+        )
+        self.assertGreater(
+            wait_0_1_pos,
+            add_kernel_pos,
+            "wait_stream(0, 1) must come after add kernel (stream 1)",
+        )
+
     def test_codegen_structure_single_stream(self):
         """Verify wrapper structure for pointwise ops with one side stream."""
         from torch._inductor.utils import run_and_get_code
@@ -2521,6 +2571,31 @@ class TestStreamCudagraphInteraction(InductorTestCase):
         for _ in range(3):
             result = compiled_fn(x)
         self.assertEqual(result, expected)
+
+    def test_wait_stream_independent_inputs_with_cudagraphs(self):
+        """wait_stream with independent inputs must work under cudagraph capture.
+
+        When the waiting-stream computation uses an input independent of the
+        waited-on stream, it must still be ordered after wait_stream.
+        """
+        side = torch.cuda.Stream()
+
+        def fn(x, y):
+            a = x * 2
+            side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side):
+                b = y + 1
+            torch.cuda.current_stream().wait_stream(side)
+            return a + b
+
+        x = torch.randn(1024, device="cuda")
+        y = torch.randn(1024, device="cuda")
+        expected = fn(x, y)
+        compiled_fn = torch.compile(fn, mode="reduce-overhead")
+        # Warmup + capture + replay
+        for _ in range(3):
+            result = compiled_fn(x, y)
+        self.assertTrue(torch.allclose(result, expected, atol=1e-5, rtol=1e-5))
 
 
 instantiate_parametrized_tests(TestStreamUtils)

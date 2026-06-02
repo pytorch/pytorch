@@ -456,6 +456,44 @@ def _wrap_sync_node(
     return control_deps_node, list(replacements.values())
 
 
+def _collect_wait_stream_forward_deps(graph: torch.fx.Graph) -> dict[Node, list[Node]]:
+    """
+    Pre-pass: for each wait_stream(waiting, waited_on) node, find tensor inputs
+    of subsequent compute nodes on the waiting stream that are defined before
+    the wait_stream. These must be threaded through the control_deps so that
+    the waiting-stream work is ordered after the wait_stream operation.
+    """
+    result: dict[Node, list[Node]] = {}
+    nodes_before: set[Node] = set()
+    for node in graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target is torch.ops.streams.wait_stream.default
+        ):
+            waiting_stream: int = node.args[0]  # type: ignore[assignment]
+            extra_deps: set[Node] = set()
+            forward_node = node.next
+            while forward_node.op != "root":
+                if (
+                    forward_node.op == "call_function"
+                    and forward_node.target not in _SYNC_OPS
+                    and (get_stream(forward_node) or 0) == waiting_stream
+                ):
+
+                    def _collect(n: torch.fx.Node) -> torch.fx.Node:
+                        if n in nodes_before and "val" in n.meta:
+                            extra_deps.add(n)
+                        return n
+
+                    map_arg(forward_node.args, _collect)
+                    map_arg(forward_node.kwargs, _collect)
+                forward_node = forward_node.next
+            if extra_deps:
+                result[node] = list(extra_deps)
+        nodes_before.add(node)
+    return result
+
+
 def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
     """
     Single-pass wrap of all sync nodes in control_deps.
@@ -468,6 +506,11 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
     graph = gm.graph
     if len(graph.nodes) == 0:
         raise RuntimeError("Expected a non-empty graph")
+
+    # Pre-pass: find inputs of waiting-stream nodes that need to be threaded
+    # through wait_stream's control_deps for forward ordering.
+    wait_stream_forward_deps = _collect_wait_stream_forward_deps(graph)
+
     stream_to_nodes: dict[int | None, list[Node]] = {}
     # Maps event_index -> control_deps node that wrapped its record_event,
     # so the corresponding wait_event/synchronize_event can depend on the record.
@@ -515,6 +558,15 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                     deps_before_sync = list(stream_to_nodes.get(waited_on_stream, ()))
                     if None in stream_to_nodes and waited_on_stream is not None:
                         deps_before_sync.extend(stream_to_nodes[None])
+                    # Also include inputs of subsequent waiting-stream nodes
+                    # so they get threaded through control_deps, creating a
+                    # forward ordering constraint (waiting-stream work must
+                    # come after wait_stream).
+                    existing_ids = {id(d) for d in deps_before_sync}
+                    for dep in wait_stream_forward_deps.get(node, ()):
+                        if id(dep) not in existing_ids:
+                            deps_before_sync.append(dep)
+                            existing_ids.add(id(dep))
                     if deps_before_sync:
                         found_sync = True
                         _wrap_sync_node(gm, node, deps_before_sync, visited)
