@@ -298,6 +298,12 @@ Tensor& _scaled_mm_out_xpu(
       {
           std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),
           std::make_pair(ScalingType::RowWise, ScalingType::RowWise),
+          std::make_pair(
+              ScalingType::BlockWise128x128, ScalingType::BlockWise1x128),
+          std::make_pair(
+              ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
+          std::make_pair(
+              ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
       },
       mat1,
       mat2,
@@ -387,11 +393,29 @@ Tensor& _scaled_mm_out_xpu(
   }
 
   // TODO: Scale_result is not supported by now!!
+  // API shapes match CUDA v1. oneDNN needs row-major contiguous.
+  // scale_a: [M, K//128] or [M//128, K//128]
+  // scale_b: [K//128, N] or [K//128, N//128]
+  // Because the user might passed in the CUDA's stride (col-major because of
+  // swizzling)
+  // call a contiguous() to ensure row-major for oneDNN
+  Tensor scale_a_internal = scale_a;
+  Tensor scale_b_internal = scale_b;
+  if (scaling_choice_a == ScalingType::BlockWise128x128 ||
+      scaling_choice_a == ScalingType::BlockWise1x128) {
+    scale_a_internal = scale_a.is_contiguous() ? scale_a : scale_a.contiguous();
+  }
+  if (scaling_choice_b == ScalingType::BlockWise1x128 ||
+      scaling_choice_b == ScalingType::BlockWise128x128) {
+    // CUDA v1 shapes [K//128, N] and [K//128, N//128] already match oneDNN's
+    // expected row-major layout. Just ensure contiguous.
+    scale_b_internal = scale_b.is_contiguous() ? scale_b : scale_b.contiguous();
+  }
   return _scaled_gemm(
       mat1,
       mat2,
-      scale_a,
-      scale_b,
+      scale_a_internal,
+      scale_b_internal,
       scaling_choice_a,
       scaling_choice_b,
       bias,
