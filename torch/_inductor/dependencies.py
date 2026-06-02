@@ -596,6 +596,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def index_expr(self, index: sympy.Expr, dtype: torch.dtype | None) -> None:
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
 
+    def value_expr(self, index: sympy.Expr, dtype: torch.dtype | None) -> None:
+        self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
+
     def bucketize(
         self,
         values: T,

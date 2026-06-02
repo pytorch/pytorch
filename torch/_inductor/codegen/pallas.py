@@ -316,6 +316,12 @@ class PallasKernelOverrides(OpOverrides):
         return PallasKernelOverrides.to_dtype(var, dtype)
 
     @staticmethod
+    def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        # Pallas index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return PallasKernelOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def constant(val, dtype: torch.dtype) -> str:
         """Convert a constant value to JAX representation."""
         jax_dtype = torch_dtype_to_jax(dtype)

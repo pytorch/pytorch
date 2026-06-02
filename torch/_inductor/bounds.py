@@ -194,6 +194,10 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
         assert isinstance(index, ValueRanges)
         return cls.to_dtype(index, dtype)
 
+    @classmethod
+    def value_expr(cls, index: Any, dtype: torch.dtype) -> ValueRanges[Any]:
+        return cls.index_expr(index, dtype)
+
     @staticmethod
     # pyrefly: ignore [bad-override]
     def to_dtype(
