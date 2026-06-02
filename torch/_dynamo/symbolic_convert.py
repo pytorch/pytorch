@@ -2695,8 +2695,16 @@ class InstructionTranslatorBase(
         )
 
         def bubble_exception_to_interpreter() -> None:
-            # Bubble the exception to the interpreter
             curr_exc = self.exn_vt_stack.get_current_exception()
+            uncaught_runtime_error_msg = getattr(
+                raised_exception, "_torch_dynamo_uncaught_runtime_error_msg", None
+            ) or getattr(curr_exc, "_torch_dynamo_uncaught_runtime_error_msg", None)
+            if uncaught_runtime_error_msg is not None:
+                raise exc.TorchRuntimeError(
+                    uncaught_runtime_error_msg, raised_exception.real_stack
+                ) from raised_exception
+
+            # Bubble the exception to the interpreter
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             if not isinstance(raised_exception, dynamo_exc):
                 raise AssertionError(

@@ -332,6 +332,87 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_set_data_on_gradtrackingtensor(self):
+        def fn(x, y):
+            x.data = y
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        msg = (
+            "mutating directly with `.data` inside functorch transform is not allowed."
+        )
+        with self.assertRaisesRegex(RuntimeError, msg) as cm:
+            with torch._functorch.eager_transforms.grad_increment_nesting():
+                opt_fn(torch.ones(5), torch.ones(5))
+        self.assertEqual(str(cm.exception).splitlines()[0], msg)
+        self.assertNotIn("Observed exception", str(cm.exception))
+
+    def test_set_data_on_batchedtensor(self):
+        def fn(x, y):
+            x.data = y
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        msg = "mutating directly with `.data` under vmap transform is not allowed."
+        with self.assertRaisesRegex(RuntimeError, msg) as cm:
+            torch.vmap(opt_fn)(torch.ones(3, 5), torch.ones(3, 5))
+        self.assertEqual(str(cm.exception).splitlines()[0], msg)
+        self.assertNotIn("Observed exception", str(cm.exception))
+
+    def test_set_data_on_functionaltensor(self):
+        def fn(x, y):
+            x.data = y
+            return x + 1
+
+        eager_fn = torch.func.functionalize(fn)
+        opt_fn = torch.func.functionalize(
+            torch.compile(fn, backend="eager", fullgraph=True)
+        )
+
+        x = torch.ones(5)
+        y = torch.zeros(5)
+        x_opt = x.clone()
+        y_opt = y.clone()
+
+        self.assertEqual(opt_fn(x_opt, y_opt), eager_fn(x, y))
+        self.assertEqual(x_opt, x)
+
+    def test_set_data_on_gradtrackingtensor_caught(self):
+        def fn(x, y):
+            try:
+                x.data = y
+            except RuntimeError:
+                return x + 2
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with torch._functorch.eager_transforms.grad_increment_nesting():
+            self.assertEqual(
+                opt_fn(torch.ones(5), torch.zeros(5)), torch.full((5,), 3.0)
+            )
+
+    def test_set_data_on_gradtrackingtensor_not_caught(self):
+        def fn(x, y):
+            try:
+                x.data = y
+            except TypeError:
+                return x + 2
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        msg = (
+            "mutating directly with `.data` inside functorch transform is not allowed."
+        )
+        with self.assertRaisesRegex(RuntimeError, msg) as cm:
+            with torch._functorch.eager_transforms.grad_increment_nesting():
+                opt_fn(torch.ones(5), torch.zeros(5))
+        self.assertEqual(str(cm.exception).splitlines()[0], msg)
+        self.assertNotIn("Observed exception", str(cm.exception))
+
     # See [Note: set_data_on_scoped_tensor] This does not actually get captured in the graph yet.
     def test_set_data_on_scoped_tensor(self):
         def fn(x):

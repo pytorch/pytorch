@@ -44,6 +44,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     ObservedAttributeError,
+    ObservedException,
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
@@ -3310,6 +3311,19 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
     def __repr__(self) -> str:
         return "SetAttrBuiltinVariable()"
 
+    @staticmethod
+    def _raise_functorch_data_mutation_error(
+        tx: "InstructionTranslatorBase", msg: str
+    ) -> NoReturn:
+        try:
+            raise_observed_exception(RuntimeError, tx, args=[msg])
+        except ObservedException as e:
+            observed_exception: Any = e
+            observed_exception._torch_dynamo_uncaught_runtime_error_msg = msg
+            current_exception: Any = tx.exn_vt_stack.get_current_exception()
+            current_exception._torch_dynamo_uncaught_runtime_error_msg = msg
+            raise
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -3375,6 +3389,16 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     # [Note: set_data_on_scoped_tensor]
                     # TODO(azahed98): The plan of record is to introduce a set_data op, entirely subsume the
                     # operation into a call_function in the fx graph, and let aot_autograd handle it.
+                    example_value = obj.as_proxy().node.meta.get("example_value")
+                    # Eager .data= dispatches to functorch wrapper TensorImpls,
+                    # whose shallow_copy_from raises instead of mutating.
+                    if isinstance(example_value, torch.Tensor):
+                        if torch._C._functorch.is_batchedtensor(example_value):
+                            msg = "mutating directly with `.data` under vmap transform is not allowed."
+                            self._raise_functorch_data_mutation_error(tx, msg)
+                        elif torch._C._functorch.is_gradtrackingtensor(example_value):
+                            msg = "mutating directly with `.data` inside functorch transform is not allowed."
+                            self._raise_functorch_data_mutation_error(tx, msg)
                     if obj.source is None:
                         unimplemented(
                             gb_type="Failed to mutate tensor data attribute",
