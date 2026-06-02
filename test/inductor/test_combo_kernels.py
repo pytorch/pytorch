@@ -235,7 +235,10 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
 
     @requires_cuda_and_triton
-    @unittest.skipIf(not SM90OrLater, "TMA requires SM90 or later (Hopper+)")
+    @unittest.skipIf(
+        not SM90OrLater or torch.version.hip,
+        "TMA requires SM90 or later (Hopper+), not supported on ROCm",
+    )
     @torch._inductor.config.patch(
         {
             "triton.use_tensor_descriptor": True,
