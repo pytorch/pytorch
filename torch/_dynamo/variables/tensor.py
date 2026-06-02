@@ -1860,6 +1860,7 @@ class TensorVariable(VariableTracker):
             get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
         result = wrap_fx_proxy(tx, proxy)
         self._sync_if_inplace_mutation(tx, version_before, False)
+        self.synchronize_attributes(tx)
         tx.output.check_input_mutation_on_current_stream(tx)
         return result
 
