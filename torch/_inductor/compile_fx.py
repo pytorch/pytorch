@@ -14,12 +14,13 @@ import time
 import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, cast, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -119,7 +120,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .ir import get_device_type, IRNode
+from .ir import ExternKernelNode, get_device_type, IRNode
 from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
@@ -136,17 +137,22 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Sequence
-
     from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
     from torch.export.pt2_archive._package_weights import Weights
 
-    from .ir import ExternKernelNode
-
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
+
+_ConfigPatchValue: TypeAlias = bool | int | str | float | None
+_ConfigPatches: TypeAlias = dict[str, _ConfigPatchValue]
+_DecompTable: TypeAlias = dict[torch._ops.OpOverload, Callable[..., Any]]
+_DecompFn: TypeAlias = Callable[..., _DecompTable]
+_ExternNodeSerializer: TypeAlias = Callable[[list[ExternKernelNode]], str]
+_AotCompileOptions: TypeAlias = dict[str, _ConfigPatchValue | _ExternNodeSerializer]
+# select_decomp_table returns dict[Any, ...] today; narrow it at this boundary.
+_DEFAULT_DECOMP_FN: _DecompFn = cast(_DecompFn, select_decomp_table)
 
 if TYPE_CHECKING or not config.is_fbcode():
     # no-op decorator
@@ -221,7 +227,7 @@ def _fx_compile_mode_default() -> FxCompileConfig:
         return FxCompileConfig(FxCompileMode.NORMAL, False, False)
 
 
-def _get_progression_configs() -> list[dict[str, Any]]:
+def _get_progression_configs() -> list[_ConfigPatches]:
     # TODO make this configurable
     return [
         {"max_autotune": True},
@@ -741,7 +747,7 @@ def fake_tensor_prop(
 
 # pass config dict back to user
 def get_patched_config_dict(
-    config_patches: str | dict[str, Any] | None = None,
+    config_patches: str | _ConfigPatches | None = None,
 ) -> dict[str, Any]:
     with config.patch(config_patches):
         return config.get_config_copy()
@@ -768,10 +774,10 @@ class _CompileFxKwargs(TypedDict, total=False):
     aot_mode: bool
     is_inference: bool
     layout_opt: bool | None
-    extern_node_serializer: Callable[[list[ExternKernelNode]], Any] | None
+    extern_node_serializer: _ExternNodeSerializer | None
     boxed_forward_device_index: BoxedDeviceIndex | None
     fx_wrapper: bool
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]]
+    get_decomp_fn: _DecompFn
 
 
 class _CompileFxCallable(Protocol):
@@ -1259,9 +1265,6 @@ class _InProcessFxCompile(FxCompile):
         """
         # Sorry about the mess, we need graph_kwargs to continue to be able
         # to propagate it further on
-        # TODO: _CompileFxKwargs actually has stronger types than in the
-        # signature, need to tighten it up
-
         assert "cudagraphs" in graph_kwargs and graph_kwargs["cudagraphs"] is not None
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
         static_input_idxs: Sequence[int] = graph_kwargs.get("static_input_idxs", ())
@@ -1271,12 +1274,10 @@ class _InProcessFxCompile(FxCompile):
         fx_wrapper: bool = graph_kwargs.get("fx_wrapper", False)
         aot_mode: bool = V.aot_compilation
         is_inference: bool = graph_kwargs.get("is_inference", False)
-        extern_node_serializer: Callable[[list[ExternKernelNode]], Any] | None = (
-            graph_kwargs.get("extern_node_serializer", None)
+        extern_node_serializer: _ExternNodeSerializer | None = graph_kwargs.get(
+            "extern_node_serializer", None
         )
-        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = graph_kwargs.get(
-            "get_decomp_fn", select_decomp_table
-        )
+        get_decomp_fn: _DecompFn = graph_kwargs.get("get_decomp_fn", _DEFAULT_DECOMP_FN)
         with (
             _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard(),
             dynamo_utils.preserve_rng_state(),
@@ -2051,22 +2052,32 @@ def compile_fx_aot(
     model_: GraphModule,
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
-    config_patches: dict[str, Any] | None = None,
+    config_patches: _AotCompileOptions | None = None,
 ) -> list[str | Weights] | str | GraphModule:
     assert isinstance(model_, GraphModule), model_
 
     # [See NOTE] Unwrapping subclasses AOT
     unwrap_tensor_subclass_parameters(model_)
 
-    # pyrefly: ignore [annotation-mismatch, redefinition]
-    config_patches: dict[str, Any] = copy.deepcopy(config_patches or {})
+    config_patches_with_options: _AotCompileOptions = copy.deepcopy(
+        config_patches or {}
+    )
+    extern_node_serializer = cast(
+        _ExternNodeSerializer | None,
+        config_patches_with_options.pop("extern_node_serializer", None),
+    )
+    config_only_patches = cast(_ConfigPatches, config_patches_with_options)
 
-    if not (config_patches.get("fx_wrapper", False) or config.fx_wrapper):
+    if not (config_only_patches.get("fx_wrapper", False) or config.fx_wrapper):
         # If fx_wrapper is not set, then set cpp_wrapper
-        config_patches["cpp_wrapper"] = True
+        config_only_patches["cpp_wrapper"] = True
 
-    output_path = config_patches.get(
+    output_path = config_only_patches.get(
         "aot_inductor.output_path", config.aot_inductor.output_path
+    )
+    assert output_path is None or isinstance(output_path, str), (
+        "aot_inductor.output_path must be a string or None, "
+        f"got {type(output_path).__name__}"
     )
 
     if output_path:
@@ -2077,16 +2088,16 @@ def compile_fx_aot(
             "into a pt2, please call `torch._inductor.aoti_compile_and_package`."
         )
     else:
-        config_patches = {
-            **config_patches,
+        config_only_patches = {
+            **config_only_patches,
             "aot_inductor.output_path": code_hash(model_.code),
         }
 
     from .utils import maybe_aoti_standalone_config
 
-    config_patches = maybe_aoti_standalone_config(config_patches)
-
-    extern_node_serializer = config_patches.pop("extern_node_serializer", None)
+    config_only_patches = cast(
+        _ConfigPatches, maybe_aoti_standalone_config(config_only_patches)
+    )
     saved_compile_id = model_.meta.get("dynamo_compile_id", None)
     saved_compile_context = torch._guards.CompileContext(saved_compile_id)
     with (
@@ -2106,7 +2117,7 @@ def compile_fx_aot(
                 inner_compile,
                 extern_node_serializer=extern_node_serializer,
             ),
-            config_patches=config_patches,
+            config_patches=config_only_patches,
         )
 
         assert isinstance(compiled_artifacts, CompiledAOTI)
@@ -2669,7 +2680,7 @@ def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
-    config_patches: dict[str, Any] | None = None,
+    config_patches: _ConfigPatches | None = None,
     decompositions: dict[OpOverload, Callable[..., Any]] | None = None,
     ignore_shape_env: bool = False,
     compile_region_name: str | None = None,
@@ -2687,10 +2698,10 @@ def compile_fx(
     """
     if decompositions is not None:
 
-        def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
-            return decompositions  # pyrefly: ignore[bad-return]
+        def get_decomp_fn() -> _DecompTable:
+            return decompositions
     else:
-        get_decomp_fn = select_decomp_table
+        get_decomp_fn = _DEFAULT_DECOMP_FN
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
@@ -2809,7 +2820,7 @@ def _maybe_wrap_and_compile_fx_main(
     inner_compile: Callable[..., OutputCode],
     ignore_shape_env: bool,
     *,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
+    get_decomp_fn: _DecompFn = _DEFAULT_DECOMP_FN,
     compile_region_name: str | None = None,
 ) -> CompileFxOutput:
     """
@@ -2859,7 +2870,7 @@ def _compile_fx_main(
     inner_compile: Callable[..., OutputCode],
     ignore_shape_env: bool,
     *,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
+    get_decomp_fn: _DecompFn = _DEFAULT_DECOMP_FN,
     compile_region_name: str | None = None,
 ) -> CompileFxOutput:
     """
