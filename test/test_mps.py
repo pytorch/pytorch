@@ -31,7 +31,7 @@ from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_mo
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
-from torch.distributions import Uniform, Exponential
+from torch.distributions import Uniform, Exponential, Dirichlet
 from torch.utils._python_dispatch import TorchDispatchMode
 from functools import partial
 
@@ -1625,6 +1625,37 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(high.grad, rand)
         low.grad.zero_()
         high.grad.zero_()
+
+    @parametrize("num_alpha", [10, 1000, 10_000])
+    @parametrize("dtype", [torch.float, torch.bfloat16, torch.float16])
+    def test_dirichlet(self, num_alpha, dtype):
+        alpha = torch.rand(num_alpha, device='mps', dtype=dtype)
+        dist = Dirichlet(alpha)
+        batch_shape = (30000 // num_alpha, 400)
+        x = dist.sample(batch_shape)
+
+        self.assertTrue((x >= 0).all())
+        sums = x.sum(dim=-1)
+        self.assertEqual(sums, torch.ones_like(sums))
+
+        if dtype == torch.float:
+            atol = 1e-3
+            rtol = 1e-3
+        else:
+            atol = 1e-2
+            rtol = 1e-2
+
+        means = x.mean(dim=-1)
+        self.assertEqual(means, torch.empty_like(means).fill_(1 / num_alpha), atol=atol, rtol=rtol)
+        batch_dims = list(range(len(batch_shape)))
+        self.assertEqual(x.mean(dim=batch_dims), alpha / alpha.sum(), atol=atol, rtol=rtol)
+
+        if dtype == torch.float:
+            # Compare mean and var with CPU impl. CPU impl only supports float
+            dist_cpu = Dirichlet(alpha.cpu())
+            x_cpu = dist_cpu.sample(batch_shape)
+            self.assertEqual(x.mean(dim=batch_dims).cpu(), x_cpu.mean(dim=batch_dims), atol=atol, rtol=rtol)
+            self.assertEqual(x.var(dim=batch_dims).cpu(), x_cpu.var(dim=batch_dims), atol=atol, rtol=rtol)
 
     def test_randperm(self, device="mps"):
         rng_device = None
@@ -9577,6 +9608,22 @@ class TestLargeTensors(TestCaseMPS):
         # Reclaim memory after running the tests
         del y
         del x
+        gc.collect()
+        torch.mps.empty_cache()
+
+    @serialTest()
+    def test_64bit_index_copy(self):
+        if torch.mps.recommended_max_memory() < 16_000_000_000:
+            raise unittest.SkipTest("Needs at least 16Gb of RAM")
+        m = (1 << 31) + 16
+        x = torch.zeros(2, m, dtype=torch.int8, device='mps')
+        src = torch.full((1, m), 7, dtype=torch.int8, device='mps')
+        x.index_copy_(0, torch.tensor([1], device='mps'), src)
+        self.assertEqual(x[1, 0].item(), 7)
+        self.assertEqual(x[1, m - 1].item(), 7)
+        self.assertEqual(x[0, 0].item(), 0)
+        self.assertEqual(x[0, m - 1].item(), 0)
+        del x, src
         gc.collect()
         torch.mps.empty_cache()
 

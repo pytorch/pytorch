@@ -81,21 +81,16 @@ extern "C" void __avx_chk_kernel() {
 }
 """
 
-    # The probe does not `import torch`: that costs multiple seconds of
-    # startup per spawn and has hung under load in CI. On Linux/macOS
-    # the parent puts torch's lib dir on LD_LIBRARY_PATH /
-    # DYLD_LIBRARY_PATH so the dynamic linker resolves libtorch_cpu
-    # automatically. On Windows neither var is consulted by
-    # ctypes.cdll.LoadLibrary, so the script locates torch via
-    # importlib.util.find_spec (which doesn't execute torch/__init__.py)
-    # and registers the lib dir with os.add_dll_directory.
+    # Skip the slow `import torch` (which has hung under load in CI) on Linux
+    # only: the parent puts torch's lib dir on LD_LIBRARY_PATH so the linker
+    # resolves libtorch_cpu for the test .so on its own. macOS can't do this --
+    # SIP strips DYLD_LIBRARY_PATH from the child -- so it falls back to import.
+    # TODO: extend the no-import path to Windows once its CI build is green
+    # enough to validate it.
     _avx_py_load = """
-import os
-if hasattr(os, "add_dll_directory"):
-    import importlib.util
-    spec = importlib.util.find_spec("torch")
-    if spec is not None and spec.origin:
-        os.add_dll_directory(os.path.join(os.path.dirname(spec.origin), "lib"))
+import sys
+if sys.platform != "linux":
+    import torch  # noqa: F401
 from ctypes import cdll
 cdll.LoadLibrary("__lib_path__")
 """
@@ -119,19 +114,20 @@ cdll.LoadLibrary("__lib_path__")
     def _build_probe_env() -> dict[str, str]:
         """Construct the child env for the dlopen probe.
 
-        Make libtorch_cpu (and other torch shlibs) findable by the dynamic
-        linker on Linux/macOS so the probe child does not need to ``import
-        torch`` to bring them into its address space. Prepend rather than
-        append so a successful probe is guaranteed to bind against the torch
-        we are currently running, not an older install on the user's loader
-        path. On Windows the equivalent registration happens inside the child
-        via ``os.add_dll_directory`` (see ``_avx_py_load``).
+        Make libtorch_cpu (and other torch shlibs) findable by the Linux
+        dynamic linker via LD_LIBRARY_PATH so the probe child does not need to
+        ``import torch`` to bring them into its address space. Prepend rather
+        than append so a successful probe is guaranteed to bind against the
+        torch we are currently running, not an older install on the user's
+        loader path. macOS and Windows do not use this fast path; they
+        ``import torch`` in the child instead (see ``_avx_py_load``).
         """
         lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
         env = python_subprocess_env()
-        for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
-            existing = env.get(var, "")
-            env[var] = os.pathsep.join([lib_dir, existing]) if existing else lib_dir
+        existing = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = (
+            os.pathsep.join([lib_dir, existing]) if existing else lib_dir
+        )
         return env
 
     def _probe_load(self, output_path: str) -> bool:

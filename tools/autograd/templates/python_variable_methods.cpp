@@ -99,6 +99,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     "size(int64_t? dim=None)",
+    "size(Dimname dim)",
   });
   auto& self_ = THPVariable_Unpack(self);
   ParsedArgs<3> parsed_args;
@@ -107,15 +108,23 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   if(r.has_torch_function()){
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
-  if (!r.toInt64Optional(0).has_value()) {
-    return THPSize_NewFromSymSizes(self_);
+  if (r.idx == 0) {
+    if (!r.toInt64Optional(0).has_value()) {
+      return THPSize_NewFromSymSizes(self_);
+    }
+    if (jit::tracer::isTracing()) {
+      // will error out if a tensor has symints
+      return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
+    } else {
+      return torch::toPyObject(self_.sym_size(r.toInt64(0)));
+    }
+  } else if (r.idx == 1) {
+    if (jit::tracer::isTracing()) {
+      TORCH_INTERNAL_ASSERT(false, "NYI: Named tensors w/ JIT");
+    }
+    return wrap(self_.size(r.dimname(0)));
   }
-  if (jit::tracer::isTracing()) {
-    // will error out if a tensor has symints
-    return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
-  } else {
-    return torch::toPyObject(self_.sym_size(r.toInt64(0)));
-  }
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -124,6 +133,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     "stride(int64_t? dim=None)",
+    "stride(Dimname dim)",
   });
   auto& self_ = THPVariable_Unpack(self);
   ParsedArgs<3> parsed_args;
@@ -133,22 +143,27 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
 
-  if (r.toInt64Optional(0).has_value()) {
-    return torch::toPyObject(self_.sym_stride(r.toInt64(0)));
+  if (r.idx == 0) {
+    if (r.toInt64Optional(0).has_value()) {
+      return torch::toPyObject(self_.sym_stride(r.toInt64(0)));
+    }
+    // yes, this is called strides in ATen.
+    at::SymIntArrayRef strides = self_.sym_strides();
+    // we can't do the normal wrapping here because IntArrayRef maps to both
+    // torch.Size and tuple in python
+    // TODO: consider factoring this out
+    THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(strides.size())));
+    if (!tuple) throw python_error();
+    for (size_t i = 0; i != strides.size(); i++) {
+      PyObject* s = torch::toPyObject(strides[i]);
+      if (!s) throw python_error();
+      PyTuple_SET_ITEM(tuple.get(), i, s);
+    }
+    return tuple.release();
+  } else if (r.idx == 1) {
+    return wrap(self_.stride(r.dimname(0)));
   }
-  // yes, this is called strides in ATen.
-  at::SymIntArrayRef strides = self_.sym_strides();
-  // we can't do the normal wrapping here because IntArrayRef maps to both
-  // torch.Size and tuple in python
-  // TODO: consider factoring this out
-  THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(strides.size())));
-  if (!tuple) throw python_error();
-  for (size_t i = 0; i != strides.size(); i++) {
-    PyObject* s = torch::toPyObject(strides[i]);
-    if (!s) throw python_error();
-    PyTuple_SET_ITEM(tuple.get(), i, s);
-  }
-  return tuple.release();
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -161,6 +176,17 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
   }
   auto& self = THPVariable_Unpack(self_);
   return wrap(self.get_device());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_has_names(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  if (has_torch_function(self_)) {
+    return handle_torch_function(self_, "has_names", args);
+  }
+  auto& self = THPVariable_Unpack(self_);
+  return wrap(self.has_names());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1288,6 +1314,7 @@ PyMethodDef variable_methods[] = {
   {"const_data_ptr", THPVariable_const_data_ptr, METH_NOARGS, nullptr},
   {"data_ptr", THPVariable_data_ptr, METH_NOARGS, nullptr},
   {"dim", THPVariable_dim, METH_NOARGS, nullptr},
+  {"has_names", THPVariable_has_names, METH_NOARGS, nullptr},
   {"double", castPyCFunctionWithKeywords(THPVariable_double), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"cdouble", castPyCFunctionWithKeywords(THPVariable_cdouble), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"element_size", THPVariable_element_size, METH_NOARGS, nullptr},

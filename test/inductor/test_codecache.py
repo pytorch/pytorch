@@ -4528,13 +4528,12 @@ class TestVecISACheckBuild(TestCase):
         env = cpu_vec_isa.VecISA._build_probe_env()
 
         torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
-        for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
-            value = env.get(var, "")
-            self.assertEqual(
-                value.split(os.pathsep)[0],
-                torch_lib,
-                msg=f"{var!r} should be prepended with {torch_lib!r}, got {value!r}",
-            )
+        value = env.get("LD_LIBRARY_PATH", "")
+        self.assertEqual(
+            value.split(os.pathsep)[0],
+            torch_lib,
+            msg=f"LD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+        )
 
 
 class TestCompilationEventLogging(TestCase):

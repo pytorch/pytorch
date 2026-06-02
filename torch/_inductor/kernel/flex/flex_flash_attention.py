@@ -89,6 +89,8 @@ def get_flex_flash_fwd_configs(
         mask_mod_packed_intervals = select_packed_mask_intervals(mask_mod_graph_module)
     if mask_mod_packed_intervals is not None:
         if any(isinstance(buf, sympy.Expr) for buf in mask_mod_other_buffers):
+            # Packed interval rendering addresses tensor captures through aux_tensors,
+            # but symbolic scalar captures are not aux tensor inputs.
             mask_mod_packed_intervals = None
         else:
             mask_mod_vec_size = DEFAULT_MASK_MOD_VEC_SIZE
