@@ -22,7 +22,6 @@ from typing import Any
 
 import torch
 import torch.fx as fx
-import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
