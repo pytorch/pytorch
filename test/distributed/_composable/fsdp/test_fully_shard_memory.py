@@ -654,8 +654,8 @@ class TestFullyShardAllReduceBufferWindow(FSDPTest):
         fully_shard(model[0], mesh=mesh)
         fully_shard(model[1], mesh=mesh)
         fully_shard(model, mesh=mesh)
-        model[0].set_all_reduce_buffer_window(1, recurse=False)
-        model.set_all_reduce_buffer_window(2, recurse=False)
+        model[0].set_all_reduce_buffer_window(1)
+        model.set_all_reduce_buffer_window(2)
         inp = torch.randn(2, 8, device=device_type)
         with self.assertRaisesRegex(
             ValueError, "all_reduce_buffer_window is scoped to the root"
@@ -679,7 +679,7 @@ class TestFullyShardAllReduceBufferWindow(FSDPTest):
         fully_shard(model[0], mesh=mesh)
         fully_shard(model[1], mesh=mesh)
         fully_shard(model, mesh=mesh)
-        model.set_all_reduce_buffer_window(2, recurse=False)
+        model.set_all_reduce_buffer_window(2)
         model(torch.randn(2, 8, device=device_type)).sum().backward()
         self.assertEqual(
             fully_shard.state(model)._comm_ctx.all_reduce_buffer_release_window, 2

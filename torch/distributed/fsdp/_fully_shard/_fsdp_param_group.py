@@ -76,15 +76,16 @@ class FSDPCommContext:
     def __init__(self) -> None:
         self.all_reduce_buffer_release_window: int | None = None
         # Sole owner of in-flight all-reduce input buffers across param groups.
-        # A real entry holds a mixed-dtype reduce buffer (distinct from the
-        # cast-down grad) so its live Python ref keeps the block off the
-        # caching allocator's free list until the AR completes, preventing the
-        # next layer's RS from reusing the same physical block mid-flight. A
-        # None entry counts a same-dtype all-reduce layer (whose buffer is
-        # param.grad's own storage, so it needs no hold) for the age window.
-        # Released by the release window or flushed at backward end / reset.
+        # Each entry's live Python ref keeps an AR buffer off the caching
+        # allocator's free list until its all-reduce completes, so the next
+        # layer's reduce-scatter cannot reuse the block mid-flight. Held for
+        # both mixed-dtype buffers (distinct from the cast-down grad) and
+        # same-dtype buffers: when accumulating into a pre-existing grad
+        # (set_to_none=False) param.grad does not alias the reduce buffer, so
+        # nothing else keeps it alive. Released by the release window, else
+        # flushed at backward end / reset.
         # See AllReduceState docstring and regression test PR #180900.
-        self.all_reduce_states: deque[AllReduceState | None] = deque()
+        self.all_reduce_states: deque[AllReduceState] = deque()
 
     def lazy_init(self, device: torch.device):
         self.device_handle = _get_device_handle(device.type)
@@ -144,13 +145,12 @@ class FSDPCommContext:
             return []
         states: list[AllReduceState] = []
         while len(self.all_reduce_states) >= window:
-            if (all_reduce_state := self.all_reduce_states.popleft()) is not None:
-                states.append(all_reduce_state)
+            states.append(self.all_reduce_states.popleft())
         return states
 
     def flush_all_reduce_buffer_states(self, stream: torch.Stream) -> None:
         for all_reduce_state in self.all_reduce_states:
-            if all_reduce_state is not None and all_reduce_state.event is not None:
+            if all_reduce_state.event is not None:
                 stream.wait_event(all_reduce_state.event)
         self.all_reduce_states.clear()
 
@@ -807,17 +807,15 @@ class FSDPParamGroup:
                         raise AssertionError(
                             "Expected all_reduce_event to be set for non-CPU device"
                         )
-                if is_mixed_dtype_all_reduce:
-                    # The reduce-dtype buffer is distinct from the grad and must
-                    # be held; the comm-ctx queue owns it (released by the window
-                    # or flushed at backward end). No window => held until flush.
-                    self.comm_ctx.all_reduce_states.append(
-                        AllReduceState(all_reduce_input, all_reduce_event)
-                    )
-                elif use_all_reduce_state_queue:
-                    # Same-dtype AR reuses param.grad's storage, so no hold is
-                    # needed; record a placeholder so the window ages correctly.
-                    self.comm_ctx.all_reduce_states.append(None)
+                # Hold the AR buffer off the allocator free list until its AR
+                # completes; the comm-ctx queue is the sole owner (released by
+                # the window, else flushed at backward end). Held regardless of
+                # dtype: when accumulating into a pre-existing grad
+                # (set_to_none=False) param.grad does not alias this buffer, so
+                # nothing else keeps it alive even in the same-dtype case.
+                self.comm_ctx.all_reduce_states.append(
+                    AllReduceState(all_reduce_input, all_reduce_event)
+                )
 
     def finalize_backward(self):
         for event in self.comm_ctx._last_post_reduce_events.values():
