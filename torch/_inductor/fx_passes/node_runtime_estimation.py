@@ -298,10 +298,10 @@ def _log_compute_estimations(
                     ret += f" SymInt({t})"
         return ret
 
-    def _safe_float_fmt(v, multiplier=1.0) -> str:
+    def _safe_float_fmt(v, multiplier=1.0, precision=4) -> str:
         try:
             val = float(v) * multiplier
-            return f"{val:.4f}"
+            return f"{val:.{precision}f}"
         except (TypeError, RuntimeError):
             if multiplier != 1.0:
                 return f"({v}) * {multiplier}"
@@ -321,7 +321,7 @@ def _log_compute_estimations(
             _node_summary(node),
             _safe_float_fmt(est_b, multiplier=1e3),
             _safe_float_fmt(est_a, multiplier=1e3),
-            _safe_float_fmt((est_a / est_b) if est_b > 0 else 0),
+            _safe_float_fmt((est_a / est_b) if float(est_b) > 0 else 0),
             _safe_float_fmt((est_a - est_b), multiplier=1e3),
             str(count_flops_fx(node)),
         ]
@@ -410,26 +410,26 @@ def _log_collective_benchmarks(
 
         if benchmarked_medians is not None:
             benchmarked_ms = benchmarked_medians[i]
-            nccl_diff_pct = (nccl_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
+            nccl_diff_pct = (nccl_ms / benchmarked_ms) if _safe_float_fmt(benchmarked_ms) != "0.0000" else 0
             inductor_diff_pct = (
-                (inductor_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
+                (inductor_ms / benchmarked_ms) if _safe_float_fmt(benchmarked_ms) != "0.0000" else 0
             )
             rows.append(
                 [
                     key,
-                    f"{benchmarked_ms:.4f}",
-                    f"{nccl_ms:.4f}",
-                    f"{inductor_ms:.4f}",
-                    f"{nccl_diff_pct:.2f}",
-                    f"{inductor_diff_pct:.2f}",
+                    _safe_float_fmt(benchmarked_ms),
+                    _safe_float_fmt(nccl_ms),
+                    _safe_float_fmt(inductor_ms),
+                    _safe_float_fmt(nccl_diff_pct, precision=2),
+                    _safe_float_fmt(inductor_diff_pct, precision=2),
                 ]
             )
         else:
             rows.append(
                 [
                     key,
-                    f"{nccl_ms:.4f}",
-                    f"{inductor_ms:.4f}",
+                    _safe_float_fmt(nccl_ms),
+                    _safe_float_fmt(inductor_ms),
                 ]
             )
 
