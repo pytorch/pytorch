@@ -2181,7 +2181,7 @@ torch.cuda.synchronize()
         F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
 
 
-instantiate_device_type_tests(TestAvgPoolDeviceType, globals(), except_for=("cpu"))
+instantiate_device_type_tests(TestAvgPoolDeviceType, globals())
 instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestPoolingNN)
 
