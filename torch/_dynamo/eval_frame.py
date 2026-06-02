@@ -2248,7 +2248,7 @@ def export(
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
 
-         **Experimental ShapesSpec API.** ``dynamic_shapes`` may also be a
+         **ShapesSpec API.** ``dynamic_shapes`` may also be a
          :class:`torch.fx.experimental.dynamic_spec.ShapesSpec` (or its
          shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`).
          This is the same spec API exposed via ``shapes_spec=`` in
