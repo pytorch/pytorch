@@ -5,6 +5,7 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/native/Padding.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_numerics.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -20,6 +21,22 @@
 #endif
 
 namespace at::meta {
+
+namespace {
+// Compute an output dimension as input + pad_before + pad_after, reporting a
+// clear error instead of overflowing int64. An overflowed size would otherwise
+// be handed to the kernel and segfault.
+// See https://github.com/pytorch/pytorch/issues/169741.
+inline int64_t replication_pad_output_size(int64_t in, int64_t pad_before, int64_t pad_after) {
+  int64_t out = in;
+  bool overflow = c10::add_overflows(out, pad_before, &out);
+  overflow |= c10::add_overflows(out, pad_after, &out);
+  TORCH_CHECK(!overflow,
+      "Padding (", pad_before, ", ", pad_after, ") is too large; the padded "
+      "output size overflows int64 for an input dimension of size ", in);
+  return out;
+}
+} // namespace
 
 TORCH_META_FUNC(replication_pad1d) (
   const Tensor& input, IntArrayRef paddingSize  // no out argument!
@@ -44,7 +61,7 @@ TORCH_META_FUNC(replication_pad1d) (
   /* sizes */
   int64_t nslices = input.size(dimslices);
   int64_t iwidth = input.size(dimw);
-  int64_t owidth = iwidth + pad_l + pad_r;
+  int64_t owidth = replication_pad_output_size(iwidth, pad_l, pad_r);
 
   TORCH_CHECK(owidth >= 1,
       "input (W: ", iwidth, ") is too small."
@@ -108,8 +125,8 @@ TORCH_META_FUNC(replication_pad2d) (
   int64_t nslices = input.size(dimslices);
   int64_t iheight = input.size(dimh);
   int64_t iwidth = input.size(dimw);
-  int64_t oheight = iheight + pad_t + pad_b;
-  int64_t owidth  = iwidth + pad_l + pad_r;
+  int64_t oheight = replication_pad_output_size(iheight, pad_t, pad_b);
+  int64_t owidth  = replication_pad_output_size(iwidth, pad_l, pad_r);
 
   TORCH_CHECK(owidth >= 1 || oheight >= 1,
       "input (H: ", iheight, ", W: ", iwidth, " ) is too small."
@@ -153,9 +170,9 @@ TORCH_META_FUNC(replication_pad3d) (
   int64_t idepth = input.size(dimd);
   int64_t iheight = input.size(dimh);
   int64_t iwidth = input.size(dimw);
-  int64_t odepth = idepth + pfront + pback;
-  int64_t oheight = iheight + ptop + pbottom;
-  int64_t owidth  = iwidth + pleft + pright;
+  int64_t odepth = replication_pad_output_size(idepth, pfront, pback);
+  int64_t oheight = replication_pad_output_size(iheight, ptop, pbottom);
+  int64_t owidth  = replication_pad_output_size(iwidth, pleft, pright);
 
   TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
       "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
