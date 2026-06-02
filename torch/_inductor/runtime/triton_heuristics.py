@@ -4993,9 +4993,21 @@ def foreach(triton_meta, filename=None, inductor_meta=None):
     Compile a triton foreach kernel
     """
     configs = []
+    inductor_meta = inductor_meta or {}
 
+    combo_meta = inductor_meta.get("combo_grid_meta") or {}
+    # If combo_grid_meta carries a stitched config, skip the autotune sweep.
+    stitched_warps = combo_meta.get("stitched_num_warps")
+    if stitched_warps is not None:
+        configs.append(
+            triton.Config(
+                {},
+                num_stages=combo_meta["stitched_num_stages"],
+                num_warps=stitched_warps,
+            )
+        )
     # Naive autotuning path for num_warps
-    if not (
+    elif not (
         inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
     ):
         configs.append(triton.Config({}, num_stages=1, num_warps=8))

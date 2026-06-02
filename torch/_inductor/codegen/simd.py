@@ -50,7 +50,8 @@ from ..optimize_indexing import (
 )
 from ..runtime.coordinate_descent_tuner import CoordescTuner
 from ..runtime.hints import DeviceProperties
-from ..runtime.runtime_utils import green_text, last_power_of_2, yellow_text
+from ..runtime.hints import TileHint
+from ..runtime.runtime_utils import green_text, last_power_of_2, next_power_of_2, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
@@ -3404,6 +3405,180 @@ class SIMDScheduling(BaseScheduling):
     def codegen_sync(self):
         V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
 
+    def _codegen_standalone_kernel(
+        self, node_info: NodeInfo, only_gen_src_code: bool
+    ) -> tuple[str, "TritonKernel"]:
+        kernel_kwargs: dict[str, Any] = {}
+        self.kernel_type.apply_feature_required_overrides(
+            node_info.features, kernel_kwargs
+        )
+        kernel = self.kernel_type(
+            node_info.tiling,
+            features=node_info.features,
+            tiling_scores=node_info.tiling_scores,
+            **kernel_kwargs,
+        )
+        self.process_kernel(kernel, node_info.node_schedule, only_gen_src_code)
+        with V.set_kernel_handler(kernel):
+            src_code = kernel.codegen_kernel()
+        return src_code, kernel
+
+    def _probe_subkernel_heuristic(
+        self, node_info: NodeInfo
+    ) -> tuple[list[Any], bool]:
+        from ..runtime.triton_heuristics import (
+            persistent_reduction,
+            pointwise,
+            reduction,
+        )
+        from .triton_utils import non_constexpr_signature
+
+        # Match ComboKernel.create_triton_kernel's construction so the probe
+        # sees the same persistent_reduction / no_x_dim flags the real combo
+        # subkernel will. Combo subkernels always disable cooperative
+        # reduction; without this override the probe can pick the wrong
+        # configs for kernels where the standalone heuristic would have
+        # gone cooperative.
+        kernel_kwargs: dict[str, Any] = dict(
+            is_combo_kernel=True,
+            override_cooperative_reduction=False,
+        )
+        self.kernel_type.apply_feature_required_overrides(
+            node_info.features, kernel_kwargs
+        )
+        kernel = self.kernel_type(
+            node_info.tiling,
+            features=node_info.features,
+            tiling_scores=node_info.tiling_scores,
+            **kernel_kwargs,
+        )
+        config_patches = self._collect_config_patches(node_info.node_schedule)
+        config_patches["benchmark_kernel"] = False
+        # decide_inplace_update -> make_inplace can mutate
+        # V.graph.unaligned_buffers; restore after the probe even on error.
+        unaligned_snapshot = OrderedSet(V.graph.unaligned_buffers)
+        try:
+            with config.patch(**config_patches), V.set_kernel_handler(kernel):
+                self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
+                # codegen_kernel populates kernel.triton_meta, which the
+                # heuristics below consume; the returned source is discarded.
+                _ = kernel.codegen_kernel()
+        finally:
+            V.graph.unaligned_buffers = unaligned_snapshot
+            metrics.generated_kernel_count -= 1
+
+        size_hints = {
+            prefix: next_power_of_2(int(V.graph.sizevars.optimization_hint(numel)))
+            for prefix, numel in kernel.numels.items()
+            if not prefix_is_reduction(prefix) or kernel.inside_reduction
+        }
+        inductor_meta = {
+            **kernel.inductor_meta_common(),
+            **kernel.inductor_meta_per_kernel(),
+        }
+        if kernel.persistent_reduction:
+            configs = persistent_reduction(
+                size_hints,
+                reduction_hint=kernel.features.get_reduction_hint(
+                    kernel.tiling_scores
+                ),
+                triton_meta=kernel.triton_meta,
+                inductor_meta=inductor_meta,
+                return_configs=True,
+            )
+        elif kernel.inside_reduction:
+            configs = reduction(
+                size_hints,
+                reduction_hint=kernel.features.get_reduction_hint(
+                    kernel.tiling_scores
+                ),
+                triton_meta=kernel.triton_meta,
+                inductor_meta=inductor_meta,
+                return_configs=True,
+            )
+        else:
+            tile_hint = None
+            if len(size_hints) == 2:
+                _, _, signature, _ = kernel.args.python_argdefs()
+                tile_hint = (
+                    TileHint.SQUARE
+                    if len(non_constexpr_signature(signature)) == 4
+                    else TileHint.DEFAULT
+                )
+            configs = pointwise(
+                size_hints,
+                triton_meta=kernel.triton_meta,
+                tile_hint=tile_hint,
+                inductor_meta=inductor_meta,
+                return_configs=True,
+            )
+        return configs, kernel.persistent_reduction
+
+    @staticmethod
+    def _stitch_no_bench_combo_config(
+        chosen_configs: list[Any],
+        fusion_persistent: list[bool],
+    ) -> Any:
+        import triton
+
+        # R*_BLOCK is hardcoded into static numels for persistent reductions
+        # (not in block_args). Skipping these keeps stitched kwargs in sync
+        # with the kernel body's tl.constexpr declarations.
+        def live_block_keys(i: int, cfg: Any) -> list[str]:
+            keys = []
+            for k in cfg.kwargs:
+                if not k.endswith("BLOCK"):
+                    continue
+                if fusion_persistent[i] and k.startswith("R"):
+                    continue
+                keys.append(k)
+            return keys
+
+        def effective_tile_elems(i: int, cfg: Any) -> int:
+            te = 1
+            for k in live_block_keys(i, cfg):
+                te *= int(cfg.kwargs[k])
+            return te
+
+        stitched_kwargs: dict[str, Any] = {}
+        for i, cfg in enumerate(chosen_configs):
+            for key in live_block_keys(i, cfg):
+                stitched_kwargs[f"{key}_{i}"] = int(cfg.kwargs[key])
+
+        configs_by_tile_elems = sorted(
+            enumerate(chosen_configs),
+            key=lambda iv: effective_tile_elems(iv[0], iv[1]),
+            reverse=True,
+        )
+        top_k = max(1, len(configs_by_tile_elems) // 2)
+        num_warps = int(max(cfg.num_warps for _, cfg in configs_by_tile_elems[:top_k]))
+        # Heaviest subkernel's num_stages wins (consistent with backend kwargs).
+        num_stages = int(configs_by_tile_elems[0][1].num_stages)
+
+        # Non-BLOCK backend kwargs (waves_per_eu, kpack, etc.): heaviest setter wins.
+        backend_kwarg_keys: OrderedSet[str] = OrderedSet()
+        for cfg in chosen_configs:
+            for k in cfg.kwargs:
+                if not k.endswith("BLOCK"):
+                    backend_kwarg_keys.add(k)
+        for k in backend_kwarg_keys:
+            for _, cfg in configs_by_tile_elems:
+                if k in cfg.kwargs:
+                    value = cfg.kwargs[k]
+                    if isinstance(value, bool):
+                        stitched_kwargs[k] = value
+                    elif isinstance(value, int):
+                        stitched_kwargs[k] = int(value)
+                    else:
+                        stitched_kwargs[k] = value
+                    break
+
+        return triton.Config(
+            dict(stitched_kwargs),
+            num_warps=num_warps,
+            num_stages=num_stages,
+        )
+
     def generate_combo_kernel_code(
         self,
         subkernel_nodes: list[BaseSchedulerNode],
@@ -3493,50 +3668,81 @@ class SIMDScheduling(BaseScheduling):
                     # Skip code generation - caller has cached benchmark results
                     kernel_code_list.append((None, None, node_group))
                 else:
-                    # Generate regular kernel
-                    kernel_kwargs: dict[str, Any] = {}
-                    self.kernel_type.apply_feature_required_overrides(
-                        node_info.features, kernel_kwargs
+                    src_code, kernel = self._codegen_standalone_kernel(
+                        node_info, only_gen_src_code
                     )
-                    kernel = self.kernel_type(
-                        node_info.tiling,
-                        features=node_info.features,
-                        **kernel_kwargs,
-                    )
-                    self.process_kernel(
-                        kernel, node_info.node_schedule, only_gen_src_code
-                    )
-                    with V.set_kernel_handler(kernel):
-                        src_code = kernel.codegen_kernel()
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
             else:
-                # Multi-node: create ComboKernel with combo subkernels
-                kernel = ComboKernel(
-                    triton_kernel_cls=self.kernel_type,
-                    enable_autotune=enable_autotune,
-                    mixed_sizes=mixed_sizes,
-                    per_subkernel_blocks=per_subkernel_blocks,
+                no_bench_mode = (
+                    per_subkernel_blocks
+                    and not enable_autotune
+                    and not only_gen_src_code
                 )
-                for pn in node_group:
-                    node_info = node_schedule_map[pn]
-                    subkernel = ComboKernel.create_triton_kernel(
-                        node_info.tiling,
-                        features=node_info.features,
-                        optimize_mask=not mixed_sizes,
+                fusion_pns: list[Any] = []
+                fusion_configs: list[Any] = []
+                fusion_persistent: list[bool] = []
+                carve_out_pns: list[Any] = []
+                if no_bench_mode:
+                    for pn in node_group:
+                        configs, persistent = self._probe_subkernel_heuristic(
+                            node_schedule_map[pn]
+                        )
+                        if configs and len(configs) <= 2:
+                            fusion_pns.append(pn)
+                            fusion_configs.append(configs[0])
+                            fusion_persistent.append(persistent)
+                        else:
+                            carve_out_pns.append(pn)
+                    if len(fusion_pns) < 2:
+                        fusion_pns = []
+                        fusion_configs = []
+                        fusion_persistent = []
+                        carve_out_pns = list(node_group)
+                else:
+                    fusion_pns = list(node_group)
+
+                if len(fusion_pns) >= 2:
+                    kernel = ComboKernel(
                         triton_kernel_cls=self.kernel_type,
-                        tiling_scores=node_info.tiling_scores,
+                        enable_autotune=enable_autotune,
+                        mixed_sizes=mixed_sizes,
                         per_subkernel_blocks=per_subkernel_blocks,
                     )
-                    self.process_kernel(
-                        kernel.create_sub_kernel(subkernel),
-                        node_info.node_schedule,
-                        only_gen_src_code,
-                    )
+                    for pn in fusion_pns:
+                        node_info = node_schedule_map[pn]
+                        subkernel = ComboKernel.create_triton_kernel(
+                            node_info.tiling,
+                            features=node_info.features,
+                            optimize_mask=not mixed_sizes,
+                            triton_kernel_cls=self.kernel_type,
+                            tiling_scores=node_info.tiling_scores,
+                            per_subkernel_blocks=per_subkernel_blocks,
+                        )
+                        self.process_kernel(
+                            kernel.create_sub_kernel(subkernel),
+                            node_info.node_schedule,
+                            only_gen_src_code,
+                        )
 
-                src_code = kernel.codegen_kernel()
-                # pyrefly: ignore [bad-argument-type]
-                kernel_code_list.append((src_code, kernel, node_group))
+                    if no_bench_mode and fusion_configs:
+                        kernel.no_bench_stitched_config = (
+                            self._stitch_no_bench_combo_config(
+                                fusion_configs,
+                                fusion_persistent,
+                            )
+                        )
+
+                    src_code = kernel.codegen_kernel()
+                    # pyrefly: ignore [bad-argument-type]
+                    kernel_code_list.append((src_code, kernel, fusion_pns))
+
+                for pn in carve_out_pns:
+                    co_src_code, co_kernel = self._codegen_standalone_kernel(
+                        node_schedule_map[pn], only_gen_src_code
+                    )
+                    # pyrefly: ignore [bad-argument-type]
+                    kernel_code_list.append((co_src_code, co_kernel, [pn]))
         # pyrefly: ignore [bad-return]
         return kernel_code_list
 

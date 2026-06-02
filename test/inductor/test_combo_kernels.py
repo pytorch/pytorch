@@ -786,6 +786,112 @@ class ComboKernelTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_autotune": 0,
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_combo_kernel_no_bench_stitched_config(self):
+        # combo_kernels_autotune=0 + per_subkernel_blocks=True fuses
+        # subkernels using configs[0] from each subkernel's heuristic,
+        # stitched into one combo config.  Generated code should bake the
+        # stitched XBLOCK_i values into both default_config (grid) and the
+        # kernel body's tl.constexpr (iteration).  These must agree, else
+        # we silently lose data when heuristic XBLOCK > block_size_1d.
+        import re
+
+        def fn(a, b, c):
+            return a * 2.0, b + 1.0, c - 1.0
+
+        inps = [
+            torch.rand(256, device=GPU_TYPE),
+            torch.rand(256, device=GPU_TYPE),
+            torch.rand(256, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        combined = " ".join(code)
+
+        default_match = re.search(
+            r"'default_config':\s*\{([^}]*)\}", combined
+        )
+        self.assertIsNotNone(default_match, "default_config not emitted")
+        default_kvs = dict(
+            re.findall(r"'(XBLOCK_\d+)':\s*(\d+)", default_match.group(1))
+        )
+        body_kvs = dict(
+            re.findall(r"(XBLOCK_\d+):\s*tl\.constexpr\s*=\s*(\d+)", combined)
+        )
+        # Grid and kernel body must agree on every XBLOCK_i.
+        self.assertEqual(default_kvs, body_kvs)
+        self.assertEqual(set(default_kvs), {"XBLOCK_0", "XBLOCK_1", "XBLOCK_2"})
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_autotune": 0,
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_combo_kernel_no_bench_numerics_large(self):
+        # Numerics check with an input size > DEFAULT_COMBO_BLOCK_SIZE_1D
+        # (=1024).  If the stitched XBLOCK in default_config diverges from
+        # the kernel body's tl.constexpr, the kernel either over-launches
+        # (xmask masks the surplus -- still correct) or under-launches
+        # (silent data loss).  This test catches the under-launch case as
+        # a numerics regression.
+        def fn(a, b, c):
+            return a * 2.0, b + 1.0, c - 1.0
+
+        inps = [torch.rand(8192, device=GPU_TYPE) for _ in range(3)]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled = torch.compile(fn)(*inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        {
+            "combo_kernels_autotune": 0,
+            "combo_kernel_per_subkernel_blocks": True,
+        }
+    )
+    def test_combo_kernel_no_bench_persistent_reduction(self):
+        # 3 same-shape persistent reductions fuse into one combo.  The
+        # stitcher must skip R*_BLOCK_i (body emits it via static numels,
+        # not from default_config); leaking R*_BLOCK_i would be either
+        # dead data or a Triton unknown-kwarg error.
+        import re
+
+        def fn(a, b, c):
+            return a.sum(-1), b.sum(-1), c.sum(-1)
+
+        inps = [torch.randn(64, 1024, device=GPU_TYPE) for _ in range(3)]
+        out_eager = fn(*inps)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        combined = " ".join(code)
+
+        default_match = re.search(r"'default_config':\s*\{([^}]*)\}", combined)
+        self.assertIsNotNone(default_match)
+        default_body = default_match.group(1)
+        # default_config must only carry XBLOCK_i; R*_BLOCK_i is body-baked.
+        self.assertNotIn("R0_BLOCK", default_body)
+        self.assertNotIn("R1_BLOCK", default_body)
+        xblocks = re.findall(r"'(XBLOCK_\d+)'", default_body)
+        self.assertEqual(set(xblocks), {"XBLOCK_0", "XBLOCK_1", "XBLOCK_2"})
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu
