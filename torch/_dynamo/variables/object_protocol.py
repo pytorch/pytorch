@@ -3,8 +3,8 @@ Dynamo implementations of CPython's PyObject_* default slot algorithms.
 
 Analogous to CPython's Objects/object.c, this module holds the general
 dispatch machinery that is independent of any specific type.
-Per-type hook implementations (bool_impl, richcompare_impl, etc.)
-live in their respective VT files.
+Per-type hook implementations (bool_impl, richcompare_impl, getattro_impl,
+etc.) live in their respective VT files.
 """
 
 import abc
@@ -35,11 +35,12 @@ from ..exc import (
     unimplemented,
 )
 from ..utils import istype
-from .base import NO_SUCH_SUBOBJ, VariableTracker
+from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
 from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
+    from ..source import Source
     from ..symbolic_convert import InstructionTranslatorBase
 
 
@@ -1488,7 +1489,7 @@ def generic_issubclass(
         )
     cls_type = maybe_get_python_type(cls)
 
-    # Step 1: PyType_CheckExact fast path — abstract.c L2772
+    # Step 1: PyType_CheckExact fast path -- abstract.c L2772
     if cls_type is type:
         try:
             return ConstantVariable.create(
@@ -1500,7 +1501,7 @@ def generic_issubclass(
         except TypeError as e:
             raise_observed_exception(TypeError, tx, args=list(e.args))
 
-    # Step 2: PEP 604 Union (e.g. ``int | str``) — abstract.c L2779-2781.
+    # Step 2: PEP 604 Union (e.g. ``int | str``) -- abstract.c L2779-2781.
     union_types = {types.UnionType}
     if sys.version_info < (3, 14):
         union_types.add(
@@ -1511,7 +1512,7 @@ def generic_issubclass(
         args = typing.get_args(cls_py)
         cls = VariableTracker.build(tx, args)
 
-    # Step 3: tuple of classes — abstract.c L2783-2799.  Check for
+    # Step 3: tuple of classes -- abstract.c L2783-2799.  Check for
     # TupleVariable instead of tuple to make the type checker happy.
     from .lists import TupleVariable
 
@@ -1552,9 +1553,244 @@ def generic_issubclass(
             "issubclass() arg 2 must be a class, a tuple of classes, or a union",
         )
 
-    # Step 4: general case — call ``__subclasscheck__`` on cls's metaclass
+    # Step 4: general case -- call ``__subclasscheck__`` on cls's metaclass
     # (abstract.c L2801-2815).  Runs user code on a custom metaclass.
     result = cls.call_method(tx, "__subclasscheck__", [derived], {})
 
     # Coerce to bool (PyObject_IsTrue, abstract.c L2812).
     return generic_bool(tx, result)
+
+
+# ── tp_getattro ──────────────────────────────────────────────────────
+#
+# Dynamo's PyObject_GetAttr / PyObject_GenericGetAttr.
+#
+# CPython references:
+#   PyObject_GetAttr:        Objects/object.c#L1259-L1283
+#   PyObject_GenericGetAttr: Objects/object.c#L1611-L1683
+#   _PyType_LookupRef:       Objects/typeobject.c#L5208-L5262
+#
+# PyObject_GetAttr(obj, name):
+#     tp = Py_TYPE(obj)
+#     if tp->tp_getattro:
+#         return tp->tp_getattro(obj, name)
+#     ...
+#     raise AttributeError
+#
+# Dispatch path:
+#     LOAD_ATTR / getattr() -> GetAttrBuiltinVariable -> generic_getattr
+#         -> obj.getattro_impl(tx, name)
+#
+# The base VariableTracker.getattro_impl currently uses const_getattr
+# (literal-only).  object_generic_getattr() below implements the full
+# PyObject_GenericGetAttr algorithm (MRO walk + descriptor protocol)
+# and is available for VTs to opt into; it will become the base default
+# once downstream VTs have the necessary slot coverage (hash_impl,
+# richcompare_impl, etc.).
+#
+# VTs with custom tp_getattro (TensorVariable, NNModuleVariable,
+# UserDefinedClassVariable, SuperVariable) override getattro_impl.
+
+_NO_DEFAULT = object()
+
+
+def mro_lookup(py_type: type, name: str) -> object:
+    """Walk py_type.__mro__ to find *name* in the class hierarchy.
+
+    Mirrors CPython's _PyType_LookupRef (Objects/typeobject.c).
+    Searches only the class chain (py_type.__mro__), NOT the metaclass
+    chain.  Returns the raw descriptor/value from the class __dict__,
+    or NO_SUCH_SUBOBJ if not found.
+    """
+    for base in py_type.__mro__:
+        if name in base.__dict__:
+            return base.__dict__[name]
+    return NO_SUCH_SUBOBJ
+
+
+def _resolve_descriptor_get(
+    tx: "InstructionTranslatorBase",
+    type_attr: object,
+    obj: VariableTracker,
+    class_vt: VariableTracker,
+    source: "Source | None",
+) -> "VariableTracker | None":
+    """Invoke tp_descr_get on a type attribute if it's a descriptor.
+
+    Handles all descriptor types that have dedicated VTs with
+    tp_descr_get_impl.  Returns None if type_attr is not a recognized
+    descriptor type (plain class variable).
+    """
+    import types as _types
+
+    from .. import variables
+
+    if isinstance(type_attr, property):
+        prop_vt = variables.PropertyVariable(type_attr, source=source)
+        return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.MemberDescriptorType):
+        md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
+        return md_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.GetSetDescriptorType):
+        gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
+        return gs_vt.tp_descr_get_impl(tx, obj, class_vt)
+    _tuplegetter = collections._tuplegetter  # pyrefly: ignore[missing-attribute]
+    if isinstance(type_attr, _tuplegetter):
+        tg_vt = variables.TupleGetterVariable(type_attr, source=source)
+        return tg_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, staticmethod):
+        sm_vt = variables.StaticMethodVariable(type_attr, source=source)
+        return sm_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, classmethod):
+        cm_vt = variables.ClassMethodVariable(type_attr, source=source)
+        return cm_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.ClassMethodDescriptorType):
+        cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
+        return cmd_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.WrapperDescriptorType):
+        wd_vt = variables.WrapperDescriptorVariable(
+            type_attr, owner=class_vt, source=source
+        )
+        return wd_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.MethodDescriptorType):
+        md_vt = variables.MethodDescriptorVariable(
+            type_attr, owner=class_vt, source=source
+        )
+        return md_vt.tp_descr_get_impl(tx, obj, class_vt)
+    if isinstance(type_attr, _types.FunctionType):
+        return variables.UserMethodVariable(type_attr, obj, source=source)
+
+    return None
+
+
+def object_generic_getattr(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+) -> VariableTracker:
+    """Dynamo's PyObject_GenericGetAttr for the base VariableTracker.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1611-L1683
+
+    Implements the standard attribute lookup algorithm using only the
+    VT's python_type() -- no self.value needed.  Works for any VT that
+    knows its Python type.
+
+    Steps:
+      1. MRO walk on python_type() for type_attr
+      2. Data descriptor -> invoke tp_descr_get
+      3. (Instance dict -- skipped, base VTs have no instance dict)
+      4. Non-data descriptor -> invoke tp_descr_get
+      5. Plain class variable -> wrap in VT
+      6. AttributeError
+    """
+    from ..source import AttrSource
+    from .user_defined import is_data_descriptor
+
+    py_type = obj.python_type()
+    type_attr = mro_lookup(py_type, name)
+
+    if type_attr is NO_SUCH_SUBOBJ:
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"'{py_type.__name__}' object has no attribute '{name}'"],
+        )
+
+    source = obj.source and AttrSource(obj.source, name)
+    class_vt = VariableTracker.build(tx, py_type)
+
+    is_data_desc = is_data_descriptor(type_attr)
+    has_get = hasattr(type(type_attr), "__get__")
+
+    # Step 2: Data descriptor takes priority.
+    # Step 4: Non-data descriptor with __get__.
+    if is_data_desc or has_get:
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        if result is not None:
+            return result
+        # Unrecognized descriptor type -- fall back to caller.
+        raise NotImplementedError(
+            f"object_generic_getattr: unhandled descriptor {type(type_attr)} for {name}"
+        )
+
+    # Step 5: Plain class variable (no __get__).
+    return VariableTracker.build(tx, type_attr, source)
+
+
+def generic_getattr(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+    default: "VariableTracker | object" = _NO_DEFAULT,
+) -> VariableTracker:
+    """Dynamo's PyObject_GetAttr: attribute access dispatch.
+
+    Checks side effects for pending attribute mutations, then dispatches
+    to obj.getattro_impl(tx, name).  On NotImplementedError, falls back
+    to GetAttrVariable (deferred resolution).
+    """
+    from .. import variables
+    from ..source import AttrSource, GetItemSource
+    from .base import AttrMutationKind
+    from .user_defined import is_data_descriptor
+
+    # NOTE [Tensor "grad" and "_grad" attr]
+    if obj.is_tensor() and name == "_grad":
+        name = "grad"
+
+    # Side effects: check for pending attribute mutations.
+    if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
+        if not isinstance(obj, variables.UserDefinedObjectVariable):
+            return tx.output.side_effects.load_attr(obj, name)
+        if tx.output.side_effects.has_pending_mutation_of_attr(
+            obj, name, AttrMutationKind.INSTANCE_DICT
+        ):
+            value = tx.output.side_effects.load_attr(obj, name, deleted_ok=True)
+            type_attr = obj.lookup_class_mro_attr(name)
+            if not isinstance(value, variables.DeletedVariable) and (
+                type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr)
+            ):
+                return value
+
+    # Handle default for getattr(obj, name, default).
+    if default is not _NO_DEFAULT:
+        hasattr_var = obj.call_obj_hasattr(tx, name)
+        if hasattr_var is not None:
+            if not hasattr_var.is_constant_match(True, False):
+                raise AssertionError(
+                    f"hasattr_var must be a constant True or False, got {hasattr_var}"
+                )
+            if not hasattr_var.as_python_constant():
+                return default  # type: ignore[return-value]
+        else:
+            return default  # type: ignore[return-value]
+
+    # __bases__, __base__, __flags__ shortcut for type objects.
+    source = obj.source and AttrSource(obj.source, name)
+    if name in {"__bases__", "__base__", "__flags__"}:
+        try:
+            value = obj.as_python_constant()
+            if isinstance(value, type):
+                if name == "__bases__":
+                    tuple_args = [
+                        VariableTracker.build(
+                            tx, b, source and GetItemSource(source, i)
+                        )
+                        for i, b in enumerate(value.__bases__)
+                    ]
+                    return variables.TupleVariable(tuple_args, source=source)
+                if name == "__base__":
+                    return VariableTracker.build(tx, value.__base__, source)
+                if name == "__flags__":
+                    return VariableTracker.build(tx, value.__flags__)
+        except NotImplementedError:
+            pass
+
+    # Core dispatch: call the VT's getattro_impl (tp_getattro).
+    try:
+        return obj.getattro_impl(tx, name)
+    except AsPythonConstantNotImplementedError:
+        raise
+    except NotImplementedError:
+        return variables.GetAttrVariable(obj, name, source=source)

@@ -14056,13 +14056,13 @@ fn
         from torch._dynamo.variables.user_defined import InspectVariable
 
         redirected_attrs = []
-        original_var_getattr = InspectVariable.var_getattr
+        original_getattro_impl = InspectVariable.getattro_impl
 
-        def tracking_var_getattr(self, tx, name):
+        def tracking_getattro_impl(self, tx, name):
             redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
             if name in redirects:
                 redirected_attrs.append(name)
-            return original_var_getattr(self, tx, name)
+            return original_getattro_impl(self, tx, name)
 
         def fn(x, gn):
             sig = inspect.signature(gn)
@@ -14074,7 +14074,7 @@ fn
             return a + b
 
         x = torch.randn(2, 3)
-        with patch.object(InspectVariable, "var_getattr", tracking_var_getattr):
+        with patch.object(InspectVariable, "getattro_impl", tracking_getattro_impl):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             result = opt_fn(x, gn)
 

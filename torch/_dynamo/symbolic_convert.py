@@ -2482,7 +2482,7 @@ class InstructionTranslatorBase(
     def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
         # based on CPython's PyTraceBack_Here impl
         frame_summary = self.frame_summary()
-        tb = exc.var_getattr(
+        tb = exc.getattro_impl(
             # pyrefly: ignore [bad-argument-type]
             self,
             "__traceback__",
@@ -2664,7 +2664,7 @@ class InstructionTranslatorBase(
                     "expected self._isinstance_exception(val) to be true"
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            tb = val.var_getattr(
+            tb = val.getattro_impl(
                 # pyrefly: ignore[bad-argument-type]
                 self,
                 "__traceback__",
@@ -2683,7 +2683,7 @@ class InstructionTranslatorBase(
                 )
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
 
-            tb = val.var_getattr(self, "__traceback__")
+            tb = val.getattro_impl(self, "__traceback__")
 
         args += [typ, val, tb]
         self.call_function(fn, args, {})
@@ -3157,7 +3157,7 @@ class InstructionTranslatorBase(
 
     def _maybe_sync_dealloc_attr(self, obj: VariableTracker, name: str) -> None:
         # Only check side_effects — a pure dict lookup with no observable
-        # side effects. We intentionally avoid var_getattr here because it
+        # side effects. We intentionally avoid getattro_impl here because it
         # can trigger __getattr__, add graph nodes, or cause graph breaks.
         if self.output.side_effects.has_pending_mutation_of_attr(obj, name):
             attr_var = self.output.side_effects.load_attr(obj, name)

@@ -1852,7 +1852,7 @@ class VariableBuilder:
             # tracing, but in dynamo we handle it as a regular object so that
             # trace_rules-based graph breaks (e.g. initial_seed, manual_seed)
             # work gracefully — allowing dynamo to compile code before and
-            # after the generator call. TorchScriptObjectVariable's var_getattr
+            # after the generator call. TorchScriptObjectVariable's getattro_impl
             # and call_method are decorated with @_raise_hard_error_if_graph_break,
             # which turns any graph break into a hard error that falls back to
             # eager for the entire function. Generator methods intentionally
@@ -5054,7 +5054,7 @@ class SourcelessBuilder:
                 cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
                 try:
                     # pyrefly: ignore[bad-argument-type]
-                    return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
+                    return cls_obj_vt.getattro_impl(tx, value.__func__.__name__)
                 except NotImplementedError:
                     pass  # failthrough to unimplemented branch
             else:

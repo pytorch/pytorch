@@ -1027,7 +1027,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     raise AssertionError(
                         "Expected first argument to accumulate_grad_ to be a tensor"
                     )
-                variable_grad = variable.var_getattr(tx, "grad")
+                variable_grad = variable.getattro_impl(tx, "grad")
                 updated_grad = tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.accumulate_grad),
                     [variable, variable_grad, new_grad],
@@ -3038,6 +3038,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         return handlers
 
+    def getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
+        from ..source import AttrSource
+
+        source = self.source and AttrSource(self.source, name)
+        try:
+            member = getattr(self.value, name)
+        except AttributeError:
+            from ..exc import raise_observed_exception
+
+            raise_observed_exception(AttributeError, tx)
+            raise
+
+        if isinstance(
+            member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+        ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
+            return TorchInGraphFunctionVariable(member, source=source)
+        return variables.GetAttrVariable(self, name, source=source)
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -3827,9 +3847,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         try:
-            shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
-            dtype = data.var_getattr(tx, "dtype").as_python_constant()
-            device = data.var_getattr(tx, "device").as_python_constant()
+            shape = tuple(data.getattro_impl(tx, "shape").as_python_constant())
+            dtype = data.getattro_impl(tx, "dtype").as_python_constant()
+            device = data.getattro_impl(tx, "device").as_python_constant()
         except NotImplementedError as e:
             unimplemented(
                 gb_type="`torch.nn.Parameter` with non-constant Tensor attributes",

@@ -843,10 +843,10 @@ class ConstDictVariable(VariableTracker):
             return VariableTracker.build(tx, not eq_result.as_python_constant())
         return eq_result
 
-    def var_getattr(self, tx: "InstructionTranslatorBase", name: str):
+    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         if name == "__class__":
             return VariableTracker.build(tx, self.python_type())
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
 
 class MappingProxyVariable(VariableTracker):

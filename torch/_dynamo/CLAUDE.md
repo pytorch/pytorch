@@ -36,7 +36,7 @@ The compilation pipeline, in execution order:
 
 Every Python value encountered during tracing is wrapped in a `VariableTracker`
 subclass. Key interface: `as_python_constant()`, `as_proxy()`,
-`call_function()`, `call_method()`, `var_getattr()`, `reconstruct()`.
+`call_function()`, `call_method()`, `getattro_impl()`, `reconstruct()`.
 
 Key fields: `source` (where the value came from, for guards) and
 `mutation_type` (whether/how mutations are tracked).

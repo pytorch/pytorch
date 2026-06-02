@@ -34,6 +34,7 @@ import sys
 import threading
 import traceback
 import types
+import unittest
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
@@ -523,7 +524,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
@@ -796,7 +797,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             cls_attr
         ):
-            return super().var_getattr(tx, name)
+            return super().getattro_impl(tx, name)
         if self.value is collections.OrderedDict:
             return variables.GetAttrVariable(self, name, py_type=type(cls_attr))
         return VariableTracker.build(tx, cls_attr, source)
@@ -2963,7 +2964,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # If the object has an overridden getattribute method, Dynamo has
             # already tried tracing it, and encountered an AttributeError. We
             # call getattr_static only when the __getattribute__ tracing fails
-            # (check var_getattr impl). So, it is safe here to raise the
+            # (check getattro_impl impl). So, it is safe here to raise the
             # AttributeError.
             raise AttributeError
 
@@ -2973,20 +2974,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def lookup_class_mro_attr(self, name: str) -> object:
         """Walk type(obj).__mro__ to find *name* in the class hierarchy.
 
-        This only searches the class chain (type(obj).__mro__), NOT the
-        metaclass chain (type(type(obj)).__mro__).  The distinction matters
-        because inspect.getattr_static conflates both chains — it can return
-        metaclass descriptors (e.g. type.__dict__['__annotations__'], a
-        getset_descriptor) when the attribute doesn't exist on the class MRO.
-        Walking cls.__mro__ directly avoids that leak.
+        Cached wrapper around mro_lookup() for UDOV.  Only searches the
+        class chain (type(obj).__mro__), NOT the metaclass chain.
         """
         if name in self._subobj_from_class:
             return self._subobj_from_class[name]
-        result = NO_SUCH_SUBOBJ
-        for base in self.value.__class__.__mro__:
-            if name in base.__dict__:
-                result = base.__dict__[name]
-                break
+        from .object_protocol import mro_lookup
+
+        result = mro_lookup(type(self.value), name)
         self._subobj_from_class[name] = result
         return result
 
@@ -3089,7 +3084,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         """Dynamo implementation of CPython's PyObject_GenericGetAttr.
 
         This mirrors object.__getattribute__ and is called from:
-        - var_getattr (for objects without a custom __getattribute__)
+        - getattro_impl (for objects without a custom __getattribute__)
         - SuperVariable.call_method (when super().__getattribute__() resolves
           to object.__getattribute__)
 
@@ -3249,9 +3244,29 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
         )
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        if (
+            issubclass(self.value.__class__, unittest.TestCase)
+            and config.enable_trace_unittest
+            and name
+            in (
+                "assertNotWarns",
+                "assertWarnsRegex",
+                "assertWarns",
+            )
+        ):
+            unimplemented(
+                gb_type="Failed to trace unittest method",
+                context=f"function: unittest.TestCase.{name}",
+                explanation=f"Dynamo does not know how to trace unittest method `{name}` ",
+                hints=[
+                    f"Avoid calling `TestCase.{name}`. "
+                    "Please report an issue to PyTorch.",
+                ],
+            )
+
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -3291,7 +3306,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = self.get_source_by_walking_mro(tx, name)
             prop_vt = variables.PropertyVariable(type_attr, source=source)
             return prop_vt.tp_descr_get_impl(
-                tx, self, self.var_getattr(tx, "__class__")
+                tx, self, self.getattro_impl(tx, "__class__")
             )
         if isinstance(type_attr, types.MemberDescriptorType):
             if tx.output.side_effects.has_pending_mutation_of_attr(
@@ -3308,7 +3323,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 return result
             md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
-            return md_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            return md_vt.tp_descr_get_impl(
+                tx, self, self.getattro_impl(tx, "__class__")
+            )
 
         if isinstance(type_attr, types.GetSetDescriptorType):
             if tx.output.side_effects.has_pending_mutation_of_attr(
@@ -3325,11 +3342,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 return result
             gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
-            return gs_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            return gs_vt.tp_descr_get_impl(
+                tx, self, self.getattro_impl(tx, "__class__")
+            )
 
         if isinstance(type_attr, _collections._tuplegetter):
             tg_vt = variables.TupleGetterVariable(type_attr, source=source)
-            return tg_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            return tg_vt.tp_descr_get_impl(
+                tx, self, self.getattro_impl(tx, "__class__")
+            )
 
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
@@ -3376,7 +3397,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if can_use_mro_source:
                 source = self.get_source_by_walking_mro(tx, name)
             sm_vt = variables.StaticMethodVariable(type_attr, source=source)
-            return sm_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            return sm_vt.tp_descr_get_impl(
+                tx, self, self.getattro_impl(tx, "__class__")
+            )
         elif isinstance(type_attr, classmethod):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
@@ -3384,18 +3407,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if can_use_mro_source:
                 source = self.get_source_by_walking_mro(tx, name)
             cm_vt = variables.ClassMethodVariable(type_attr, source=source)
-            return cm_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            return cm_vt.tp_descr_get_impl(
+                tx, self, self.getattro_impl(tx, "__class__")
+            )
         elif isinstance(type_attr, types.ClassMethodDescriptorType):
             cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
-            return cmd_vt.tp_descr_get_impl(tx, self, self.var_getattr(tx, "__class__"))
+            return cmd_vt.tp_descr_get_impl(
+                tx, self, self.getattro_impl(tx, "__class__")
+            )
         elif isinstance(type_attr, types.WrapperDescriptorType):
-            class_vt = self.var_getattr(tx, "__class__")
+            class_vt = self.getattro_impl(tx, "__class__")
             wd_vt = variables.WrapperDescriptorVariable(
                 type_attr, owner=class_vt, source=source
             )
             return wd_vt.tp_descr_get_impl(tx, self, class_vt)
         elif isinstance(type_attr, types.MethodDescriptorType):
-            class_vt = self.var_getattr(tx, "__class__")
+            class_vt = self.getattro_impl(tx, "__class__")
             md_vt = variables.MethodDescriptorVariable(
                 type_attr, owner=class_vt, source=source
             )
@@ -3492,7 +3519,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         try:
-            var_vt = self.var_getattr(tx, name)
+            var_vt = self.getattro_impl(tx, name)
             return VariableTracker.build(
                 tx, not isinstance(var_vt, variables.DeletedVariable)
             )
@@ -3870,14 +3897,14 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
     Construction is handled by the generic polyfill path (tracing through
     the auto-generated __init__). Field values are retrieved dynamically
-    via var_getattr using InstructionTranslator.current_tx().
+    via getattro_impl using InstructionTranslator.current_tx().
     """
 
     def _get_field_vt(self, field_name: str) -> VariableTracker:
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        return self.var_getattr(tx, field_name)
+        return self.getattro_impl(tx, field_name)
 
     def as_python_constant(self) -> object:
         from dataclasses import fields
@@ -4033,7 +4060,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             return self._base_vt.call_method(tx, name, args, kwargs)  # type: ignore[missing-attribute]
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx: "InstructionTranslatorBase", name: str):
+    def getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         if name in (
             "args",
             "__cause__",
@@ -4041,8 +4068,8 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             "__suppress_context__",
             "__traceback__",
         ):
-            return self._base_vt.var_getattr(tx, name)  # type: ignore[missing-attribute]
-        return super().var_getattr(tx, name)
+            return self._base_vt.getattro_impl(tx, name)  # type: ignore[missing-attribute]
+        return super().getattro_impl(tx, name)
 
     @property
     def __context__(self) -> "ConstantVariable":
@@ -4097,13 +4124,13 @@ class InspectVariable(UserDefinedObjectVariable):
     def is_matching_class(obj: object) -> bool:
         return obj in InspectVariable._PROPERTY_REDIRECTS
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
         if name in redirects:
-            return super().var_getattr(tx, redirects[name])
-        return super().var_getattr(tx, name)
+            return super().getattro_impl(tx, redirects[name])
+        return super().getattro_impl(tx, name)
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
@@ -4121,7 +4148,7 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
             raise AssertionError(f"Expected KeyedJaggedTensor, got {type(value)}")
         super().__init__(value, **kwargs)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if (
@@ -4130,8 +4157,8 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
             and name in ("_length_per_key", "_offset_per_key")
         ):
             with TracingContext.patch(force_unspec_int_unbacked_size_like=True):
-                return super().var_getattr(tx, name)
-        return super().var_getattr(tx, name)
+                return super().getattro_impl(tx, name)
+        return super().getattro_impl(tx, name)
 
 
 _CONSTANT_BASE_TYPES = (int, float, str)
@@ -4645,14 +4672,14 @@ class DefaultDictVariable(UserDefinedDictVariable):
             f"{tracked_repr(tx, self._base_vt)})",
         )
 
-    def var_getattr(
+    def getattro_impl(
         self,
         tx: "InstructionTranslatorBase",
         name: str,
     ) -> VariableTracker:
         if name == "default_factory":
             return self.default_factory
-        return super().var_getattr(tx, name)
+        return super().getattro_impl(tx, name)
 
     def _missing_impl(
         self,
@@ -5269,7 +5296,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
         return super().method_setattr_standard(tx, name, value)
 
-    def var_getattr(
+    def getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         # A common pattern in the init code of MutableMapping objects is to
@@ -5282,7 +5309,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         ):
             return variables.UserMethodVariable(polyfills.mapping_get, self)
         else:
-            return super().var_getattr(tx, name)
+            return super().getattro_impl(tx, name)
 
     def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self._maybe_get_baseclass_method("__len__") in dict_methods:
