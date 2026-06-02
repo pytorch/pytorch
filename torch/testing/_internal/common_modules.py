@@ -1794,10 +1794,14 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
         return torch.randn((*batch_dims, in_features), device=device, dtype=dtype, requires_grad=requires_grad)
 
     def reference_fn(m, p, i, t):
-        # p[0] is linear.weight(bias=False)
+        # p[0] is linear.weight; p[1] is linear.bias when bias=True.
         linear_weight = p[0].reshape(m.num_classes, *m.out_features, i.shape[-1])
+        linear_bias = (
+            p[1].reshape(m.num_classes, *m.out_features) if len(p) > 1 else None
+        )
         return linear_cross_entropy_loss_reference(
             i, linear_weight, t,
+            linear_bias=linear_bias,
             weight=m.weight,
             reduction=m.reduction, ignore_index=m.ignore_index, label_smoothing=m.label_smoothing)
 
@@ -1913,6 +1917,36 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                         input = make_input(batch_dims, in_features)
                         target = torch.full_like(target, ii)
                         yield module_args, module_kwargs, (input, target)
+
+        # Minimal bias=True coverage: one sample per (size, out_features)
+        # with the rest of the parametrization fixed at defaults. Bias is
+        # orthogonal to reduction / ignore_index / label_smoothing /
+        # weight / target_dtype (linear adds a constant to every logit
+        # element regardless of how cross_entropy reduces or weights
+        # them), so we don't expand against those axes. ``options=None``
+        # only -- the chunked path warns + falls back on linear_bias and
+        # gets covered by a dedicated unit test.
+        for sizes in [(8, 5, 4), (None, 8, 4)]:
+            num_batches, in_features, num_classes = sizes
+            batch_dims = () if num_batches is None else (num_batches,)
+            for of in [(), (3, 2, 4)]:
+                if num_batches is None and of:
+                    continue  # K-dim loss requires a batch dim.
+                module_args = (in_features, num_classes)
+                module_kwargs = dict(
+                    out_features=of,
+                    bias=True,
+                    device=device,
+                    dtype=dtype,
+                    reduction="mean",
+                    weight=None,
+                    ignore_index=None,
+                    label_smoothing=0.0,
+                    options=None,
+                )
+                input = make_input(batch_dims, in_features)
+                target = make_target(num_classes, (*batch_dims, *of), torch.int64)
+                yield module_args, module_kwargs, (input, target)
 
     module_inputs = []
     for module_args, module_kwargs, (input, target) in samples():
