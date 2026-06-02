@@ -80,6 +80,147 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_testing.assert_onnx_program(onnx_program)
         self.assertNotIn("Cast", [node.op_type for node in onnx_program.model.graph])
 
+    def test_prims_remainder(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.prims.remainder.default(x, y)
+
+        test_inputs = (
+            (
+                torch.tensor([5, -5, 6, -6], dtype=torch.int64),
+                torch.tensor([3, 3, -3, -3], dtype=torch.int64),
+            ),
+            (
+                torch.tensor([5, 6, 255], dtype=torch.uint8),
+                torch.tensor([3, 4, 7], dtype=torch.uint8),
+            ),
+            (
+                torch.tensor([5.5, -5.5, 6.0, -6.0, -5.0], dtype=torch.float32),
+                torch.tensor([3.0, 3.0, -3.0, -3.0, float("inf")], dtype=torch.float32),
+            ),
+        )
+
+        for x, y in test_inputs:
+            with self.subTest(dtype=x.dtype):
+                onnx_program = self.export(Model(), (x, y))
+                onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_prims_remainder_signed_integer_min_negative_one(self):
+        class TensorTensorModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.prims.remainder.default(x, y)
+
+        class ScalarTensorModel(torch.nn.Module):
+            def __init__(self, scalar):
+                super().__init__()
+                self.scalar = scalar
+
+            def forward(self, y):
+                return torch.ops.prims.remainder.default(self.scalar, y)
+
+        for dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
+            info = torch.iinfo(dtype)
+            with self.subTest(dtype=dtype, operands="tensor_tensor"):
+                x = torch.tensor([info.min, info.min + 1, 5], dtype=dtype)
+                y = torch.tensor([-1, -2, -1], dtype=dtype)
+                onnx_program = self.export(TensorTensorModel(), (x, y))
+                onnx_testing.assert_onnx_program(onnx_program, args=(x, y))
+
+            with self.subTest(dtype=dtype, operands="scalar_tensor"):
+                y = torch.tensor([-1, -2], dtype=dtype)
+                onnx_program = self.export(ScalarTensorModel(info.min), (y,))
+                onnx_testing.assert_onnx_program(onnx_program, args=(y,))
+
+    def test_prims_remainder_scalar_tensor(self):
+        class IntScalarModel(torch.nn.Module):
+            def forward(self, y):
+                return torch.ops.prims.remainder.default(200, y)
+
+        onnx_program = self.export(
+            IntScalarModel(), (torch.tensor([8, 7], dtype=torch.int64),)
+        )
+        onnx_testing.assert_onnx_program(
+            onnx_program, args=(torch.tensor([8, 7], dtype=torch.int64),)
+        )
+
+        class FloatScalarModel(torch.nn.Module):
+            def forward(self, y):
+                return torch.ops.prims.remainder.default(-5.0, y)
+
+        y = torch.tensor([float("inf"), -float("inf"), 3.0], dtype=torch.float32)
+        onnx_program = self.export(FloatScalarModel(), (y,))
+        onnx_testing.assert_onnx_program(onnx_program, args=(y,))
+
+    def test_prims_remainder_float_scalar_integer_tensor_uses_default_dtype(self):
+        class LeftFloatScalarModel(torch.nn.Module):
+            def forward(self, y):
+                return torch.ops.prims.remainder.default(-5.0, y)
+
+        class RightFloatScalarModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.prims.remainder.default(x, 2.0)
+
+        old_dtype = torch.get_default_dtype()
+        try:
+            torch.set_default_dtype(torch.float64)
+
+            y = torch.tensor([2, 3], dtype=torch.int64)
+            onnx_program = self.export(LeftFloatScalarModel(), (y,))
+            self.assertEqual(
+                onnx_program.model.graph.outputs[0].dtype, ir.DataType.DOUBLE
+            )
+            onnx_testing.assert_onnx_program(onnx_program, args=(y,))
+
+            x = torch.tensor([5, -5], dtype=torch.int64)
+            onnx_program = self.export(RightFloatScalarModel(), (x,))
+            self.assertEqual(
+                onnx_program.model.graph.outputs[0].dtype, ir.DataType.DOUBLE
+            )
+            onnx_testing.assert_onnx_program(onnx_program, args=(x,))
+        finally:
+            torch.set_default_dtype(old_dtype)
+
+    def test_prims_remainder_bfloat16_runs_with_ort(self):
+        class LeftFloatScalarModel(torch.nn.Module):
+            def forward(self, y):
+                return torch.ops.prims.remainder.default(-5.0, y)
+
+        class RightFloatScalarModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.prims.remainder.default(x, 2.0)
+
+        class TensorTensorModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.prims.remainder.default(x, y)
+
+        old_dtype = torch.get_default_dtype()
+        try:
+            torch.set_default_dtype(torch.bfloat16)
+
+            y = torch.tensor([2, 3], dtype=torch.int64)
+            onnx_program = self.export(LeftFloatScalarModel(), (y,))
+            self.assertEqual(
+                onnx_program.model.graph.outputs[0].dtype, ir.DataType.BFLOAT16
+            )
+            onnx_testing.assert_onnx_program(onnx_program, args=(y,))
+
+            x = torch.tensor([5, -5], dtype=torch.int64)
+            onnx_program = self.export(RightFloatScalarModel(), (x,))
+            self.assertEqual(
+                onnx_program.model.graph.outputs[0].dtype, ir.DataType.BFLOAT16
+            )
+            onnx_testing.assert_onnx_program(onnx_program, args=(x,))
+        finally:
+            torch.set_default_dtype(old_dtype)
+
+        x = torch.tensor([5.5, -5.5, -5.0], dtype=torch.bfloat16)
+        y = torch.tensor([3.0, 3.0, float("inf")], dtype=torch.bfloat16)
+        onnx_program = self.export(TensorTensorModel(), (x, y))
+        self.assertEqual(
+            onnx_program.model.graph.outputs[0].dtype, ir.DataType.BFLOAT16
+        )
+        onnx_testing.assert_onnx_program(onnx_program, args=(x, y))
+
     def test_onnx_export_conditional(self):
         class CondModel(torch.nn.Module):
             def forward(self, x):
