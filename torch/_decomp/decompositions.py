@@ -5566,6 +5566,8 @@ def multilabel_margin_loss_forward(
     z = z / dim
     # masks loss
     z = torch.where(is_target, 0, z)
+    # masks out rows for invalid target positions (at/after the first -1)
+    z = torch.where(target_mask.T.unsqueeze(dim=-1), z, 0)
     # reduction
     if reduction == Reduction.MEAN.value:
         z = z.sum(dim=(0, -1)).mean()
