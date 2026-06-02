@@ -56,6 +56,30 @@ PassType = Callable[[torch.fx.GraphModule], PassResult | None]
 log: logging.Logger = logging.getLogger(__name__)
 
 
+def _format_devices(devices: set[torch.device]) -> str:
+    def sort_key(device: torch.device) -> tuple[str, int]:
+        return device.type, -1 if device.index is None else device.index
+
+    return ", ".join(str(device) for device in sorted(devices, key=sort_key))
+
+
+def _fake_tensor_device_mismatch_error(exc: Exception) -> ValueError | None:
+    # torch.export is imported during torch initialization; keep this import lazy.
+    from torch._subclasses.fake_tensor import FakeTensorDeviceMismatchError
+
+    if not isinstance(exc, FakeTensorDeviceMismatchError):
+        return None
+
+    devices = {exc.common_device, exc.device}
+    return ValueError(
+        "torch.export.export encountered tensors on different devices while tracing: "
+        f"{_format_devices(devices)}.\n"
+        "This can happen when example inputs, module parameters, buffers, or tensors "
+        "created inside forward are not on the same device.\n"
+        "Move all tensors used by forward to the same device before exporting."
+    )
+
+
 def export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
@@ -179,6 +203,10 @@ def export(
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         )
     except Exception as e:
+        device_mismatch_error = _fake_tensor_device_mismatch_error(e)
+        if device_mismatch_error is not None:
+            raise device_mismatch_error from e
+
         draft_export_msg = (
             "The error above occurred when calling torch.export.export. If you would "
             "like to view some more information about this error, and get a list "
