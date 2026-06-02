@@ -273,6 +273,10 @@ benchmark_harness = True
 # fuse pointwise into templates epilogues
 epilogue_fusion = True
 
+# fuse atomic-add scatter mutations into Triton template epilogues
+# Disabled by default because performance depends on index contention.
+epilogue_fusion_with_atomic_add = False
+
 # fuse pointwise into template prologues
 prologue_fusion = prologue_fusion_enabled()
 
@@ -312,14 +316,14 @@ pre_grad_custom_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = No
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
 _pre_fusion_custom_pass: (
-    torch._inductor.custom_graph_pass.CustomGraphPassCallable | None
+    torch._inductor.custom_graph_pass.CustomSchedulerPassCallable | None
 ) = None
 
 # Registers a custom pass to be run right after fusion in Inductor scheduler.
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
 _post_fusion_custom_pass: (
-    torch._inductor.custom_graph_pass.CustomGraphPassCallable | None
+    torch._inductor.custom_graph_pass.CustomSchedulerPassCallable | None
 ) = None
 
 # Deprecated
@@ -1405,6 +1409,15 @@ use_fast_triton_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER", "1") == "1"
 )
 
+# Use the Level 0 launch_metadata_schema from CompiledKernel.bin
+# (versioned, stable contract) instead of hasattr probing of
+# CompiledKernel internals in save_gpu_kernel().
+# When True (default), prefers schema["entry_name"]/["num_warps"]/["shared_mem"].
+# When False, forces the legacy hasattr fallback path.
+use_launch_metadata_schema: bool = (
+    os.environ.get("TORCHINDUCTOR_USE_LAUNCH_METADATA_SCHEMA", "1") == "1"
+)
+
 # gemm autotuning global cache dir
 global_cache_dir: str | None
 if is_fbcode():
@@ -1836,6 +1849,11 @@ class triton:
     # not incurring large memory overhead
     reorder_for_reducing_graph_partitions: bool = True
 
+    # Memory budget multiplier for cudagraph partition reordering.
+    # When reordering nodes to minimize partitions, the reordering is only
+    # applied if the peak memory increase is within this budget.
+    cudagraph_partition_memory_budget: float = 1.1
+
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
 
@@ -2162,6 +2180,9 @@ class aot_inductor:
     enable_frame_pointer = (
         os.environ.get("AOT_INDUCTOR_ENABLE_FRAME_POINTER", "1") == "1"
     )
+
+    # Enable lightweight line tables for profiling tools (e.g. strobelight)
+    enable_line_tables = os.environ.get("AOT_INDUCTOR_ENABLE_LINE_TABLES", "1") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
     # to use which cpp compiler optimization level, default to O1
@@ -2863,6 +2884,7 @@ class test_configs:
     force_no_impl_grouping: bool = False
 
     max_mm_configs: int | None = None
+    max_flex_configs: int | None = None
 
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
@@ -2945,6 +2967,14 @@ class eager_numerics:
 # emulate the eager numerics.
 emulate_precision_casts: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
+
+# Targeted variant of emulate_precision_casts for saved low-precision outputs.
+# When a low-precision pointwise result is saved for backward and also used by
+# later forward math, this inserts a downcast-upcast at the saved value so
+# forward and backward consume the same precision.
+emulate_precision_casts_on_saved_tensors: bool = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS_ON_SAVED_TENSORS", "1") == "1"
 )
 
 # adds patch, save_config, etc
