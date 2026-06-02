@@ -56,7 +56,7 @@ from torch._dynamo.utils import (
     dynamo_timed,
     get_metrics_context,
 )
-from torch._inductor import config, exc, metrics
+from torch._inductor import config, config_comms, exc, metrics
 from torch._inductor.codegen.common import (
     custom_backend_codegen_configs,
     custom_backend_passes,
@@ -1334,6 +1334,11 @@ class FxGraphHashDetails:
         self.inductor_config = config.save_config_portable(
             ignore_private_configs=False, readonly_values=True
         )
+        # pyrefly: ignore [missing-attribute]
+        self.inductor_config_comms = config_comms.save_config_portable(
+            ignore_private_configs=False, readonly_values=True
+        )
+
         # Custom passes should provide an ID to hash when they run late (after cache lookup).
         if resolve_pre_grad_pass_timing() != "early":
             self.pre_grad_custom_pass = self._get_custom_pass_detail(
