@@ -9,7 +9,7 @@ from torch.utils._ordered_set import OrderedSet
 from ...virtualized import V
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True)
 class LaneExprInfo:
     """How an index expression changes across vectorized lanes.
 

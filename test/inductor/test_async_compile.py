@@ -88,7 +88,7 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides=None,
                                 device_capability=None, hw_info=None):
     with open(_PRECOMPILE_SENTINEL, "w") as f:
         import json
-        json.dump({"shapes": precompile_shapes, "strides": precompile_strides, "dtypes": precompile_dtypes}, f)
+        f.write(json.dumps({"shapes": precompile_shapes, "dtypes": precompile_dtypes}))
 """
 )
 

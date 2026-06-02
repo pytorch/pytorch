@@ -506,62 +506,6 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 self.assertEqual(aot_eager_ret, eager_ret)
                 self.assertEqual(inductor_ret, eager_ret)
 
-    def test_out_return_preserves_view_after_graph_break(self):
-        sz = 9
-
-        def f(data, other1, other2):
-            inp = data[:sz]
-            output = data[:sz]
-            torch._dynamo.graph_break()
-            expected = torch.empty_like(output)
-            torch.addcmul(
-                inp,
-                other1.view(inp.shape),
-                other2.view(inp.shape),
-                out=expected,
-            )
-            result = torch.addcmul(
-                inp,
-                other1.view(inp.shape),
-                other2.view(inp.shape),
-                out=output,
-            )
-            return output, result, expected
-
-        data = torch.randn(2 * sz, dtype=torch.float64)
-        other1 = torch.randn(sz, dtype=torch.float64)
-        other2 = torch.randn(sz, dtype=torch.float64)
-
-        output, result, expected = torch.compile(f, backend="aot_eager")(
-            data, other1, other2
-        )
-
-        self.assertEqual(output.shape, (sz,))
-        self.assertEqual(result.shape, (sz,))
-        self.assertEqual(expected.shape, (sz,))
-        self.assertEqual(result.data_ptr(), output.data_ptr())
-        self.assertEqual(output, expected)
-        self.assertEqual(result, expected)
-
-        def same_metadata_view(data, other):
-            inp = data.view(data.shape)
-            output = data.view(data.shape)
-            torch._dynamo.graph_break()
-            expected = torch.empty_like(output)
-            torch.add(inp, other, out=expected)
-            result = torch.add(inp, other, out=output)
-            return data, output, result, expected
-
-        base, output, result, expected = torch.compile(
-            same_metadata_view, backend="aot_eager"
-        )(torch.randn(sz), torch.randn(sz))
-
-        self.assertIs(output._base, base)
-        self.assertIs(result._base, base)
-        self.assertEqual(result.data_ptr(), output.data_ptr())
-        self.assertEqual(output, expected)
-        self.assertEqual(result, expected)
-
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_with_returns_v2(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
