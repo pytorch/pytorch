@@ -118,6 +118,120 @@ class TestUserDefinedObjectConstruction(TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_instantiate_class_ignores_instance_init_attr(self):
+        class Foo:
+            def __new__(cls, *args):
+                obj = object.__new__(cls)
+
+                def wrong_init(*args, **kwargs):
+                    raise AssertionError("should call class __init__")
+
+                obj.__init__ = wrong_init
+                return obj
+
+            def __init__(self, a):
+                self.a = a
+
+        def fn(t):
+            f = Foo(3)
+            return t.sin() + f.a
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_explicit_class_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            pass
+
+        def fn(t):
+            f = Foo()
+            Foo.__init__(f, 1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_fn(x)
+
+    def test_explicit_bound_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            pass
+
+        def fn(t):
+            f = Foo()
+            f.__init__(1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_fn(x)
+
+    def test_explicit_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            pass
+
+        def fn(t):
+            f = Foo()
+            object.__init__(f, 1)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_fn(x)
+
+    def test_super_object_init_with_extra_arg_not_noop(self):
+        class Foo:
+            def __init__(self):
+                super().__init__(1)
+
+        def fn(t):
+            Foo()
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_fn(x)
+
+    def test_instantiate_class_with_staticmethod_init(self):
+        class Foo:
+            def __new__(cls, *args):
+                return object.__new__(cls)
+
+            def init(a):
+                pass
+
+            __init__ = staticmethod(init)
+
+        def fn(t):
+            Foo(3)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_instantiate_class_with_classmethod_init(self):
+        class Foo:
+            def __new__(cls, *args):
+                return object.__new__(cls)
+
+            def init(cls, a):
+                pass
+
+            __init__ = classmethod(init)
+
+        def fn(t):
+            Foo(3)
+            return t.sin()
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_instantiate_class_with_custom_getattribute_reads_init_state(self):
         class Foo:
             def __init__(self, a):

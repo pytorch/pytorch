@@ -61,7 +61,6 @@ from ..source import (
 from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
-    identity,
     istype,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -219,8 +218,8 @@ class SuperVariable(VariableTracker):
         # applied if it has one. We currently don't have polyfills for all the
         # relevant `tp_descr_get`, so we explicitly handle the cases we care
         # about here (e.g., note the staticmethod, classmethod cases).
-        if inner_fn is object.__init__:
-            return LambdaVariable(identity)
+        if inner_fn is object.__init__ and not args and not kwargs:
+            return variables.ConstantVariable.create(None)
         elif inner_fn is torch.nn.Module.__init__:
             objvar = self.objvar
             from ..side_effects import AttributeMutationNew

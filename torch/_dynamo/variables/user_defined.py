@@ -578,6 +578,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Step 3-5: Class MRO lookup.
         cls_attr = self.lookup_cls_mro_attr(name)
         if cls_attr is not NO_SUCH_SUBOBJ:
+            from ..mutation_guard import unpatched_nn_module_init
+
+            if cls_attr is torch.nn.Module.__init__:
+                cls_attr = unpatched_nn_module_init
             if hasattr(type(cls_attr), "__get__"):
                 # Step 4: Descriptor — invoke __get__(None, cls).
                 return self.resolve_cls_descriptor(tx, name, cls_attr, source)
@@ -1030,13 +1034,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .object_protocol import generic_len
 
             return generic_len(tx, args[0])
-        elif (
-            name == "__init__"
-            and len(args) == 1
-            and not kwargs
-            and self.lookup_cls_mro_attr("__init__") is object.__init__
-        ):
-            return variables.ConstantVariable.create(None)
+        elif name == "__init__" and not kwargs:
+            init = self.lookup_cls_mro_attr("__init__")
+            if len(args) == 1 and (
+                init is object.__init__
+                or (
+                    issubclass(self.value, BaseException)
+                    and init in (BaseException.__init__, Exception.__init__)
+                )
+                or self.value is collections.OrderedDict
+            ):
+                return variables.ConstantVariable.create(None)
         elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
             return SourcelessBuilder.create(tx, dict).call_method(
@@ -2525,7 +2533,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
-                return ConstantVariable.create(None)
+                if not args and not kwargs:
+                    return ConstantVariable.create(None)
 
             if is_standard_setattr(method) or issubclass(
                 type(self.value), threading.local

@@ -194,18 +194,50 @@ def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     raise TypeError(f"argument of type {type(b)} is not iterable")
 
 
-def accumulate_grad(x: torch.Tensor, new_grad: torch.Tensor | None) -> None:
+def accumulate_grad(
+    x: torch.Tensor,
+    variable_grad: torch.Tensor | None,
+    new_grad: torch.Tensor | None,
+) -> torch.Tensor | None:
     # polyfills according to the Gradient Layout Contract
     if new_grad is None:
-        return
+        return variable_grad
     new_grad_strided = torch.empty_like(x)
     new_grad_strided.copy_(new_grad)
-    if x.grad is None:
-        x.grad = new_grad_strided
+    if variable_grad is None:
+        return new_grad_strided
+    elif variable_grad.is_sparse and not new_grad_strided.is_sparse:
+        return new_grad_strided + variable_grad
     elif torch.is_grad_enabled():
-        x.grad = x.grad + new_grad_strided
+        return variable_grad + new_grad_strided
     else:
-        x.grad.add_(new_grad_strided)
+        variable_grad.add_(new_grad_strided)
+        return variable_grad
+
+
+def accumulate_grad_no_alias(
+    x: torch.Tensor,
+    variable_grad: torch.Tensor | None,
+    new_grad: torch.Tensor | None,
+) -> torch.Tensor | None:
+    # Mirrors inductor::accumulate_grad_: same gradient layout logic as
+    # accumulate_grad, but the returned grad must not alias any input.
+    if new_grad is None:
+        if variable_grad is None:
+            return None
+        return variable_grad.clone()
+    new_grad_strided = torch.empty_like(x)
+    new_grad_strided.copy_(new_grad)
+    if variable_grad is None:
+        return new_grad_strided
+    elif variable_grad.is_sparse and not new_grad_strided.is_sparse:
+        return new_grad_strided + variable_grad
+    elif torch.is_grad_enabled():
+        return variable_grad + new_grad_strided
+    else:
+        result = variable_grad.clone()
+        result.add_(new_grad_strided)
+        return result
 
 
 # This mirrors
@@ -474,7 +506,28 @@ def instantiate_user_defined_class_object(
     # for classes with custom __instancecheck__ (e.g. torch.ByteStorage).
     # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
     if issubclass(type(obj), cls):
-        type(obj).__init__(obj, *args, **kwargs)
+        init = type(obj).__init__
+        if init is object.__init__ or (
+            not args
+            and not kwargs
+            and issubclass(type(obj), BaseException)
+            and init in (BaseException.__init__, Exception.__init__)
+        ):
+            return obj
+
+        for base in type(obj).__mro__:
+            if "__init__" in base.__dict__:
+                init = base.__dict__["__init__"]
+                break
+        else:
+            init = object.__init__
+
+        if isinstance(init, staticmethod):
+            init.__func__(*args, **kwargs)
+        elif isinstance(init, classmethod):
+            init.__func__(type(obj), *args, **kwargs)
+        else:
+            type(obj).__init__(obj, *args, **kwargs)
     return obj
 
 
