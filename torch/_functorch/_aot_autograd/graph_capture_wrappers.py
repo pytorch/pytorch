@@ -1468,14 +1468,15 @@ def aot_dispatch_subclass(
     # That's why we created a fresh metadata object on the dense -> dense function here,
     # and plumb it back up to the partitioner.
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
-    meta_updated = run_functionalized_fw_and_collect_metadata(
-        without_output_descs(metadata_fn),
-        # pyrefly: ignore [bad-argument-type]
-        flat_args_descs=primals_unwrapped_descs,
-        static_input_indices=remapped_static_indices,
-        keep_input_mutations=meta.keep_input_mutations,
-        # pyrefly: ignore [not-iterable]
-    )(*primals_unwrapped)
+    with torch._dynamo.eval_frame._use_eager_on_nested_compile():
+        meta_updated = run_functionalized_fw_and_collect_metadata(
+            without_output_descs(metadata_fn),
+            # pyrefly: ignore [bad-argument-type]
+            flat_args_descs=primals_unwrapped_descs,
+            static_input_indices=remapped_static_indices,
+            keep_input_mutations=meta.keep_input_mutations,
+            # pyrefly: ignore [not-iterable]
+        )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated
 

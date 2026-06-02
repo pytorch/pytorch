@@ -582,7 +582,11 @@ def create_aot_state(
                     "aot_collect_metadata", log_pt2_compile_event=True
                 )
 
-            with dynamo_timed_ctx, ctx:
+            with (
+                dynamo_timed_ctx,
+                ctx,
+                torch._dynamo.eval_frame._use_eager_on_nested_compile(),
+            ):
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
                     flat_args_descs=flat_args_descs,
