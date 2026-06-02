@@ -1234,13 +1234,13 @@ class TestLinalg(TestCase):
         def test_kron_non_contiguous(self, device):
             A = torch.randn(3, 4, device=device)
             B = torch.randn(4, 3, device=device)
-    
+
             B_non_contig = B.t()
             self.assertFalse(B_non_contig.is_contiguous())
-    
+
             result = torch.kron(A, B_non_contig)
+
             expected = torch.kron(A, B.contiguous())
-    
             self.assertEqual(result, expected)
 
     @dtypes(*floating_and_complex_types())
