@@ -536,6 +536,10 @@ def nothing(f):
     return f
 
 
+def call_model_generate(model, example_inputs, collect_outputs=True):
+    return model.generate(**example_inputs)
+
+
 @functools.cache
 def patch_torch_manual_seed():
     """Make torch manual seed deterministic. Helps with accuracy testing."""
@@ -701,6 +705,7 @@ def timed(
         return t
 
     time_total = 0
+    result = None
     # Dont collect outputs to correctly measure timing
     for i in range(times):
         # If batch_size is 1, it too often collides with other non batch size
@@ -718,6 +723,8 @@ def timed(
         reset_rng_state(use_xla)
         t_iter_begin = time.perf_counter()
         result = model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
+        if not return_result:
+            result = None
 
         # instead of calling sync on result_list, we should call mark_step.
         # In training case, result_list may be empty, but we want to
@@ -930,11 +937,10 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
             maybe_mark_step(args)
 
             with maybe_mark_profile(p=p, mark=mark):
-                timings[rep], actual_output = timed(
+                timings[rep] = timed(
                     model,
                     model_iter_fn,
                     inputs,
-                    return_result=True,
                     times=times,
                     collect_outputs=args.collect_outputs,
                 )
@@ -1044,11 +1050,13 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     Writes to ./speedups.csv
     """
+    eager_model = kwargs.pop("eager_model", model)
+    eager_context = kwargs.pop("eager_context", contextlib.nullcontext)
+    dynamo_context = kwargs.pop("dynamo_context", contextlib.nullcontext)
+
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
     should_randomize_input = args.randomize_input
-
-    import contextlib
 
     from torch._inductor.utils import maybe_profile
 
@@ -1080,7 +1088,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     elif args.aot_precompile:
         frozen_model_iter_fn = aot_precompile(model, example_inputs)
     else:
-        if kwargs["hf_llm"]:
+        if kwargs.get("hf_llm", False):
             # If it's an llm, we want to optimize model.forward, and use
             # the generate function
             model.forward = torch._dynamo.run(model)
@@ -1100,12 +1108,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         maybe_mark_step(args)
 
         # interleave the runs to handle frequency scaling and load changes
-        with torch.compiler.set_stance("force_eager"):
-            timings[rep, 0], expected_output = timed(
-                model,
+        with torch.compiler.set_stance("force_eager"), eager_context():
+            timings[rep, 0] = timed(
+                eager_model,
                 model_iter_fn,
                 inputs,
-                return_result=True,
                 times=times,
                 collect_outputs=args.collect_outputs,
                 batch_size=kwargs.get("batch_size"),
@@ -1114,14 +1121,14 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         # call mark_step between the 2 calls to make the comparison fair.
         maybe_mark_step(args)
 
-        timings[rep, 1], actual_output = timed(
-            model,
-            frozen_model_iter_fn,
-            inputs,
-            return_result=True,
-            times=times,
-            collect_outputs=args.collect_outputs,
-        )
+        with dynamo_context():
+            timings[rep, 1] = timed(
+                model,
+                frozen_model_iter_fn,
+                inputs,
+                times=times,
+                collect_outputs=args.collect_outputs,
+            )
 
     # Collect profiler trace in a separate run so that profiler overhead
     # does not pollute the wall-clock performance numbers above.
@@ -1131,16 +1138,17 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             with (
                 maybe_mark_profile(p=p, mark="expected"),
                 torch.compiler.set_stance("force_eager"),
+                eager_context(),
             ):
                 timed(
-                    model,
+                    eager_model,
                     model_iter_fn,
                     inputs,
                     return_result=False,
                     times=times,
                     collect_outputs=False,
                 )
-            with maybe_mark_profile(p=p, mark="actual"):
+            with maybe_mark_profile(p=p, mark="actual"), dynamo_context():
                 timed(
                     model,
                     frozen_model_iter_fn,
@@ -1853,22 +1861,32 @@ class BenchmarkRunner:
                 )
                 self.autocast_arg["dtype"] = amp_dtype
 
-    def init_optimizer(self, name, device, params):
+    def create_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
             if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
-                self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+                optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
                 # Disable multi_tensor_sgd for benchmarking, there isn't a large performance benefit (~1%) to compiling
                 # this optimizer because it is a single foreach add, and increases compile time.
                 # After autotuning and fake tensor caching lands, we can enable, because the compile time impact will be lower.
                 # Fake Tensor caching: https://github.com/pytorch/pytorch/pull/113873
                 # Autotuning: https://github.com/pytorch/pytorch/issues/117447
-                self.optimizer.step = torch._dynamo.disable(self.optimizer.step)
+                optimizer.step = torch._dynamo.disable(optimizer.step)
+                return optimizer
             else:
-                self.optimizer = torch.optim.Adam(
-                    params, lr=0.01, capturable=True, foreach=True
-                )
-        else:
-            self.optimizer = None
+                return torch.optim.Adam(params, lr=0.01, capturable=True, foreach=True)
+        return None
+
+    def init_optimizer(self, name, device, params):
+        self.optimizer = self.create_optimizer(name, device, params)
+
+    @contextlib.contextmanager
+    def use_optimizer(self, optimizer):
+        previous_optimizer = self.optimizer
+        self.optimizer = optimizer
+        try:
+            yield
+        finally:
+            self.optimizer = previous_optimizer
 
     @property
     def args(self):
@@ -2788,12 +2806,20 @@ class BenchmarkRunner:
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
 
-        # Use distributed wrapping as necessary
+        eager_model = self.deepcopy_and_maybe_parallelize(model)
         model = self.deepcopy_and_maybe_parallelize(model)
 
-        if not hasattr(model, name):
-            model.name = name
-        self.init_optimizer(name, current_device, model.parameters())
+        for benchmark_model in (eager_model, model):
+            if not hasattr(benchmark_model, "name"):
+                benchmark_model.name = name
+
+        eager_optimizer = self.create_optimizer(
+            name, current_device, eager_model.parameters()
+        )
+        dynamo_optimizer = self.create_optimizer(
+            name, current_device, model.parameters()
+        )
+        self.optimizer = dynamo_optimizer
 
         # The self.autocast context is needed for the model we export with aot_compile,
         # similar to what we do in the check_accuracy function
@@ -2813,21 +2839,28 @@ class BenchmarkRunner:
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"eager_{self.args.only}"
             ):
-                eager_latency, eager_peak_mem, _ = warmup(
-                    self.model_iter_fn, model, example_inputs, "eager"
-                )
-                if self.args.use_warm_peak_memory:
-                    _, eager_peak_mem, _ = warmup(
-                        self.model_iter_fn, model, example_inputs, "eager", niters=1
+                with self.use_optimizer(eager_optimizer):
+                    eager_latency, eager_peak_mem, _ = warmup(
+                        self.model_iter_fn, eager_model, example_inputs, "eager"
                     )
+                if self.args.use_warm_peak_memory:
+                    with self.use_optimizer(eager_optimizer):
+                        _, eager_peak_mem, _ = warmup(
+                            self.model_iter_fn,
+                            eager_model,
+                            example_inputs,
+                            "eager",
+                            niters=1,
+                        )
 
-            baseline_timings = experiment(
-                self.model_iter_fn,
-                model,
-                example_inputs,
-                mark="expected",
-                **experiment_kwargs,
-            )
+            with self.use_optimizer(eager_optimizer):
+                baseline_timings = experiment(
+                    self.model_iter_fn,
+                    eager_model,
+                    example_inputs,
+                    mark="expected",
+                    **experiment_kwargs,
+                )
 
             # reset dynamo
             torch._dynamo.reset()
@@ -2835,22 +2868,25 @@ class BenchmarkRunner:
             if self.args.export_aot_inductor:
                 optimized_model_iter_fn = optimize_ctx
             else:
-                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                with self.use_optimizer(dynamo_optimizer):
+                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
-                dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                    optimized_model_iter_fn, model, example_inputs, "dynamo"
-                )
-                if self.args.use_warm_peak_memory:
-                    _, dynamo_peak_mem, _ = warmup(
-                        optimized_model_iter_fn,
-                        model,
-                        example_inputs,
-                        "dynamo",
-                        niters=1,
+                with self.use_optimizer(dynamo_optimizer):
+                    dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
+                        optimized_model_iter_fn, model, example_inputs, "dynamo"
                     )
+                if self.args.use_warm_peak_memory:
+                    with self.use_optimizer(dynamo_optimizer):
+                        _, dynamo_peak_mem, _ = warmup(
+                            optimized_model_iter_fn,
+                            model,
+                            example_inputs,
+                            "dynamo",
+                            niters=1,
+                        )
                 # If we use warm peak memory, the AOT model loading transient memory
                 # won't be present on the warm measurement.  We only have to account for
                 # it when using cold memory.
@@ -2861,7 +2897,8 @@ class BenchmarkRunner:
                 with torch.profiler.profile(
                     activities=[torch.profiler.ProfilerActivity.CPU]
                 ) as prof:
-                    warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
+                    with self.use_optimizer(dynamo_optimizer):
+                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
 
                 events = list(
                     filter(
@@ -2896,13 +2933,14 @@ class BenchmarkRunner:
                         dynamo_cache_lookup_latency
                     )
 
-            backend_timings = experiment(
-                self.model_iter_fn,
-                model,
-                example_inputs,
-                mark="expected",
-                **experiment_kwargs,
-            )
+            with self.use_optimizer(dynamo_optimizer):
+                backend_timings = experiment(
+                    self.model_iter_fn,
+                    model,
+                    example_inputs,
+                    mark="expected",
+                    **experiment_kwargs,
+                )
             timings = np.stack((baseline_timings, backend_timings), axis=1)
             result_summary = latency_experiment_summary(
                 self.suite_name, self.args, model, timings, **experiment_kwargs
@@ -2969,13 +3007,20 @@ class BenchmarkRunner:
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
 
-        # Use distributed wrapping as necessary
+        eager_model = self.deepcopy_and_maybe_parallelize(model)
         model = self.deepcopy_and_maybe_parallelize(model)
 
-        if not hasattr(model, name):
-            model.name = name
+        for benchmark_model in (eager_model, model):
+            if not hasattr(benchmark_model, "name"):
+                benchmark_model.name = name
 
-        self.init_optimizer(name, current_device, model.parameters())
+        eager_optimizer = self.create_optimizer(
+            name, current_device, eager_model.parameters()
+        )
+        dynamo_optimizer = self.create_optimizer(
+            name, current_device, model.parameters()
+        )
+        self.optimizer = dynamo_optimizer
 
         # The self.autocast context is needed for the model we export with aot_compile,
         # similar to what we do in the check_accuracy function
@@ -2995,10 +3040,13 @@ class BenchmarkRunner:
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"eager_{self.args.only}"
             ):
-                with torch.compiler.set_stance("force_eager"):
+                with (
+                    torch.compiler.set_stance("force_eager"),
+                    self.use_optimizer(eager_optimizer),
+                ):
                     eager_latency, eager_peak_mem, _ = warmup(
                         self.model_iter_fn,
-                        copy.deepcopy(model),
+                        eager_model,
                         example_inputs,
                         "eager",
                         niters=niters,
@@ -3006,7 +3054,7 @@ class BenchmarkRunner:
                     if self.args.use_warm_peak_memory:
                         _, eager_peak_mem, _ = warmup(
                             self.model_iter_fn,
-                            copy.deepcopy(model),
+                            eager_model,
                             example_inputs,
                             "eager",
                             niters=1,
@@ -3020,28 +3068,31 @@ class BenchmarkRunner:
             ):
                 optimized_model_iter_fn = optimize_ctx
             else:
-                if getattr(self, "hf_llm", False):
-                    # If it's an llm, we want to optimize model.forward, and use
-                    # the generate function
-                    model = optimize_ctx(model)
-                    optimized_model_iter_fn = self.model_iter_fn
-                else:
-                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                with self.use_optimizer(dynamo_optimizer):
+                    if getattr(self, "hf_llm", False):
+                        # If it's an llm, we want to optimize model.forward, and use
+                        # the generate function
+                        model = optimize_ctx(model)
+                        optimized_model_iter_fn = self.model_iter_fn
+                    else:
+                        optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
             ):
-                dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                    optimized_model_iter_fn, model, example_inputs, "dynamo"
-                )
-                if self.args.use_warm_peak_memory:
-                    _, dynamo_peak_mem, _ = warmup(
-                        optimized_model_iter_fn,
-                        model,
-                        example_inputs,
-                        "dynamo",
-                        niters=1,
+                with self.use_optimizer(dynamo_optimizer):
+                    dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
+                        optimized_model_iter_fn, model, example_inputs, "dynamo"
                     )
+                if self.args.use_warm_peak_memory:
+                    with self.use_optimizer(dynamo_optimizer):
+                        _, dynamo_peak_mem, _ = warmup(
+                            optimized_model_iter_fn,
+                            model,
+                            example_inputs,
+                            "dynamo",
+                            niters=1,
+                        )
                 # If we use warm peak memory, the AOT model loading transient memory
                 # won't be present on the warm measurement.  We only have to account for
                 # it when using cold memory.
@@ -3052,7 +3103,8 @@ class BenchmarkRunner:
                 with torch.profiler.profile(
                     activities=[torch.profiler.ProfilerActivity.CPU]
                 ) as prof:
-                    warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
+                    with self.use_optimizer(dynamo_optimizer):
+                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
 
                 events = list(
                     filter(
@@ -3091,26 +3143,35 @@ class BenchmarkRunner:
                 ok, total = Stats.reset_counters()
                 results = []
                 # run with torch._dynamo few times to populate the cache
-                for _ in range(3):
-                    optimized_model_iter_fn(model, example_inputs)
-                _, frames_second_pass = Stats.reset_counters()  # should be 0
-                if frames_second_pass > 0:
-                    optimized_model_iter_fn(model, example_inputs)
-                    _, frames_third_pass = Stats.reset_counters()  # should be 0
-                else:
-                    frames_third_pass = 0
+                with self.use_optimizer(dynamo_optimizer):
+                    for _ in range(3):
+                        optimized_model_iter_fn(model, example_inputs)
+                    _, frames_second_pass = Stats.reset_counters()  # should be 0
+                    if frames_second_pass > 0:
+                        optimized_model_iter_fn(model, example_inputs)
+                        _, frames_third_pass = Stats.reset_counters()  # should be 0
+                    else:
+                        frames_third_pass = 0
 
                 results.append(
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
             experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
-
-            results.append(
-                experiment(
-                    self.model_iter_fn, model, example_inputs, **experiment_kwargs
-                )
+            experiment_kwargs["eager_model"] = eager_model
+            experiment_kwargs["eager_context"] = functools.partial(
+                self.use_optimizer, eager_optimizer
             )
+            experiment_kwargs["dynamo_context"] = functools.partial(
+                self.use_optimizer, dynamo_optimizer
+            )
+
+            with self.use_optimizer(dynamo_optimizer):
+                results.append(
+                    experiment(
+                        self.model_iter_fn, model, example_inputs, **experiment_kwargs
+                    )
+                )
             return " ".join(map(str, results))
 
     def minify_model(
