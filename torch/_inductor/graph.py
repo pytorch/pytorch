@@ -1394,12 +1394,12 @@ class GraphLowering(torch.fx.Interpreter):
                     override_decomp=True,
                 )
             elif config.implicit_fallbacks:
-                error = (
-                    MissingOperatorWithDecomp
-                    if get_decompositions([target])
-                    else MissingOperatorWithoutDecomp
-                )
                 if log.isEnabledFor(logging.INFO):
+                    error = (
+                        MissingOperatorWithDecomp
+                        if get_decompositions([target])
+                        else MissingOperatorWithoutDecomp
+                    )
                     log.info(
                         "Creating implicit fallback for:\n%s",
                         error.operator_str(target, args, kwargs),
