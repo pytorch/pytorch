@@ -942,16 +942,14 @@ def threshold(
     if inplace:
         raise NotImplementedError
 
-    # Eager compares against the threshold in a device-dependent dtype
-    # (issue #185470): the CUDA kernel casts the scalar threshold to the input
-    # dtype and compares in the input dtype, while the CPU kernel compares in
-    # fp32. Match each so the boundary classification agrees with eager on the
-    # running device. Only the comparison dtype changes; the result still comes
-    # from a, so the output dtype is unaffected.
     cmp = a
-    if a.device.type != "cuda" and utils.is_low_precision_dtype(a.dtype):
+    cmp_threshold = threshold
+    if a.device.type == "cuda" and utils.is_low_precision_dtype(a.dtype):
+        # CUDA threshold kernels cast the scalar threshold to the input dtype.
+        cmp_threshold = torch.scalar_tensor(threshold, dtype=a.dtype, device=a.device)
+    elif utils.is_low_precision_dtype(a.dtype):
         cmp = prims.convert_element_type(a, torch.float32)
-    return torch.where(cmp <= threshold, value, a)
+    return torch.where(cmp <= cmp_threshold, value, a)
 
 
 # CompositeImplicitAutograd - don't register decomp

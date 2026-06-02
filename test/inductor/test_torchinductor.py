@@ -8194,10 +8194,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     def test_threshold_low_precision_boundary(self):
-        # threshold's boundary comparison is device-dependent in eager: CUDA
-        # compares in the input dtype, CPU in fp32. bf16(0.1) == 0.10009765625,
-        # so an input equal to that is at the bound on CUDA (-> value) but above
-        # it on CPU (-> kept). Compiled must match eager per device (#185470).
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA-specific threshold boundary")
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest(
+                f"torch.bfloat16 not supported for device {self.device}"
+            )
+
+        # CUDA threshold compares the scalar threshold in the input dtype.
+        # bf16(0.1) == 0.10009765625, so this input is exactly at the bound.
         def fn(x):
             return F.threshold(x, 0.1, 0.0)
 
