@@ -265,6 +265,7 @@ def mark_nodes_dislike_padding(
             aten.convolution,
             aten.convolution_backward,
             aten._scaled_mm,
+            aten._scaled_mm_v2,
         ]
     )
     # what's a better way to collect the reduction ops?

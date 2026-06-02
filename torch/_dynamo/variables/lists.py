@@ -196,7 +196,11 @@ class BaseListVariable(VariableTracker):
         # override this to fall back to the base "missing" behavior.
         # ref: https://github.com/python/cpython/blob/f31a89bb9010/Objects/listobject.c#L3916-L3921 (list_iteritem)
         # ref: https://github.com/python/cpython/blob/f31a89bb9010/Objects/tupleobject.c#L876-L885 (tuple_iteritem)
+        if not isinstance(self, (ListVariable, TupleVariable)):
+            return super().tp_iteritem_impl(tx, index)
         i = index.as_python_constant()
+        if i < 0:
+            raise AssertionError(f"Invalid index {i}")
         if i >= len(self.items):
             raise_observed_exception(IndexError, tx)
         return self.items[i], ConstantVariable.create(i + 1)
@@ -503,6 +507,19 @@ class BaseListVariable(VariableTracker):
             else:
                 self.items += args[0].items  # type: ignore[attr-defined]
                 return self
+        elif name == "__reversed__":
+            # list/tuple/namedtuple __reversed__: reverse iterator over items.
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return ListIteratorVariable(
+                list(reversed(self.items)),
+                mutation_type=ValueMutationNew(),
+            )
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -775,14 +792,6 @@ class RangeVariable(BaseListVariable):
             self.start(), self.stop(), self.step(), self.range_length()
         )
 
-    def tp_iteritem_impl(
-        self, tx: "InstructionTranslatorBase", index: VariableTracker
-    ) -> tuple[VariableTracker, VariableTracker]:
-        # CPython's range type does not install _tp_iteritem — iteration goes
-        # through range_iterator (tp_iternext) instead.  Skip BaseListVariable's
-        # generic impl (which would happily index self.items = [start, stop, step]).
-        return VariableTracker.tp_iteritem_impl(self, tx, index)
-
     def sq_item_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -835,6 +844,22 @@ class RangeVariable(BaseListVariable):
 
         if name == "count":
             return SourcelessBuilder.create(tx, self.range_count(*args))
+        elif name == "__reversed__":
+            # range.__reversed__: range_iterator with reversed bounds.
+            # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c (range_reverse)
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            length = self.range_length()
+            start = self.start()
+            step = self.step()
+            new_start = start + (length - 1) * step
+            new_step = -step
+            return RangeIteratorVariable(new_start, 0, new_step, length)
         elif name == "index":
             x = args[0].as_python_constant()
             start, stop, step = self.start(), self.stop(), self.step()
@@ -1547,14 +1572,6 @@ class DequeVariable(CommonListMethodsVariable):
         # that keeps track of the maxlen and doesn't allow iterating over more
         # items than maxlen.
         return ListIteratorVariable(self.items, mutation_type=ValueMutationNew())
-
-    def tp_iteritem_impl(
-        self, tx: "InstructionTranslatorBase", index: VariableTracker
-    ) -> tuple[VariableTracker, VariableTracker]:
-        # collections.deque does not install _tp_iteritem in CPython — fall
-        # back to the base "missing" behavior rather than BaseListVariable's
-        # generic indexer.
-        return VariableTracker.tp_iteritem_impl(self, tx, index)
 
 
 class TupleVariable(BaseListVariable):

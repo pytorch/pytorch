@@ -6317,7 +6317,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 isinstance(receiver, UserDefinedObjectVariable)
                 and isinstance(receiver.value, collections.abc.Iterator)
             )
-            or (sys.version_info >= (3, 15) and isinstance(receiver, BaseListVariable))
+            or (
+                sys.version_info >= (3, 15)
+                and isinstance(receiver, (ListVariable, TupleVariable))
+            )
         ):
             if val.is_constant_none():
                 try:
