@@ -182,7 +182,7 @@ ScopePtr ONNXGraphTopLevelScope(Graph& graph) {
 
 // This pass is to be used for ONNX conversion only. The ONNX converter depends
 // on a number of deprecated aten operators. These operators are removed from IR
-// and replaced by the compiled python function code. However, in-order to
+// and replaced by the compiled python function code. However, in order to
 // maintain the behavior for ONNX conversion, we replace these function calls
 // with the aten symbolic which can still be used by the ONNX converter.
 void ONNXFunctionCallSubstitution(Graph& graph) {
