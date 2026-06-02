@@ -50,7 +50,7 @@ A human has fully classified the issue only when it has **BOTH**:
 2. One of the sub-oncall labels: `oncall: distributed parallelisms`, `oncall: distributed infra`, or `oncall: distributed checkpointing`.
 
 If both are present:
-- Add `bot-triaged` label
+- Add `bot-triaged` + `triaged` labels (the human classification is complete and confident)
 - **STOP** — a human already classified this issue.
 
 If only one is present (a module label without a sub-oncall, or a sub-oncall without a module label), triage is **incomplete** — proceed to Step 1. The PT-level triage bot can apply distributed module labels alongside `oncall: distributed`, but it does not pick the sub-oncall; that is your job.
@@ -88,7 +88,7 @@ If no sub-oncall is present, apply exactly one based on the routing rules in [di
 Use the routing decision tree and edge cases in [distributed-rubric.md](distributed-rubric.md) Section 1 to determine the correct sub-oncall.
 
 **After routing to `oncall: distributed infra` or `oncall: distributed checkpointing`:**
-- Add `bot-triaged`
+- Add `bot-triaged` (the sub-oncall routing is a confident, complete outcome)
 - **STOP** — the sub-oncall team owns further triage
 
 **After routing to `oncall: distributed parallelisms`:**
@@ -102,8 +102,8 @@ From the issue description, comments, code snippets, and stack traces, classify 
 
 | Confidence | Criteria | Action |
 |-----------|---------|--------|
-| **HIGH or MEDIUM** | Explicit module mention, obvious API usage, or probable module based on context | Add `module:` label(s) + `bot-triaged` |
-| **LOW** | Cannot determine module — vague description, no code, no stack trace | Add `triage review` + `bot-triaged` |
+| **HIGH or MEDIUM** | Explicit module mention, obvious API usage, or probable module based on context | Add `module:` label(s) + `bot-triaged` + `triaged` |
+| **LOW** | Cannot determine module — vague description, no code, no stack trace | Add `triage review` + `bot-triaged` (no `triaged` — punting to a human) |
 
 **Rules:**
 - You can apply multiple module labels when the issue spans modules (e.g., `module: fsdp` + `module: dtensor` for FSDP2 issues that hit DTensor bugs).
@@ -155,7 +155,8 @@ If the issue lacks a minimal reproduction script:
 - Remove existing labels — only add labels
 - Remove `oncall: distributed` — it stays even if the issue is mislabeled
 - Remove `oncall: pt2` — if already present, keep it
-- Remove `bot-triaged` — it is applied by the parent skill and must stay
+- Remove `bot-triaged` or `triaged` — they are applied by the parent skill and must stay
+- Add `triaged` when you are NOT confident in the classification — i.e. any time the action also applies `triage review` or `needs reproduction`, or in the §5 high-priority flow
 - Add labels not in [distributed-labels.json](distributed-labels.json)
 - Add comments to issues except when using the templates in Step 1 (mislabel) or Step 6 (reproduction)
 - Assign issues to users
@@ -164,6 +165,7 @@ If the issue lacks a minimal reproduction script:
 **DO:**
 - Be conservative — when in doubt, add `triage review` for human attention
 - Add `bot-triaged` whenever the bot has processed the issue, regardless of confidence. Pair with `triage review` for LOW-confidence or uncertain cases so the cron sweep won't re-pick it. (Exception: §5 high-priority flow intentionally omits `bot-triaged`.)
+- Add `triaged` ONLY when you reach a confident, complete classification: a human already classified it (Step 0), a confident sub-oncall routing (Step 2), or a HIGH/MEDIUM-confidence module classification (Step 3).
 - Always add a sub-oncall label (Step 2) before module labels (Step 3)
 - Read the full issue including comments before classifying
 - Check the rubric's "Common Mislabel Traps" section before finalizing

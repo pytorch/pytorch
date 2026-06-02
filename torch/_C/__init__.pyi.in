@@ -1972,6 +1972,7 @@ class TensorBase(metaclass=_TensorMeta):
     retains_grad: _bool
     shape: Size
     data: Tensor
+    names: list[str]
     device: _device
     dtype: _dtype
     grad_dtype: _dtype | None
@@ -2574,6 +2575,7 @@ class _XpuDeviceProperties:
     memory_bus_width: _int
     sub_group_sizes: list[_int]
     local_mem_size: _int
+    last_level_cache_size: _int
     has_fp16: _bool
     has_fp64: _bool
     has_atomic64: _bool
@@ -2581,6 +2583,7 @@ class _XpuDeviceProperties:
     has_subgroup_matrix_multiply_accumulate: _bool
     has_subgroup_matrix_multiply_accumulate_tensor_float32: _bool
     has_subgroup_2d_block_io: _bool
+    is_integrated_gpu: _bool
     total_memory: _int
     gpu_subslice_count: _int
     architecture: _int

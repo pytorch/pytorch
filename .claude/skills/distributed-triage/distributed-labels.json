@@ -83,6 +83,10 @@
       "description": "Issue has been triaged by the triage bot"
     },
     {
+      "name": "triaged",
+      "description": "This issue has been looked at a team member, and triaged and prioritized into an appropriate module"
+    },
+    {
       "name": "feature",
       "description": "Wholly new functionality that does not exist today"
     },
