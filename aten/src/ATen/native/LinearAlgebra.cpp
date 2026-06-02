@@ -3527,14 +3527,14 @@ struct KronImpl final {
         mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
       }
       at::native::resize_output(result, result_reshape);
-      auto result_mul = at::_unsafe_view(result, mul_shape);
+      auto result_mul = result.reshape(mul_shape);
       at::mul_out(result_mul, self_view, other_view);
 
       return result;
     }
 
     Tensor kron() const {
-      return at::_unsafe_view(at::mul(self_view, other_view), result_reshape);
+      return at::mul(self_view, other_view).reshape(result_reshape);
     }
   private:
     int64_t maxdim;
