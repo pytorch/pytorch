@@ -435,14 +435,6 @@ def generate_wheels_matrix(
             ):
                 continue
 
-            # TODO: Re-enable XPU for python 3.15 once the triton XPU 3.15
-            # wheel build is fixed (tracked in #184901). Triton XPU is
-            # currently skipped for 3.15/3.15t in build-triton-wheel.yml.
-            if arch_version in XPU_ARCHES and (
-                python_version == "3.15" or python_version == "3.15t"
-            ):
-                continue
-
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
