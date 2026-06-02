@@ -387,6 +387,28 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(x_comp.grad, grad_x_eager)
         torch.testing.assert_close(w_comp.grad, grad_w_eager)
 
+    def test_compile_dynamic_grad_conv_transpose2d(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181175
+        batch_norm = torch.nn.BatchNorm2d(5).eval()
+        conv_transpose = torch.nn.ConvTranspose2d(5, 2, 3)
+        max_pool = torch.nn.MaxPool2d(2)
+
+        torch.manual_seed(0)
+        x = torch.randn(3, 5, 14, 15)
+
+        def fn(x):
+            y = batch_norm(x)
+            y = conv_transpose(y)
+            y = max_pool(y)
+            return torch.softmax(y, dim=0).mean()
+
+        expected = torch.func.grad(fn)(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad(fn), backend="inductor", dynamic=True)
+        result = compiled(x)
+        torch.testing.assert_close(result, expected)
+
     @config.patch(freezing=True)
     @requires_mkl
     @patch("torch.cuda.is_available", lambda: False)
@@ -905,6 +927,27 @@ class CPUReproTests(TestCase):
             result, code = run_and_get_cpp_code(fn_opt, inp)
             self.assertNotIn("kernel_src", code)
             self.assertEqual(expected, result)
+
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
+    def test_set_source_tensor_with_view_source(self):
+        def fn(x):
+            x = torch.sigmoid(x).view(x.size(0), -1)
+            param1 = nn.Parameter(x)
+            with torch.no_grad():
+                x.mul_(1.4386868137611386)
+            y = torch.cat([x, x], dim=1)
+            param2 = nn.Parameter(y)
+            z = torch.zeros_like(x) + x
+            param3 = nn.Parameter(z)
+            return param1, param2, param3
+
+        inp = torch.randn(2, 3, 4)
+        with torch.no_grad():
+            expected = fn(inp)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        with torch.no_grad():
+            result = opt_fn(inp)
+        self.assertEqual(expected, result)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -5360,7 +5403,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.rand(37)
+        x = torch.rand(31)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():
@@ -6543,9 +6586,14 @@ class CPUReproTests(TestCase):
         model = torch.export.export(model, example_batch, strict=True).module()
 
         with torch.no_grad():
+            expected = model(*example_batch)
             metrics.reset()
-            torch.compile(model)(*example_batch)
-            check_metrics_vec_kernel_count(5)
+            actual, code = run_and_get_cpp_code(torch.compile(model), *example_batch)
+            self.assertTrue(same(expected, actual))
+            FileCheck().check("cpp_fused_add_native_layer_norm").run(code)
+            if _can_check_vec_metrics():
+                # The exact split of vectorized loops can vary by CPU backend.
+                self.assertGreaterEqual(metrics.generated_cpp_vec_kernel_count, 5)
 
     def test_dropout(self):
         class Model(nn.Module):
