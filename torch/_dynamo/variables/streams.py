@@ -757,7 +757,16 @@ class EventVariable(VariableTracker):
         # not an input or global
         if self.source:
             raise AssertionError("Event should not have a source during reconstruct")
-        # Similar to stream handling, we lift the event into a global and then codegen bytecode to load it from there.
-        prefix = "_event"
-        name = codegen.tx.output.install_global_by_id(prefix, self.value)
-        codegen.append_output(codegen.create_load_global(name, add=True))
+        if self.user_object_index is not None:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    torch._dynamo.graph_bytecode_inputs.__name__,
+                    "get_external_object_by_index",
+                )
+            )
+            codegen.append_output(codegen.create_load_const(self.user_object_index))
+            codegen.extend_output(create_call_function(1, False))
+        else:
+            prefix = "_event"
+            name = codegen.tx.output.install_global_by_id(prefix, self.value)
+            codegen.append_output(codegen.create_load_global(name, add=True))
