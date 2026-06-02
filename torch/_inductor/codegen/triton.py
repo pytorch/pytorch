@@ -632,45 +632,20 @@ class BlockDescriptorOptions:
     def has_mask(self) -> bool:
         return bool(self.boundary_check())
 
-    def codegen_broadcast_and_reshape(
+    @dataclasses.dataclass(frozen=True)
+    class _BroadcastAndReshapePlan:
+        broadcast_shape: Sequence[sympy.Expr]
+        pre_broadcast_shape: Sequence[sympy.Expr]
+        supports_implicit_broadcast: bool
+        permute_dims: Sequence[int] | None
+        old_shape: Sequence[sympy.Expr]
+
+    def _broadcast_and_reshape_plan(
         self,
-        value: str,
-        initial_shape: Sequence[sympy.Expr],
         final_shape: Sequence[sympy.Expr],
         allow_implicit: bool,
         for_store: bool,
-        return_shape: bool = False,
-    ) -> str | tuple[str, Sequence[sympy.Expr | int | str]]:
-        """
-        Generate a broadcast and a reshape for the block descriptor.
-        This restores stride-0 dimensions which were removed from the block descriptor.
-
-        Transposes are also applied to the input using self.stride_sorter:
-        if for_store is True:
-            - First Broadcast the value. Since self.broadcast_shape is stored in
-            descending stride order, it must be reverted to the original order
-            since the input value does not have dims with descending strides
-            - After, transpose the broadcasted value so that dimensions are in
-            descending stride order
-            - Finally reshape to the block shape
-        else (for load):
-            - First broadcast the value to self.broadcast_shape (strides are descending)
-            - Then transpose the value so that dimensions no longer have descending strides
-            - Finally reshape the block to the final kernel tile shape
-        """
-        current_shape: Sequence[sympy.Expr | int | str] = initial_shape
-
-        def apply_reshape(
-            value: str,
-            old_shape: Sequence[sympy.Expr | int | str],
-            new_shape: Sequence[sympy.Expr | int | str],
-        ) -> str:
-            nonlocal current_shape
-            result = triton_reshape(value, old_shape, new_shape)
-            if result != value:
-                current_shape = new_shape
-            return result
-
+    ) -> _BroadcastAndReshapePlan:
         broadcast_shape = self.broadcast_shape
         broadcasting_dims = self.broadcasting_dims
 
@@ -688,8 +663,8 @@ class BlockDescriptorOptions:
             sympy.S.One if is_broadcasting else dim
             for dim, is_broadcasting in zip(broadcast_shape, broadcasting_dims)
         ]
-        value = apply_reshape(value, initial_shape, pre_broadcast_shape)
 
+        implicit_broadcast_shape = pre_broadcast_shape
         if (
             not self.stride_sorter.is_identity
             and not for_store
@@ -699,7 +674,7 @@ class BlockDescriptorOptions:
             # with implicit broadcasting then we don't need an explicit broadcast
             # unless the caller requests it. So just test implicit broadcast support
             # with the transposed pre broadcast shape
-            pre_broadcast_shape = self.stride_sorter.revert(pre_broadcast_shape)
+            implicit_broadcast_shape = self.stride_sorter.revert(pre_broadcast_shape)
 
         # Broadcast singletons.
         # For loads, we can often implicitly broadcast singleton dimensions.
@@ -707,21 +682,16 @@ class BlockDescriptorOptions:
         # than add singletons.
         sizevars = V.graph.sizevars
         supports_implicit_broadcast = allow_implicit and (
-            len(pre_broadcast_shape) == len(final_shape)
+            len(implicit_broadcast_shape) == len(final_shape)
             and all(
                 sizevars.statically_known_equals(pre_dim, 1)
                 or sizevars.statically_known_equals(pre_dim, post_dim)
-                for pre_dim, post_dim in zip(pre_broadcast_shape, final_shape)
+                for pre_dim, post_dim in zip(implicit_broadcast_shape, final_shape)
             )
         )
 
-        if any(self.broadcasting_dims) and not supports_implicit_broadcast:
-            value = (
-                f"tl.broadcast_to({value}, {V.kernel.index_to_str(broadcast_shape)})"
-            )
-            current_shape = broadcast_shape
-
         old_shape = self.broadcast_shape
+        permute_dims = None
         if not self.stride_sorter.is_identity:
             # if for_store the transform is
             #   (non-descending strides) broadcasted kernel tile shape
@@ -734,20 +704,96 @@ class BlockDescriptorOptions:
                 if for_store
                 else self.stride_sorter.revert_sort_idx
             )
-            value = f"tl.trans({value}, {permute_dims})"
-            current_shape = [current_shape[i] for i in permute_dims]
             old_shape = (
                 self.broadcast_shape
                 if for_store
                 else self.stride_sorter.revert(self.broadcast_shape)
             )
 
-        # Reshape to the final shape.
-        value = apply_reshape(value, old_shape, final_shape)
+        return BlockDescriptorOptions._BroadcastAndReshapePlan(
+            broadcast_shape=broadcast_shape,
+            pre_broadcast_shape=pre_broadcast_shape,
+            supports_implicit_broadcast=supports_implicit_broadcast,
+            permute_dims=permute_dims,
+            old_shape=old_shape,
+        )
 
-        if return_shape:
-            return value, current_shape
-        return value
+    @staticmethod
+    def _shape_after_reshape(
+        old_shape: Sequence[sympy.Expr | int | str],
+        new_shape: Sequence[sympy.Expr | int | str],
+    ) -> Sequence[sympy.Expr | int | str]:
+        if triton_shape_dims(old_shape) == triton_shape_dims(new_shape):
+            return old_shape
+        return new_shape
+
+    def broadcast_and_reshape_shape(
+        self,
+        initial_shape: Sequence[sympy.Expr],
+        final_shape: Sequence[sympy.Expr],
+        allow_implicit: bool,
+        for_store: bool,
+    ) -> Sequence[sympy.Expr | int | str]:
+        plan = self._broadcast_and_reshape_plan(
+            final_shape,
+            allow_implicit,
+            for_store,
+        )
+
+        current_shape = self._shape_after_reshape(
+            initial_shape, plan.pre_broadcast_shape
+        )
+
+        if any(self.broadcasting_dims) and not plan.supports_implicit_broadcast:
+            current_shape = plan.broadcast_shape
+
+        if plan.permute_dims is not None:
+            current_shape = [current_shape[i] for i in plan.permute_dims]
+
+        if triton_shape_dims(plan.old_shape) == triton_shape_dims(final_shape):
+            return current_shape
+        return final_shape
+
+    def codegen_broadcast_and_reshape(
+        self,
+        value: str,
+        initial_shape: Sequence[sympy.Expr],
+        final_shape: Sequence[sympy.Expr],
+        allow_implicit: bool,
+        for_store: bool,
+    ) -> str:
+        """
+        Generate a broadcast and a reshape for the block descriptor.
+        This restores stride-0 dimensions which were removed from the block descriptor.
+
+        Transposes are also applied to the input using self.stride_sorter:
+        if for_store is True:
+            - First Broadcast the value. Since self.broadcast_shape is stored in
+            descending stride order, it must be reverted to the original order
+            since the input value does not have dims with descending strides
+            - After, transpose the broadcasted value so that dimensions are in
+            descending stride order
+            - Finally reshape to the block shape
+        else (for load):
+            - First broadcast the value to self.broadcast_shape (strides are descending)
+            - Then transpose the value so that dimensions no longer have descending strides
+            - Finally reshape the block to the final kernel tile shape
+        """
+        plan = self._broadcast_and_reshape_plan(
+            final_shape,
+            allow_implicit,
+            for_store,
+        )
+        value = triton_reshape(value, initial_shape, plan.pre_broadcast_shape)
+
+        if any(self.broadcasting_dims) and not plan.supports_implicit_broadcast:
+            value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(plan.broadcast_shape)})"
+
+        if plan.permute_dims is not None:
+            value = f"tl.trans({value}, {plan.permute_dims})"
+
+        # Reshape to the final shape.
+        return triton_reshape(value, plan.old_shape, final_shape)
 
 
 @dataclasses.dataclass
@@ -2393,8 +2439,8 @@ class TritonKernelOverrides(TritonOverrides):
         var = V.kernel.cse.generate(
             V.kernel.compute,
             cls.to_dtype(f"({indexing.index_str})", cast_dtype),
-            bounds=get_bounds_index_expr(expr),
             dtype=output_dtype,
+            bounds=get_bounds_index_expr(expr),
             shape=shape,
         )
 
@@ -4222,13 +4268,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     line = f"tl.load({block_descriptor}{other}{ep}{cachemod})"
                 else:
                     line = self.codegen_descriptor_load_line(block_descriptor, indexing)
-                line, shape = indexing.codegen_broadcast_and_reshape(
+                line = indexing.codegen_broadcast_and_reshape(
                     line,
                     indexing.block_shape,
                     indexing.final_shape,
                     allow_implicit=True,
                     for_store=False,
-                    return_shape=True,
+                )
+                shape = indexing.broadcast_and_reshape_shape(
+                    indexing.block_shape,
+                    indexing.final_shape,
+                    allow_implicit=True,
+                    for_store=False,
                 )
             elif is_sympy_integer_like(original_index):
                 line = f"tl.load({var} + ({original_index}))"
