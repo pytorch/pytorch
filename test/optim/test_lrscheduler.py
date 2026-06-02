@@ -833,6 +833,22 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, [x * 10 for x in single_targets]]
         self._test_get_last_lr(scheduler, targets, epochs)
 
+    def test_sequentiallr_milestones_contain_zero(self):
+        """
+        Test SequentialLR when milestones contain 0.
+        When milestones=[0], the second scheduler should be active from epoch 0.
+        Regression test for https://github.com/pytorch/pytorch/issues/185872
+        """
+        epochs = 5
+        schedulers = [None] * 2
+        # First scheduler: LR starts at 0.1, stays constant
+        # Second scheduler: LR starts at 0.05 (factor 0.5), stays constant
+        targets = [[0.05] * epochs]
+        schedulers[0] = ConstantLR(self.opt, factor=1.0, total_iters=1)
+        schedulers[1] = ConstantLR(self.opt, factor=0.5, total_iters=1)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=[0])
+        self._test(scheduler, targets, epochs)
+
     def test_sequentiallr_does_not_alias_lr_and_initial_lr(self):
         # The TestLRScheduler object uses self.opt to avoid instantiating a new optimizer for each test.
         # self.opt has a float lr, and we need to use a Tensor lr to ensure that a former SequentialLR bug is fixed.
