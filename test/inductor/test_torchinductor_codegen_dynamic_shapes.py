@@ -119,6 +119,9 @@ test_failures = {
     "test_as_strided_on_split_view_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_cat_empty_1d_negative_dim_zero_output_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     #
     # Failed to find dynamic for loop variable:
     #
@@ -445,6 +448,9 @@ test_failures = {
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_bucketize_scalar_with_options_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_bucketize_scalar_unbacked_value_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
 }
