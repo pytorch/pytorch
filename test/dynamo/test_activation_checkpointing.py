@@ -2379,6 +2379,114 @@ sum_1: aten.sum.default -> PREFER_RECOMPUTE
 cos: aten.cos.default -> PREFER_RECOMPUTE""",
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_memory_budget_annotation_reduces_act_mem(self):
+        import torch.fx.traceback as fx_traceback
+
+        N, NUM_LAYERS = 1000, 4
+
+        class Model(torch.nn.Module):
+            def __init__(self, budget=None):
+                super().__init__()
+                self.budget = budget
+                self.linears = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+
+            def forward(self, x):
+                for linear in self.linears:
+                    if self.budget is not None:
+                        with fx_traceback.annotate({"memory_budget": self.budget}):
+                            x = linear(x).relu()
+                    else:
+                        x = linear(x).relu()
+                return x.sum()
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            act_mem = (
+                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
+            )
+            out.backward()
+            return act_mem
+
+        x = torch.randn(N, N, device="cuda")
+
+        torch._dynamo.reset()
+        compiled = torch.compile(Model().cuda(), backend="aot_eager")
+        self.assertGreater(get_act_mem(lambda: compiled(x)), 0)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(Model(budget=0.0).cuda(), backend="aot_eager")
+        self.assertEqual(get_act_mem(lambda: compiled(x)), 0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_memory_budget_annotation_per_region(self):
+        """Different regions can have different memory budgets across graph breaks."""
+        import torch.fx.traceback as fx_traceback
+
+        N, NUM_LAYERS = 1000, 2
+
+        class Model(torch.nn.Module):
+            def __init__(self, budget_a, budget_b):
+                super().__init__()
+                self.budget_a = budget_a
+                self.budget_b = budget_b
+                self.linears_a = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+                self.linears_b = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+
+            def forward(self, x):
+                with fx_traceback.annotate({"memory_budget": self.budget_a}):
+                    for linear in self.linears_a:
+                        x = linear(x).relu()
+                torch._dynamo.graph_break()
+                with fx_traceback.annotate({"memory_budget": self.budget_b}):
+                    for linear in self.linears_b:
+                        x = linear(x).relu()
+                return x.sum()
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            act_mem = (
+                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
+            )
+            out.backward()
+            return act_mem
+
+        x = torch.randn(N, N, device="cuda")
+
+        torch._dynamo.reset()
+        both_save = torch.compile(Model(1.0, 1.0).cuda(), backend="aot_eager")
+        mem_both_save = get_act_mem(lambda: both_save(x))
+
+        torch._dynamo.reset()
+        a_recomp = torch.compile(Model(0.0, 1.0).cuda(), backend="aot_eager")
+        mem_a_recomp = get_act_mem(lambda: a_recomp(x))
+
+        torch._dynamo.reset()
+        b_recomp = torch.compile(Model(1.0, 0.0).cuda(), backend="aot_eager")
+        mem_b_recomp = get_act_mem(lambda: b_recomp(x))
+
+        torch._dynamo.reset()
+        both_recomp = torch.compile(Model(0.0, 0.0).cuda(), backend="aot_eager")
+        mem_both_recomp = get_act_mem(lambda: both_recomp(x))
+
+        # Both save > either one recomputing > both recomputing
+        self.assertGreater(mem_both_save, mem_a_recomp)
+        self.assertGreater(mem_both_save, mem_b_recomp)
+        self.assertGreater(mem_a_recomp, mem_both_recomp)
+        self.assertGreater(mem_b_recomp, mem_both_recomp)
+
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""

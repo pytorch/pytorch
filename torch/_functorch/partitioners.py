@@ -3791,11 +3791,42 @@ def min_cut_rematerialization_partition(
             for user in node.users:
                 node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
 
+    # Per-region memory_budget override resolution. Two reader paths:
+    #   - Legacy: node.meta["memory_budget"], populated by the
+    #     `MemoryBudgetMode` / `set_memory_budget` allow_in_graph marker.
+    #     First matching node wins (preserves prior behavior).
+    #   - Custom: node.meta["custom"]["memory_budget"], populated by
+    #     `fx_traceback.annotate({"memory_budget": ...})` and propagated to all
+    #     FX nodes via _COPY_META_FIELDS["custom"]. The annotate path is the
+    #     supported replacement -- its contextmanager `finally:` restores
+    #     `current_meta` on every exit path, so it cannot leak across compiles
+    #     the way the legacy marker did (no-op __exit__ under Dynamo). A joint
+    #     graph is partitioned with a single budget, so all annotated nodes in
+    #     the graph must agree; disagreement means the caller put mutually
+    #     exclusive budgets in the same region (across a graph break each
+    #     region becomes its own joint graph and is resolved independently).
+    # Custom overrides legacy when both are set.
     memory_budget = config.activation_memory_budget
+
     for node in joint_graph.nodes:
-        if isinstance(node.meta.get("memory_budget", None), float):
-            memory_budget = node.meta["memory_budget"]
+        if isinstance(node.meta.get("memory_budget", None), (int, float)):
+            memory_budget = float(node.meta["memory_budget"])
             break
+
+    custom_budgets = OrderedSet(
+        float(node.meta["custom"]["memory_budget"])
+        for node in joint_graph.nodes
+        if isinstance(node.meta.get("custom", {}).get("memory_budget"), (int, float))
+    )
+    if len(custom_budgets) > 1:
+        raise RuntimeError(
+            f"Conflicting fx_traceback.annotate memory_budget values within a "
+            f"single joint graph: {sorted(custom_budgets)}. A joint graph is "
+            f"partitioned with a single budget; use a graph break to separate "
+            f"regions that need different budgets."
+        )
+    if custom_budgets:
+        memory_budget = next(iter(custom_budgets))
     saved_values = choose_saved_values_set(
         joint_graph,
         node_info,
