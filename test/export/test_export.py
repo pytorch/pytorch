@@ -14111,10 +14111,15 @@ graph():
                 return x + f.int_1 + f.int_2
 
         torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
-        ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
+        try:
+            ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
 
-        inp = torch.ones(2, 2)
-        self.assertEqual(ep.module()(inp, MyInput(4, 4)), Foo()(inp, MyInput(4, 4)))
+            inp = torch.ones(2, 2)
+            self.assertEqual(ep.module()(inp, MyInput(4, 4)), Foo()(inp, MyInput(4, 4)))
+        finally:
+            opaque_name = torch._library.opaque_object.get_opaque_type_name(MyInput)
+            if torch._C._is_opaque_type_registered(opaque_name):
+                torch._C._unregister_opaque_type(opaque_name)
 
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
