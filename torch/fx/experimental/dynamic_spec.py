@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 __all__ = [
     "ShapeVar",
     "IntVar",
-    "STATIC",
     "TensorSpec",
     "ObjectSpec",
     "DictSpec",
@@ -37,13 +36,6 @@ __all__ = [
 
 # Indent unit for nested repr output. Two spaces per level.
 _INDENT = "  "
-
-
-# Sentinel meaning "this dim / scalar arg is static" (taken from the
-# actual input at runtime, with recompiles on different values).
-# Alias for ``None`` so users can write either ``TensorSpec([A, STATIC])``
-# (more readable) or ``TensorSpec([A, None])``.
-STATIC = None
 
 
 # ---------------------------------------------------------------------------
