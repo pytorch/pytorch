@@ -1618,7 +1618,8 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
               "ldexp can't be cast to the desired output type ", result.scalar_type());
 
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
-      isFloatingType(self.scalar_type())) {
+      isFloatingType(self.scalar_type()) &&
+      ldexp_stub.is_device_supported(self.device().type())) {
     return _ldexp_int_exponent(self, other, result);
   }
 
@@ -1627,7 +1628,8 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
-      isFloatingType(self.scalar_type())) {
+      isFloatingType(self.scalar_type()) &&
+      ldexp_stub.is_device_supported(self.device().type())) {
     Tensor result = at::empty_like(self);
     return _ldexp_int_exponent(self, other, result);
   }
