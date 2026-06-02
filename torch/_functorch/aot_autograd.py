@@ -470,6 +470,32 @@ AOT_COUNTER = itertools.count()
 aot_autograd_decompositions: dict[OpOverload, Callable[..., Any]] = {}
 
 
+def _trace_aot_export_error_metadata(
+    artifact_name: str, fw_metadata: ViewAndMutationMeta
+) -> None:
+    from torch._logging import trace_structured
+    from torchgen.utils import dataclass_repr
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": artifact_name,
+            "encoding": "string",
+        },
+        payload_fn=lambda: dataclass_repr(fw_metadata),
+        expect_trace_id=False,
+    )
+
+
+def _aot_export_error_trace_hint() -> str:
+    return """\
+For more diagnostics, run with `TORCH_TRACE`:
+
+    TORCH_TRACE="/tmp/tracedir" python foo.py
+
+See https://pytorch.org/docs/stable/torch.compiler_troubleshooting.html#tlparse-torch-trace"""
+
+
 def create_aot_state(
     stack: contextlib.ExitStack,
     flat_fn: Callable[_P, _R],
@@ -641,35 +667,43 @@ issue""")
         # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
         # Keeping .resize_() in the graph will require some work
         # Allowing it but keeping the graph functional will require some calling convention changes.
-        if len([x for x in fw_metadata.input_info if x.mutates_metadata]) != 0:
+        metadata_mutation_input_indices = [
+            i for i, x in enumerate(fw_metadata.input_info) if x.mutates_metadata
+        ]
+        if len(metadata_mutation_input_indices) != 0:
+            _trace_aot_export_error_metadata(
+                "aot_export_metadata_mutation_fw_metadata", fw_metadata
+            )
             raise RuntimeError(
                 f"""\
 Found an input that received a metadata mutation, through e.g. a call to `.resize_()` or `.transpose_()`.
-This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
+This is currently banned in the aot_export workflow. If you need this functionality,
+please file a GitHub issue and attach the TORCH_TRACE logs.
+Input indices that received metadata mutations: {metadata_mutation_input_indices}.
 
-fw_metadata={str(fw_metadata)}"""
+{_aot_export_error_trace_hint()}"""
             )
         # In export, banning data mutations on inputs that require grad for now.
         # This should be rare, and is tricky to get right. When we trace the backward,
         # we currently trace with autograd.grad instead of .backward(), which makes it difficult
         # to ensure that we run autograd all the way through the input **before** it saw the mutation.
-        if (
-            len(
-                [
-                    x
-                    for x in fw_metadata.input_info
-                    if x.requires_grad and x.mutates_data
-                ]
+        grad_mutation_input_indices = [
+            i
+            for i, x in enumerate(fw_metadata.input_info)
+            if x.requires_grad and x.mutates_data
+        ]
+        if len(grad_mutation_input_indices) != 0 and aot_config.export_trace_joint:
+            _trace_aot_export_error_metadata(
+                "aot_export_requires_grad_mutation_fw_metadata", fw_metadata
             )
-            != 0
-            and aot_config.export_trace_joint
-        ):
             raise RuntimeError(
                 f"""\
 Found a graph input that requires gradients, and received a mutation.
-This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
+This is currently banned in the aot_export workflow. If you need this functionality,
+please file a GitHub issue and attach the TORCH_TRACE logs.
+Input indices that require gradients and received mutations: {grad_mutation_input_indices}.
 
-fw_metadata={str(fw_metadata)}"""
+{_aot_export_error_trace_hint()}"""
             )
         if req_subclass_dispatch:
             raise RuntimeError(

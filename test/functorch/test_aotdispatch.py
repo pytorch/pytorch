@@ -5825,12 +5825,21 @@ class <lambda>(torch.nn.Module):
 
         mod = TestMod(fn)
         inp = torch.randn(2, 4)
-        with self.assertRaisesRegex(
-            RuntimeError, "Found an input that received a metadata mutation"
-        ):
-            aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False)
-            aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
-            aot_export_module(mod, [inp], trace_joint=False)
+        test_cases = (
+            lambda: aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False),
+            lambda: aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True),
+            lambda: aot_export_module(mod, [inp], trace_joint=False),
+        )
+        for case in test_cases:
+            with self.assertRaisesRegex(
+                RuntimeError, "Found an input that received a metadata mutation"
+            ) as cm:
+                case()
+            msg = str(cm.exception)
+            self.assertIn("TORCH_TRACE", msg)
+            self.assertIn("Input indices that received metadata mutations: [1]", msg)
+            self.assertNotIn("fw_metadata", msg)
+            self.assertNotIn("ViewAndMutationMeta", msg)
 
     def test_aot_export_forward_mutation_no_buffer_mut(self):
         class M(torch.nn.Module):
@@ -5925,8 +5934,33 @@ graph():
         with self.assertRaisesRegex(
             RuntimeError,
             "Found a graph input that requires gradients, and received a mutation",
-        ):
+        ) as cm:
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
+        msg = str(cm.exception)
+        self.assertIn("TORCH_TRACE", msg)
+        self.assertIn(
+            "Input indices that require gradients and received mutations: [0]", msg
+        )
+        self.assertNotIn("fw_metadata", msg)
+        self.assertNotIn("ViewAndMutationMeta", msg)
+
+        with patch("torch._logging.trace_structured") as mock_trace_structured:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Found a graph input that requires gradients, and received a mutation",
+            ):
+                aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
+        matching_trace_calls = [
+            call
+            for call in mock_trace_structured.call_args_list
+            if call.args[0] == "artifact"
+            and call.kwargs["metadata_fn"]()["name"]
+            == "aot_export_requires_grad_mutation_fw_metadata"
+        ]
+        self.assertEqual(len(matching_trace_calls), 1)
+        self.assertIn(
+            "ViewAndMutationMeta", matching_trace_calls[0].kwargs["payload_fn"]()
+        )
 
         gm, _ = aot_export_module(mod, [inp], trace_joint=False)
         self.assertExpectedInline(
