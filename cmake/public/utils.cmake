@@ -566,3 +566,30 @@ function(target_link_options_if_supported tgt flag)
     message(WARNING "Attempted to use unsupported link option : ${flag}.")
   endif()
 endfunction()
+
+##############################################################################
+# Optimize ${tgt} with LLVM BOLT at build time when USE_LLVM_BOLT is ON. The
+# freshly-linked library is moved into a prebolt/ subdirectory and the bolted
+# library is written in its place.
+function(target_optimize_if_llvm_bolt_enabled tgt)
+  if(NOT USE_LLVM_BOLT)
+    return()
+  endif()
+  set(_profile "${LLVM_BOLT_PROFILES_DIR}/lib${tgt}.yaml")
+  if(NOT EXISTS "${_profile}")
+    message(FATAL_ERROR "USE_LLVM_BOLT is on but no BOLT profile for target '${tgt}' "
+                        "at ${_profile}.")
+  endif()
+  set(_prebolt "$<TARGET_FILE_DIR:${tgt}>/prebolt/$<TARGET_FILE_NAME:${tgt}>")
+  add_custom_command(TARGET ${tgt} POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:${tgt}>/prebolt"
+    COMMAND "${CMAKE_COMMAND}" -E rename "$<TARGET_FILE:${tgt}>" "${_prebolt}"
+    COMMAND "${LLVM_BOLT_EXECUTABLE}" "${_prebolt}"
+            -o "$<TARGET_FILE:${tgt}>"
+            "-data=${_profile}"
+            -lite -infer-stale-profile
+            -reorder-blocks=ext-tsp -reorder-functions=hfsort
+            -split-functions -split-all-cold -split-eh -dyno-stats
+    COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"
+    VERBATIM)
+endfunction()

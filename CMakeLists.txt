@@ -413,6 +413,13 @@ endif()
 cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker for ld."
   "${USE_PRIORITIZED_TEXT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 
+# LLVM BOLT post-link binary optimization. Defaults ON only for aarch64 CUDA
+# builds where a suitable llvm-bolt (>=21) is available. Depends on the
+# linker script because the committed profiles were collected with it enabled.
+find_program(LLVM_BOLT_EXECUTABLE NAMES llvm-bolt)
+cmake_dependent_option(USE_LLVM_BOLT "Optimize libraries with LLVM BOLT." ON
+  "USE_CUDA AND LINUX AND CPU_AARCH64 AND USE_PRIORITIZED_TEXT_FOR_LD AND LLVM_BOLT_EXECUTABLE" OFF)
+
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
 # on Windows and AArch64.
@@ -792,6 +799,35 @@ else()
     It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
     To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
     ]])
+  endif()
+endif()
+
+if(USE_LLVM_BOLT)
+  execute_process(
+    COMMAND ${LLVM_BOLT_EXECUTABLE} --version
+    OUTPUT_VARIABLE _bolt_version
+    ERROR_QUIET
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  string(REGEX MATCH "LLVM version ([0-9.]+)" _ "${_bolt_version}")
+  if(CMAKE_MATCH_1 VERSION_LESS 21)
+    message(WARNING "Disabling USE_LLVM_BOLT: ${LLVM_BOLT_EXECUTABLE} is version "
+                    "'${CMAKE_MATCH_1}' but >= 21 is required.")
+    set(USE_LLVM_BOLT OFF CACHE BOOL "Optimize libraries with LLVM BOLT." FORCE)
+  else()
+    # Extract the committed BOLT profiles for the build-time optimization step
+    # (target_optimize_if_llvm_bolt_enabled in cmake/public/utils.cmake).
+    set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
+    file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
+         DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
+
+    # BOLT requires -fno-reorder-blocks-and-partition and -Wl,--emit-relocs.
+    # NVIDIA internal benchmarking shows -fno-plt also provides a perf boost.
+    append_cxx_flag_if_supported("-fno-plt" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_CXX_FLAGS)
+    append_c_flag_if_supported("-fno-plt" CMAKE_C_FLAGS)
+    append_c_flag_if_supported("-fno-reorder-blocks-and-partition" CMAKE_C_FLAGS)
+    string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,--emit-relocs")
   endif()
 endif()
 
