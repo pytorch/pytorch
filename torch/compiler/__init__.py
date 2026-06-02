@@ -516,6 +516,20 @@ def _non_strict_tracing_context():
 
 
 @contextlib.contextmanager
+def _compile_session_context():
+    """Context manager that sets _is_compiling_flag for the duration of a
+    torch.compile session.
+    """
+    global _is_compiling_flag
+    old = _is_compiling_flag
+    try:
+        _is_compiling_flag = True
+        yield
+    finally:
+        _is_compiling_flag = old
+
+
+@contextlib.contextmanager
 def _patch_autograd_grad():
     """Patch autograd.grad for non-strict make_fx tracing.
 
