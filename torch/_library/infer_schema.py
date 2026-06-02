@@ -27,6 +27,7 @@ def infer_schema(
     *,
     mutates_args,
     op_name: str | None = None,
+    tags: torch.Tag | typing.Sequence[torch.Tag] | None = (),
 ) -> str:
     r"""Parses the schema of a given function with type hints. The schema is inferred from the
     function's type hints, and can be used to define a new operator.
@@ -46,8 +47,11 @@ def infer_schema(
         prototype_function: The function from which to infer a schema for from its type annotations.
         op_name (Optional[str]): The name of the operator in the schema. If ``name`` is None, then the
             name is not included in the inferred schema. Note that the input schema to
-            ``torch.library.Library.define`` requires a operator name.
+            ``torch.library.Library.define`` requires an operator name.
         mutates_args ("unknown" | Iterable[str]): The arguments that are mutated in the function.
+        tags (Tag | Sequence[Tag] | None): one or more tags to apply to the
+            inferred schema. Use ``torch.Tag.inplace`` or ``torch.Tag.out`` to
+            infer the conventional aliasing for those operator kinds.
 
     Returns:
         The inferred schema.
@@ -69,6 +73,18 @@ def infer_schema(
     # inspect.signature() and we no longer need to deal with stringified
     # annotations below.
     sig = inspect.signature(prototype_function)
+    if tags is None:
+        tags = ()
+    elif isinstance(tags, torch.Tag):
+        tags = (tags,)
+    is_inplace = torch.Tag.inplace in tags
+    is_out = torch.Tag.out in tags
+    if is_inplace and is_out:
+        raise AssertionError(
+            "torch.Tag.inplace and torch.Tag.out are mutually exclusive"
+        )
+    if type(mutates_args) is not str:
+        mutates_args = tuple(mutates_args)
 
     def error_fn(what):
         raise ValueError(f"infer_schema(func): {what} Got func with signature {sig})")
@@ -111,6 +127,11 @@ def infer_schema(
     params = []
     seen_args = set()
     saw_kwarg_only_arg = False
+    first_positional_arg_name = None
+    first_positional_arg_schema_type = None
+    first_positional_arg_alias = None
+    out_arg_aliases = []
+    out_arg_names = []
     for idx, (name, param) in enumerate(sig.parameters.items()):
         if not supported_param(param):
             error_fn("We do not support positional-only args, varargs, or varkwargs.")
@@ -164,6 +185,15 @@ def infer_schema(
         if schema_type is None:
             raise AssertionError(f"schema_type is None for param {name}")
 
+        if (
+            param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+            and first_positional_arg_name is None
+        ):
+            first_positional_arg_name = name
+            first_positional_arg_schema_type = schema_type
+            first_positional_arg_alias = f"a{idx}"
+
+        is_mutated = False
         if type(mutates_args) is str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(
@@ -171,13 +201,24 @@ def infer_schema(
                     "the arguments that are mutated or the string 'unknown'. "
                 )
             if schema_type.startswith("Tensor"):
+                is_mutated = True
                 schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
         elif name in mutates_args:
+            is_mutated = True
             if not schema_type.startswith("Tensor"):
                 error_fn(
                     f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated"
                 )
             schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
+        if is_out and is_mutated:
+            if param.kind != inspect.Parameter.KEYWORD_ONLY:
+                error_fn("torch.Tag.out requires mutable arguments to be keyword-only.")
+            if schema_type != f"Tensor(a{idx}!)":
+                error_fn(
+                    "torch.Tag.out only supports mutable keyword-only Tensor arguments."
+                )
+            out_arg_aliases.append(f"a{idx}")
+            out_arg_names.append(name)
         seen_args.add(name)
         if param.default is inspect.Parameter.empty:
             # pyrefly: ignore [bad-argument-type]
@@ -212,8 +253,37 @@ def infer_schema(
                 f"mutates_args should contain the names of all args that the "
                 f"custom op mutates, or just the string 'unknown' if you don't know."
             )
+    if is_inplace:
+        if first_positional_arg_name is None:
+            error_fn("torch.Tag.inplace requires a positional Tensor argument.")
+        if first_positional_arg_schema_type != "Tensor":
+            error_fn(
+                "torch.Tag.inplace requires the first positional argument to be a Tensor."
+            )
+        if type(mutates_args) is str or set(mutates_args) != {
+            first_positional_arg_name
+        }:
+            error_fn(
+                "torch.Tag.inplace requires mutates_args to contain exactly "
+                f"the first positional argument, got {mutates_args}."
+            )
+    if is_out and len(out_arg_aliases) == 0:
+        error_fn(
+            "torch.Tag.out requires at least one mutable keyword-only Tensor argument."
+        )
     return_annotation, _ = unstringify_type(sig.return_annotation)
-    ret = parse_return(return_annotation, error_fn)
+    if is_out:
+        ret = _infer_out_return_schema(
+            return_annotation, out_arg_aliases, out_arg_names, error_fn
+        )
+    else:
+        ret = parse_return(return_annotation, error_fn)
+    if is_inplace:
+        if ret != "Tensor":
+            error_fn(
+                "torch.Tag.inplace requires the return annotation to be torch.Tensor."
+            )
+        ret = f"Tensor({first_positional_arg_alias}!)"
     if op_name is not None:
         return f"{op_name}({', '.join(params)}) -> {ret}"
     return f"({', '.join(params)}) -> {ret}"
@@ -331,6 +401,33 @@ def parse_return(annotation, error_fn):
     if len(args) == 1:
         output_ty = "(" + output_ty + ")"
     return "(" + output_ty + ")"
+
+
+def _infer_out_return_schema(
+    return_annotation,
+    out_arg_aliases,
+    out_arg_names,
+    error_fn,
+):
+    if len(out_arg_aliases) == 1:
+        return_annotation_matches_out_args = return_annotation is Tensor
+    else:
+        return_annotation_matches_out_args = typing.get_origin(
+            return_annotation
+        ) is tuple and typing.get_args(return_annotation) == (Tensor,) * len(
+            out_arg_aliases
+        )
+
+    if not return_annotation_matches_out_args:
+        error_fn(
+            "torch.Tag.out requires the return annotation to match the "
+            f"mutable keyword-only Tensor arguments {tuple(out_arg_names)}."
+        )
+
+    aliased_returns = [f"Tensor({out_arg_alias}!)" for out_arg_alias in out_arg_aliases]
+    if len(aliased_returns) == 1:
+        return aliased_returns[0]
+    return f"({', '.join(aliased_returns)})"
 
 
 SUPPORTED_PARAM_TYPES = get_supported_param_types()
