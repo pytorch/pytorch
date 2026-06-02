@@ -414,6 +414,24 @@ class TestCase(InductorTestCase):
         self.assertTrue(torch.allclose(result, expected))
         self.assertIn(".to(tl.float32)", code)
 
+    @requires_gpu()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
+    def test_randint_symbolic_bounds_use_value_expr(self):
+        @torch.compile(fullgraph=True)
+        def fn(high):
+            return torch.randint(2**32, high.item(), (5, 5), device=GPU_TYPE)
+
+        high = torch.tensor(2**40, device=GPU_TYPE, dtype=torch.int64)
+        result, codes = run_and_get_code(fn, high)
+        code = "\n".join(codes)
+        self.assertEqual(result.dtype, torch.int64)
+        self.assertGreaterEqual(result.min().item(), 2**32)
+        self.assertLess(result.max().item(), 2**40)
+        self.assertIn("triton_helpers.randint64", code)
+        self.assertIn(".to(tl.int64)", code)
+
 
 instantiate_device_type_tests(
     TestCase, globals(), only_for=("cuda", "xpu"), allow_xpu=True
