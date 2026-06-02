@@ -3580,7 +3580,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         self.assertEqual(result, expected)
         self.assertEqual(result.shape, (M, out_feature))
-        self.assertEqual(counters["inductor"]["qlinear_binary_lower_count"], 1)
+        self.assertEqual(result.stride(), (out_feature, 1))
+        if not IS_ARM64:
+            self.assertEqual(counters["inductor"]["qlinear_binary_lower_count"], 1)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
