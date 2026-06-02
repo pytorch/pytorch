@@ -8312,6 +8312,40 @@ class TestLearnableBiases(InductorTestCase):
         )
 
     @skip_on_cpu
+    @largeTensorTest("6GB", device=test_device[0])
+    def test_large_batch_head_bias_uses_int64_indexing(self, device):
+        batch_size = 513
+        num_heads = 1
+        seq_len = 2048
+        head_dim = 16
+        dtype = torch.float16
+
+        query = torch.randn(
+            batch_size, num_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+        key = torch.randn_like(query)
+        value = torch.randn_like(query)
+        bias = torch.randn(
+            batch_size, num_heads, seq_len, seq_len, device=device, dtype=dtype
+        )
+
+        def fn(query, key, value, bias):
+            def bias_func(score, b, h, q_idx, kv_idx):
+                return score + bias[b, h, q_idx, kv_idx]
+
+            return flex_attention(
+                query,
+                key,
+                value,
+                score_mod=bias_func,
+                kernel_options={"BACKEND": "TRITON"},
+            )
+
+        out, code = run_and_get_code(torch.compile(fn), query, key, value, bias)
+        self.assertEqual(out.shape, query.shape)
+        FileCheck().check("INDEX_DTYPE : tl.constexpr = tl.int64").run("\n".join(code))
+
+    @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
     )

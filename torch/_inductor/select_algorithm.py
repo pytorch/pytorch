@@ -2629,9 +2629,25 @@ class TritonTemplate(KernelTemplate):
         kernel_name = f"triton_{self.name}"
 
         numel = sympy_product(layout.size)
-        buffers = itertools.chain(input_nodes, (fake_out,))
+        buffers_for_indexing = list(input_nodes) + [fake_out]
 
-        if TritonScheduling.can_use_32bit_indexing(numel, buffers):
+        def add_subgraph_buffers_for_indexing(subgraph) -> None:
+            if subgraph is None:
+                return
+            if isinstance(subgraph, (list, tuple)):
+                for child in subgraph:
+                    add_subgraph_buffers_for_indexing(child)
+                return
+            for name in subgraph.get_read_writes().buffer_names(
+                ignore_integer_index=False
+            ):
+                buffer = V.graph.try_get_buffer(name)
+                if buffer is not None:
+                    buffers_for_indexing.append(buffer)
+
+        add_subgraph_buffers_for_indexing(subgraphs)
+
+        if TritonScheduling.can_use_32bit_indexing(numel, buffers_for_indexing):
             index_dtype = "tl.int32"
         else:
             index_dtype = "tl.int64"
