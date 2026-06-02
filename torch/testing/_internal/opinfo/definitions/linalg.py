@@ -2639,9 +2639,8 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_eager",
                 device_type="mps",
             ),
-            # see https://github.com/pytorch/pytorch/issues/177264
             DecorateInfo(
-                unittest.expectedFailure,
+                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-04)}),
                 "TestEagerFusionOpInfo",
                 "test_aot_autograd_symbolic_exhaustive",
                 device_type="cpu",
