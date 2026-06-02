@@ -2999,6 +2999,19 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(actual, expected, exact_dtype=False)
 
     @onlyNativeDeviceTypes
+    @dtypes(torch.int16, torch.int32, torch.int64)
+    def test_lcm_int_min(self, device, dtype):
+        # lcm of the type minimum must not raise SIGFPE from the INT_MIN / -1
+        # integer-division trap; it should match NumPy's wraparound.
+        # See https://github.com/pytorch/pytorch/issues/121343
+        info = torch.iinfo(dtype)
+        a = torch.tensor([info.min], dtype=dtype, device=device)
+        b = torch.tensor([215], dtype=dtype, device=device)
+        actual = torch.lcm(a, b)
+        expected = np.lcm(a.cpu().numpy(), b.cpu().numpy())
+        self.assertEqual(actual, expected, exact_dtype=False)
+
+    @onlyNativeDeviceTypes
     @dtypesIfCPU(torch.float32, torch.float64, torch.float16)
     @dtypes(torch.float32, torch.float64)
     def test_nextafter(self, device, dtype):
