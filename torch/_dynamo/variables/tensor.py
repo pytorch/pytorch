@@ -16,6 +16,7 @@ These classes work together to track tensor operations and properties during Dyn
 """
 
 import functools
+import inspect
 import logging
 import operator
 import textwrap
@@ -464,9 +465,16 @@ class TensorVariable(VariableTracker):
 
         custom_getattr = get_custom_getattr(_input_associated_real_value)
         if custom_getattr:
-            if not (
-                is_traceable_wrapper_subclass(_input_associated_real_value)
-                and name in _input_associated_real_value.__tensor_flatten__()[0]
+            if not is_traceable_wrapper_subclass(_input_associated_real_value):
+                raise NotImplementedError
+            try:
+                inspect.getattr_static(_input_associated_real_value, name)
+                has_static_attr = True
+            except AttributeError:
+                has_static_attr = False
+            if (
+                not has_static_attr
+                and name not in _input_associated_real_value.__tensor_flatten__()[0]
             ):
                 raise NotImplementedError
 
@@ -1363,7 +1371,7 @@ class TensorVariable(VariableTracker):
             if isinstance(var, TensorVariable) and var.requires_grad:
                 # Non-leaf tensors (has_grad_fn=True) must be skipped because:
                 # 1. Semantically: they're intermediates, not the leaves we want gradients for
-                # 2. Implementation: accumulate_grad polyfill can't handle .grad on non-leafs
+                # 2. Implementation: the backward rewrite can't handle .grad on non-leafs
                 #    (Dynamo creates GetAttrVariable instead of TensorVariable)
                 #
                 # In-graph created tensors without proper source also can't be handled
@@ -1423,7 +1431,7 @@ class TensorVariable(VariableTracker):
           This matches eager where only leaves get .grad.
         - User-provided (inputs=[...]): Errors if any non-leaf tensor is found.
           While eager backward(inputs=[non_leaf]) works, Dynamo cannot trace it
-          because the accumulate_grad polyfill accesses .grad, and Dynamo creates
+          because the backward rewrite accesses .grad, and Dynamo creates
           a generic GetAttrVariable for .grad on non-leaf tensors (instead of a
           TensorVariable), which cannot be used in tensor operations.
 
@@ -2185,7 +2193,7 @@ class TensorVariable(VariableTracker):
             if requires_grad:
                 tx.output.leaf_var_creation_order.append(self)
                 # For source-less intermediates, initialize .grad = None in
-                # side effects so the accumulate_grad polyfill can read/write
+                # side effects so the backward rewrite can read/write
                 # .grad naturally. Graph inputs don't need this — they handle
                 # .grad through their source.
                 if not self.source and tx.output.side_effects.is_attribute_mutation(
