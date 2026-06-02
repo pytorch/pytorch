@@ -88,7 +88,6 @@ from torch.export.dynamic_shapes import (
 from torch.export.exported_program import OutputKind
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental.proxy_tensor import (
-    _PRE_DISPATCH_GETATTRIBUTE_OVERRIDE,
     get_proxy_slot,
     make_fx,
     PreDispatchTorchFunctionMode,
@@ -1838,6 +1837,8 @@ def _export_to_aten_ir_make_fx(
                                     proxy_tensor = get_proxy_slot(self, tracer, None)
                                     if proxy_tensor is None:
                                         continue
+                                    if get_proxy_slot(out, tracer, None) is not None:
+                                        continue
                                     proxy = proxy_tensor.proxy
                                     inner_proxy = tracer.create_proxy(
                                         "call_function",
@@ -1863,9 +1864,6 @@ def _export_to_aten_ir_make_fx(
                 tensor_type_to_old_getattribute: dict[
                     type[torch.Tensor], tuple[Callable, set[str]]
                 ] = {}
-                tensor_type_to_old_marker: dict[
-                    type[torch.Tensor], tuple[bool, Any]
-                ] = {}
                 for arg in args:
                     subclass_types_to_instances: dict[
                         type[torch.Tensor], list[type[torch.Tensor]]
@@ -1889,11 +1887,6 @@ def _export_to_aten_ir_make_fx(
                         old_getattr,
                         attrs_to_proxy,
                     ) in tensor_type_to_old_getattribute.items():
-                        tensor_type_to_old_marker[k] = (
-                            hasattr(k, _PRE_DISPATCH_GETATTRIBUTE_OVERRIDE),
-                            getattr(k, _PRE_DISPATCH_GETATTRIBUTE_OVERRIDE, None),
-                        )
-                        setattr(k, _PRE_DISPATCH_GETATTRIBUTE_OVERRIDE, True)
                         custom = functools.partialmethod(
                             custom_getattribute,
                             original_getattr=old_getattr,
@@ -1904,11 +1897,6 @@ def _export_to_aten_ir_make_fx(
                 finally:
                     for k, (old_getattr, _) in tensor_type_to_old_getattribute.items():
                         k.__getattribute__ = old_getattr  # type: ignore[method-assign, attr-defined]
-                        had_marker, old_marker = tensor_type_to_old_marker[k]
-                        if had_marker:
-                            setattr(k, _PRE_DISPATCH_GETATTRIBUTE_OVERRIDE, old_marker)
-                        elif hasattr(k, _PRE_DISPATCH_GETATTRIBUTE_OVERRIDE):
-                            delattr(k, _PRE_DISPATCH_GETATTRIBUTE_OVERRIDE)
 
             @contextmanager
             def _maybe_restore_grad_state():

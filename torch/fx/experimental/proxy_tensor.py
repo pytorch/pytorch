@@ -1052,7 +1052,6 @@ def fetch_object_proxy(
 
 
 HANDLED_TYPES = (Tensor, torch.nn.Parameter, FakeTensor)
-_PRE_DISPATCH_GETATTRIBUTE_OVERRIDE = "_torch_export_pre_dispatch_getattribute_override"
 
 
 def _rebuild_traceable_wrapper_subclass(
@@ -1071,6 +1070,13 @@ def _rebuild_traceable_wrapper_subclass(
     )
 
 
+def _get_traceable_wrapper_subclass_attr(t: Tensor, attr: str) -> object:
+    # Avoid recursively re-entering export's temporary __getattribute__ shim
+    # while proxy_tensor is explicitly wiring subclass inner tensor proxies.
+    with torch._C.DisableTorchFunction():
+        return getattr(t, attr)
+
+
 def _track_traceable_wrapper_subclass_attrs(
     t: Tensor,
     proxy: Proxy,
@@ -1078,15 +1084,19 @@ def _track_traceable_wrapper_subclass_attrs(
 ) -> None:
     attrs, _ = type(t).__tensor_flatten__(t)  # type: ignore[attr-defined]
     for attr in attrs:
-        attr_value = getattr(t, attr)
+        attr_value = _get_traceable_wrapper_subclass_attr(t, attr)
         if isinstance(attr_value, Tensor):
-            attr_proxy = tracer.create_proxy(
-                "call_function",
-                torch.ops.export.access_subclass_inner_tensor.default,
-                (proxy, attr),
-                {},
-            )
-            track_tensor_tree(attr_value, attr_proxy, constant=None, tracer=tracer)
+            attr_proxy_slot = get_proxy_slot(attr_value, tracer, None)
+            if attr_proxy_slot is None:
+                attr_proxy = tracer.create_proxy(
+                    "call_function",
+                    torch.ops.export.access_subclass_inner_tensor.default,
+                    (proxy, attr),
+                    {},
+                )
+                track_tensor_tree(attr_value, attr_proxy, constant=None, tracer=tracer)
+            else:
+                attr_proxy = attr_proxy_slot.proxy
             if is_traceable_wrapper_subclass(attr_value):
                 _track_traceable_wrapper_subclass_attrs(attr_value, attr_proxy, tracer)
         elif isinstance(attr_value, OpaqueBase):
@@ -1114,7 +1124,7 @@ def _track_traceable_wrapper_subclass(
 
     attrs, meta = type(t).__tensor_flatten__(t)  # type: ignore[attr-defined]
     for attr in attrs:
-        attr_value = getattr(t, attr)
+        attr_value = _get_traceable_wrapper_subclass_attr(t, attr)
         if (
             isinstance(attr_value, Tensor)
             and is_traceable_wrapper_subclass(attr_value)
@@ -1124,7 +1134,11 @@ def _track_traceable_wrapper_subclass(
 
     kwargs: dict[str, object] = {}
     graphable_args = (
-        (tuple(getattr(t, attr) for attr in attrs), tuple(t.shape), tuple(t.stride())),
+        (
+            tuple(_get_traceable_wrapper_subclass_attr(t, attr) for attr in attrs),
+            tuple(t.shape),
+            tuple(t.stride()),
+        ),
         kwargs,
     )
     flat_args, in_spec = to_graphable(graphable_args)
@@ -1152,8 +1166,7 @@ def _track_traceable_wrapper_subclass(
         "call_function", flat_apply, (func_spec_proxy, spec_proxy, *flat_proxy_args), {}
     )
     track_tensor_tree(t, out_proxy, constant=None, tracer=tracer)
-    if not getattr(type(t), _PRE_DISPATCH_GETATTRIBUTE_OVERRIDE, False):
-        _track_traceable_wrapper_subclass_attrs(t, out_proxy, tracer)
+    _track_traceable_wrapper_subclass_attrs(t, out_proxy, tracer)
 
 
 def _maybe_record_pointwise_barrier(
@@ -1445,11 +1458,7 @@ def proxy_call(
         constant=constant,
         tracer=tracer,
     )
-    if (
-        pre_dispatch
-        and is_traceable_wrapper_subclass(out)
-        and not getattr(type(out), _PRE_DISPATCH_GETATTRIBUTE_OVERRIDE, False)
-    ):
+    if pre_dispatch and is_traceable_wrapper_subclass(out):
         _track_traceable_wrapper_subclass_attrs(
             typing.cast(Tensor, out), proxy_out, tracer
         )
