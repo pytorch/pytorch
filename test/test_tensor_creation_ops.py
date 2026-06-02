@@ -2711,6 +2711,35 @@ class TestTensorCreation(TestCase):
                 torch.eye(n, m, out=res2)
                 self.assertEqual(res1, res2)
 
+    def test_eye_no_performance_cliff(self, device):
+        """Regression test for #48251: torch.eye correctness at and around
+        the GRAIN_SIZE boundary (d=182, numel=33124 > 32768). The underlying
+        fix lives in zero_ on dense CPU tensors; this test pins the
+        user-facing behavior across the boundary and on a strided out=."""
+        if device != "cpu":
+            return
+        for d in [181, 182, 183, 200, 256, 512, 1024, 2048, 4096, 8192]:
+            res = torch.eye(d, device=device)
+            self.assertEqual(res.shape, (d, d))
+            self.assertEqual(res.diagonal().sum().item(), d)
+            self.assertEqual(res.sum().item(), d)
+
+        # Non-square cases around the threshold
+        for n, m in [(182, 180), (180, 182), (200, 200), (256, 512), (1024, 2048)]:
+            res = torch.eye(n, m, device=device)
+            expected_ones = min(n, m)
+            self.assertEqual(res.diagonal().sum().item(), expected_ones)
+            self.assertEqual(res.sum().item(), expected_ones)
+
+        # Strided out= tensor: zero_ falls back to fill_(0) for non-dense
+        # storage, so unrelated elements in the underlying buffer stay intact.
+        x = torch.full((100, 100), 42.0, device=device)
+        torch.eye(50, out=x[::2, ::2])
+        self.assertEqual(x[0, 0].item(), 1.0)
+        self.assertEqual(x[0, 2].item(), 0.0)
+        self.assertEqual(x[0, 1].item(), 42.0)
+        self.assertEqual(x[1, 0].item(), 42.0)
+
     @precisionOverride({torch.float: 1e-8, torch.double: 1e-10})
     @dtypes(*floating_and_complex_types())
     def test_linspace_vs_numpy(self, device, dtype):
