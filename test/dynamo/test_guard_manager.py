@@ -554,6 +554,36 @@ user_stack=None)
         self.assertFalse(guard_manager.check(f_locals_unaliased))
         self.assertFalse(guard_manager.check_verbose(f_locals_unaliased).result)
 
+    def test_clone_preserves_no_tensor_aliasing_guard_for_recursive_dict_tags(self):
+        class Foo:
+            pass
+
+        foo = Foo()
+        foo.x = torch.randn(3, 4)
+        foo.y = torch.randn(3, 4)
+
+        guard_manager = RootGuardManager()
+        foo_mgr = guard_manager.framelocals_manager(
+            ("foo", 0), "foo", foo, default_mgr_enum
+        )
+        x_mgr = foo_mgr.getattr_manager("x", "foo.x", foo.x, default_mgr_enum)
+        y_mgr = foo_mgr.getattr_manager("y", "foo.y", foo.y, default_mgr_enum)
+        install_no_tensor_aliasing_guard(
+            [x_mgr, y_mgr],
+            ["foo.x", "foo.y"],
+            ["no_aliasing(foo.x, foo.y)"],
+            None,
+        )
+
+        x_mgr.mark_tag_safe()
+        y_mgr.mark_tag_safe()
+        foo_mgr.mark_tag_safe()
+        foo_mgr.mark_tag_safe_root()
+
+        cloned_root = guard_manager.clone_manager(lambda x: True)
+        self.assertTrue(cloned_root.check({"foo": foo}))
+        self.assertTrue(cloned_root.check({"foo": foo}))
+
     def test_weakref_alive_guard(self):
         root = RootGuardManager()
         x = torch.rand(3, 4)
@@ -756,6 +786,22 @@ user_stack=None)
 
         self.assertTrue(guards_manager.check(foo))
         self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
+
+    def test_dict_getitem_accessor_with_object_aliasing_guard(self):
+        a = tuple(range(1000, 1002))
+        b = tuple(range(1000, 1002))
+        d = {"a": a}
+
+        guards_manager = RootGuardManager()
+        x_mgr = guards_manager.framelocals_manager(("x", 0), "x", a, default_mgr_enum)
+        d_mgr = guards_manager.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        d_a_mgr = d_mgr.dict_getitem_manager("a", "d['a']", a, default_mgr_enum)
+        install_object_aliasing_guard(x_mgr, d_a_mgr, ["x is d['a']"], None)
+
+        self.assertTrue(d_a_mgr.has_relational_guard())
+        self.assertTrue(d_a_mgr.has_unoptimized_relational_guard())
+        self.assertTrue(guards_manager.check({"x": a, "d": d}))
+        self.assertFalse(guards_manager.check({"x": b, "d": d}))
 
     def test_globals(self):
         global global_pair, Pair
@@ -1381,6 +1427,25 @@ class TagSafetyChecks(RecursiveDictTagTests):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with install_guard_manager_testing_hook(hook):
             opt_fn(torch.randn(4, 4))
+
+    def test_unoptimized_relational_guard_not_tag_safe(self):
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        a = tuple(range(1000, 1002))
+        d = {"a": a}
+        root = RootGuardManager()
+        x_mgr = root.framelocals_manager(("x", 0), "x", a, default_mgr_enum)
+        d_mgr = root.framelocals_manager(("d", 1), "d", d, default_mgr_enum)
+        d_a_mgr = d_mgr.dict_getitem_manager("a", "d['a']", a, default_mgr_enum)
+        install_object_aliasing_guard(x_mgr, d_a_mgr, ["x is d['a']"], None)
+
+        GuardManagerWrapper(root).find_tag_safe_roots()
+
+        self.assertTrue(x_mgr.has_unoptimized_relational_guard())
+        self.assertTrue(d_a_mgr.has_unoptimized_relational_guard())
+        self.assertFalse(x_mgr.is_tag_safe())
+        self.assertFalse(d_mgr.is_tag_safe())
+        self.assertFalse(d_a_mgr.is_tag_safe())
 
     def test_nn_module_tag_safe(self):
         class Foo(torch.nn.Module):
