@@ -479,6 +479,7 @@
   approved_by:
   - guilhermeleobas
   - rtimpe
+  - trichmo
   mandatory_checks_name:
   - EasyCLA
   - Lint
