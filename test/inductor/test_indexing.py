@@ -2,6 +2,7 @@
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 
 import sympy
 
@@ -944,6 +945,52 @@ class TestOptimizationHintZeroDivision(InductorTestCase):
         expr = ModularIndexing(u0 + 1, u1, 4)
         hint = sizevars.optimization_hint(expr, fallback=8192)
         self.assertEqual(hint, 1)
+
+
+class TestOptimizationHintWideUnbackedSubstitution(InductorTestCase):
+    """Tests for bounded unbacked replacement canonicalization in optimization_hint."""
+
+    def test_expression_replacements_still_apply_for_small_expr(self):
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        u0 = shape_env.create_unbacked_symint().node.expr
+        u1 = shape_env.create_unbacked_symint().node.expr
+        shape_env.deferred_runtime_asserts.setdefault(u1, []).append(
+            SimpleNamespace(expr=sympy.Eq(u1 + 1, u0 + 2))
+        )
+
+        self.assertEqual(sizevars.optimization_hint(u0 + 2, fallback=0), 1)
+
+    def test_expression_replacements_precede_symbol_replacements(self):
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        u0 = shape_env.create_unbacked_symint().node.expr
+        u1 = shape_env.create_unbacked_symint().node.expr
+        u2 = shape_env.create_unbacked_symint().node.expr
+        shape_env.guard_or_defer_runtime_assert(sympy.Eq(u0, u1), "u0 == u1")
+        shape_env.guard_or_defer_runtime_assert(sympy.Eq(u1 + 1, u2), "u1 + 1 == u2")
+
+        self.assertEqual(
+            sizevars.optimization_hint(u1 + 1, fallback=0),
+            sizevars.optimization_hint(u2, fallback=0),
+        )
+
+    def test_wide_expression_skips_expensive_expr_subs(self):
+        sizevars = SizeVarAllocator()
+        shape_env = sizevars.shape_env
+        unbacked = [shape_env.create_unbacked_symint().node.expr for _ in range(128)]
+        for i, sym in enumerate(unbacked[1:], start=1):
+            shape_env.deferred_runtime_asserts.setdefault(sym, []).append(
+                SimpleNamespace(expr=sympy.Eq(sym + 1, unbacked[0] + i + 1))
+            )
+
+        expr = sum((i + 1) * sym for i, sym in enumerate(unbacked))
+
+        def fail_subs(*args, **kwargs):
+            raise AssertionError("wide optimization_hint should avoid sympy subs")
+
+        with unittest.mock.patch.object(sympy.Basic, "subs", fail_subs):
+            self.assertEqual(sizevars.optimization_hint(expr, fallback=0), 0)
 
 
 class TestOptimizationHintIdentityExpansion(InductorTestCase):
