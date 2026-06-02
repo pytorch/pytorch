@@ -19,7 +19,7 @@ import sympy
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._C import DispatchKey
+from torch._C import _dispatch_keys, DispatchKey
 from torch._higher_order_ops.utils import redirect_to_mode
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
@@ -1246,8 +1246,23 @@ def identify_triton_stores_from_ast(tree: ast.Module) -> TritonStores:
 # Triton Kernel Wrappers
 
 
+class _TritonKernelWrapper(HigherOrderOperator):
+    def _get_overloaded_args(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[Tensor, ...]:
+        overloaded_args = list(super()._get_overloaded_args(args, kwargs))
+        triton_kwargs = kwargs.get("kwargs")
+        if isinstance(triton_kwargs, dict):
+            overloaded_args.extend(
+                arg
+                for arg in triton_kwargs.values()
+                if isinstance(arg, Tensor) and _dispatch_keys(arg).has("Python")
+            )
+        return tuple(overloaded_args)
+
+
 # Used for wrapping a Triton Kernel
-class TritonKernelWrapperMutation(HigherOrderOperator):
+class TritonKernelWrapperMutation(_TritonKernelWrapper):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_mutation", cacheable=True)
 
@@ -1273,7 +1288,7 @@ triton_kernel_wrapper_mutation = TritonKernelWrapperMutation()
 
 
 # Used for wrapping a Triton Kernel in a functional manner
-class TritonKernelWrapperFunctional(HigherOrderOperator):
+class TritonKernelWrapperFunctional(_TritonKernelWrapper):
     def __init__(self) -> None:
         super().__init__("triton_kernel_wrapper_functional", cacheable=True)
 
