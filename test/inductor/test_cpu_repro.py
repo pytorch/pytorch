@@ -334,6 +334,39 @@ class CPUReproTests(TestCase):
                             (v,),
                         )
 
+    def test_conv_max_pool_where_backward_mutation_dep(self):
+        # Repro for https://github.com/pytorch/pytorch/issues/185509
+        def fn(x, weight, bias, mask):
+            conv = F.conv2d(x, weight, bias, padding=1)
+            pool = F.max_pool2d(conv, kernel_size=3, stride=1, padding=1)
+            return torch.where(mask, conv, pool)
+
+        def clone_inputs(inputs):
+            return [x.detach().clone().requires_grad_(True) for x in inputs]
+
+        def run(f, inputs, mask):
+            out = f(*inputs, mask)
+            out.sum().backward()
+            return out.detach(), [x.grad.detach().clone() for x in inputs]
+
+        torch.manual_seed(0)
+        inputs = [
+            torch.randn(2, 3, 6, 7, requires_grad=True),
+            torch.randn(4, 3, 3, 3, requires_grad=True),
+            torch.zeros(4, requires_grad=True),
+        ]
+        mask = (torch.rand(2, 4, 6, 7) > 0.5).detach()
+
+        expected_out, expected_grads = run(fn, clone_inputs(inputs), mask)
+
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(fn, backend="inductor")
+        actual_out, actual_grads = run(compiled_fn, clone_inputs(inputs), mask)
+
+        torch.testing.assert_close(actual_out, expected_out)
+        for actual_grad, expected_grad in zip(actual_grads, expected_grads):
+            torch.testing.assert_close(actual_grad, expected_grad, atol=1e-4, rtol=1e-4)
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
