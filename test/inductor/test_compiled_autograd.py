@@ -1687,6 +1687,189 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_custom_fn_hop_cache_hit_with_custom_forward_backend(self):
+        class MyMatMul(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return a @ b
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                a, b = ctx.saved_tensors
+                return grad_output @ b.t(), a.t() @ grad_output
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return MyMatMul.apply(a, b)
+
+        fwd_compiles = 0
+        ca_compiles = 0
+
+        def fwd_compiler(gm, example_inputs):
+            nonlocal fwd_compiles
+            fwd_compiles += 1
+            for module in gm.modules():
+                self.assertNotIn("_autograd_function_apply_cache", module.__dict__)
+            return gm
+
+        def ca_compiler(gm):
+            nonlocal ca_compiles
+            ca_compiles += 1
+            return gm
+
+        torch._dynamo.reset()
+        counters["compiled_autograd"].clear()
+        compiled_model = torch.compile(
+            Model(), backend=fwd_compiler, fullgraph=True, dynamic=True
+        )
+        a = torch.randn(2, 3, requires_grad=True)
+        b = torch.randn(3, 3, requires_grad=True)
+
+        with torch.autograd.set_multithreading_enabled(False):
+            for _ in range(4):
+                a.grad = None
+                b.grad = None
+                out = compiled_model(a, b)
+                grad = torch.ones_like(out)
+                with compiled_autograd._enable(ca_compiler, dynamic=True):
+                    out.backward(grad)
+                self.assertEqual(a.grad, grad @ b.t())
+                self.assertEqual(b.grad, a.t() @ grad)
+
+        self.assertEqual(fwd_compiles, 1)
+        self.assertEqual(ca_compiles, 1)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_custom_fn_hop_cache_distinguishes_forward_graphs(self):
+        class MyMatMul(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return a @ b
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                a, b = ctx.saved_tensors
+                return grad_output @ b.t(), a.t() @ grad_output
+
+        class MyMul(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return a * b
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                a, b = ctx.saved_tensors
+                return grad_output * b, grad_output * a
+
+        class MatMulModel(torch.nn.Module):
+            def forward(self, a, b):
+                return MyMatMul.apply(a, b)
+
+        class MulModel(torch.nn.Module):
+            def forward(self, a, b):
+                return MyMul.apply(a, b)
+
+        fwd_compiles = 0
+        ca_compiles = 0
+
+        def fwd_compiler(gm, example_inputs):
+            nonlocal fwd_compiles
+            fwd_compiles += 1
+            return gm
+
+        def ca_compiler(gm):
+            nonlocal ca_compiles
+            ca_compiles += 1
+            return gm
+
+        torch._dynamo.reset()
+        counters["compiled_autograd"].clear()
+        matmul = torch.compile(
+            MatMulModel(), backend=fwd_compiler, fullgraph=True, dynamic=True
+        )
+        mul = torch.compile(
+            MulModel(), backend=fwd_compiler, fullgraph=True, dynamic=True
+        )
+        a = torch.randn(2, 3, requires_grad=True)
+        b = torch.randn(3, 3, requires_grad=True)
+        x = torch.randn(2, 3, requires_grad=True)
+        y = torch.randn(2, 3, requires_grad=True)
+
+        with torch.autograd.set_multithreading_enabled(False):
+            with compiled_autograd._enable(ca_compiler, dynamic=True):
+                matmul(a, b).sum().backward()
+            with compiled_autograd._enable(ca_compiler, dynamic=True):
+                mul(x, y).sum().backward()
+
+        self.assertEqual(fwd_compiles, 2)
+        self.assertEqual(ca_compiles, 2)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 2)
+
+    def test_custom_fn_hop_cache_hit_with_live_backward_nodes(self):
+        class MyMatMul(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return a @ b
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                a, b = ctx.saved_tensors
+                return grad_output @ b.t(), a.t() @ grad_output
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return MyMatMul.apply(a, b)
+
+        fwd_compiles = 0
+        ca_compiles = 0
+
+        def fwd_compiler(gm, example_inputs):
+            nonlocal fwd_compiles
+            fwd_compiles += 1
+            return gm
+
+        def ca_compiler(gm):
+            nonlocal ca_compiles
+            ca_compiles += 1
+            return gm
+
+        torch._dynamo.reset()
+        counters["compiled_autograd"].clear()
+        compiled_model = torch.compile(
+            Model(), backend=fwd_compiler, fullgraph=True, dynamic=True
+        )
+        a1 = torch.randn(2, 3, requires_grad=True)
+        b1 = torch.randn(3, 3, requires_grad=True)
+        a2 = torch.randn(2, 3, requires_grad=True)
+        b2 = torch.randn(3, 3, requires_grad=True)
+
+        with torch.autograd.set_multithreading_enabled(False):
+            for _ in range(4):
+                for tensor in (a1, b1, a2, b2):
+                    tensor.grad = None
+
+                out1 = compiled_model(a1, b1)
+                out2 = compiled_model(a2, b2)
+                self.assertIs(type(out1.grad_fn), type(out2.grad_fn))
+
+                with compiled_autograd._enable(ca_compiler, dynamic=True):
+                    (out1.sum() + (out2 * 2).sum()).backward()
+
+                grad1 = torch.ones_like(out1)
+                grad2 = torch.full_like(out2, 2)
+                self.assertEqual(a1.grad, grad1 @ b1.t())
+                self.assertEqual(b1.grad, a1.t() @ grad1)
+                self.assertEqual(a2.grad, grad2 @ b2.t())
+                self.assertEqual(b2.grad, a2.t() @ grad2)
+
+        self.assertEqual(fwd_compiles, 1)
+        self.assertEqual(ca_compiles, 1)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
     def test_custom_fn_saved_multiple_tensors(self):
         def fn():
             class MyFn(torch.autograd.Function):
