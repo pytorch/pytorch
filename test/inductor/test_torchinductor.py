@@ -10314,6 +10314,38 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
+    def test_index_ops_on_expanded_tensor(self):
+        def make_input(src):
+            return torch.zeros(1, src.size(1), device=src.device).expand(
+                src.size(0) + 1, -1
+            )
+
+        def check(fn):
+            idx = torch.tensor([0, 1, 0], device=self.device)
+            src = torch.ones(3, 8, device=self.device)
+            self.common(fn, (idx, src), check_lowp=False)
+
+        check(lambda idx, src: make_input(src).index_add(0, idx, src))
+        check(lambda idx, src: make_input(src).index_copy(0, idx[:2], src[:2]))
+        check(lambda idx, src: make_input(src).index_fill(0, idx[:2], 1.0))
+        check(lambda idx, src: make_input(src).index_put((idx,), src, accumulate=True))
+        check(
+            lambda idx, src: make_input(src).index_put(
+                (idx[:2],), src[:2], accumulate=False
+            )
+        )
+
+    def test_index_ops_on_expanded_tensor_dim1(self):
+        def fn(idx, src):
+            x = torch.zeros(src.size(0), 1, device=src.device).expand(
+                -1, src.size(1) + 5
+            )
+            return x.index_add(1, idx, src)
+
+        idx = torch.tensor([0, 2, 0], device=self.device)
+        src = torch.ones(4, 3, device=self.device)
+        self.common(fn, (idx, src), check_lowp=False)
+
     def test_adding_tensor_offsets(self):
         @torch.compile(fullgraph=True)
         def fn(x):
