@@ -28,7 +28,11 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
-from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_dict
+from torch._inductor.utils import (
+    fresh_cache,
+    run_and_get_code,
+    triton_version_uses_attrs_dict,
+)
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -190,6 +194,104 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         self.assertIsNone(_re.search(r"\b__dunder_add_kernel_0\b", code))
         self.assertIsNotNone(_re.search(r"\b_dunder_add_kernel_0\b", code))
+
+    @requires_cuda_and_triton
+    def test_dim_max_min_reuse_argreduce_value(self):
+        dtypes = [torch.float32, torch.float16]
+        if torch.cuda.is_bf16_supported(including_emulation=False):
+            dtypes.append(torch.bfloat16)
+
+        for op, indexed_helper, value_helper, selected_value in (
+            (torch.max, "max_with_index", "max2", 100.0),
+            (torch.min, "min_with_index", "min2", -100.0),
+        ):
+            torch._dynamo.reset()
+
+            def fn(x):
+                return op(x, -1)
+
+            for dtype in dtypes:
+                x = torch.randn(8, 4097, dtype=dtype, device=GPU_TYPE)
+                x[:, 4095] = selected_value
+                expected_values, expected_indices = fn(x)
+                with fresh_cache():
+                    actual, codes = run_and_get_code(torch.compile(fn, dynamic=True), x)
+                actual_values, actual_indices = actual
+
+                self.assertEqual(actual_values, expected_values)
+                self.assertEqual(actual_indices, expected_indices)
+
+                source = "\n".join(codes)
+                self.assertEqual(source.count(f"triton_helpers.{indexed_helper}"), 1)
+                self.assertNotIn(f"triton_helpers.{value_helper}", source)
+
+                torch._dynamo.reset()
+
+                def value_only(x):
+                    return op(x, -1).values
+
+                with fresh_cache():
+                    actual_values, value_codes = run_and_get_code(
+                        torch.compile(value_only, dynamic=True), x
+                    )
+
+                self.assertEqual(actual_values, expected_values)
+
+                value_source = "\n".join(value_codes)
+                self.assertEqual(
+                    value_source.count(f"triton_helpers.{indexed_helper}"), 1
+                )
+                self.assertNotIn(f"triton_helpers.{value_helper}", value_source)
+                self.assertEqual(value_source.count("tl.store("), 1)
+
+        x = torch.tensor([[0.0, -0.0], [-0.0, 0.0]], device=GPU_TYPE)
+        for op in (torch.max, torch.min):
+            torch._dynamo.reset()
+
+            def fn(x):
+                return op(x, -1)
+
+            expected_values, expected_indices = fn(x)
+            with fresh_cache():
+                actual_values, actual_indices = torch.compile(fn, dynamic=True)(x)
+
+            self.assertEqual(
+                torch.signbit(actual_values), torch.signbit(expected_values)
+            )
+            self.assertEqual(actual_indices, expected_indices)
+
+            torch._dynamo.reset()
+
+            def value_only(x):
+                return op(x, -1).values
+
+            expected_values = value_only(x)
+            with fresh_cache():
+                actual_values = torch.compile(value_only, dynamic=True)(x)
+
+            self.assertEqual(
+                torch.signbit(actual_values), torch.signbit(expected_values)
+            )
+
+        for value_op, index_op in (
+            (torch.amax, torch.argmax),
+            (torch.amin, torch.argmin),
+        ):
+            torch._dynamo.reset()
+
+            def separate_value_and_index(x):
+                return value_op(x, -1), index_op(x, -1)
+
+            expected_values, expected_indices = separate_value_and_index(x)
+            with fresh_cache():
+                actual_values, actual_indices = torch.compile(
+                    separate_value_and_index, dynamic=True
+                )(x)
+
+            self.assertEqual(
+                torch.signbit(actual_values), torch.signbit(expected_values)
+            )
+            self.assertEqual(actual_indices, expected_indices)
 
     @requires_gpu
     def test_triton_kernel_ill_formed(self):

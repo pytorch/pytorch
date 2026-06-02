@@ -2771,6 +2771,36 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True,
         capture_dynamic_output_shape_ops=True,
+        recompile_limit=1,
+        fail_on_recompile_limit_hit=True,
+    )
+    def test_list_symbolic_length_init(self):
+        def fn_clear_to_concrete(x, lengths):
+            seqlens = torch.diff(lengths.cpu())
+            offsets = []
+            for num in -(-seqlens // 16):
+                offsets.extend(torch.arange(num))
+            offsets.__init__([1, 2, 3])
+            return x + len(offsets)
+
+        def fn_init_from_symbolic_range(x, lengths):
+            num = torch.diff(lengths.cpu())[0]
+            offsets = [1, 2, 3]
+            offsets.__init__(range(num))
+            return x + len(offsets)
+
+        x = torch.ones(())
+        for fn in (fn_clear_to_concrete, fn_init_from_symbolic_range):
+            compiled = torch.compile(fn, fullgraph=True, backend="eager")
+            for lengths in (
+                torch.tensor([0, 33, 33, 33, 33]),
+                torch.tensor([0, 8, 16, 24, 33]),
+            ):
+                self.assertEqual(compiled(x, lengths), fn(x, lengths))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True,
+        capture_dynamic_output_shape_ops=True,
     )
     def test_list_symbolic_length_materialize_graph_breaks(self):
         def make_offsets(lengths):
@@ -5126,6 +5156,24 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result5, x + 5)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_guard_on_pos_default_mapping(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def target(x, b=1, c=2):
+            return x + b
+
+        @torch.compile(backend=cnts)
+        def caller(x):
+            return target(x, c=3)
+
+        x = torch.ones(())
+        self.assertEqual(caller(x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+
+        with patch.object(target, "__defaults__", (1,)):
+            expected_msg = "missing .* required positional argument: 'b'"
+            self.assertRaisesRegex(Exception, expected_msg, caller, x)
+
     def test_func_default_torch_args(self):
         """
         Tests other types of torch types as function default (size, dtype, device)
@@ -5148,6 +5196,30 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out.size(), compiled_out.size())
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_shadowed_dataclass_field_property_matches_eager(self):
+        @dataclass
+        class Data:
+            value: torch.Tensor
+            edges: torch.Tensor
+
+            @property
+            def edges(self) -> torch.Tensor:
+                return torch.randn(3)
+
+        def fn(x):
+            data = Data(value=x, edges=x)
+            return data.value.sum()
+
+        x = torch.randn(3)
+        expected_msg = (
+            r"(property 'edges' of .*Data' object has no setter"
+            r"|can't set attribute(?: 'edges')?)"
+        )
+        self.assertRaisesRegex(AttributeError, expected_msg, fn, x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaisesRegex(Exception, expected_msg, opt_fn, x)
 
     def test_dataclass_factory(self):
         @dataclass
