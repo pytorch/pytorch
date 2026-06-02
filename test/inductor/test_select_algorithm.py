@@ -1142,6 +1142,21 @@ class TestAutotuneDynamicMaxSize(TestCase):
         self.assertNotIn(8, cache_key)
         self.assertEqual(scaled_config.block_m, 64)
 
+    def test_large_default_dynamic_upper_bound_uses_hint(self):
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        shape_env = ShapeEnv()
+        shape_env.var_to_range[s0] = ValueRanges(
+            2, SizeVarAllocator._MAX_AUTOTUNE_UPPER_BOUND + 1
+        )
+        shape_env.backed_var_to_val[s0] = sympy.Integer(8)
+        sizevars = SizeVarAllocator(shape_env)
+
+        self.assertEqual(sizevars.upper_bound_or_hint(s0), 8)
+
     @requires_gpu()
     @requires_triton()
     def test_mm_compile_time_autotune_uses_dynamic_upper_bound(self):
@@ -1203,6 +1218,15 @@ class TestAutotuneDynamicMaxSize(TestCase):
 
 
 class TestTemplateRender(TestCase):
+    @staticmethod
+    def _template_kernel_has_atomic_add(code):
+        template_kernels = code.split("@triton.jit\n")
+        return any(
+            kernel.startswith("def triton_tem")
+            and "tl.atomic_add" in kernel.split("'''", 1)[0]
+            for kernel in template_kernels
+        )
+
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
@@ -1467,6 +1491,65 @@ class TestTemplateRender(TestCase):
             self.assertIn("triton_helpers.maximum", code)
             # Verify prologue fusion: sigmoid fused via hook
             self.assertIn("tl.sigmoid", code)
+
+    @inductor_config.patch(
+        {
+            "epilogue_fusion_first": True,
+            "epilogue_fusion_with_atomic_add": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    @requires_gpu()
+    @requires_triton()
+    @patches
+    def test_template_atomic_add_epilogue_fusion(self):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(a, b, index, out):
+            mm = torch.matmul(a, b)
+            return out.index_add_(0, index, mm)
+
+        a = torch.randn(64, 64, device=GPU_TYPE)
+        b = torch.randn(64, 64, device=GPU_TYPE)
+        index = torch.arange(64, device=GPU_TYPE) // 2
+        out = torch.randn(32, 64, device=GPU_TYPE)
+
+        expected = fn(a, b, index, out.clone())
+        opt_fn = torch.compile(fn, mode="max-autotune-no-cudagraphs")
+        actual, (code,) = run_and_get_code(opt_fn, a, b, index, out.clone())
+
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+        self.assertTrue(self._template_kernel_has_atomic_add(code))
+
+    @inductor_config.patch(
+        {
+            "epilogue_fusion_first": True,
+            "epilogue_fusion_with_atomic_add": False,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    @requires_gpu()
+    @requires_triton()
+    @patches
+    def test_template_atomic_add_epilogue_fusion_disabled(self):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(a, b, index, out):
+            mm = torch.matmul(a, b)
+            return out.index_add_(0, index, mm)
+
+        a = torch.randn(64, 64, device=GPU_TYPE)
+        b = torch.randn(64, 64, device=GPU_TYPE)
+        index = torch.arange(64, device=GPU_TYPE) // 2
+        out = torch.randn(32, 64, device=GPU_TYPE)
+
+        expected = fn(a, b, index, out.clone())
+        opt_fn = torch.compile(fn, mode="max-autotune-no-cudagraphs")
+        actual, (code,) = run_and_get_code(opt_fn, a, b, index, out.clone())
+
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+        self.assertIn("tl.atomic_add", code)
+        self.assertFalse(self._template_kernel_has_atomic_add(code))
 
 
 if __name__ == "__main__":

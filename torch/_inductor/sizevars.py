@@ -250,6 +250,10 @@ class SizeVarAllocator:
     calculations for tensor operations.
     """
 
+    # Treat compiler/default dynamic limits as effectively unbounded for
+    # autotune benchmark materialization.
+    _MAX_AUTOTUNE_UPPER_BOUND = 2**31 - 2
+
     def __init__(self, shape_env=None) -> None:
         super().__init__()
         # Note: this can lead to bugs. Reasoning APIs depends on existing information in
@@ -1115,9 +1119,12 @@ class SizeVarAllocator:
                 return None
             upper = sympy.ceiling(upper)
         try:
-            return int(upper)
+            upper_int = int(upper)
         except (TypeError, ValueError, OverflowError):
             return None
+        if upper_int > SizeVarAllocator._MAX_AUTOTUNE_UPPER_BOUND:
+            return None
+        return upper_int
 
     def upper_bound_or_hint(
         self,
