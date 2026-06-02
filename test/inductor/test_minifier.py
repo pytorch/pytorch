@@ -2,6 +2,7 @@
 import unittest
 from unittest.mock import patch
 
+import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
@@ -143,6 +144,43 @@ class Repro(torch.nn.Module):
     def forward(self, arg0_1):
         relu = torch.ops.aten.relu.default(arg0_1);  arg0_1 = None
         return (relu,)""",
+        )
+
+    def test_run_fwd_maybe_bwd_expanded_input_layout(self):
+        from torch._dynamo.debug_utils import (
+            clone_inputs_retaining_gradness,
+            run_fwd_maybe_bwd,
+        )
+        from torch._inductor.compile_fx import compile_fx_inner
+
+        class Repro(torch.nn.Module):
+            def forward(self, x):
+                return (torch.ops.aten.add.Tensor(x, 1),)
+
+        mod = torch.fx.symbolic_trace(Repro()).eval()
+        x = torch.arange(2, dtype=torch.float32).view(2, 1).expand(2, 3)
+        compiled = compile_fx_inner(mod, [x])
+
+        cloned_x = clone_inputs_retaining_gradness([x])[0]
+        self.assertEqual(cloned_x.stride(), x.stride())
+        self.assertEqual(
+            run_fwd_maybe_bwd(compiled, [x], only_fwd=True),
+            mod(x),
+        )
+
+    def test_clone_inputs_retains_as_strided_storage_offset(self):
+        from torch._dynamo.debug_utils import clone_inputs_retaining_gradness
+
+        x = torch.as_strided(
+            torch.arange(20, dtype=torch.float32), (3,), (2,), storage_offset=10
+        )
+        cloned_x = clone_inputs_retaining_gradness([x])[0]
+
+        self.assertEqual(cloned_x.stride(), x.stride())
+        self.assertEqual(cloned_x.storage_offset(), x.storage_offset())
+        self.assertEqual(
+            torch.as_strided(cloned_x, (15,), (1,), 0),
+            torch.as_strided(x, (15,), (1,), 0),
         )
 
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
