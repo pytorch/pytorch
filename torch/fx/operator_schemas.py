@@ -4,7 +4,6 @@ import numbers
 import types
 import typing
 import warnings
-from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any, cast, Literal, NamedTuple, overload, TYPE_CHECKING
 
@@ -176,11 +175,6 @@ def check_for_mutable_operation(
     args: tuple["Argument", ...],
     kwargs: dict[str, "Argument"],
 ) -> None:
-    # OrderedDict construction is output-container reconstruction, not a
-    # mutable tensor operation.
-    if target is OrderedDict:
-        return
-
     signatures, schemas = get_signature_for_torch_op(target, return_schemas=True)
 
     if signatures and schemas:

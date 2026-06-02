@@ -1231,6 +1231,30 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(5))
         self.assertTrue(result)
 
+    def test_tuple_cmp_symbolic_shapes_ordering(self):
+        """Tuple ordering (>=, <=, >, <) with symbolic shape elements."""
+
+        def fn(x):
+            return x.shape >= (3, 4), x.shape <= (3, 4), x.shape > (2, 5)
+
+        ge, le, gt = torch.compile(fn, backend="eager")(torch.randn(3, 4))
+        self.assertTrue(ge)
+        self.assertTrue(le)
+        self.assertTrue(gt)
+
+    def test_tuple_cmp_symbolic_shapes_ordering_two_tensors(self):
+        """Ordering between two tensor shapes."""
+
+        def fn(x, y):
+            return x.shape >= y.shape, x.shape < y.shape, x.shape == y.shape
+
+        ge, lt, eq = torch.compile(fn, backend="eager")(
+            torch.randn(3, 4), torch.randn(3, 5)
+        )
+        self.assertFalse(ge)
+        self.assertTrue(lt)
+        self.assertFalse(eq)
+
     # =====================================================================
     # Sourceless torch.Size
     # =====================================================================

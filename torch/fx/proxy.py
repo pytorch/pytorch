@@ -24,7 +24,11 @@ from torch.utils._traceback import CapturedTraceback
 
 from ._compatibility import compatibility
 from .graph import Graph, magic_methods, reflectable_magic_methods
-from .immutable_collections import immutable_dict, immutable_list
+from .immutable_collections import (
+    immutable_dict,
+    immutable_list,
+    immutable_ordered_dict,
+)
 from .node import Argument, base_types, Node, Target
 from .operator_schemas import check_for_mutable_operation
 
@@ -977,28 +981,9 @@ def _create_arg_dict(self: TracerBase, a: dict[Any, Any]) -> dict[Any, Argument]
 
 def _create_arg_ordered_dict(
     self: TracerBase, a: OrderedDict[Any, Any]
-) -> dict[Any, Argument] | Node:
-    items = tuple(
+) -> immutable_ordered_dict[Any, Argument]:
+    return immutable_ordered_dict(
         (_create_arg_dict_key(self, k), self.create_arg(v)) for k, v in a.items()
-    )
-    contains_node = False
-
-    def check_node(n: Node) -> Node:
-        nonlocal contains_node
-        contains_node = True
-        return n
-
-    map_arg(items, check_node)
-    if not contains_node:
-        return dict(items)
-
-    # Node args normalize dicts to immutable_dict, so make OrderedDict
-    # reconstruction explicit to preserve the traced function's output type.
-    return self.create_node(
-        "call_function",
-        OrderedDict,
-        (items,),
-        {},
     )
 
 

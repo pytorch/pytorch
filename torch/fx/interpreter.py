@@ -15,6 +15,7 @@ from ._lazy_graph_module import _make_graph_module
 from ._symbolic_trace import Tracer
 from .graph import Graph
 from .graph_module import GraphModule
+from .immutable_collections import compatibility_unwrap
 from .node import Argument, map_aggregate, map_arg, Node, Target
 from .proxy import Proxy
 
@@ -445,7 +446,7 @@ class Interpreter:
         Return:
             Any: The return value referenced by the output node
         """
-        return args[0]
+        return compatibility_unwrap(args[0])
 
     # Helper methods
     @compatibility(is_backward_compatible=True)
@@ -643,6 +644,12 @@ class Transformer(Interpreter):
     ) -> Any:
         # Override so that functions that were wrapped are still wrapped.
         return self.tracer.create_proxy("call_function", target, args, kwargs)
+
+    @compatibility(is_backward_compatible=True)
+    def output(
+        self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
+    ) -> Any:
+        return args[0]
 
     @compatibility(is_backward_compatible=True)
     def transform(self) -> GraphModule:

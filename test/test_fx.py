@@ -1047,6 +1047,7 @@ class TestFX(JitTestCase):
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/74208")
     @unittest.skip("Hotfix for SEV remediation")
     def test_trace_buffer_slice(self):
         bs, d_hid = 10, 23
@@ -1189,6 +1190,13 @@ class TestFX(JitTestCase):
 
         traced = symbolic_trace(M().eval())
         traced.graph.lint()
+        self.assertFalse(
+            any(
+                node.op == "call_function"
+                and node.target is collections.OrderedDict
+                for node in traced.graph.nodes
+            )
+        )
         traced_output = traced(x)
         self.assertIsInstance(traced_output[2], collections.OrderedDict)
         self.assertEqual(list(traced_output[2].keys()), ["out1", "out2"])
@@ -1200,6 +1208,13 @@ class TestFX(JitTestCase):
                 "remove_dropout": True,
                 "mkldnn_layout_optimize": False,
             },
+        )
+        self.assertFalse(
+            any(
+                node.op == "call_function"
+                and node.target is collections.OrderedDict
+                for node in optimized.graph.nodes
+            )
         )
         optimized_output = optimized(x)
         self.assertIsInstance(optimized_output[2], collections.OrderedDict)
@@ -1215,6 +1230,32 @@ class TestFX(JitTestCase):
 
         traced = symbolic_trace(f)
         self.assertEqual(traced(torch.tensor(2)), torch.tensor(3))
+
+    def test_symbolic_trace_preserves_nested_ordered_dict_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return {
+                    "outer": collections.OrderedDict(
+                        [
+                            ("out1", x + 1),
+                            ("out2", x + 2),
+                        ]
+                    )
+                }
+
+        x = torch.randn(3)
+        traced = symbolic_trace(M())
+        traced.graph.lint()
+        self.assertFalse(
+            any(
+                node.op == "call_function"
+                and node.target is collections.OrderedDict
+                for node in traced.graph.nodes
+            )
+        )
+        traced_output = traced(x)
+        self.assertIsInstance(traced_output["outer"], collections.OrderedDict)
+        self.assertEqual(list(traced_output["outer"].keys()), ["out1", "out2"])
 
     def test_tensor_constant(self):
         class ConstTensor(torch.nn.Module):

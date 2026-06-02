@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from collections.abc import Iterable
 from typing import Any, NoReturn, TypeVar
 from typing_extensions import Self
@@ -81,6 +82,47 @@ class immutable_dict(dict[_KT, _VT]):
 
     def __reduce__(self) -> tuple[type[Self], tuple[tuple[tuple[_KT, _VT], ...]]]:
         return (type(self), (tuple(self.items()),))
+
+
+@compatibility(is_backward_compatible=True)
+class immutable_ordered_dict(tuple[tuple[_KT, _VT], ...]):
+    """An immutable ordered mapping aggregate for FX node arguments."""
+
+    __slots__: tuple[()] = ()
+    _fields: tuple[str, ...] = ()
+
+    def __new__(
+        cls,
+        *items: Iterable[tuple[_KT, _VT]] | tuple[_KT, _VT],
+    ) -> Self:
+        if len(items) == 1:
+            first = items[0]
+            if not (
+                isinstance(first, tuple)
+                and len(first) == 2
+                and not isinstance(first[0], tuple)
+            ):
+                items = tuple(first)  # type: ignore[assignment,arg-type]
+        return tuple.__new__(cls, items)  # type: ignore[return-value]
+
+    def items(self) -> tuple[tuple[_KT, _VT], ...]:
+        return tuple(self)
+
+
+def compatibility_unwrap(value: Any) -> Any:
+    if isinstance(value, immutable_ordered_dict):
+        return OrderedDict((k, compatibility_unwrap(v)) for k, v in value.items())
+    if isinstance(value, tuple) and hasattr(value, "_fields"):
+        return type(value)(*(compatibility_unwrap(v) for v in value))
+    if type(value) is tuple:
+        return tuple(compatibility_unwrap(v) for v in value)
+    if type(value) in {list, immutable_list}:
+        return [compatibility_unwrap(v) for v in value]
+    if type(value) is OrderedDict:
+        return OrderedDict((k, compatibility_unwrap(v)) for k, v in value.items())
+    if type(value) in {dict, immutable_dict}:
+        return {k: compatibility_unwrap(v) for k, v in value.items()}
+    return value
 
 
 # Register immutable collections for PyTree operations
