@@ -488,6 +488,20 @@ class StorageOverlap(GuardEnvExpr):
     non_overlapping_sources: list[Source]
 
 
+@dataclasses.dataclass(frozen=True)
+class StorageOverlapPair(GuardEnvExpr):
+    input_source_a: Source
+    input_source_b: Source
+    overlaps: bool
+
+    def __post_init__(self) -> None:
+        if self.input_source_a == self.input_source_b:
+            raise AssertionError(
+                f"input_source_a and input_source_b must be different, "
+                f"got {self.input_source_a}"
+            )
+
+
 """
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 

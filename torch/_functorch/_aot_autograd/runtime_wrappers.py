@@ -64,6 +64,7 @@ from .descriptors import (
 from .functional_utils import gen_alias_from_base
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
+    add_input_mutation_storage_overlap_guards,
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
     remove_dupe_metadata,
@@ -2175,6 +2176,10 @@ def merge_view_inputs(
     if not [info for info in mutated_input_info if info.mutates_data]:
         # Return early when there are no mutations.
         return fwd_inputs, fwd_inputs_descs, None
+
+    add_input_mutation_storage_overlap_guards(
+        aot_config, fwd_inputs, mutated_input_info
+    )
 
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
     # pyrefly: ignore [implicit-any]

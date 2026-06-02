@@ -1646,6 +1646,36 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         self._test_no_storage_overlap_guards(f, non_overlapping_args)
 
+    def test_input_mutation_storage_overlap_recompiles(self):
+        def f(x, y):
+            x.mul_(2)
+            return x + y
+
+        for dynamic in (False, True):
+            for first_call in ("different_storage", "same_storage_no_overlap"):
+                with self.subTest(dynamic=dynamic, first_call=first_call):
+                    torch._dynamo.reset()
+                    compiler = CompileCounterWithBackend("aot_eager")
+                    opt_f = torch.compile(f, backend=compiler, dynamic=dynamic)
+
+                    # First call compiles under the assumption that the
+                    # mutated input does not overlap any other input.
+                    if first_call == "different_storage":
+                        opt_f(torch.ones(4), torch.ones(4))
+                    else:
+                        base = torch.ones(8)
+                        opt_f(base[:4], base[4:8])
+
+                    base = torch.ones(8)
+                    opt_out = opt_f(base[:4], base[2:6])
+
+                    base_ref = torch.ones(8)
+                    ref_out = f(base_ref[:4], base_ref[2:6])
+
+                    self.assertEqual(opt_out, ref_out)
+                    self.assertEqual(base, base_ref)
+                    self.assertEqual(compiler.frame_count, 2)
+
     def test_inputs_overlapping_with_mutation_stress(self):
         # Stress test for StorageOverlap guard.
         #

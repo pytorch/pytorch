@@ -18,9 +18,10 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
-from torch._guards import StorageOverlap
+from torch._guards import StorageOverlap, StorageOverlapPair
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from torch.multiprocessing.reductions import StorageWeakRef
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
@@ -348,10 +349,8 @@ def compute_overlapping_inputs(
         if aot_config.aot_autograd_arg_pos_to_source and shape_env is not None:
             maybe_suppress_guards = shape_env.suppress_guards  # type: ignore[assignment]
 
-    # Check whether there are any symbolic values being used.
-    # We do this for 2 reasons:
-    #   1. StorageOverlap guard is only issued whenever dynamic shapes is turned on
-    #   2. Triggers the fast-path for computing storage overlapping
+    # Check whether there are any symbolic values being used. This controls the
+    # overlap computation path.
     symbolic = any(
         isinstance(x, torch.SymInt)
         for i in aliased_input_indices
@@ -388,8 +387,6 @@ def compute_overlapping_inputs(
     # dynamo sources inside AOTAutograd.
     if (
         tracing_context is not None
-        # Make sure dynamic shapes is currently being used.
-        and symbolic
         # We check that we have more than 1 aliased tensor, which should be true at
         # this point, anyway.
         and num_aliases > 1
@@ -409,6 +406,65 @@ def compute_overlapping_inputs(
         )
 
     return actual_aliased_indices
+
+
+def add_input_mutation_storage_overlap_guards(
+    aot_config: AOTConfig,
+    fwd_inputs: list[Any],
+    input_info: list[InputAliasInfo],
+) -> None:
+    if not any(info.mutates_data for info in input_info):
+        return
+
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is None:
+        return
+
+    if not aot_config.aot_autograd_arg_pos_to_source:
+        return
+
+    tensor_indices = [
+        i
+        for i, inpt in enumerate(fwd_inputs)
+        if isinstance(inpt, Tensor)
+        and i < len(aot_config.aot_autograd_arg_pos_to_source)
+        and aot_config.aot_autograd_arg_pos_to_source[i] is not None
+    ]
+    if len(tensor_indices) <= 1:
+        return
+
+    mutated_tensor_indices = [
+        i for i in tensor_indices if i < len(input_info) and input_info[i].mutates_data
+    ]
+    if not mutated_tensor_indices:
+        return
+
+    guarded_pairs: set[tuple[int, int]] = set()
+    for i in mutated_tensor_indices:
+        for j in tensor_indices:
+            if i == j:
+                continue
+            pair = (min(i, j), max(i, j))
+            if pair in guarded_pairs:
+                continue
+            guarded_pairs.add(pair)
+
+            src_i = aot_config.aot_autograd_arg_pos_to_source[i]
+            src_j = aot_config.aot_autograd_arg_pos_to_source[j]
+            if src_i == src_j:
+                continue
+
+            same_storage = StorageWeakRef(
+                fwd_inputs[i].untyped_storage()
+            ) == StorageWeakRef(fwd_inputs[j].untyped_storage())
+            if same_storage:
+                # Same-storage groups are handled by compute_overlapping_inputs()
+                # through StorageOverlap guards.
+                continue
+
+            tracing_context.guards_context.aotautograd_guards.append(
+                StorageOverlapPair(src_i, src_j, False)
+            )
 
 
 def _graph_input_names(gm: torch.fx.GraphModule) -> list[str]:
