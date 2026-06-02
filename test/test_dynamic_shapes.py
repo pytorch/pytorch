@@ -1730,6 +1730,87 @@ class f(torch.nn.Module):
             x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
             torch.ops.aten.avg_pool1d(x, [2], [2])
 
+    def test_pixel_shuffle_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, u(shape_env), 3, 3), device="meta")
+            torch.ops.aten.pixel_shuffle(x, 1)
+
+    def test_pdist_forward_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((self._make_unbacked_size(shape_env), 5), device="meta")
+            torch.ops.aten._pdist_forward(x, 2.0)
+
+    def test_reflection_pad2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.reflection_pad2d(x, [1, 1, 1, 1])
+
+    def test_replication_pad2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.replication_pad2d(x, [1, 1, 1, 1])
+
+    def test_reflection_pad1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.reflection_pad1d(x, [1, 1])
+
+    def test_replication_pad1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.replication_pad1d(x, [1, 1])
+
+    def test_reflection_pad3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.reflection_pad3d(x, [1, 1, 1, 1, 1, 1])
+
+    def test_replication_pad3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.replication_pad3d(x, [1, 1, 1, 1, 1, 1])
+
 
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
@@ -4043,10 +4124,10 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
         ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, 'invalid shape dimension u0. If this was symbolic, it was assumed to not be -1.If this was meant to be inferred, please explicitly pass in -1.');  ge_1 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "shape '[u0, u0]' is invalid for input of size u1");  eq = _assert_scalar_2 = None
         view: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
         view_1: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense])
         view_2: "i64[u0, u0][s7*u0, s7]cpu" = torch.ops.aten.view.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
@@ -4084,10 +4165,10 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
         ge_1: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, 'invalid shape dimension u0. If this was symbolic, it was assumed to not be -1.If this was meant to be inferred, please explicitly pass in -1.');  ge_1 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "shape '[u0, u0]' is invalid for input of size u1");  eq = _assert_scalar_2 = None
         view: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
         view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
         view_2: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None

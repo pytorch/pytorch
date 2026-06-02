@@ -245,8 +245,6 @@ def insert_deferred_runtime_asserts(
     def render_assert_message(ra: RuntimeAssert, node: fx.Node) -> str:
         if ra.error_message is None:
             return f"Runtime assertion failed for expression {ra.expr} on node '{node}'"
-        if callable(ra.error_message):
-            return str(ra.error_message())
         return str(ra.error_message)
 
     def matches_bound_assert(

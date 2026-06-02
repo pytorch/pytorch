@@ -8597,6 +8597,12 @@ class ShapeEnv:
         *,
         error_message: RuntimeAssertErrorMessageInput = None,
     ) -> bool:
+        """
+        Add a guard for ``orig_expr`` or defer it as a runtime assert.
+
+        ``error_message`` is rendered lazily only when this call actually creates
+        a runtime assert, so duplicate cached checks do not evaluate it.
+        """
         prior_error_message = self._runtime_assert_error_message
         self._runtime_assert_error_message = error_message
         try:
