@@ -2025,6 +2025,43 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
+    def test_captured_score_mod_2d_unit_dim_index_backward(self, device):
+        max_len = 4
+        dtype = torch.float32
+        embedding_table = nn.Parameter(
+            torch.randn(2 * max_len, 1, device=device, dtype=dtype)
+        )
+        embedding_table_ref = nn.Parameter(embedding_table.detach().squeeze(-1).clone())
+        query = torch.randn(1, 1, 3, 32, device=device, dtype=dtype)
+        key = torch.randn(1, 1, 3, 32, device=device, dtype=dtype)
+        value = torch.randn(1, 1, 3, 32, device=device, dtype=dtype)
+
+        def rpe(score, _b, _h, q_idx, kv_idx):
+            delta = q_idx - kv_idx
+            delta = torch.clamp(delta, -max_len, max_len - 1)
+            delta += max_len
+            return score + embedding_table[delta.int()][0]
+
+        def rpe_ref(score, _b, _h, q_idx, kv_idx):
+            delta = q_idx - kv_idx
+            delta = torch.clamp(delta, -max_len, max_len - 1)
+            delta += max_len
+            return score + embedding_table_ref[delta.int()]
+
+        compiled_flex_attention = torch.compile(
+            flex_attention, backend="aot_eager", fullgraph=True
+        )
+        out = compiled_flex_attention(query, key, value, score_mod=rpe)
+        out_ref = compiled_flex_attention(query, key, value, score_mod=rpe_ref)
+
+        self.assertEqual(out, out_ref)
+        out.sum().backward()
+        out_ref.sum().backward()
+        self.assertEqual(embedding_table.grad.squeeze(-1), embedding_table_ref.grad)
+
+    @supported_platform
+    @skip_on_cpu
     @skip_on_xpu
     @expected_not_implemented_on_mps
     def test_bf16_score_mod_captured_grad_dtype(self, device):

@@ -643,6 +643,59 @@ redirect_to_mode(flex_attention, _CachedTorchDispatchMode)
 
 
 # ---------------------------- Autograd Implementation ----------------------------
+def _fuse_nested_index_backward(joint_graph: GraphModule) -> None:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+
+    zeros_and_scatter = torch.ops.flex_lib.zeros_and_scatter.default
+
+    def _same_shape(left: object, right: object) -> bool:
+        if not isinstance(left, (list, tuple)) or not isinstance(right, (list, tuple)):
+            return False
+        return statically_known_true(sym_eq(tuple(left), tuple(right)))
+
+    graph = joint_graph.graph
+    for node in list(graph.nodes):
+        if node.op != "call_function" or node.target is not zeros_and_scatter:
+            continue
+
+        shape, indices, value = node.args
+        if (
+            not isinstance(value, torch.fx.Node)
+            or value.op != "call_function"
+            or value.target is not zeros_and_scatter
+        ):
+            continue
+
+        inner_shape, inner_indices, inner_value = value.args
+        if not isinstance(shape, (list, tuple)) or not isinstance(
+            indices, (list, tuple)
+        ):
+            continue
+        if not isinstance(inner_indices, (list, tuple)):
+            continue
+
+        # Backward for x[i][j] produces scatter(scatter(grad, j), i).
+        # When j indexes exactly the dimensions left over by i, fuse the
+        # scatters into backward for x[i, j]. This keeps vmap from reducing the
+        # intermediate scatter before the outer index can use it.
+        if not _same_shape(shape[len(indices) :], inner_shape):
+            continue
+
+        with graph.inserting_before(node):
+            fused = graph.call_function(
+                zeros_and_scatter,
+                args=(shape, list(indices) + list(inner_indices), inner_value),
+            )
+            fused.meta.update(node.meta)
+        node.replace_all_uses_with(fused)
+        graph.erase_node(node)
+        if len(value.users) == 0:
+            graph.erase_node(value)
+
+    graph.lint()
+    joint_graph.recompile()
+
+
 def create_fw_bw_graph(
     score_mod: Callable,
     index_values: tuple[Tensor, Tensor, Tensor, Tensor, Tensor],
@@ -742,6 +795,7 @@ def create_fw_bw_graph(
         joint_graph = make_fx(joint_f)(
             *unwrapped_score_mod_indexes, example_grad, *unwrapped_other_buffers
         )
+        _fuse_nested_index_backward(joint_graph)
         # pyrefly: ignore [bad-return]
         return score_mod, joint_graph
 
