@@ -1687,7 +1687,7 @@ class TestDictSpecCompile(TestCase):
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
             compiled(torch.randn(4, 3))
         self.assertEqual(
-            str(ctx.exception),
+            str(ctx.exception).split("\n\nfrom user code:")[0],
             "RuntimeError: shapes_spec walk: while processing source "
             "'x', at 'x' the spec is DictSpec, but the source has no "
             "further access past it",
@@ -1851,7 +1851,7 @@ class TestWalkSpecRaises(TestCase):
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
             compiled({"x": torch.randn(4, 3)})
         self.assertEqual(
-            str(ctx.exception),
+            str(ctx.exception).split("\n\nfrom user code:")[0],
             "RuntimeError: shapes_spec walk: while processing source "
             "\"cfg['x']\", at 'cfg' the spec is ObjectSpec",
         )
@@ -1874,7 +1874,7 @@ class TestWalkSpecRaises(TestCase):
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
             compiled(Container(torch.randn(4, 3)))
         self.assertEqual(
-            str(ctx.exception),
+            str(ctx.exception).split("\n\nfrom user code:")[0],
             "RuntimeError: shapes_spec walk: while processing source "
             "'obj.x', at 'obj' the spec is DictSpec",
         )
@@ -1893,7 +1893,7 @@ class TestWalkSpecRaises(TestCase):
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
             compiled({"x": torch.randn(4, 3)})
         self.assertEqual(
-            str(ctx.exception),
+            str(ctx.exception).split("\n\nfrom user code:")[0],
             "RuntimeError: shapes_spec walk: while processing source "
             "\"cfg['x']\", at 'cfg' the spec is SeqSpec",
         )
@@ -1912,7 +1912,7 @@ class TestWalkSpecRaises(TestCase):
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as ctx:
             compiled({"x": torch.randn(4, 3)})
         self.assertEqual(
-            str(ctx.exception),
+            str(ctx.exception).split("\n\nfrom user code:")[0],
             "RuntimeError: shapes_spec walk: while processing source "
             "\"cfg['x']\", at 'cfg' the spec is TensorSpec, but "
             "the source has further access past it",
