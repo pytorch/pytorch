@@ -28,6 +28,7 @@ std::unordered_set<PyCodeObject*> breakpoint_code_objects;
 
 // -1 means inactive, >= 0 means active with that many compiled frames.
 thread_local int fullgraph_compiled_frame_count = -1;
+thread_local int fullgraph_graph_frame_count = -1;
 
 // When true and fullgraph_compiled_frame_count > 0, sub-frames under fullgraph
 // compilation will error (via get_fail_callback) instead of being silently
@@ -68,11 +69,15 @@ struct DebugContextGuard {
 
 } // namespace
 
-extern "C" bool increment_fullgraph_compiled_frame_count_if_active(void) {
+extern "C" bool increment_fullgraph_compiled_frame_count_if_active(
+    bool graph_frame) {
   if (fullgraph_compiled_frame_count < 0) {
     return false;
   }
   fullgraph_compiled_frame_count++;
+  if (graph_frame && fullgraph_graph_frame_count >= 0) {
+    fullgraph_graph_frame_count++;
+  }
   return true;
 }
 
@@ -80,6 +85,14 @@ extern "C" int set_fullgraph_compiled_frame_count(int val) {
   int old = fullgraph_compiled_frame_count;
   if (val < 0 || old < 0) {
     fullgraph_compiled_frame_count = val;
+  }
+  return old;
+}
+
+extern "C" int set_fullgraph_graph_frame_count(int val) {
+  int old = fullgraph_graph_frame_count;
+  if (val < 0 || old < 0) {
+    fullgraph_graph_frame_count = val;
   }
   return old;
 }
@@ -471,8 +484,9 @@ PyObject* dynamo__custom_eval_frame(
   // clearing/popping the frame, meaning that unless we default evaluate the
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
-  auto eval_custom = [&]() {
-    if (increment_fullgraph_compiled_frame_count_if_active()) {
+  auto eval_custom = [&](bool count_fullgraph_frame) {
+    if (increment_fullgraph_compiled_frame_count_if_active(
+            count_fullgraph_frame)) {
       // Under fullgraph, disable or error Dynamo for sub-frames of compiled
       // code. If fullgraph_error_on_nested_compile is set, wrap the callback
       // with get_fail_callback so compilation attempts error. Otherwise, set
@@ -580,6 +594,7 @@ PyObject* dynamo__custom_eval_frame(
   _PytorchRecordFunctionState* rf =
       _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = nullptr;
+  bool fullgraph_count_frame = false;
   lookup(
       extra,
       locals.get(),
@@ -587,6 +602,7 @@ PyObject* dynamo__custom_eval_frame(
       isolate_recompiles_id,
       &maybe_cached_code,
       &trace_annotation,
+      &fullgraph_count_frame,
       is_skip_guard_eval_unsafe);
   _pytorch_record_function_exit(rf);
 
@@ -624,7 +640,7 @@ PyObject* dynamo__custom_eval_frame(
     cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
-    eval_custom();
+    eval_custom(fullgraph_count_frame);
     return eval_result;
   }
 
@@ -717,7 +733,7 @@ PyObject* dynamo__custom_eval_frame(
     // Re-enable custom behavior
     cached_code = CacheEntry_get_code(new_cache_entry),
     trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
-    eval_custom();
+    eval_custom(CacheEntry_get_fullgraph_count_frame(new_cache_entry));
   } else {
     eval_default();
   }

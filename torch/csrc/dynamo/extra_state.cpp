@@ -243,6 +243,7 @@ void lookup(
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
+    bool* fullgraph_count_frame,
     bool is_skip_guard_eval_unsafe) {
   CacheEntry* found = nullptr;
   bool guard_error = false;
@@ -250,6 +251,7 @@ void lookup(
   for (const auto& entry : extra_state->precompile_entries) {
     if (torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
       *maybe_cached_code = entry.code.ptr();
+      *fullgraph_count_frame = entry.fullgraph_count_frame;
       return;
     }
   }
@@ -287,9 +289,11 @@ void lookup(
     }
     *maybe_cached_code = found->code.ptr();
     *trace_annotation = found->trace_annotation.c_str();
+    *fullgraph_count_frame = found->fullgraph_count_frame;
     return;
   }
   *maybe_cached_code = py::none().ptr();
+  *fullgraph_count_frame = false;
 }
 
 CacheEntry* create_cache_entry(
@@ -334,7 +338,7 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
     for (auto& kv : extra->cache_entry_map) {
       ids.push_back(kv.first);
     }
-    std::sort(ids.begin(), ids.end());
+    std::ranges::sort(ids);
     for (int64_t id : ids) {
       for (CacheEntry& e : extra->cache_entry_map[id]) {
         result.append(py::cast(e, py::return_value_policy::reference));
@@ -376,8 +380,10 @@ size_t _get_total_cache_entry_count(const py::handle& code_obj) {
   return extra->total_cache_entry_count;
 }
 
-PrecompileEntry::PrecompileEntry(py::object gm, py::object c)
-    : guard_manager(std::move(gm)), code(std::move(c)) {
+PrecompileEntry::PrecompileEntry(py::object gm, py::object c, bool count_frame)
+    : guard_manager(std::move(gm)),
+      code(std::move(c)),
+      fullgraph_count_frame(count_frame) {
   TORCH_CHECK(
       PyCode_Check(code.ptr()), "Expecting CodeType from PrecompileEntry.");
   root_mgr =
@@ -399,7 +405,8 @@ void _reset_precompile_entries(const py::handle& code_obj) {
 void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
-    py::object dynamo_code) {
+    py::object dynamo_code,
+    bool fullgraph_count_frame) {
   TORCH_CHECK_TYPE(
       py::isinstance(code_obj, py::module::import("types").attr("CodeType")),
       "expected a code object!");
@@ -409,12 +416,12 @@ void _load_precompile_entry(
   if (extra == nullptr) {
     extra = init_and_set_extra_state(code);
   }
-  auto entry =
-      PrecompileEntry(std::move(guard_manager), std::move(dynamo_code));
+  auto entry = PrecompileEntry(
+      std::move(guard_manager), std::move(dynamo_code), fullgraph_count_frame);
   extra->precompile_entries.push_back(std::move(entry));
 }
 
-void _set_lru_cache(py::object boolean) {
+void _set_lru_cache(const py::object& boolean) {
   if (py::cast<bool>(boolean)) {
     use_lru = true;
   } else {

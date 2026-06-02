@@ -9,6 +9,8 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
   this->guard_manager = guarded_code.attr("guard_manager");
   this->code = guarded_code.attr("code");
   this->compile_id = guarded_code.attr("compile_id");
+  this->fullgraph_count_frame =
+      guarded_code.attr("fullgraph_count_frame").cast<bool>();
   py::object trace_annotation = guarded_code.attr("trace_annotation");
   const char* trace_annotation_str = PyUnicode_AsUTF8(trace_annotation.ptr());
   if (trace_annotation) {
@@ -56,6 +58,10 @@ PyCodeObject* CacheEntry_get_code(CacheEntry* e) {
 
 const char* CacheEntry_get_trace_annotation(CacheEntry* e) {
   return e->trace_annotation.c_str();
+}
+
+bool CacheEntry_get_fullgraph_count_frame(CacheEntry* e) {
+  return e->fullgraph_count_frame;
 }
 
 PyObject* CacheEntry_to_obj(CacheEntry* e) {

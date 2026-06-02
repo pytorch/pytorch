@@ -51,9 +51,10 @@ typedef struct CacheEntry CacheEntry;
 typedef struct VISIBILITY_HIDDEN PrecompileEntry {
   py::object guard_manager;
   py::object code;
+  bool fullgraph_count_frame;
   void* root_mgr;
 
-  PrecompileEntry(py::object gm, py::object c);
+  PrecompileEntry(py::object gm, py::object c, bool count_frame);
 } PrecompileEntry;
 
 typedef struct VISIBILITY_HIDDEN ExtraState {
@@ -199,6 +200,7 @@ void lookup(
     int64_t isolate_recompiles_id,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
+    bool* fullgraph_count_frame,
     bool is_skip_guard_eval_unsafe);
 
 // Create a new cache entry at extra_state holding on to guarded_code.
@@ -233,8 +235,9 @@ void _reset_precompile_entries(const py::handle& code_obj);
 void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
-    py::object dynamo_code);
+    py::object dynamo_code,
+    bool fullgraph_count_frame);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
-void _set_lru_cache(py::object boolean);
+void _set_lru_cache(const py::object& boolean);
 
 #endif

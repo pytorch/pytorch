@@ -769,6 +769,19 @@ static PyObject* set_fullgraph_compiled_frame_count_py(
   return PyLong_FromLong(old);
 }
 
+// Set the C++ thread-local fullgraph graph-frame counter and return the old
+// value. The C++ setter owns the active-to-active no-op behavior.
+static PyObject* set_fullgraph_graph_frame_count_py(
+    PyObject* dummy,
+    PyObject* arg) {
+  long val = PyLong_AsLong(arg);
+  if (val == -1 && PyErr_Occurred()) {
+    return NULL;
+  }
+  int old = set_fullgraph_graph_frame_count((int)val);
+  return PyLong_FromLong(old);
+}
+
 // Set fullgraph_error_on_nested_compile and return the old value.
 static PyObject* set_fullgraph_error_on_nested_compile_py(
     PyObject* dummy,
@@ -799,6 +812,10 @@ static PyMethodDef _methods[] = {
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
     {"set_fullgraph_compiled_frame_count",
      set_fullgraph_compiled_frame_count_py,
+     METH_O,
+     NULL},
+    {"set_fullgraph_graph_frame_count",
+     set_fullgraph_graph_frame_count_py,
      METH_O,
      NULL},
     {"set_fullgraph_error_on_nested_compile",

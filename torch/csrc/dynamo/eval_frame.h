@@ -34,8 +34,9 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(
 
 extern bool is_skip_guard_eval_unsafe;
 
-bool increment_fullgraph_compiled_frame_count_if_active(void);
+bool increment_fullgraph_compiled_frame_count_if_active(bool graph_frame);
 int set_fullgraph_compiled_frame_count(int val);
+int set_fullgraph_graph_frame_count(int val);
 bool get_fullgraph_error_on_nested_compile(void);
 bool set_fullgraph_error_on_nested_compile(bool val);
 

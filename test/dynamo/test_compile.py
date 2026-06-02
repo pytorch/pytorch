@@ -368,6 +368,50 @@ class FullgraphTests(TestCase):
         finally:
             torch._dynamo.eval_frame.reset_code(f.__code__)
 
+    def test_fullgraph_precompile_entry_uses_graph_frame_metadata(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+
+        def g(x):
+            return x + 1
+
+        def h(x):
+            return x + 2
+
+        def f(x):
+            return g(x) + h(x)
+
+        def injected_g(x):
+            return x + 1
+
+        def injected_h(x):
+            return x + 2
+
+        torch._dynamo.eval_frame.skip_code(f.__code__)
+        try:
+            _load_precompile_entry(
+                g.__code__,
+                torch._dynamo.guards.GuardManagerWrapper(),
+                injected_g.__code__,
+                False,
+            )
+            _load_precompile_entry(
+                h.__code__,
+                torch._dynamo.guards.GuardManagerWrapper(),
+                injected_h.__code__,
+                True,
+            )
+            self.assertEqual(
+                torch.compile(f, backend="eager", fullgraph=True)(torch.ones(3)),
+                torch.ones(3) * 2 + 3,
+            )
+        finally:
+            torch._dynamo.eval_frame.reset_code(f.__code__)
+            _reset_precompile_entries(g.__code__)
+            _reset_precompile_entries(h.__code__)
+
     def test_fullgraph_frame_count_is_thread_local(self):
         first_thread_entered = threading.Event()
         second_thread_done = threading.Event()
