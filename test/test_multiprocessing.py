@@ -535,9 +535,7 @@ class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
             self.assertTrue(var.is_leaf)
             ready = ctx.Event()
             queue = ctx.Queue()
-            p = ctx.Process(
-                target=requires_grad_variable_sharing, args=(queue, ready)
-            )
+            p = ctx.Process(target=requires_grad_variable_sharing, args=(queue, ready))
             p.daemon = True
             p.start()
             queue.put(var)
@@ -549,9 +547,7 @@ class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
         var0 = torch.arange(1.0, 26, device=device).view(5, 5).requires_grad_(True)
         var = var0 * 2
         queue = mp.SimpleQueue()
-        self.assertRaisesRegex(
-            RuntimeError, r"requires_grad", lambda: queue.put(var)
-        )
+        self.assertRaisesRegex(RuntimeError, r"requires_grad", lambda: queue.put(var))
 
     def test_is_shared_accelerator(self, device):
         if torch.device(device).type == "cpu":
@@ -560,9 +556,7 @@ class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
         self.assertTrue(t.is_shared())
 
 
-instantiate_device_type_tests(
-    TestMultiprocessingDeviceType, globals(), allow_xpu=True
-)
+instantiate_device_type_tests(TestMultiprocessingDeviceType, globals(), allow_xpu=True)
 
 
 @unittest.skipIf(
