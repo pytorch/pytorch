@@ -363,6 +363,169 @@ def _sparse_coo_tensor_with_dims_and_tensors(
     return constructors(fake_mode, func, *args, **kwargs)
 
 
+def _spdiags_static_offsets(offsets: FakeTensorLike) -> list[int] | None:
+    constant = getattr(offsets, "constant", None)
+    if constant is None:
+        constant = getattr(offsets, "real_tensor", None)
+    if isinstance(constant, FakeTensor):
+        return None
+    if constant is None or constant.device.type != "cpu":
+        return None
+    return [int(offset) for offset in constant.reshape(-1).tolist()]
+
+
+def _spdiags_nnz(offsets: list[int], rows: int, cols: int, diag_cols: int) -> int:
+    nnz = 0
+    pos_offset_limit = min(cols, diag_cols)
+    for offset in offsets:
+        if offset <= 0:
+            nnz_per_diag = min(offset + rows, diag_cols)
+        else:
+            nnz_per_diag = pos_offset_limit - offset
+        torch._check(
+            nnz_per_diag >= 0,
+            lambda: f"Trying to create tensor with negative dimension {nnz_per_diag}",
+        )
+        nnz += nnz_per_diag
+    return nnz
+
+
+def _spdiags_max_nnz_per_diag(rows: int, cols: int, diag_cols: int) -> int:
+    non_positive_offset_max = min(rows, diag_cols)
+    positive_offset_max = max(min(cols, diag_cols) - 1, 0)
+    return max(non_positive_offset_max, positive_offset_max, 0)
+
+
+def _spdiags_dynamic_size(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    *,
+    max_size: int | None,
+) -> torch.SymInt:
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        raise DynamicOutputShapeException(func)
+
+    nnz = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(nnz, min=0, max=max_size)
+    return nnz
+
+
+def _spdiags_is_static_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+@register_op_impl(aten._spdiags.default)
+def _spdiags(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    diagonals: FakeTensorLike,
+    offsets: FakeTensorLike,
+    shape: Sequence[int],
+    layout: torch.layout | None = None,
+) -> FakeTensor:
+    diagonals_dim = diagonals.dim()
+    torch._check(diagonals_dim in (1, 2), lambda: "Diagonals must be vector or matrix")
+    torch._check(len(shape) == 2, lambda: "Output shape must be 2d")
+
+    offsets_dim = offsets.dim()
+    torch._check(offsets_dim in (0, 1), lambda: "Offsets must be scalar or vector")
+
+    n_diags = 1 if diagonals_dim == 1 else diagonals.size(0)
+    n_offsets = 1 if offsets_dim == 0 else offsets.size(0)
+    torch._check(
+        n_diags == n_offsets,
+        lambda: f"Number of diagonals ({n_diags}) does not match the number of offsets ({n_offsets})",
+    )
+
+    if layout is not None:
+        torch._check(
+            layout in (torch.sparse_coo, torch.sparse_csc, torch.sparse_csr),
+            lambda: f"Only output layouts (Sparse, SparseCsc, SparseCsr) are supported, got {layout}",
+        )
+    torch._check(
+        offsets.dtype == torch.long,
+        lambda: f"Offset Tensor must have dtype Long but got {offsets.dtype}",
+    )
+    torch._check(
+        diagonals.device.type == "cpu" and offsets.device.type == "cpu",
+        lambda: "_spdiags is only implemented for CPU tensors",
+    )
+
+    rows, cols = shape
+    diag_cols = diagonals.size(0) if diagonals_dim == 1 else diagonals.size(1)
+    static_sizes = all(
+        _spdiags_is_static_int(value) for value in (rows, cols, diag_cols, n_offsets)
+    )
+
+    static_offsets = _spdiags_static_offsets(offsets)
+    if static_offsets is not None:
+        torch._check(
+            len(static_offsets) == len(set(static_offsets)),
+            lambda: "Offset tensor contains duplicate values",
+        )
+
+    out_layout = layout if layout is not None else torch.sparse_coo
+    if static_sizes and (rows == 0 or cols == 0):
+        nnz = 0
+    elif static_offsets is not None and static_sizes:
+        nnz = _spdiags_nnz(static_offsets, rows, cols, diag_cols)  # type: ignore[arg-type]
+    elif static_sizes and n_offsets == 0:
+        nnz = 0
+    else:
+        max_nnz = (
+            n_offsets * _spdiags_max_nnz_per_diag(rows, cols, diag_cols)
+            if static_sizes
+            else None
+        )
+        nnz = _spdiags_dynamic_size(fake_mode, func, max_size=max_nnz)  # type: ignore[arg-type]
+
+    with in_kernel_invocation_manager(fake_mode):
+        values = torch.empty((nnz,), dtype=diagonals.dtype, device="meta")
+        with torch.sparse.check_sparse_tensor_invariants(False):
+            if out_layout == torch.sparse_coo:
+                indices = torch.empty((2, nnz), dtype=torch.long, device="meta")
+                is_coalesced = nnz <= 1 if isinstance(nnz, int) else False
+                out = torch.ops.aten._sparse_coo_tensor_unsafe.default(
+                    indices,
+                    values,
+                    shape,
+                    device=torch.device("meta"),
+                    is_coalesced=is_coalesced,
+                )
+            elif out_layout == torch.sparse_csr:
+                crow_indices = torch.empty((rows + 1,), dtype=torch.long, device="meta")
+                col_indices = torch.empty((nnz,), dtype=torch.long, device="meta")
+                out = torch.ops.aten._sparse_compressed_tensor_unsafe.default(
+                    crow_indices,
+                    col_indices,
+                    values,
+                    shape,
+                    layout=out_layout,
+                    device=torch.device("meta"),
+                )
+            else:
+                ccol_indices = torch.empty((cols + 1,), dtype=torch.long, device="meta")
+                row_indices = torch.empty((nnz,), dtype=torch.long, device="meta")
+                out = torch.ops.aten._sparse_compressed_tensor_unsafe.default(
+                    ccol_indices,
+                    row_indices,
+                    values,
+                    shape,
+                    layout=out_layout,
+                    device=torch.device("meta"),
+                )
+
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, diagonals.device
+    )
+
+
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags
@@ -490,6 +653,13 @@ def meta_select(
 
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
+
+    if guard_or_false(index >= size) or guard_or_false(index < -size):
+        torch._check_index(
+            False,
+            lambda: f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}",
+        )
 
     new_size = list(self.size())
     new_stride = list(self.stride())
@@ -640,6 +810,69 @@ def _compute_stride(
     if view_d != -1:
         return None
     return new_stride
+
+
+def _optimization_hint_or_none(value: Any) -> int | None:
+    if type(value) is int:
+        return value
+    if isinstance(value, torch.SymInt):
+        from torch.fx.experimental.symbolic_shapes import optimization_hint
+
+        return optimization_hint(value, fallback=None)
+    return None
+
+
+def _hinted_eq(lhs: Any, rhs: Any) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(lhs == rhs):
+        return True
+
+    lhs_hint = _optimization_hint_or_none(lhs)
+    rhs_hint = _optimization_hint_or_none(rhs)
+    if lhs_hint is None or rhs_hint is None or lhs_hint != rhs_hint:
+        return False
+
+    # Hints are not shape semantics. They only show that the equality is true
+    # for the traced example, so record the symbolic equality required for the
+    # view rather than specializing either side to a concrete value.
+    torch._check(lhs == rhs)
+    return True
+
+
+def _is_contiguous_with_hinted_checks(a: torch.Tensor) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, is_nested_int
+
+    if guard_or_false(a.numel() < 2):
+        return True
+
+    numel_hint = _optimization_hint_or_none(a.numel())
+    if numel_hint is None:
+        return False
+    if numel_hint < 2:
+        torch._check(a.numel() < 2)
+        return True
+
+    expected_stride = 1
+    expected_stride_max = 1
+    for size, stride in reversed(tuple(zip(a.shape, a.stride()))):
+        if guard_or_false(size == 1):
+            continue
+
+        size_hint = _optimization_hint_or_none(size)
+        if size_hint == 1:
+            torch._check(size == 1)
+            continue
+
+        if not _hinted_eq(stride, expected_stride) and not _hinted_eq(
+            stride, expected_stride_max
+        ):
+            return False
+
+        expected_stride_max *= size if is_nested_int(size) else torch.sym_max(size, 1)
+        expected_stride *= size
+
+    return True
 
 
 def _view_has_unbacked_input(
@@ -833,6 +1066,10 @@ def _view_unbacked_meta(
                 allow_copy=allow_copy,
                 tried_duck_specialize=True,
             )
+
+        if _is_contiguous_with_hinted_checks(a):
+            strides = make_contiguous_strides_for(shape)
+            return a.as_strided(shape, strides)  # type: ignore[return-value]
 
         return _view_unbacked_meta(
             a, shape, size_oblivious_enabled=False, allow_copy=allow_copy
@@ -1460,8 +1697,8 @@ def conv(
     # folded convs that do not need to match eager's public input checks.
     if (
         func is aten.convolution.default
-        and input_.fake_device.type == "cuda"
         and input_.dtype != weight.dtype
+        and not input_.is_mkldnn
         and not fake_mode.allow_non_fake_inputs
     ):
         raise RuntimeError(

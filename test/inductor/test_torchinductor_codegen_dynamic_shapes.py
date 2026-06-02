@@ -119,6 +119,9 @@ test_failures = {
     "test_as_strided_on_split_view_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_cat_empty_1d_negative_dim_zero_output_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     #
     # Failed to find dynamic for loop variable:
     #
@@ -160,6 +163,8 @@ test_failures = {
     "test_repeat_as_strided_dynamic_shapes": TestFailure(("cpu",)),
     "test_mul_index_expr_dynamic_shapes": TestFailure(("cpu",)),
     "test_flip_cat_dynamic_shapes": TestFailure(("cpu",)),
+    "test_flip_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
+    "test_flip_zero_dim_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_pad_single_dynamic_shapes": TestFailure(("cpu",)),
     "test_slice_scatter_dtype_consistency_dynamic_shapes": TestFailure(
         (
@@ -171,6 +176,17 @@ test_failures = {
     #
     # Failed to find for loop/triton kernel:
     #
+    # Fallback ops (data-dependent output size) route to ATen eager — no
+    # Triton kernel or C++ loop is generated, so dynamic-shape codegen check fails.
+    "test_bincount_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_bincount_with_weights_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dim_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unique_dim_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    # test_amp_update_scale does not use self.common(), so check_codegen() is
+    # never triggered — the test calls torch.compile() directly and passes.
+    # No TestFailure entry needed.
     "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linalg_eig_stride_consistency_dynamic_shapes": TestFailure(
@@ -215,6 +231,12 @@ test_failures = {
     "test_bucketize_int_int32_int32_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_int_int64_int64_dynamic_shapes": TestFailure(("cpu",)),
     "test_searchsorted_dynamic_shapes": TestFailure(("cpu",)),
+    "test_searchsorted_expanded_boundaries_zero_stride_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
+    "test_bucketize_expanded_boundaries_zero_stride_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_like_rands_sliced_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),

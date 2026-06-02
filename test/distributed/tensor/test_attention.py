@@ -364,6 +364,57 @@ class RingAttentionTest(DTensorTestBase):
                     behavior,
                 )
 
+    @skip_if_lt_x_gpu(2)
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @with_comms
+    def test_context_parallel_sdpa_short_sequence(self) -> None:
+        old_load_balance = _cp_options.enable_load_balance
+        try:
+            _cp_options.enable_load_balance = True
+            device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+            qkv_len = self.world_size
+            for dim in [1, 2, 4, 8]:
+                with self.subTest(dim=dim):
+                    qkv = [
+                        torch.rand(
+                            (1, 1, qkv_len, dim),
+                            device=self.device_type,
+                            dtype=torch.bfloat16,
+                        )
+                        for _ in range(3)
+                    ]
+
+                    with torch.no_grad():
+                        for t in qkv:
+                            dist.broadcast(t, src=0)
+
+                    with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                        out = F.scaled_dot_product_attention(*qkv, is_causal=True)
+
+                    cp_qkv = [t.detach().clone() for t in qkv]
+                    with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                        with context_parallel(
+                            device_mesh, buffers=cp_qkv, buffer_seq_dims=[2, 2, 2]
+                        ):
+                            self.assertFalse(_cp_options.enable_load_balance)
+                            cp_out = F.scaled_dot_product_attention(
+                                *cp_qkv, is_causal=True
+                            )
+
+                        (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [2])
+
+                    torch.testing.assert_close(
+                        cp_out,
+                        out,
+                        atol=8e-3 * self.world_size,
+                        rtol=1e-3 * self.world_size,
+                    )
+        finally:
+            _cp_options.enable_load_balance = old_load_balance
+
 
 # Compile the flex_attention function
 compiled_flex_attention = torch.compile(flex_attention, dynamic=False, fullgraph=True)
@@ -1221,6 +1272,7 @@ RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
         # Need to make attention implementation local tensor friendly, e.g.
         # rewrite "rank local" logic
         "test_ring_attention_sdpa",
+        "test_context_parallel_sdpa_short_sequence",
     ],
 )
 
