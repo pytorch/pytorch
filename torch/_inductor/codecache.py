@@ -91,6 +91,8 @@ from torch._inductor.custom_graph_pass import (
     CustomGraphPassCallable,
     CustomPartitionerFn,
     CustomPartitionerFnType,
+    CustomPassBase,
+    CustomSchedulerPass,
     get_custom_graph_passes,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
@@ -1053,7 +1055,7 @@ class CacheabilityValidator:
         # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
         # and ensure they are not passing us raw callables
         if config._pre_fusion_custom_pass is not None:
-            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
+            if not isinstance(config._pre_fusion_custom_pass, CustomSchedulerPass):
                 self.bypass("Unsupported _pre_fusion_custom_pass")
         for p in config._fuse_ddp_communication_passes:
             if callable(p) and not isinstance(p, CustomGraphPass):
@@ -1410,7 +1412,7 @@ class FxGraphHashDetails:
             return tuple(self._get_custom_pass_detail_unsafe(x) for x in custom_pass)
         if isinstance(custom_pass, str):
             return custom_pass
-        if isinstance(custom_pass, CustomGraphPass):
+        if isinstance(custom_pass, CustomPassBase):
             return custom_pass.uuid()
         if callable(custom_pass):
             # Returning None is safe here because we raise an explicit bypass error
