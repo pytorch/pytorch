@@ -471,3 +471,39 @@ class TestAutocast(TestCase):
                 self.assertTrue(comparison, f"torch.{op} result did not match control")
             self.assertTrue(torch.is_autocast_enabled(device_type=device))
         self.assertFalse(torch.is_autocast_enabled(device_type=device))
+
+
+# Registry mapping device_type -> test list class.
+# New backends can register their own list class to get op-level autocast
+# tests for free via TestAutocastOps in test/test_autocast.py.
+_AUTOCAST_TEST_LISTS_REGISTRY: dict[str, type] = {
+    "cpu": AutocastCPUTestLists,
+}
+
+
+def register_autocast_test_lists(device_type: str, cls: type) -> None:
+    """Register an autocast test list class for a device type.
+
+    The registered class should follow the same interface as AutocastCPUTestLists
+    (attributes: torch_16, torch_fp32, nn_16, nn_fp32, torch_expect_builtin_promote,
+    methods_expect_builtin_promote, torch_need_autocast_promote).
+
+    Example for out-of-tree backends::
+
+        from torch.testing._internal.autocast_test_lists import register_autocast_test_lists
+
+        class AutocastXPUTestLists:
+            def __init__(self, dev):
+                ...  # populate torch_16, torch_fp32, etc.
+
+        register_autocast_test_lists("xpu", AutocastXPUTestLists)
+    """
+    _AUTOCAST_TEST_LISTS_REGISTRY[device_type] = cls
+
+
+def get_autocast_test_lists(device_type: str, dev):
+    """Get the autocast test lists for a device type, or None if not registered."""
+    cls = _AUTOCAST_TEST_LISTS_REGISTRY.get(device_type)
+    if cls is None:
+        return None
+    return cls(dev)
