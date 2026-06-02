@@ -296,14 +296,8 @@ class Benchmarker:
         warmup = kwargs.pop("warmup", inductor_config.inductor_default_autotune_warmup)
         rep = kwargs.pop("rep", inductor_config.inductor_default_autotune_rep)
 
-        cuda_device_ctx = (
-            torch.cuda.device(inferred_device)
-            if inferred_device.type == "cuda" and inferred_device.index is not None
-            else contextlib.nullcontext()
-        )
-
         # Surfacing all kernels during autotuning is super noisy; filtering these out.
-        with DebugMode._benchmarking_inductor(), cuda_device_ctx:
+        with DebugMode._benchmarking_inductor():
             # First, try a registered device-specific benchmarker
             benchmark_fn: Callable[..., Any] | None = _BENCHMARK_DISPATCH.get(
                 inferred_device.type

@@ -431,33 +431,6 @@ class TestBenchmarker(TestCase):
         self.assertEqual(result, 3.0)
         self.assertEqual(calls, ["enter", (1, 2, True), "fn", "exit"])
 
-    def test_benchmark_uses_inferred_cuda_device_context(self):
-        from torch._inductor.runtime import benchmarking as _bench
-
-        benchmarker = TritonBenchmarker()
-        orig = dict(_bench._BENCHMARK_DISPATCH)
-        entered_devices = []
-
-        @contextlib.contextmanager
-        def fake_cuda_device(device):
-            entered_devices.append(device)
-            yield
-
-        try:
-            _bench.register_benchmarker(
-                "cuda",
-                lambda self, f, *, warmup, rep, **kw: 7.0,
-                override=True,
-            )
-            with patch("torch.cuda.device", side_effect=fake_cuda_device):
-                result = benchmarker.benchmark(lambda: None, device="cuda:1")
-        finally:
-            _bench._BENCHMARK_DISPATCH.clear()
-            _bench._BENCHMARK_DISPATCH.update(orig)
-
-        self.assertEqual(result, 7.0)
-        self.assertEqual(entered_devices, [torch.device("cuda:1")])
-
     def test_benchmark_gpu_with_cuda_graph_uses_gpu_benchmark_lock(self):
         from torch._inductor.runtime import benchmarking as _bench
 
