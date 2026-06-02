@@ -3,11 +3,13 @@ import os
 import shlex
 import subprocess
 import sys
+import types
+import unittest
 from unittest import mock
 
 import torch
 from torch import _dynamo as dynamo, _inductor as inductor
-from torch._inductor import config, cpu_vec_isa
+from torch._inductor import config, cpp_builder as cpp_builder_module, cpu_vec_isa
 from torch._inductor.codecache import write
 from torch._inductor.cpp_builder import CppBuilder, CppOptions, CppTorchOptions
 from torch._inductor.cpu_vec_isa import invalid_vec_isa
@@ -210,9 +212,43 @@ class TestStandaloneInductor(TestCase):
             name="test_vectorized_bool_mask_cast",
             sources=source_path,
             output_dir=os.path.dirname(source_path),
-            BuildOption=CppTorchOptions(vec_isa=vec_isa, compile_only=True),
+            BuildOption=CppTorchOptions(vec_isa=vec_isa),
         )
         cpp_builder.build()
+
+    def test_fbcode_local_build_uses_absolute_linker_script(self):
+        fake_build_paths = types.SimpleNamespace(
+            cc_include="cc_include",
+            glibc_include="glibc_include",
+            glibc_lib="glibc_lib",
+            libgcc_arch_include="libgcc_arch_include",
+            libgcc_backward_include="libgcc_backward_include",
+            libgcc_include="libgcc_include",
+            linux_kernel_include="linux_kernel_include",
+            openmp_include="openmp_include",
+            python_include="python_include",
+            sleef_include="sleef_include",
+        )
+
+        with (
+            mock.patch.object(
+                cpp_builder_module,
+                "config",
+                types.SimpleNamespace(is_fbcode=lambda: True),
+            ),
+            mock.patch.object(
+                cpp_builder_module, "build_paths", fake_build_paths, create=True
+            ),
+        ):
+            _, _, _, local_ldflags = cpp_builder_module._setup_standard_sys_libs(
+                "clang++", aot_mode=False, use_relative_path=False
+            )
+            _, _, _, relative_ldflags = cpp_builder_module._setup_standard_sys_libs(
+                "clang++", aot_mode=False, use_relative_path=True
+            )
+
+        self.assertIn(f"Wl,--script={cpp_builder_module._LINKER_SCRIPT}", local_ldflags)
+        self.assertIn("Wl,--script=script.ld", relative_ldflags)
 
     def test_cpp_codegen_bool_where_uses_mask_cast_helper(self):
         if not cpu_vec_isa.pick_vec_isa():
@@ -287,6 +323,7 @@ class TestStandaloneInductor(TestCase):
             if flag.startswith(("march=", "mcpu="))
         ]
 
+    @unittest.skipIf(config.is_fbcode(), "fbcode does not emit CPU architecture flags")
     def test_aot_cpp_march_config(self):
         with (
             config.patch({"cpp.march": "x86-64"}),
@@ -298,6 +335,7 @@ class TestStandaloneInductor(TestCase):
             arch_flags = self._aot_cpp_arch_flags()
         self.assertEqual(arch_flags, ["march=x86-64"])
 
+    @unittest.skipIf(config.is_fbcode(), "fbcode does not emit CPU architecture flags")
     def test_aot_cpp_march_config_ppc64le(self):
         with (
             config.patch({"cpp.march": "power9"}),
@@ -309,6 +347,7 @@ class TestStandaloneInductor(TestCase):
             arch_flags = self._aot_cpp_arch_flags()
         self.assertEqual(arch_flags, ["mcpu=power9"])
 
+    @unittest.skipIf(config.is_fbcode(), "fbcode does not emit CPU architecture flags")
     def test_cpp_march_config_can_disable_arch_flag(self):
         with config.patch({"cpp.march": ""}):
             arch_flags = self._aot_cpp_arch_flags()

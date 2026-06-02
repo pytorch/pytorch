@@ -549,17 +549,20 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
         return False
 
     try:
-        output_msg = (
-            subprocess.check_output([cpp_compiler, "/help"], stderr=subprocess.STDOUT)
-            .strip()
-            .decode(*SUBPROCESS_DECODE_ARGS)
+        result = subprocess.run(
+            [cpp_compiler, "/help"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
         )
-        return "Microsoft" in output_msg.splitlines()[0]
-    except FileNotFoundError:
-        return False
 
-    # pyrefly: ignore [unreachable]
-    return False
+        output_msg = result.stdout.strip().decode(*SUBPROCESS_DECODE_ARGS)
+        lines = output_msg.splitlines()
+
+        return bool(lines) and "Microsoft" in lines[0]
+
+    except OSError:
+        return False
 
 
 @functools.cache
@@ -1060,6 +1063,13 @@ def _get_optimization_cflags(
         else:
             cflags.append("fno-omit-frame-pointer")
 
+    if config.aot_inductor.enable_line_tables and not should_add_debug_symbol_flags:
+        if not _IS_WINDOWS:
+            if _is_clang(cpp_compiler):
+                cflags.append("gline-tables-only")
+            else:
+                cflags.append("g1")
+
     cflags += _get_ffast_math_flags()
 
     if _IS_WINDOWS:
@@ -1258,7 +1268,7 @@ def _setup_standard_sys_libs(
         include_dirs.append(build_paths.linux_kernel_include)
         include_dirs.append("include")
 
-        if aot_mode and not use_relative_path:
+        if not use_relative_path:
             linker_script = _LINKER_SCRIPT
         else:
             linker_script = os.path.basename(_LINKER_SCRIPT)
