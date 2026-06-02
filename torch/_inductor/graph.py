@@ -107,7 +107,6 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
-    convert_shape_to_inductor,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
@@ -265,6 +264,7 @@ def mark_nodes_dislike_padding(
             aten.convolution,
             aten.convolution_backward,
             aten._scaled_mm,
+            aten._scaled_mm_v2,
         ]
     )
     # what's a better way to collect the reduction ops?
@@ -362,7 +362,7 @@ def is_mkldnn_conv(node: Node) -> bool:
 
 
 class GraphLowering(torch.fx.Interpreter):
-    """Lower an FX graph into Inductor IR and wrapper code metadata."""
+    """Lower an FX graph into Inductor IR and track compilation state."""
 
     graph_outputs: list[ir.IRNode]
 
@@ -424,6 +424,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, TensorBox | TorchBindObject | sympy.Expr] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
+        # InputBuffer offsets are relative to input.data_ptr(); explicit FX
+        # as_strided storage offsets are relative to the input's storage.
+        self.graph_input_storage_offsets: dict[str, Expr] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
@@ -589,18 +592,23 @@ class GraphLowering(torch.fx.Interpreter):
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
 
-    def symbolic_sizes_strides(
+    def get_placeholder_sizes_strides(
         self, ex: torch.Tensor
     ) -> tuple[Sequence[int | Expr], Sequence[int | Expr]]:
+        sizes, strides, _ = self.symbolic_sizes_strides_storage_offset(ex)
+        return sizes, strides
+
+    def symbolic_sizes_strides_storage_offset(
+        self, ex: torch.Tensor
+    ) -> tuple[Sequence[int | Expr], Sequence[int | Expr], Expr]:
         """
         Support dynamic shapes and dynamic strides by assigning variables
         to each dimension.  We duck-shape tensors, so if two tensors
         have the same size they get assigned the same symbolic variable.
         """
         if self.reuse_shape_env:
-            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
-                ex.stride()
-            )
+            size, stride = ex.size(), ex.stride()
+            storage_offset = ex.storage_offset()
         else:
             from torch._dynamo.source import ConstantSource
 
@@ -616,7 +624,7 @@ class GraphLowering(torch.fx.Interpreter):
             (
                 size,
                 stride,
-                _,
+                storage_offset,
             ) = self._shape_env.transfer_symbols_from_foreign_shape_env(
                 ex.size(),
                 ex.stride(),
@@ -624,9 +632,14 @@ class GraphLowering(torch.fx.Interpreter):
                 source,
             )
 
-        r_size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
-        r_stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
-        return r_size, r_stride
+        r_size = [sympy.sympify(i) for i in size]
+        r_stride = [sympy.sympify(i) for i in stride]
+        r_storage_offset = (
+            storage_offset.node.expr
+            if isinstance(storage_offset, torch.SymInt)
+            else sympy.sympify(storage_offset)
+        )
+        return r_size, r_stride, r_storage_offset
 
     def static_sizes_strides(
         self, ex: torch.Tensor
@@ -1299,8 +1312,11 @@ class GraphLowering(torch.fx.Interpreter):
         if not example._has_symbolic_sizes_strides:
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
+            storage_offset = sympy.Integer(example.storage_offset())
         else:
-            sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
+            sizes, strides, storage_offset = self.symbolic_sizes_strides_storage_offset(
+                example
+            )
 
         if (
             self.is_backward
@@ -1324,6 +1340,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.graph_inputs[target] = tensor
         self.graph_input_names.append(target)
+        self.graph_input_storage_offsets[target] = storage_offset
         self.graph_inputs_original[target] = tensor.data.data  # type: ignore[union-attr]
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
@@ -1377,7 +1394,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
                 log.info(
                     "Creating implicit fallback for:\n%s",
-                    error.operator_str(target, args, kwargs),
+                    LazyString(error.operator_str, target, args, kwargs),
                 )
 
                 tag: torch._C.Tag | None = get_layout_constraint_tag(
@@ -1481,41 +1498,6 @@ class GraphLowering(torch.fx.Interpreter):
                 e, target, args, kwargs, stack_trace=stack_trace
             ).with_traceback(e.__traceback__) from None
 
-    @staticmethod
-    def _normalize_args_kwargs(
-        target: torch._ops.OpOverload,
-        args: Any,
-        kwargs: Any,
-    ) -> tuple[Any, Any]:
-        result = torch.fx.operator_schemas.normalize_function(target, args, kwargs)
-        assert result is not None
-        return result[0], result[1]
-
-    def _fake_args_kwargs_for_layout_constraints(
-        self,
-        target: torch._ops.OpOverload,
-        node: torch.fx.Node,
-    ) -> tuple[Any, Any] | None:
-        if "eager_input_vals" not in node.meta:
-            return None
-        fake_args, fake_kwargs = node.meta["eager_input_vals"]
-        return self._normalize_args_kwargs(target, fake_args, fake_kwargs)
-
-    @staticmethod
-    def _layout_constraints_for_target(
-        target: Callable[..., Any],
-        *,
-        with_default: bool = False,
-    ) -> Callable[..., tuple[Any, Any]] | None:
-        layout_constraints = maybe_layout_constraints(target)
-        if layout_constraints is not None:
-            return layout_constraints
-        if with_default and isinstance(target, torch._ops.OpOverload):
-            return tag_to_layout_constraint(
-                get_layout_constraint_tag(target, with_default=True)
-            )
-        return None
-
     def _apply_layout_constraints(
         self,
         target: Callable[..., Any],
@@ -1525,9 +1507,15 @@ class GraphLowering(torch.fx.Interpreter):
         *,
         with_default: bool = False,
     ) -> tuple[Any, dict[str, Any], tuple[Any, Any] | None]:
-        layout_constraints = self._layout_constraints_for_target(
-            target, with_default=with_default
-        )
+        layout_constraints = maybe_layout_constraints(target)
+        if (
+            layout_constraints is None
+            and with_default
+            and isinstance(target, torch._ops.OpOverload)
+        ):
+            layout_constraints = tag_to_layout_constraint(
+                get_layout_constraint_tag(target, with_default=True)
+            )
         if layout_constraints is None:
             return args, kwargs, None
 
@@ -1536,16 +1524,23 @@ class GraphLowering(torch.fx.Interpreter):
             if not isinstance(target, torch._ops.OpOverload):
                 return args, kwargs, None
 
-            fake_args_kwargs = self._fake_args_kwargs_for_layout_constraints(
-                target, node
-            )
-            if fake_args_kwargs is None:
+            if "eager_input_vals" not in node.meta:
                 return args, kwargs, None
-            fake_args, fake_kwargs = fake_args_kwargs
-            args, kwargs = self._normalize_args_kwargs(target, args, kwargs)
-            old_args, old_kwargs = self._normalize_args_kwargs(
+
+            fake_args, fake_kwargs = node.meta["eager_input_vals"]
+            result = torch.fx.operator_schemas.normalize_function(
+                target, fake_args, fake_kwargs
+            )
+            assert result is not None
+            fake_args, fake_kwargs = result[0], result[1]
+            result = torch.fx.operator_schemas.normalize_function(target, args, kwargs)
+            assert result is not None
+            args, kwargs = result[0], result[1]
+            result = torch.fx.operator_schemas.normalize_function(
                 target, old_args, old_kwargs
             )
+            assert result is not None
+            old_args, old_kwargs = result[0], result[1]
             args, kwargs = constrain_to_fake_tensors(
                 args, kwargs, fake_args, fake_kwargs
             )

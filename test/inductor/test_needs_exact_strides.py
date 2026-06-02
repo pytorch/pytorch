@@ -237,32 +237,6 @@ class TestNeedsExactStrides(InductorTestCase):
             self.assertTrue(post_pass.called)
             self.assertEqual(seen_strides, [(32, 1, 4)])
 
-    def test_registered_lowering_without_tag_has_no_default_constraint(self):
-        with torch.library._scoped_library("mylib_lowering_layout", "DEF") as lib:
-            lib.define("lowered_identity(Tensor x) -> Tensor")
-
-            @torch.library.impl(lib, "lowered_identity", "Meta")
-            def _(x):
-                return torch.empty_like(x)
-
-            from torch._inductor.graph import GraphLowering
-            from torch._inductor.lowering import (
-                constrain_to_fake_tensors,
-                register_lowering,
-            )
-
-            target = torch.ops.mylib_lowering_layout.lowered_identity.default
-
-            @register_lowering(target)
-            def _(x):
-                return x
-
-            self.assertIsNone(GraphLowering._layout_constraints_for_target(target))
-            self.assertIs(
-                GraphLowering._layout_constraints_for_target(target, with_default=True),
-                constrain_to_fake_tensors,
-            )
-
     @parametrize("dtype", [torch.float, torch.float8_e8m0fnu])
     def test_custom_op(self, dtype):
         device = (
