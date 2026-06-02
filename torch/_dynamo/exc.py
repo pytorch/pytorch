@@ -706,8 +706,8 @@ def augment_exc_message(
     if frame is not None:
         real_stack = getattr(exc, "real_stack", None)
         if real_stack is not None:
-            real_stack = _filter_dynamo_synthetic_user_frames(real_stack)
-            if len(real_stack) == 0:
+            filtered_real_stack = _filter_dynamo_synthetic_user_frames(real_stack)
+            if len(real_stack) > 0 and len(filtered_real_stack) == 0:
                 real_stack_frame = frame
 
     real_stack = get_real_stack(exc, real_stack_frame)
