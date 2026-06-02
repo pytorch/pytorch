@@ -50,7 +50,6 @@ from torch.testing._internal.common_utils import (
     TEST_SCIPY,
     TestCase,
     torch_to_numpy_dtype_dict,
-    xfailIfTorchDynamo,
 )
 from torch.utils import _pytree as pytree
 
@@ -77,7 +76,6 @@ reference_filtered_ops = list(filter(lambda op: op.ref is not None, unary_ufuncs
 # about the concept of ufuncs.
 
 
-# TODO: port test_unary_out_op_mem_overlap
 # TODO: add test for inplace variants erroring on broadcasted inputs
 class TestUnaryUfuncs(TestCase):
     exact_dtype = True
@@ -856,7 +854,6 @@ class TestUnaryUfuncs(TestCase):
 
     # TODO: run on non-native device types
     # https://github.com/pytorch/pytorch/issues/126474
-    @xfailIfTorchDynamo
     @dtypes(torch.double)
     def test_unary_out_op_mem_overlap(self, device, dtype):
         sz = 3
