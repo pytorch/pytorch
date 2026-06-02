@@ -9911,6 +9911,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 (a, b),
             )
 
+    @skip_if_halide
+    @skip_if_pallas
+    def test_multilabel_margin_loss_padded_target(self):
+        # Targets are -1 padded after the first -1; the decomposition must not
+        # accumulate loss terms for those invalid target positions (#185464).
+        target = torch.tensor([[0, 1, -1, -1, -1]], dtype=torch.int64)
+
+        def fn(x):
+            return F.multilabel_margin_loss(x, target.to(x.device))
+
+        for reduction in ("mean", "sum", "none"):
+
+            def fn_r(x, reduction=reduction):
+                return F.multilabel_margin_loss(
+                    x, target.to(x.device), reduction=reduction
+                )
+
+            x = torch.tensor(
+                [[1.0, -1.0, 0.5, 0.3, -0.2]], device=self.device, requires_grad=True
+            )
+            x_c = x.detach().clone().requires_grad_(True)
+            out = fn_r(x)
+            out_c = torch.compile(fn_r, fullgraph=True)(x_c)
+            self.assertEqual(out, out_c)
+            out.sum().backward()
+            out_c.sum().backward()
+            self.assertEqual(x.grad, x_c.grad)
+
     @xfail_if_mps  # dtypes mismatch
     def test_nll_loss_backward(self):
         def fn(a, b, c):
