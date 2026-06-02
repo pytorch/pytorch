@@ -80,6 +80,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       }
       if (THPVariable_Check(obj.ptr())) {
         auto var = py::cast<autograd::Variable>(obj);
+        guardAgainstNamedTensor<autograd::Variable>(var);
         return var;
       } else {
         if (!allow_numbers_as_tensors) {
@@ -642,6 +643,7 @@ py::object toPyObject(IValue ivalue) {
               " to a Python object");
       }
     } else {
+      guardAgainstNamedTensor<at::Tensor>(tensor);
       return py::cast(std::move(tensor));
     }
   } else if (ivalue.isStorage()) {
