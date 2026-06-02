@@ -10,7 +10,7 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 import torch
-from torch._inductor.virtualized import V
+from torch._inductor.virtualized import ops, V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map, tree_map_only
 
@@ -92,6 +92,42 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
         data=scatter,
     )
     return buffer
+
+
+def create_unindexed_grad_scatter(values: ComputedBuffer) -> ComputedBuffer:
+    """Accumulate an unindexed scalar captured grad into a real grad buffer."""
+    assert values.get_size() == [], (
+        "Only scalar captured grads can be accumulated without explicit indices"
+    )
+    device = values.get_device()
+    assert device is not None
+    grad = _full(0, device, torch.float32, [])
+    assert isinstance(grad, TensorBox)
+    grad.realize()
+    # Inline the unnamed contribution; values.make_loader() would try to load
+    # from a buffer name that does not exist.
+    values_loader = values.data.make_loader()
+    src_dtype = values.get_dtype()
+
+    def inner_fn(index):
+        value = values_loader(index)
+        if src_dtype != grad.get_dtype():
+            value = ops.to_dtype(value, grad.get_dtype(), src_dtype=src_dtype)
+        return value
+
+    scatter = Scatter(
+        device=device,
+        dtype=grad.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=[],
+        output_indexer=lambda _: [],
+        scatter_mode="atomic_add",
+    )
+    return ComputedBuffer(
+        name=grad.data.data.name,  # type: ignore[attr-defined]
+        layout=MutationLayoutSHOULDREMOVE(grad),
+        data=scatter,
+    )
 
 
 def get_fwd_subgraph_outputs(

@@ -3,6 +3,7 @@
 import functools
 import gc
 import json
+import math
 import os
 import random
 import string
@@ -9016,6 +9017,67 @@ class TestLearnableBiases(InductorTestCase):
             bias_sdpa_gold,
             device,
         )
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    def test_captured_scalar_score_mod_requires_grad(self, device):
+        B, H, S, D = 1, 1, 128, 64
+        torch.manual_seed(0)
+        q_base, k_base, v_base = [
+            torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+            for _ in range(3)
+        ]
+
+        def run_flex(indexed):
+            q, k, v = [
+                x.detach().clone().requires_grad_(True)
+                for x in (q_base, k_base, v_base)
+            ]
+            captured = torch.randn(
+                (1,) if indexed else (),
+                device=device,
+                dtype=torch.float32,
+                requires_grad=True,
+            )
+
+            if indexed:
+
+                def score_mod(score, b, h, q_idx, kv_idx):
+                    return score * captured[score.new_zeros((), dtype=torch.int)]
+
+            else:
+
+                def score_mod(score, b, h, q_idx, kv_idx):
+                    return score * captured
+
+            out = torch.compile(flex_attention, dynamic=False)(
+                q, k, v, score_mod=score_mod
+            )
+            out.sum().backward()
+            return out, q.grad, k.grad, v.grad, captured, captured.grad
+
+        def run_ref(captured):
+            q, k, v = [
+                x.detach().clone().to(torch.float64).requires_grad_(True)
+                for x in (q_base, k_base, v_base)
+            ]
+            captured_ref = captured.detach().clone().to(torch.float64)
+            captured_ref.requires_grad_(True)
+            scores = torch.matmul(q, k.transpose(-2, -1)) * (1.0 / math.sqrt(D))
+            scores = scores * (captured_ref[0] if captured_ref.ndim else captured_ref)
+            out = torch.matmul(torch.softmax(scores, dim=-1), v)
+            out.sum().backward()
+            return out, q.grad, k.grad, v.grad, captured_ref.grad
+
+        for indexed in (False, True):
+            with self.subTest(indexed=indexed):
+                out, dq, dk, dv, captured, d_captured = run_flex(indexed)
+                ref = run_ref(captured)
+                for actual, expected in zip((out, dq, dk, dv, d_captured), ref):
+                    torch.testing.assert_close(
+                        actual.float(), expected.float(), atol=1e-2, rtol=1e-2
+                    )
 
     @supported_platform
     @skip_on_cpu
