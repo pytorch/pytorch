@@ -10,10 +10,6 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_cpp_code
 
 
-if sys.platform == "darwin":
-    raise unittest.SkipTest("CPU cpp_wrapper tests are not run on macOS")
-
-
 libtest = torch.library.Library(  # noqa: SCOPED_LIBRARY
     "test_cpp_wrapper_asserts", "FRAGMENT"
 )
@@ -32,6 +28,7 @@ def unique_op_name(name):
     return f"{name}_{os.getpid()}"
 
 
+@unittest.skipIf(sys.platform == "darwin", "CPU cpp_wrapper tests are not run on macOS")
 class CppWrapperAssertTests(InductorTestCase):
     @config.patch(
         cpp_wrapper=True,
