@@ -275,11 +275,22 @@ template <
 inline T cast_to(const U from) {
   return T(float(from), 0.0);
 }
-// - Complex to scalar (should not really be used, but exists for compliteness)
+// - Complex to bool: nonzero test over both components (matches bool(complex)).
 template <
     typename T,
     typename U,
-    ::metal::enable_if_t<!is_complex_v<T> && is_complex_v<U>, bool> = true>
+    ::metal::enable_if_t<::metal::is_same_v<T, bool> && is_complex_v<U>, bool> =
+        true>
+inline T cast_to(const U from) {
+  return from.x != 0 || from.y != 0;
+}
+// - Complex to non-bool scalar (discards the imaginary part, matching CPU).
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        !is_complex_v<T> && !::metal::is_same_v<T, bool> && is_complex_v<U>,
+        bool> = true>
 inline T cast_to(const U from) {
   return static_cast<T>(from.x);
 }
