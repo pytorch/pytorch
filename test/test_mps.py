@@ -15001,6 +15001,7 @@ class TestConsistency(TestCaseMPS):
     # is a little larger than 8 GB. MPS allocations are capped at 16 GB, so it
     # cannot be run on float32.
     @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
+    @serialTest()
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("trigger_32bit_overflow", [False, True])
     def test_group_norm_large_input(self, device, dtype, trigger_32bit_overflow):
