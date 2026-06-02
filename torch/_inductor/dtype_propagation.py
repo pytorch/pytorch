@@ -242,9 +242,18 @@ class DtypePropagationOpsHandler:
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> torch.dtype:
         # TODO - TODO - rationalize index_expr. The dtype is not always used and we are inconsistent about int32 or int64
         # in lowerings. cpp just uses the dtype
-        if dtype not in (torch.int32, torch.int64) or not hasattr(
-            V.kernel, "index_dtype"
-        ):
+        if not hasattr(V.kernel, "index_dtype"):
+            return upcast_compute_type(dtype)
+
+        # Check if this index_expr should use int64 for value computation
+        from .loop_body import get_index_expr_int64_usage
+
+        is_for_values_only, has_int64_iota = get_index_expr_int64_usage()
+        if is_for_values_only and has_int64_iota:
+            return torch.int64
+
+        # For non-integer dtypes, use upcast
+        if dtype not in (torch.int32, torch.int64):
             return upcast_compute_type(dtype)
 
         return V.kernel.get_index_dtype_as_torch_dtype()

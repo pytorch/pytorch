@@ -2341,6 +2341,39 @@ class TritonKernelOverrides(TritonOverrides):
 
     @classmethod
     def index_expr(cls, expr, dtype):
+        """
+        Handles dtype selection for index expressions based on usage.
+
+        - For non-integer int 32/64 dtypes: Respect the requested dtype.
+        - elif used for VALUES and original dtype is int64: Use int64 to preserve semantics.
+        - elif used for INDEXING or original dtype is not int64: Use kernel index dtype.
+        """
+
+        def _cast_index_vars_to_int64(index_str: str) -> str:
+            """
+            Cast index variables to int64 for value computation.
+
+            Example:
+                Input:  "1000000000*x0"
+                Output: "1000000000*x0.to(tl.int64)"
+
+                Input:  "10000000*r0_0"  (reduction variable)
+                Output: "10000000*r0_0.to(tl.int64)"
+
+            Args:
+                index_str: String containing index expression with index variables
+
+            Returns:
+                Modified string with .to(tl.int64) casts on index variables
+            """
+            import re
+
+            return re.sub(
+                r"\b(x\d+|xindex|r\d+_\d+)\b",
+                lambda m: f"{m.group(0)}.to(tl.int64)",
+                index_str,
+            )
+
         expr = _materialize_trunc_to_float_expr(expr, dtype)
         indexing = V.kernel.indexing(
             expr, block_ptr=False, tma_compatibility_checker=None
@@ -2353,10 +2386,37 @@ class TritonKernelOverrides(TritonOverrides):
         else:
             shape = TritonSymbols.get_block_shape(indexing.index)
 
-        # Our sympy expr printing casts to the current kernel index dtype.
-        # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
         index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
-        dtype = dtype if dtype not in (torch.int32, torch.int64) else index_dtype
+        is_for_values_only = False
+        index_str_to_use = indexing.index_str
+        current_fx_node = V.interpreter.current_node
+        original_dtype = None
+
+        # Check if this index_expr has int64 iota ancestor via tracing
+        if current_fx_node:
+            from ..loop_body import get_index_expr_int64_usage
+
+            is_for_values_only, has_int64_iota = get_index_expr_int64_usage()
+
+            # Set original_dtype if this is a value computation from int64 iota
+            if is_for_values_only and has_int64_iota:
+                original_dtype = torch.int64
+
+        # Determine dtype to use based on usage chain and original dtype
+        if (
+            is_for_values_only
+            and original_dtype == torch.int64
+            and index_dtype == torch.int32
+        ):
+            index_str_to_use = _cast_index_vars_to_int64(indexing.index_str)
+
+        if is_for_values_only and original_dtype == torch.int64:
+            dtype_to_use = torch.int64
+        elif dtype not in (torch.int32, torch.int64):
+            # Non-integer dtypes: respect requested dtype
+            dtype_to_use = dtype
+        else:
+            dtype_to_use = index_dtype
 
         # after we emit this var we cast it to the correct dtype
         orig = config.test_configs.runtime_triton_dtype_assert
@@ -2364,21 +2424,24 @@ class TritonKernelOverrides(TritonOverrides):
             config.test_configs.runtime_triton_dtype_assert = False
             var = V.kernel.cse.generate(
                 V.kernel.compute,
-                indexing.index_str,
+                index_str_to_use,
                 bounds=get_bounds_index_expr(expr),
-                dtype=dtype,
+                dtype=dtype_to_use,
                 shape=shape,
             )
         finally:
             config.test_configs.runtime_triton_dtype_assert = orig
 
-        if dtype not in (torch.int32, torch.int64):
+        if dtype_to_use not in (torch.int32, torch.int64):
+            # Non-integer dtype: cast to requested dtype
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 cls.to_dtype(var, dtype),
                 dtype=upcast_compute_type(dtype),
                 shape=var.shape,
             )
+        elif is_for_values_only and original_dtype == torch.int64:
+            pass
         else:
             # TODO: we are not always consistent in enforcing that the output of the index expr printing
             # results in the indexing dtype. So if we detect that we have an input which might type promote

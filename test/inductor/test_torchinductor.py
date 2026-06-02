@@ -3382,6 +3382,25 @@ class CommonTemplate:
 
         self.common(fn, (torch.zeros(5, dtype=torch.int64),), check_lowp=False)
 
+    def test_arange8(self):
+        def fn(x):
+            # Create a small tensor with int64 values > INT32_MAX
+            idx = torch.arange(0, 2, device=x.device, dtype=torch.int64)
+            large_val = torch.tensor(2147483648, dtype=torch.int64, device=x.device)
+            return idx * large_val
+
+        x = torch.zeros(1, device=self.device)
+        self.common(fn, (x,))
+
+    def test_arange9(self):
+        # Reduction operation with int64 values
+        def fn(x):
+            idx = torch.arange(0, 100, device=x.device, dtype=torch.int64)
+            val = idx * int(1e7)  # Large but < INT32_MAX
+            return val.sum()
+
+        self.common(fn, (torch.zeros(1),))
+
     def test_linspace1(self):
         def fn(x):
             return torch.linspace(0.125, 0.875, 7, device=x.device) + x
