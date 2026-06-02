@@ -288,7 +288,7 @@ struct AddGenericMetadata : public MetadataBase {
         continue;
       }
 
-      // Until needed, lets limit the kwargs to only ints, doubles, strings,
+      // Until needed, let's limit the kwargs to only ints, doubles, strings,
       // bools, and list of strings
       bool isValidType =
           val.isInt() || val.isDouble() || val.isString() || val.isBool();
@@ -1361,6 +1361,7 @@ void ProfilerResult::save(const std::string& path) {
   trace_->save(path);
 }
 
+#ifdef USE_KINETO
 const std::vector<const libkineto::ITraceActivity*>* ProfilerResult::
     traceActivities() {
   if (trace_) {
@@ -1368,6 +1369,7 @@ const std::vector<const libkineto::ITraceActivity*>* ProfilerResult::
   }
   return nullptr;
 }
+#endif
 
 } // namespace autograd::profiler
 

@@ -618,14 +618,13 @@ class SymInt:
     def __hash__(self) -> builtins.int:
         if self.node.is_nested_int():
             return hash(self.node.nested_int())
-        else:
-            # We could support constant SymInts as well, but not doing it for now
-            raise TypeError("unhashable type: non-nested SymInt")
-            # TODO: Force specialization
-            # This can't be done because the TypeError here is load bearing
-            # for einops
-            # https://github.com/arogozhnikov/einops/blob/6181e1e95dc58c00a3143c1726da1c6ee0463164/einops/einops.py#L237
-            # return hash(builtins.int(self))
+        if self.node.expr.is_number:
+            # Constant SymInt: hash by value; nothing to specialize.
+            return hash(builtins.int(self.node.int_()))
+        # einops relies on this TypeError to bypass its lru_cache on
+        # dynamic shapes.
+        # See https://github.com/arogozhnikov/einops/blob/6181e1e95dc58c00a3143c1726da1c6ee0463164/einops/einops.py#L237
+        raise TypeError("unhashable type: non-nested SymInt")
 
     def as_integer_ratio(self) -> tuple["SymInt", builtins.int]:
         """Represent this int as an exact integer ratio"""
@@ -2886,13 +2885,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
-from torch import fx as fx
-
-
-# Register MPS specific decomps
-torch.backends.mps._init()
-
-from torch import compiler as compiler
+from torch import compiler as compiler, fx as fx
 
 
 class _TritonLibrary:
@@ -3014,12 +3007,6 @@ def _constrain_as_size(
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
 
 
-from torch import _logging
-
-
-_logging._init_logs()
-
-
 def _import_device_backends():
     """
     Leverage the Python plugin mechanism to load out-of-the-tree device extensions.
@@ -3076,11 +3063,18 @@ def _as_tensor_fullprec(t):
         return torch.as_tensor(t)
 
 
-# `_import_device_backends` should be kept at the end to ensure
-# all the other functions in this module that may be accessed by
-# an autoloaded backend are defined
+# `_import_device_backends` should run after the definitions above to ensure
+# all the other functions in this module that may be accessed by an autoloaded
+# backend are defined.
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+from torch import _logging
+
+
+# Keep `TORCH_LOGS` initialization after backend autoload so backends can
+# register their log names before `TORCH_LOGS` is parsed and validated.
+_logging._init_logs()
 
 # Register all registered custom / override ops in torch/_native
 import torch._native

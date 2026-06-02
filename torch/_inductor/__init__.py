@@ -14,6 +14,7 @@ from .standalone_compile import CompiledArtifact, DynamicShapesType  # noqa: TC0
 
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
+    from torch._subclasses import FakeTensorMode
     from torch.export import ExportedProgram
     from torch.export.pt2_archive._package import AOTICompiledModel
     from torch.export.pt2_archive._package_weights import Weights
@@ -315,7 +316,7 @@ def aot_compile(
         )
 
 
-lite_mode_options: dict[str, bool | int] = {
+lite_mode_options = {
     # Fallback by default unless users explicitly annotated with
     # regional inductor compile.
     "fallback_by_default": True,
@@ -349,7 +350,7 @@ def list_mode_options(
         >>> torch._inductor.list_mode_options()
     """
 
-    mode_options: dict[str, dict[str, bool | int]] = {
+    mode_options: dict[str, dict[str, bool]] = {
         "default": {},
         # lite backend for opt-in optimizations
         "lite": lite_mode_options,
@@ -367,7 +368,6 @@ def list_mode_options(
         "max-autotune": {
             "max_autotune": True,
             "triton.cudagraphs": True,
-            "triton.cudagraph_min_partition_size": 2,
             "coordinate_descent_tuning": True,
         },
     }
@@ -412,6 +412,7 @@ def standalone_compile(
     options: dict[str, Any] | None = None,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
     donate_graph_module: bool = False,
+    fake_mode: FakeTensorMode | None = None,
 ) -> CompiledArtifact:
     """
     Precompilation API for inductor.
@@ -438,6 +439,9 @@ def standalone_compile(
         donate_graph_module: If True, standalone_compile takes ownership of
             the graph module and may mutate it, avoiding an internal deepcopy.
             Defaults to False for backwards compatibility.
+        fake_mode: Optional FakeTensorMode to use when
+            dynamic_shapes="from_example_inputs". The mode must have a ShapeEnv.
+            When omitted, a fresh FakeTensorMode is created as before.
 
     Returns:
         CompiledArtifact that can be saved to disk or invoked directly.
@@ -452,6 +456,7 @@ def standalone_compile(
         options=options,
         aot=aot,
         donate_graph_module=donate_graph_module,
+        fake_mode=fake_mode,
     )
 
 
