@@ -2471,7 +2471,9 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker | None:
         if obj.has_unpack_var_sequence(tx):
             items = list(reversed(obj.unpack_var_sequence(tx)))
-            return variables.TupleVariable(items)
+            return variables.ListIteratorVariable(
+                items, mutation_type=ValueMutationNew()
+            )
         return None
 
     def call_sorted(

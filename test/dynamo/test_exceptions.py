@@ -528,6 +528,32 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
+    def test_stop_iteration_after_list_consumes_iterator(self):
+        def fn_iter(t):
+            it = iter([1, 2, 3])
+            list(it)
+            try:
+                next(it)
+            except StopIteration:
+                return t.sin()
+            else:
+                raise AssertionError("Expected StopIteration")
+
+        def fn_reversed(t):
+            rev = reversed([1, 2, 3])
+            list(rev)
+            try:
+                next(rev)
+            except StopIteration:
+                return t.sin()
+            else:
+                raise AssertionError("Expected StopIteration")
+
+        t = torch.randn(4)
+        for fn in (fn_iter, fn_reversed):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(t), opt_fn(t))
+
     def test_nn_reraise(self):
         class M(torch.nn.Module):
             def forward(self, x):
