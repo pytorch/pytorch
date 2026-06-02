@@ -8274,11 +8274,13 @@ def forward(self, primals_1, tangents_1):
                 noop,
                 noop,
                 noop,
+                noop,
             )
         with self.assertRaisesRegex(AssertionError, "single mutable list"):
             bwd_fn(
                 (torch.tensor(1.0), torch.tensor(2.0)),
                 None,
+                noop,
                 noop,
                 noop,
                 noop,
