@@ -528,6 +528,9 @@ def bwd_dq_block_mn(
         n="n",
         grad_score_mod="ds"
     ) | indent_except_first(1) }}
+    # Constant joint graphs can produce a scalar; broadcast to the score tile.
+    if len(grad_scores.shape) < 2:
+        grad_scores = grad_scores + tl.zeros([BLOCK_M2, BLOCK_N2], dtype=tl.float32)
     {# See Note Selective masking DQ #}
     if not IS_DIVISIBLE:
         grad_scores = tl.where(offs_n2[None, :] < KV_LEN, grad_scores, 0.0)
@@ -716,7 +719,9 @@ def bwd_dkdv_block_mn(
         n="n",
         grad_score_mod="dsT"
     ) | indent_except_first(1) }}
-
+    # Constant joint graphs can produce a scalar; broadcast to the score tile.
+    if len(grad_scores.shape) < 2:
+        grad_scores = grad_scores + tl.zeros([BLOCK_N1, BLOCK_M1], dtype=tl.float32)
     {# See Note: Selective masking DK/DV#}
     if not IS_DIVISIBLE:
         grad_scores = tl.where(offs_m1[None, :] < Q_LEN, grad_scores, 0.0)

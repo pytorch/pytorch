@@ -3939,6 +3939,33 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             v_grad, v_grad2, atol=tolerance.atol, rtol=tolerance.rtol
         )
 
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps
+    def test_score_mod_without_score_gradient(self, device):
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        dtype = torch.float16 if torch.device(device).type == "cuda" else torch.float32
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 1, 128, 16),
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        out = torch.compile(flex_attention, dynamic=False)(q, k, v, score_mod=score_mod)
+        out.float().pow(2).sum().backward()
+
+        self.assertIsNotNone(q.grad)
+        self.assertIsNotNone(k.grad)
+        self.assertIsNotNone(v.grad)
+        torch.testing.assert_close(q.grad, torch.zeros_like(q.grad), atol=0, rtol=0)
+        torch.testing.assert_close(k.grad, torch.zeros_like(k.grad), atol=0, rtol=0)
+        self.assertGreater(v.grad.abs().sum().item(), 0)
+
     # Use weird mask to test reusing block_mask does work well.
     @supported_platform
     @skip_on_cpu

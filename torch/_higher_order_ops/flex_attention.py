@@ -736,6 +736,9 @@ def create_fw_bw_graph(
             args = [score, b, h, m, n] + list(other_buffers)
             optional_grad = [example_grad] if example_grad.requires_grad else []
             _, grads = joint(args, optional_grad)
+            if grads[0] is None:
+                grads = list(grads)
+                grads[0] = torch.zeros_like(example_grad, dtype=score.dtype)
 
             return grads
 
