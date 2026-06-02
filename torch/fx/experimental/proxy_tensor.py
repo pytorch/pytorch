@@ -540,6 +540,14 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
         op = getattr(operator, v, None)
         if op is not None:
             handlers[k] = op
+        # sympy Max/Min have no operator.* equivalent, so map them to the torch
+        # sym builtins. Without this, _build_proxy_for_sym_expr cannot rebuild
+        # expressions like Max(1, u2) that escape a disable_proxy_modes_tracing
+        # region (e.g. DTensor shard propagation size inference).
+        elif v == "maximum":
+            handlers[k] = torch.sym_max
+        elif v == "minimum":
+            handlers[k] = torch.sym_min
 
     # sympy.Add is n-ary (e.g. Add(a, b, c)) but operator.add is binary.
     # torch.sym_sum handles n-ary integer addition and accepts both
