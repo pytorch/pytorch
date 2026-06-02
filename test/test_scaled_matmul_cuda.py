@@ -1145,8 +1145,6 @@ class TestFP8Matmul(TestCase):
     @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
-        if torch.xpu.is_available() and use_fast_accum:
-            raise unittest.SkipTest("XPU does not support fast accum yet")
 
         M, K, N = (1024, 512, 2048)
         fill_value = 0.5
