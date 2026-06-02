@@ -52,6 +52,7 @@ from torch._C._dynamo.guards import (
     check_type_id,
     ClosureGuardAccessor,
     CodeGuardAccessor,
+    compute_overlapping_tensors,
     dict_version,
     DictGetItemGuardAccessor,
     DictGuardManager,
@@ -98,6 +99,7 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
+    StorageOverlapPair,
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
@@ -110,6 +112,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SYMPY_INTERP,
 )
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
 from torch.utils._indented_buffer import IndentedBuffer
 from torch.utils._ordered_set import OrderedSet
@@ -835,6 +838,44 @@ def unwrap_async_collective_tensor(x: torch.Tensor) -> torch.Tensor:
     return x
 
 
+def _has_symbolic_sizes_strides_or_offset(t: torch.Tensor) -> bool:
+    return any(
+        isinstance(x, torch.SymInt)
+        for x in [
+            *t.shape,
+            *t.stride(),
+            t.storage_offset(),
+        ]
+    )
+
+
+def check_storage_overlap_pair(
+    a: torch.Tensor, b: torch.Tensor, expected_overlap: bool
+) -> bool:
+    if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
+        return False
+
+    same_storage = StorageWeakRef(a.untyped_storage()) == StorageWeakRef(
+        b.untyped_storage()
+    )
+    if not same_storage:
+        actual_overlap = False
+    else:
+        actual_overlap = (
+            len(
+                compute_overlapping_tensors(
+                    [a, b],
+                    symbolic=(
+                        _has_symbolic_sizes_strides_or_offset(a)
+                        or _has_symbolic_sizes_strides_or_offset(b)
+                    ),
+                )
+            )
+            == 2
+        )
+    return actual_overlap == expected_overlap
+
+
 # For user stack printing
 @functools.cache
 def uninteresting_files() -> set[str]:
@@ -882,6 +923,7 @@ def _get_closure_vars() -> dict[str, object]:
             "device": torch.device,
             "___from_numpy": from_numpy,
             "___unwrap_async_collective_tensor": unwrap_async_collective_tensor,
+            "___check_storage_overlap_pair": check_storage_overlap_pair,
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
@@ -5198,6 +5240,18 @@ class CheckFunctionManager:
                     non_overlapping_guard_managers,
                     [code_part],
                     None,
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOverlapPair):
+                source_a = guard.input_source_a
+                source_b = guard.input_source_b
+                code_part = (
+                    f"___check_storage_overlap_pair({source_a.name}, "
+                    f"{source_b.name}, {guard.overlaps})"
+                )
+                builder.add_python_lambda_leaf_guard_to_root(
+                    [code_part],
+                    [code_part],
                 )
                 add_code_part(code_part, None, True)
             else:
