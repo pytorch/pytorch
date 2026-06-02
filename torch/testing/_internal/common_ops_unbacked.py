@@ -32,7 +32,6 @@ ops_dde_xfail = {
     xfail("cummax"),
     xfail("cummin"),
     xfail("cumulative_trapezoid"),
-    xfail("diagonal_scatter"),
     xfail("diff"),
     xfail("dsplit"),
     xfail("equal"),
@@ -155,6 +154,7 @@ ops_dde_xfail = {
     xfail("nn.functional.interpolate", "trilinear"),
     xfail("nn.functional.l1_loss"),
     xfail("nn.functional.linear_cross_entropy"),
+    xfail("nn.functional.linear_cross_entropy", "chunked"),
     xfail("nn.functional.local_response_norm"),
     xfail("nn.functional.max_pool1d"),
     xfail("nn.functional.max_pool2d"),
@@ -170,11 +170,8 @@ ops_dde_xfail = {
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.nll_loss"),
     xfail("nn.functional.pad", "circular"),
-    xfail("nn.functional.pad", "reflect"),
     xfail("nn.functional.pad", "replicate"),
     xfail("nn.functional.pad", "replicate_negative"),
-    xfail("nn.functional.pdist"),
-    xfail("nn.functional.pixel_shuffle"),
     xfail("nn.functional.prelu"),
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.scaled_dot_product_attention"),
@@ -247,4 +244,6 @@ ops_unbacked_skip = {
     skip("zeros"),
     # Sparse ops that can't be deepcopied
     skip("sparse.sampled_addmm"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/179881
+    skip("norm", "nuc"),
 }

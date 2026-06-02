@@ -39,7 +39,7 @@ import typing
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
-from typing import Any, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
+from typing import Any, cast, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
 
 import sympy
 
@@ -79,12 +79,22 @@ from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
+from torch.fx.experimental.dynamic_spec import (
+    DictSpec,
+    IntermediateSpec,
+    IntVar,
+    LeafSpec,
+    ObjectSpec,
+    ShapesSpec,
+    TensorSpec,
+)
 from torch.fx.experimental.sym_node import _DynamicScalar, DynamicInt
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     _nested_int_aware_sort,
     DimDynamic,
     RelaxedUnspecConstraint,
+    ShapeEnv,
     StatefulSymbolicContext,
     SubclassSymbolicContext,
     SymbolicContext,
@@ -135,6 +145,7 @@ from ..source import (
     is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
+    NNModuleSource,
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
@@ -145,6 +156,7 @@ from ..source import (
     TupleIteratorGetItemSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
+    UnspecializedParamBufferSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -200,6 +212,7 @@ from .ctx_manager import (
     ErrorOnGraphBreakVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
+    RecordFunctionVariable,
 )
 from .dicts import ConstDictVariable, MappingProxyVariable, SetVariable
 from .distributed import WorldMetaClassVariable
@@ -321,10 +334,7 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import (
-        InstructionTranslator,
-        InstructionTranslatorBase,
-    )
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 log = logging.getLogger(__name__)
@@ -346,6 +356,199 @@ DimList = list
 def safe_has_grad(t: object) -> bool:
     with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
         return hasattr(t, "grad")
+
+
+@dataclasses.dataclass(frozen=True)
+class _LocalToken:
+    """Root token: a top-level function-argument access."""
+
+    name: str
+    is_varargs: bool = False
+    is_varkw: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class _AttrToken:
+    """Attribute access (``obj.name``)."""
+
+    name: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _SubscriptToken:
+    """Subscript access (``obj[key]``).
+
+    Emitted for ``dict`` key lookups (matched against ``DictSpec`` entries).
+    The key may be ``int`` or ``str`` — both are valid dict keys.
+    """
+
+    key: int | str
+
+
+_AccessToken = _LocalToken | _AttrToken | _SubscriptToken
+_AccessPath = list[_AccessToken]
+
+
+def _source_to_access_path(source: Source) -> _AccessPath | None:
+    """Translate a dynamo ``Source`` chain into a flat ``_AccessPath``.
+
+    Walks ``source.base`` from leaf to root, then reverses so the path
+    reads root-first. The returned path always starts with a single
+    ``_LocalToken`` (the input arg) followed by zero or more access
+    tokens, each of which is either an ``_AttrToken`` (attribute
+    access) or a ``_SubscriptToken`` (``dict[key]`` access with an
+    ``int`` or ``str`` key).
+
+    Returns ``None`` for sources that we know we can't represent them
+    in shapes specs.
+    """
+    path: list[_AccessToken] = []
+    cur: Source = source
+    while not isinstance(cur, LocalSource):
+        if isinstance(cur, NNModuleSource):
+            # ``NNModuleSource`` is a guard-semantics marker, not an
+            # access step — transparently unwrap.
+            cur = cur.base
+            continue
+        # ``self.weight`` → dynamo emits
+        # ``DictGetItemSource(UnspecializedParamBufferSource(_,
+        # '_parameters'), 'weight')``. Collapse that pair into a single
+        # attr token.
+        if isinstance(cur, DictGetItemSource) and isinstance(
+            cur.base, UnspecializedParamBufferSource
+        ):
+            path.append(_AttrToken(cur.index))
+            cur = cur.base.base
+            continue
+        # Plain ``dict[key]`` access.
+        if isinstance(cur, DictGetItemSource) and isinstance(cur.index, (int, str)):
+            path.append(_SubscriptToken(cur.index))
+            cur = cur.base
+            continue
+        # Integer subscript (e.g. *args[i] or list[i]).
+        if isinstance(cur, GetItemSource) and type(cur.index) is int:
+            path.append(_SubscriptToken(cur.index))
+            cur = cur.base
+            continue
+        if isinstance(cur, AttrSource):
+            path.append(_AttrToken(cur.member))
+            cur = cur.base
+            continue
+        return None
+    if not cur.is_input:
+        return None
+    path.append(
+        _LocalToken(cur.local_name, is_varargs=cur.is_varargs, is_varkw=cur.is_varkw)
+    )
+    path.reverse()
+    return path
+
+
+def _walk_spec(
+    current_spec: IntermediateSpec,
+    remaining_tokens: _AccessPath,
+) -> LeafSpec:
+    """Walk down a spec tree starting at ``current_spec``, consuming each
+    token in order. Returns the leaf spec at the end of the walk, or
+    ``None`` if a key/field along the way wasn't specified by the user.
+    Raises on type-mismatch (the existing tight invariants).
+    """
+    for token in remaining_tokens:
+        if current_spec is None:
+            # Under-specified: a previous descent (DictSpec key lookup or
+            # ObjectSpec field lookup) returned None because the user didn't
+            # provide a spec for this entry. Treat as static.
+            return None
+        match current_spec:
+            case ObjectSpec():
+                if not isinstance(token, _AttrToken):
+                    raise RuntimeError(
+                        f"shapes_spec walk: ObjectSpec at path {remaining_tokens!r} expects "
+                        f"an attribute access (_AttrToken), got "
+                        f"{type(token).__name__}"
+                    )
+                current_spec = current_spec._fields.get(token.name)
+            case DictSpec():
+                if not isinstance(token, _SubscriptToken):
+                    raise RuntimeError(
+                        f"shapes_spec walk: DictSpec at path {remaining_tokens!r} expects "
+                        f"a str/int subscript (_SubscriptToken), got "
+                        f"{type(token).__name__}"
+                        f"({getattr(token, 'key', None)!r})"
+                    )
+                current_spec = current_spec._entries.get(token.key)
+            case _:
+                # leaf spec (TensorSpec / IntVar / int / None) but path still
+                # has tokens → the user spec is too shallow for the access.
+                raise RuntimeError(
+                    f"shapes_spec walk: leaf spec ({type(current_spec).__name__}) "
+                    f"at path {remaining_tokens!r} cannot consume further token {token!r}; "
+                    f"the spec is too shallow for this access"
+                )
+    if not isinstance(current_spec, LeafSpec):
+        raise RuntimeError(
+            f"shapes_spec walk ended on a container ({type(current_spec).__name__}) "
+            f"for access path {remaining_tokens!r}; expected a leaf spec"
+        )
+    return current_spec
+
+
+def lookup_spec_from_dynamo_source(
+    source: Source, shapes_spec: ShapesSpec | None
+) -> LeafSpec:
+    """Look up the LeafSpec at the access path derived from ``source`` in ``params``.
+    Returns ``None`` if the source isn't covered.
+    """
+    if shapes_spec is None or shapes_spec._params is None:
+        return None
+    path = _source_to_access_path(source)
+    if not path or not isinstance(path[0], _LocalToken):
+        return None
+    params = shapes_spec._params
+    root = path[0]
+    if root.is_varargs:
+        # ``*args`` element access: root is the varargs local, next token must
+        # be an int subscript. A varargs local is always followed by a
+        # subscript token in ``_source_to_access_path``; anything else means
+        # the chain was mis-tokenized.
+        if not isinstance(path[1], _SubscriptToken):
+            raise RuntimeError(
+                f"Expected _SubscriptToken after *args local at path "
+                f"{path!r}, got {type(path[1]).__name__}"
+            )
+        key = path[1].key
+        if type(key) is not int:
+            raise RuntimeError(
+                f"Unexpected non-int subscript for *args access at path "
+                f"{path!r}: {type(key).__name__}({key!r})"
+            )
+        if params._varargs is None or not (0 <= key < len(params._varargs)):
+            return None
+        return _walk_spec(params._varargs[key], path[2:])
+    if root.is_varkw:
+        # ``**kwargs`` element access: root is the varkw local, next token must
+        # be a str subscript. A varkw local is always followed by a subscript
+        # token in ``_source_to_access_path``; anything else means the chain
+        # was mis-tokenized.
+        if not isinstance(path[1], _SubscriptToken):
+            raise RuntimeError(
+                f"Expected _SubscriptToken after **kwargs local at path "
+                f"{path!r}, got {type(path[1]).__name__}"
+            )
+        key = path[1].key
+        if not isinstance(key, str):
+            raise RuntimeError(
+                f"Unexpected non-str subscript for **kwargs access at path "
+                f"{path!r}: {type(key).__name__}({key!r})"
+            )
+        if params._varkw is None or key not in params._varkw:
+            return None
+
+        return _walk_spec(params._varkw[key], path[2:])
+    # Regular named arg: seed at the named-arg root and descend the rest.
+
+    current_spec: IntermediateSpec = params._named_args.get(root.name)
+    return _walk_spec(current_spec, path[1:])
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
@@ -509,7 +712,7 @@ class VariableBuilder:
 
     def __init__(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         source: Source,
         allow_lazy_constant: bool = True,
     ) -> None:
@@ -735,7 +938,7 @@ class VariableBuilder:
             source_key = k
 
             source_value = GetItemSource(self.get_source(), source_key)
-            res_value = LazyVariableTracker.create(v, source_value)
+            res_value = LazyVariableTracker.create(v, source_value, tx=self.tx)
 
             return key, res_value
 
@@ -860,12 +1063,16 @@ class VariableBuilder:
             ):
                 return self.wrap_tensor(value)
 
+        if isinstance(value, torch.profiler.record_function):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return RecordFunctionVariable(value)
         if is_namedtuple(value):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
             output: list[VariableTracker] = [
                 LazyVariableTracker.create(
                     getattr(value, name),
                     source=AttrSource(self.source, name),
+                    tx=self.tx,
                 )
                 for name in namedtuple_fields(type(value))
             ]
@@ -919,9 +1126,9 @@ class VariableBuilder:
                     source_key = k
                 else:
                     source_key = ConstDictKeySource(base, i)
-                    key = LazyVariableTracker.create(k, source_key)
+                    key = LazyVariableTracker.create(k, source_key, tx=self.tx)
                 source_value = DictGetItemSource(base, source_key)
-                res_value = LazyVariableTracker.create(v, source_value)
+                res_value = LazyVariableTracker.create(v, source_value, tx=self.tx)
 
                 return key, res_value
 
@@ -1006,7 +1213,9 @@ class VariableBuilder:
             L = list(value)
             items = [
                 LazyVariableTracker.create(
-                    v, source=NonSerializableSetGetItemSource(self.source, i)
+                    v,
+                    source=NonSerializableSetGetItemSource(self.source, i),
+                    tx=self.tx,
                 )
                 for i, v in enumerate(L)
             ]
@@ -1214,7 +1423,7 @@ class VariableBuilder:
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.exec_final_callbacks,
                 ).call_function(
                     self.tx,
-                    (self.tx.output.side_effects.get_ca_final_callbacks_var(),),
+                    [self.tx.output.side_effects.get_ca_final_callbacks_var()],
                     {},
                 )
             )
@@ -1686,6 +1895,7 @@ class VariableBuilder:
                     proxy,
                     value,
                     source=self.source,
+                    tx=self.tx,
                 )
 
             if is_opaque_value_type(type(value)):
@@ -1761,6 +1971,7 @@ class VariableBuilder:
                 proxy,  # pyrefly: ignore[bad-argument-type]
                 fake_script_obj,
                 source=self.source,
+                tx=self.tx,
             )
         elif (
             isinstance(value, (dict, collections.OrderedDict))
@@ -1780,10 +1991,10 @@ class VariableBuilder:
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
-                key = LazyVariableTracker.create(k, source_key)
+                key = LazyVariableTracker.create(k, source_key, tx=self.tx)
 
                 source_value = DictSubclassGetItemSource(base, source_key)
-                res_value = LazyVariableTracker.create(v, source_value)
+                res_value = LazyVariableTracker.create(v, source_value, tx=self.tx)
 
                 return key, res_value
 
@@ -1820,6 +2031,7 @@ class VariableBuilder:
                 LazyVariableTracker.create(
                     tuple.__getitem__(value, i),
                     source=GetItemSource(self.get_source(), i),
+                    tx=self.tx,
                 )
                 for i in range(tuple.__len__(value))
             ]
@@ -1843,6 +2055,7 @@ class VariableBuilder:
                 LazyVariableTracker.create(
                     list.__getitem__(value, i),
                     source=ListGetItemSource(self.get_source(), i),
+                    tx=self.tx,
                 )
                 for i in range(list.__len__(value))
             ]
@@ -1862,6 +2075,7 @@ class VariableBuilder:
                 LazyVariableTracker.create(
                     list.__getitem__(L, i),
                     source=NonSerializableSetGetItemSource(self.get_source(), i),
+                    tx=self.tx,
                 )
                 for i in range(list.__len__(L))
             ]
@@ -1989,6 +2203,7 @@ class VariableBuilder:
             LazyVariableTracker.create(
                 item,
                 source=GetItemSource(self.get_source(), i),
+                tx=self.tx,
             )
             for i, item in enumerate(value)
         ]
@@ -2317,10 +2532,39 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value: object) -> VariableTracker:
+        # NOTE: DynamicInt (subclass of int) and SymInt inputs never reach here
+        # because ConstantVariable.is_literal() rejects non-exact types.
+        # They are handled later in __call__ and always treated as dynamic.
         if type(value) is int:
-            if not isinstance(value, int):
-                raise AssertionError(f"Expected int, got {type(value)}")
-            # allowlist has higher precedence over specialization control.
+            # Check for user-provided spec from shapes_spec.
+            if config._shapes_spec is not None:
+                int_spec = lookup_spec_from_dynamo_source(
+                    self.source, config._shapes_spec
+                )
+                if int_spec is None:
+                    # shapes_spec is set but this int has no spec → force static
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return ConstantVariable.create(value=value, source=self.source)
+                elif isinstance(int_spec, int):
+                    # Explicit static value — verify the actual matches.
+                    if value != int_spec:
+                        raise ValueError(
+                            f"shapes_spec declares {self.source.name} as static "
+                            f"with value {int_spec}, but got {value}"
+                        )
+                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return ConstantVariable.create(value=value, source=self.source)
+                elif isinstance(int_spec, (IntVar, torch.SymInt)):
+                    result = self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
+                    sym_val = result.sym_num  # type: ignore[attr-defined]
+                    _wire_spec_slot(int_spec, sym_val)
+                    return result
+                else:
+                    raise ValueError(
+                        f"shapes_spec for {self.source.name}: unexpected value "
+                        f"{int_spec!r} (expected int, IntVar, or None)"
+                    )
+
             if is_dynamic_source(self.source.name):
                 log.debug(
                     "%s marked dynamic via dynamic-sources list", self.source.name
@@ -2445,10 +2689,26 @@ class VariableBuilder:
 
         is_static_input = get_static_address_type(value) is not None
 
-        if not is_static_input and (
-            isinstance(value, torch.nn.Parameter)
-            # mark tensor attributes of nn modules static
-            or (source and source.guard_source.is_unspecialized_nn_module())
+        # When a shapes_spec is provided for this tensor, we must skip the
+        # fast paths below that would freeze the tensor as a graph constant.
+        # Those paths bypass _automatic_dynamic where the spec is applied.
+        # Without this check, specifying TensorSpec on an nn.Parameter would
+        # be silently ignored.
+        # At tensor builder callsites, shapes_spec for this source can only be TensorSpec or None.
+        _tensor_spec = cast(
+            TensorSpec | None,
+            lookup_spec_from_dynamo_source(source, config._shapes_spec),
+        )
+        _has_spec = _tensor_spec is not None
+
+        if (
+            not _has_spec
+            and not is_static_input
+            and (
+                isinstance(value, torch.nn.Parameter)
+                # mark tensor attributes of nn modules static
+                or (source and source.guard_source.is_unspecialized_nn_module())
+            )
         ):
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
@@ -2467,9 +2727,12 @@ class VariableBuilder:
             is_parameter_freezing() or torch._dynamo.config.prepare_freezing
         )
 
-        if should_install_free_tensor or (
-            (source.guard_source.is_specialized_nn_module() or make_graph_attribute)
-            and not source.guard_source.is_fsdp_module()
+        if not _has_spec and (
+            should_install_free_tensor
+            or (
+                (source.guard_source.is_specialized_nn_module() or make_graph_attribute)
+                and not source.guard_source.is_fsdp_module()
+            )
         ):
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -2574,7 +2837,7 @@ class VariableBuilder:
         # See NOTE [HigherOrderOperator tracing design] for more details.
 
         example_value = wrap_to_fake_tensor_and_record(
-            value, tx=self.tx, is_tensor=True, source=source
+            value, tx=self.tx, is_tensor=True, source=source, tensor_spec=_tensor_spec
         )
 
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
@@ -3474,9 +3737,12 @@ def handle_traced_output(
         if is_sparse_any(example_value) and (
             not tx.export or not config.capture_sparse_compute
         ):
+            # Avoid calling str() on FakeTensors with unbacked symints as it triggers
+            # _tensor_str machinery which can cause GuardOnDataDependentSymNode errors
+            context = f"sparse tensor with layout={example_value.layout}, shape={example_value.shape}"
             unimplemented(
                 gb_type="Attempted to wrap sparse Tensor with VariableTracker",
-                context=str(example_value),
+                context=context,
                 explanation="torch.compile does not support sparse Tensors with VariableTracker",
                 hints=[*graph_break_hints.SPARSE_TENSOR],
             )
@@ -3711,6 +3977,7 @@ def handle_traced_output(
         return TorchScriptObjectVariable.create(
             proxy,
             example_value,
+            tx=tx,
         )
     elif is_opaque_type(type(example_value)):
         # This is for handling opaque objects in custom ops
@@ -3718,6 +3985,7 @@ def handle_traced_output(
             return TorchScriptObjectVariable.create(
                 example_value,  # pyrefly: ignore[bad-argument-type]
                 example_value,
+                tx=tx,
             )
         fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
             tx.output.fake_mode, example_value
@@ -3725,6 +3993,7 @@ def handle_traced_output(
         return TorchScriptObjectVariable.create(
             proxy,
             fake_script_obj,
+            tx=tx,
         )
     else:
         unimplemented(
@@ -3976,6 +4245,203 @@ def is_unbacked_source(source_name: str, dim: int | None = None) -> bool:
     return False
 
 
+def _symbolic_context_from_shapes_spec(
+    e: Any,
+    source: Source,
+    tensor_spec: TensorSpec | None,
+    view_base_context: SymbolicContext | None,
+    shape_env_to_source_to_symbol_cache: dict[Any, Any],
+) -> StatefulSymbolicContext:
+    if tensor_spec is not None and len(tensor_spec) != e.dim():
+        raise ValueError(
+            f"TensorSpec has {len(tensor_spec)} dims but tensor {source.name} "
+            f"has {e.dim()} dims"
+        )
+    dynamic_sizes = []
+    dynamic_strides = [DimDynamic.INFER_STRIDE] * e.dim()
+
+    for i in range(e.dim()):
+        if tensor_spec is None:
+            dynamic_sizes.append(DimDynamic.STATIC)
+        else:
+            dim_spec = tensor_spec[i]
+            if isinstance(dim_spec, int):
+                actual_size = e.size(i)
+                if actual_size != dim_spec:
+                    raise ValueError(
+                        f"shapes_spec declares dim {i} as static with value "
+                        f"{dim_spec}, but got {actual_size}"
+                    )
+                dynamic_sizes.append(DimDynamic.STATIC)
+            elif isinstance(dim_spec, torch.SymInt):
+                dynamic_sizes.append(DimDynamic.UNBACKED)
+            elif dim_spec is None:
+                dynamic_sizes.append(DimDynamic.STATIC)
+            else:
+                raise ValueError(
+                    f"shapes_spec dim {i}: unexpected value {dim_spec!r} "
+                    f"(expected LeafIntSpec)"
+                )
+
+    return StatefulSymbolicContext(
+        dynamic_sizes=dynamic_sizes,
+        dynamic_strides=dynamic_strides,
+        view_base_context=view_base_context,
+        tensor_source=source,
+        shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+    )
+
+
+def _wire_spec_slot(
+    spec: IntVar | SymInt,
+    size_sym: torch.SymInt,
+) -> None:
+    """Wire an IntVar or SymInt spec leaf into the real shape env.
+
+    A spec leaf may be:
+      - IntVar:  bare spec variable. Records
+        ``_spec_symbol_to_compile_symbol[A.sympy_sym] = u_new`` so future bare/derived
+        uses can resolve A; emits a runtime eq-check on repeat occurrences
+        (dedup).
+      - SymInt:  derived expression (e.g. ``A * 2 + 1``) backed by the spec
+        ShapeEnv. Emits
+        ``torch._check(u_new == expr.xreplace(_spec_symbol_to_compile_symbol))``, or
+        defers to ``_shape_spec_pending_assumptions`` if any free spec symbol isn't
+        bound yet (drained on the next bare-IntVar binding).
+
+    ``_spec_symbol_to_compile_symbol`` only ever holds IntVar sympy.Symbol entries.
+
+    ``size_sym`` is the freshly allocated unbacked SymInt for this leaf's
+    input (tensor dim or scalar arg).
+    """
+    from torch.fx.experimental.dynamic_spec import IntVar as _IntVar
+
+    shape_env = size_sym.node.shape_env
+
+    if isinstance(spec, _IntVar):
+        # Bare IntVar — first occurrence binds the spec sym to this input;
+        # subsequent occurrences dedup via runtime eq-check.
+        spec_sym = spec.sympy_sym
+        compile_expr = size_sym.node.expr
+        # Apply optimization hint on EVERY occurrence: var_to_hint_override
+        # is per-symbol and doesn't propagate via equivalence.
+        if spec.optimization_hint is not None:
+            shape_env.var_to_hint_override[compile_expr] = spec.optimization_hint
+        if spec_sym not in shape_env._spec_symbol_to_compile_symbol:
+            shape_env._spec_symbol_to_compile_symbol[spec_sym] = compile_expr
+            # Bounds apply ONLY on the canonical (first) symbol. Subsequent
+            # occurrences are tied to this one via the Eq runtime assert
+            # below; ShapeEnv._set_replacement / _refine_ranges intersect
+            # var_to_range across both sides of an integer Eq, so the
+            # bounds propagate to every other occurrence's symbol
+            # automatically.
+            if spec.min is not None:
+                torch._check(size_sym >= spec.min)
+            if spec.max is not None:
+                torch._check(size_sym <= spec.max)
+            _drain_shape_spec_pending_assumptions(shape_env)
+        else:
+            existing_expr = shape_env._spec_symbol_to_compile_symbol[spec_sym]
+            shape_env.guard_or_defer_runtime_assert(
+                sympy.Eq(compile_expr, existing_expr),
+                f"IntVar({spec.name}) dedup eq-check",
+            )
+    elif isinstance(spec, torch.SymInt):
+        spec_expr = spec.node.expr
+        free = spec_expr.free_symbols
+        deferred_bool = sympy.Eq(size_sym.node.expr, spec_expr)
+        if free.issubset(shape_env._spec_symbol_to_compile_symbol):
+            _emit_pending_bool(shape_env, deferred_bool)
+        else:
+            shape_env._shape_spec_pending_assumptions.append((free, deferred_bool))
+    else:
+        raise TypeError(
+            f"_wire_spec_slot: expected IntVar or SymInt, got {type(spec).__name__}"
+        )
+
+
+def _emit_pending_bool(shape_env: ShapeEnv, bool_expr: sympy.Expr) -> None:
+    """Substitute spec symbols and defer the resulting boolean as a runtime
+    assert. ``bool_expr`` is a sympy boolean (e.g. ``Eq``, ``Gt``) whose free
+    spec symbols must already be present in ``_spec_symbol_to_compile_symbol``."""
+    substituted = bool_expr.xreplace(shape_env._spec_symbol_to_compile_symbol)
+    shape_env.guard_or_defer_runtime_assert(substituted, "shapes_spec deferred check")
+
+
+def _drain_shape_spec_pending_assumptions(shape_env: ShapeEnv) -> None:
+    """Re-scan pending derived/assumption checks; emit any whose deps are now bound.
+
+    TODO: optimize with an inverted index (sym → pending entries) if the
+    pending list grows large. Inductor uses this pattern in
+    ``graph.py:ras_by_symbol``. Spec wiring typically has < 10 entries so
+    the linear scan here is fine; revisit if profiling shows otherwise.
+    """
+    pending = shape_env._shape_spec_pending_assumptions
+    if not pending:
+        return
+    subst_keys = shape_env._spec_symbol_to_compile_symbol.keys()
+    keep = []
+    for free, bool_expr in pending:
+        if free.issubset(subst_keys):
+            _emit_pending_bool(shape_env, bool_expr)
+        else:
+            keep.append((free, bool_expr))
+    shape_env._shape_spec_pending_assumptions[:] = keep
+
+
+def _wire_spec_assumptions(shape_env: ShapeEnv, shapes_spec: ShapesSpec) -> None:
+    """Append each ShapesSpec.assumptions SymBool to the pending list.
+    Called BEFORE any input is processed.
+    """
+    for a in shapes_spec._assumptions:
+        bool_expr = a.node.expr
+        shape_env._shape_spec_pending_assumptions.append(
+            (bool_expr.free_symbols, bool_expr)
+        )
+
+
+def _finalize_spec_wiring(shape_env: ShapeEnv) -> None:
+    """Verify all pending spec assumptions/derived-dim checks have been
+    emitted (i.e. every spec IntVar referenced by a derived expression or
+    user assumption has been bound by some bare-IntVar input slot).
+    """
+    pending = shape_env._shape_spec_pending_assumptions
+    if not pending:
+        return
+
+    subst_keys = shape_env._spec_symbol_to_compile_symbol.keys()
+
+    # Strip "#N" uid suffixes for user-facing error messages so callers see
+    # the original IntVar name ("a") rather than the disambiguated internal
+    # form ("a#0"). Works on both single sympy.Symbols and stringified
+    # expressions (e.g. "a#0 > b#1" -> "a > b").
+    def _pretty(s: object) -> str:
+        return re.sub(r"#\d+", "", str(s))
+
+    # Build a "expr (unbound: [...])" line per pending check that still
+    # has unbound deps.
+    lines = []
+    all_unbound: set[sympy.Symbol] = set()
+    for free, bool_expr in pending:
+        missing = free - subst_keys
+        if not missing:
+            raise RuntimeError(
+                f"_finalize_spec_wiring: pending entry has all symbols bound "
+                f"({bool_expr}); _drain_shape_spec_pending_assumptions should "
+                f"have removed it before finalize."
+            )
+        all_unbound |= missing
+        missing_names = sorted(_pretty(s) for s in missing)
+        lines.append(f"  - {_pretty(bool_expr)}  (unbound: {missing_names})")
+    raise ValueError(
+        f"shapes_spec: {len(lines)} pending check(s) reference unbound "
+        f"IntVar(s) {sorted(_pretty(s) for s in all_unbound)}. Every IntVar "
+        f"used in a derived expression or assumption must also appear as a "
+        f"bare-IntVar slot somewhere in the spec. Offending checks:\n"
+        + "\n".join(lines)
+    )
+
+
 # Performs automatic dynamic dim determination.
 # Returns a SymbolicContext
 def _automatic_dynamic(
@@ -3984,6 +4450,7 @@ def _automatic_dynamic(
     source: Source,
     static_shapes: bool,
     outer_only: bool = False,
+    tensor_spec: TensorSpec | None = None,
 ) -> SymbolicContext:
     # strided NT not supported
     if e.is_nested and not isinstance(
@@ -4044,17 +4511,9 @@ def _automatic_dynamic(
             tensor_source=outer_context.tensor_source,
             shape_env_to_source_to_symbol_cache=outer_context.shape_env_to_source_to_symbol_cache,
             inner_contexts=inner_contexts,
-        )
-
-    if static_shapes and not is_dynamic_source(name):
-        return StatefulSymbolicContext(
-            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
-            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
-            constraint_sizes=[None] * e.dim(),
-            constraint_strides=[None] * e.dim(),
-            view_base_context=view_base_context,
-            tensor_source=source,
-            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+            track_outer_size_stride=not isinstance(
+                e, torch.nested._internal.nested_tensor.NestedTensor
+            ),
         )
 
     # We preserve the dynamism of inputs. For example, when users call
@@ -4072,6 +4531,24 @@ def _automatic_dynamic(
 
         return StatefulSymbolicContext(
             dynamic_sizes=[_classify_symint(s) for s in e.size()],
+            dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
+            constraint_sizes=[None] * e.dim(),
+            constraint_strides=[None] * e.dim(),
+            view_base_context=view_base_context,
+            tensor_source=source,
+            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        )
+
+    # Fast path: when the tensor must be static (and not in the dynamic-source
+    # whitelist), short-circuit to a fully-STATIC StatefulSymbolicContext.
+    # Important: this must run BEFORE record_automatic_dynamic so that PGO
+    # frame_state is not polluted by sizes of tensors we are forcing static
+    # (e.g. nn.Parameter shapes when force_parameter_static_shapes=True).
+    # Otherwise PGO would later "learn" those dims as dynamic and bypass the
+    # progressive PGO warm-up that consumers (e.g. test_pgo_dynamic_params) rely on.
+    if config._shapes_spec is None and static_shapes and not is_dynamic_source(name):
+        return StatefulSymbolicContext(
+            dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             constraint_strides=[None] * e.dim(),
@@ -4119,11 +4596,21 @@ def _automatic_dynamic(
                     constraint.dim, constraint.constraint_range, constraint.name
                 )
 
+    if config._shapes_spec is not None:
+        return _symbolic_context_from_shapes_spec(
+            e,
+            source,
+            tensor_spec,
+            view_base_context,
+            shape_env_to_source_to_symbol_cache,
+        )
+
     dynamic_sizes = []
     dynamic_strides = []
     constraint_sizes = []
     constraint_strides = []
     specialize_on = []
+
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_strict_unbacked = i in getattr(e, "_dynamo_strict_unbacked_indices", ())
@@ -4290,11 +4777,17 @@ def wrap_to_fake_tensor_and_record(
     source: Source | None,
     is_tensor: bool,
     parent_context: Any | None = None,
+    tensor_spec: TensorSpec | None = None,
 ) -> Any:
     _t0 = time.time_ns()
     try:
         return _wrap_to_fake_tensor_and_record_impl(
-            e, tx, source=source, is_tensor=is_tensor, parent_context=parent_context
+            e,
+            tx,
+            source=source,
+            is_tensor=is_tensor,
+            parent_context=parent_context,
+            tensor_spec=tensor_spec,
         )
     finally:
         tx.output.bytecode_tracing_timings.wrap_to_fake_tensor_and_record_ns += (
@@ -4309,6 +4802,7 @@ def _wrap_to_fake_tensor_and_record_impl(
     source: Source | None,
     is_tensor: bool,
     parent_context: Any | None = None,
+    tensor_spec: TensorSpec | None = None,
 ) -> Any:
     if (
         type(e) in (torch.Tensor, torch.nn.Parameter, FakeTensor)
@@ -4324,7 +4818,9 @@ def _wrap_to_fake_tensor_and_record_impl(
         )
 
         if not parent_context:
-            symbolic_context = _automatic_dynamic(e, tx, source, static_shapes)
+            symbolic_context = _automatic_dynamic(
+                e, tx, source, static_shapes, tensor_spec=tensor_spec
+            )
         else:
             # Parent contexts are passed in when we are recursively creating
             # fake tensors for subclasses. A better design would be not to create a
@@ -4363,6 +4859,15 @@ def _wrap_to_fake_tensor_and_record_impl(
                     symbolic_context=symbolic_context,
                 )
             )
+        if tensor_spec is not None:
+            for dim_i in range(fake_e.dim()):
+                dim_spec = tensor_spec[dim_i]
+                if dim_spec is None or isinstance(dim_spec, int):
+                    continue
+                size_sym = fake_e.size(dim_i)
+                if not isinstance(size_sym, torch.SymInt):
+                    continue
+                _wire_spec_slot(dim_spec, size_sym)
         if (
             source is not None
             and isinstance(fake_e, FakeTensor)
@@ -4490,7 +4995,7 @@ class SourcelessBuilder:
             and not isinstance(value, enum.Enum)
             and not is_pybind11_enum_member(value)
         ):
-            return TorchScriptObjectVariable.create(value, value)
+            return TorchScriptObjectVariable.create(value, value, tx=tx)
         elif is_opaque_reference_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
@@ -4499,6 +5004,7 @@ class SourcelessBuilder:
             return TorchScriptObjectVariable.create(
                 value,  # pyrefly: ignore[bad-argument-type]
                 fake_script_obj,
+                tx=tx,
             )
         # type: ignore[attr-defined]
         elif isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
@@ -4634,11 +5140,11 @@ class SourcelessBuilder:
 
     @staticmethod
     def make_type_handlers() -> dict[
-        type, Callable[["InstructionTranslator", Any], VariableTracker]
+        type, Callable[["InstructionTranslatorBase", Any], VariableTracker]
     ]:
         create = SourcelessBuilder.create
         handlers: dict[
-            type, Callable[[InstructionTranslator, Any], VariableTracker]
+            type, Callable[[InstructionTranslatorBase, Any], VariableTracker]
         ] = {}
         for t in common_constant_types:
             handlers[t] = lambda tx, value: ConstantVariable(value)
@@ -4711,7 +5217,7 @@ class SourcelessBuilder:
             )
         )
 
-        def passthrough(tx: "InstructionTranslator", value: T) -> T:
+        def passthrough(tx: "InstructionTranslatorBase", value: T) -> T:
             return value
 
         for cls in VariableTrackerMeta.all_subclasses:
@@ -4733,7 +5239,7 @@ class SourcelessUserDefinedObjectBuilder:
         raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
 
     @staticmethod
-    def create(tx: "InstructionTranslator", value: Any) -> VariableTracker:
+    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
         value_type = type(value)
         if issubclass(value_type, MutableMapping):
             return MutableMappingVariable(value, mutation_type=ValueMutationNew())

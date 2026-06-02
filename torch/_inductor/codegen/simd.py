@@ -44,7 +44,10 @@ if TYPE_CHECKING:
     from ..ir import IRNode
 
 from ..ops_handler import WrapperHandler
-from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..optimize_indexing import (
+    convert_index_expr_to_value_expr,
+    indexing_dtype_strength_reduction,
+)
 from ..runtime.coordinate_descent_tuner import CoordescTuner
 from ..runtime.hints import DeviceProperties
 from ..runtime.runtime_utils import green_text, last_power_of_2, yellow_text
@@ -571,6 +574,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.min_xblock: int | None = None
         self.min_rblock: int | None = None
         self.saved_partial_accumulate: list[PartialAccumulate] = []
+        self._index_dtype = self.features.select_index_dtype()
 
     def codegen_template_body(
         self,
@@ -619,7 +623,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         raise NotImplementedError
 
     def get_index_dtype_as_torch_dtype(self) -> torch.dtype:
-        return self.features.select_index_dtype()
+        return self._index_dtype
 
     @property
     def index_dtype(self) -> str:
@@ -2923,7 +2927,7 @@ class SIMDScheduling(BaseScheduling):
         self, node: scheduler.FusedSchedulerNode | scheduler.SchedulerNode
     ):
         """
-        Given a set of pre-fused nodes, generate a Triton kernel.
+        Given a set of pre-fused nodes, generate a SIMD kernel.
         """
         assert self.scheduler
         nodes = [
@@ -3157,6 +3161,7 @@ class SIMDScheduling(BaseScheduling):
                 else:
                     # TODO - use split ranges ?
                     indexing_dtype_strength_reduction(node._body)
+                    convert_index_expr_to_value_expr(node._body)
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 
@@ -3397,7 +3402,7 @@ class SIMDScheduling(BaseScheduling):
                 return None
 
     def codegen_sync(self):
-        V.graph.wrapper_code.generate_debug_sync(V.graph.wrapper_code)
+        V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
 
     def generate_combo_kernel_code(
         self,
