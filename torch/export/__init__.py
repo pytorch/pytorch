@@ -61,7 +61,8 @@ def export(
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any] | None = None,
     *,
-    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
+    # dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | ShapesSpec | ParamsSpec | None
+    dynamic_shapes: Any = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
     prefer_deferred_runtime_asserts_over_guards: bool = False,
@@ -126,6 +127,42 @@ def export(
          where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
+
+         **ShapesSpec API.** ``dynamic_shapes`` may also be a
+         :class:`torch.fx.experimental.dynamic_spec.ShapesSpec` (or its
+         shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`).
+         This is a newer unbacked unified API across compile, pre-compile, 
+         export, etc., and is the recommended way to specify dynamic 
+         shapes for export going forward.
+
+         Key properties (see :mod:`torch.fx.experimental.dynamic_spec` for
+         full details):
+
+         * **Unbacked-only.** Dims / scalars marked dynamic become unbacked
+           SymInts (``u`` symbols) and are never specialized (including no
+           0/1 specialization).
+         * **Assumptions and derived expressions.** You may attach
+           assumptions and expressions derived from the spec's symbols.
+         * **Export-time soundness.** The exported graph is guaranteed valid
+           for every assumption provided, otherwise export fails. (The legacy
+           ``Dim.DYNAMIC`` / ``Dim.AUTO`` mode may silently specialize a
+           dynamic dim, yielding a graph only valid for the example shape.)
+
+         Example::
+
+            from torch.fx.experimental.dynamic_spec import (
+                ParamsSpec, ShapesSpec, ShapeVar, TensorSpec,
+            )
+
+            ep = torch.export.export(
+                mod, (torch.randn(8, 3),),
+                dynamic_shapes=ShapesSpec(
+                    params=ParamsSpec({
+                        "x": TensorSpec([ShapeVar("batch", min=1, max=128), None]),
+                    })
+                ),
+                strict=True,
+            )
 
         strict: When disabled (default), the export function will trace the program through
          Python runtime, which by itself will not validate some of the implicit assumptions

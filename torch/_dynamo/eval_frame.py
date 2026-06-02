@@ -2202,7 +2202,7 @@ def export(
     pre_dispatch: bool = False,
     decomposition_table: dict[torch._ops.OpOverload, Callable[..., Any]] | None = None,
     tracing_mode: str = "symbolic",
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
+    dynamic_shapes: Any = None,
     specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
@@ -2248,6 +2248,42 @@ def export(
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
 
+         **Experimental ShapesSpec API.** ``dynamic_shapes`` may also be a
+         :class:`torch.fx.experimental.dynamic_spec.ShapesSpec` (or its
+         shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`).
+         This is the same spec API exposed via ``shapes_spec=`` in
+         :func:`torch.compile`.
+
+         The keys of ``ParamsSpec`` are **parameter names of the callable
+         being traced** (for an ``nn.Module`` this is the parameters of
+         ``forward``)::
+
+             class M(torch.nn.Module):
+                 def forward(self, x, y, z=None):
+                     ...
+
+             ep = torch.export.export(
+                 M(),
+                 args=(torch.randn(8, 3),),                 # x
+                 kwargs={"y": torch.randn(5, 3), "z": 7},   # y, z
+                 dynamic_shapes=ShapesSpec(params=ParamsSpec({
+                     "x": TensorSpec([ShapeVar("A"), None]),
+                     "y": TensorSpec([ShapeVar("B"), None]),
+                 })),
+                 strict=True,
+             )
+
+         Key properties of the ``ShapesSpec`` path (see
+         :mod:`torch.fx.experimental.dynamic_spec` for full details):
+
+         * **Unbacked-only.** Dims / scalars marked dynamic become unbacked
+           SymInts (``u`` symbols) and are never specialized (including no
+           0/1 specialization).
+         * **Assumptions and derived expressions.** You may attach
+           assumptions and expressions derived from the spec's symbols.
+         * **Export-time soundness.** The exported graph is guaranteed to be
+           valid for every assumption provided, otherwise export fails.
+
         same_signature (bool): If True, rewrite the returned graph's signature to be the same as f.
 
         disable_constraint_solver (bool): Whether the dim constraint solver must be disabled.
@@ -2267,6 +2303,33 @@ def export(
     """
     if config.debug_force_graph_break_on_leaf_return:
         raise unittest.SkipTest("Cannot force graph break on export")
+
+    # `dynamic_shapes` is overloaded: it accepts the legacy dict/tuple/list/Dim
+    # spec, OR the new ShapesSpec/ParamsSpec API. If the latter is passed, we
+    # route it through dynamo's `shapes_spec` mechanism and skip the legacy
+    # constraint processing.
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+
+    shapes_spec: ShapesSpec | None = None
+    if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
+        if constraints:
+            raise ValueError(
+                "`dynamic_shapes=ShapesSpec(...)` cannot be combined with "
+                "`constraints`. ShapesSpec controls dynamic behavior on its own."
+            )
+        if prefer_deferred_runtime_asserts_over_guards:
+            raise ValueError(
+                "`prefer_deferred_runtime_asserts_over_guards=True` cannot "
+                "be combined with `dynamic_shapes=ShapesSpec(...)`. "
+                "ShapesSpec currently uses unbacked symbols only, which "
+                "already emit runtime assertions; the flag has no effect."
+            )
+        shapes_spec = (
+            ShapesSpec(dynamic_shapes)
+            if isinstance(dynamic_shapes, ParamsSpec)
+            else dynamic_shapes
+        )
+        dynamic_shapes = None
 
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_dynamo"})
@@ -2453,6 +2516,11 @@ def export(
             ),
             _compiling_state_context(),
         ):
+            # `optimize_assert` is dynamo's single-graph-capture entry point
+            # (used by both `fullgraph=True` torch.compile and export). It
+            # forces graph-break-as-error and traces `f` once into a single
+            # FX graph; here the backend just captures the graph instead of
+            # compiling/running it.
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(
@@ -2461,6 +2529,7 @@ def export(
                 ),
                 export=True,
                 export_constraints=constraints,
+                shapes_spec=shapes_spec,
             )(f)
             # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
             try:
