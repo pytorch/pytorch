@@ -1890,7 +1890,7 @@ class TestFSDPOptimState(FSDPTest):
         for state in osd["state"].values():
             for s in state.values():
                 self.assertFalse(isinstance(s, ShardedTensor))
-                self.assertFalse(s.device_type in ("cuda", "xpu"))
+                self.assertFalse(s.device.type in ("cuda", "xpu"))
 
         # Test sharded state_dict without offload_to_cpu
         with FSDP.state_dict_type(
