@@ -2233,6 +2233,16 @@
       ]
     }
   ],
+  "GB5240": [
+    {
+      "Gb_type": "function __dict__ write to signature slot",
+      "Context": "function.__dict__[{name}] = ...",
+      "Explanation": "Dynamo does not support writing function signature slots through __dict__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB8335": [
     {
       "Gb_type": "Generator reconstruction with mutations",
@@ -2954,6 +2964,16 @@
       ]
     }
   ],
+  "GB7618": [
+    {
+      "Gb_type": "inspect.signature on nested function with non-constant signature metadata",
+      "Context": "inspect.signature({target_arg.get_name()})",
+      "Explanation": "Dynamo could not statically construct signature metadata for this nested function.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0210": [
     {
       "Gb_type": "torch.distributed package is not available!",
@@ -3409,6 +3429,26 @@
       "Gb_type": "Attempted to call op with non-contiguous `out=` list of tensors",
       "Context": "self.value={self.value}, args={args}, kwargs={kwargs}",
       "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5559": [
+    {
+      "Gb_type": "inspect.signature on nested function with unsupported kwargs",
+      "Context": "inspect.signature({target_arg.get_name()}, {name}=...)",
+      "Explanation": "Dynamo does not support the inspect.signature kwarg {name} for nested functions.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0951": [
+    {
+      "Gb_type": "inspect.signature on nested function with non-constant kwargs",
+      "Context": "inspect.signature({target_arg.get_name()}, {name}=...)",
+      "Explanation": "Dynamo requires inspect.signature kwargs for nested functions to be Python constants.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -4537,6 +4577,16 @@
       "Explanation": "Member '{name}' is not registered for this opaque object type.",
       "Hints": [
         "Register '{name}' with a MemberType in register_opaque_type(members=...)."
+      ]
+    }
+  ],
+  "GB1925": [
+    {
+      "Gb_type": "inspect.signature on nested function with eval_str=True",
+      "Context": "inspect.signature({target_arg.get_name()}, eval_str=True)",
+      "Explanation": "Dynamo does not evaluate string annotations for nested functions during inspect.signature tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

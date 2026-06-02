@@ -13966,6 +13966,375 @@ fn
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         self.assertEqual(fn(x, gn), opt_fn(x, gn))
 
+    def test_inspect_signature_nested_function_parameters(self):
+        import inspect
+
+        def fn(x):
+            closed_over = x + 1
+
+            def inner(a: int, b: torch.Tensor = 2, *, c=3):
+                return a + closed_over + b + c
+
+            params = inspect.signature(inner).parameters
+            return (
+                x
+                + len(params)
+                + params["b"].default
+                + int(params["a"].kind)
+                + len(params["a"].name)
+                + int(params["a"].annotation is int)
+                + int(params["b"].annotation is torch.Tensor)
+            )
+
+        x = torch.randn(2, 3)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_inspect_signature_nested_function_signature_override(self):
+        import inspect
+
+        def fn(x):
+            def template(a, b, c):
+                return a + b + c
+
+            override_signature = inspect.signature(template)
+
+            def inner(a, b):
+                return a + b
+
+            inner.__signature__ = override_signature
+            return x + len(inspect.signature(inner).parameters)
+
+        x = torch.randn(())
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_inspect_signature_nested_function_source_signature_graph_break(self):
+        import inspect
+
+        override_signature = inspect.Signature(
+            [
+                inspect.Parameter("a", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+                inspect.Parameter("b", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+            ]
+        )
+
+        def fn(x):
+            def inner(a):
+                return a
+
+            inner.__signature__ = override_signature
+            return x + len(inspect.signature(inner).parameters)
+
+        x = torch.randn(())
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(fn(x), x + 2)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "inspect.signature on nested function with non-constant signature metadata",
+        ):
+            opt_fn(x)
+
+    def test_inspect_signature_nested_function_follows_wrapped(self):
+        import functools
+        import inspect
+
+        def fn(x):
+            closed_over = x + 1
+
+            def original(a, b, c):
+                return a + b + c + closed_over
+
+            @functools.wraps(original)
+            def inner(a, b):
+                return a + b
+
+            return x + len(inspect.signature(inner).parameters)
+
+        x = torch.randn(())
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_inspect_signature_nested_function_kwargs(self):
+        import functools
+        import inspect
+
+        def fn(x):
+            def original(a, b, c):
+                return a + b + c
+
+            @functools.wraps(original)
+            def inner(a, b):
+                return a + b
+
+            default_params = inspect.signature(
+                inner, globals=None, locals=None, eval_str=False
+            ).parameters
+            nowrap_params = inspect.signature(inner, follow_wrapped=False).parameters
+            kw_obj_params = inspect.signature(
+                obj=inner, follow_wrapped=False
+            ).parameters
+            return x + len(default_params) + len(nowrap_params) + len(kw_obj_params)
+
+        x = torch.randn(())
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_inspect_signature_nested_function_source_wrapped_graph_break(self):
+        import inspect
+
+        def wrapped(a=1):
+            return a
+
+        def fn(x):
+            def inner(a):
+                return a
+
+            inner.__wrapped__ = wrapped
+            return x + len(inspect.signature(inner).parameters)
+
+        x = torch.randn(())
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(fn(x), x + 1)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "inspect.signature on nested function with non-constant signature metadata",
+        ):
+            opt_fn(x)
+
+    def test_inspect_signature_nested_function_precedence(self):
+        import inspect
+
+        def fn(x):
+            def template(a, b):
+                return a + b
+
+            override_signature = inspect.signature(template)
+
+            def signature_overrides_defaults(a=x):
+                return a
+
+            signature_overrides_defaults.__signature__ = override_signature
+
+            def wrapped_with_tensor_default(a=x, b=1, c=2):
+                return a
+
+            def wrapper(a, b):
+                return a + b
+
+            wrapper.__wrapped__ = wrapped_with_tensor_default
+
+            sig_params = inspect.signature(signature_overrides_defaults).parameters
+            nowrap_params = inspect.signature(wrapper, follow_wrapped=False).parameters
+            return x + len(sig_params) + len(nowrap_params)
+
+        x = torch.randn(())
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_inspect_signature_nested_function_mutated_defaults(self):
+        import inspect
+
+        def fn(x):
+            def inner(a=1, *, b=2):
+                return a + b
+
+            original_params = inspect.signature(inner).parameters
+            inner.__defaults__ = (7,)
+            inner.__kwdefaults__ = {"b": 11}
+            mutated_params = inspect.signature(inner).parameters
+            read_defaults = inner.__defaults__[0]
+            read_kwdefaults = inner.__kwdefaults__["b"]
+            inner.__defaults__ = (13,)
+            inner.__kwdefaults__ = {"b": 17}
+            inner.__defaults__ = None
+            inner.__kwdefaults__ = None
+            none_defaults = int(inner.__defaults__ is None)
+            none_kwdefaults = int(inner.__kwdefaults__ is None)
+            none_params = inspect.signature(inner).parameters
+            del inner.__defaults__
+            del inner.__kwdefaults__
+            deleted_params = inspect.signature(inner).parameters
+            deleted_count = (
+                int(none_params["a"].default is inspect.Parameter.empty)
+                + int(none_params["b"].default is inspect.Parameter.empty)
+                + int(deleted_params["a"].default is inspect.Parameter.empty)
+                + int(deleted_params["b"].default is inspect.Parameter.empty)
+            )
+            return (
+                x
+                + original_params["a"].default
+                + original_params["b"].default
+                + mutated_params["a"].default
+                + mutated_params["b"].default
+                + read_defaults
+                + read_kwdefaults
+                + none_defaults
+                + none_kwdefaults
+                + deleted_count
+            )
+
+        x = torch.randn(())
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_inspect_signature_nested_function_dunder_dict_slots_graph_break(self):
+        def defaults_fn(x):
+            def inner(a=1):
+                return a
+
+            inner.__dict__["__defaults__"] = (2,)
+            return x + inner.__defaults__[0]
+
+        def kwdefaults_fn(x):
+            def inner(*, a=1):
+                return a
+
+            inner.__dict__["__kwdefaults__"] = {"a": 2}
+            return x + inner.__kwdefaults__["a"]
+
+        x = torch.randn(())
+        for fn in (defaults_fn, kwdefaults_fn):
+            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+            self.assertEqual(fn(x), x + 1)
+            with self.assertRaisesRegex(
+                Unsupported,
+                "function __dict__ write to signature slot",
+            ):
+                opt_fn(x)
+
+    def test_inspect_signature_nested_function_string_metadata_graph_break(self):
+        import inspect
+
+        def fn(x):
+            def text_signature(a):
+                return a
+
+            text_signature.__text_signature__ = "(p, /)"
+
+            def signature_string(a):
+                return a
+
+            signature_string.__signature__ = "(q, /)"
+            return x + len(inspect.signature(text_signature).parameters)
+
+        def gn(x):
+            def signature_string(a):
+                return a
+
+            signature_string.__signature__ = "(q, /)"
+            return x + len(inspect.signature(signature_string).parameters)
+
+        x = torch.randn(())
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        opt_gn = torch.compile(backend="eager", fullgraph=True)(gn)
+        self.assertEqual(fn(x), x + 1)
+        try:
+            expected = gn(x)
+        except TypeError as e:
+            # CPython versions differ on whether a string __signature__ is
+            # accepted. Dynamo should still graph break before specializing it.
+            self.assertIn("__signature__", str(e))
+        else:
+            self.assertEqual(expected, x + 1)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "inspect.signature on nested function with non-constant signature metadata",
+        ):
+            opt_fn(x)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "inspect.signature on nested function with non-constant signature metadata",
+        ):
+            opt_gn(x)
+
+    def test_inspect_signature_nested_function_eval_str_graph_break(self):
+        import inspect
+
+        def fn(x):
+            def inner(a: "int"):
+                return a
+
+            sig = inspect.signature(inner, eval_str=True)
+            return x + int(sig.parameters["a"].annotation is int)
+
+        x = torch.randn(())
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        self.assertEqual(fn(x), x + 1)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "inspect.signature on nested function with eval_str=True",
+        ):
+            opt_fn(x)
+
+    def test_inspect_signature_nested_function_identity_metadata_graph_break(self):
+        import inspect
+
+        def default_fn(x):
+            default = []
+
+            def inner(a=default):
+                return a
+
+            param = inspect.signature(inner).parameters["a"]
+            return x + int(param.default is default)
+
+        def kwdefault_fn(x):
+            default = []
+
+            def inner(*, a=default):
+                return a
+
+            param = inspect.signature(inner).parameters["a"]
+            return x + int(param.default is default)
+
+        def annotation_fn(x):
+            annotation = []
+
+            def inner(a: annotation):
+                return a
+
+            param = inspect.signature(inner).parameters["a"]
+            return x + int(param.annotation is annotation)
+
+        x = torch.randn(())
+        for fn in (default_fn, kwdefault_fn, annotation_fn):
+            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+            self.assertEqual(fn(x), x + 1)
+            with self.assertRaisesRegex(
+                Unsupported,
+                "inspect.signature on nested function with non-constant signature metadata",
+            ):
+                opt_fn(x)
+
+    def test_inspect_signature_nested_function_partialmethod_graph_break(self):
+        import functools
+        import inspect
+
+        def base(self, a, b, c=1):
+            return a + b + c
+
+        partialmethod = functools.partialmethod(base, 1)
+
+        def fn(x):
+            def inner(self, a, b, c=1):
+                return a + b + c
+
+            partialmethod_attr = (
+                "__partialmethod__" if sys.version_info >= (3, 13) else "_partialmethod"
+            )
+            setattr(inner, partialmethod_attr, partialmethod)
+            return x + len(inspect.signature(inner).parameters)
+
+        x = torch.randn(())
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        fn(x)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "inspect.signature on nested function with non-constant signature metadata",
+        ):
+            opt_fn(x)
+
     def test_inspect_signature_caching(self):
         """Test that inspect.signature results are cached for repeated calls."""
         import inspect
