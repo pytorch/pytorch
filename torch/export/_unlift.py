@@ -360,16 +360,19 @@ def _get_codegen(
     in_spec: pytree.TreeSpec,
     out_spec: pytree.TreeSpec | None,
     forward_arg_names: list[str] | None = None,
+    is_args_kwargs: bool = False,
 ) -> _PyTreeCodeGen:
     """
     Create the codegen for the graph module based on the in/out specs
     """
-    is_args_kwargs = (
+    if is_args_kwargs and not (
         in_spec.type is tuple
         and in_spec.num_children == 2
         and in_spec.child(0).type is tuple
         and in_spec.child(1).type is dict
-    )
+    ):
+        raise AssertionError(f"Expected args/kwargs input spec, got {in_spec}")
+
     if forward_arg_names:
         names = forward_arg_names
     elif is_args_kwargs:
@@ -397,6 +400,7 @@ def _unlift(
     in_spec: pytree.TreeSpec,
     out_spec: pytree.TreeSpec | None,
     forward_arg_names: list[str] | None = None,
+    is_args_kwargs: bool = True,
 ):
     """
     Args:
@@ -419,7 +423,12 @@ def _unlift(
     _insert_copy_for_mutations(
         gm, mutated_outputs, unlifted_name_to_node, input_name_to_node
     )
-    gm.graph._codegen = _get_codegen(in_spec, out_spec, forward_arg_names)
+    gm.graph._codegen = _get_codegen(
+        in_spec,
+        out_spec,
+        forward_arg_names,
+        is_args_kwargs,
+    )
     gm.graph.lint()
     gm.recompile()
     return gm
@@ -841,6 +850,7 @@ def _unlift_exported_program_lifted_states(
         ep.call_spec.in_spec,
         ep.call_spec.out_spec,
         forward_arg_names=forward_arg_names,
+        is_args_kwargs=True,
     )
     unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints, ep)
     unlift_gm.meta.update(ep.graph_module.meta)

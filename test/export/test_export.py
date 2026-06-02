@@ -579,6 +579,46 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
+    def test_unlift_codegen_disambiguates_positional_tuple_dict_spec(self):
+        from torch.export._unlift import _get_codegen
+
+        _, in_spec = tree_flatten(((torch.ones(1),), {"x": torch.ones(1)}))
+
+        positional_bindings = _get_codegen(
+            in_spec, None, is_args_kwargs=False
+        ).gen_var_bindings(["arg_0", "arg_1"], ["arg_0", "arg_1"], False)
+        self.assertExpectedInline(
+            positional_bindings,
+            """\
+
+    arg_0, arg_1, = fx_pytree.tree_flatten_spec([arg_0, arg_1], self._in_spec)""",
+        )
+
+        args_kwargs_bindings = _get_codegen(
+            in_spec, None, is_args_kwargs=True
+        ).gen_var_bindings(["arg_0", "x"], ["arg_0", "x"], False)
+        self.assertExpectedInline(
+            args_kwargs_bindings,
+            """\
+
+    arg_0, x, = fx_pytree.tree_flatten_spec(([arg_0], {'x':x}), self._in_spec)""",
+        )
+
+    def test_export_module_tuple_dict_positional_codegen(self):
+        class M(torch.nn.Module):
+            def forward(self, a, x):
+                return a[0] + x["x"]
+
+        a = torch.randn(3)
+        x = torch.randn(3)
+        ep = export(M(), ((a,), {"x": x}))
+        mod = ep.module()
+
+        new_a = torch.randn(3)
+        new_x = torch.randn(3)
+        self.assertEqual(mod((new_a,), {"x": new_x}), new_a + new_x)
+        self.assertTrue(mod.graph._codegen.pytree_info.is_args_kwargs)
+
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
         exported_program = export(f, args, kwargs)
