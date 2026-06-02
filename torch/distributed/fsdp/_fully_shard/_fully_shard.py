@@ -267,7 +267,12 @@ def fully_shard(
         module, device, ignored_params
     )
     state = fully_shard.state(modules[0])  # type: ignore[attr-defined]
-    state.init(modules, device, mp_policy, auto_reshard_after_forward)
+    state.init(
+        modules,
+        device,
+        mp_policy,
+        auto_reshard_after_forward,
+    )
 
     _init_param_group(
         state,
@@ -449,6 +454,41 @@ class FSDPModule:
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
+
+    def set_all_reduce_buffer_window(self, window: int | None) -> None:
+        """
+        Sets how many extra mixed-dtype all-reduce input buffers may remain
+        outstanding in the shared communication context during backward.
+
+        Call this on the root FSDP module: the window is a property of the
+        root's shared communication context, not of individual submodules, so
+        there is no per-submodule scoping (hence no ``recurse``).
+
+        ``None`` holds each mixed-dtype buffer until backward finalization. An
+        integer ``k >= 1`` releases a mixed-dtype buffer once it is ``k`` native
+        all-reduce layers behind the current all-reduce, reducing peak memory at
+        the cost of additional stream ordering. Only mixed-dtype reductions
+        (``reduce_dtype != param dtype``) allocate these buffers; same-dtype
+        reductions reuse ``param.grad`` and are unaffected.
+
+        For separately rooted FSDP modules sharing a context via
+        :func:`share_comm_ctx`, set the same value on each root.
+
+        Args:
+            window (Optional[int]): ``None`` or an integer ``>= 1``.
+        """
+        if window is not None and (isinstance(window, bool) or window < 1):
+            raise ValueError(
+                f"all_reduce_buffer_window must be None or an integer >= 1, "
+                f"but got {window}"
+            )
+        state = self._get_fsdp_state()
+        state._all_reduce_buffer_window = window
+        # Before lazy init this per-state value is read in `_init_shared_state`;
+        # once initialized the communication context is shared and live, so
+        # update it directly to take effect without re-initialization.
+        if state._is_root is not None:
+            state._comm_ctx.all_reduce_buffer_release_window = window
 
     def set_reshard_after_forward(
         self, reshard_after_forward: bool, recurse: bool = True

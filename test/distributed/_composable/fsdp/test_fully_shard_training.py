@@ -2549,6 +2549,8 @@ class TestFullyShardShareCommContext(FSDPTest):
             partial_reduce_output: torch.Tensor | None,  # only used for HSDP
             all_reduce_hook: Callable[[torch.Tensor], None] | None,
             force_sum_reduction_for_comms: bool = False,
+            prev_all_reduce_release_events: list[torch.Event] | None = None,
+            record_all_reduce_input_release_event: bool = False,
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -2568,6 +2570,8 @@ class TestFullyShardShareCommContext(FSDPTest):
                 partial_reduce_output,
                 all_reduce_hook,
                 force_sum_reduction_for_comms,
+                prev_all_reduce_release_events,
+                record_all_reduce_input_release_event,
             )
 
         with (
