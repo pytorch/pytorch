@@ -1766,10 +1766,20 @@ def _compile(
                 raise AssertionError(
                     "SkipFrame exception must have _torch_dynamo_tracer_output set"
                 ) from None
+            skip_reason = f"Dynamo decided to skip the frame while tracing: {e}"
+            if isinstance(e, exc.EmptyGraph):
+                return (
+                    ConvertFrameReturn(
+                        frame_exec_strategy=FrameExecStrategy(
+                            FrameAction.SKIP, FrameAction.SKIP
+                        ),
+                        apply_to_code=False,
+                        skip_reason=skip_reason,
+                    ),
+                    e._torch_dynamo_tracer_output,
+                )
             return (
-                ConvertFrameReturn(
-                    skip_reason=f"Dynamo decided to skip the frame while tracing: {e}"
-                ),
+                ConvertFrameReturn(skip_reason=skip_reason),
                 e._torch_dynamo_tracer_output,
             )
 
