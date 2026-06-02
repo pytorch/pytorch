@@ -576,6 +576,71 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
         return x + a
 
 
+class _LenTensorPytreeCache(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.key_cache: list[torch.Tensor] = []
+        self.value_cache: list[torch.Tensor] = []
+
+    def update(self, key_states: torch.Tensor, value_states: torch.Tensor) -> None:
+        self.key_cache.append(key_states)
+        self.value_cache.append(value_states)
+
+    def get_seq_length(self) -> int:
+        if len(self.key_cache) == 0 or len(self.key_cache[0]) == 0:
+            return 0
+        return self.key_cache[0].shape[-2]
+
+
+def _flatten_len_tensor_pytree_cache(cache):
+    return [cache.key_cache, cache.value_cache], [
+        "key_cache",
+        "value_cache",
+    ]
+
+
+def _flatten_with_keys_len_tensor_pytree_cache(cache):
+    values, context = _flatten_len_tensor_pytree_cache(cache)
+    return [(pytree.MappingKey(k), v) for k, v in zip(context, values)], context
+
+
+def _unflatten_len_tensor_pytree_cache(values, context):
+    cache = _LenTensorPytreeCache()
+    for k, v in zip(context, values):
+        setattr(cache, k, v)
+    return cache
+
+
+def _flatten_spec_len_tensor_pytree_cache(cache, _):
+    return [cache.key_cache, cache.value_cache]
+
+
+class _LenTensorPytreeModule(torch.nn.Module):
+    def forward(self, x, cache):
+        key = torch.cat(cache.key_cache, dim=1)
+        value = torch.cat(cache.value_cache, dim=1)
+        seq_length = cache.get_seq_length()
+        zeros = torch.zeros(
+            (
+                len(cache.key_cache[0]),
+                cache.key_cache[0].shape[1],
+                seq_length,
+                cache.key_cache[0].shape[-1],
+            )
+        )
+        return x + (key + value + zeros).sum(dim=2, keepdim=True)
+
+
+def _make_len_tensor_pytree_inputs(batch, seq_length):
+    x = torch.randn(batch, 8, 7, 1)
+    cache = _LenTensorPytreeCache()
+    cache.update(
+        torch.ones(batch, 8, seq_length, 6),
+        torch.ones(batch, 8, seq_length, 6) * 2,
+    )
+    return x, cache
+
+
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
@@ -651,92 +716,38 @@ class TestExport(TestCase):
         self._test_export_same_as_eager(f, inp)
 
     def test_non_strict_export_len_tensor_pytree_nn_module_input(self):
-        class Cache(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.key_cache: list[torch.Tensor] = []
-                self.value_cache: list[torch.Tensor] = []
-
-            def update(
-                self, key_states: torch.Tensor, value_states: torch.Tensor
-            ) -> None:
-                self.key_cache.append(key_states)
-                self.value_cache.append(value_states)
-
-            def get_seq_length(self) -> int:
-                if len(self.key_cache) == 0 or len(self.key_cache[0]) == 0:
-                    return 0
-                return self.key_cache[0].shape[-2]
-
-        def flatten_cache(cache):
-            return [cache.key_cache, cache.value_cache], [
-                "key_cache",
-                "value_cache",
-            ]
-
-        def flatten_with_keys_cache(cache):
-            values, context = flatten_cache(cache)
-            return [(pytree.MappingKey(k), v) for k, v in zip(context, values)], context
-
-        def unflatten_cache(values, context):
-            cache = Cache()
-            for k, v in zip(context, values):
-                setattr(cache, k, v)
-            return cache
-
-        class Module(torch.nn.Module):
-            def forward(self, x, cache):
-                key = torch.cat(cache.key_cache, dim=1)
-                value = torch.cat(cache.value_cache, dim=1)
-                seq_length = cache.get_seq_length()
-                zeros = torch.zeros(
-                    (
-                        len(cache.key_cache[0]),
-                        cache.key_cache[0].shape[1],
-                        seq_length,
-                        cache.key_cache[0].shape[-1],
-                    )
-                )
-                return x + (key + value + zeros).sum(dim=2, keepdim=True)
-
-        def make_inputs(batch, seq_length):
-            x = torch.randn(batch, 8, 7, 1)
-            cache = Cache()
-            cache.update(
-                torch.ones(batch, 8, seq_length, 6),
-                torch.ones(batch, 8, seq_length, 6) * 2,
-            )
-            return x, cache
-
-        pytree.register_pytree_node(
-            Cache,
-            flatten_cache,
-            unflatten_cache,
-            serialized_type_name="test.export.test_export.Cache",
-            flatten_with_keys_fn=flatten_with_keys_cache,
+        pytree._private_register_pytree_node(
+            _LenTensorPytreeCache,
+            _flatten_len_tensor_pytree_cache,
+            _unflatten_len_tensor_pytree_cache,
+            serialized_type_name="test.export.test_export._LenTensorPytreeCache",
+            flatten_with_keys_fn=_flatten_with_keys_len_tensor_pytree_cache,
         )
         torch.fx._pytree.register_pytree_flatten_spec(
-            Cache, lambda cache, _: [cache.key_cache, cache.value_cache]
+            _LenTensorPytreeCache, _flatten_spec_len_tensor_pytree_cache
         )
         try:
-            x, cache = make_inputs(3, 5)
+            x, cache = _make_len_tensor_pytree_inputs(3, 5)
             batch = Dim("batch", min=1, max=1024)
             seq_length = Dim("seq_length", min=1, max=1024)
-            ep = export(
-                Module(),
-                (x, cache),
-                dynamic_shapes=(
-                    {0: batch},
-                    [[{0: batch, 2: seq_length}], [{0: batch, 2: seq_length}]],
-                ),
-                strict=False,
-            )
+            with torch.serialization.safe_globals([_LenTensorPytreeCache]):
+                ep = export(
+                    _LenTensorPytreeModule(),
+                    (x, cache),
+                    dynamic_shapes=(
+                        {0: batch},
+                        [[{0: batch, 2: seq_length}], [{0: batch, 2: seq_length}]],
+                    ),
+                    strict=False,
+                )
 
-            x2, cache2 = make_inputs(4, 6)
-            self.assertEqual(ep.module()(x2, cache2), Module()(x2, cache2))
+            x2, cache2 = _make_len_tensor_pytree_inputs(4, 6)
+            self.assertEqual(
+                ep.module()(x2, cache2), _LenTensorPytreeModule()(x2, cache2)
+            )
         finally:
-            pytree._deregister_pytree_node(Cache)
-            torch.fx._pytree._deregister_pytree_flatten_spec(Cache)
+            pytree._deregister_pytree_node(_LenTensorPytreeCache)
+            torch.fx._pytree._deregister_pytree_flatten_spec(_LenTensorPytreeCache)
 
     @skipIfCrossRef  # CrossRefMode interferes with functorch ops
     @skipIfTorchDynamo("export inside dynamo is not supported")
@@ -1621,6 +1632,56 @@ graph():
             self.assertEqual(eager_out_bigru, ep_out_bigru)
             ep_out_bigru_dynamic = ep_bigru.module()(x_, h0_bi)
             self.assertEqual(ep_out_bigru_dynamic, model_bigru(x_, h0_bi))
+
+    def test_dynamic_lstm_with_aliased_flat_weights(self):
+        from torch.export._patches import register_lstm_while_loop_decomposition
+
+        def share_flat_weight_storage(lstm):
+            flat_weight_names = lstm._flat_weights_names
+            old_weights = [getattr(lstm, name).detach() for name in flat_weight_names]
+            flat = torch.nn.Parameter(
+                torch.empty(
+                    sum(weight.numel() for weight in old_weights),
+                    device=old_weights[0].device,
+                    dtype=old_weights[0].dtype,
+                )
+            )
+            offset = 0
+            with torch.no_grad():
+                for name, old_weight in zip(flat_weight_names, old_weights):
+                    view = flat[offset : offset + old_weight.numel()].view_as(
+                        old_weight
+                    )
+                    view.copy_(old_weight)
+                    setattr(lstm, name, torch.nn.Parameter(view))
+                    offset += old_weight.numel()
+            lstm._init_flat_weights()
+
+        class BiLSTM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(4, 3, batch_first=True, bidirectional=True)
+                share_flat_weight_storage(self.lstm)
+
+            def forward(self, x):
+                out, _ = self.lstm(x)
+                return out
+
+        with torch.backends.mkldnn.flags(enabled=False):
+            model = BiLSTM()
+            storages = {
+                getattr(model.lstm, name).untyped_storage().data_ptr()
+                for name in model.lstm._flat_weights_names
+            }
+            self.assertEqual(len(storages), 1)
+
+            x = torch.randn(2, 5, 4)
+            dynamic_shapes = {"x": {1: Dim.DYNAMIC}}
+            with register_lstm_while_loop_decomposition():
+                ep = export(model, (x,), dynamic_shapes=dynamic_shapes)
+
+            x_dynamic = torch.randn(2, 7, 4)
+            self.assertEqual(ep.module()(x_dynamic), model(x_dynamic))
 
     @testing.expectedFailureStrictV2
     def test_no_tensor_computation(self):
