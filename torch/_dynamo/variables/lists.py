@@ -31,7 +31,13 @@ from ..bytecode_transformation import (
     create_dup_top,
     create_instruction,
 )
-from ..exc import raise_observed_exception, raise_type_error, unimplemented
+from ..exc import (
+    ObservedException,
+    raise_observed_exception,
+    raise_type_error,
+    unimplemented,
+    Unsupported,
+)
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
@@ -1078,55 +1084,71 @@ class ListVariable(CommonListMethodsVariable):
             if len(kwargs) != 0:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
 
-            if key_fn_var.is_constant_none():
-                keys = self.items.copy()
-            else:
-                keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
+            tx.output.side_effects.mutation(self)
+            # CPython's list.sort detaches the list while sorting: reads
+            # during the sort observe an empty list, items added during the
+            # sort are discarded, and the mutation raises ValueError after
+            # the sorted result is installed.
+            saved = list(self.items)
+            self.items.clear()
 
-            if not all(k.is_python_constant() for k in keys):
-                first_non_constant_key = None
-                for k in keys:
-                    if not k.is_python_constant():
-                        first_non_constant_key = k
-                if first_non_constant_key is None:
-                    raise AssertionError(
-                        "expected at least one non-constant key when not all keys are constant"
+            class _TracedKey:
+                # Compares through Dynamo so user-defined __lt__ (e.g. from
+                # functools.cmp_to_key) is traced like CPython's timsort,
+                # which only ever uses "<".
+                def __init__(self, key: VariableTracker) -> None:
+                    self.key = key
+
+                def __lt__(self, other: "_TracedKey") -> bool:
+                    result = variables.BuiltinVariable(operator.lt).call_function(
+                        tx, [self.key, other.key], {}
                     )
-
-                try:
-                    python_type = str(first_non_constant_key.python_type())
-                except NotImplementedError:
-                    python_type = "unknown"
-
-                unimplemented(
-                    gb_type="sort with non-constant keys",
-                    context=str(first_non_constant_key),
-                    explanation=(
-                        f"Cannot perform sort with non-constant key. "
-                        f"First non-constant key type: {python_type}. "
-                        f"Most notably, we cannot sort with Tensor or SymInt keys, but we can "
-                        f"sort ints."
-                    ),
-                    hints=["Use something else as the key."],
-                )
+                    if not result.is_python_constant():
+                        unimplemented(
+                            gb_type="sort with non-constant keys",
+                            context=str(self.key),
+                            explanation=(
+                                f"Cannot perform sort whose key comparison is not "
+                                f"a compile-time constant. "
+                                f"Key type: {self.key.python_type()}. "
+                                f"Most notably, we cannot sort with Tensor or SymInt "
+                                f"keys, but we can sort ints."
+                            ),
+                            hints=["Use something else as the key."],
+                        )
+                    return bool(result.as_python_constant())
 
             try:
-                tx.output.side_effects.mutation(self)
-                sorted_items_with_keys = sorted(
-                    (
-                        (
-                            x,
-                            k.as_python_constant(),
-                            -i if reverse else i,  # extra key to ensure stable sort
-                        )
-                        for i, (k, x) in enumerate(zip(keys, self.items))
-                    ),
-                    key=operator.itemgetter(1, 2),
-                    reverse=reverse,
-                )
-                self.items[:] = [x for x, *_ in sorted_items_with_keys]
+                if key_fn_var.is_constant_none():
+                    keys = list(saved)
+                else:
+                    keys = [key_fn_var.call_function(tx, [x], {}) for x in saved]
+
+                if all(k.is_python_constant() for k in keys):
+                    order = sorted(
+                        range(len(saved)),
+                        key=lambda i: keys[i].as_python_constant(),
+                        reverse=reverse,
+                    )
+                else:
+                    order = sorted(
+                        range(len(saved)),
+                        key=lambda i: _TracedKey(keys[i]),
+                        reverse=reverse,
+                    )
+                new_items = [saved[i] for i in order]
+            except (ObservedException, Unsupported):
+                self.items[:] = saved
+                raise
             except Exception as e:
+                self.items[:] = saved
                 raise_observed_exception(type(e), tx, args=list(e.args))
+            modified_during_sort = bool(self.items)
+            self.items[:] = new_items
+            if modified_during_sort:
+                raise_observed_exception(
+                    ValueError, tx, args=["list modified during sort"]
+                )
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
