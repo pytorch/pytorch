@@ -980,6 +980,22 @@ command = [
 ]
 
 [[linter]]
+code = 'WORKFLOWOWNERS'
+include_patterns = [
+    '.github/workflows/*.yml',
+    '.github/workflows/*.yaml',
+]
+exclude_patterns = [
+    '**/fb/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/workflow_owners_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+
+[[linter]]
 code = 'TEST_HAS_MAIN'
 include_patterns = [
     'test/**/test_*.py',

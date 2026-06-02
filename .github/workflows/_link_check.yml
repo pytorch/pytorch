@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 on:
   workflow_call:
     inputs:

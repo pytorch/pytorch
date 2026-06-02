@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2", "module: rocm"]
 name: inductor-rocm-mi300
 
 on:

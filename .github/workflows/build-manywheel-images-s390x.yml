@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: Build manywheel docker images for s390x
 
 on:

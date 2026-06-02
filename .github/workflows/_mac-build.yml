@@ -1,3 +1,4 @@
+# Owner(s): ["module: macos"]
 name: mac-build
 
 on:

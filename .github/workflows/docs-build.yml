@@ -1,3 +1,4 @@
+# Owner(s): ["module: docs"]
 name: docs-build
 
 # Standalone docs build so the docs preview can be published as soon as the

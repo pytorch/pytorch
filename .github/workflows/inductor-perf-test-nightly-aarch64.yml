@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2", "module: arm"]
 name: inductor-perf-nightly-aarch64
 
 on:
