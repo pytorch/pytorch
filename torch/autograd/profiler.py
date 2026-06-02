@@ -422,7 +422,16 @@ class profile:
         if self.use_device and hasattr(torch, self.use_device):
             device_module = getattr(torch, self.use_device)
             if hasattr(device_module, "synchronize"):
-                device_module.synchronize()
+                if self.use_device == "cuda":
+                    for i in range(torch.cuda.device_count()):
+                        if torch._C._cuda_hasPrimaryContext(i):
+                            torch.cuda.synchronize(i)
+                elif hasattr(device_module, "device_count"):
+                    # No hasPrimaryContext equivalent for non-CUDA backends
+                    for i in range(device_module.device_count()):
+                        device_module.synchronize(i)
+                else:
+                    device_module.synchronize()
 
         if self._function_events and self.acc_events:
             self._old_function_events = self._function_events
@@ -1144,7 +1153,9 @@ class emit_nvtx:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        torch.cuda.synchronize()
+        for i in range(torch.cuda.device_count()):
+            if torch._C._cuda_hasPrimaryContext(i):
+                torch.cuda.synchronize(i)
         _disable_profiler()
         _run_on_profiler_stop()
         return False

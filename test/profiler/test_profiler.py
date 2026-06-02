@@ -586,6 +586,38 @@ class TestProfiler(TestCase):
         self.assertTrue(found_cuda)
         self._check_stats(prof._stats())
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not TEST_MULTIGPU, "Multiple GPUs needed")
+    def test_profiler_sync_all_devices_on_exit(self):
+        """Profiler must capture k
+        ernels on non-default devices without explicit sync.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/181238
+        """
+        device = "cuda:1"
+        x = torch.randn(4096, 4096, device=device)
+        y = torch.randn(4096, 4096, device=device)
+        # Warm up to avoid lazy-loading overhead
+        torch.mm(x, y)
+        torch.cuda.synchronize(device)
+
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            for _ in range(10):
+                torch.mm(x, y)
+            # No explicit torch.cuda.synchronize(device) here —
+            # the profiler's __exit__ should sync all active devices.
+
+        found_mm_on_device1 = any(
+            "gemm" in evt.name.lower()
+            and evt.device_type in (DeviceType.CUDA, DeviceType.PrivateUse1)
+            and evt.device_index == 1
+            for evt in prof.events()
+        )
+        self.assertTrue(
+            found_mm_on_device1,
+            "Profiler failed to capture matmul kernels on cuda:1",
+        )
+
     def test_memory_profiler(self):
         def run_profiler(tensor_creation_fn):
             # collecting allocs / deallocs
