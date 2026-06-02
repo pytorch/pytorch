@@ -561,9 +561,9 @@ def bound_builtin_method_descriptor(value: Any) -> Any | None:
     if method_self is None or isinstance(method_self, types.ModuleType):
         return None
 
-    # random.Random methods mutate RNG state.  Existing random handling either
-    # records RandomValueSource calls from a RandomVariable, or graph-breaks for
-    # pre-bound module helpers like random.random.
+    # random.Random methods mutate RNG state. Existing random handling either
+    # records RandomValueSource calls from a RandomVariable, or from the
+    # supported module-level random helpers.
     if isinstance(method_self, random.Random):
         return None
 
@@ -1713,6 +1713,9 @@ class VariableBuilder:
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, method_self, obj_source)
             return BoundBuiltinMethodVariable(descriptor, obj_vt, source=self.source)
+        elif UserDefinedObjectVariable.is_supported_random_function(value):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return UserDefinedObjectVariable(value, source=self.source)
         elif is_function(value) and value in (float.fromhex, float.hex):
             self.install_guards(GuardBuilder.ID_MATCH)
             return GetAttrVariable(
@@ -5023,6 +5026,8 @@ class SourcelessBuilder:
             # pyrefly: ignore[not-callable, bad-argument-count, missing-attribute]
             obj = trace_rules.lookup_callable(value.__self__)(value.__self__)
             return GetAttrVariable(obj, "__new__", py_type=type(value))
+        elif UserDefinedObjectVariable.is_supported_random_function(value):
+            return UserDefinedObjectVariable(value)
         elif is_function_or_wrapper(value):
             # pyrefly: ignore[not-callable, bad-argument-count]
             return trace_rules.lookup(value)(value)

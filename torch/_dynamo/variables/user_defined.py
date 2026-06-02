@@ -2116,6 +2116,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         }
         return fns
 
+    @staticmethod
+    def is_supported_random_function(value: Any) -> bool:
+        try:
+            return value in UserDefinedObjectVariable._supported_random_functions()
+        except (TypeError, AttributeError):
+            # TypeError: unhashable type
+            # AttributeError: backing object may not be fully initialized
+            return False
+
     def mp_subscript_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2846,12 +2855,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().unpack_var_sequence(tx)
 
     def is_supported_random(self) -> bool:
-        try:
-            return self.value in self._supported_random_functions()
-        except (TypeError, AttributeError):
-            # TypeError: unhashable type
-            # AttributeError: backing object may not be fully initialized
-            return False
+        return self.is_supported_random_function(self.value)
 
     def call_function(
         self,
