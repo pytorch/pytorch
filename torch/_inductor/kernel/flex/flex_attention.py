@@ -29,6 +29,7 @@ from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
     create_placeholder,
+    create_unindexed_grad_scatter,
     freeze_irnodes,
     get_fwd_subgraph_outputs,
     infer_dense_strides,
@@ -620,6 +621,14 @@ def process_joint_outputs(
 
     # outer_grads has the structure: Len(other_buffer_grads) if buffer doesn't require grad than it will be None
     # We only grab the buffers that require grad for inlining into kernel
+    # Scalar captures used without indexing do not go through zeros_and_scatter,
+    # but still need a real grad buffer for the template's atomic accumulation.
+    other_grads = [
+        create_unindexed_grad_scatter(buf)
+        if isinstance(buf, ComputedBuffer) and buf.name is None
+        else buf
+        for buf in other_grads
+    ]
     grads_compute = [buf for buf in other_grads if buf is not None]
 
     def get_out(buf):

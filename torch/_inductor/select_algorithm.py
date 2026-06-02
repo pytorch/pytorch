@@ -461,6 +461,9 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     def _broadcast_index(self, index: sympy.Expr, shape: str) -> str:
         index_str = self._process_indexing(index)
         index_shape = TritonSymbols.get_block_shape(index)
+        if isinstance(index, sympy.Integer):
+            # tl.broadcast_to expects a tl.tensor, not a constexpr literal.
+            index_str = f"tl.full([], {index_str}, tl.int64)"
         if (
             index_shape
             and len(index_shape) == 1
@@ -1055,7 +1058,8 @@ class TritonTemplateKernel(TritonKernel):
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
             return sum(
-                x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())
+                (x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())),
+                sympy.S.Zero,
             )
 
         return scatter_graph.data.store_output(  # type: ignore[attr-defined]
