@@ -950,6 +950,8 @@ def forward(self, pred_1, a_1, b_1, c_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    eq = arg5_1 == arg5_1;  arg5_1 = None
+    _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s19, s89) on node 'eq'");  eq = _assert_scalar = None
     return (add,)""",
         )
         # Backward
@@ -958,6 +960,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = add = None
+    eq = arg5_1 == arg5_1;  arg5_1 = None
+    _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s19, s89) on node 'eq'");  eq = _assert_scalar = None
     zeros_like = torch.ops.aten.zeros_like.default(arg4_1, pin_memory = False);  arg4_1 = None
     clone = torch.ops.aten.clone.default(arg6_1)
     clone_1 = torch.ops.aten.clone.default(arg6_1);  arg6_1 = None
@@ -6184,8 +6188,8 @@ def forward(self, a_1, b_1):
     sum_1 = torch.ops.aten.sum.default(a_1)
     gt = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
     sym_size_int = torch.ops.aten.sym_size.int(a_1, 1)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(b_1, 0)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(b_1, 1)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(b_1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(b_1, 0)
     sym_size_int_3 = torch.ops.aten.sym_size.int(a_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
@@ -6198,6 +6202,9 @@ def forward(self, a_1, b_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    eq = arg3_1 == arg3_1;  arg3_1 = None
+    _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s12, s30) on node 'eq'");  _assert_scalar = None
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s85, s57) on node 'eq_1'");  eq = _assert_scalar_1 = None
     return (add,)""",
         )
         self.assertExpectedInline(
@@ -6205,6 +6212,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    eq = arg3_1 == arg3_1;  arg3_1 = None
+    _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s12, s30) on node 'eq'");  _assert_scalar = None
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s85, s57) on node 'eq_1'");  eq = _assert_scalar_1 = None
     return (mul,)""",
         )
 

@@ -101,7 +101,7 @@ def _trace_branch_with_isolated_shape_env(fn, operands, name):
     deferred_runtime_asserts_start = shape_env._snapshot_deferred_runtime_asserts()
     with shape_env.isolate_branch_shape_env():
         graph = reenter_make_fx(fn)(*operands)
-        shape_env.insert_branch_runtime_asserts(
+        shape_env._insert_branch_runtime_asserts(
             graph,
             name,
             guard_start,
@@ -230,7 +230,7 @@ def cond(
     if isinstance(pred, (bool, int, float)):
         # This is the non-strict export case. Strict export and torch.compile are
         # handled above in dynamo.
-        if torch.compiler.is_compiling():
+        if torch.compiler.is_exporting():
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",

@@ -4630,7 +4630,7 @@ class ShapeEnv:
             for symbol, asserts in self.deferred_runtime_asserts.items()
         }
 
-    def insert_branch_runtime_asserts(
+    def _insert_branch_runtime_asserts(
         self,
         gm: torch.fx.GraphModule,
         name: str,

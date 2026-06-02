@@ -2503,7 +2503,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     supports_input_mutation=self.supports_input_mutation,
                     supports_aliasing=self.supports_aliasing,
                 )
-                shape_env.insert_branch_runtime_asserts(
+                shape_env._insert_branch_runtime_asserts(
                     torch.fx.GraphModule(dict(tx.output.nn_modules), ret_graph),
                     f"{self._HOP_NAME}_branch",
                     guard_start,
