@@ -6303,6 +6303,26 @@ class TestMPS(TestCaseMPS):
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, torch.float16)
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, test_bool=True)
 
+    def test_col2im_uint32_overflow(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/185663
+        K = L = 65537
+        cols = torch.zeros(1, K, L, dtype=torch.bool)
+        cols[0, K - 1, :] = True
+        args = ([1, 131073], [1, K], [1, 1], [0, 0], [1, 1])
+        out_cpu = torch.ops.aten.col2im(cols, *args)
+        out_mps = torch.ops.aten.col2im(cols.to("mps"), *args).cpu()
+        self.assertEqual(out_cpu, out_mps)
+
+    def test_col2im_uint32_overflow_spatial(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/185663
+        H = W = 65537
+        cols = torch.zeros(1, 1, H * W, dtype=torch.bool)
+        cols[0, 0, 1 << 32:] = True
+        args = ([H, W], [1, 1], [1, 1], [0, 0], [1, 1])
+        out_cpu = torch.ops.aten.col2im(cols, *args)
+        out_mps = torch.ops.aten.col2im(cols.to("mps"), *args).cpu()
+        self.assertEqual(out_cpu, out_mps)
+
     def test_fold_invalid_input_raises(self):
         # F.fold/col2im on MPS must raise the same shape errors as CPU. See #170639.
         cases = [
