@@ -1708,9 +1708,8 @@ class sample_skips_and_xfails:
         self.rules = rules
 
     def __call__(self, fn):
-        rules = getattr(fn, "sample_skips_and_xfails", None)
-        if rules is not None:
-            raise RuntimeError("Multiple sets of sample_skips_and_xfails defined")
+        if hasattr(fn, "sample_skips_and_xfails"):
+            fn.sample_skips_and_xfails.append(self.rules)
 
         fn.sample_skips_and_xfails = self.rules
         return fn
