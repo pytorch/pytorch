@@ -1708,6 +1708,11 @@ class sample_skips_and_xfails:
         self.rules = rules
 
     def __call__(self, fn):
+        if not isinstance(self.rules, list):
+            raise TypeError(
+                "The rules for sample_skips_and_xfails must be defined as a list"
+            )
+
         if hasattr(fn, "sample_skips_and_xfails"):
             fn.sample_skips_and_xfails.append(self.rules)
 
