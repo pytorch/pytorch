@@ -2,6 +2,8 @@
 
 #include <c10/util/irange.h>
 
+#include <fmt/ranges.h>
+
 #include <array>
 #include <iostream>
 #include <sstream>
@@ -107,16 +109,14 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
   out << "    type = " << cudnnTypeToString(dtype) << '\n';
   out << "    nbDims = " << nbDims << '\n';
   // Read out only nbDims of the arrays!
-  out << "    dimA = ";
-  for (auto i : ArrayRef<int>{dimA, static_cast<size_t>(nbDims)}) {
-    out << i << ", ";
-  }
-  out << '\n';
-  out << "    strideA = ";
-  for (auto i : ArrayRef<int>{strideA, static_cast<size_t>(nbDims)}) {
-    out << i << ", ";
-  }
-  out << '\n';
+  out << "    dimA = "
+      << fmt::format(
+             "{}", fmt::join(ArrayRef<int>{dimA, static_cast<size_t>(nbDims)}, ", "))
+      << '\n';
+  out << "    strideA = "
+      << fmt::format(
+             "{}", fmt::join(ArrayRef<int>{strideA, static_cast<size_t>(nbDims)}, ", "))
+      << '\n';
   return out;
 }
 
@@ -183,11 +183,10 @@ std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
   out << "    tensor_format = " << cudnnMemoryFormatToString(tformat) << '\n';
   out << "    nbDims = " << nbDims << '\n';
   // Read out only nbDims of the arrays!
-  out << "    dimA = ";
-  for (auto i : ArrayRef<int>{dimA, static_cast<size_t>(nbDims)}) {
-    out << i << ", ";
-  }
-  out << '\n';
+  out << "    dimA = "
+      << fmt::format(
+             "{}", fmt::join(ArrayRef<int>{dimA, static_cast<size_t>(nbDims)}, ", "))
+      << '\n';
   return out;
 }
 
