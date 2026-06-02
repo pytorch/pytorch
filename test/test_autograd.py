@@ -16919,6 +16919,79 @@ class TestAutogradMultipleDispatch(TestCase):
                 self.assertEqual(x.grad, expected)
 
 
+class TestAutogradClampGradient(TestCase):
+
+    def _get_grad(self, fn, *inputs):
+        tensors = [torch.tensor(v, requires_grad=True) for v in inputs]
+        fn(*tensors).backward()
+        grads = [t.grad.item() for t in tensors]
+        return grads[0] if len(grads) == 1 else tuple(grads)
+
+    def test_clamp_scalar(self):
+        # min and max
+        fn = lambda x: torch.clamp(x, min=0.0, max=2.0)
+        self.assertEqual(self._get_grad(fn, 0.0), 0.0)
+        self.assertEqual(self._get_grad(fn, 1.0), 1.0)
+        self.assertEqual(self._get_grad(fn, 2.0), 0.0)
+
+        # min only
+        fn = lambda x: torch.clamp(x, min=0.0)
+        self.assertEqual(self._get_grad(fn, 0.0), 0.0)
+        self.assertEqual(self._get_grad(fn, 1.0), 1.0)
+
+        # max only
+        fn = lambda x: torch.clamp(x, max=0.0)
+        self.assertEqual(self._get_grad(fn, -1.0), 1.0)
+        self.assertEqual(self._get_grad(fn, 0.0), 0.0)
+
+    def test_clamp_tensor(self):
+        # min and max
+        fn = lambda x, mn, mx: torch.clamp(x, min=mn, max=mx)
+        self.assertEqual(self._get_grad(fn, -1.0, 0.0, 2.0), (0.0, 1.0, 0.0))
+        self.assertEqual(self._get_grad(fn, 0.0, 0.0, 2.0), (0.0, 0.0, 0.0))
+        self.assertEqual(self._get_grad(fn, 1.0, 0.0, 2.0), (1.0, 0.0, 0.0))
+        self.assertEqual(self._get_grad(fn, 2.0, 0.0, 2.0), (0.0, 0.0, 0.0))
+        self.assertEqual(self._get_grad(fn, 3.0, 0.0, 2.0), (0.0, 0.0, 1.0))
+        # min > max
+        self.assertEqual(self._get_grad(fn, 1.0, 2.0, 0.0), (0.0, 0.0, 1.0))
+        
+        # min only
+        fn = lambda x, mn: torch.clamp(x, min=mn)
+        self.assertEqual(self._get_grad(fn, -1.0, 0.0), (0.0, 1.0))
+        self.assertEqual(self._get_grad(fn, 0.0, 0.0), (0.0, 0.0))
+        self.assertEqual(self._get_grad(fn, 1.0, 0.0), (1.0, 0.0))
+        
+        # max only
+        fn = lambda x, mx: torch.clamp(x, max=mx)
+        self.assertEqual(self._get_grad(fn, -1.0, 0.0), (1.0, 0.0))
+        self.assertEqual(self._get_grad(fn, 0.0, 0.0), (0.0, 0.0))
+        self.assertEqual(self._get_grad(fn, 1.0, 0.0), (0.0, 1.0))
+
+    def test_clamp_min_scalar(self):
+        fn = lambda x: torch.clamp_min(x, 0.0)
+        self.assertEqual(self._get_grad(fn, -1.0), 0.0)
+        self.assertEqual(self._get_grad(fn, 0.0), 0.0)
+        self.assertEqual(self._get_grad(fn, 1.0), 1.0)
+    
+    def test_clamp_min_tensor(self):
+        fn = lambda x, mn: torch.clamp_min(x, mn)
+        self.assertEqual(self._get_grad(fn, -1.0, 0.0), (0.0, 1.0))
+        self.assertEqual(self._get_grad(fn, 0.0, 0.0), (0.0, 0.0))
+        self.assertEqual(self._get_grad(fn, 1.0, 0.0), (1.0, 0.0))
+
+    def test_clamp_max_scalar(self):
+        fn = lambda x: torch.clamp_max(x, 0.0)
+        self.assertEqual(self._get_grad(fn, -1.0), 1.0)
+        self.assertEqual(self._get_grad(fn, 0.0), 0.0)
+        self.assertEqual(self._get_grad(fn, 1.0), 0.0)
+        
+    def test_clamp_max_tensor(self):
+        fn = lambda x, mx: torch.clamp_max(x, mx)
+        self.assertEqual(self._get_grad(fn, -1.0, 0.0), (1.0, 0.0))
+        self.assertEqual(self._get_grad(fn, 0.0, 0.0), (0.0, 0.0))
+        self.assertEqual(self._get_grad(fn, 1.0, 0.0), (0.0, 1.0))
+
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
