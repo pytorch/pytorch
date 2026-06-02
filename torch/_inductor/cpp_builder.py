@@ -556,10 +556,9 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
             check=False,
         )
 
-        output_msg = result.stdout.strip().decode(*SUBPROCESS_DECODE_ARGS)
-        lines = output_msg.splitlines()
+        lines = (result.stdout or b"").strip().splitlines()
 
-        return bool(lines) and "Microsoft" in lines[0]
+        return bool(lines) and b"Microsoft" in lines[0]
 
     except OSError:
         return False
