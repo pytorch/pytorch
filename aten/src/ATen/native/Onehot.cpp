@@ -22,9 +22,15 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     // using meta bit test to catch Fake Tensor as well until __torch_function__
     if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit)) ||
             self.key_set().has_all(DispatchKeySet(DispatchKey::Python))) {
+        if (auto maybe_numel = self.sym_numel().maybe_as_int();
+            maybe_numel.has_value() && maybe_numel.value() == 0) {
+            TORCH_CHECK(num_classes > 0, "Can not infer total number of classes from empty tensor.");
+        }
         // functional version that torch.compiles better and works with dynamic shapes
         if (num_classes == -1) {
           num_classes = self.max().item().toLong() + 1;
+        } else {
+          TORCH_CHECK(num_classes > 0, "Class values must be smaller than num_classes.");
         }
         {
           // If `self` is a DTensor, then allow implicit replication
