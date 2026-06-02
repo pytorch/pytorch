@@ -1437,7 +1437,9 @@ def _use_uvm(device: "Device" = None):
     def _get_advise_target(device_id):
         target = _advise_cache.get(device_id)
         if target is None:
-            target = _make_advise_target(_rt, device_id) if _use_mem_location else device_id
+            target = (
+                _make_advise_target(_rt, device_id) if _use_mem_location else device_id
+            )
             _advise_cache[device_id] = target
         return target
 
@@ -1445,6 +1447,7 @@ def _use_uvm(device: "Device" = None):
         try:
             err, ptr = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
             _check(err, f"cudaMallocManaged({size})")
+            ptr = int(ptr)
             if device >= 0:
                 advise_target = _get_advise_target(device)
                 _check(
