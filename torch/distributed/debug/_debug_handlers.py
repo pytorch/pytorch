@@ -575,6 +575,123 @@ class TorchCommsFlightRecorderHandler(DebugHandler):
         return "torchcomms_fr_trace"
 
 
+HEALTH_CHECK_TEMPLATE = """
+{% extends "base.html" %}
+{% block header %}
+    <h1>{% block title %}TorchComms Health Check{% endblock %}</h1>
+{% endblock %}
+{% block content %}
+    <h2>Health Status</h2>
+    {% if fetch_summary %}<pre>{{ fetch_summary }}</pre>{% endif %}
+    {% for i, (addr, resp) in enumerate(zip(addrs, resps)) %}
+        <h3>Rank {{ i }}: {{ addr }}</h3>
+        {% if resp.status_code != 200 %}
+            <p>Failed to fetch: status={{ resp.status_code }}</p>
+            <pre>{{ resp.text }}</pre>
+        {% else %}
+            <pre>{{ resp.text }}</pre>
+        {% endif %}
+    {% endfor %}
+    {% if dump_triggered %}
+        <h2>Flight Recorder Dump (triggered by unhealthy rank)</h2>
+        {% for i, (addr, resp) in enumerate(zip(dump_addrs, dump_resps)) %}
+            <h3>Rank {{ i }}: {{ addr }}</h3>
+            {% if resp.status_code != 200 %}
+                <p>Failed to dump: status={{ resp.status_code }}</p>
+                <pre>{{ resp.text }}</pre>
+            {% else %}
+                <pre>{{ resp.text }}</pre>
+            {% endif %}
+        {% endfor %}
+    {% endif %}
+{% endblock %}
+    """
+
+
+class TorchCommsHealthCheckHandler(DebugHandler):
+    """Health check that detects watchdog timeouts and triggers FR dumps."""
+
+    def routes(self) -> list[Route]:
+        return [Route("/torchcomms_health_check", self._handle)]
+
+    def nav_links(self) -> list[NavLink]:
+        return [NavLink("/torchcomms_health_check", "TorchComms Health")]
+
+    def templates(self) -> dict[str, str]:
+        return {"torchcomms_health_check.html": HEALTH_CHECK_TEMPLATE}
+
+    @staticmethod
+    def _any_unhealthy(resps: list[Response]) -> bool:
+        """Return True if any rank explicitly reports itself as unhealthy.
+
+        Only responses with a 200 status code are inspected.  Non-200
+        responses (connection errors, timeouts, etc.) are intentionally
+        ignored so that a single unreachable rank does not trigger an
+        expensive Flight Recorder dump across the entire job.  A dump is
+        only triggered when a rank is reachable *and* positively reports
+        ``{"healthy": false}``.
+        """
+        for resp in resps:
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                    if not data.get("healthy", True):
+                        return True
+                except Exception:
+                    pass
+        return False
+
+    def _handle(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("torchcomms_health_check", timeout=self.fetch_timeout)
+        dump_triggered = False
+        dump_addrs: list[str] = []
+        dump_resps: list[Response] = []
+        if self._any_unhealthy(resps):
+            dump_addrs, dump_resps = fetch_all(
+                "torchcomms_fr_dump_file", timeout=self.fetch_timeout
+            )
+            dump_triggered = True
+        return req.frontend.render_template(
+            "torchcomms_health_check.html",
+            fetch_summary=format_fetch_summary(addrs, resps),
+            addrs=addrs,
+            resps=resps,
+            dump_triggered=dump_triggered,
+            dump_addrs=dump_addrs,
+            dump_resps=dump_resps,
+        )
+
+    def dump(self) -> str | None:
+        addrs, resps = fetch_all("torchcomms_health_check", timeout=self.fetch_timeout)
+        parts: list[str] = []
+        summary = format_fetch_summary(addrs, resps)
+        if summary:
+            parts.append(summary)
+            parts.append("")
+        for i, (addr, resp) in enumerate(zip(addrs, resps)):
+            parts.append(f"=== Rank {i}: {addr} ===")
+            parts.append(
+                resp.text if resp.status_code == 200 else f"Error: {resp.status_code}"
+            )
+        if self._any_unhealthy(resps):
+            parts.append("")
+            parts.append("=== Unhealthy rank detected, triggering FR dump ===")
+            dump_addrs, dump_resps = fetch_all(
+                "torchcomms_fr_dump_file", timeout=self.fetch_timeout
+            )
+            for i, (addr, resp) in enumerate(zip(dump_addrs, dump_resps)):
+                parts.append(f"--- Rank {i}: {addr} ---")
+                parts.append(
+                    resp.text
+                    if resp.status_code == 200
+                    else f"Error: {resp.status_code}"
+                )
+        return "\n".join(parts)
+
+    def dump_filename(self) -> str:
+        return "torchcomms_health_check"
+
+
 def default_handlers() -> list[DebugHandler]:
     return [
         IndexHandler(),
@@ -582,6 +699,7 @@ def default_handlers() -> list[DebugHandler]:
         PySpyHandler(),
         FlightRecorderHandler(),
         TorchCommsFlightRecorderHandler(),
+        TorchCommsHealthCheckHandler(),
         ProfilerHandler(),
         WaitCountersHandler(),
         TCPStoreHandler(),
