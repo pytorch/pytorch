@@ -32,6 +32,7 @@ from torch.distributed.tensor._utils import (
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
+    _MaskPartial,
     _StridedShard,
     Partial,
     Placement,
@@ -53,6 +54,149 @@ __all__ = [
 ]
 
 aten = torch.ops.aten
+
+_MASK_BUFFER_ATTR_PREFIX = "_mask_buffer_data_"
+
+
+def _mask_buffer_attr_name(mesh_dim: int) -> str:
+    return f"{_MASK_BUFFER_ATTR_PREFIX}{mesh_dim}"
+
+
+def _mask_buffer_attr_index(attr_name: str) -> int | None:
+    if not attr_name.startswith(_MASK_BUFFER_ATTR_PREFIX):
+        return None
+    suffix = attr_name.removeprefix(_MASK_BUFFER_ATTR_PREFIX)
+    if not suffix.isdecimal():
+        return None
+    return int(suffix)
+
+
+def _clone_placements_for_tensor_flatten(
+    placements: tuple[Placement, ...],
+) -> tuple[tuple[Placement, ...], tuple[int, ...]]:
+    mask_buffer_indices: list[int] = []
+
+    for mesh_dim, placement in enumerate(placements):
+        if (
+            isinstance(placement, _MaskPartial)
+            and placement.mask_buffer.data is not None
+        ):
+            mask_buffer_indices.append(mesh_dim)
+
+    if not mask_buffer_indices:
+        return placements, ()
+    return (
+        _clone_mask_partial_placements(placements, mask_buffer_indices),
+        tuple(mask_buffer_indices),
+    )
+
+
+def _clone_mask_partial_placements(
+    placements: tuple[Placement, ...],
+    mask_buffer_indices: Sequence[int],
+    *,
+    owned_by_dtensor: bool = False,
+) -> tuple[Placement, ...]:
+    copied_placements = list(placements)
+    mask_buffer_copies: dict[int, Any] = {}
+
+    for mesh_dim in mask_buffer_indices:
+        placement = placements[mesh_dim]
+        if not isinstance(placement, _MaskPartial):
+            raise AssertionError(f"Expected _MaskPartial placement at index {mesh_dim}")
+        mask_buffer_id = id(placement.mask_buffer)
+        mask_buffer = mask_buffer_copies.get(mask_buffer_id)
+        if mask_buffer is None:
+            mask_buffer = type(placement.mask_buffer)(owned_by_dtensor=owned_by_dtensor)
+            mask_buffer_copies[mask_buffer_id] = mask_buffer
+        copied_placements[mesh_dim] = _MaskPartial(
+            reduce_op=placement.reduce_op,
+            mask_buffer=mask_buffer,
+            offset_shape=placement.offset_shape,
+            offset_dim=placement.offset_dim,
+        )
+
+    return tuple(copied_placements)
+
+
+def _move_mask_buffer_state_to_new_placements(
+    placements: tuple[Placement, ...],
+) -> tuple[Placement, ...]:
+    copied_placements = list(placements)
+    mask_buffer_copies: dict[int, Any] = {}
+    original_mask_buffers: dict[int, Any] = {}
+
+    for mesh_dim, placement in enumerate(placements):
+        if not isinstance(placement, _MaskPartial):
+            continue
+        if placement.mask_buffer.data is None:
+            continue
+
+        mask_buffer_id = id(placement.mask_buffer)
+        mask_buffer = mask_buffer_copies.get(mask_buffer_id)
+        if mask_buffer is None:
+            mask_buffer = type(placement.mask_buffer)(
+                data=placement.mask_buffer.data,
+                refcount=placement.mask_buffer.refcount,
+                owned_by_dtensor=True,
+            )
+            mask_buffer_copies[mask_buffer_id] = mask_buffer
+            original_mask_buffers[mask_buffer_id] = placement.mask_buffer
+        copied_placements[mesh_dim] = _MaskPartial(
+            reduce_op=placement.reduce_op,
+            mask_buffer=mask_buffer,
+            offset_shape=placement.offset_shape,
+            offset_dim=placement.offset_dim,
+        )
+
+    for mask_buffer in original_mask_buffers.values():
+        if not mask_buffer.owned_by_dtensor:
+            mask_buffer.data = None
+            mask_buffer.refcount = 0
+
+    if not original_mask_buffers:
+        return placements
+    return tuple(copied_placements)
+
+
+def _move_mask_buffer_state_to_new_spec(
+    spec: Any,
+) -> Any:
+    if isinstance(spec, DTensorSpec):
+        placements = _move_mask_buffer_state_to_new_placements(spec.placements)
+        if placements is spec.placements:
+            return spec
+        return DTensorSpec(
+            spec.mesh,
+            placements,
+            tensor_meta=spec.tensor_meta,
+            shard_order=spec.shard_order,
+            use_strided_shard_as_shard_order=spec.use_strided_shard_as_shard_order,
+        )
+    if isinstance(spec, tuple):
+        return tuple(_move_mask_buffer_state_to_new_spec(s) for s in spec)
+    if isinstance(spec, list):
+        return [_move_mask_buffer_state_to_new_spec(s) for s in spec]
+    return spec
+
+
+def _placement_metadata_eq(lhs: Placement, rhs: Placement) -> bool:
+    if isinstance(lhs, _MaskPartial) and isinstance(rhs, _MaskPartial):
+        return (
+            lhs.reduce_op == rhs.reduce_op
+            and lhs.offset_shape == rhs.offset_shape
+            and lhs.offset_dim == rhs.offset_dim
+        )
+    return lhs == rhs
+
+
+def _placements_metadata_eq(
+    lhs: Sequence[Placement],
+    rhs: Sequence[Placement],
+) -> bool:
+    return len(lhs) == len(rhs) and all(
+        _placement_metadata_eq(left, right) for left, right in zip(lhs, rhs)
+    )
 
 
 def _normalize_placements_for_grad(
@@ -348,6 +492,10 @@ class DTensor(torch.Tensor):
             consider using ``distribute_tensor``.
         """
         super().__init__()
+        spec = object.__getattribute__(self, "_spec")
+        moved_spec = _move_mask_buffer_state_to_new_spec(spec)
+        if moved_spec is not spec:
+            object.__setattr__(self, "_spec", moved_spec)
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
     # pyre-fixme[3]: Return type must be annotated.
@@ -355,16 +503,48 @@ class DTensor(torch.Tensor):
         # TODO: consider all_gather the local tensors for better debugging
         return f"DTensor(local_tensor={self._local_tensor}, device_mesh={self._spec.mesh}, placements={self._spec.placements})"
 
+    def __getattr__(self, name: str) -> Any:
+        mask_buffer_index = _mask_buffer_attr_index(name)
+        if mask_buffer_index is not None:
+            placements = object.__getattribute__(self, "_spec").placements
+            if mask_buffer_index < len(placements):
+                placement = placements[mask_buffer_index]
+                if (
+                    isinstance(placement, _MaskPartial)
+                    and placement.mask_buffer.data is not None
+                ):
+                    return placement.mask_buffer.data
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
+
     def __tensor_flatten__(self):
         """
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return ["_local_tensor", "device_mesh"], (
-            self._spec.placements,
+        placements, mask_buffer_indices = _clone_placements_for_tensor_flatten(
+            self._spec.placements
+        )
+        if not mask_buffer_indices:
+            return ["_local_tensor", "device_mesh"], (
+                self._spec.placements,
+                self._spec.tensor_meta,
+                self._spec.shard_order,
+                self.requires_grad,
+            )
+        # _MaskPartial carries tensor mask state in placement metadata. Expose it
+        # as an inner tensor so compiled DTensor outputs rebuild with runtime masks.
+        tensor_attrs = ["_local_tensor", "device_mesh"]
+        tensor_attrs.extend(
+            _mask_buffer_attr_name(mesh_dim) for mesh_dim in mask_buffer_indices
+        )
+        return tensor_attrs, (
+            placements,
             self._spec.tensor_meta,
             self._spec.shard_order,
             self.requires_grad,
+            mask_buffer_indices,
         )
 
     @staticmethod
@@ -375,7 +555,20 @@ class DTensor(torch.Tensor):
             )
         local_tensor = inner_tensors["_local_tensor"]
         mesh = inner_tensors["device_mesh"]
-        placements, old_tensor_meta, shard_order, requires_grad = flatten_spec
+        if len(flatten_spec) == 4:
+            placements, old_tensor_meta, shard_order, requires_grad = flatten_spec
+            mask_buffer_indices = ()
+        else:
+            (
+                placements,
+                old_tensor_meta,
+                shard_order,
+                requires_grad,
+                mask_buffer_indices,
+            ) = flatten_spec
+            placements = _clone_mask_partial_placements(
+                placements, mask_buffer_indices, owned_by_dtensor=True
+            )
         unflatten_tensor_meta = TensorMeta(
             shape=outer_size,
             stride=outer_stride,
@@ -388,13 +581,27 @@ class DTensor(torch.Tensor):
             shard_order=shard_order,
         )
         # pyrefly: ignore [bad-argument-type]
-        return DTensor(
+        result = DTensor(
             # pyrefly: ignore [bad-argument-count]
             local_tensor,
             unflatten_spec,
             # pyrefly: ignore [unexpected-keyword]
             requires_grad=requires_grad,
         )
+        for mesh_dim in mask_buffer_indices:
+            placement = result._spec.placements[mesh_dim]
+            mask_buffer_attr = _mask_buffer_attr_name(mesh_dim)
+            mask = inner_tensors[mask_buffer_attr]
+            if not isinstance(placement, _MaskPartial):
+                raise AssertionError(
+                    f"Expected _MaskPartial placement for {mask_buffer_attr}"
+                )
+            if not isinstance(mask, torch.Tensor):
+                raise AssertionError(
+                    f"Expected Tensor mask buffer for {mask_buffer_attr}"
+                )
+            placement.mask_buffer.materialize_mask(mask)
+        return result
 
     def _stable_hash_for_caching(self) -> str:
         """
@@ -417,7 +624,9 @@ class DTensor(torch.Tensor):
         if expected_type is not None:
             return None
 
-        (placements, _, _, _) = flatten_spec
+        placements = flatten_spec[0]
+        if _placements_metadata_eq(self.placements, placements):
+            return self
         return self.redistribute(
             device_mesh=self.device_mesh,
             placements=placements,

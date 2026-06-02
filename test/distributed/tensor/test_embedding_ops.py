@@ -3,6 +3,7 @@
 import sys
 
 import torch
+import torch._dynamo.testing
 from torch.distributed.tensor import (
     distribute_module,
     distribute_tensor,
@@ -186,6 +187,182 @@ class TestEmbeddingOp(DTensorTestBase):
             self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
 
     @with_comms
+    def test_sharded_embedding_rowwise_compile(self):
+        if self.is_local_tensor_enabled:
+            self.skipTest("torch.compile DTensor subclass output test")
+        mesh = self.build_device_mesh()
+        torch.manual_seed(0)
+        local_embedding = torch.nn.Embedding(10, 20, device=self.device_type)
+        sharded_embedding = torch.nn.Embedding(10, 20, device=self.device_type)
+        sharded_embedding.weight = torch.nn.Parameter(
+            local_embedding.weight.detach().clone()
+        )
+        sharded_embedding = self._apply_sharding(sharded_embedding, 0, mesh)
+        compiled_embedding = torch.compile(sharded_embedding)
+
+        torch.manual_seed(10)
+        inp = torch.randint(0, 10, (8, 8), device=self.device_type)
+        replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
+        output = compiled_embedding(replicated_inp)
+
+        from torch.distributed.tensor.placement_types import _MaskPartial
+
+        self.assertIsInstance(output.placements[0], _MaskPartial)
+        self.assertIsNotNone(output.placements[0].mask_buffer.data)
+        self.assertEqual(output.full_tensor(), local_embedding(inp))
+
+    @with_comms
+    def test_pending_mask_partial_compile_input(self):
+        if self.is_local_tensor_enabled:
+            self.skipTest("torch.compile DTensor subclass input test")
+        mesh = self.build_device_mesh()
+        torch.manual_seed(0)
+        local_embedding = torch.nn.Embedding(10, 20, device=self.device_type)
+        sharded_embedding = torch.nn.Embedding(10, 20, device=self.device_type)
+        sharded_embedding.weight = torch.nn.Parameter(
+            local_embedding.weight.detach().clone()
+        )
+        sharded_embedding = self._apply_sharding(sharded_embedding, 0, mesh)
+
+        torch.manual_seed(10)
+        inp = torch.randint(0, 10, (8, 8), device=self.device_type)
+        replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
+        pending_output = sharded_embedding(replicated_inp)
+        compiled_output = torch.compile(lambda x: x)(pending_output)
+
+        self.assertEqual(compiled_output.full_tensor(), local_embedding(inp))
+
+    @with_comms
+    def test_pending_mask_partial_compile_input_guard_reuses_graph(self):
+        if self.is_local_tensor_enabled:
+            self.skipTest("torch.compile DTensor subclass input test")
+        mesh = self.build_device_mesh()
+        torch.manual_seed(0)
+        local_embedding = torch.nn.Embedding(10, 20, device=self.device_type)
+        sharded_embedding = torch.nn.Embedding(10, 20, device=self.device_type)
+        sharded_embedding.weight = torch.nn.Parameter(
+            local_embedding.weight.detach().clone()
+        )
+        sharded_embedding = self._apply_sharding(sharded_embedding, 0, mesh)
+
+        inp1 = torch.zeros((4, 4), dtype=torch.long, device=self.device_type)
+        inp2 = torch.full((4, 4), 9, dtype=torch.long, device=self.device_type)
+        replicated_inp1 = DTensor.from_local(inp1, mesh, [Replicate()], run_check=False)
+        replicated_inp2 = DTensor.from_local(inp2, mesh, [Replicate()], run_check=False)
+        pending_output1 = sharded_embedding(replicated_inp1)
+        pending_output2 = sharded_embedding(replicated_inp2)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled_identity = torch.compile(
+            lambda x: x, backend=counter, fullgraph=True, dynamic=False
+        )
+
+        compiled_output1 = compiled_identity(pending_output1)
+        compiled_output2 = compiled_identity(pending_output2)
+
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(compiled_output1.full_tensor(), local_embedding(inp1))
+        self.assertEqual(compiled_output2.full_tensor(), local_embedding(inp2))
+
+    @with_comms
+    def test_compiled_embedding_repeated_pending_outputs(self):
+        if self.is_local_tensor_enabled:
+            self.skipTest("torch.compile DTensor subclass output test")
+        mesh = self.build_device_mesh()
+        torch.manual_seed(0)
+        local_embedding = torch.nn.Embedding(16, 8, device=self.device_type)
+        sharded_embedding = torch.nn.Embedding(16, 8, device=self.device_type)
+        sharded_embedding.weight = torch.nn.Parameter(
+            local_embedding.weight.detach().clone()
+        )
+        sharded_embedding = self._apply_sharding(sharded_embedding, 0, mesh)
+        compiled_embedding = torch.compile(sharded_embedding)
+
+        inp1 = torch.zeros((4, 4), dtype=torch.long, device=self.device_type)
+        inp2 = torch.full((4, 4), 15, dtype=torch.long, device=self.device_type)
+        replicated_inp1 = DTensor.from_local(inp1, mesh, [Replicate()], run_check=False)
+        replicated_inp2 = DTensor.from_local(inp2, mesh, [Replicate()], run_check=False)
+
+        output1 = compiled_embedding(replicated_inp1)
+        output2 = compiled_embedding(replicated_inp2)
+
+        self.assertIsNot(
+            output1.placements[0].mask_buffer, output2.placements[0].mask_buffer
+        )
+        self.assertEqual(output1.full_tensor(), local_embedding(inp1))
+        self.assertEqual(output2.full_tensor(), local_embedding(inp2))
+
+    @with_comms
+    def test_multiple_compiled_embeddings_rowwise_different_masks(self):
+        if self.is_local_tensor_enabled:
+            self.skipTest("torch.compile DTensor subclass output test")
+        mesh = self.build_device_mesh()
+        torch.manual_seed(0)
+        local_embedding1 = torch.nn.Embedding(16, 8, device=self.device_type)
+        local_embedding2 = torch.nn.Embedding(16, 8, device=self.device_type)
+        sharded_embedding1 = torch.nn.Embedding(16, 8, device=self.device_type)
+        sharded_embedding2 = torch.nn.Embedding(16, 8, device=self.device_type)
+        sharded_embedding1.weight = torch.nn.Parameter(
+            local_embedding1.weight.detach().clone()
+        )
+        sharded_embedding2.weight = torch.nn.Parameter(
+            local_embedding2.weight.detach().clone()
+        )
+        sharded_embedding1 = self._apply_sharding(sharded_embedding1, 0, mesh)
+        sharded_embedding2 = self._apply_sharding(sharded_embedding2, 0, mesh)
+
+        class TwoEmbeddings(torch.nn.Module):
+            def __init__(self, embedding1, embedding2):
+                super().__init__()
+                self.embedding1 = embedding1
+                self.embedding2 = embedding2
+
+            def forward(self, inp1, inp2):
+                return self.embedding1(inp1), self.embedding2(inp2)
+
+        inp1 = torch.zeros((4, 4), dtype=torch.long, device=self.device_type)
+        inp2 = torch.full((4, 4), 15, dtype=torch.long, device=self.device_type)
+        replicated_inp1 = DTensor.from_local(inp1, mesh, [Replicate()], run_check=False)
+        replicated_inp2 = DTensor.from_local(inp2, mesh, [Replicate()], run_check=False)
+
+        output1, output2 = torch.compile(
+            TwoEmbeddings(sharded_embedding1, sharded_embedding2)
+        )(replicated_inp1, replicated_inp2)
+
+        self.assertIsNot(output1.placements[0], output2.placements[0])
+        self.assertIsNot(
+            output1.placements[0].mask_buffer, output2.placements[0].mask_buffer
+        )
+        self.assertEqual(output1.full_tensor(), local_embedding1(inp1))
+        self.assertEqual(output2.full_tensor(), local_embedding2(inp2))
+
+    @with_comms
+    def test_pending_mask_partial_redistribute_preserves_original(self):
+        mesh = self.build_device_mesh()
+        torch.manual_seed(0)
+        local_embedding = torch.nn.Embedding(10, 20, device=self.device_type)
+        sharded_embedding = torch.nn.Embedding(10, 20, device=self.device_type)
+        sharded_embedding.weight = torch.nn.Parameter(
+            local_embedding.weight.detach().clone()
+        )
+        sharded_embedding = self._apply_sharding(sharded_embedding, 0, mesh)
+
+        torch.manual_seed(10)
+        inp = torch.randint(0, 10, (8, 8), device=self.device_type)
+        replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
+        pending_output = sharded_embedding(replicated_inp)
+        copied_output = pending_output.redistribute(
+            placements=pending_output.placements
+        )
+
+        self.assertIsNot(
+            pending_output.placements[0].mask_buffer,
+            copied_output.placements[0].mask_buffer,
+        )
+        self.assertEqual(pending_output.full_tensor(), local_embedding(inp))
+        self.assertEqual(copied_output.full_tensor(), local_embedding(inp))
+
+    @with_comms
     def test_multiple_embeddings_rowwise(self):
         mesh = self.build_device_mesh()
 
@@ -194,8 +371,8 @@ class TestEmbeddingOp(DTensorTestBase):
 
         from torch.distributed.tensor.placement_types import _MaskPartial
 
-        # case 1: two embeddings with the same shape, thus sharing the underlying _MaskPartial
-        # and MaskBuffer, because of cache hit from sharding propagation
+        # case 1: two embeddings with the same shape get separate output
+        # _MaskPartial instances so their live mask buffers do not alias.
 
         emb1 = torch.nn.Embedding(10, 23, device=self.device_type)
         sharded_emb1 = self._apply_sharding(emb1, 0, mesh)
@@ -213,7 +390,12 @@ class TestEmbeddingOp(DTensorTestBase):
         self.assertIsInstance(partial_placement2, _MaskPartial)
         output2.full_tensor()
 
-        self.assertEqual(id(partial_placement1), id(partial_placement2))
+        self.assertIsNot(partial_placement1, partial_placement2)
+        self.assertIsNot(partial_placement1.mask_buffer, partial_placement2.mask_buffer)
+        self.assertEqual(
+            partial_placement1.offset_shape, partial_placement2.offset_shape
+        )
+        self.assertEqual(partial_placement1.offset_dim, partial_placement2.offset_dim)
 
         # case 2: two embeddings with the same logical_dim_size, but different logical_shape
         # thus they will have different _MaskPartial placements (with no cache hit)

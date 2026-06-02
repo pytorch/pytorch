@@ -2905,22 +2905,48 @@ class VariableBuilder:
             if is_dtensor:
                 self.install_guards(GuardBuilder.TYPE_MATCH)
 
-                inner_attrs = value.__tensor_flatten__()[0]
-                if inner_attrs != ["_local_tensor", "device_mesh"]:
+                inner_attrs, flattening_ctx = value.__tensor_flatten__()
+                if inner_attrs[:2] != ["_local_tensor", "device_mesh"]:
                     raise RuntimeError(
-                        "Expecting DTensor inner attrs to be ['_local_tensor', 'device_mesh']"
+                        "Expecting DTensor inner attrs to start with ['_local_tensor', 'device_mesh']"
+                    )
+                if len(flattening_ctx) == 4:
+                    valid_flattening_ctx = (
+                        inner_attrs == ["_local_tensor", "device_mesh"]
+                        and flattening_ctx[0] == value._spec.placements
+                        and flattening_ctx[1] == value._spec.tensor_meta
+                        and flattening_ctx[2] == value._spec.shard_order
+                        and flattening_ctx[3] == value.requires_grad
+                    )
+                elif len(flattening_ctx) == 5:
+                    from torch.distributed.tensor._api import (
+                        _mask_buffer_attr_name,
+                        _placements_metadata_eq,
                     )
 
-                flattening_ctx = value.__tensor_flatten__()[1]
-                if not (
-                    len(flattening_ctx) == 4
-                    and flattening_ctx[0] == value._spec.placements
-                    and flattening_ctx[1] == value._spec.tensor_meta
-                    and flattening_ctx[2] == value._spec.shard_order
-                    and flattening_ctx[3] == value.requires_grad
-                ):
+                    mask_buffer_indices = flattening_ctx[4]
+                    expected_attrs = [
+                        "_local_tensor",
+                        "device_mesh",
+                        *(
+                            _mask_buffer_attr_name(mesh_dim)
+                            for mesh_dim in mask_buffer_indices
+                        ),
+                    ]
+                    valid_flattening_ctx = (
+                        inner_attrs == expected_attrs
+                        and _placements_metadata_eq(
+                            value._spec.placements, flattening_ctx[0]
+                        )
+                        and flattening_ctx[1] == value._spec.tensor_meta
+                        and flattening_ctx[2] == value._spec.shard_order
+                        and flattening_ctx[3] == value.requires_grad
+                    )
+                else:
+                    valid_flattening_ctx = False
+                if not valid_flattening_ctx:
                     raise RuntimeError(
-                        "Expecting DTensor flattening ctx to be (placements, tensor_meta, shard_order, requires_grad)"
+                        "Expecting DTensor flattening ctx to be (placements, tensor_meta, shard_order, requires_grad) with optional mask buffer indices"
                     )
                 # Guard on the dtensor spec
                 install_guard(
