@@ -4,6 +4,7 @@
 from dataclasses import dataclass
 import operator
 import logging
+import random
 import sys
 
 import torch
@@ -117,6 +118,28 @@ class TestPartitionFunctions:
         # right branch
         relu_1 = add.relu()
         return relu, relu_1
+
+    @staticmethod
+    def forward_depth_window_regression(a, b):
+        rng = random.Random(0)
+        num_nodes = 8
+        num_unsupported = 5
+        unsupported_indices = set(rng.sample(range(num_nodes), num_unsupported))
+
+        left = a
+        right = b
+        for i in range(num_nodes):
+            if i in unsupported_indices:
+                if rng.random() < 0.5:
+                    left = left.relu()
+                else:
+                    right = right.relu()
+            else:
+                if rng.random() < 0.5:
+                    left = left + right
+                else:
+                    right = right + left
+        return left, right
 
     @staticmethod
     def forward7(a, b, c):
@@ -240,6 +263,136 @@ class TestPartitionFunctions:
         a0, a1 = torch.ops.aten.var_mean(a)
         return a0
 
+    @staticmethod
+    def forward19(a, b, c):
+        # multiple outputs at different depths; relu/sigmoid are unsupported
+        shallow = operator.add(a, 1)
+        blocked = b.relu()
+        blocked_2 = blocked.sigmoid()
+        deep = operator.add(blocked, blocked_2)
+        # return the unsupported node too, to keep depth calculation honest
+        return shallow, blocked, deep
+
+    @staticmethod
+    def forward20(a, b, c):
+        # single-input variant: blocked node feeds both output and deeper user
+        shallow = operator.add(a, 1)
+        blocked = a.relu()
+        blocked_2 = blocked.sigmoid()
+        deep = operator.add(blocked, blocked_2)
+        return shallow, blocked, deep
+
+    @staticmethod
+    def forward21(a, b, c):
+        # multi-input variant: shallow path is independent of blocked path depth
+        shallow = operator.add(a, 1)
+        blocked = b.relu()
+        blocked_2 = blocked.sigmoid()
+        deep = operator.add(blocked_2, shallow)
+        return shallow, blocked, deep
+
+    @staticmethod
+    def forward22(a, b, c):
+        # single-input, two-output case with deeper unsupported fan-out
+        base = operator.add(a, a)
+        blocked = a.relu()
+        blocked_2 = blocked.sigmoid()
+        deep = operator.add(blocked, blocked_2)
+        return base, deep
+
+    @staticmethod
+    def forward23(a, b, c):
+        # multi-input, two-output case mirroring residual-style skip + blocked path
+        base = operator.add(a, b)
+        blocked = c.relu()
+        blocked_2 = blocked.sigmoid()
+        deep = operator.add(blocked, blocked_2)
+        return base, deep
+
+    @staticmethod
+    def forward_long_chain_scattered(a, b, c):
+        # Long chain with unsupported ops scattered: tests multiple partition formation
+        x = a + 1
+        x = x + 1
+        x = x.relu()
+        x = x + 1
+        x = x + 1
+        x = x.relu()
+        x = x + 1
+        return x
+
+    @staticmethod
+    def forward_diamond_with_unsupported(a, b, c):
+        # Diamond: supported -> unsupported -> supported merge with direct path
+        add1 = a + 1
+        add2 = a + 2
+        relu = add1.relu()
+        add3 = relu + add2
+        return add3
+
+    @staticmethod
+    def forward_all_unsupported(a, b, c):
+        # Every node unsupported: should produce no partitions
+        x = a.relu()
+        y = b.sigmoid()
+        return x, y
+
+    @staticmethod
+    def forward_single_supported(a, b, c):
+        # Single supported node only
+        return a + b
+
+    @staticmethod
+    def forward_parallel_chains(a, b, c):
+        # Two independent chains with unsupported in one
+        # Chain 1: a -> add1 -> add2
+        # Chain 2: b -> relu (unsupported) -> add3
+        add1 = a + 1
+        add2 = add1 + 1
+        relu = b.relu()
+        add3 = relu + 1
+        return add2, add3
+
+    @staticmethod
+    def forward_deep_blocklist(a, b, c):
+        # Unsupported node whose upstream is deep; blocklist should propagate
+        base = a + 1
+        mid = base + 1
+        top = mid + 1
+        relu = top.relu()        # unsupported
+        use_relu = relu + base   # merging with base creates cycle concern
+        return use_relu
+
+    @staticmethod
+    def forward_multiple_unsupported_between(a, b, c):
+        # Multiple unsupported nodes between supported regions
+        x = a + 1
+        x = x.relu()
+        x = x.sigmoid()
+        x = x + 1
+        return x
+
+    @staticmethod
+    def forward_wide_fanout(a, b, c):
+        # Wide fan-out from single node, one branch unsupported
+        base = a + 1
+        b1 = base + 2
+        b2 = base + 3
+        b3 = base + 4
+        b_bad = base.relu()  # unsupported
+        merge = b1 + b2
+        merge = merge + b3
+        merge = merge + b_bad
+        return merge
+
+    @staticmethod
+    def forward_supported_only_no_unsupported(a, b, c):
+        # All supported: should use fast path and produce one partition
+        x = a + b
+        y = x + c
+        z = y + a
+        return z
+
 @torch.fx.wrap
 def _nested_tuple_producer(x):
     """Returns a nested tuple structure: (x+1, (x+2, x+3))"""
@@ -308,6 +461,22 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward16, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
         # should be empty partition, not a partition with empty nodes
         (TestPartitionFunctions.forward18, [], False),
+        # multi-output graph where depth must account for the farthest user
+        (TestPartitionFunctions.forward19, [["add_1", "add"]], False),
+        # single-input multi-output with deeper unsupported fan-out
+        (TestPartitionFunctions.forward20, [["add_1", "add"]], False),
+        # multi-input multi-output combination
+        (TestPartitionFunctions.forward21, [["add_1", "add"]], False),
+        # single-input two-output combination
+        (TestPartitionFunctions.forward22, [["add_1", "add"]], False),
+        # multi-input two-output combination
+        (TestPartitionFunctions.forward23, [["add_1", "add"]], False),
+        # all unsupported: no partitions
+        (TestPartitionFunctions.forward_all_unsupported, [], False),
+        # single supported node only
+        (TestPartitionFunctions.forward_single_supported, [["add"]], False),
+        # all supported, no unsupported: fast path single partition
+        (TestPartitionFunctions.forward_supported_only_no_unsupported, [["add_2", "add_1", "add"]], False),
     ])
     def test_partitioner(self, fn, expected_partition, bookend_non_compute_pass):
         traced = symbolic_trace(fn)
@@ -339,6 +508,219 @@ class TestFXGraphPasses(JitTestCase):
         expected = fn(a, b, c)
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
+
+    def test_partitioner_skips_fast_stop_on_unrelated_deep_unsupporteds(self):
+        def fn(a, b):
+            base = operator.add(a, b)
+            blocked = base.relu()
+            blocked = blocked.relu()
+            blocked = blocked.relu()
+            _ = blocked.relu()
+            return operator.add(base, b)
+
+        gm = symbolic_trace(fn)
+
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            gm,
+            supported_ops,
+            allows_single_node_partition=True,
+        )
+
+        partitions = partitioner.propose_partitions()
+        self.assertEqual(len(partitions), 1)
+        nodes_names = [node.name for node in next(iter(partitions)).nodes]
+        self.assertEqual(
+            nodes_names,
+            ["add", "add_1"],
+            f"Unexpected partition nodes: {nodes_names}",
+        )
+
+    def test_partitioner_depth_window_uses_input_and_output(self):
+        traced = symbolic_trace(TestPartitionFunctions.forward_depth_window_regression)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            supported_ops,
+            allows_single_node_partition=True,
+        )
+        partitions = partitioner.propose_partitions()
+        partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
+        self.assertEqual(len(partitions_name), 1)
+        self.assertEqual(set(partitions_name[0]), {"add", "add_1", "add_2"})
+
+    def test_partitioner_long_chain_scattered_unsupported(self):
+        """Multiple supported regions separated by unsupported nodes form separate partitions
+        and fuse correctly."""
+        traced = symbolic_trace(TestPartitionFunctions.forward_long_chain_scattered)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced, supported_ops, allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertGreaterEqual(len(partitions), 1)
+
+        fused = partitioner.fuse_partitions(partitions)
+        a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
+        expected = TestPartitionFunctions.forward_long_chain_scattered(a, b, c)
+        result = fused(a, b, c)
+        torch.testing.assert_close(expected, result)
+
+    def test_partitioner_diamond_with_unsupported(self):
+        """Diamond: unsupported on one path prevents merging upstream nodes across it.
+        Fused result must still be numerically correct."""
+        traced = symbolic_trace(TestPartitionFunctions.forward_diamond_with_unsupported)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced, supported_ops, allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertGreaterEqual(len(partitions), 1)
+
+        fused = partitioner.fuse_partitions(partitions)
+        a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
+        expected = TestPartitionFunctions.forward_diamond_with_unsupported(a, b, c)
+        result = fused(a, b, c)
+        torch.testing.assert_close(expected, result)
+
+    def test_partitioner_parallel_chains(self):
+        """Two independent chains: one fully supported, one with unsupported.
+        Both should partition without cycles and fuse correctly."""
+        traced = symbolic_trace(TestPartitionFunctions.forward_parallel_chains)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced, supported_ops, allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertGreaterEqual(len(partitions), 1)
+
+        fused = partitioner.fuse_partitions(partitions)
+        a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
+        expected = TestPartitionFunctions.forward_parallel_chains(a, b, c)
+        result = fused(a, b, c)
+        torch.testing.assert_close(expected, result)
+
+    def test_partitioner_deep_blocklist(self):
+        """Unsupported node whose downstreams reach the partition should blocklist
+        its upstreams. Fused output must remain correct."""
+        traced = symbolic_trace(TestPartitionFunctions.forward_deep_blocklist)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced, supported_ops, allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertGreaterEqual(len(partitions), 1)
+
+        fused = partitioner.fuse_partitions(partitions)
+        a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
+        expected = TestPartitionFunctions.forward_deep_blocklist(a, b, c)
+        result = fused(a, b, c)
+        torch.testing.assert_close(expected, result)
+
+    def test_partitioner_multiple_unsupported_between(self):
+        """Multiple consecutive unsupported nodes between supported regions."""
+        traced = symbolic_trace(TestPartitionFunctions.forward_multiple_unsupported_between)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced, supported_ops, allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertGreaterEqual(len(partitions), 1)
+
+        fused = partitioner.fuse_partitions(partitions)
+        a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
+        expected = TestPartitionFunctions.forward_multiple_unsupported_between(a, b, c)
+        result = fused(a, b, c)
+        torch.testing.assert_close(expected, result)
+
+    def test_partitioner_wide_fanout(self):
+        """Wide fan-out from single node with one unsupported branch merging back.
+        Tests that blocklist doesn't over-eagerly block other branches."""
+        traced = symbolic_trace(TestPartitionFunctions.forward_wide_fanout)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced, supported_ops, allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertGreaterEqual(len(partitions), 1)
+
+        fused = partitioner.fuse_partitions(partitions)
+        a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
+        expected = TestPartitionFunctions.forward_wide_fanout(a, b, c)
+        result = fused(a, b, c)
+        torch.testing.assert_close(expected, result)
+
+    def test_partitioner_no_cycles_in_fused_graph(self):
+        """Stress test: verify fused graph for forward12 (known cycle-prone case)
+        has no cyclic dependency by checking forward pass works."""
+        traced = symbolic_trace(TestPartitionFunctions.forward12)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced, supported_ops, allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+        fused = partitioner.fuse_partitions(partitions)
+        a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
+        expected = TestPartitionFunctions.forward12(a, b, c)
+        result = fused(a, b, c)
+        torch.testing.assert_close(expected, result)
+
+    def test_partitioner_allows_single_node_false_filters(self):
+        """With allows_single_node_partition=False, single-compute partitions are removed."""
+        def fn(a, b, c):
+            # add1 alone after relu barrier
+            x = a.relu()
+            y = x + 1
+            return y
+
+        traced = symbolic_trace(fn)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced, supported_ops, allows_single_node_partition=False
+        )
+        partitions = partitioner.propose_partitions()
+        # Single add node should be filtered out
+        self.assertEqual(len(partitions), 0)
+
+    def test_partitioner_fast_path_all_supported(self):
+        """When no unsupported node has both inputs and outputs, fast path is used."""
+        def fn(a, b, c):
+            x = a + b
+            y = x + c
+            z = y + 1
+            return z
+
+        traced = symbolic_trace(fn)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced, supported_ops, allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+        # All should be in one partition via fast path
+        self.assertEqual(len(partitions), 1)
+        nodes = {node.name for node in partitions[0].nodes}
+        self.assertEqual(nodes, {"add", "add_1", "add_2"})
+
+    def test_partitioner_fast_path_unsupported_at_boundary(self):
+        """Unsupported nodes only at input/output boundaries still use fast path."""
+        def fn(a, b, c):
+            x = a.relu()   # unsupported, but only has output users
+            y = x + 1      # supported
+            z = y + 1      # supported
+            return z
+
+        traced = symbolic_trace(fn)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced, supported_ops, allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+        all_nodes = set()
+        for p in partitions:
+            for node in p.nodes:
+                all_nodes.add(node.name)
+        self.assertIn("add", all_nodes)
+        self.assertIn("add_1", all_nodes)
 
     @parametrize("fn, expected_partition", [
         (TestPartitionFunctions.forward17, [['add', 'add_1', 'add_2']]),
