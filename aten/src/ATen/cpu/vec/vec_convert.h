@@ -2,9 +2,21 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_n.h>
+#include <c10/util/TypeCast.h>
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
+
+template <typename dst_t, typename src_t>
+static inline dst_t convert_scalar(src_t value) {
+  if constexpr (
+      std::is_same_v<dst_t, uint8_t> && std::is_floating_point_v<src_t>) {
+    // Match eager float -> uint8_t semantics for negative values.
+    return c10::convert<dst_t>(value);
+  } else {
+    return static_cast<dst_t>(value);
+  }
+}
 
 template <
     typename dst_t,
@@ -21,7 +33,7 @@ struct VecConvert {
     src.store(src_buf);
     __at_align__ dst_t dst_buf[VectorizedN<dst_t, dst_n>::size()];
     for (int i = 0; i < count; i++) {
-      dst_buf[i] = static_cast<dst_t>(src_buf[i]);
+      dst_buf[i] = convert_scalar<dst_t>(src_buf[i]);
     }
     return VectorizedN<dst_t, dst_n>::loadu(dst_buf, count);
   }
