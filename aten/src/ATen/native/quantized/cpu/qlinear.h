@@ -28,7 +28,7 @@ class QLinearOnednn final {
       Tensor onednn_weight, // int8 tensor from MkldnnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
-      std::optional<at::Tensor> other, // extra input for binary post-op
+      std::optional<Tensor> other, // extra input for binary post-op
       std::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
