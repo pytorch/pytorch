@@ -15627,6 +15627,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(x, source)
 
+    def test_index_add_out_of_bounds(self):
+        # https://github.com/pytorch/pytorch/issues/185885
+        # Eager index_add bounds-checks the index; the inductor decomp routes
+        # through index_put (advanced-indexing semantics) which silently
+        # accepts out-of-range/negative indices. Compiled must match eager
+        # and raise instead of returning a tensor.
+        def fn(index):
+            x = torch.zeros(4, 3, device=self.device)
+            source = torch.ones(index.size(0), 3, device=self.device)
+            return torch.index_add(x, 0, index, source)
+
+        valid = torch.tensor([0, 2], device=self.device)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(compiled_fn(valid), fn(valid))
+
+        for bad in (-1, 4, 5):
+            indices = torch.tensor([0, bad], device=self.device)
+            with self.assertRaises(RuntimeError):
+                fn(indices)
+            with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
+                compiled_fn(indices)
+
     @skip_if_gpu_halide  # cuda error
     def test_mutations_loop_fusion(self):
         def fn(tensor, index, source):

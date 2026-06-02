@@ -3357,6 +3357,15 @@ def _index_add(
     x1 = x.unsqueeze(0) if zero_dim else x
     idx = (None,) * dim + (index,)
     index_put = aten.index_put_ if inplace else aten.index_put
+    size = x1.size(dim)
+    # _assert_async is side-effectful and won't be DCE'd; mirrors one_hot.
+    # Eager index_add bounds-checks the index to [0, size), but the
+    # index_put decomp below follows advanced-indexing semantics and
+    # silently accepts negative/out-of-range indices, so re-add the check.
+    aten._assert_async.msg(
+        torch.all((index >= 0) & (index < size)),
+        "index_add(): index out of bounds",
+    )
     out = index_put(x1, idx, tensor, accumulate=True)
     if inplace:
         return x
