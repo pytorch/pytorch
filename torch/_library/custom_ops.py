@@ -272,10 +272,6 @@ def custom_op(
     return inner(fn)
 
 
-# Sentinel returned by fast_path when it can't handle the call.
-_DO_SLOW_PATH = object()
-
-
 class CustomOpDef:
     """CustomOpDef is a wrapper around a function that turns it into a custom op.
 
@@ -869,11 +865,10 @@ class CustomOpDef:
           an autograd key, ADInplaceOrView, and a dense backend key.
           (Falls back to slow path under inference_mode, Functionalize, Vmap, etc.)
         - The schema has no tensor-list args and is not a view op.
-        When any condition fails, ``fast_path`` returns ``_DO_SLOW_PATH``
-        and the call falls through to the C++ dispatcher.
+        When any condition fails, the call falls through to the C++ dispatcher.
 
         Dispatch chain (all in Python, no C++ dispatcher hops):
-        fast_path -> autograd_impl -> [adinplaceorview_impl ->] backend_dispatch
+        autograd_impl -> [adinplaceorview_impl ->] backend_dispatch
         Connected via TLS-based redispatch interception in OpOverload.redispatch."""
         schema = self._opoverload._schema
         if schema._is_view_op():
@@ -903,46 +898,30 @@ class CustomOpDef:
                 return (autograd_impl, adinplaceorview_impl, backend_dispatch)
             return (autograd_impl, backend_dispatch)
 
-        def fast_path(*args, **kwargs):
-            # Dynamo needs the real dispatcher graph
-            if torch.compiler.is_compiling():
-                return _DO_SLOW_PATH
+        def _check_fast_path(args, kwargs):
+            # Dynamo needs the real dispatcher graph;
             # kwargs / no-positional-arg calls need schema-level handling
-            if not args or kwargs:
-                return _DO_SLOW_PATH
+            if torch.compiler.is_compiling() or not args or kwargs:
+                return None
 
             # Returns (device_type, keyset_raw) or None; rejects subclasses,
             # modes, autocast, multi-device, nested/sparse/quantized
-            check = _C._custom_op_fast_path_check(
+            check = _C._custom_op_fast_path_check(  # pyrefly: ignore[missing-attribute]
                 args
-            )  # pyrefly: ignore[missing-attribute]
+            )
             if check is None:
-                return _DO_SLOW_PATH
+                return None
 
             device_type, keyset_raw = check
 
             # meta tensors and disabled kernels need C++ fallback logic
             if device_type == "meta" or device_type in disabled_kernel:
-                return _DO_SLOW_PATH
+                return None
             # No registered kernel for this device
             backend_impl = backend_impls.get(device_type) or backend_impls.get(None)
             if backend_impl is None:
-                return _DO_SLOW_PATH
-
-            chain = chain_cache.get(device_type)
-            if chain is None:
-                chain = _build_chain(backend_impl)
-                chain_cache[device_type] = chain
-
-            opdef._fast_path_hits += 1
-            keyset = _C.DispatchKeySet.from_raw_repr(keyset_raw)
-            prev = _ops._set_fast_redispatch(op, chain)
-            try:
-                return op.redispatch(keyset, *args)
-            finally:
-                _ops._unset_fast_redispatch(prev)
-
-        self._fast_path = fast_path
+                return None
+            return (device_type, keyset_raw, backend_impl)
 
         # Install fast path on the OpOverload's `_op` (read by `torch.ops.ns.name.default(x)`).
         # Save the original entry once so repeated `_install_fast_path` invocations
@@ -953,14 +932,27 @@ class CustomOpDef:
             overload._orig_op = overload._op  # pyrefly: ignore[missing-attribute]
 
         def fast_op(*args, **kwargs):
-            result = fast_path(*args, **kwargs)
-            if result is not _DO_SLOW_PATH:
-                return result
+            info = _check_fast_path(args, kwargs)
+            if info is not None:
+                device_type, keyset_raw, backend_impl = info
+                chain = chain_cache.get(device_type)
+                if chain is None:
+                    chain = _build_chain(backend_impl)
+                    chain_cache[device_type] = chain
+
+                opdef._fast_path_hits += 1
+                keyset = _C.DispatchKeySet.from_raw_repr(keyset_raw)
+                prev = _ops._set_fast_redispatch(op, chain)
+                try:
+                    return op.redispatch(keyset, *args)
+                finally:
+                    _ops._unset_fast_redispatch(prev)
             return overload._orig_op(  # pyrefly: ignore[missing-attribute]
                 *args, **kwargs
             )
 
         overload._op = fast_op
+        self._fast_path = fast_op
 
     def _register_backend_select_dispatcher(self, device_arg_index: int):
         """
