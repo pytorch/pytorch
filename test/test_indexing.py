@@ -20,10 +20,9 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
-    onlyOn,
     skipXLA,
     skipXPUIf,
     tol,
@@ -44,13 +43,14 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_CUDA,
     TEST_MPS,
+    TEST_PRIVATEUSE1,
     TEST_XPU,
     TestCase,
     xfailIfTorchDynamo,
 )
 
 
-class TestIndexing(TestCase):
+class TestIndexingDevice(TestCase):
     def test_index(self, device):
         def consec(size, start=1):
             sequence = torch.ones(torch.tensor(size).prod(0)).cumsum(0)
@@ -1021,7 +1021,7 @@ class TestIndexing(TestCase):
     @skipIfTorchDynamo(
         "This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472"
     )
-    @serialTest(TEST_CUDA or TEST_XPU or TEST_MPS)
+    @serialTest(TEST_CUDA or TEST_XPU or TEST_MPS or TEST_PRIVATEUSE1)
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
@@ -1098,7 +1098,7 @@ class TestIndexing(TestCase):
         out_cpu = t.index_put_(indices, values2d, accumulate=True)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_index_put_large_indices(self, device):
         def generate_indices(num_indices: int, index_range: int):
             indices = []
@@ -1150,7 +1150,7 @@ class TestIndexing(TestCase):
             a_dev.index_put_(indices=[b_dev], values=c_dev, accumulate=True)
             self.assertEqual(a_dev.cpu(), a)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_index_put_accumulate_non_contiguous(self, device):
         t = torch.zeros((5, 2, 2))
         t_dev = t.to(device)
@@ -1169,7 +1169,7 @@ class TestIndexing(TestCase):
 
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_index_put_deterministic_with_optional_tensors(self, device):
         def func(x, i, v):
             with DeterministicGuard(True):
@@ -1651,7 +1651,7 @@ class TestIndexing(TestCase):
 
         self.assertRaisesRegex(IndexError, "invalid index", runner)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_invalid_device(self, device):
         idx = torch.tensor([0, 1])
         b = torch.zeros(5, device=device)
@@ -1663,7 +1663,7 @@ class TestIndexing(TestCase):
                 lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate),
             )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_cpu_indices(self, device):
         idx = torch.tensor([0, 1])
         b = torch.zeros(2, device=device)
@@ -1739,7 +1739,7 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
             torch.take_along_dim(t, indices, dim=7)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     @dtypes(torch.float)
     def test_gather_take_along_dim_cross_device(self, device, dtype):
         shape = (2, 3, 1, 4)
@@ -1769,7 +1769,7 @@ class TestIndexing(TestCase):
         ):
             torch.take_along_dim(t.cpu(), indices, dim=0)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyAccelerator
     def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
         with DeterministicGuard(True):
             idx1 = torch.tensor([0])
@@ -2045,8 +2045,8 @@ class TestIndexing(TestCase):
                     y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
+    @onlyAccelerator
     @serialTest()
-    @onlyCUDA
     @toleranceOverride(
         {
             torch.float32: tol(atol=1e-5, rtol=1e-3),
@@ -2070,7 +2070,7 @@ class TestIndexing(TestCase):
             self.assertEqual(out.cpu(), expected)
 
         for m, n, D in [(1024, 512, 128), (4096, 3072, 128), (4096, 1024, 1024)]:
-            torch.cuda.empty_cache()
+            torch.accelerator.empty_cache()
             for idx_dtype in (torch.int32, torch.int64):
                 src = make_tensor((n, D), device=device, dtype=dtype)
                 idx = torch.randint(m, (n,), device=device, dtype=idx_dtype)
@@ -2126,43 +2126,6 @@ class TestIndexing(TestCase):
         self.assertEqual(out, expected)
 
     @serialTest()
-    @onlyCUDA
-    @toleranceOverride(
-        {
-            # Tolerances follow test_index_add_fast_path: this shape does
-            # ~n/m atomic adds per row (~670 here with m=13), and bf16's
-            # 7-bit mantissa accumulates noise quickly under non-
-            # deterministic atomicAdd ordering. fp32 stays tight.
-            torch.float32: tol(atol=1e-4, rtol=1e-3),
-            torch.bfloat16: tol(atol=20.0, rtol=0.5),
-        }
-    )
-    @dtypes(torch.float32, torch.bfloat16)
-    def test_index_add_smem_stage_alignment_regression(self, device, dtype):
-        # Regression for SEV S664741: the original D104669063 was reverted
-        # when this delegation surfaced a latent scatter_add TMA smem
-        # stage-alignment bug -- chunk_bytes < 128 (or not a multiple of
-        # 128) plus multi-iter-per-CTA (M_src > grid_x cap of sm*64) wrote
-        # stage 1 of the 2-stage pipeline buffer at a non-128-aligned smem
-        # offset, faulting in cp.async.bulk. Fixed in PR #184554 by
-        # rounding the stage stride to 128 bytes. This test pins the
-        # prod shape (small D + high M_src) at the index_add layer so a
-        # future refactor of the delegation re-exposing the same shape
-        # class is caught here, not in prod.
-        sm = torch.cuda.get_device_properties(0).multi_processor_count
-        # D=8 fp32 -> chunk_bytes=32 (< 128). M_src > sm*64 forces every
-        # CTA into >= 2 iterations -> stage 1 used. Prod fault was at
-        # sm*64=8448 (H100); sm*64 + 256 exposes the regime on any GPU.
-        m, n, D = 13, sm * 64 + 256, 8
-        src = make_tensor((n, D), device=device, dtype=dtype)
-        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
-        out = torch.zeros(m, D, device=device, dtype=dtype)
-        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
-        out.index_add_(0, idx, src)
-        self.assertEqual(out.cpu(), expected)
-
-    @serialTest()
-    @onlyCUDA
     @dtypes(torch.complex64, torch.complex128, torch.bool)
     def test_index_add_excluded_dtypes(self, device, dtype):
         # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the
@@ -2569,10 +2532,48 @@ class NumpyTests(TestCase):
         self.assertEqual(kernel, kernel2)
 
 
+class TestIndexingCUDA(TestCase):
+    @serialTest()
+    @toleranceOverride(
+        {
+            # Tolerances follow test_index_add_fast_path: this shape does
+            # ~n/m atomic adds per row (~670 here with m=13), and bf16's
+            # 7-bit mantissa accumulates noise quickly under non-
+            # deterministic atomicAdd ordering. fp32 stays tight.
+            torch.float32: tol(atol=1e-4, rtol=1e-3),
+            torch.bfloat16: tol(atol=20.0, rtol=0.5),
+        }
+    )
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_index_add_smem_stage_alignment_regression(self, device, dtype):
+        # Regression for SEV S664741: the original D104669063 was reverted
+        # when this delegation surfaced a latent scatter_add TMA smem
+        # stage-alignment bug -- chunk_bytes < 128 (or not a multiple of
+        # 128) plus multi-iter-per-CTA (M_src > grid_x cap of sm*64) wrote
+        # stage 1 of the 2-stage pipeline buffer at a non-128-aligned smem
+        # offset, faulting in cp.async.bulk. Fixed in PR #184554 by
+        # rounding the stage stride to 128 bytes. This test pins the
+        # prod shape (small D + high M_src) at the index_add layer so a
+        # future refactor of the delegation re-exposing the same shape
+        # class is caught here, not in prod.
+        sm = torch.cuda.get_device_properties(0).multi_processor_count
+        # D=8 fp32 -> chunk_bytes=32 (< 128). M_src > sm*64 forces every
+        # CTA into >= 2 iterations -> stage 1 used. Prod fault was at
+        # sm*64=8448 (H100); sm*64 + 256 exposes the regime on any GPU.
+        m, n, D = 13, sm * 64 + 256, 8
+        src = make_tensor((n, D), device=device, dtype=dtype)
+        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
+        out = torch.zeros(m, D, device=device, dtype=dtype)
+        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
+        out.index_add_(0, idx, src)
+        self.assertEqual(out.cpu(), expected)
+
+
 instantiate_device_type_tests(
-    TestIndexing, globals(), except_for="meta", allow_mps=True, allow_xpu=True
+    TestIndexingDevice, globals(), except_for="meta", allow_mps=True, allow_xpu=True
 )
 instantiate_device_type_tests(NumpyTests, globals(), except_for="meta", allow_xpu=True)
+instantiate_device_type_tests(TestIndexingCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
