@@ -7,6 +7,9 @@
 #include <cstdlib>
 #include <limits>
 #include <map>
+#include <unordered_map>
+
+#include <c10/util/hash.h>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -627,6 +630,15 @@ inline IndexValueVec<T, NV, NI>& argmin_combine_vec(
   return argmin_vec_impl(a, next_value, next_idx, tail_size);
 }
 
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmin_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmin_vec_impl(a, next_value, next_index, tail_size);
+}
+
 template <typename T, int NV, int NI, bool horizontal>
 inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
     IndexValueVec<T, NV, NI>& a,
@@ -635,6 +647,15 @@ inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
     std::optional<int64_t> tail_size = std::nullopt) {
   auto next_idx = create_index<T, NI, horizontal>(next_index);
   return argmax_vec_impl(a, next_value, next_idx, tail_size);
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmax_vec_impl(a, next_value, next_index, tail_size);
 }
 
 template <typename T, int NV, int NI>
@@ -1086,16 +1107,14 @@ inline std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(
 }
 
 inline std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
-  thread_local std::map<int64_t, std::tuple<std::shared_ptr<int64_t[]>, int>>
-      cache;
-  auto it = cache.find(number);
-  if (it != cache.end()) {
-    return it->second;
-  } else {
-    auto factors = _get_factors(number);
-    cache[number] = factors;
-    return factors;
+  thread_local std::
+      unordered_map<int64_t, std::tuple<std::shared_ptr<int64_t[]>, int>>
+          cache;
+  auto [it, inserted] = cache.try_emplace(number);
+  if (inserted) {
+    it->second = _get_factors(number);
   }
+  return it->second;
 }
 // NOLINTEND(*-avoid-c-arrays)
 
@@ -1208,20 +1227,19 @@ inline void mm_get_thread_blocking(
     int64_t& Mt,
     int64_t& Nt,
     int64_t& Kt) {
-  thread_local std::map<
-      std::
-          tuple<int, int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>,
-      std::tuple<int64_t, int64_t, int64_t>>
-      cache;
+  using Key = std::
+      tuple<int, int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>;
+  thread_local std::
+      unordered_map<Key, std::tuple<int64_t, int64_t, int64_t>, c10::hash<Key>>
+          cache;
   auto key = std::make_tuple(num_threads, max_k_slices, M, N, K, Mr, Nr, Kr);
-  auto it = cache.find(key);
-  if (it != cache.end()) {
-    std::tie(Mt, Nt, Kt) = it->second;
-    return;
-  } else {
+  auto [it, inserted] = cache.try_emplace(key);
+  if (inserted) {
     _mm_get_thread_blocking(
         num_threads, max_k_slices, M, N, K, Mr, Nr, Kr, Mt, Nt, Kt);
-    cache[key] = std::make_tuple(Mt, Nt, Kt);
+    it->second = std::make_tuple(Mt, Nt, Kt);
+  } else {
+    std::tie(Mt, Nt, Kt) = it->second;
   }
 }
 
@@ -1303,22 +1321,22 @@ void mm_get_cache_blocking(
     int64_t& Kc_blocks,
     uint32_t L1_cache_size,
     uint32_t L2_cache_size) {
-  thread_local std::map<
-      std::tuple<
-          int,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t>,
-      std::tuple<int64_t, int64_t, int64_t>>
-      cache;
+  using Key = std::tuple<
+      int,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t>;
+  thread_local std::
+      unordered_map<Key, std::tuple<int64_t, int64_t, int64_t>, c10::hash<Key>>
+          cache;
   auto key = std::make_tuple(
       num_threads,
       M,
@@ -1332,11 +1350,8 @@ void mm_get_cache_blocking(
       Kt_blocks,
       L1_cache_size,
       L2_cache_size);
-  auto it = cache.find(key);
-  if (it != cache.end()) {
-    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = it->second;
-    return;
-  } else {
+  auto [it, inserted] = cache.try_emplace(key);
+  if (inserted) {
     _mm_get_cache_blocking<X_t, W_t>(
         num_threads,
         M,
@@ -1353,7 +1368,9 @@ void mm_get_cache_blocking(
         Kc_blocks,
         L1_cache_size,
         L2_cache_size);
-    cache[key] = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
+    it->second = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
+  } else {
+    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = it->second;
   }
 }
 
