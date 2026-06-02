@@ -4389,6 +4389,22 @@ class DeviceCachingAllocator {
     // list of events per stream to avoid head-of-line delays if one
     // or more streams has long-running operations.
 
+    // On ROCm 7.x, cudaEventQuery (hipEventQuery) can segfault on
+    // accumulated/stale event handles. If any stream has accumulated
+    // more than a small threshold of events, drain all events via
+    // synchronize_and_free_events which uses cudaEventSynchronize
+    // (safe) instead of cudaEventQuery. This mirrors the workaround
+    // of calling torch.cuda.synchronize() or torch.cuda.empty_cache().
+#ifdef USE_ROCM
+    constexpr size_t kMaxRocmEventsBeforeDrain = 16;
+    for (auto it = cuda_events.begin(); it != cuda_events.end(); ++it) {
+      if (it->second.size() > kMaxRocmEventsBeforeDrain) {
+        synchronize_and_free_events(context);
+        return;
+      }
+    }
+#endif
+
     // Iterate over different streams.
     for (auto it = cuda_events.begin(); it != cuda_events.end();) {
       // Iterate over this stream's (event, block) pairs.
