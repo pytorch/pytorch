@@ -30,8 +30,8 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.distributed.optim import _NamedOptimizer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    DEVICEInitMode,
     DEVICE_TYPE,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     TransformerWithSharedParams,
