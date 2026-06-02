@@ -139,28 +139,22 @@ def prod(input, axis):
 
 @triton.jit
 def _is_neg_zero(x):
-    # Triton does not expose a `.dtype` attribute on
-    # raw Python scalars. We temporarily promote `x`
-    # to a tensor strictly for compile-time type resolution,
-    # preserving the unmodified `x` for the actual bitcast.
-    x_tensor = promote_to_tensor(x)
-    dtype = x_tensor.dtype
-    if dtype == tl.float32:
+    if hasattr(x, "dtype") and x.dtype == tl.float32:
         return (x == 0.0) & (x.to(tl.int32, bitcast=True) < 0)
-    elif dtype == tl.float16 or dtype == tl.bfloat16:
+    elif hasattr(x, "dtype") and (x.dtype == tl.float16 or x.dtype == tl.bfloat16):
         return (x == 0.0) & (x.to(tl.int16, bitcast=True) < 0)
-    elif dtype == tl.float64:
+    elif hasattr(x, "dtype") and x.dtype == tl.float64:
         return (x == 0.0) & (x.to(tl.int64, bitcast=True) < 0)
-    elif dtype in (
-        getattr(tl, "float8e4nv", None),
-        getattr(tl, "float8e5", None),
-        getattr(tl, "float8e4b8", None),
-        getattr(tl, "float8e4b15", None),
-        getattr(tl, "float8e5b16", None),
+    elif hasattr(x, "dtype") and (
+        x.dtype == getattr(tl, "float8e4nv", None)
+        or x.dtype == getattr(tl, "float8e5", None)
+        or x.dtype == getattr(tl, "float8e4b8", None)
+        or x.dtype == getattr(tl, "float8e4b15", None)
+        or x.dtype == getattr(tl, "float8e5b16", None)
     ):
         return (x == 0.0) & (x.to(tl.int8, bitcast=True) < 0)
     else:
-        return x != x
+        return (x == x) & False
 
 
 @triton.jit
@@ -188,13 +182,29 @@ def maximum(a, b):
 
 
 @triton.jit
+def _reduction_minimum(a, b):
+    mask = a < b
+    if is_floating(a):
+        mask |= a != a
+    return tl.where(mask, a, b)
+
+
+@triton.jit
+def _reduction_maximum(a, b):
+    mask = a > b
+    if is_floating(a):
+        mask |= a != a
+    return tl.where(mask, a, b)
+
+
+@triton.jit
 def min2(a, dim):
-    return tl.reduce(a, dim, minimum)
+    return tl.reduce(a, dim, _reduction_minimum)
 
 
 @triton.jit
 def max2(a, dim):
-    return tl.reduce(a, dim, maximum)
+    return tl.reduce(a, dim, _reduction_maximum)
 
 
 @triton.jit
@@ -246,13 +256,45 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
 
 
 @triton.jit
+def _reduction_minimum_with_index(a_value, a_index, b_value, b_index):
+    mask = a_value < b_value
+    equal = a_value == b_value
+    if is_floating(a_value):
+        a_isnan = a_value != a_value
+        b_isnan = b_value != b_value
+        mask |= a_isnan & (not b_isnan)
+        # Consider NaNs as equal
+        equal |= a_isnan & b_isnan
+
+    # Prefer lowest index if values are equal
+    mask |= equal & (a_index < b_index)
+    return tl.where(mask, a_value, b_value), tl.where(mask, a_index, b_index)
+
+
+@triton.jit
+def _reduction_maximum_with_index(a_value, a_index, b_value, b_index):
+    mask = a_value > b_value
+    equal = a_value == b_value
+    if is_floating(a_value):
+        a_isnan = a_value != a_value
+        b_isnan = b_value != b_value
+        mask |= a_isnan & (not b_isnan)
+        # Consider NaNs as equal
+        equal |= a_isnan & b_isnan
+
+    # Prefer lowest index if values are equal
+    mask |= equal & (a_index < b_index)
+    return tl.where(mask, a_value, b_value), tl.where(mask, a_index, b_index)
+
+
+@triton.jit
 def min_with_index(value, index, dim):
-    return tl.reduce((value, index), dim, minimum_with_index)
+    return tl.reduce((value, index), dim, _reduction_minimum_with_index)
 
 
 @triton.jit
 def max_with_index(value, index, dim):
-    return tl.reduce((value, index), dim, maximum_with_index)
+    return tl.reduce((value, index), dim, _reduction_maximum_with_index)
 
 
 @triton.jit

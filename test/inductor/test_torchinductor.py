@@ -18003,12 +18003,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         # Add FP8 types if hardware/software support allows
         # (Requires CUDA 12.1+ and Hopper+ architecture for native execution)
-        if (
-            self.device == "cuda"
-            and hasattr(torch, "float8_e4m3fn")
-            and torch.cuda.get_device_capability(self.device)[0] >= 9
-        ):
-            fp_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
+        if GPU_TYPE == "cuda" and torch.cuda.is_available():
+            capability = torch.cuda.get_device_capability()
+            if capability >= (9, 0):  # Hopper architecture
+                fp_dtypes.extend(
+                    [
+                        torch.float8_e4m3fn,
+                        torch.float8_e5m2,
+                        # add any other FP8 types here
+                    ]
+                )
 
         for dtype in fp_dtypes:
             # Construct permutations matrix for signed zeros
@@ -18052,7 +18056,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         # Sanity/Regression check for Integer and Boolean types
         # Since integers can't represent -0.0, we just want to ensure our fallback branch doesn't break them.
-        int_dtypes = [torch.int8, torch.int32, torch.int64, torch.uint8, torch.bool]
+        int_dtypes = [torch.int8, torch.int32, torch.int64, torch.uint8]
         for dtype in int_dtypes:
             a = torch.tensor([0, 1, 0, 1], device=self.device, dtype=dtype)
             b = torch.tensor([1, 0, 0, 1], device=self.device, dtype=dtype)
@@ -18071,6 +18075,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 eager_max,
                 msg=f"Inductor integer maximum regression on {dtype}",
             )
+
+        a = torch.tensor([False, True], device=self.device, dtype=torch.bool)
+        b = torch.tensor([True, False], device=self.device, dtype=torch.bool)
+
+        # Only test min/max as torch.bool does not support argmin/argmax
+        eager_min, eager_max = torch.minimum(a, b), torch.maximum(a, b)
+        compiled_fn = torch.compile(
+            lambda a, b: (torch.minimum(a, b), torch.maximum(a, b))
+        )
+        comp_min, comp_max = compiled_fn(a, b)
+
+        self.assertEqual(
+            comp_min, eager_min, msg=f"Inductor minimum regression on {torch.bool}"
+        )
+        self.assertEqual(
+            comp_max, eager_max, msg=f"Inductor maximum regression on {torch.bool}"
+        )
 
     def test_jvp_compile_backward(self):
         def jvp_fn(f, x):
