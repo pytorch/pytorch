@@ -2747,7 +2747,7 @@ class CppVecKernel(CppKernel):
     def _get_mask_cast(self, mask: CppCSEVariable, dtype: torch.dtype) -> str:
         assert mask.dtype == torch.bool, repr(mask)
         num_vectors = self._get_num_vectors(dtype)
-        return f"{mask}.template cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>()"
+        return f"inductor_vec_mask_cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>({mask})"
 
     def _get_vec_load_line(
         self,
