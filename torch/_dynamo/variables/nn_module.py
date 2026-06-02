@@ -84,6 +84,42 @@ if TYPE_CHECKING:
     from .dicts import DunderDictVariable
 
 
+_UNSUPPORTED_DYNAMIC_MODULE_HOOK_REGISTRATION_METHODS = frozenset(
+    {
+        "register_backward_hook",
+        "register_forward_hook",
+        "register_forward_pre_hook",
+        "register_full_backward_hook",
+        "register_full_backward_pre_hook",
+    }
+)
+
+
+def is_unsupported_dynamic_module_hook_registration_method(
+    name: str, method: Any
+) -> bool:
+    if name not in _UNSUPPORTED_DYNAMIC_MODULE_HOOK_REGISTRATION_METHODS:
+        return False
+    return inspect.getattr_static(torch.nn.Module, name) is method
+
+
+def unsupported_dynamic_module_hook_registration(name: str) -> None:
+    unimplemented(
+        gb_type="Dynamic nn.Module hook registration",
+        context=f"nn.Module.{name}",
+        explanation=(
+            "Dynamo does not support registering nn.Module execution hooks "
+            "during tracing. Hooks registered before calling `torch.compile` "
+            "are supported, but adding or removing hooks inside a compiled "
+            "region mutates module state and is not modeled."
+        ),
+        hints=[
+            "Register hooks on the module before calling `torch.compile`.",
+            "Move hook registration outside the compiled function.",
+        ],
+    )
+
+
 def initialize_lazy_module(
     tx: "InstructionTranslatorBase",
     mod: torch.nn.Module,
@@ -798,6 +834,14 @@ class NNModuleVariable(VariableTracker):
             name = f"{module.__class__.__name__}_{name}_result"
             return invoke_and_store_as_constant(tx, fn, name, args, kwargs)
 
+        try:
+            method = inspect.getattr_static(type(module), name)
+        except AttributeError:
+            method = None
+
+        if is_unsupported_dynamic_module_hook_registration_method(name, method):
+            unsupported_dynamic_module_hook_registration(name)
+
         def assert_all_args_kwargs_const() -> None:
             if not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
@@ -1209,6 +1253,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = inspect.getattr_static(type(self.value), name)
             except AttributeError:
                 method = None
+
+            if is_unsupported_dynamic_module_hook_registration_method(name, method):
+                unsupported_dynamic_module_hook_registration(name)
 
             if isinstance(method, staticmethod):
                 source = AttrSource(
