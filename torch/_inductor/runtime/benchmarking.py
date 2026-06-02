@@ -1,17 +1,13 @@
-import builtins
 import contextlib
 import functools
 import inspect
-import os
-import re
-import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, cast, Concatenate
+from typing import Any, Concatenate
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -52,180 +48,42 @@ def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
     return torch.device(device_type).type
 
 
-_GPU_BENCHMARK_LOCK_STATE_NAME = "_torchinductor_gpu_benchmark_lock_state"
-
-
-def _gpu_benchmark_process_lock_state() -> dict[str, object]:
-    existing_state = cast(
-        dict[str, object] | None,
-        getattr(builtins, _GPU_BENCHMARK_LOCK_STATE_NAME, None),
-    )
-    if existing_state is not None:
-        return existing_state
-    state: dict[str, object] = {
-        "mutex": threading.RLock(),
-        "local": threading.local(),
-        "locks": {},
-    }
-    setattr(builtins, _GPU_BENCHMARK_LOCK_STATE_NAME, state)
-    return state
-
-
-def _env_flag_enabled(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _gpu_benchmark_lock_enabled() -> bool:
-    return _env_flag_enabled("INDUCTOR_GPU_BENCH_LOCK") or _env_flag_enabled(
-        "TORCHINDUCTOR_GPU_BENCH_LOCK"
-    )
+_GpuBenchmarkLockContext = Callable[[], contextlib.AbstractContextManager[None]]
+_gpu_benchmark_lock_context: _GpuBenchmarkLockContext | None = None
+_gpu_benchmark_lock_local = threading.local()
 
 
 def set_gpu_benchmark_lock_context(
-    context_factory: Callable[[], contextlib.AbstractContextManager[None]] | None,
-) -> Callable[[], contextlib.AbstractContextManager[None]] | None:
+    context_factory: _GpuBenchmarkLockContext | None,
+) -> _GpuBenchmarkLockContext | None:
     """Override the process-local GPU benchmark lock context.
 
-    This is intended for benchmark harnesses that need a wider locking protocol,
-    such as holding a shared lock during setup and upgrading to exclusive for
-    timing. Returning the previous context lets callers restore it in tests.
+    This lets benchmark harnesses provide the context used by Inductor internal
+    benchmark calls. Returning the previous context lets callers restore it in
+    tests.
     """
-    state = _gpu_benchmark_process_lock_state()
-    with cast(Any, state["mutex"]):
-        previous = state.get("custom_context_factory")
-        if context_factory is None:
-            state.pop("custom_context_factory", None)
-        else:
-            state["custom_context_factory"] = context_factory
-    return cast(Callable[[], contextlib.AbstractContextManager[None]] | None, previous)
-
-
-def _safe_lock_component(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip()) or "unknown"
-
-
-def _visible_cuda_device_for_lock() -> str:
-    if torch.version.hip:
-        visible_devices_env = (
-            os.environ.get("HIP_VISIBLE_DEVICES")
-            or os.environ.get("ROCR_VISIBLE_DEVICES")
-            or os.environ.get("CUDA_VISIBLE_DEVICES")
-            or ""
-        )
-    else:
-        visible_devices_env = (
-            os.environ.get("CUDA_VISIBLE_DEVICES")
-            or os.environ.get("HIP_VISIBLE_DEVICES")
-            or os.environ.get("ROCR_VISIBLE_DEVICES")
-            or ""
-        )
-    visible_devices = [
-        device.strip() for device in visible_devices_env.split(",") if device.strip()
-    ]
-    try:
-        current_device = torch.cuda.current_device()
-    except Exception:
-        current_device = 0
-
-    if 0 <= current_device < len(visible_devices):
-        return visible_devices[current_device]
-    return str(current_device)
+    global _gpu_benchmark_lock_context
+    previous = _gpu_benchmark_lock_context
+    _gpu_benchmark_lock_context = context_factory
+    return previous
 
 
 @contextlib.contextmanager
 def maybe_gpu_benchmark_lock() -> Iterator[None]:
-    """Optionally serialize GPU benchmark timing for the current visible device."""
-    if not _gpu_benchmark_lock_enabled():
+    """Optionally enter the registered GPU benchmark lock context."""
+    context_factory = _gpu_benchmark_lock_context
+    if context_factory is None:
         yield
         return
-
-    state = _gpu_benchmark_process_lock_state()
-    mutex = cast(Any, state["mutex"])
-    local = cast(Any, state["local"])
-    with mutex:
-        custom_context_factory = cast(
-            Callable[[], contextlib.AbstractContextManager[None]] | None,
-            state.get("custom_context_factory"),
-        )
-    if custom_context_factory is not None:
-        custom_context_depth = getattr(local, "custom_context_depth", 0)
-        local.custom_context_depth = custom_context_depth + 1
-        try:
-            if custom_context_depth == 0:
-                with custom_context_factory():
-                    yield
-            else:
-                yield
-        finally:
-            if custom_context_depth == 0:
-                del local.custom_context_depth
-            else:
-                local.custom_context_depth = custom_context_depth
+    if getattr(_gpu_benchmark_lock_local, "depth", 0) > 0:
+        yield
         return
-
+    _gpu_benchmark_lock_local.depth = 1
     try:
-        import fcntl
-    except ImportError:
-        yield
-        return
-
-    lock_dir = (
-        os.environ.get("INDUCTOR_GPU_BENCH_LOCK_DIR")
-        or os.environ.get("TORCHINDUCTOR_GPU_BENCH_LOCK_DIR")
-        or os.environ.get("COMPILE_UTILS_GPU_LOCK_DIR")
-        or os.path.join(tempfile.gettempdir(), "compile_utils_gpu_locks")
-    )
-    os.makedirs(lock_dir, exist_ok=True)
-    device = _safe_lock_component(_visible_cuda_device_for_lock())
-    lock_path = os.path.join(lock_dir, f"gpu_{device}.lock")
-
-    with mutex:
-        locks = cast(dict[str, Any], state.setdefault("locks", {}))
-        lock = locks.get(lock_path)
-        if lock is None:
-            lock = threading.RLock()
-            locks[lock_path] = lock
-
-    held_locks = getattr(local, "held_locks", None)
-    if held_locks is None:
-        held_locks = {}
-        local.held_locks = held_locks
-
-    if held_locks.get(lock_path, 0) > 0:
-        held_locks[lock_path] += 1
-        try:
+        with context_factory():
             yield
-        finally:
-            held_locks[lock_path] -= 1
-        return
-
-    with lock:
-        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o666)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            try:
-                os.ftruncate(fd, 0)
-                os.write(
-                    fd,
-                    (
-                        f"pid={os.getpid()}\n"
-                        f"gpu={device}\n"
-                        "mode=exclusive\n"
-                        "label=inductor_benchmark\n"
-                        f"acquired_unix={time.time():.0f}\n"
-                    ).encode(),
-                )
-                os.fsync(fd)
-            except OSError:
-                pass
-            held_locks[lock_path] = 1
-            try:
-                yield
-            finally:
-                del held_locks[lock_path]
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
+    finally:
+        del _gpu_benchmark_lock_local.depth
 
 
 def gpu_benchmark_lock(fn: Callable[P, T]) -> Callable[P, T]:
