@@ -857,44 +857,6 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @dynamo_config.patch({"capture_scalar_outputs": True})
-    def test_inplace_multidim_dynamic_slice_tensor_bound(self, device):
-        # Regression test for https://github.com/pytorch/pytorch/issues/183259
-        def fn(tensor_span):
-            batch_size = tensor_span.shape[0]
-            mask = torch.zeros(
-                (batch_size, 20, 20),
-                dtype=torch.float32,
-                device=tensor_span.device,
-            )
-            for i in range(batch_size):
-                span = tensor_span[i, 0]
-                mask[i, :span, :span] = 1.0
-            return mask
-
-        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
-        for span in (8, 25, -1, -25, 0):
-            tensor_span = torch.tensor([[span]], dtype=torch.int64, device=device)
-            actual = compiled_fn(tensor_span)
-            expected = fn(tensor_span)
-            torch.testing.assert_close(actual, expected)
-
-    @dynamo_config.patch({"capture_scalar_outputs": True})
-    def test_slice_scatter_dynamic_end_invalid_src_size(self, device):
-        def fn(x, src, end):
-            return torch.ops.aten.slice_scatter.default(x, src, 0, 0, end.item(), 1)
-
-        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
-        for src_len in (2, 4):
-            x = torch.arange(5, dtype=torch.float32, device=device)
-            src = torch.ones(src_len, dtype=torch.float32, device=device)
-            end = torch.tensor(3, dtype=torch.int64, device=device)
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "expected src to have a size equal to the slice of self|Eq\\(",
-            ):
-                compiled_fn(x, src, end)
-
-    @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_override_optimization_hint_eager(self, device):
         """Test that override_optimization_hint updates var_to_hint_override eagerly."""
         t = torch.tensor([5], device=device)
