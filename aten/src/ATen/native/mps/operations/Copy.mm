@@ -1,10 +1,12 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_copy_from_and_resize_native.h>
 #include <ATen/ops/_copy_from_native.h>
+#include <ATen/ops/from_blob.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/neg.h>
 #include <ATen/ops/real.h>
@@ -84,8 +86,9 @@ static void copy_cast_mps(at::Tensor& dst,
 }
 
 static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
-  auto sameMemFormat =
-      src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
+  // Ensure  src_ and dst_ tensors reside in unified memory and belong to correct devices
+  TORCH_INTERNAL_ASSERT(src_.device().type() == at::kMPS);
+  TORCH_INTERNAL_ASSERT(dst_.device().type() == at::kCPU);
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* stream = getCurrentMPSStream();
@@ -110,56 +113,76 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
   id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   size_t dst_tensor_nbytes = dst.nbytes();
+  const void* host_dst = static_cast<const char*>(dst.storage().data()) + dst.storage_offset() * dst.itemsize();
 
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
 
-    const void* host_dst = static_cast<const char*>(dst.storage().data()) + dst.storage_offset() * dst.itemsize();
     void* alignedPtr = pageAlignedBlockPtr(host_dst, (NSUInteger)dst_tensor_nbytes, &alignedLength);
     NSUInteger destOffset = (uintptr_t(host_dst) - uintptr_t(alignedPtr));
-    // 4 bytes alignment required on macos for blits.
-    TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned blit request");
+    // 4 bytes alignment required on macos
+    TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned copy request");
 
     // Only capture on non_blocking - capturing across waitUntilCompleted would
     // deadlock Metal's completion thread on the GIL.
     auto* dst_storage = non_blocking ? new c10::Storage(dst.storage()) : nullptr;
+    // Both src and dst tensors have MTLBuffer backing in shared storage
+    // we can memcpy directly between their contents pointers and avoid encoding
+    // a Metal blit.
     id<MTLBuffer> destBuffer = [device newBufferWithBytesNoCopy:alignedPtr
                                                          length:alignedLength
                                                         options:options
                                                     deallocator:^(void*, NSUInteger) {
                                                       delete dst_storage;
                                                     }];
-    id<MTLBuffer> maybeCastedSourceBuffer = sourceBuffer;
-    Tensor maybeCastedSource;
-    bool needsBlit = true;
-    if (src_.dtype() != dst.dtype()) {
-      if (destOffset == 0 && storage_byte_offset == 0) {
-        // Return the casted tensor directly if there's no destination offset
-        needsBlit = false;
-        maybeCastedSourceBuffer = destBuffer;
-      } else if (src.element_size() < dst.element_size()) {
-        maybeCastedSource = at::empty(dst.sizes(), dst.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-        maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
+    TORCH_INTERNAL_ASSERT(sourceBuffer.storageMode == MTLStorageModeShared);
+    TORCH_INTERNAL_ASSERT(destBuffer.storageMode == MTLStorageModeShared);
+
+    // Ensure any GPU work that produced `sourceBuffer` is finished and
+    // the contents are visible to the CPU.
+    stream->synchronize(SyncType::COMMIT_AND_WAIT);
+
+    // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
+    TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
+
+    const void* src_ptr = static_cast<const char*>((void*)[sourceBuffer contents]) + storage_byte_offset;
+    void* dst_ptr = static_cast<char*>((void*)[destBuffer contents]) + destOffset;
+
+    // Handle logical metadata differences negation/conjugation
+    // if these differ we must manually apply the transform before copying.
+    const bool needs_conj = src_.is_conj() != dst.is_conj();
+    const bool needs_neg = src_.is_neg() != dst.is_neg();
+    const bool needs_type_conv = src_.dtype() != dst.dtype();
+
+    // Same element type and no conjugation/negation metadata differences
+    if (!needs_type_conv && !needs_conj && !needs_neg) {
+      memcpy(dst_ptr, src_ptr, dst_tensor_nbytes);
+    } else {
+      // Create a CPU tensor view over the shared buffer and perform any
+      // required conjugation/negation and dtype conversion on the CPU,
+      // then copy into the destination.
+      Tensor src_cpu_view = at::from_blob(const_cast<void*>(src_ptr),
+                                          src.sizes(),
+                                          src.strides(),
+                                          at::TensorOptions().dtype(src_.dtype()).device(at::kCPU));
+      Tensor tmp = src_cpu_view;
+      if (needs_conj) {
+        tmp = tmp.conj();
       }
-
-      // In case of dtype change, first convert src inplace
-      copy_cast_mps(dst, src, maybeCastedSourceBuffer, sourceBuffer, non_blocking);
-    }
-
-    if (needsBlit) {
-      const size_t size_to_copy = (src.nbytes() / src.element_size()) * dst.element_size();
-
-      // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
-      TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
-      uint64_t profile_id =
-          getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
-
-      stream->copy_and_sync(
-          maybeCastedSourceBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
+      if (needs_neg) {
+        tmp = at::neg(tmp);
+      }
+      if (needs_type_conv) {
+        tmp = tmp.to(dst.dtype());
+      }
+      tmp = tmp.contiguous();
+      const void* tmp_ptr = static_cast<const char*>(tmp.storage().data()) + tmp.storage_offset() * tmp.itemsize();
+      memcpy(dst_ptr, tmp_ptr, dst_tensor_nbytes);
     }
     [destBuffer release];
   }
+
   if (!dst.is_same(dst_)) {
     dst_.copy_(dst, non_blocking);
   }
@@ -169,7 +192,6 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
 // Copies tensor from cpu to mps backed by identical strided-contiguous data
 static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
-  MPSStream* stream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   auto dst_byte_offset = dst.storage_offset() * dst.itemsize();
   auto src_byte_offset = src.storage_offset() * src.itemsize();
@@ -186,8 +208,14 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
 
     void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)size_to_copy, &alignedLength);
     sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
+    // 4 bytes alignment required on macos
+    TORCH_INTERNAL_ASSERT(sourceOffset % 4 == 0, "Unaligned copy request");
+
     // See note in copy_from_mps_ above.
     auto* src_storage = non_blocking ? new c10::Storage(src.storage()) : nullptr;
+    // Both src and dst tensors have MTLBuffer backing in shared storage
+    // we can memcpy directly between their contents pointers and avoid encoding
+    // a Metal blit.
     id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
                                                            length:alignedLength
                                                           options:options
@@ -195,16 +223,53 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
                                                         delete src_storage;
                                                       }];
 
-    uint64_t profile_id =
-        getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
+    TORCH_INTERNAL_ASSERT(destBuffer.storageMode == MTLStorageModeShared);
+    TORCH_INTERNAL_ASSERT(sourceBuffer.storageMode == MTLStorageModeShared);
 
-    stream->copy_and_sync(
-        sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking, profile_id);
+    // Both buffers are shared; copy CPU-visible memory directly.
+    const void* src_ptr = static_cast<const char*>((void*)[sourceBuffer contents]) + sourceOffset;
+    void* dst_ptr = static_cast<char*>((void*)[destBuffer contents]) + dst_byte_offset;
+
+    // Handle logical metadata differences negation/conjugation
+    // if these differ we must manually apply the transform before copying.
+    const bool needs_conj = src.is_conj() != dst.is_conj();
+    const bool needs_neg = src.is_neg() != dst.is_neg();
+    const bool needs_type_conv = src.dtype() != dst.dtype();
+
+    // Same element type and no conjugation/negation metadata differences
+    if (!needs_type_conv && !needs_conj && !needs_neg) {
+      memcpy(dst_ptr, src_ptr, size_to_copy);
+    } else {
+      // Create a CPU tensor view over the shared buffer and perform any
+      // required conjugation/negation and dtype conversion on the CPU,
+      // then make it contiguous and memcopy into the destination.
+      Tensor tmp = src;
+      if (needs_conj) {
+        tmp = tmp.conj();
+      }
+      if (needs_neg) {
+        tmp = at::neg(tmp);
+      }
+      if (needs_type_conv) {
+        tmp = tmp.to(dst.dtype());
+      }
+      tmp = tmp.contiguous();
+      const void* tmp_ptr = static_cast<const char*>(tmp.storage().data()) + tmp.storage_offset() * tmp.itemsize();
+      memcpy(dst_ptr, tmp_ptr, size_to_copy);
+    }
     [sourceBuffer release];
   }
 }
 
 static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
+  // Ensure  src_ and dst_ tensors reside in unified memory and belong to correct devices
+  TORCH_INTERNAL_ASSERT(src_.device().type() == at::kCPU);
+  TORCH_INTERNAL_ASSERT(dst_.device().type() == at::kMPS);
+
+  // Ensure previous GPU writes to _dst are finished before src_ is written to dst_
+  MPSStream* stream = getCurrentMPSStream();
+  stream->synchronize(SyncType::COMMIT_AND_WAIT);
+
   // Typecast to dst_ if needed and expand, which is a no-op
   Tensor src = (src_.dtype() != dst_.dtype() ? src_.to(dst_.dtype()) : src_).expand_as(dst_);
 
@@ -226,7 +291,14 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
     dst = at::empty_like(src, at::device(at::kMPS));
   }
   copy_to_mps_stride_contig(dst, src, non_blocking && !needs_copy);
-  return needs_copy ? dst_.copy_(dst) : dst_;
+  if (needs_copy) {
+    dst_ = dst_.copy_(dst);
+  }
+
+  // Ensure src_ is written to dst_ before future GPU reads from dst_
+  stream->synchronize(SyncType::COMMIT_AND_WAIT);
+
+  return dst_;
 }
 
 void copy_blit_mps(void* dst, const void* src, size_t size) {
