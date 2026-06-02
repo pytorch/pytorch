@@ -2203,21 +2203,32 @@ class ChromiumEventLogger:
             if metadata:
                 CompileEventLogger.add_record_function_data(event_name, **metadata)
 
-    def reset(self) -> None:
-        # We this on every compile in case a compile crashes or restarts and we haven't
-        # cleared the stack.
+    def _reset_to_state(
+        self,
+        stack_depth: int,
+        pt2_compile_substack_depth: int,
+        event_data_keys: set[str],
+        record_function_keys: set[str],
+    ) -> None:
         stack = self.get_stack()
+        del stack[stack_depth:]
         substack = self.get_pt2_compile_substack()
-        stack.clear()
-        substack.clear()
+        del substack[pt2_compile_substack_depth:]
         event_data = self.get_event_data()
-        event_data.clear()
+        for event_name in list(event_data):
+            if event_name not in event_data_keys:
+                del event_data[event_name]
         # Clean up any lingering record functions (shouldn't happen in normal operation)
         record_functions = self.get_record_functions()
-        if record_functions:
-            for rf in record_functions.values():
+        for event_name, rf in list(record_functions.items()):
+            if event_name not in record_function_keys:
                 rf.__exit__(None, None, None)
-            record_functions.clear()
+                del record_functions[event_name]
+
+    def reset(self) -> None:
+        # We do this on every compile in case a compile crashes or restarts and
+        # we haven't cleared the stack.
+        self._reset_to_state(0, 0, set(), set())
 
     def log_event_end(
         self,
@@ -2398,6 +2409,14 @@ def chromium_event_timed(
     instead. Use this context manager only if you want to avoid dynamo_timed.
     """
     chromium_event_log = get_chromium_event_logger()
+    reset_state: tuple[int, int, set[str], set[str]] | None = None
+    if reset_event_log_on_exit:
+        reset_state = (
+            len(chromium_event_log.get_stack()),
+            len(chromium_event_log.get_pt2_compile_substack()),
+            set(chromium_event_log.get_event_data()),
+            set(chromium_event_log.get_record_functions()),
+        )
     chromium_start_time = time.time_ns()
     chromium_event_log.log_event_start(
         event_name,
@@ -2415,8 +2434,8 @@ def chromium_event_timed(
             chromium_start_time,
             log_pt2_compile_event,
         )
-        if reset_event_log_on_exit:
-            chromium_event_log.reset()
+        if reset_state is not None:
+            chromium_event_log._reset_to_state(*reset_state)
 
 
 @dataclasses.dataclass
@@ -3897,13 +3916,58 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
 
 
 def _has_active_exception_handler(tx: InstructionTranslatorBase) -> bool:
+    def is_except_handler(
+        cur_tx: InstructionTranslatorBase,
+        target: Instruction,
+        seen: set[Instruction] | None = None,
+    ) -> bool:
+        if seen is None:
+            seen = set()
+        if target in seen:
+            return False
+        seen.add(target)
+
+        handler_idx = cur_tx.indexof[target]
+        for idx, inst in enumerate(
+            cur_tx.instructions[handler_idx:], start=handler_idx
+        ):
+            # Exception-table entries also cover with/finally cleanup blocks.
+            # Only real except handlers run exception matching or bare-except
+            # stack cleanup at the handler target.
+            if inst.opname in ("NOP", "PUSH_EXC_INFO"):
+                continue
+            if inst.opname in ("CHECK_EXC_MATCH", "JUMP_IF_NOT_EXC_MATCH"):
+                return True
+            if inst.opname == "POP_TOP":
+                return True
+            if inst.opname == "WITH_EXCEPT_START":
+                return False
+            break
+
+        for inst in cur_tx.instructions[idx:]:
+            if inst.opname in ("CHECK_EXC_MATCH", "JUMP_IF_NOT_EXC_MATCH"):
+                return True
+            if inst.opname == "WITH_EXCEPT_START":
+                return False
+            if inst.opname == "RERAISE":
+                entry = inst.exn_tab_entry
+                return bool(entry and is_except_handler(cur_tx, entry.target, seen))
+            if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+                return False
+        return False
+
     cur_tx: InstructionTranslatorBase | None = tx
     while cur_tx is not None:
         if sys.version_info >= (3, 11):
-            if cur_tx.current_instruction.exn_tab_entry:
+            entry = cur_tx.current_instruction.exn_tab_entry
+            if entry and is_except_handler(cur_tx, entry.target):
                 return True
-        elif len(cur_tx.block_stack):
-            return True
+        else:
+            if any(
+                block.target is not None and is_except_handler(cur_tx, block.target)
+                for block in cur_tx.block_stack
+            ):
+                return True
         cur_tx = cur_tx.parent
     return False
 
@@ -4105,6 +4169,19 @@ def _get_fake_value_impl(
                 str(cause),
                 case_name="constrain_as_size_example",
             ) from cause
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.FakeTensorDeviceMismatchError
+        ):
+            _wrap_graph_break_with_torch_runtime_err(
+                lambda: unimplemented(
+                    gb_type="Tensor device mismatch",
+                    context=f"{op} {node.target}",
+                    explanation=str(cause),
+                    hints=["Move inputs, parameters, and buffers to the same device."],
+                    from_exc=cause,
+                )
+            )
+            raise AssertionError("should not be reachable") from None
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
