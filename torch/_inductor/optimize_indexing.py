@@ -348,7 +348,9 @@ class _ValueUseAnalysis:
                 self._enqueue_graph_output(self.subblocks[node.target].graph)
 
             if node.op == "call_module" and node.target == "get_index":
-                expr = self.loop_body.indexing_exprs[node.args[0]]
+                index_name = node.args[0]
+                assert isinstance(index_name, str)
+                expr = self.loop_body.indexing_exprs[index_name]
                 if isinstance(expr, sympy.Expr):
                     for symbol in expr.free_symbols:
                         indirect_input = self.indirect_inputs.get(symbol)
