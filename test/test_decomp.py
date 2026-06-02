@@ -836,7 +836,7 @@ def forward(self, scores_1, mask_1, value_1):
             # Stuff we shouldn't bother testing
             # (TODO: remove detach from the decomp table?)
             # N.b. Testing in-place ops would need dedicated logic
-            in_place = func._schema.is_mutable
+            in_place = func._schema.name.endswith("_")
             ignored_ops = [
                 torch.ops.aten.detach.default,
                 # non-deterministic ops
