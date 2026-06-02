@@ -601,11 +601,16 @@ def promote_constants(
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
     tensor_dtype = ex.get_dtype()
 
-    # Round scalar to tensor's dtype for comparison ops to match eager
-    if override_return_dtype == torch.bool and tensor_dtype in (
-        torch.bfloat16,
-        torch.float16,
-    ):
+    # Round scalar to tensor's dtype for comparison ops to match eager.
+    # CPU bf16/fp16 arithmetic with Python scalars also observes this rounding
+    # before Inductor's fp32 opmath upcast.
+    low_pr_fp = (torch.bfloat16, torch.float16)
+    device = ex.get_device()
+    should_round_scalar = tensor_dtype in low_pr_fp and (
+        override_return_dtype == torch.bool
+        or (device is not None and device.type == "cpu")
+    )
+    if should_round_scalar:
         _round_scalar = lambda v: torch.tensor(v, dtype=tensor_dtype).item()  # noqa: E731
     else:
         _round_scalar = lambda v: v  # noqa: E731

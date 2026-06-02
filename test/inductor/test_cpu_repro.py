@@ -4817,6 +4817,55 @@ class CPUReproTests(TestCase):
         self.common(f, (x,))
         check_metrics_vec_kernel_count(1)
 
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    def test_low_precision_python_float_scalar_rounding(self, dtype):
+        scalar = 1.7
+        rounded_scalar = torch.tensor(scalar, dtype=dtype).item()
+
+        def add_fn(x):
+            return x + scalar
+
+        x = torch.full((2,), -rounded_scalar, dtype=dtype)
+        expected = add_fn(x)
+        actual = torch.compile(add_fn, backend="inductor")(x)
+        self.assertEqual(expected, torch.zeros_like(expected))
+        self.assertEqual(actual, expected)
+
+        def clamp_fn(x):
+            return torch.clamp_min(x + scalar, 0).sum()
+
+        def run(call):
+            x = torch.full((2,), -rounded_scalar, dtype=dtype, requires_grad=True)
+            loss = call(x)
+            loss.backward()
+            return loss, x.grad
+
+        expected = run(clamp_fn)
+        actual = run(torch.compile(clamp_fn, backend="inductor"))
+        self.assertEqual(actual, expected)
+
+    def test_margin_ranking_loss_bfloat16_float_margin_boundary_grad(self):
+        margin = 1.7
+
+        def fn(input1, input2, target):
+            return F.margin_ranking_loss(
+                input1, input2, target, margin=margin, reduction="mean"
+            )
+
+        def run(call):
+            input1 = torch.tensor(
+                [1.703125, 1.703125], dtype=torch.bfloat16, requires_grad=True
+            )
+            input2 = torch.tensor([0.0, 0.0], dtype=torch.bfloat16, requires_grad=True)
+            target = torch.tensor([1.0, 1.0], dtype=torch.bfloat16)
+            loss = call(input1, input2, target)
+            loss.backward()
+            return loss, input1.grad, input2.grad
+
+        expected = run(fn)
+        actual = run(torch.compile(fn, backend="inductor"))
+        self.assertEqual(actual, expected)
+
     def test_bf16_zeros(self):
         def fn():
             x = torch.zeros(1, 1, 32, dtype=torch.bfloat16)
