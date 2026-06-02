@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>

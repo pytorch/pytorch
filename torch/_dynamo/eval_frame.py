@@ -745,6 +745,9 @@ class OptimizedModule(torch.nn.Module):
         keys = {
             key for key in state_dict if isinstance(key, str) and key.startswith(prefix)
         }
+        if not any(key.startswith(internal_prefix) for key in keys):
+            return False
+
         state_dict_keys = self._orig_mod_state_dict_keyspace()
         expected_public_keys = {prefix + key for key in state_dict_keys}
         expected_internal_keys = {internal_prefix + key for key in state_dict_keys}
