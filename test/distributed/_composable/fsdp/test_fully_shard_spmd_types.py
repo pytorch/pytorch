@@ -321,6 +321,40 @@ class TestFullyShardSpmdTypes(FSDPTest):
             )
 
     @skip_if_lt_x_gpu(4)
+    def test_fsdp_dp_axes_require_replicated_params(self):
+        """DP-owned axes require R params.
+
+        FSDP owns gradient reduction across both shard and replicate DP axes,
+        so I@DP/CP params are rejected before DTensor conversion.
+        """
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("dp", "cp"),
+        )
+        dp_axis = spmd.MeshAxis.of(mesh.get_group("dp"))
+        cp_axis = spmd.MeshAxis.of(mesh.get_group("cp"))
+
+        for axis_name, bad_axis in (("dp", dp_axis), ("cp", cp_axis)):
+            model = TestScale(16, device=device_type)
+            spmd.assert_type(
+                model.weight,
+                {
+                    dp_axis: spmd.I if bad_axis is dp_axis else spmd.R,
+                    cp_axis: spmd.I if bad_axis is cp_axis else spmd.R,
+                },
+            )
+            with self.assertRaisesRegex(
+                ValueError,
+                f"Expected spmd.R on DP mesh dim '{axis_name}'",
+            ):
+                fully_shard(
+                    model,
+                    mesh=mesh,
+                    dp_mesh_dims=DataParallelMeshDims(shard="dp", replicate="cp"),
+                )
+
+    @skip_if_lt_x_gpu(4)
     def test_fsdp_tp_unsharded_param(self):
         """TP-replicated params handle I@TP and R@TP grads differently.
 
