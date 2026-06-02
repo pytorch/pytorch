@@ -37,6 +37,10 @@ StoreMode = AtomicMode | Literal["tma"] | None
 ReductionType = Literal[
     "argmax",
     "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
     "welford_reduce",
     "welford_combine",
     "any",
@@ -1077,42 +1081,19 @@ class OpCountResult(NamedTuple):
     nontrivial_read_count: int
 
 
-class OpCountLimitExceeded(RuntimeError):
-    """Raised when bounded op-count analysis has enough evidence to stop."""
-
-
 class OpCounterCSE(DefaultHandler):
-    """Counts scalar ops while applying CSE to repeated scalar expressions."""
+    """Shim to count how many ops are used"""
 
-    def __init__(self, inner: OpsHandler[Any], max_ops: int | None = None):
+    def __init__(self, inner: OpsHandler[Any]):
         super().__init__()
         self.parent_handler = inner
-        self.max_ops = max_ops
-        # This is a work bound, not the op-count threshold. Keep it looser so
-        # common CSE-heavy expressions can still get exact counts.
-        self.max_visits = None if max_ops is None else max_ops * 100
         self.op_count = 0
-        self.visit_count = 0
-        self.limit_exceeded = False
         self.var_names: dict[str, str] = {}
         self._used_ops: OrderedSet[str] = OrderedSet()
         self._read_names: list[str] = []
         self._nontrivial_read_count = 0
 
-    def _check_limit(self) -> None:
-        if self.max_ops is not None and self.op_count > self.max_ops:
-            self.limit_exceeded = True
-            raise OpCountLimitExceeded
-        if self.max_visits is not None and self.visit_count > self.max_visits:
-            self.limit_exceeded = True
-            raise OpCountLimitExceeded
-
-    def _record_visit(self) -> None:
-        self.visit_count += 1
-        self._check_limit()
-
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        self._record_visit()
         self._used_ops.add(name)
         return pytree.tree_map(
             self._update_count, getattr(self.parent_handler, name)(*args, **kwargs)
@@ -1123,17 +1104,14 @@ class OpCounterCSE(DefaultHandler):
         if not varname:
             varname = f"tmp{self.op_count}"
             self.op_count += 1
-            self._check_limit()
             self.var_names[val] = varname
         return varname
 
     def indirect_indexing(self, *args, **kwargs):
-        self._record_visit()
         self._used_ops.add("indirect_indexing")
         return self.parent_handler.indirect_indexing(*args, **kwargs)
 
     def load(self, name: str, index: sympy.Expr) -> str:
-        self._record_visit()
         val = self.parent_handler.load(name, index)
         if val not in self.var_names:
             self._used_ops.add("load")
@@ -1143,7 +1121,6 @@ class OpCounterCSE(DefaultHandler):
         return self._update_count(val)
 
     def load_seed(self, name: str, offset: T):
-        self._record_visit()
         val = self.parent_handler.load_seed(name, offset)
         if val not in self.var_names:
             self._used_ops.add("load_seed")
@@ -1163,7 +1140,6 @@ class OpCounterCSE(DefaultHandler):
         """
         See [Note: Inductor bucketize op]
         """
-        self._record_visit()
         val = self.parent_handler.bucketize(
             values,
             boundaries,
@@ -1181,12 +1157,8 @@ class OpCounterCSE(DefaultHandler):
         return self._update_count(val)
 
     def getvalue(self):
-        num_ops = self.op_count
-        if self.limit_exceeded:
-            assert self.max_ops is not None
-            num_ops = max(num_ops, self.max_ops + 1)
         return OpCountResult(
-            num_ops, self._used_ops, self._read_names, self._nontrivial_read_count
+            self.op_count, self._used_ops, self._read_names, self._nontrivial_read_count
         )
 
 
