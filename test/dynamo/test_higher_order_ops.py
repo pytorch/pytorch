@@ -3504,9 +3504,9 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return wrap_with_set_grad_enabled(True, body, x)
 
-        x = torch.zeros(3)
+        x = torch.zeros(())
         out = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(x, torch.ones(3))
+        self.assertEqual(x, torch.ones(()))
         self.assertEqual(out, x)
 
     def test_wrap_with_autocast_allows_aliasing_and_input_mutation(self):
@@ -3519,9 +3519,9 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return wrap_with_autocast("cpu", torch.bfloat16, True, None, body, x)
 
-        x = torch.zeros(3)
+        x = torch.zeros(())
         out = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(x, torch.ones(3))
+        self.assertEqual(x, torch.ones(()))
         self.assertEqual(out, x)
 
     @requires_gpu_and_triton

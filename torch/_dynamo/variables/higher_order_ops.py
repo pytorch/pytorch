@@ -3934,6 +3934,8 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.strict_mode"
     _ALLOW_FALLBACK_TO_EAGER = False
+    supports_input_mutation = False
+    supports_aliasing = False
 
     def _call_function(
         self,
@@ -3980,6 +3982,8 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             self._HOP_NAME,
             source_target=self.value,
             should_flatten_outputs=True,
+            supports_input_mutation=self.supports_input_mutation,
+            supports_aliasing=self.supports_aliasing,
         )
 
         strict_mode_nn_modules = dict(tx.output.nn_modules)
