@@ -17,7 +17,12 @@ import torch.nn as nn
 
 if dist._is_spmd_types_available():
     import spmd_types as spmd
-    import spmd_types._checker
+    from spmd_types.runtime import get_partition_spec
+    from spmd_types.types import (
+        normalize_local_type,
+        normalize_partition_spec,
+        partition_spec_get_shard,
+    )
 
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -274,7 +279,7 @@ class FSDPParam:
         # https://github.com/pytorch/pytorch/issues/113045
         self.is_spmd_types = (
             dist._is_spmd_types_available()
-            and spmd._checker.has_local_type(param)
+            and bool(spmd.get_local_type(param))
             and not isinstance(param, DTensor)
         )
         if self.is_spmd_types:
@@ -362,8 +367,12 @@ class FSDPParam:
                 "(pass dp_mesh_dims to fully_shard)"
             )
 
-        local_type = spmd.get_local_type(param)
-        self._spmd_types_orig_type = dict(local_type)
+        local_type = normalize_local_type(spmd.get_local_type(param))
+        orig_partition_spec = get_partition_spec(param)
+        if orig_partition_spec is not None:
+            orig_partition_spec = normalize_partition_spec(orig_partition_spec)
+        self._spmd_types_orig_type = local_type
+        self._spmd_types_orig_partition_spec = orig_partition_spec
 
         dp_dim_names = mesh_info.dp_mesh_dims
         if dp_dim_names is None:
@@ -385,30 +394,21 @@ class FSDPParam:
         for name in spmd_mesh.mesh_dim_names:
             axis = spmd.MeshAxis.of(spmd_mesh.get_group(name))
             axis_type = local_type.get(axis)
+            shard_info = partition_spec_get_shard(orig_partition_spec, axis)
+            if shard_info is not None:
+                placements.append(Shard(shard_info.dim))
+                grad_placements.append(Shard(shard_info.dim))
+                continue
             if axis_type is None or axis_type is spmd.I or axis_type is spmd.R:
                 placements.append(Replicate())
                 grad_placements.append(
                     Partial() if axis_type is spmd.R else Replicate()
                 )
-            elif isinstance(axis_type, spmd.S):
-                placements.append(Shard(axis_type.dim))
-                grad_placements.append(Shard(axis_type.dim))
             elif axis_type is spmd.V:
-                spec = spmd.get_partition_spec(param)
-                if spec is not None:
-                    from spmd_types.types import (  # pyrefly: ignore[missing-import]
-                        partition_spec_get_shard,
-                    )
-
-                    shard_info = partition_spec_get_shard(spec, axis)
-                    if shard_info is not None:
-                        placements.append(Shard(shard_info.dim))
-                        grad_placements.append(Shard(shard_info.dim))
-                        continue
                 raise ValueError(
                     f"Parameter '{self._module_info.param_name}' has V type "
                     f"on axis {axis} but no PartitionSpec shard info. "
-                    f"Use S(dim) instead of V for sharded parameters."
+                    f"Use assert_type with S(dim) or pass a PartitionSpec."
                 )
             else:
                 raise ValueError(
@@ -429,7 +429,11 @@ class FSDPParam:
             return
         orig_type = self._spmd_types_orig_type
         if orig_type:
-            spmd.assert_type(tensor, orig_type)
+            spmd.assert_type(
+                tensor,
+                orig_type,
+                partition_spec=self._spmd_types_orig_partition_spec,
+            )
 
     def _init_sharding_spec(
         self,

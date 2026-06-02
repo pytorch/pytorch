@@ -12,8 +12,7 @@ from torch.distributed.fsdp import DataParallelMeshDims, fully_shard
 
 if dist._is_spmd_types_available():
     import spmd_types as spmd
-    import spmd_types._checker
-    import spmd_types._type_attr
+    from spmd_types.checker import typecheck
 
 from torch.distributed.tensor import DTensor, init_device_mesh, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
@@ -121,8 +120,9 @@ class TestFullyShardSpmdTypes(FSDPTest):
                         DTensor,
                         f"{fqn} should be plain tensor at compute time",
                     )
-                    self.assertTrue(
-                        spmd._checker.has_local_type(param),
+                    self.assertNotEqual(
+                        spmd.get_local_type(param),
+                        {},
                         f"{fqn} should have spmd_types annotation at compute time",
                     )
                     if fqn in expected_types:
@@ -151,7 +151,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
         ref_loss = ref_out.sum()
         ref_loss.backward()
 
-        with spmd._checker.typecheck(strict_mode="strict", local=False):
+        with typecheck(strict_mode="strict", local=False):
             spmd.assert_type(inp, input_type)
             out = model(inp)
         self.assertEqual(spmd.get_local_type(out)[fsdp_axis], spmd.V)
@@ -188,7 +188,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
         ref_model.load_state_dict(model.state_dict())
 
         for param in model.parameters():
-            spmd._type_attr.set_local_type(param, {fsdp_axis: spmd.R})
+            spmd.assert_type(param, {fsdp_axis: spmd.R})
 
         fully_shard(
             model,
@@ -246,14 +246,14 @@ class TestFullyShardSpmdTypes(FSDPTest):
         _tp_init(model, tp_pg)
 
         for fqn, param in model.named_parameters():
-            spmd._type_attr.set_local_type(
-                param, {fsdp_axis: spmd.R, tp_axis: tp_plan[fqn]}
-            )
+            spmd.assert_type(param, {fsdp_axis: spmd.R, tp_axis: tp_plan[fqn]})
 
         def shard_fn(param):
-            lt = spmd.get_local_type(param)
-            tp_type = lt.get(tp_axis)
-            if isinstance(tp_type, spmd.S) and tp_type.dim == 0:
+            from spmd_types.runtime import get_partition_spec
+            from spmd_types.types import partition_spec_get_shard
+
+            tp_shard = partition_spec_get_shard(get_partition_spec(param), tp_axis)
+            if tp_shard is not None and tp_shard.dim == 0:
                 return Shard(1)
             return Shard(0)
 
@@ -292,6 +292,33 @@ class TestFullyShardSpmdTypes(FSDPTest):
         inp = torch.randn((2, 16), device=device_type)
         with spmd.set_current_mesh(mesh):
             self._run_fwd_bwd(model, ref_model, inp, fsdp_axis, input_type)
+
+    @skip_if_lt_x_gpu(4)
+    def test_fsdp_tp_local_v_param_requires_partition_spec(self):
+        """Local-only V@TP params are ambiguous for FSDP.
+
+        Without PartitionSpec shard info, FSDP cannot choose a DTensor
+        Shard(dim), so fully_shard should reject the parameter at init time.
+        """
+        dp_size = 2
+        tp_size = self.world_size // dp_size
+        mesh = init_device_mesh(
+            device_type.type,
+            (dp_size, tp_size),
+            mesh_dim_names=("fsdp", "tp"),
+        )
+        fsdp_axis = spmd.MeshAxis.of(mesh.get_group("fsdp"))
+        tp_axis = spmd.MeshAxis.of(mesh.get_group("tp"))
+
+        model = TestScale(16, device=device_type)
+        spmd.assert_type(model.weight, {fsdp_axis: spmd.R, tp_axis: spmd.V})
+
+        with self.assertRaisesRegex(ValueError, "no PartitionSpec shard info"):
+            fully_shard(
+                model,
+                mesh=mesh,
+                dp_mesh_dims=DataParallelMeshDims(shard="fsdp"),
+            )
 
     @skip_if_lt_x_gpu(4)
     def test_fsdp_tp_unsharded_param(self):
@@ -365,7 +392,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
                 input_partition_spec = spmd.PartitionSpec((fsdp_axis, tp_axis), None)
             with (
                 spmd.set_current_mesh(mesh),
-                spmd._checker.typecheck(strict_mode="strict", local=False),
+                typecheck(strict_mode="strict", local=False),
             ):
                 spmd.assert_type(inp, input_type, partition_spec=input_partition_spec)
                 loss = model(inp).sum()

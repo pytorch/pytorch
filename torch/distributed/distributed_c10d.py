@@ -1348,28 +1348,20 @@ def is_ucc_available() -> bool:
     return _UCC_AVAILABLE
 
 
-class _NoOpContextDecorator:
-    """No-op that works as both a context manager and a decorator."""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        pass
-
-    def __call__(self, func):
-        return func
-
-
 def spmd_no_typecheck():
-    """Return a spmd_types no_typecheck context/decorator, or a no-op if not installed."""
+    """Return a spmd_types no_typecheck context, or a no-op if not installed."""
     from torch.distributed import _is_spmd_types_available
 
     if _is_spmd_types_available():
         import spmd_types
 
         return spmd_types.no_typecheck()
-    return _NoOpContextDecorator()
+
+    @contextlib.contextmanager
+    def no_typecheck():
+        yield
+
+    return no_typecheck()
 
 
 def is_xccl_available() -> bool:
