@@ -168,14 +168,13 @@ if HAS_TABULATE:
                     finally:
                         if torch.cuda.is_available():
                             _disable_tensor_cores()
-                            table.append([
-                                ("Training" if optimizer else "Inference"),
-                                # pyrefly: ignore [redundant-condition]
-                                backend if backend else "-",
-                                mode if mode is not None else "-",
-                                f"{compilation_time} ms " if compilation_time else "-",
-                                f"{running_time} ms " if running_time else "-",
-                            ])
+                    table.append([
+                        ("Training" if optimizer else "Inference"),
+                        backend if backend else "-",
+                        mode if mode is not None else "-",
+                        f"{compilation_time} ms " if compilation_time else "-",
+                        f"{running_time} ms " if running_time else "-",
+                    ])
 
             else:
                 torch._dynamo.reset()
