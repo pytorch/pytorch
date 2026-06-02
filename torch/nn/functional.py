@@ -3735,10 +3735,11 @@ def linear_cross_entropy(
         - Forward-mode AD (``jvp``, ``jacfwd``) is unsupported.
         - ``torch.func.grad`` / ``vmap(grad(...))`` does not work, but
           plain ``output.backward()`` does.
-        - ``torch.compile`` falls back to eager at the chunked op (no
-          Inductor lowering). To keep double-backward correct under
-          compile, ``allow_retain_graph=True`` is forced internally
-          with a warning.
+        - ``torch.compile`` falls back to eager at the chunked op;
+          ``allow_retain_graph=True`` is forced internally to keep
+          double-backward correct (with a warning).
+        - ``torch.jit.trace`` falls back to the reference path with a
+          warning.
         - :class:`LinearCrossEntropyOptions` is not TorchScript-scriptable.
 
         The reference path (``options=None``) supports all of the above.
@@ -3819,22 +3820,22 @@ def linear_cross_entropy(
         )
     ignore_index = ignore_index if ignore_index is not None else -100
 
-    # K-dim loss (out_features != ()) falls back to the reference
-    # cross_entropy: the chunked op runs softmax over the full
-    # linear_weight.shape[0], not per-position over the num_classes
-    # axis.
+    # K-dim loss falls back: the chunked op softmaxes over the full
+    # linear_weight.shape[0], not per-position over num_classes.
     if options is not None and (
         out_features
         or reduction not in {"mean", "sum"}
         or label_smoothing != 0.0
         or target.dtype != torch.int64
+        or torch.jit.is_tracing()
     ):
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
             "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
-            f" == int64, out_features == (). Got reduction={reduction!r}, "
-            f"label_smoothing={label_smoothing}, target.dtype={target.dtype}"
-            f", out_features={tuple(out_features)}.",
+            " == int64, out_features == (), and not under torch.jit.trace."
+            f" Got reduction={reduction!r}, label_smoothing={label_smoothing}, "
+            f"target.dtype={target.dtype}, out_features={tuple(out_features)}, "
+            f"tracing={torch.jit.is_tracing()}.",
             stacklevel=2,
         )
 
@@ -3844,6 +3845,7 @@ def linear_cross_entropy(
         and label_smoothing == 0.0
         and target.dtype == torch.int64
         and not out_features
+        and not torch.jit.is_tracing()
     ):
         if input.dim() == 2:
             num_batches = input.shape[0]
@@ -3863,10 +3865,8 @@ def linear_cross_entropy(
         )
 
         # Force allow_retain_graph=True under torch.compile: the default
-        # mode's second-backward guard relies on a Python ``ctx._gi = None``
-        # mutation that Dynamo's autograd tracing does not preserve, so
-        # without this override double-backward under torch.compile would
-        # silently return wrong gradients.
+        # second-backward guard uses a Python ``ctx._gi = None`` mutation
+        # that Dynamo doesn't preserve, breaking double-backward.
         if not options.allow_retain_graph and torch.compiler.is_compiling():
             warnings.warn(
                 "linear_cross_entropy: forcing allow_retain_graph=True under "
