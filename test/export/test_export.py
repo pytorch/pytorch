@@ -2599,6 +2599,200 @@ graph():
             ep = export(m, (x, y))
         self.assertEqual(ep.module()(x, y), m(x, y))
 
+    def test_autograd_grad_reuses_saved_forward_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.sqrt(x)
+                (grad,) = torch.autograd.grad(y, x, torch.ones_like(y))
+                return y, grad
+
+        m = M()
+        x = (torch.rand(4, 4) + 0.1).requires_grad_()
+        ref_y, ref_grad = m(x)
+
+        ep = export(m, (x,), strict=False)
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 0)
+        FileCheck().check("torch.ops.aten.sqrt.default").check_not("lifted_tensor").run(
+            str(ep.graph)
+        )
+        detach_nodes = [
+            node
+            for node in ep.graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.aten.detach.default
+        ]
+        self.assertEqual(len(detach_nodes), 1)
+
+        y, grad = ep.module()(x)
+        self.assertNotIsInstance(grad, torch._subclasses.fake_tensor.FakeTensor)
+        self.assertEqual(y, ref_y)
+        self.assertEqual(grad, ref_grad)
+        self.assertEqual(grad.requires_grad, ref_grad.requires_grad)
+        self.assertIsNone(grad.grad_fn)
+
+        decomp_ep = ep.run_decompositions({})
+        decomp_y, decomp_grad = decomp_ep.module()(x)
+        self.assertEqual(len(decomp_ep.graph_signature.lifted_tensor_constants), 0)
+        self.assertNotIsInstance(decomp_grad, torch._subclasses.fake_tensor.FakeTensor)
+        self.assertEqual(decomp_y, ref_y)
+        self.assertEqual(decomp_grad, ref_grad)
+        self.assertEqual(decomp_grad.requires_grad, ref_grad.requires_grad)
+        self.assertIsNone(decomp_grad.grad_fn)
+
+    def test_autograd_grad_dynamic_shapes_reuses_saved_forward_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.sqrt(x)
+                (grad,) = torch.autograd.grad(y, x, torch.ones_like(y))
+                return y, grad
+
+        m = M()
+        x = (torch.rand(4, 4) + 0.1).requires_grad_()
+        ref_y, ref_grad = m(x)
+
+        ep = export(
+            m,
+            (x,),
+            strict=False,
+            dynamic_shapes=({0: Dim("n"), 1: Dim("m")},),
+        )
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 0)
+        FileCheck().check("torch.ops.aten.sqrt.default").check_not("lifted_tensor").run(
+            str(ep.graph)
+        )
+
+        y, grad = ep.module()(x)
+        self.assertNotIsInstance(grad, torch._subclasses.fake_tensor.FakeTensor)
+        self.assertEqual(y, ref_y)
+        self.assertEqual(grad, ref_grad)
+        self.assertEqual(grad.requires_grad, ref_grad.requires_grad)
+        self.assertIsNone(grad.grad_fn)
+
+        decomp_ep = ep.run_decompositions({})
+        decomp_y, decomp_grad = decomp_ep.module()(x)
+        self.assertEqual(len(decomp_ep.graph_signature.lifted_tensor_constants), 0)
+        self.assertNotIsInstance(decomp_grad, torch._subclasses.fake_tensor.FakeTensor)
+        self.assertEqual(decomp_y, ref_y)
+        self.assertEqual(decomp_grad, ref_grad)
+        self.assertEqual(decomp_grad.requires_grad, ref_grad.requires_grad)
+        self.assertIsNone(decomp_grad.grad_fn)
+
+    def test_autograd_grad_create_graph_reuses_saved_forward_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.sqrt(x)
+                (grad,) = torch.autograd.grad(
+                    y, x, torch.ones_like(y), create_graph=True
+                )
+                return y, grad
+
+        m = M()
+        x = (torch.rand(4, 4) + 0.1).requires_grad_()
+        ref_y, ref_grad = m(x)
+
+        ep = export(m, (x,), strict=False)
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 0)
+        FileCheck().check("torch.ops.aten.sqrt.default").check_not("lifted_tensor").run(
+            str(ep.graph)
+        )
+        detach_nodes = [
+            node
+            for node in ep.graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.aten.detach.default
+        ]
+        self.assertEqual(len(detach_nodes), 0)
+
+        y, grad = ep.module()(x)
+        self.assertNotIsInstance(grad, torch._subclasses.fake_tensor.FakeTensor)
+        self.assertEqual(y, ref_y)
+        self.assertEqual(grad, ref_grad)
+        self.assertEqual(grad.requires_grad, ref_grad.requires_grad)
+        self.assertIsNotNone(grad.grad_fn)
+
+        decomp_ep = ep.run_decompositions({})
+        decomp_y, decomp_grad = decomp_ep.module()(x)
+        self.assertEqual(len(decomp_ep.graph_signature.lifted_tensor_constants), 0)
+        self.assertNotIsInstance(decomp_grad, torch._subclasses.fake_tensor.FakeTensor)
+        self.assertEqual(decomp_y, ref_y)
+        self.assertEqual(decomp_grad, ref_grad)
+        self.assertEqual(decomp_grad.requires_grad, ref_grad.requires_grad)
+        self.assertIsNotNone(decomp_grad.grad_fn)
+
+    def test_autograd_grad_create_graph_under_no_grad_reuses_saved_forward_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.sqrt(x)
+                with torch.no_grad():
+                    (grad,) = torch.autograd.grad(
+                        y, x, torch.ones_like(y), create_graph=True
+                    )
+                return y, grad
+
+        m = M()
+        x = (torch.rand(4, 4) + 0.1).requires_grad_()
+        ref_y, ref_grad = m(x)
+
+        ep = export(m, (x,), strict=False)
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 0)
+        FileCheck().check("torch.ops.aten.sqrt.default").check_not("lifted_tensor").run(
+            str(ep.graph)
+        )
+
+        y, grad = ep.module()(x)
+        self.assertNotIsInstance(grad, torch._subclasses.fake_tensor.FakeTensor)
+        self.assertEqual(y, ref_y)
+        self.assertEqual(grad, ref_grad)
+        self.assertEqual(grad.requires_grad, ref_grad.requires_grad)
+        self.assertIsNotNone(grad.grad_fn)
+
+        decomp_ep = ep.run_decompositions({})
+        decomp_y, decomp_grad = decomp_ep.module()(x)
+        self.assertEqual(len(decomp_ep.graph_signature.lifted_tensor_constants), 0)
+        self.assertNotIsInstance(decomp_grad, torch._subclasses.fake_tensor.FakeTensor)
+        self.assertEqual(decomp_y, ref_y)
+        self.assertEqual(decomp_grad, ref_grad)
+        self.assertEqual(decomp_grad.requires_grad, ref_grad.requires_grad)
+        self.assertIsNotNone(decomp_grad.grad_fn)
+
+    def test_autograd_grad_prefers_differentiable_saved_forward_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.sqrt(x)
+                z = y.detach()
+                (grad,) = torch.autograd.grad(y, x, torch.ones_like(y))
+                return z, grad
+
+        m = M()
+        x = (torch.rand(4, 4) + 0.1).requires_grad_()
+        ref_z, ref_grad = m(x)
+
+        ep = export(m, (x,), strict=False)
+        self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 0)
+        FileCheck().check("torch.ops.aten.sqrt.default").check_not("lifted_tensor").run(
+            str(ep.graph)
+        )
+
+        z, grad = ep.module()(x)
+        self.assertNotIsInstance(grad, torch._subclasses.fake_tensor.FakeTensor)
+        self.assertEqual(z, ref_z)
+        self.assertEqual(z.requires_grad, ref_z.requires_grad)
+        self.assertIsNone(z.grad_fn)
+        self.assertEqual(grad, ref_grad)
+        self.assertEqual(grad.requires_grad, ref_grad.requires_grad)
+        self.assertIsNone(grad.grad_fn)
+
+        decomp_ep = ep.run_decompositions({})
+        decomp_z, decomp_grad = decomp_ep.module()(x)
+        self.assertEqual(len(decomp_ep.graph_signature.lifted_tensor_constants), 0)
+        self.assertNotIsInstance(decomp_grad, torch._subclasses.fake_tensor.FakeTensor)
+        self.assertEqual(decomp_z, ref_z)
+        self.assertEqual(decomp_z.requires_grad, ref_z.requires_grad)
+        self.assertIsNone(decomp_z.grad_fn)
+        self.assertEqual(decomp_grad, ref_grad)
+        self.assertEqual(decomp_grad.requires_grad, ref_grad.requires_grad)
+        self.assertIsNone(decomp_grad.grad_fn)
+
     def test_subclass_context(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
