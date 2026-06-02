@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import functools
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -384,7 +385,6 @@ class StreamContextVariable(ContextWrappingVariable):
         # Instead, we push a 0-arg callable that returns the ctx mgr value
         # at runtime.  The partial is installed as a global on the compiled
         # function so the resume prologue can LOAD_GLOBAL it.
-        import functools
 
         # self.stream is None when we're really a StreamVariable
         # entering itself as a ctx mgr (with foo: where foo is a
