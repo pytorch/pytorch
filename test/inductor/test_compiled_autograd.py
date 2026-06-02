@@ -4857,6 +4857,33 @@ class CompiledAutograd1(torch.nn.Module):
             fn,
         )
 
+    def test_accumulate_grad_sparse_grad_with_torch_compile(self):
+        with config.patch(compiled_autograd=True):
+
+            @torch.compile(backend="eager")
+            def _test_grad_tensor(
+                params_grad_tensor,
+                backward_grad_tensor,
+                should_preserve_reference,
+                create_graph,
+            ):
+                params = torch.tensor([1.5, 1.5]).requires_grad_()
+                params.grad = params_grad_tensor
+                grad_saved = params.grad
+                params.backward(backward_grad_tensor, create_graph=create_graph)
+                return (id(grad_saved) == id(params.grad)) == should_preserve_reference
+
+            self.assertTrue(
+                _test_grad_tensor(
+                    torch.sparse_coo_tensor(
+                        torch.tensor([[1, 1]]).long(), torch.tensor([1.0, 1.0])
+                    ),
+                    torch.tensor([1.5, 1.5]),
+                    False,
+                    False,
+                )
+            )
+
     # Case 2.1: Sparse variable_grad + Dense new_grad
     # } else if (!GradMode::is_enabled()) {
     #   if (variable_grad.is_sparse() && !new_grad.is_sparse()) {

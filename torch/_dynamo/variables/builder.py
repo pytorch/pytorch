@@ -2223,6 +2223,10 @@ class VariableBuilder:
             source = self.source
             if not isinstance(value, list):
                 raise AssertionError(f"Expected list for steal_arg, got {type(value)}")
+            # Compiled autograd graphs can mutate tensor.grad while running. The
+            # generated guards are entry guards, but the guard sanity check runs
+            # after tracing and can observe the post-mutation grad state.
+            self.tx.output.skip_guards_check = True
             tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(value),
@@ -4178,26 +4182,24 @@ def record_automatic_dynamic(
         ex_stride = e.stride()
         dim = e.dim()
 
-        stride = [None] * dim
+        stride: list[int | InferStride] = [0] * dim
         pending = [(ex_stride[i], -i) for i in range(dim)]
         pending.sort(key=_nested_int_aware_sort)
-        candidates = {}
+        candidates: dict[Any, int | InferStride] = {}
         for i_stride, neg_i in pending:
             i = -neg_i
-            # pyrefly: ignore [unsupported-operation]
             stride[i] = candidates.get(i_stride, i_stride)
             # pyrefly: ignore [no-matching-overload]
             candidates.setdefault(i_stride * ex_size[i], InferStride(i))
+        entry = FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
     else:
-        # pyrefly: ignore [implicit-any]
-        stride = []
+        entry = FrameStateSizeEntry.make_tensor_without_stride(tuple(ex_size))
 
     return process_automatic_dynamic(
         # type: ignore[arg-type]ks
         tx,
         name,
-        # type: ignore[arg-type]
-        FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride)),
+        entry,
     )
 
 
