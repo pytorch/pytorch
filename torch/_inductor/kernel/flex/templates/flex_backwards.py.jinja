@@ -164,8 +164,8 @@
         )
         {%- else %}
         # load Q and do: they stay in SRAM throughout the inner loop.
-        q = load_checked_2d(Q2, offs_m2, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM, INDEX_DTYPE)
-        do = load_checked_2d(DO2, offs_m2, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM, INDEX_DTYPE)
+        q = load_checked_2d(Q2, offs_m2, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
+        do = load_checked_2d(DO2, offs_m2, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
         {%- endif %}
         if PRESCALE_QK:
             q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
@@ -216,7 +216,7 @@
             )
 
         # Write back dQ.
-        dq_ptrs = DQ2 + offs_m2[:, None].to(INDEX_DTYPE) * stride_dqm + offs_k[None, :].to(INDEX_DTYPE) * stride_dqd
+        dq_ptrs = DQ2 + offs_m2[:, None] * stride_dqm + offs_k[None, :] * stride_dqd
         dq *= SM_SCALE
         if IS_DIVISIBLE and SAFE_HEAD_DIM:
             tl.store(dq_ptrs, dq)
@@ -268,8 +268,8 @@
         )
         {%- else %}
         # load K and V: they stay in SRAM throughout the inner loop.
-        k = load_checked_2d(K, offs_n1, offs_k, stride_kn, stride_kd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM, INDEX_DTYPE)
-        v = load_checked_2d(V, offs_n1, offs_v, stride_vn, stride_vd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM, INDEX_DTYPE)
+        k = load_checked_2d(K, offs_n1, offs_k, stride_kn, stride_kd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM)
+        v = load_checked_2d(V, offs_n1, offs_v, stride_vn, stride_vd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM)
         {%- endif %}
         if PRESCALE_QK:
             k = (k * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
@@ -357,7 +357,7 @@
                 )
 
         # Write back dV and dK.
-        dv_ptrs = DV + offs_n1[:, None].to(INDEX_DTYPE) * stride_dvm + offs_v[None, :].to(INDEX_DTYPE) * stride_dvd
+        dv_ptrs = DV + offs_n1[:, None] * stride_dvm + offs_v[None, :] * stride_dvd
 
         index_n = offs_n1[:, None]
         index_k = offs_k[None, :]
@@ -452,10 +452,10 @@ def bwd_dq_block_mn(
     )
     kT = tl.trans(k)
     {%- else %}
-    kT_ptrs = K + offs_n2[None, :].to(INDEX_DTYPE) * stride_kn + offs_k[:, None].to(INDEX_DTYPE) * stride_kd
-    vT_ptrs = V + offs_n2[None, :].to(INDEX_DTYPE) * stride_vn + offs_v[:, None].to(INDEX_DTYPE) * stride_vd
+    kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
+    vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_v[:, None] * stride_vd
     # NB reversed order to since K is transposed
-    kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN, INDEX_DTYPE)
+    kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN)
     {%- endif %}
     qk = tl.dot(q, kT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
@@ -513,7 +513,7 @@ def bwd_dq_block_mn(
     )
     vT = tl.trans(v)
     {%- else %}
-    vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN, INDEX_DTYPE)
+    vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN)
     {%- endif %}
     dp = tl.dot(do, vT, input_precision=FLOAT32_PRECISION)
     ds = p * (dp - Di[:, None])
@@ -632,10 +632,10 @@ def bwd_dkdv_block_mn(
     )
     qT = tl.trans(q)
     {%- else %}
-    qT_ptrs = Q + offs_m1[None, :].to(INDEX_DTYPE) * stride_qm + offs_k[:, None].to(INDEX_DTYPE) * stride_qd
-    do_ptrs = DO + offs_m1[:, None].to(INDEX_DTYPE) * stride_dom + offs_v[None, :].to(INDEX_DTYPE) * stride_dod
+    qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
+    do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_v[None, :] * stride_dod
     # NB reversed order since Q is transposed
-    qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN, INDEX_DTYPE)
+    qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN)
     {%- endif %}
     # Load LSE before computing qk to reduce pipeline stall.
     if IS_DIVISIBLE:
@@ -693,7 +693,7 @@ def bwd_dkdv_block_mn(
         [(q_start + offset).to(tl.int32), 0],
     )
     {%- else %}
-    do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM, INDEX_DTYPE)
+    do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
     {%- endif %}
     # Compute dV.
     ppT = pT
