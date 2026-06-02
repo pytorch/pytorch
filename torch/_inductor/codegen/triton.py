@@ -120,6 +120,7 @@ from .simd import (
 from .triton_utils import (
     config_of,
     equal_1_arg_indices,
+    is_unaligned_buffer_name,
     non_constexpr_signature,
     should_unwrap_unspec_arg,
     signature_to_meta,
@@ -2737,6 +2738,8 @@ class TMACompatibilityChecker:
     dtype: torch.dtype
     for_store: bool
     force: bool
+    # Inductor buffer name being loaded from / stored to.
+    buffer_name: str | None = None
 
     def __post_init__(self):
         self.failed_debug_prefix = "Cannot use TMA descriptor for load / store since: "
@@ -2843,6 +2846,19 @@ class TMACompatibilityChecker:
                 self.failed_debug_prefix,
                 constant_offset_expr,
                 element_size,
+            )
+            return False
+
+        # When operations like slicing, as_strided, or view(dtype=...) are folded into
+        # the kernel argument (for example, via reinterpret_tensor with a non-aligned
+        # storage_offset), the resulting buffer's data_ptr may not be 16-byte aligned.
+        if self.buffer_name is not None and is_unaligned_buffer_name(self.buffer_name):
+            log.debug(
+                "%s TMA descriptor base must be 16 byte aligned but buffer %s "
+                "is recorded as unaligned (e.g. produced by a sub-pointer "
+                "view / reinterpret_tensor).",
+                self.failed_debug_prefix,
+                self.buffer_name,
             )
             return False
 
@@ -4056,6 +4072,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype,
                 for_store=False,
                 force=getattr(self, "tma_load_for_template_epilogue", False),
+                buffer_name=name,
             ),
         )
 
@@ -4248,6 +4265,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype,
                 for_store=True,
                 force=force,
+                buffer_name=name,
             )
         indexing = self.indexing(
             index,
