@@ -101,6 +101,31 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self._run_init_op(torch.randint_like, low=0, high=100, dtype=dtype)
 
     @with_comms
+    def test_auto_registered_random_variants(self):
+        registry = (
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs
+        )
+        self.assertIn(torch.ops.aten.uniform.default, registry)
+        self.assertIn(torch.ops.aten.uniform.out, registry)
+        self.assertIn(torch.ops.aten.normal_functional.default, registry)
+
+        device_mesh = self.build_device_mesh()
+        input = torch.empty(8, 4, device=self.device_type)
+        dinput = distribute_tensor(input, device_mesh, [Shard(0)])
+
+        result = torch.ops.aten.uniform.default(dinput, 0.0, 1.0)
+        self.assertEqual(result.placements, (Shard(0),))
+
+        if not self.is_local_tensor_enabled:
+            out = distribute_tensor(torch.empty_like(input), device_mesh, [Shard(0)])
+            out_result = torch.ops.aten.uniform.out(dinput, 0.0, 1.0, out=out)
+            self.assertIs(out_result, out)
+            self.assertEqual(out.placements, (Shard(0),))
+
+        functional_result = torch.ops.aten.normal_functional.default(dinput, 0.0, 1.0)
+        self.assertEqual(functional_result.placements, (Shard(0),))
+
+    @with_comms
     def test_multinomial_sharded(self):
         """Test multinomial with sharded batch dimension."""
         device_mesh = self.build_device_mesh()
