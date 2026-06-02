@@ -26,7 +26,7 @@ WIN_CI_DIR = Path(__file__).resolve().parent
 PYTORCH_ROOT = WIN_CI_DIR.parent.parent.parent
 
 sys.path.insert(0, str(WIN_CI_DIR))
-from _common import download, write_env_exports  # noqa: E402
+from _common import download, write_env_exports
 
 
 # Pin numpy by Python version. Matches the legacy table in setup_build.bat.

@@ -21,10 +21,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+
 # Allow this script to be invoked from anywhere; sibling helpers live next
 # to it on disk.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import download, write_env_exports  # noqa: E402
+from _common import download, write_env_exports
 
 
 # Directory containing this script (.ci/pytorch/windows). Used as the root
