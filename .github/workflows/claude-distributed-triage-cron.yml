@@ -109,10 +109,10 @@ jobs:
             if [ -n "$REASON" ] && [ "$HAS_SUB_ONCALL" = true ]; then
               PHASE1_COUNT=$((PHASE1_COUNT + 1))
               if [ "$DRY_RUN" = "true" ]; then
-                echo "[DRY RUN] Would add 'bot-triaged' to #${ISSUE_NUM} (${REASON})"
+                echo "[DRY RUN] Would add 'bot-triaged' + 'triaged' to #${ISSUE_NUM} (${REASON})"
               else
-                echo "Adding 'bot-triaged' to #${ISSUE_NUM} (${REASON}; full labels: ${LABELS})"
-                gh issue edit "$ISSUE_NUM" --repo ${{ github.repository }} --add-label "bot-triaged"
+                echo "Adding 'bot-triaged' + 'triaged' to #${ISSUE_NUM} (${REASON}; full labels: ${LABELS})"
+                gh issue edit "$ISSUE_NUM" --repo ${{ github.repository }} --add-label "bot-triaged" --add-label "triaged"
 
                 # Fetch title and append to daily manifest
                 TITLE=$(gh issue view "$ISSUE_NUM" --repo ${{ github.repository }} --json title --jq '.title')
@@ -133,7 +133,7 @@ jobs:
             fi
           done <<< "$ISSUES"
 
-          echo "Phase 1 complete: ${PHASE1_COUNT} issues marked as bot-triaged"
+          echo "Phase 1 complete: ${PHASE1_COUNT} issues marked as bot-triaged + triaged"
 
       - name: "Phase 2: Collect issues needing LLM triage"
         id: collect
