@@ -15627,6 +15627,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(x, source)
 
+    # triton-cpu and pallas lower the runtime assert to a hard abort (SIGABRT)
+    # rather than a catchable RuntimeError, so the assertRaisesRegex below
+    # cannot intercept it on those backends. The fix itself is correct there;
+    # only the test's error-interception differs.
+    @xfail_if_triton_cpu
+    @xfail_if_pallas
     def test_index_add_out_of_bounds(self):
         # https://github.com/pytorch/pytorch/issues/185885
         # Eager index_add bounds-checks the index; the inductor decomp routes
