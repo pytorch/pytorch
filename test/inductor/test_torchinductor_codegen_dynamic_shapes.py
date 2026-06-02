@@ -119,6 +119,9 @@ test_failures = {
     "test_as_strided_on_split_view_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_cat_empty_1d_negative_dim_zero_output_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     #
     # Failed to find dynamic for loop variable:
     #
@@ -160,8 +163,8 @@ test_failures = {
     "test_repeat_as_strided_dynamic_shapes": TestFailure(("cpu",)),
     "test_mul_index_expr_dynamic_shapes": TestFailure(("cpu",)),
     "test_flip_cat_dynamic_shapes": TestFailure(("cpu",)),
-    "test_flip_zero_dim_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_flip_zero_dim_backward_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_flip_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
+    "test_flip_zero_dim_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_pad_single_dynamic_shapes": TestFailure(("cpu",)),
     "test_slice_scatter_dtype_consistency_dynamic_shapes": TestFailure(
         (
