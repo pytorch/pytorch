@@ -3759,6 +3759,7 @@ class SubgraphTracer(fx.Tracer):
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False
+        self.is_autograd_function_backward = False
 
         self.debug_level: int = parent.debug_level + 1 if parent is not None else 0
 
