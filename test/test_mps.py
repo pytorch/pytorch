@@ -10467,6 +10467,7 @@ class TestNNMPS(NNTestCase):
         r2_cpu = r2.to("cpu")
         self.assertEqual(r1, r2_cpu)
 
+    @serialTest()
     def test_group_norm_backward(self, device='mps'):
         # See https://github.com/pytorch/pytorch/issues/88331 for more detail
         shape = [1, 4, 16, 16]
