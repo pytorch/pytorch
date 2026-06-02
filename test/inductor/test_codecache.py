@@ -39,7 +39,6 @@ from torch._inductor.codecache import (
     BypassFxGraphCache,
     CacheabilityValidator,
     CacheBase,
-    CppWrapperCodeCache,
     CUDACodeCache,
     FxGraphCache,
     FxGraphCachePickler,
@@ -438,33 +437,6 @@ class TestPyCodeCache(TestCase):
                 [sys.executable, "-c", step3], env=env
             ).decode()
             self.assertIn("debug", out)
-
-    def test_cpp_wrapper_none_output_keeps_none_refcount(self):
-        source = textwrap.dedent(
-            """
-            #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-
-            void inductor_entry_impl(
-                AtenTensorHandle* input_handles,
-                AtenTensorHandle* output_handles
-            ) {
-                output_handles[0] = nullptr;
-            }
-            """
-        )
-
-        with mock.patch.object(
-            CppWrapperCodeCache, "load_async", return_value=lambda: None
-        ) as load_async:
-            CppWrapperCodeCache.load_pybinding_async(
-                ["std::vector<AtenTensorHandle>"],
-                source,
-                device_type="cpu",
-                num_outputs=1,
-            )
-
-        generated_source = load_async.call_args.args[0]
-        self.assertIn("Py_NewRef(Py_None)", generated_source)
 
 
 @instantiate_parametrized_tests

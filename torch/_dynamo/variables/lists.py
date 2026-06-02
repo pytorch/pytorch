@@ -35,6 +35,7 @@ from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
+    cmp_name_to_op_str_mapping,
     get_fake_value,
     guard_if_dyn,
     iter_contains,
@@ -321,91 +322,6 @@ class BaseListVariable(VariableTracker):
             kwargs["mutation_type"] = ValueMutationNew()
         return type(self)(new_items, **kwargs)
 
-    def richcompare_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        """list_richcompare / tuplerichcompare.
-
-        https://github.com/python/cpython/blob/e76aa128fe/Objects/listobject.c#L3352
-        https://github.com/python/cpython/blob/e76aa128fe/Objects/tupleobject.c#L821
-        CPython operates on the internal C array directly, so we compare
-        VT items without going through a polyfill.
-        """
-        from .object_protocol import generic_richcompare
-        from .tensor import SymNodeVariable
-
-        if not isinstance(other, BaseListVariable):
-            return ConstantVariable.create(NotImplemented)
-        try:
-            self_base = list if issubclass(self.python_type(), list) else tuple
-            other_base = list if issubclass(other.python_type(), list) else tuple
-            if self_base is not other_base:
-                return ConstantVariable.create(NotImplemented)
-        except NotImplementedError:
-            return ConstantVariable.create(NotImplemented)
-
-        left = self.items
-        right = other.items
-
-        cmp_op = cmp_name_to_op_mapping[op]
-
-        if cmp_op is operator.eq and len(left) != len(right):
-            return ConstantVariable.create(False)
-        if cmp_op is operator.ne and len(left) != len(right):
-            return ConstantVariable.create(True)
-
-        sym_eq_acc = None
-        for a, b in zip(left, right):
-            eq_result = generic_richcompare(tx, a, b, "__eq__")
-            if eq_result.is_python_constant():
-                if not eq_result.as_python_constant():
-                    if cmp_op in (operator.eq, operator.ne):
-                        return ConstantVariable.create(cmp_op is operator.ne)
-                    return generic_richcompare(tx, a, b, op)
-            elif eq_result.is_symnode_like():
-                if cmp_op not in (operator.eq, operator.ne):
-                    # Ordering requires branching on element equality, which
-                    # can't be expressed as a single symbolic expression.
-                    # Specialize: install a guard on the equality result and
-                    # proceed with the concrete value.
-                    eq_bool = guard_if_dyn(eq_result)
-                    if not eq_bool:
-                        return generic_richcompare(tx, a, b, op)
-                    continue
-                if sym_eq_acc is None:
-                    sym_eq_acc = eq_result
-                else:
-                    proxy = tx.output.create_proxy(
-                        "call_function",
-                        operator.and_,
-                        (sym_eq_acc.as_proxy(), eq_result.as_proxy()),
-                        {},
-                    )
-                    sym_eq_acc = SymNodeVariable.create(tx, proxy, sym_num=None)
-            else:
-                unimplemented(
-                    gb_type="list_richcompare_nonconst",
-                    context=f"element comparison produced {type(eq_result).__name__}",
-                    explanation="Cannot determine list/tuple comparison at compile time when element comparison produces a non-constant result.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-
-        if sym_eq_acc is not None:
-            if cmp_op is operator.ne:
-                proxy = tx.output.create_proxy(
-                    "call_function",
-                    operator.not_,
-                    (sym_eq_acc.as_proxy(),),
-                    {},
-                )
-                return SymNodeVariable.create(tx, proxy, sym_num=None)
-            return sym_eq_acc
-
-        return ConstantVariable.create(cmp_op(len(left), len(right)))
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -413,6 +329,8 @@ class BaseListVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         if name == "index":
             if not len(args):
                 raise_args_mismatch(
@@ -481,6 +399,54 @@ class BaseListVariable(VariableTracker):
             else:
                 self.items += args[0].items  # type: ignore[attr-defined]
                 return self
+        elif name in cmp_name_to_op_mapping:
+            if len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+
+            left = self
+            right = args[0]
+            # TODO this type check logic mirrors the following
+            # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/object.c#L991-L1007
+            # But we should probably move it up the stack to so that we don't
+            # need to duplicate it for different VTs.
+            if not isinstance(left, BaseListVariable) or not isinstance(
+                right, BaseListVariable
+            ):
+                if name == "__eq__":
+                    return SourcelessBuilder.create(tx, operator.is_).call_function(
+                        tx, [left, right], {}
+                    )
+                elif name == "__ne__":
+                    return SourcelessBuilder.create(tx, operator.is_not).call_function(
+                        tx, [left, right], {}
+                    )
+                else:
+                    op_str = cmp_name_to_op_str_mapping[name]
+                    left_ty = left.python_type_name()
+                    right_ty = right.python_type_name()
+                    raise_observed_exception(
+                        TypeError,
+                        tx,
+                        args=[
+                            f"{op_str} not supported between instances of '{left_ty}' and '{right_ty}'"
+                        ],
+                    )
+
+            return SourcelessBuilder.create(tx, polyfills.list_cmp).call_function(
+                tx,
+                [
+                    SourcelessBuilder.create(tx, cmp_name_to_op_mapping[name]),
+                    left,
+                    right,
+                ],
+                {},
+            )
+
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -758,36 +724,6 @@ class RangeVariable(BaseListVariable):
         index = key.as_python_constant()
         return self.apply_index(tx, index)
 
-    def richcompare_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        """range_richcompare: eq/ne via range_equals, NotImplemented for ordering.
-
-        https://github.com/python/cpython/blob/e76aa128fe/Objects/rangeobject.c#L472
-        """
-        from .builder import SourcelessBuilder
-
-        if op not in ("__eq__", "__ne__"):
-            return ConstantVariable.create(NotImplemented)
-        try:
-            if other.python_type() is not range:
-                return ConstantVariable.create(NotImplemented)
-        except NotImplementedError:
-            return ConstantVariable.create(NotImplemented)
-
-        if isinstance(other, RangeVariable):
-            cmp = self.range_equals(other)
-        else:
-            cmp = False
-
-        if op == "__eq__":
-            return SourcelessBuilder.create(tx, cmp)
-        else:
-            return SourcelessBuilder.create(tx, not cmp)
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -810,6 +746,30 @@ class RangeVariable(BaseListVariable):
                 tx,
                 args=[f"{x} is not in range"],
             )
+        elif name in cmp_name_to_op_mapping:
+            other = args[0]
+            pt = other.python_type()
+            if name not in ("__eq__", "__ne__"):
+                msg = f"{name} not supported between instances of 'range' and '{pt}'"
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[msg],
+                )
+
+            if pt is not range:
+                return VariableTracker.build(tx, NotImplemented)
+
+            if isinstance(other, RangeVariable):
+                cmp = self.range_equals(other)
+            else:
+                cmp = False
+
+            # Two ranges are equal if they produce the same sequence of values
+            if name == "__eq__":
+                return SourcelessBuilder.create(tx, cmp)
+            else:
+                return SourcelessBuilder.create(tx, not cmp)
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
@@ -1904,24 +1864,6 @@ class SliceVariable(VariableTracker):
         except TypeError as e:
             raise_observed_exception(TypeError, tx, args=[str(e)])
         return h, False
-
-    def richcompare_impl(
-        self,
-        tx: "InstructionTranslator",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        """slice_richcompare: delegates all 6 ops to (start, stop, step) tuple comparison.
-
-        https://github.com/python/cpython/blob/e76aa128fe/Objects/sliceobject.c#L667-L686
-        """
-        from .object_protocol import generic_richcompare
-
-        if not isinstance(other, SliceVariable):
-            return ConstantVariable.create(NotImplemented)
-        self_tuple = TupleVariable(list(self.items))
-        other_tuple = TupleVariable(list(other.items))
-        return generic_richcompare(tx, self_tuple, other_tuple, op)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)

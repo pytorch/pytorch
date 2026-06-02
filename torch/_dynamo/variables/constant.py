@@ -8,7 +8,6 @@ maintaining type safety through the compilation process.
 
 from __future__ import annotations
 
-import enum
 import operator
 from typing import Any, Literal, overload, TYPE_CHECKING
 from typing_extensions import override
@@ -16,7 +15,7 @@ from typing_extensions import override
 import torch
 from torch._dynamo.source import GetItemSource
 
-from .. import graph_break_hints, variables
+from .. import variables
 from ..exc import raise_observed_exception, unimplemented
 from ..utils import (
     common_constant_types,
@@ -212,13 +211,6 @@ class ConstantVariable(VariableTracker):
     def hash_impl(self, tx: InstructionTranslator) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
         return hash(self.value), False
-
-    def richcompare_impl(
-        self, tx: InstructionTranslator, other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import python_constant_richcompare_impl
-
-        return python_constant_richcompare_impl(self, tx, other, op)
 
     def len_impl(self, tx: InstructionTranslator) -> VariableTracker:
         """Generic len for any constant value (sequence or mapping)."""
@@ -668,36 +660,24 @@ CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
 CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
 
 
-class FakeValueKind(enum.Enum):
-    ID = "id"
-    HASH = "hash"
-
-
 class FakeIdVariable(VariableTracker):
-    """A compile-time-only id or hash value that can be used as a dict key but
-    cannot be reconstructed across graph breaks.
+    """A compile-time-only id value that can be used as a dict key but cannot
+    be reconstructed across graph breaks.
 
-    When dynamo evaluates ``id(x)`` or ``hash(x)`` on a variable tracker that
-    has no corresponding runtime object, we mint a fake integer.  The ``kind``
-    field tracks which builtin produced the value so that same-kind comparisons
-    (e.g. ``id(a) != id(b)``) can be resolved at compile time while cross-kind
-    comparisons graph-break.
+    When dynamo evaluates ``id(x)`` on a variable tracker that has no
+    corresponding runtime object (e.g. a ``ConstDictVariable`` created during
+    tracing), we mint a fake integer id.  This variable holds that id and
+    supports the minimal interface needed to participate as a dict key
+    (hashing and equality).  It intentionally blocks reconstruction so that a
+    graph break does not silently bake a stale id into the resumed bytecode.
     """
 
     # PyLong_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L6585
     _cpython_type = int
 
-    _nonvar_fields = {
-        "kind",
-        *VariableTracker._nonvar_fields,
-    }
-
-    def __init__(
-        self, value: int, *, kind: FakeValueKind = FakeValueKind.ID, **kwargs: Any
-    ) -> None:
+    def __init__(self, value: int, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
-        self.kind = kind
 
     def as_python_constant(self) -> int:
         return self.value
@@ -711,36 +691,27 @@ class FakeIdVariable(VariableTracker):
     def hash_impl(self, tx: Any) -> tuple[int, bool]:
         return hash(self.value), True
 
-    def richcompare_impl(
-        self, tx: Any, other: VariableTracker, op: str
-    ) -> VariableTracker:
-        if (
-            isinstance(other, FakeIdVariable)
-            and self.kind == other.kind
-            and op in ("__eq__", "__ne__")
-        ):
-            result = (
-                (self.value == other.value)
-                if op == "__eq__"
-                else (self.value != other.value)
-            )
-            return ConstantVariable.create(result)
-        unimplemented(
-            gb_type="Comparison on compile-time-only id or hash value",
-            context=f"FakeIdVariable({self.value}) {op} {type(other).__name__}",
-            explanation="Cannot compare a compile-time-only id() or hash() "
-            "value. The comparison will run eagerly.",
-            hints=[
-                "Avoid comparing id() or hash() of objects created inside "
-                "the compiled region against other values.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
     def is_python_equal(self, other: object) -> bool:
         if isinstance(other, (FakeIdVariable, ConstantVariable)):
             return self.value == other.as_python_constant()
         return False
+
+    def call_method(
+        self,
+        tx: InstructionTranslator,
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from ..utils import cmp_name_to_op_mapping
+
+        if name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
+            other = args[0]
+            if isinstance(other, (FakeIdVariable, ConstantVariable)):
+                return ConstantVariable.create(
+                    cmp_name_to_op_mapping[name](self.value, other.as_python_constant())
+                )
+        return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(

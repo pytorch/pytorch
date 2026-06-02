@@ -837,6 +837,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support seqused_k")
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["backend"] != "fa2"
@@ -863,8 +864,6 @@ class TestVarlenAttention(NNTestCase):
         self, device, dtype, actual_kv_lens, backend, sdpa_backend=None
     ):
         if TEST_WITH_ROCM:
-            if sdpa_backend == "ck":
-                self.skipTest("CK backend does not support seqused_k")
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
 
         torch.manual_seed(42)
@@ -969,7 +968,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support block_table")
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support seqused_k")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("page_size", [32, 64, 128, 256])
     @parametrize("compile", [False, True])

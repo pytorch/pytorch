@@ -6,13 +6,11 @@ import unittest
 
 import torch
 from torch.cuda._graph_annotations import (
-    _get_stream_id,
     _is_tools_id_unavailable,
     clear_kernel_annotations,
     enable_annotations,
     get_kernel_annotations,
     mark_kernels,
-    mark_stream,
     remap_to_exec_graph,
     resolve_pending_annotations,
 )
@@ -50,14 +48,11 @@ class TestMarkKernels(TestCase):
             _ = x + 1
         self.assertEqual(len(get_kernel_annotations()), 0)
 
-    def test_single_scope_at_capture_start_uses_root_fallback(self):
+    def test_single_scope(self):
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(8, device="cuda")
 
         with torch.cuda.graph(graph):
-            # mark_kernels is the first captured work here, so the entry
-            # frontier is empty and the implementation must fall back to
-            # newly created graph roots.
             with mark_kernels("phase_a"):
                 _ = x + 1
             resolve_pending_annotations()
@@ -398,99 +393,6 @@ class TestMarkKernels(TestCase):
 
         # Annotations should be empty because resolve was never called.
         self.assertEqual(len(get_kernel_annotations()), 0)
-
-    def test_mark_stream_snapshots_capture_before_switch(self):
-        graph = torch.cuda.CUDAGraph()
-        x = torch.randn(8, device="cuda")
-        capture_stream = torch.cuda.Stream()
-        aux_stream = torch.cuda.Stream()
-        expected_stream_id = _get_stream_id(aux_stream)
-        aux_done = torch.cuda.Event()
-
-        capture_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.graph(graph, stream=capture_stream):
-            _ = x + 1
-            aux_ready = capture_stream.record_event()
-            with mark_stream(aux_stream, {"name": "aux"}):
-                aux_stream.wait_event(aux_ready)
-                _ = x * 2
-                aux_stream.record_event(aux_done)
-            capture_stream.wait_event(aux_done)
-            resolve_pending_annotations()
-
-        annotations = get_kernel_annotations()
-        self.assertGreater(len(annotations), 0)
-        for anns in annotations.values():
-            self.assertEqual(len(anns), 1)
-            ann = anns[0]
-            self.assertEqual(ann["name"], "aux")
-            self.assertEqual(ann["stream"], expected_stream_id)
-
-    def test_mark_stream_annotates_target_already_capturing_when_synced(self):
-        graph = torch.cuda.CUDAGraph()
-        x = torch.randn(8, device="cuda")
-        capture_stream = torch.cuda.Stream()
-        aux_stream = torch.cuda.Stream()
-        expected_stream_id = _get_stream_id(aux_stream)
-        aux_done = torch.cuda.Event()
-
-        capture_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.graph(graph, stream=capture_stream):
-            base = x + 1
-            fork_event = capture_stream.record_event()
-
-            with torch.cuda.stream(aux_stream):
-                aux_stream.wait_event(fork_event)
-                _ = base * 2
-
-            _ = base - 1
-            branch_ready = capture_stream.record_event()
-
-            with mark_stream(aux_stream, {"name": "aux_branch"}):
-                aux_stream.wait_event(branch_ready)
-                _ = base * 3
-                aux_stream.record_event(aux_done)
-
-            capture_stream.wait_event(aux_done)
-            resolve_pending_annotations()
-
-        annotations = get_kernel_annotations()
-        self.assertGreater(len(annotations), 0)
-        for anns in annotations.values():
-            self.assertEqual(len(anns), 1)
-            ann = anns[0]
-            self.assertEqual(ann["name"], "aux_branch")
-            self.assertEqual(ann["stream"], expected_stream_id)
-
-    def test_mark_kernels_skips_preexisting_dependents_on_entry_frontier(self):
-        graph = torch.cuda.CUDAGraph()
-        x = torch.randn(8, device="cuda")
-        capture_stream = torch.cuda.Stream()
-        aux_stream = torch.cuda.Stream()
-        aux_done = torch.cuda.Event()
-
-        capture_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.graph(graph, stream=capture_stream):
-            base = x + 1
-            shared_event = capture_stream.record_event()
-
-            with torch.cuda.stream(aux_stream):
-                aux_stream.wait_event(shared_event)
-                _ = base * 2
-
-            with mark_kernels("tagged"):
-                with torch.cuda.stream(aux_stream):
-                    aux_stream.wait_event(shared_event)
-                    _ = base * 3
-                    aux_stream.record_event(aux_done)
-
-            capture_stream.wait_event(aux_done)
-            resolve_pending_annotations()
-
-        annotations = get_kernel_annotations()
-        self.assertEqual(len(annotations), 1)
-        for anns in annotations.values():
-            self.assertEqual(anns, [{"str": "tagged"}])
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA not available")
