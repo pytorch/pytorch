@@ -1151,6 +1151,10 @@ class SequentialLR(LRScheduler):
                 "Sequential Schedulers expects number of schedulers provided to be one more "
                 f"than the number of milestone points, but got number of schedulers {len(schedulers)} and the "
                 f"number of milestones to be equal to {len(milestones)}"
+        if any(m < 1 for m in milestones):
+            raise ValueError(
+                f"milestones must be >= 1, but got {milestones}"
+            )       
             )
         self._schedulers = schedulers
         self._milestones = milestones
