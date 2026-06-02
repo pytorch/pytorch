@@ -3300,6 +3300,8 @@ def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 def _index_copy(
     x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
         x.device == index.device and x.device == tensor.device,
@@ -3313,6 +3315,45 @@ def _index_copy(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
+    num_indices = index.numel()
+    if tensor.ndim == 0:
+        torch._check(
+            num_indices == 1,
+            lambda: (
+                "index_copy_(): When source is scalar, index should have "
+                f"one element (got {num_indices})"
+            ),
+        )
+    elif x.ndim != 0:
+        torch._check(
+            tensor.ndim == x.ndim,
+            lambda: (
+                "index_copy_(): When source and destination are not scalars, "
+                "their dimensionality must match. Source dimensionality "
+                f"({tensor.ndim}), destination dimensionality ({x.ndim})"
+            ),
+        )
+
+    x_sliced_shape = x.shape[:dim] + x.shape[dim + 1 :] if x.ndim > 0 else ()
+    tensor_sliced_shape = (
+        tensor.shape[:dim] + tensor.shape[dim + 1 :] if tensor.ndim > 0 else ()
+    )
+    torch._check(
+        sym_eq(x_sliced_shape, tensor_sliced_shape),
+        lambda: (
+            "index_copy_(): Source/destination tensor must have same slice shapes. "
+            f"Destination slice shape: {x_sliced_shape} at dimension {dim} "
+            f"and source slice shape: {tensor_sliced_shape} at dimension 0."
+        ),
+    )
+    if tensor.ndim != 0:
+        torch._check(
+            num_indices == tensor.size(dim),
+            lambda: (
+                f"index_copy_(): Number of indices ({num_indices}) should be "
+                f"equal to source.size(dim) ({tensor.size(dim)})"
+            ),
+        )
     # Treat scalars as elements of \R^1
     zero_dim = x.ndim == 0
     x1 = x.unsqueeze(0) if zero_dim else x
