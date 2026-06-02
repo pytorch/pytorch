@@ -11,8 +11,6 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
 
-#include <utility>
-
 namespace at::functorch {
 
 // NOTE: [functorch's PyTorch Operator Hacks]
@@ -29,12 +27,8 @@ namespace at::functorch {
 // TODO: upstream into core
 
 namespace {
-Tensor index_select_backward_hack(
-    const Tensor& grad,
-    c10::SymIntArrayRef self_sizes,
-    int64_t dim,
-    const Tensor& index) {
-  return at::zeros_symint(self_sizes, grad.options()).index_add(dim, index, grad);
+Tensor index_select_backward_hack(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
+  return at::zeros(self_sizes, grad.options()).index_add(dim, index, grad);
 }
 
 // TODO: linear is pretty important for performance, but I'm not sure how to work
@@ -114,15 +108,15 @@ Tensor binary_cross_entropy_with_logits_hack(
   return apply_loss_reduction(loss, reduction);
 }
 
-Tensor trace_backward_decomp(const Tensor& grad, c10::SymIntArrayRef sizes) {
+Tensor trace_backward_decomp(const Tensor& grad, IntArrayRef sizes) {
   TORCH_CHECK(sizes.size() == 2, "expected matrix input");
-  auto grad_input = at::zeros_symint(sizes[0] * sizes[1], grad.options());
+  auto grad_input = at::zeros(sizes[0] * sizes[1], grad.options());
   auto diag_size = std::min(sizes[0], sizes[1]);
   auto step = sizes[1] + 1;
   auto indices = at::arange(0, diag_size * step, step, grad.options().dtype(at::kLong));
   // Workaround using index_put instead of yet unsupported index_fill_
-  grad_input = grad_input.index_put({std::move(indices)}, grad);
-  return grad_input.view_symint(sizes);
+  grad_input = grad_input.index_put({indices}, grad);
+  return grad_input.view(sizes);
 }
 }
 
