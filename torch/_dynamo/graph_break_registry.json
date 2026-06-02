@@ -20,6 +20,16 @@
       ]
     }
   ],
+  "GB9832": [
+    {
+      "Gb_type": "random.Random.setstate() with dynamic state",
+      "Context": "setstate() with non-constant random.Random state",
+      "Explanation": "Dynamo cannot replay random.Random.setstate() when its state argument is produced dynamically outside the current compiled region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0002": [
     {
       "Gb_type": "Assertion failed on symbolic shapes",

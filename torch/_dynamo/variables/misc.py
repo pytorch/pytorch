@@ -31,7 +31,7 @@ import weakref
 from collections.abc import Callable, Sequence
 from random import Random
 from types import BuiltinFunctionType
-from typing import Any, TYPE_CHECKING, TypeGuard, Union
+from typing import Any, NoReturn, TYPE_CHECKING, TypeGuard, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -54,6 +54,8 @@ from ..source import (
     AttrSource,
     GenericAttrSource,
     GetItemSource,
+    is_constant_source,
+    RandomValueSource,
     TypeMROSource,
     TypeSource,
     WeakRefCallSource,
@@ -66,7 +68,12 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
 )
-from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    NO_SUCH_SUBOBJ,
+    ValueMutationExisting,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
@@ -2437,7 +2444,10 @@ class RandomVariable(VariableTracker):
             )
 
     @staticmethod
-    def wrap_state(state: tuple[int, tuple[int, ...], float | None]) -> TupleVariable:
+    def wrap_state(
+        state: tuple[int, tuple[int, ...], float | None],
+        source: Source | None = None,
+    ) -> TupleVariable:
         RandomVariable.check_state(state)
         return variables.TupleVariable(
             [
@@ -2446,7 +2456,8 @@ class RandomVariable(VariableTracker):
                     [variables.ConstantVariable.create(x) for x in state[1]]
                 ),
                 variables.ConstantVariable.create(state[2]),
-            ]
+            ],
+            source=source,
         )
 
     @staticmethod
@@ -2457,6 +2468,28 @@ class RandomVariable(VariableTracker):
         RandomVariable.check_state(state_obj)
         return state_obj
 
+    def use_runtime_source(self) -> bool:
+        return self.source is not None and isinstance(
+            self.mutation_type, ValueMutationExisting
+        )
+
+    def check_runtime_source_mutation(self, tx: "InstructionTranslatorBase") -> None:
+        if self.use_runtime_source():
+            tx.output.side_effects.check_allowed_mutation(self)
+
+    @staticmethod
+    def unimplemented_dynamic_state() -> NoReturn:
+        unimplemented(
+            gb_type="random.Random.setstate() with dynamic state",
+            context="setstate() with non-constant random.Random state",
+            explanation=(
+                "Dynamo cannot replay random.Random.setstate() when its "
+                "state argument is produced dynamically outside the current "
+                "compiled region."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -2465,35 +2498,100 @@ class RandomVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "seed":
-            tx.output.side_effects.mutation(self)
-            self.random.seed(
-                *[x.as_python_constant() for x in args],
-                **{key: val.as_python_constant() for key, val in kwargs.items()},
-            )
+            args_const = [x.as_python_constant() for x in args]
+            kwargs_const = {
+                key: val.as_python_constant() for key, val in kwargs.items()
+            }
+            if self.use_runtime_source():
+                self.check_runtime_source_mutation(tx)
+                self.random.seed(*args_const, **kwargs_const)
+                tx.output.add_random_call(
+                    None,
+                    tuple(args_const),
+                    kwargs_const,
+                    source=self.source,
+                    method_name=name,
+                )
+            else:
+                tx.output.side_effects.mutation(self)
+                self.random.seed(*args_const, **kwargs_const)
             return variables.ConstantVariable.create(None)
         elif name == "getstate":
-            return self.wrap_state(self.random.getstate())
+            state = self.random.getstate()
+            if self.use_runtime_source():
+                random_call_index = tx.output.add_random_call(
+                    None,
+                    (),
+                    {},
+                    source=self.source,
+                    method_name=name,
+                )
+                return self.wrap_state(
+                    state, source=RandomValueSource(random_call_index)
+                )
+            return self.wrap_state(state)
         elif name == "setstate":
-            tx.output.side_effects.mutation(self)
-            self.random.setstate(self.unwrap_state(args[0]))
+            state_arg = args[0]
+            state_arg_source = state_arg.source
+            state_arg_is_runtime_value = isinstance(state_arg_source, RandomValueSource)
+            if self.use_runtime_source():
+                self.check_runtime_source_mutation(tx)
+            if (
+                not state_arg_is_runtime_value
+                and state_arg_source is not None
+                and not is_constant_source(state_arg_source)
+            ):
+                self.unimplemented_dynamic_state()
+            try:
+                state = self.unwrap_state(state_arg)
+            except AsPythonConstantNotImplementedError:
+                self.unimplemented_dynamic_state()
+            self.random.setstate(state)
+            if self.use_runtime_source():
+                runtime_state = (
+                    state_arg_source if state_arg_is_runtime_value else state
+                )
+                tx.output.add_random_call(
+                    None,
+                    (runtime_state,),
+                    {},
+                    source=self.source,
+                    method_name=name,
+                )
+            elif state_arg_is_runtime_value:
+                self.unimplemented_dynamic_state()
+            else:
+                tx.output.side_effects.mutation(self)
             return variables.ConstantVariable.create(None)
         elif name in self._supported_fn_names:
-            tx.output.side_effects.mutation(self)
-            state = self.random.getstate()
+            args_const = [x.as_python_constant() for x in args]
+            kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
+            if self.use_runtime_source():
+                self.check_runtime_source_mutation(tx)
+                example_value = getattr(self.random, name)(*args_const, **kwargs_const)
+                return call_random_fn(
+                    tx,
+                    None,
+                    args,
+                    kwargs,
+                    source=self.source,
+                    method_name=name,
+                    example_value=example_value,
+                )
+            else:
+                tx.output.side_effects.mutation(self)
+                state = self.random.getstate()
 
-            def call_random_meth(*args: Any, **kwargs: Any) -> Any:
-                r = random.Random()
-                r.setstate(state)
-                return getattr(r, name)(*args, **kwargs)
+                def call_random_meth(*args: Any, **kwargs: Any) -> Any:
+                    r = random.Random()
+                    r.setstate(state)
+                    return getattr(r, name)(*args, **kwargs)
 
-            # self.random state not actually updated by call_random_meth, so update here
-            # by calling the method
-            getattr(self.random, name)(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
+                # self.random state not actually updated by call_random_meth, so update here
+                # by calling the method
+                getattr(self.random, name)(*args_const, **kwargs_const)
 
-            return call_random_fn(tx, call_random_meth, args, kwargs)
+                return call_random_fn(tx, call_random_meth, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:

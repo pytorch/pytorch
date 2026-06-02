@@ -2,6 +2,7 @@
 import enum
 import functools
 import pprint
+import random
 import re
 import unittest
 import warnings
@@ -214,6 +215,25 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             "HOP: Unsafe side effect",
         ):
             f(x)
+
+    def test_cond_random_object_side_effect(self):
+        rng = random.Random(0)
+        rng_state = rng.getstate()
+
+        def true_fn(x):
+            rng.randint(1, 100)
+            return x + 1
+
+        def false_fn(x):
+            return x - 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return torch.cond(x.sum() > 0, true_fn, false_fn, [x])
+
+        with self.assertRaisesRegex(RuntimeError, "HOP: Unsafe side effect"):
+            fn(torch.ones(2))
+        self.assertEqual(rng.getstate(), rng_state)
 
     def test_no_freevars(self):
         def f(x):

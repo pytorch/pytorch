@@ -409,6 +409,12 @@ class SideEffects:
             )
         return False
 
+    def check_allowed_mutation(self, item: VariableTracker) -> bool:
+        if item in self.ignore_mutation_on_these_variables:
+            return False
+        self.check_allowed_side_effect(item)
+        return True
+
     def store_attr(
         self,
         item: VariableTracker,
@@ -954,10 +960,9 @@ class SideEffects:
         }
 
     def mutation(self, var: VariableTracker) -> None:
-        if var in self.ignore_mutation_on_these_variables:
+        if not self.check_allowed_mutation(var):
             return
 
-        self.check_allowed_side_effect(var)
         # Capture user stack for this mutation
         self._capture_user_stack(var)
 

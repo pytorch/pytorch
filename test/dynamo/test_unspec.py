@@ -213,6 +213,65 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
         self.assertEqual(rand3_1.getstate(), rand3_2.getstate())
 
+    def test_random_object_repeat(self):
+        def fn(x, rng):
+            return x + rng.randint(1, 100)
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        rng1 = random.Random(0)
+        rng2 = random.Random(0)
+
+        self.assertEqual(fn(inp, rng1), opt_fn(inp, rng2))
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(fn(inp, rng1), opt_fn(inp, rng2))
+            self.assertEqual(fn(inp, rng1), opt_fn(inp, rng2))
+
+        self.assertEqual(rng1.getstate(), rng2.getstate())
+
+    def test_random_object_getstate_repeat(self):
+        def fn(x, src, dst):
+            a = src.randint(1, 100)
+            dst.setstate(src.getstate())
+            b = dst.randint(1, 100)
+            return x + a + b
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        src1 = random.Random(0)
+        dst1 = random.Random(1)
+        src2 = random.Random(0)
+        dst2 = random.Random(1)
+
+        self.assertEqual(fn(inp, src1, dst1), opt_fn(inp, src2, dst2))
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(fn(inp, src1, dst1), opt_fn(inp, src2, dst2))
+            self.assertEqual(fn(inp, src1, dst1), opt_fn(inp, src2, dst2))
+
+        self.assertEqual(src1.getstate(), src2.getstate())
+        self.assertEqual(dst1.getstate(), dst2.getstate())
+
+    def test_random_object_getstate_graph_break_repeat(self):
+        def fn(x, src):
+            src.randint(1, 100)
+            state = src.getstate()
+            x.sum().item()
+            dst = random.Random(123)
+            dst.setstate(state)
+            return x + dst.randint(1, 100)
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager")
+        src1 = random.Random(0)
+        src2 = random.Random(0)
+
+        self.assertEqual(fn(inp, src1), opt_fn(inp, src2))
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(fn(inp, src1), opt_fn(inp, src2))
+            self.assertEqual(fn(inp, src1), opt_fn(inp, src2))
+
+        self.assertEqual(src1.getstate(), src2.getstate())
+
     def test_random_object_methods(self):
         def fn(x, rand1, rand2, rand3):
             rand1.seed(42)
@@ -235,6 +294,13 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         y1 = fn(inp, rand1_1, rand2_1, rand3_1)
         y2 = opt_fn(inp, rand1_2, rand2_2, rand3_2)
         self.assertEqual(y1, y2)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            y1 = fn(inp, rand1_1, rand2_1, rand3_1)
+            y2 = opt_fn(inp, rand1_2, rand2_2, rand3_2)
+            self.assertEqual(y1, y2)
+            y1 = fn(inp, rand1_1, rand2_1, rand3_1)
+            y2 = opt_fn(inp, rand1_2, rand2_2, rand3_2)
+            self.assertEqual(y1, y2)
         self.assertEqual(rand1_1.getstate(), rand1_2.getstate())
         self.assertEqual(rand2_1.getstate(), rand2_2.getstate())
         self.assertEqual(rand3_1.getstate(), rand3_2.getstate())

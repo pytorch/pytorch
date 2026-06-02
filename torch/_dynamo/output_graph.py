@@ -137,6 +137,7 @@ from .source import (
     LocalSource,
     NumpyTensorSource,
     ParamBufferSource,
+    RandomValueSource,
     ShapeEnvSource,
     SyntheticLocalSource,
     TensorProperty,
@@ -341,9 +342,50 @@ class GraphCompileReason:
             graph_break_reasons.append(self)
 
 
-def _get_gen_rand_values_fn(random_calls: Any) -> Callable[[], list[Any]]:
-    def _gen_rand_values() -> list[Any]:
-        return [fn(*args, **kwargs) for fn, args, kwargs in random_calls]
+@dataclass
+class RandomCall:
+    fn: Callable[..., object] | None
+    args: tuple[object, ...]
+    kwargs: dict[str, object]
+    source: Source | None = None
+    method_name: str | None = None
+
+
+def _resolve_random_call_arg(arg: object, random_values: list[Any]) -> object:
+    if isinstance(arg, RandomValueSource):
+        return random_values[arg.random_call_index]
+    return arg
+
+
+def _get_gen_rand_values_fn(
+    random_calls: Sequence[RandomCall],
+    random_source_indexes: dict[Source, int],
+) -> Callable[..., list[Any]]:
+    def _gen_rand_values(*random_sources: Any) -> list[Any]:
+        random_values = []
+        for random_call in random_calls:
+            args = tuple(
+                _resolve_random_call_arg(arg, random_values) for arg in random_call.args
+            )
+            kwargs = {
+                key: _resolve_random_call_arg(arg, random_values)
+                for key, arg in random_call.kwargs.items()
+            }
+            source = random_call.source
+            if source is None:
+                if random_call.fn is None:
+                    raise AssertionError("random call without fn or source")
+                random_values.append(random_call.fn(*args, **kwargs))
+            else:
+                if random_call.method_name is None:
+                    raise AssertionError("source-backed random call without method")
+                random_values.append(
+                    getattr(
+                        random_sources[random_source_indexes[source]],
+                        random_call.method_name,
+                    )(*args, **kwargs)
+                )
+        return random_values
 
     return _gen_rand_values
 
@@ -883,9 +925,7 @@ class OutputGraph(OutputGraphCommon):
         # functions that returns a tuple of random values for each original call.
         # random_calls tracks calls to random() and random_values_var stores the name of
         # the variable that stores __gen_rand_values results.
-        self.random_calls: list[
-            tuple[Callable[..., object], tuple[object, ...], dict[str, object]]
-        ] = []
+        self.random_calls: list[RandomCall] = []
         self.random_values_var: Any = None
 
         # Bytecode to insert right before we call the graph
@@ -1465,6 +1505,20 @@ class OutputGraph(OutputGraphCommon):
 
     def count_calls(self) -> int:
         return count_calls(self.graph)
+
+    def add_random_call(
+        self,
+        fn: Callable[..., object] | None,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        source: Source | None = None,
+        method_name: str | None = None,
+    ) -> int:
+        random_call_index = len(self.random_calls)
+        self.random_calls.append(
+            RandomCall(fn, args, kwargs, source=source, method_name=method_name)
+        )
+        return random_call_index
 
     def is_empty_graph(self) -> bool:
         return len(list(self.graph.nodes)) == 0
@@ -2048,8 +2102,15 @@ class OutputGraph(OutputGraphCommon):
         if len(self.random_calls) > 0:
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
+            random_sources: list[Source] = []
+            random_source_indexes: dict[Source, int] = {}
+            for random_call in self.random_calls:
+                source = random_call.source
+                if source is not None and source not in random_source_indexes:
+                    random_source_indexes[source] = len(random_sources)
+                    random_sources.append(source)
             rand_fn = disable(
-                _get_gen_rand_values_fn(self.random_calls),
+                _get_gen_rand_values_fn(self.random_calls, random_source_indexes),
                 reason="do not trace into Dynamo rng recovery function",
             )
             rand_fn_name = self.install_global("__gen_rand_values", rand_fn)
@@ -2059,7 +2120,12 @@ class OutputGraph(OutputGraphCommon):
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
             )
-            random_calls_instructions.extend(create_call_function(0, False))
+            for source in random_sources:
+                codegen(source)
+            random_calls_instructions.extend(codegen.get_instructions())
+            random_calls_instructions.extend(
+                create_call_function(len(random_sources), False)
+            )
             random_calls_instructions.append(
                 codegen.create_store(self.random_values_var),
             )
