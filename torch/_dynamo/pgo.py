@@ -48,7 +48,7 @@ from torch.utils._ordered_set import OrderedSet
 if TYPE_CHECKING:
     import types
 
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
 
 
@@ -436,7 +436,7 @@ class FrameStateSizeEntry:
 
 
 def update_automatic_dynamic(
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     name: str,
     entry: FrameStateSizeEntry,
     *,
@@ -552,7 +552,7 @@ def update_automatic_dynamic(
 
 
 def process_automatic_dynamic(
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     name: str,
     entry: FrameStateSizeEntry,
     *,
