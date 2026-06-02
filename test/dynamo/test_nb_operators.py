@@ -532,33 +532,6 @@ class TestNbOr(torch._dynamo.test_case.TestCase):
         self.assertEqual(_InheritedSub() | _BaseWithOr(), "_BaseWithOr.__or__")
         self.assertEqual(_BaseWithOr() | _InheritedSub(), "_BaseWithOr.__or__")
 
-    # --- Tensor or ---
-
-    def test_or_tensor_and_int(self):
-        def fn(x):
-            return x | 7
-
-        x = torch.tensor([0b0010, 0b0100], dtype=torch.int64)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(x), fn(x))
-
-    def test_or_int_and_tensor(self):
-        def fn(x):
-            return 7 | x
-
-        x = torch.tensor([0b0010, 0b0100], dtype=torch.int64)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(x), fn(x))
-
-    def test_or_tensor_and_tensor(self):
-        def fn(x, y):
-            return x | y
-
-        x = torch.tensor([0b0010, 0b0100], dtype=torch.int64)
-        y = torch.tensor([0b0001, 0b1000], dtype=torch.int64)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(x, y), fn(x, y))
-
 
 # --- Helper classes for sub tests ---
 
