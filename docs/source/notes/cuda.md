@@ -224,27 +224,11 @@ If full precision reductions are needed, users can disable reduced precision red
 torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 ```
 
-Assigning a boolean is equivalent to assigning
-`(allow_reduced_precision, True)` and sets `allow_splitk` to `True`. To
-disable both reduced precision reductions and split-k reductions, assign
-`(allow_reduced_precision, allow_splitk)` explicitly:
-
-```python
-torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (False, False)
-```
-
-The current split-k setting can be queried with
-`torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k`.
-The combination `(True, False)` is not supported because reduced precision
-reductions require split-k.
-
 To toggle the reduced precision reduction flags in C++, one can do
 
 ```cpp
-at::globalContext().setAllowFP16ReductionCuBLAS(false, false);
+at::globalContext().setAllowFP16ReductionCuBLAS(false);
 ```
-
-The second argument is `allow_splitk` and defaults to `true` when omitted.
 
 (bf16reducedprecision)=
 
@@ -261,27 +245,11 @@ precision reductions in bf16 GEMMs with:
 torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
 ```
 
-Assigning a boolean is equivalent to assigning
-`(allow_reduced_precision, True)` and sets `allow_splitk` to `True`. To
-disable both reduced precision reductions and split-k reductions, assign
-`(allow_reduced_precision, allow_splitk)` explicitly:
-
-```python
-torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, False)
-```
-
-The current split-K setting can be queried with
-`torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k`.
-The combination `(True, False)` is not supported because reduced precision
-reductions require split-K.
-
 To toggle the reduced precision reduction flags in C++, one can do
 
 ```cpp
-at::globalContext().setAllowBF16ReductionCuBLAS(false, false);
+at::globalContext().setAllowBF16ReductionCuBLAS(true);
 ```
-
-The second argument is `allow_splitk` and defaults to `true` when omitted.
 
 (fp16accumulation)=
 
@@ -968,6 +936,8 @@ with torch.cuda.use_mem_pool(pool):
      {class}`torch.cuda.MemPool` object is holding a reference. Only at that point, can the memory
      held by the pool be returned to the system when the pool's destructor is called using
      `del`.
+   * {class}`torch.cuda.MemPool` doesn't currently support `expandable_segments` mode of
+     CUDACachingAllocator.
    * [NCCL has specific requirements](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/bufferreg.html#memory-allocator) for a buffer to be compatible with NVLS reductions.
      These requirements can be broken in a dynamic workload, for instance, the buffer being
      sent to NCCL by the CUDACachingAllocator might be split and hence, not correctly aligned.

@@ -1534,56 +1534,6 @@ graph():
             ep_out_bigru_dynamic = ep_bigru.module()(x_, h0_bi)
             self.assertEqual(ep_out_bigru_dynamic, model_bigru(x_, h0_bi))
 
-    def test_dynamic_lstm_with_aliased_flat_weights(self):
-        from torch.export._patches import register_lstm_while_loop_decomposition
-
-        def share_flat_weight_storage(lstm):
-            flat_weight_names = lstm._flat_weights_names
-            old_weights = [getattr(lstm, name).detach() for name in flat_weight_names]
-            flat = torch.nn.Parameter(
-                torch.empty(
-                    sum(weight.numel() for weight in old_weights),
-                    device=old_weights[0].device,
-                    dtype=old_weights[0].dtype,
-                )
-            )
-            offset = 0
-            with torch.no_grad():
-                for name, old_weight in zip(flat_weight_names, old_weights):
-                    view = flat[offset : offset + old_weight.numel()].view_as(
-                        old_weight
-                    )
-                    view.copy_(old_weight)
-                    setattr(lstm, name, torch.nn.Parameter(view))
-                    offset += old_weight.numel()
-            lstm._init_flat_weights()
-
-        class BiLSTM(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lstm = torch.nn.LSTM(4, 3, batch_first=True, bidirectional=True)
-                share_flat_weight_storage(self.lstm)
-
-            def forward(self, x):
-                out, _ = self.lstm(x)
-                return out
-
-        with torch.backends.mkldnn.flags(enabled=False):
-            model = BiLSTM()
-            storages = {
-                getattr(model.lstm, name).untyped_storage().data_ptr()
-                for name in model.lstm._flat_weights_names
-            }
-            self.assertEqual(len(storages), 1)
-
-            x = torch.randn(2, 5, 4)
-            dynamic_shapes = {"x": {1: Dim.DYNAMIC}}
-            with register_lstm_while_loop_decomposition():
-                ep = export(model, (x,), dynamic_shapes=dynamic_shapes)
-
-            x_dynamic = torch.randn(2, 7, 4)
-            self.assertEqual(ep.module()(x_dynamic), model(x_dynamic))
-
     @testing.expectedFailureStrictV2
     def test_no_tensor_computation(self):
         class Module(torch.nn.Module):

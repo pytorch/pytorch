@@ -312,7 +312,7 @@ def export(
             as arguments, with the ordering as specified by ``model.state_dict().values()``
         verbose: if True, prints a description of the
             model being exported to stdout. In addition, the final ONNX graph will include the
-            field ``doc_string`` from the exported model which mentions the source code locations
+            field ``doc_string``` from the exported model which mentions the source code locations
             for ``model``. If True, ONNX exporter logging will be turned on.
         training:
             * ``TrainingMode.EVAL``: export the model in inference mode.
@@ -1213,7 +1213,7 @@ def unconvertible_ops(
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
     opset_version: int | None = None,
 ) -> tuple[_C.Graph, list[str]]:
-    """Returns an approximated list of all ops that are not yet supported by :mod:`torch.onnx`.
+    """Returns an approximated list of all ops that are yet supported by :mod:`torch.onnx`.
 
     .. deprecated:: 2.5
         Unconvertible ops are not definitive. Please remove usage of this function.
@@ -1826,7 +1826,7 @@ def _verify_custom_op_name(symbolic_name: str) -> None:
             f"Failed to register operator {symbolic_name}. "
             "The symbolic name must match the format domain::name, "
             "and should start with a letter and contain only "
-            "alphanumeric characters"
+            "alphanumerical characters"
         )
 
     ns, _ = jit_utils.parse_node_kind(symbolic_name)
@@ -1885,7 +1885,7 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int) -> Non
 
 
 def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names) -> None:
-    """Ensures dynamic axes argument follows the expected format."""
+    """Ensures dynamic axes argument is follows the expected format."""
     if len(dynamic_axes) == 0:
         return
 

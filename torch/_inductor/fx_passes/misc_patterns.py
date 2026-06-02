@@ -7,7 +7,6 @@ from torch._ops import OpOverload, OpOverloadPacket
 from torch.utils._ordered_set import OrderedSet
 
 from ..pattern_matcher import fwd_only, register_replacement
-from ..utils import is_nvidia_sm100_or_later
 
 
 aten = torch.ops.aten
@@ -96,12 +95,12 @@ def _misc_patterns_init(input_device: torch.device | None = None):
                 and inp_val.dtype == torch.float32
             )
 
-        is_sm100_plus = is_nvidia_sm100_or_later()
+        is_sm100_plus = torch.cuda.get_device_capability() >= (10, 0)
 
         if is_sm100_plus:
             from .. import inductor_prims
 
-            # Pattern 1: Bit manipulation approach (NVIDIA SM100+ only - uses PTX instruction)
+            # Pattern 1: Bit manipulation approach (SM100+ only - uses PTX instruction)
             def e8m0_rceil_pattern(inp):
                 inp_bits = inp.view(torch.int32)
                 biased_exp = (inp_bits >> 23) & 0xFF
@@ -131,7 +130,7 @@ def _misc_patterns_init(input_device: torch.device | None = None):
         # Pattern 2: log2 + ceil approach (used by torchao MX formats)
         # Matches: (clamp(ceil(log2(x)), -127, 127) + 127).to(uint8)
         #
-        # Registered on ALL CUDA hardware. On NVIDIA SM100+ uses the PTX instruction;
+        # Registered on ALL CUDA hardware. On SM100+ uses the PTX instruction;
         # on earlier hardware uses exact IEEE 754 bit-manipulation.
         #
         # The bit-manipulation replacement is preferred over the software

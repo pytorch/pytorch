@@ -4,7 +4,7 @@ from __future__ import annotations
 """
 This file does three things:
 - Contains the definition of SymNode
-- Installs all the magic methods into SymBool, SymFloat, SymInt at import time
+- Installs all the magic methods into SymBool, SymFloat, SymFloat at import time
 - Does not depend on sympy at import time
 
 As this file is imported from within torch/__init__.py we do not want it to depend on SymPy

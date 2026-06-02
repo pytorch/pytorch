@@ -3,17 +3,14 @@ name: Upload docs preview
 # Runs in the base-repo context so it has the AWS credentials needed to write
 # to s3://doc-previews. This exists because OSDC docs builds run in a k8s pod
 # that does not (and should not) have S3 write permission, and fork PRs cannot
-# authenticate via OIDC from the build job itself. The docs-build.yml docs job
-# stages the built docs as a GHA artifact; this workflow downloads that
-# artifact and performs the actual S3 upload.
-#
-# Triggered off docs-build (just the build + docs jobs) rather than the full
-# `pull` workflow so the preview publishes as soon as the docs finish.
+# authenticate via OIDC from the build job itself. The pull.yml docs job stages
+# the built docs as a GHA artifact; this workflow downloads that artifact and
+# performs the actual S3 upload.
 
 on:
   workflow_run:
     workflows:
-      - docs-build
+      - pull
     types:
       - completed
 

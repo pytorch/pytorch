@@ -1972,7 +1972,6 @@ class TensorBase(metaclass=_TensorMeta):
     retains_grad: _bool
     shape: Size
     data: Tensor
-    names: list[str]
     device: _device
     dtype: _dtype
     grad_dtype: _dtype | None

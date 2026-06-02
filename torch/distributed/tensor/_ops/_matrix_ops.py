@@ -1273,7 +1273,7 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
         output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
     ) -> bool:
         # 1. compute the local-tensor shape/strides given this sharding proposal
-        # 2. apply the logic from the grouped_mm meta function
+        # 2. apply the logic from the groped_mm meta function
         # UGH the input DTensorSpecs are missing their tensormetas... so i can get them another way
         def local_meta(spec: OpSpec, placements: tuple[Placement, ...]) -> TensorMeta:
             if not isinstance(spec.output_specs, DTensorSpec):

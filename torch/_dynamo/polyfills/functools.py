@@ -4,7 +4,6 @@ Python polyfills for functools
 
 import functools
 from collections.abc import Callable, Iterable
-from functools import _initial_missing  # type: ignore[attr-defined]
 from typing import TypeVar
 
 from ..decorators import substitute_in_graph
@@ -15,6 +14,9 @@ __all__ = ["reduce"]
 
 _T = TypeVar("_T")
 _U = TypeVar("_U")
+
+
+_initial_missing = object()
 
 
 # Reference: https://docs.python.org/3/library/functools.html#functools.reduce

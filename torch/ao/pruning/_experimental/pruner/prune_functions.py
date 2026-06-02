@@ -206,7 +206,7 @@ def prune_conv2d_padded(conv2d_1: nn.Conv2d) -> None:
         ):  # conv2d_1 has original bias and bias propagated from previous layer
             new_bias = torch.zeros(conv2d_1.bias.shape)
             new_bias[mask] = conv2d_1.bias[mask]  # type: ignore[possibly-undefined]
-            # adjusted bias to keep in conv2d_1
+            # adjusted bias that to keep in conv2d_1
             # pyrefly: ignore [unbound-name]
             new_bias[~mask] = cast(Tensor, conv2d_1._bias)[~mask]
             # pruned biases that are kept instead of propagated

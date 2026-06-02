@@ -773,7 +773,7 @@ def generic_getiter(
         if not pyiter_check(res_T):
             raise_type_error(
                 tx,
-                f"iter() returned non-iterator of type '{res.python_type_name()}'",
+                f"{obj.python_type_name()}.__iter__() returned non-iterator {res.python_type_name()}",
             )
         return res
     elif pysequence_check(T):

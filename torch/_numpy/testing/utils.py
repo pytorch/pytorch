@@ -1503,7 +1503,7 @@ def nulp_diff(x, y, dtype=None):
 
 def _integer_repr(x, vdt, comp):
     # Reinterpret binary representation of the float as sign-magnitude:
-    # take into account two's-complement representation
+    # take into account two-complement representation
     # See also
     # https://randomascii.wordpress.com/2012/02/25/comparing-floating-point-numbers-2012-edition/
     rx = x.view(vdt)
@@ -1655,7 +1655,7 @@ def _gen_alignment_data(dtype=float32, type="binary", max_size=24):
     type : string
         'unary': create data for unary operations, creates one input
                  and output array
-        'binary': create data for binary operations, creates two input
+        'binary': create data for unary operations, creates two input
                  and output array
     max_size : integer
         maximum size of data to produce
@@ -1936,7 +1936,7 @@ class suppress_warnings:
         noise mostly on the outmost level. Unsuppressed and unrecorded
         warnings will be forwarded based on this rule. Defaults to "always".
         "location" is equivalent to the warnings "default", match by exact
-        location the warning originated from.
+        location the warning warning originated from.
 
     Notes
     -----

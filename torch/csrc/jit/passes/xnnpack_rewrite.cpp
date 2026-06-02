@@ -462,7 +462,7 @@ script::Module optimizeForMobile(
   if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
     for (const auto& method : cloned_module.get_methods()) {
       auto graph = method.graph();
-      // Module must not be in training mode but optimize calls eval()
+      // Module must be not be in training mode but optimize calls eval()
       removeDropout(graph);
     }
   }

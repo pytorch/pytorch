@@ -412,7 +412,7 @@ Check this module for more information.
                 )
                 argname = direct_solve(optionalScalarRef_ctype)
                 return f"{argname}.has_value() ? ::std::make_optional({argname}) : ::std::nullopt"
-            elif goal.type == OptionalCType(BaseCType(tensorT)):
+            elif goal.type == OptionalCType(BaseCType(scalarT)):
                 optionalTensorRef_ctype = NamedCType(
                     goal.name, BaseCType(optionalTensorRefT)
                 )

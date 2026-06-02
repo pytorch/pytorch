@@ -1,7 +1,6 @@
 #include <torch/csrc/lazy/core/metrics.h>
 
 #include <c10/util/irange.h>
-#include <fmt/format.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/helpers.h>
@@ -9,7 +8,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <iterator>
 #include <sstream>
 
 namespace torch::lazy {
@@ -328,8 +326,8 @@ std::string MetricFnValue(double value) {
 }
 
 std::string MetricFnBytes(double value) {
-  static constexpr auto kSizeSuffixes =
-      std::to_array<const char*>({"B", "KB", "MB", "GB", "TB", "PB"});
+  static const std::array<const char*, 6> kSizeSuffixes{
+      "B", "KB", "MB", "GB", "TB", "PB"};
   unsigned sfix = 0;
   for (; (sfix + 1) < kSizeSuffixes.size() && value >= 1024.0; ++sfix) {
     value /= 1024.0;
@@ -346,31 +344,30 @@ std::string MetricFnTime(double value) {
     double scaler;
     int width;
     int precision;
+    char fill;
   };
-  static constexpr auto time_parts = std::to_array<TimePart>(
-      {{"d", 86400.0 * 1e9, 2, 0},
-       {"h", 3600.0 * 1e9, 2, 0},
-       {"m", 60.0 * 1e9, 2, 0},
-       {"s", 1e9, 2, 0},
-       {"ms", 1e6, 3, 0},
-       {"us", 1e3, 7, 3}});
+  static const std::array<TimePart, 6> time_parts{
+      {{"d", 86400.0 * 1e9, 2, 0, '0'},
+       {"h", 3600.0 * 1e9, 2, 0, '0'},
+       {"m", 60.0 * 1e9, 2, 0, '0'},
+       {"s", 1e9, 2, 0, '0'},
+       {"ms", 1e6, 3, 0, '0'},
+       {"us", 1e3, 7, 3, '0'}}};
   int count = 0;
-  std::string str;
-  for (const TimePart& part : time_parts) {
+  std::stringstream ss;
+  for (const auto i : c10::irange(time_parts.size())) {
+    const TimePart& part = time_parts[i];
     double ctime = value / part.scaler;
-    if (ctime >= 1.0 || count > 0 || &part == &time_parts.back()) {
-      fmt::format_to(
-          std::back_inserter(str),
-          "{:0{}.{}f}{}",
-          ctime,
-          part.width,
-          part.precision,
-          part.suffix);
+    if (ctime >= 1.0 || count > 0 || i + 1 == time_parts.size()) {
+      ss.precision(part.precision);
+      ss.width(part.width);
+      ss.fill(part.fill);
+      ss << std::fixed << ctime << part.suffix;
       value -= std::floor(ctime) * part.scaler;
       ++count;
     }
   }
-  return str;
+  return ss.str();
 }
 
 std::string CreateMetricReport() {

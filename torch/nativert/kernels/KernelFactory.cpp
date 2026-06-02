@@ -18,7 +18,7 @@
 
 namespace torch::nativert {
 
-inline constexpr auto kSymIntOps = std::to_array<std::string_view>({
+inline constexpr std::array<std::string_view, 7> kSymIntOps = {
     "_operator.floordiv",
     "_operator.mod",
     "torch.sym_int",
@@ -26,9 +26,9 @@ inline constexpr auto kSymIntOps = std::to_array<std::string_view>({
     "torch.sym_ite",
     "torch.sym_max",
     "torch.sym_min",
-});
+};
 
-inline constexpr auto kSymBoolOps = std::to_array<std::string_view>({
+inline constexpr std::array<std::string_view, 8> kSymBoolOps = {
     "_operator.eq",
     "_operator.ne",
     "_operator.le",
@@ -37,21 +37,21 @@ inline constexpr auto kSymBoolOps = std::to_array<std::string_view>({
     "_operator.gt",
     "_operator.and_",
     "torch.sym_not",
-});
+};
 
-inline constexpr auto kSymFloatOps = std::to_array<std::string_view>({
+inline constexpr std::array<std::string_view, 4> kSymFloatOps = {
     "torch._sym_sqrt",
     "math.trunc",
     "_operator.neg",
     "_operator.truediv",
-});
+};
 
-inline constexpr auto kScalarBinaryOps = std::to_array<std::string_view>({
+inline constexpr std::array<std::string_view, 4> kScalarBinaryOps = {
     "_operator.mul",
     "_operator.add",
     "_operator.sub",
     "_operator.pow",
-});
+};
 
 namespace {
 

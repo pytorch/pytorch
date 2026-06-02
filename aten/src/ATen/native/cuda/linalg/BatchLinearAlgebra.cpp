@@ -858,100 +858,6 @@ static void lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, c
   });
 }
 
-#ifdef USE_LINALG_SOLVER
-enum class SolverBackend : char {
-  CUSOLVER,
-  CUBLAS
-};
-#ifndef USE_ROCM
-namespace {
-
-  // Based on benchmarks across H100, A100, L40, RTX5090 with about 3800 points:
-  // - with batch dims in the range 2^i, with i in 0-8;
-  // - square matrices of dim 2^i and (2^{i+1} + 2^i)/2, with 2^k <= 8192;
-  // - square matrices of dim 2^i-/+1;
-  // Rule: use cuSOLVER when n*n > threshold, where threshold depends on
-  // batch size and dtype.
-
-  // batch <= 2:
-  //   threshold = T * batch
-  //   float32/complex64: T = 8400
-  //   float64/complex128: T = 2200
-
-  // batch > 2:
-  //   float32/complex64: threshold = 18600 * batch
-  //   float64:           threshold = 16600 * batch * isqrt(batch)
-  //   complex128:        threshold = 5200 * batch * isqrt(batch)
-
-  // cuBLAS's strided-batched kernel is nearly O(1) in batch for fixed N -
-  // it processes all matrices in one launch. cuSOLVER is O(batch) since it
-  // processes matrices independently. So cuBLAS wins at high batch / small N,
-  // and the threshold grows with batch.
-
-  // float64 needs super-linear scaling (batch^1.5) because cuBLAS's cost
-  // grows more slowly with N for float64 than for other dtypes - its
-  // advantage over cuSOLVER persists to larger N at high batch. Empirically
-  // N^2/batch at the crossover roughly doubles each time batch doubles.
-
-  // complex128 also uses batch^1.5 scaling empirically, though its crossover
-  // ratios are less regular. The lower multiplier (5200 vs 16600) reflects
-  // that cuSOLVER overtakes cuBLAS at smaller N for complex128.
-  //
-  // NOTE: additionally validated on Blackwell CUDA 13.2 with FP64 emulation
-  // on/off for cuSOLVER (on by default for cuBLAS).
-  // No severe mispredictions observed.
-  inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype) {
-    // cuBLAS does not support rectangular inputs.
-    if (m != n) {
-      return SolverBackend::CUSOLVER;
-    }
-
-    if (batch == 1) {
-      // cuBLAS is optimized for batched inputs.
-      return SolverBackend::CUSOLVER;
-    } else {
-      int64_t threshold = 0;
-      if (batch == 2) {
-        // batch <= 2:  n * n > T_small * batch
-        // At batch=2, cuBLAS has minimal batching advantage - kernel launch overhead
-        // dominates. cuSOLVER is competitive at much smaller N, so lower thresholds
-        // suffice. Only two groups needed: float32/complex64 vs float64/complex128.
-        switch (dtype) {
-          case ScalarType::Float:
-          case ScalarType::ComplexFloat:
-            threshold = 8400 * batch;
-            break;
-          default:
-            // i.e. Double, ComplexDouble
-            threshold = 2200 * batch;
-        }
-      } else {
-        // batch > 2:
-        // At larger batch, cuBLAS's batching advantage kicks in. For float64/complex128
-        // this advantage grows super-linearly (cuBLAS stays flat while cuSOLVER scales
-        // linearly), captured by the batch * isqrt(batch) term.
-        switch (dtype) {
-          case ScalarType::Float:
-          case ScalarType::ComplexFloat:
-            threshold = 18600 * batch;
-            break;
-          case ScalarType::Double:
-            threshold = 16600 * batch * static_cast<int64_t>(std::sqrt(batch));
-            break;
-          default:
-            // i.e. ComplexDouble
-            threshold = 5200 * batch * static_cast<int64_t>(std::sqrt(batch));
-        }
-      }
-
-      return n * n > threshold ? SolverBackend::CUSOLVER : SolverBackend::CUBLAS;
-    }
-  }
-
-}
-#endif
-#endif
-
 static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
   auto batch_size = batchCount(input);
   (void) batch_size; // Silence unused warning in some builds
@@ -969,21 +875,11 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   const auto preferred_backend = at::globalContext().linalgPreferredBackend();
 #ifdef USE_LINALG_SOLVER
   const auto lu_factor_cusolver = [batch_size, m, n](const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-#ifdef USE_ROCM
-    // FIXME: this heuristic is likely incorrect for ROCM.
     if (m != n || (batch_size == 1 || m >= 512)) {
       lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
     } else {
       lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
     }
-#else
-    const auto solver_backend = get_lu_factor_solver_backend(batch_size, m, n, input.scalar_type());
-    if (solver_backend == SolverBackend::CUSOLVER) {
-      lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
-    } else {
-      lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
-    }
-#endif
   };
 
   if (preferred_backend == at::LinalgBackend::Cusolver) {
