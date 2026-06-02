@@ -7111,7 +7111,8 @@ class FusedUserTritonKernel(TritonKernel):
         self.output_store_dtype: torch.dtype = writing_node.node.layout.dtype
 
     def want_no_x_dim(self) -> bool:
-        # For now, we enforce 1d reductions. Thus, suppress XBLOCK=1 for reductions.
+        # Legality enforces len(output_tile == 1) for reduction epilogues, so
+        # the non-reduction x-dimension always collapses to XBLOCK=1.
         return self.features.is_reduction()
 
     def _get_persistent_RBLOCK(self, rnumel) -> int:
@@ -7192,16 +7193,18 @@ class FusedUserTritonKernel(TritonKernel):
         assert self.func_def is not None
         new_args = [ast.arg(arg=p) for p in self.additional_buf_args.values()]
         self.func_def.args.args[:0] = new_args
-        ast.fix_missing_locations(self.kernel_ast)
 
     def codegen_aliases(self) -> list[str]:
         if not self.block_aliases:
             return []
 
+        # Aliases are injected at the top of the function body, so use the
+        # function body's indentation level, not the store's col_offset
+        assert self.func_def is not None and self.func_def.body
+        body_indent = " " * self.func_def.body[0].col_offset
         aliases = []
-        indentations = " " * self.kernel_stores.stores[0].store_node.col_offset
         for varname, alias in self.block_aliases.items():
-            aliases.append(f"{indentations}{varname}: tl.constexpr = {alias}")
+            aliases.append(f"{body_indent}{varname}: tl.constexpr = {alias}")
 
         return aliases
 
