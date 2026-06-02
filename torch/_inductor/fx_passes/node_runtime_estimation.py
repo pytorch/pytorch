@@ -298,6 +298,15 @@ def _log_compute_estimations(
                     ret += f" SymInt({t})"
         return ret
 
+    def _safe_float_fmt(v, multiplier=1.0) -> str:
+        try:
+            val = float(v) * multiplier
+            return f"{val:.4f}"
+        except (TypeError, RuntimeError):
+            if multiplier != 1.0:
+                return f"({v}) * {multiplier}"
+            return str(v)
+
     headers = [
         "Node",
         "Benchmarked Est(us)",
@@ -310,10 +319,10 @@ def _log_compute_estimations(
     rows = [
         [
             _node_summary(node),
-            f"{est_b * 1e3:.4f}",
-            f"{est_a * 1e3:.4f}",
-            f"{(est_a / est_b) if est_b > 0 else 0:.4f}",
-            f"{(est_a - est_b) * 1e3:.4f}",
+            _safe_float_fmt(est_b, multiplier=1e3),
+            _safe_float_fmt(est_a, multiplier=1e3),
+            _safe_float_fmt((est_a / est_b) if est_b > 0 else 0),
+            _safe_float_fmt((est_a - est_b), multiplier=1e3),
             str(count_flops_fx(node)),
         ]
         for node, est_b, est_a in zip(
