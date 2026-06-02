@@ -31,9 +31,9 @@ from torch.distributed.optim import _NamedOptimizer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
+    DEVICE_TYPE,
     FSDPInitMode,
     FSDPTest,
-    get_devtype,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -44,7 +44,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-device_type = torch.device(get_devtype())
+device_type = DEVICE_TYPE
 STATE_DICT_TYPES = [StateDictType.FULL_STATE_DICT, StateDictType.SHARDED_STATE_DICT]
 
 if not dist.is_available():
