@@ -1629,6 +1629,8 @@ class FxGraphHashDetails:
             torch.backends.cuda.mem_efficient_sdp_enabled(),
             torch.backends.cuda.math_sdp_enabled(),
             torch.backends.cuda.cudnn_sdp_enabled(),
+            torch._C._get_overrideable_sdp_enabled(),
+            torch._C._get_fa3_sdp_enabled(),
             torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed(),
             tuple(torch._C._get_sdp_priority_order()),
         )
