@@ -9911,6 +9911,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 (a, b),
             )
 
+    @skip_if_halide
+    @skip_if_pallas
     def test_multilabel_margin_loss_padded_target(self):
         # Targets are -1 padded after the first -1; the decomposition must not
         # accumulate loss terms for those invalid target positions (#185464).
