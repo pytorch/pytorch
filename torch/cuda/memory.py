@@ -1404,20 +1404,6 @@ def _use_uvm(device: "Device" = None):
 
     log = logging.getLogger(__name__)
 
-    def _make_advise_target(_rt, device_id):
-        """Build the device argument for cudaMemAdvise.
-
-        Newer cuda-python (cuda.bindings 12.x) requires a cudaMemLocation
-        struct; older versions expect a plain int.  We probe once so the
-        per-allocation hot path never catches TypeError.
-        """
-        if hasattr(_rt, "cudaMemLocation"):
-            loc = _rt.cudaMemLocation()
-            loc.type = _rt.cudaMemLocationType.cudaMemLocationTypeDevice
-            loc.id = device_id
-            return loc
-        return device_id
-
     _ALLOC_FN = ctypes.CFUNCTYPE(
         ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
     )
@@ -1430,18 +1416,25 @@ def _use_uvm(device: "Device" = None):
         if err != _rt.cudaError_t.cudaSuccess:
             raise RuntimeError(f"CUDA error: {err}. {msg}")
 
-    # Probe which form cudaMemAdvise accepts (struct vs int) once at setup.
-    _use_mem_location = hasattr(_rt, "cudaMemLocation")
-    _advise_cache: dict = {}
+    _advise_uses_struct = hasattr(_rt, "cudaMemLocation")
 
-    def _get_advise_target(device_id):
-        target = _advise_cache.get(device_id)
-        if target is None:
-            target = (
-                _make_advise_target(_rt, device_id) if _use_mem_location else device_id
-            )
-            _advise_cache[device_id] = target
-        return target
+    def _mem_advise(ptr, size, advice, device_id, _runtime=_rt):
+        """Call cudaMemAdvise, handling struct-vs-int API difference.
+
+        cuda-bindings 13.x requires a cudaMemLocation struct;
+        cuda-bindings 12.x expects a plain int device ordinal.
+        We try struct first and latch to int on TypeError.
+        """
+        nonlocal _advise_uses_struct
+        if _advise_uses_struct:
+            try:
+                loc = _runtime.cudaMemLocation()
+                loc.type = _runtime.cudaMemLocationType.cudaMemLocationTypeDevice
+                loc.id = device_id
+                return _runtime.cudaMemAdvise(ptr, size, advice, loc)
+            except TypeError:
+                _advise_uses_struct = False
+        return _runtime.cudaMemAdvise(ptr, size, advice, device_id)
 
     def _uvm_alloc(size, device, stream, _runtime=_rt):
         try:
@@ -1449,22 +1442,21 @@ def _use_uvm(device: "Device" = None):
             _check(err, f"cudaMallocManaged({size})")
             ptr = int(ptr)
             if device >= 0:
-                advise_target = _get_advise_target(device)
                 _check(
-                    _runtime.cudaMemAdvise(
+                    _mem_advise(
                         ptr,
                         size,
                         _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
-                        advise_target,
+                        device,
                     ),
                     "cudaMemAdvise(SetPreferredLocation)",
                 )
                 _check(
-                    _runtime.cudaMemAdvise(
+                    _mem_advise(
                         ptr,
                         size,
                         _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
-                        advise_target,
+                        device,
                     ),
                     "cudaMemAdvise(SetAccessedBy)",
                 )
