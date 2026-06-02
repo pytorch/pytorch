@@ -1259,22 +1259,22 @@ Tensor clamp_backward(
     const Tensor& self,
     const Tensor& min,
     const Tensor& max) {
-  // Use strict comparisons so the subgradient at the boundary is 0
-  // (minimum-norm convention, consistent with relu).
+  // Tensor overload: keep non-strict comparisons since (0, 0) is not a
+  // valid subgradient when both self and min/max require grad.
   if (max.defined() && min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
-    const auto self_gt_min = self > min;
-    const auto self_lt_max = self < max;
+    const auto self_ge_min = self >= min;
+    const auto self_le_max = self <= max;
     const auto& pred = areAnyTensorSubclassLike({self, min, max})
-        ? self_gt_min.logical_and(self_lt_max)
-        : self_gt_min.logical_and_(self_lt_max);
+        ? self_ge_min.logical_and(self_le_max)
+        : self_ge_min.logical_and_(self_le_max);
     return where(pred, grad, zero);
   } else if (min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self > min, grad, zero);
+    return where(self >= min, grad, zero);
   } else if (max.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where(self < max, grad, zero);
+    return where(self <= max, grad, zero);
   } else {
     return grad;
   }
