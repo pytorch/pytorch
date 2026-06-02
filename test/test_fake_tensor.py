@@ -1821,6 +1821,27 @@ for t in threads:
             with self.assertRaisesRegex(IndexError, "index .* out of range"):
                 torch.select(x, dim=1, index=-10)
 
+    def test_one_hot_invalid_num_classes(self):
+        with FakeTensorMode():
+            x = torch.arange(0, 5) % 3
+            for num_classes in (0, -2):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Class values must be smaller than num_classes"
+                ):
+                    torch.nn.functional.one_hot(x, num_classes)
+
+            empty = torch.empty([4, 0], dtype=torch.long)
+            for num_classes in (-2, -1, 0):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Can not infer total number of classes from empty tensor",
+                ):
+                    torch.nn.functional.one_hot(empty, num_classes)
+
+            self.assertEqual(
+                torch.nn.functional.one_hot(empty, 3).shape, torch.Size([4, 0, 3])
+            )
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 

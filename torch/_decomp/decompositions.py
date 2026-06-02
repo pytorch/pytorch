@@ -6076,8 +6076,20 @@ register_inplace(aten.silu_, aten.silu)
 
 @aten.one_hot.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 def one_hot(self: Tensor, num_classes: int = -1) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(self.numel() == 0):
+        torch._check(
+            num_classes > 0,
+            lambda: "Can not infer total number of classes from empty tensor.",
+        )
     if num_classes == -1:
         num_classes = int(self.max().item()) + 1
+    else:
+        torch._check(
+            num_classes > 0,
+            lambda: "one_hot: Class values must be smaller than num_classes.",
+        )
     # _assert_async is side-effectful and won't be DCE'd
     aten._assert_async.msg(
         torch.all(self >= 0),

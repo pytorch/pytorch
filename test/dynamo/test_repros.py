@@ -7789,18 +7789,28 @@ SavedForBackwardsAOTOutput(idx=5)""",
         self.assertEqual(result, 5)
 
     def test_one_hot_bounds_check_compiled(self):
-        # https://github.com/pytorch/pytorch/issues/144211
+        # https://github.com/pytorch/pytorch/issues/146274
         # torch.compile(one_hot) should raise on out-of-bounds indices,
         # not silently produce wrong results.
         one_hot = torch.compile(torch.nn.functional.one_hot, fullgraph=True)
 
         a = torch.arange(0, 5) % 3  # [0, 1, 2, 0, 1]
+        with self.assertRaisesRegex(RuntimeError, "Class values.*num_classes"):
+            one_hot(a, 0)
+
+        torch._dynamo.reset()
         with self.assertRaises(RuntimeError):
             one_hot(a, 1)
 
         torch._dynamo.reset()
         with self.assertRaises(RuntimeError):
             one_hot(torch.tensor([-1, 0, 1]), 3)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            RuntimeError, "Can not infer total number of classes"
+        ):
+            one_hot(torch.empty(0, dtype=torch.long), 0)
 
         torch._dynamo.reset()
         expected = torch.nn.functional.one_hot(a, 3)
