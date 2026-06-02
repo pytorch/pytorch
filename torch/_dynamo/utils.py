@@ -1362,6 +1362,21 @@ def is_lru_cache_wrapped_function(
     )
 
 
+_lru_cache_wrappers_allowed_to_trace_without_warning: weakref.WeakSet[
+    functools._lru_cache_wrapper[Any]
+] = weakref.WeakSet()
+
+
+def allow_lru_cache_wrapper_trace_without_warning(
+    value: functools._lru_cache_wrapper[Any],
+) -> None:
+    _lru_cache_wrappers_allowed_to_trace_without_warning.add(value)
+
+
+def is_lru_cache_wrapper_trace_without_warning_allowed(value: Any) -> bool:
+    return value in _lru_cache_wrappers_allowed_to_trace_without_warning
+
+
 _FuncTypes: TypeAlias = (
     types.FunctionType
     | types.BuiltinFunctionType
