@@ -2384,6 +2384,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = fn(y)
         self.assertTrue(same(ref, res))
 
+    def test_dropout_eval_setattr_parameter(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(5, 5))
+
+            def forward(self, x):
+                w = torch.nn.functional.dropout(self.weight, training=False)
+                self.foo = w
+                return x + self.weight
+
+        mod = Mod()
+        x = torch.randn(5, 5)
+        mod(x)
+        mod.compile(backend="eager", fullgraph=True)
+        self.assertTrue(same(mod(x), x + mod.weight))
+        self.assertIs(mod.foo, mod.weight)
+
     def test_setitem_boolean_mask_diff(self):
         def fn(x, b, y):
             x = x.clone()
