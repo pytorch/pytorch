@@ -378,8 +378,6 @@ class SideEffects:
             self._maybe_record_side_effect(item)
             return True
         if self.is_reconstructing_generator():
-            # This is missing the case where one mutates a tensor. See
-            # test_generator.py::test_reconstruct_generator_tensor_mutation
             unimplemented(
                 gb_type="Generator reconstruction with mutations",
                 context=f"mutating object: {item}",

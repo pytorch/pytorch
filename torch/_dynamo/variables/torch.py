@@ -130,6 +130,27 @@ T = TypeVar("T")
 
 log = logging.getLogger(__name__)
 
+
+@functools.lru_cache(None)
+def _torch_function_mutates_first_arg(name: str) -> bool:
+    return any(
+        schema.arguments
+        and schema.arguments[0].alias_info
+        and schema.arguments[0].alias_info.is_write
+        for schema in torch._C._jit_get_schemas_for_operator(f"aten::{name}")
+    )
+
+
+def _check_generator_reconstruction_tensor_mutation_arg(
+    tx: "InstructionTranslatorBase", var: VariableTracker
+) -> None:
+    if var.is_tensor():
+        tx.output.side_effects.check_allowed_side_effect(var)
+    elif isinstance(var, (TupleVariable, ListVariable)):
+        for item in var.items:
+            _check_generator_reconstruction_tensor_mutation_arg(tx, item)
+
+
 supported_ctx_manager_classes = dict.fromkeys(
     [
         torch.profiler.profiler.profile,
@@ -3176,6 +3197,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         out_kwarg_vt = None
         if "out" in kwargs:
             out_kwarg_vt = kwargs["out"]
+            if tx.output.side_effects.is_reconstructing_generator():
+                _check_generator_reconstruction_tensor_mutation_arg(tx, out_kwarg_vt)
 
             # e.g., out=(t1, t2, ...)
             if isinstance(out_kwarg_vt, (TupleVariable, ListVariable)):
@@ -3197,6 +3220,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         if fn_ in ops_consuming_unbacked_scalars:
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
+
+        fn_name = getattr(fn_, "__name__", None)
+        if (
+            fn_name
+            and tx.output.side_effects.is_reconstructing_generator()
+            and _torch_function_mutates_first_arg(fn_name)
+            and args
+        ):
+            _check_generator_reconstruction_tensor_mutation_arg(tx, args[0])
 
         with ctx():
             tensor_variable = wrap_fx_proxy(

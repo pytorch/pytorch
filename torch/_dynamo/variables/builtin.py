@@ -1477,6 +1477,13 @@ class BuiltinVariable(BaseBuiltinVariable):
                 fn = IN_PLACE_DESUGARING_MAP[fn]
                 args = [args[0], args[1]]  # type: ignore[assignment]
 
+            if (
+                fn in IN_PLACE_DESUGARING_MAP
+                and tx.output.side_effects.is_reconstructing_generator()
+                and args[0].is_tensor()
+            ):
+                tx.output.side_effects.check_allowed_side_effect(args[0])
+
             if fn is operator.getitem and isinstance(args[1], SymNodeVariable):
                 # Standard indexing will force specialization due to
                 # __index__.  Rewrite as a regular torch op which will

@@ -569,11 +569,56 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(StopIteration):
             next(gen)
 
-    @unittest.expectedFailure
     def test_reconstruct_generator_tensor_mutation(self):
         def whoo(t):
             yield t.sin_()
             yield t.cos_()
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
+    def test_reconstruct_generator_tensor_mutation_torch_function(self):
+        def whoo(t):
+            yield torch.sin_(t)
+            yield torch.cos_(t)
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
+    def test_reconstruct_generator_tensor_mutation_out_kwarg(self):
+        def whoo(t):
+            yield torch.sin(t, out=t)
+            yield torch.cos(t, out=t)
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
+    def test_reconstruct_generator_tensor_mutation_inplace_operator(self):
+        def whoo(t):
+            yield t.sin()
+            t += 1
+            yield t.cos()
 
         def fn(t):
             gen = whoo(t)
