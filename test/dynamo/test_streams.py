@@ -181,7 +181,6 @@ class <lambda>(torch.nn.Module):
         )
 
     @requires_cuda
-    @unittest.skip("Needs graph break support with annotation context")
     def test_stream_context_graph_break(self):
         def fn(x, y):
             s2 = torch.Stream()
@@ -206,8 +205,33 @@ class <lambda>(torch.nn.Module):
         ) = extract_graph(fn, *inp)
         self.assertEqual(expected, actual)
         self.assertEqual(len(fw_graphs), 2)
-        self.assertExpectedInline(print_graph(fw_graphs[0]), """""")
-        self.assertExpectedInline(print_graph(fw_graphs[1]), """""")
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]", arg1_1: "f32[2, 2]"):
+        # Annotation: {'stream': 2}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
+
+        # Annotation: {'stream': 1}
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+
+        # Annotation: {'stream': 1}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_2, add);  add_2 = add = None
+        return (add_3,)
+""",
+        )
+        self.assertExpectedInline(
+            print_graph(fw_graphs[1]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+        return (add,)
+""",
+        )
 
     @requires_cuda
     def test_target_values_dict_round_trips_through_graph_break(self):
