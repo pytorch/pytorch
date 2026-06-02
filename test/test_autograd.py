@@ -12954,7 +12954,7 @@ class TestAutogradDeviceType(TestCase):
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
-            with self.subTest(f=f):
+            with self.subTest(f=f.__name__):
                 x1 = torch.tensor(
                     [1.0, 0.0, 1.0, 0.0, 1.0, 0.0], device=device, requires_grad=True
                 )
@@ -12977,7 +12977,7 @@ class TestAutogradDeviceType(TestCase):
             return torch.aminmax(x)[1]
 
         for f in [torch.amin, torch.amax, amax2, amin2]:
-            with self.subTest(f=f):
+            with self.subTest(f=f.__name__):
                 x1 = torch.tensor(
                     [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
                     device=device,
