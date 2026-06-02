@@ -8193,6 +8193,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn([64]),),
         )
 
+    def test_threshold_low_precision_boundary(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA-specific threshold boundary")
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest(
+                f"torch.bfloat16 not supported for device {self.device}"
+            )
+
+        # CUDA threshold compares the scalar threshold in the input dtype.
+        # bf16(0.1) == 0.10009765625, so this input is exactly at the bound.
+        def fn(x):
+            return F.threshold(x, 0.1, 0.0)
+
+        x = torch.tensor([0.10009765625], dtype=torch.bfloat16, device=self.device)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
     def test_hardsigmoid(self):
         def fn(x):
             return F.hardsigmoid(x), F.hardsigmoid(x + 3), F.hardsigmoid(x - 3)
