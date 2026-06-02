@@ -13,21 +13,21 @@ from nvmath.bindings.cublas import (  # pyrefly: ignore[missing-import]
 import torch
 
 
-# cublasLt scratch space for kernel execution. Shared across all cached
-# ForeachMMCublasLt instances. Larger values may enable better algorithms
-# for large shapes; 32 MB matches the PyTorch C++ cublasLt path.
-CUBLASLT_WORKSPACE_BYTES = 32 * 1024 * 1024
+_cublaslt_workspaces: dict[tuple, torch.Tensor] = {}
 
-_cublaslt_workspaces: dict[torch.device, torch.Tensor] = {}
+
+def _get_cublaslt_workspace_size() -> int:
+    return torch.backends.cuda.cublaslt_workspace_size()
 
 
 def _get_cublaslt_workspace(device="cuda"):
-    dev = torch.device(device)
-    if dev not in _cublaslt_workspaces:
-        _cublaslt_workspaces[dev] = torch.empty(
-            CUBLASLT_WORKSPACE_BYTES, dtype=torch.uint8, device=dev
+    ws_size = _get_cublaslt_workspace_size()
+    key = (torch.device(device), ws_size)
+    if key not in _cublaslt_workspaces:
+        _cublaslt_workspaces[key] = torch.empty(
+            ws_size, dtype=torch.uint8, device=device
         )
-    return _cublaslt_workspaces[dev]
+    return _cublaslt_workspaces[key], ws_size
 
 
 def _set_attr(setter, handle, attr, val, ctype):
@@ -115,7 +115,7 @@ class ForeachMMCublasLt:
         self._beta_ptr = scalars.data_ptr() + 4
         self._scalars = scalars  # prevent GC
 
-        self._workspace = _get_cublaslt_workspace(device)
+        self._workspace, self._ws_bytes = _get_cublaslt_workspace(device)
         self._ws_ptr = self._workspace.data_ptr()
         self._dims = dims  # prevent GC
 
@@ -158,7 +158,7 @@ class ForeachMMCublasLt:
             cublasLt.matmul_preference_set_attribute,
             pref,
             Attr.MAX_WORKSPACE_BYTES,
-            CUBLASLT_WORKSPACE_BYTES,
+            self._ws_bytes,
             ctypes.c_uint64,
         )
         avg_N = sum(Ns) // G
@@ -241,7 +241,7 @@ class ForeachMMCublasLt:
             self._Dd,  # D (output)
             self._algo_ptr,
             self._ws_ptr,
-            CUBLASLT_WORKSPACE_BYTES,
+            self._ws_bytes,
             torch.cuda.current_stream().cuda_stream,
         )
 
