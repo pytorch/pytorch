@@ -511,8 +511,17 @@ def try_match_insignificant_strides(
 
     storage, old_layout = as_storage_and_layout(tensor)
     new_stride = [*old_layout.stride]
+    available_symbols = free_symbols(
+        [*old_layout.size, *old_layout.stride, old_layout.offset]
+    )
     for i, s in enumerate(tensor.get_size()):
         if V.graph.sizevars.statically_known_leq(s, 1):
+            # Size-1 strides are semantically irrelevant, so keep the existing
+            # stride if the requested one would introduce an unbound symbol.
+            if any(
+                symbol not in available_symbols for symbol in free_symbols([strides[i]])
+            ):
+                continue
             new_stride[i] = strides[i]
 
     new_layout = FixedLayout(
