@@ -2156,6 +2156,66 @@ class TestFP8Matmul(TestCase):
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
+    def test_functional_scaled_mm_single_value_expansion(self, device) -> None:
+        M, N, K = 128, 128, 128
+        x = torch.randn(M, K, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn)
+        w = torch.randn(N, K, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn)
+        x_scale = to_blocked(
+            torch.full((M, K // 32), 1.0, dtype=torch.float8_e8m0fnu, device=device)
+        )
+        w_scale = to_blocked(
+            torch.full((N, K // 32), 1.0, dtype=torch.float8_e8m0fnu, device=device)
+        )
+        swizzle = SwizzleType.NO_SWIZZLE if torch.version.hip else SwizzleType.SWIZZLE_32_4_4
+
+        actual = scaled_mm(
+            x,
+            w.t(),
+            x_scale,
+            ScalingType.BlockWise1x32,
+            w_scale,
+            ScalingType.BlockWise1x32,
+            swizzle_a=swizzle,
+            swizzle_b=swizzle,
+        )
+        expected = scaled_mm(
+            x,
+            w.t(),
+            [x_scale],
+            [ScalingType.BlockWise1x32],
+            [w_scale],
+            [ScalingType.BlockWise1x32],
+            swizzle_a=[swizzle],
+            swizzle_b=[swizzle],
+        )
+        self.assertEqual(actual, expected)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
+    def test_functional_scaled_mm_rejects_mismatched_scale_lists(self, device) -> None:
+        M, N, K = 128, 128, 128
+        x = torch.randn(M, K, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn)
+        w = torch.randn(N, K, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn)
+        x_scale = to_blocked(
+            torch.full((M, K // 32), 1.0, dtype=torch.float8_e8m0fnu, device=device)
+        )
+        w_scale = to_blocked(
+            torch.full((N, K // 32), 1.0, dtype=torch.float8_e8m0fnu, device=device)
+        )
+        swizzle = SwizzleType.NO_SWIZZLE if torch.version.hip else SwizzleType.SWIZZLE_32_4_4
+
+        with self.assertRaisesRegex(ValueError, "Invalid scaling configuration"):
+            scaled_mm(
+                x,
+                w.t(),
+                [x_scale, x_scale],
+                [ScalingType.BlockWise1x32],
+                w_scale,
+                ScalingType.BlockWise1x32,
+                swizzle_a=[swizzle, swizzle],
+                swizzle_b=swizzle,
+            )
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     def test_passed_swizzle_arrays(self, device) -> None:
         # Ensure that incorrectly-sized swizzle arrays are caught
         M, N, K = 128, 128, 128
@@ -2376,6 +2436,31 @@ class TestFP8Matmul(TestCase):
             out_ref = scaled_mm_wrap(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
                                      out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
             self.assertEqual(out, out_ref, atol=5e-2, rtol=5e-4)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
+    def test_functional_scaled_grouped_mm_rejects_mismatched_scale_lists(self):
+        device = "cuda"
+        fp8_dtype = e4m3_type
+        m, n, k, n_groups = 16, 32, 64, 4
+        a = torch.randn(m, k * n_groups, device=device).to(fp8_dtype)
+        b = torch.randn(n, k * n_groups, device=device).to(fp8_dtype)
+        scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
+        scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
+        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
+
+        with self.assertRaisesRegex(
+            ValueError, "Invalid scaling configuration|No gemm implementation was found"
+        ):
+            scaled_grouped_mm(
+                a,
+                b.t(),
+                [scale_a, scale_a],
+                [ScalingType.RowWise],
+                scale_b,
+                ScalingType.RowWise,
+                offs=offs,
+                output_dtype=torch.bfloat16,
+            )
 
     # Testing only _scaled_grouped_mm() with multiple shapes, as
     # _scaled_mm() already has more combinations of parameters than
