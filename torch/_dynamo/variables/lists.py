@@ -352,7 +352,11 @@ class BaseListVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
 
         left = self.items
-        right = other.items  # pyrefly: ignore[missing-attribute]
+        # CPython uses ob_item (the C array) directly, bypassing __iter__.
+        # For user-defined subclasses (UserDefinedListVariable etc.),
+        # the items live on the _base_vt.
+        other_vt = getattr(other, "_base_vt", None) or other
+        right = other_vt.items  # pyrefly: ignore[missing-attribute]
 
         cmp_op = cmp_name_to_op_mapping[op]
 
@@ -1289,6 +1293,14 @@ class DequeVariable(CommonListMethodsVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     # tp_hash = PyObject_HashNotImplemented (unhashable)
     _cpython_type = collections.deque
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        return self._seq_richcompare(tx, other, op, collections.deque)
 
     def is_hashable(self) -> bool:
         return False

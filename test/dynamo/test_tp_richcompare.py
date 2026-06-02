@@ -704,6 +704,66 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         self._assert_all_cmp_equals((1, (2, 3)), (1, (2, 3)))
 
     # =====================================================================
+    # Deque comparison (DequeVariable)
+    # =====================================================================
+
+    def test_deque_cmp(self):
+        from collections import deque
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: deque([1, 2, 3]), lambda: deque([1, 2, 3])
+        )
+        self._assert_all_sourceless_cmp_equals(
+            lambda: deque([1, 2]), lambda: deque([1, 3])
+        )
+
+    def test_deque_cmp_cross_type(self):
+        """deque vs list: NotImplemented (different types)."""
+        from collections import deque
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: deque([1, 2]), lambda: [1, 2], error_ops=self._ORDERING_OPS
+        )
+
+    # =====================================================================
+    # List subclass comparison (UserDefinedListVariable)
+    # =====================================================================
+
+    def test_list_subclass_cmp(self):
+        """list subclass without __eq__ uses list's comparison."""
+
+        class MyList(list):
+            pass
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: MyList([1, 2, 3]), lambda: MyList([1, 2, 3])
+        )
+        self._assert_all_sourceless_cmp_equals(
+            lambda: MyList([1, 2]), lambda: MyList([1, 3])
+        )
+
+    def test_list_subclass_vs_list(self):
+        """MyList vs plain list."""
+
+        class MyList(list):
+            pass
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: MyList([1, 2, 3]), lambda: [1, 2, 3]
+        )
+
+    def test_immutable_list_cmp(self):
+        """torch.fx.immutable_collections.immutable_list comparison."""
+        from torch.fx.immutable_collections import immutable_list
+
+        self._assert_all_sourceless_cmp_equals(
+            lambda: immutable_list([1, 2, 3]), lambda: immutable_list([1, 2, 3])
+        )
+        self._assert_all_sourceless_cmp_equals(
+            lambda: immutable_list([1, 2]), lambda: immutable_list([1, 3])
+        )
+
+    # =====================================================================
     # dict_items comparison (set-like)
     # =====================================================================
 
