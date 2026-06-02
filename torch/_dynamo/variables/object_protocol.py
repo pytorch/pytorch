@@ -8,6 +8,7 @@ live in their respective VT files.
 """
 
 import abc
+import collections
 import enum
 import sys
 import types
@@ -39,7 +40,7 @@ from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
-    from ..symbolic_convert import InstructionTranslator
+    from ..symbolic_convert import InstructionTranslatorBase
 
 
 def vt_identity_compare(
@@ -71,12 +72,15 @@ def vt_identity_compare(
     if left_known != right_known:
         return ConstantVariable.create(False)
 
-    # Mutable containers created during tracing: VT identity = Python identity.
+    # Objects created during tracing: VT identity = Python identity.
     from .dicts import ConstDictVariable
     from .lists import ListVariable
+    from .misc import TracebackVariable
     from .sets import SetVariable
 
-    if isinstance(left, (ConstDictVariable, ListVariable, SetVariable)):
+    if isinstance(
+        left, (ConstDictVariable, ListVariable, SetVariable, TracebackVariable)
+    ):
         return ConstantVariable.create(False)
 
     # Different Python types can never be the same object.
@@ -100,7 +104,7 @@ def vt_identity_compare(
 
 
 def binop_type_error(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
     op_symbol: str,
@@ -221,6 +225,12 @@ def type_implements_tp_iternext(obj_type: type) -> bool:
     return has_slot(type_slot, PyTypeSlots.TP_ITERNEXT)
 
 
+def type_implements_tp_repr(obj_type: type) -> bool:
+    """Check whether obj_type implements the tp_repr slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_REPR)
+
+
 def type_implements_nb_slot(obj_type: type, slot: int) -> bool:
     """Check whether obj_type implements the nb slot."""
     _, _, number_slots, _ = _get_cached_slots(obj_type)
@@ -264,7 +274,7 @@ def maybe_get_python_type(obj: VariableTracker) -> type:
 
 
 def validate_sequence_index(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     key: VariableTracker,
     container_name: str,
 ) -> VariableTracker:
@@ -287,7 +297,7 @@ def validate_sequence_index(
 
 
 def vt_mapping_size(
-    tx: "InstructionTranslator", obj: "VariableTracker"
+    tx: "InstructionTranslatorBase", obj: "VariableTracker"
 ) -> "VariableTracker":
     # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L2308-L2330
     T = maybe_get_python_type(obj)
@@ -301,7 +311,7 @@ def vt_mapping_size(
 
 
 def generic_len(
-    tx: "InstructionTranslator", obj: "VariableTracker"
+    tx: "InstructionTranslatorBase", obj: "VariableTracker"
 ) -> "VariableTracker":
     # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L53-L69
     """
@@ -315,7 +325,9 @@ def generic_len(
     return vt_mapping_size(tx, obj)
 
 
-def generic_bool(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+def generic_bool(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
     """Mirrors PyObject_IsTrue.
 
     https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
@@ -355,8 +367,43 @@ def generic_bool(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
     return ConstantVariable.create(True)
 
 
+_repr_running: set[int] = set()
+
+
+def generic_repr(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
+    """Mirrors PyObject_Repr with Py_ReprEnter/Py_ReprLeave cycle detection.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L745-L778
+
+    Resolution order: tp_repr -> TypeError if the result is not str.
+    """
+    obj_type = maybe_get_python_type(obj)
+
+    if type_implements_tp_repr(obj_type):
+        obj_id = id(obj)
+        if obj_id in _repr_running:
+            sentinel = {list: "[...]", dict: "{...}", collections.deque: "[...]"}
+            return ConstantVariable.create(sentinel.get(obj_type, "..."))
+        _repr_running.add(obj_id)
+        try:
+            result = obj.repr_impl(tx)
+        finally:
+            _repr_running.discard(obj_id)
+        result_type = maybe_get_python_type(result)
+        if not issubclass(result_type, str):
+            raise_type_error(
+                tx,
+                f"__repr__ returned non-string (type {result_type.__name__})",
+            )
+        return result
+
+    raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
+
+
 def vt_getitem(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     obj: VariableTracker,
     key: VariableTracker,
 ) -> VariableTracker:
@@ -399,7 +446,7 @@ def vt_getitem(
 
 
 def vt_sequence_getitem(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     obj: VariableTracker,
     index: VariableTracker,
 ) -> VariableTracker:
@@ -432,7 +479,7 @@ def vt_sequence_getitem(
 
 
 def vt_sequence_setitem(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     s: VariableTracker,
     i: VariableTracker,
     o: VariableTracker,
@@ -458,7 +505,7 @@ def vt_sequence_setitem(
 
 
 def generic_setitem(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     o: VariableTracker,
     key: VariableTracker,
     value: VariableTracker,
@@ -482,7 +529,7 @@ def generic_setitem(
 
 
 def sequence_delitem(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     s: VariableTracker,
     i: VariableTracker,
 ) -> VariableTracker:
@@ -507,7 +554,7 @@ def sequence_delitem(
 
 
 def generic_delitem(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     o: VariableTracker,
     key: VariableTracker,
 ) -> VariableTracker:
@@ -529,7 +576,9 @@ def generic_delitem(
     raise_type_error(tx, f"'{o.python_type_name()}' does not support item deletion")
 
 
-def generic_int(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+def generic_int(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
     """Mirrors PyNumber_Long (int(x) dispatch).
 
     https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1520-L1632
@@ -569,7 +618,9 @@ def generic_int(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTr
     )
 
 
-def generic_float(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+def generic_float(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
     """Mirrors PyNumber_Float (float(x) dispatch).
 
     https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1635-L1692
@@ -609,7 +660,7 @@ def generic_float(tx: "InstructionTranslator", obj: VariableTracker) -> Variable
 
 
 def generic_iternext(
-    tx: "InstructionTranslator", obj: VariableTracker
+    tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> "VariableTracker":
     """
     Implements PyIter_Next / tp_iternext semantics for VariableTracker objects.
@@ -627,7 +678,9 @@ def generic_iternext(
     return obj.tp_iternext_impl(tx)
 
 
-def generic_neg(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+def generic_neg(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
     """Mirrors PyNumber_Negative.
 
     https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1392
@@ -647,7 +700,9 @@ def generic_neg(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTr
     )
 
 
-def generic_pos(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+def generic_pos(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
     """Mirrors PyNumber_Positive.
 
     https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1393
@@ -667,7 +722,9 @@ def generic_pos(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTr
     )
 
 
-def generic_abs(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+def generic_abs(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
     """Mirrors PyNumber_Absolute.
 
     https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1375-L1395
@@ -687,8 +744,14 @@ def generic_abs(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTr
     )
 
 
+def vt_is_iterable(obj: VariableTracker) -> bool:
+    """Check if the object supports iteration (i.e. has tp_iter or sequence protocol)."""
+    T = maybe_get_python_type(obj)
+    return type_implements_tp_iter(T) or pysequence_check(T)
+
+
 def generic_getiter(
-    tx: "InstructionTranslator", obj: VariableTracker
+    tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> "VariableTracker":
     """
     Implements PyObject_GetIter semantics for VariableTracker objects.
@@ -710,7 +773,7 @@ def generic_getiter(
         if not pyiter_check(res_T):
             raise_type_error(
                 tx,
-                f"{obj.python_type_name()}.__iter__() returned non-iterator {res.python_type_name()}",
+                f"iter() returned non-iterator of type '{res.python_type_name()}'",
             )
         return res
     elif pysequence_check(T):
@@ -766,7 +829,7 @@ def is_python_subtype(w: VariableTracker, v: VariableTracker) -> bool:
 
 
 def binary_op1(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
     op_slot: str,
@@ -839,7 +902,7 @@ def binary_op1(
 
 
 def binary_op(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
     op_slot: str,
@@ -871,7 +934,7 @@ def binary_op(
 
 
 def binary_iop1(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
     iop_slot: str,
@@ -890,7 +953,7 @@ def binary_iop1(
 
 
 def binary_iop(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
     iop_slot: str,
@@ -910,7 +973,7 @@ def binary_iop(
 
 # add / inplace add needs special handling
 def vt_add(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
 ) -> VariableTracker:
@@ -927,7 +990,7 @@ def vt_add(
 
 
 def vt_inplace_add(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
 ) -> VariableTracker:
@@ -958,7 +1021,7 @@ def vt_inplace_add(
 
 
 def sequence_repeat(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     seq: VariableTracker,
     n: VariableTracker,
 ) -> VariableTracker:
@@ -980,7 +1043,7 @@ def sequence_repeat(
 
 
 def sequence_inplace_repeat(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     seq: VariableTracker,
     n: VariableTracker,
 ) -> VariableTracker:
@@ -1000,7 +1063,7 @@ def sequence_inplace_repeat(
 
 
 def generic_multiply(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
 ) -> VariableTracker:
@@ -1030,7 +1093,7 @@ def generic_multiply(
 
 
 def generic_inplace_multiply(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     v: VariableTracker,
     w: VariableTracker,
 ) -> VariableTracker:
@@ -1099,7 +1162,7 @@ def generic_inplace_multiply(
 
 
 def slot_wrapper_mul(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     self: VariableTracker,
     other: VariableTracker,
     reverse: bool = False,
@@ -1121,7 +1184,7 @@ def slot_wrapper_mul(
 
 
 def slot_wrapper_imul(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     self: VariableTracker,
     other: VariableTracker,
 ) -> VariableTracker:
@@ -1142,8 +1205,203 @@ def slot_wrapper_imul(
     return slot_wrapper_mul(tx, self, other)
 
 
+# ---------------------------------------------------------------------------
+# tp_richcompare -- comparison dispatch
+#
+# CPython comparison architecture (Objects/object.c, Objects/typeobject.c):
+#
+#   a == b  (COMPARE_OP bytecode)
+#     -> PyObject_RichCompare(a, b, Py_EQ)
+#       -> do_richcompare(a, b, Py_EQ)            # the 4-step algorithm
+#         -> type(a)->tp_richcompare(a, b, Py_EQ)  # per-type slot
+#
+#   a.__eq__(b)  (attribute access)
+#     -> type(a)->tp_getattro(a, "__eq__")          # descriptor protocol
+#     -> returns wrapper bound to tp_richcompare
+#     -> calling wrapper invokes tp_richcompare(a, b, Py_EQ) directly
+#
+# do_richcompare algorithm (Objects/object.c#L901-L955):
+#   1. Subclass priority: if type(b) is a proper subclass of type(a),
+#      try type(b)->tp_richcompare(b, a, swapped_op) first
+#   2. Forward: type(a)->tp_richcompare(a, b, op)
+#   3. Reflected: type(b)->tp_richcompare(b, a, swapped_op)
+#   4. Fallback: identity for eq/ne, TypeError for ordering
+#
+# Dynamo implementation:
+#
+#   richcompare_impl(self, tx, other, op) -- per-VT slot, analogous to
+#     tp_richcompare.  Returns ConstantVariable(NotImplemented) when the
+#     type does not handle the comparison.
+#
+#   generic_richcompare(tx, lhs, rhs, op) -- analogous to do_richcompare.
+#     Implements the 4-step algorithm directly using richcompare_impl
+#     slots.  If a user comparison method graph-breaks, the Unsupported
+#     exception propagates to COMPARE_OP (which has
+#     @break_graph_if_unsupported) and runs the comparison eagerly.
+#     UDOV.richcompare_impl disables nested graph breaks on the resolved
+#     funcvar so the InliningInstructionTranslator does not try to split
+#     the inlined user method mid-function.
+#
+# Two entry points converge on richcompare_impl:
+#
+#   COMPARE_OP (a == b):
+#     -> BuiltinVariable dispatch -> generic_richcompare
+#       -> richcompare_impl (4-step: subclass priority, forward, reflected, fallback)
+#
+#   call_method("__eq__") (a.__eq__(b) in user code):
+#     -> base.py call_method -> richcompare_impl directly
+#
+# The call_method path calls richcompare_impl directly (not
+# generic_richcompare) to match CPython semantics: a.__eq__(b) invokes
+# the type's tp_richcompare slot without do_richcompare's reflected-
+# operand protocol, and may return NotImplemented.
+# ---------------------------------------------------------------------------
+
+
+def is_richcompare_not_implemented(result: VariableTracker) -> bool:
+    return result.is_constant_match(NotImplemented)
+
+
+def object_richcompare(
+    self: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    other: VariableTracker,
+    op: str,
+) -> VariableTracker:
+    """object's tp_richcompare.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6263-L6305
+    - __eq__: identity check, else NotImplemented
+    - __ne__: delegates to tp_richcompare(self, other, Py_EQ) and inverts
+    - ordering
+    """
+    if op == "__eq__":
+        identity = vt_identity_compare(self, other)
+        if identity is not None and identity.as_python_constant():
+            return ConstantVariable.create(True)
+        return ConstantVariable.create(NotImplemented)
+    elif op == "__ne__":
+        # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6279-L6298
+        eq_result = self.richcompare_impl(tx, other, "__eq__")
+        if is_richcompare_not_implemented(eq_result):
+            return ConstantVariable.create(NotImplemented)
+        return ConstantVariable.create(not eq_result.as_python_constant())
+    else:
+        return ConstantVariable.create(NotImplemented)
+
+
+def python_constant_richcompare_impl(
+    self: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    other: VariableTracker,
+    op: str,
+) -> VariableTracker:
+    """Constant-fold comparison for types with as_python_constant()."""
+    if not self.is_python_constant() or not other.is_python_constant():
+        return ConstantVariable.create(NotImplemented)
+    self_val = self.as_python_constant()
+    other_val = other.as_python_constant()
+    try:
+        result = getattr(type(self_val), op)(self_val, other_val)
+    except TypeError as e:
+        raise_observed_exception(TypeError, tx, args=list(e.args))
+    return ConstantVariable.create(result)
+
+
+# _Py_SwappedOp: https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L987
+_REFLECTED_OP: dict[str, str] = {
+    "__lt__": "__gt__",
+    "__gt__": "__lt__",
+    "__le__": "__ge__",
+    "__ge__": "__le__",
+    "__eq__": "__eq__",
+    "__ne__": "__ne__",
+}
+
+_OP_STR: dict[str, str] = {
+    "__lt__": "<",
+    "__le__": "<=",
+    "__eq__": "==",
+    "__ne__": "!=",
+    "__gt__": ">",
+    "__ge__": ">=",
+}
+
+
+def generic_richcompare(
+    tx: "InstructionTranslatorBase",
+    lhs: VariableTracker,
+    rhs: VariableTracker,
+    op: str,
+) -> VariableTracker:
+    """Dynamo's do_richcompare.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L994-L1039
+
+    Implements the 4-step algorithm directly using richcompare_impl slots.
+    Graph breaks inside user comparison methods propagate to COMPARE_OP
+    (which runs eagerly) because UDOV.richcompare_impl disables nested
+    graph breaks on the resolved funcvar.
+    """
+    reflected = _REFLECTED_OP[op]
+
+    try:
+        lhs_type = lhs.python_type()
+    except NotImplementedError:
+        lhs_type = None
+    try:
+        rhs_type = rhs.python_type()
+    except NotImplementedError:
+        rhs_type = None
+
+    checked_reverse = False
+
+    # Step 1: subclass priority
+    if (
+        lhs_type is not None
+        and rhs_type is not None
+        and lhs_type is not rhs_type
+        and issubclass(rhs_type, lhs_type)
+    ):
+        checked_reverse = True
+        result = rhs.richcompare_impl(tx, lhs, reflected)
+        if not is_richcompare_not_implemented(result):
+            return result
+
+    # Step 2: forward
+    result = lhs.richcompare_impl(tx, rhs, op)
+    if not is_richcompare_not_implemented(result):
+        return result
+
+    # Step 3: reflected (if not already tried)
+    if not checked_reverse:
+        result = rhs.richcompare_impl(tx, lhs, reflected)
+        if not is_richcompare_not_implemented(result):
+            return result
+
+    # Step 4: fallback
+    if op in ("__eq__", "__ne__"):
+        identity = vt_identity_compare(lhs, rhs)
+        if identity is not None:
+            if op == "__ne__":
+                return ConstantVariable.create(not identity.as_python_constant())
+            return identity
+        unimplemented(
+            gb_type="richcompare identity fallback undetermined",
+            context=f"generic_richcompare({lhs}, {rhs}, {op})",
+            explanation="Cannot determine object identity for comparison fallback.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    else:
+        raise_type_error(
+            tx,
+            f"'{_OP_STR[op]}' not supported between instances of "
+            f"'{lhs.python_type_name()}' and '{rhs.python_type_name()}'",
+        )
+
+
 def generic_hash_impl(
-    tx: "InstructionTranslator", obj: VariableTracker
+    tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> tuple[int, bool]:
     """Internal API: compute hash as (value, is_fake).
 
@@ -1154,7 +1412,9 @@ def generic_hash_impl(
     return obj.hash_impl(tx)
 
 
-def generic_hash(tx: "InstructionTranslator", obj: VariableTracker) -> VariableTracker:
+def generic_hash(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
     """User-facing API: mirrors PyObject_Hash, returns a VariableTracker.
 
     https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1101-L1115
@@ -1162,16 +1422,16 @@ def generic_hash(tx: "InstructionTranslator", obj: VariableTracker) -> VariableT
     Wraps the result in ConstantVariable or FakeIdVariable depending on
     whether the hash depends on a sourceless object's identity.
     """
-    from .constant import ConstantVariable, FakeIdVariable
+    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
 
     h, is_fake = generic_hash_impl(tx, obj)
     if is_fake:
-        return FakeIdVariable(h)
+        return FakeIdVariable(h, kind=FakeValueKind.HASH)
     return ConstantVariable.create(h)
 
 
 def generic_contains(
-    tx: "InstructionTranslator", obj: "VariableTracker", item: "VariableTracker"
+    tx: "InstructionTranslatorBase", obj: "VariableTracker", item: "VariableTracker"
 ) -> "VariableTracker":
     """
     Implements PySequence_Contains semantics for VariableTracker objects.
@@ -1203,7 +1463,7 @@ _CONSTANT_FOLD_SUBCLASSCHECK_METACLASSES: tuple[type, ...] = (
 
 
 def generic_issubclass(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     derived: VariableTracker,
     cls: VariableTracker,
 ) -> VariableTracker:
