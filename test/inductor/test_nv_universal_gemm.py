@@ -2,11 +2,16 @@
 
 
 import unittest
+from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+    EPILOGUE_FN_NAME,
+)
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.template_heuristics.nv_universal_gemm import (
     HeuristicConfig,
     NVUniversalGemmHeuristics,
@@ -717,6 +722,183 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
                 else:
                     result = compiled_fn(a, b)
                     torch.testing.assert_close(result, a @ b)
+
+
+@unittest.skipIf(
+    not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
+    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+)
+@instantiate_parametrized_tests
+class TestNVUniversalGemmEpilogueFusion(TestCase):
+    """Test cases for NVIDIA Universal GEMM epilogue fusion.
+
+    Tests verify both correctness and that fusion actually occurs by examining
+    generated code for epilogue markers. Benchmarks are mocked to ensure
+    deterministic fusion decisions independent of GPU noise.
+    """
+
+    M, N, K = 512, 512, 512
+
+    def _compile_and_check(self, fn, *args):
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "NVGEMM",
+                    "nvgemm_max_profiling_configs": 2,
+                    "force_disable_caches": True,
+                }
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+        ):
+            result, code_list = run_and_get_code(torch.compile(fn), *args)
+        code = "\n".join(code_list)
+        epilogue_fused = EPILOGUE_FN_NAME in code and "EpilogueArguments" in code
+        return result, code, epilogue_fused
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_matmul_pointwise_epilogue_fusion(self, dtype):
+        """Pointwise op (relu) is fused into the GEMM epilogue."""
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+
+        def fn(a, b):
+            return torch.relu(a @ b)
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused, "pointwise op was NOT fused into epilogue")
+
+    def test_matmul_add_relu_chained(self):
+        """Multi-op pointwise chain (a@b + bias → relu) collapses to one
+        ComputedBuffer and is fused as a single epilogue."""
+        dtype = torch.bfloat16
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+        bias = torch.randn(self.M, self.N, device="cuda", dtype=dtype)
+
+        def fn(a, b, bias):
+            return torch.relu((a @ b) + bias)
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b, bias)
+        torch.testing.assert_close(result, fn(a, b, bias), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused, "bias+relu chain was NOT fused into epilogue")
+
+    def test_matmul_cast_dtype(self):
+        """Output-dtype cast in the epilogue."""
+        dtype = torch.bfloat16
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+
+        def fn(a, b):
+            return (a @ b).to(torch.float32)
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(epilogue_fused, "dtype cast was NOT fused into epilogue")
+
+    def test_plain_matmul_no_epilogue(self):
+        """Test that plain matmul does NOT produce epilogue fusion markers."""
+        dtype = torch.bfloat16
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+
+        def fn(a, b):
+            return a @ b
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertFalse(
+            epilogue_fused, "plain matmul should NOT have epilogue fusion markers"
+        )
+
+    def test_reduction_not_fused(self):
+        """Test that reductions after GEMM are NOT fused into the epilogue."""
+        dtype = torch.bfloat16
+        a = torch.randn(self.M, self.K, device="cuda", dtype=dtype)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=dtype)
+
+        def fn(a, b):
+            return (a @ b).sum(dim=-1)
+
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        expected = fn(a, b)
+        torch.testing.assert_close(
+            result.float(), expected.float(), atol=5e-2, rtol=5e-2
+        )
+        self.assertFalse(
+            epilogue_fused,
+            "reduction after GEMM should NOT be fused into NVGEMM epilogue",
+        )
+
+    def test_workspace_runtime_integration(self):
+        """End-to-end: mock the chosen kernel's workspace_size to non-zero and
+        actually let benchmark_codegened_module run, exercising the runtime
+        path that consumes the generated get_args()/call() helpers.
+
+        Without the workspace fix, the rendered call would TypeError on the
+        missing positional arg, _benchmark_nvgemm_module's broad except would
+        return inf, autotune would silently fall back to a non-EFC choice,
+        and a naive `assert_close` against eager would still pass. To actually
+        catch the regression we intercept _benchmark_nvgemm_module to record
+        every (ms, path) it returns and assert at least one finite-ms result —
+        i.e., at least one EFC choice with workspace did get benchmarked."""
+        import cutlass_api
+
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
+
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            return torch.relu(a @ b)
+
+        bench_results: list[tuple[float, str]] = []
+        orig_bench = CUDACombinedScheduling._benchmark_nvgemm_module
+
+        def capturing_bench(self, module):
+            ms, path = orig_bench(self, module)
+            bench_results.append((ms, path))
+            return ms, path
+
+        torch._dynamo.reset()
+        with (
+            patch.object(
+                cutlass_api.Kernel, "get_workspace_size", lambda self, args: 4096
+            ),
+            mock.patch.object(
+                CUDACombinedScheduling, "_benchmark_nvgemm_module", capturing_bench
+            ),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "NVGEMM",
+                    "nvgemm_max_profiling_configs": 2,
+                    "force_disable_caches": True,
+                }
+            ),
+        ):
+            result = torch.compile(fn)(a, b)
+        torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(bench_results, "_benchmark_nvgemm_module never invoked")
+        finite = [(ms, p) for ms, p in bench_results if ms != float("inf")]
+        self.assertTrue(
+            finite,
+            f"All NVGEMM benchmarks returned inf — workspace handling likely "
+            f"broken. Results: {bench_results}",
+        )
 
 
 if __name__ == "__main__":
