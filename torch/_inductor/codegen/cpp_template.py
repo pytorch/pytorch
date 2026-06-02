@@ -72,7 +72,7 @@ class CppTemplate(KernelTemplate):
             expected_args,
         )
         # extra_args are only used for benchmarking, not compiled kernel correctness
-        extra_args = V.graph.sizevars.optimization_hints(
+        extra_args = V.graph.sizevars.upper_bounds_or_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
         # Cast the size hint from int to ctypes.c_ulonglong explicitly

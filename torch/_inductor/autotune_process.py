@@ -387,12 +387,16 @@ class TensorMeta:
 
     @classmethod
     def from_irnodes(
-        cls, irnodes: LayoutOrBuffer | Sequence[LayoutOrBuffer]
+        cls,
+        irnodes: LayoutOrBuffer | Sequence[LayoutOrBuffer],
+        hint_override: int | None = None,
     ) -> TensorMeta | list[TensorMeta]:
         from torch._inductor.select_algorithm import get_strides_with_layout_constraints
 
         if isinstance(irnodes, Sequence):
-            result: list[Any] = [cls.from_irnodes(x) for x in irnodes]
+            result: list[Any] = [
+                cls.from_irnodes(x, hint_override=hint_override) for x in irnodes
+            ]
             assert all(isinstance(x, TensorMeta) for x in result)
             return result
 
@@ -408,11 +412,15 @@ class TensorMeta:
         return TensorMeta(
             device=device,
             dtype=dtype,
-            sizes=V.graph.sizevars.optimization_hints(node.get_size()),
-            strides=V.graph.sizevars.optimization_hints(
-                get_strides_with_layout_constraints(node)
+            sizes=V.graph.sizevars.upper_bounds_or_hints_with_override(
+                node.get_size(), hint_override=hint_override
             ),
-            offset=V.graph.sizevars.optimization_hint(node.get_layout().offset),
+            strides=V.graph.sizevars.upper_bounds_or_hints_with_override(
+                get_strides_with_layout_constraints(node), hint_override=hint_override
+            ),
+            offset=V.graph.sizevars.upper_bound_or_hint_with_override(
+                node.get_layout().offset, hint_override=hint_override
+            ),
             name=node.get_name(),
         )
 
