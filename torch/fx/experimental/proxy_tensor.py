@@ -118,6 +118,9 @@ _AnyScriptObjectType = torch.ScriptObject | FakeScriptObject
 aten = torch.ops.aten
 prim = torch.ops.prim
 
+_AMBIGUOUS_AUTOGRAD_SAVED_TENSOR_PROXY = object()
+_UNHASHABLE_TENSOR_METADATA_COMPONENT = object()
+
 log = logging.getLogger(__name__)
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
@@ -286,6 +289,7 @@ def set_proxy_slot(
             or not _is_proxy_tensor_update_tensor_tracker_disabled()
         ):
             tracer.tensor_tracker[obj] = proxy
+            _set_autograd_saved_tensor_proxy_index(obj, tracer, proxy)
     elif isinstance(obj, (_AnyScriptObject)) or is_opaque_value(obj):
         if not isinstance(proxy, Proxy):
             raise AssertionError(f"Expected Proxy, got {type(proxy)}")
@@ -483,6 +487,11 @@ def get_proxy_slot(
                 # pyrefly: ignore [bad-argument-type, no-matching-overload]
                 value = tracker.get(obj)
 
+    if value is None and isinstance(obj, FakeTensor) and obj.requires_grad:
+        grad_fn = _fake_tensor_grad_fn(obj)
+        if grad_fn is not None:
+            value = _proxy_tensor_for_autograd_saved_tensor(obj, tracer, grad_fn)
+
     if value is None and isinstance(obj, FakeScriptObject):
         # A new FakeScriptObject wrapping the same real_obj may have been
         # created (e.g. output flattening in unwrap_tensor_subclasses calls
@@ -500,6 +509,158 @@ def get_proxy_slot(
 
     res = transform(value)
     return res
+
+
+def _fake_tensor_metadata_key(
+    t: FakeTensor,
+) -> (
+    tuple[
+        FakeTensorMode,
+        int,
+        object,
+        int,
+        tuple[object, ...],
+        tuple[object, ...],
+        torch.dtype,
+        torch.device,
+        torch.layout,
+    ]
+    | None
+):
+    if t.layout is not torch.strided:
+        return None
+
+    storage_offset = _hashable_tensor_metadata_component(t.storage_offset())
+    sizes = _hashable_tensor_metadata_sequence(t.size())
+    strides = _hashable_tensor_metadata_sequence(t.stride())
+    if (
+        storage_offset is _UNHASHABLE_TENSOR_METADATA_COMPONENT
+        or sizes is None
+        or strides is None
+    ):
+        return None
+
+    key = (
+        t.fake_mode,
+        t.untyped_storage()._cdata,
+        storage_offset,
+        t._version,
+        sizes,
+        strides,
+        t.dtype,
+        t.device,
+        t.layout,
+    )
+    try:
+        hash(key)
+    except TypeError:
+        return None
+    return key
+
+
+def _hashable_tensor_metadata_component(component: object) -> object:
+    if isinstance(component, py_sym_types):
+        return (type(component), component.node.expr)
+
+    try:
+        hash(component)
+    except TypeError:
+        return _UNHASHABLE_TENSOR_METADATA_COMPONENT
+    return component
+
+
+def _hashable_tensor_metadata_sequence(
+    components: Sequence[object],
+) -> tuple[object, ...] | None:
+    result = tuple(_hashable_tensor_metadata_component(c) for c in components)
+    if any(c is _UNHASHABLE_TENSOR_METADATA_COMPONENT for c in result):
+        return None
+    return result
+
+
+def _autograd_saved_tensor_alias_key(
+    t: FakeTensor,
+    grad_fn: object | None = None,
+) -> tuple[object, bool, int] | None:
+    metadata_key = _fake_tensor_metadata_key(t)
+    if metadata_key is None:
+        return None
+    if grad_fn is None:
+        grad_fn = _fake_tensor_grad_fn(t)
+        if grad_fn is None:
+            return None
+    return (metadata_key, t.requires_grad, id(grad_fn))
+
+
+def _fake_tensor_grad_fn(t: FakeTensor) -> object | None:
+    try:
+        return t.grad_fn
+    except RuntimeError as e:
+        if "new_fn INTERNAL ASSERT FAILED" in str(e):
+            return None
+        raise
+
+
+def _set_autograd_saved_tensor_proxy_index(
+    obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor
+) -> None:
+    if not isinstance(obj, FakeTensor) or not obj.requires_grad:
+        return
+
+    grad_fn = _fake_tensor_grad_fn(obj)
+    if grad_fn is None:
+        return
+
+    key = _autograd_saved_tensor_alias_key(obj, grad_fn)
+    if key is None:
+        return
+
+    existing = tracer._autograd_saved_tensor_proxy_index.get(key)
+    if existing is None:
+        tracer._autograd_saved_tensor_proxy_index[key] = proxy
+    elif (
+        isinstance(existing, _ProxyTensor)
+        and existing.proxy.node is not proxy.proxy.node
+    ):
+        tracer._autograd_saved_tensor_proxy_index[key] = (
+            _AMBIGUOUS_AUTOGRAD_SAVED_TENSOR_PROXY
+        )
+
+
+def _proxy_tensor_for_autograd_saved_tensor(
+    obj: FakeTensor, tracer: _ProxyTracer, grad_fn: object
+) -> _ProxyTensor | None:
+    alias_key = _autograd_saved_tensor_alias_key(obj, grad_fn)
+    if alias_key is None:
+        return None
+
+    alias_proxy = tracer._autograd_saved_tensor_proxy_index.get(alias_key)
+    if (
+        alias_proxy is None
+        or alias_proxy is _AMBIGUOUS_AUTOGRAD_SAVED_TENSOR_PROXY
+        or not isinstance(alias_proxy, _ProxyTensor)
+    ):
+        return None
+
+    if torch.is_grad_enabled():
+        tracer.tensor_tracker[obj] = alias_proxy
+        return alias_proxy
+
+    # create_graph=False backward formulas run with grad disabled and read
+    # saved forward tensors through a detach boundary.  The unpacked saved
+    # tensor is a fresh FakeTensor wrapper, so trace that boundary explicitly
+    # instead of wiring the formula directly to the forward proxy.
+    detach_proxy = tracer.create_proxy(
+        "call_function",
+        torch.ops.aten.detach.default,
+        (alias_proxy.proxy,),
+        {},
+    )
+    set_meta(detach_proxy, fast_detach(obj.fake_mode, obj))
+
+    proxy_tensor = _ProxyTensor(detach_proxy, None)
+    tracer.tensor_tracker[obj] = proxy_tensor
+    return proxy_tensor
 
 
 # Recursively traverses traceable wrapper subclasses,
@@ -1128,6 +1289,21 @@ def _fetch_proxies_and_all_constant_flag(
     return f_flat_args_kwargs, tuple(proxy_flat_args_kwargs), all_constant
 
 
+def _sync_traced_grad_enabled(tracer: _ProxyTracer) -> None:
+    grad_enabled = torch.is_grad_enabled()
+    if tracer._proxy_tensor_recorded_grad_enabled == grad_enabled:
+        return
+
+    node = tracer.create_node(
+        "call_function",
+        torch._C._set_grad_enabled,
+        (grad_enabled,),
+        {},
+    )
+    node.meta["val"] = None
+    tracer._proxy_tensor_recorded_grad_enabled = grad_enabled
+
+
 def proxy_call(
     proxy_mode: ProxyTorchDispatchMode,
     func: OpOverload,
@@ -1215,6 +1391,8 @@ def proxy_call(
             )
 
     proxy_args, proxy_kwargs = pytree.tree_unflatten(proxy_flat_args_kwargs, spec)
+    if pre_dispatch:
+        _sync_traced_grad_enabled(tracer)
 
     # When we trace through a torch.tensor invocation, you never actually
     # see a torch.ops.aten.tensor call. Instead, the way this function is
@@ -1376,6 +1554,7 @@ class _SympyExprTrackerValue:
 def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> None:
     """Initialize the tracker dictionaries shared by PythonKeyTracer and _GraphAppendingTracerEx."""
     tracer.tensor_tracker = WeakTensorKeyDictionary()
+    tracer._autograd_saved_tensor_proxy_index = {}
     tracer.symnode_tracker = _SymNodeDict()
     tracer.script_object_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
     tracer.opaque_tracker = WeakIdKeyDictionary()
@@ -1387,6 +1566,7 @@ def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> N
     # distinguish between different calls to the same torch function.
     tracer.torch_fn_counts = {}
     tracer.enable_thunkify = False
+    tracer._proxy_tensor_recorded_grad_enabled = torch.is_grad_enabled()
 
 
 class PythonKeyTracer(Tracer):
@@ -1400,11 +1580,13 @@ class PythonKeyTracer(Tracer):
     # of the same real object (e.g. primal vs tangent) resolve to one proxy.
     _opaque_real_obj_proxy: dict[int, Proxy]
     symnode_tracker: _SymNodeDict
+    _autograd_saved_tensor_proxy_index: dict[object, _ProxyTensor | object]
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
+    _proxy_tensor_recorded_grad_enabled: bool
 
     def __init__(self) -> None:
         super().__init__(autowrap_modules=())  # type: ignore[arg-type]
@@ -1845,6 +2027,9 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # For autocast, the python APIs run so we don't have to run them again
             # here.
             if func is torch._C._set_grad_enabled:
+                if len(args) != 1 or not isinstance(args[0], bool):
+                    raise AssertionError(f"expected bool grad mode, got {args}")
+                self.tracer._proxy_tensor_recorded_grad_enabled = args[0]
                 # pyrefly: ignore [bad-argument-type]
                 func(*args, **kwargs)
             return node
@@ -2103,11 +2288,13 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     # of the same real object (e.g. primal vs tangent) resolve to one proxy.
     _opaque_real_obj_proxy: dict[int, Proxy]
     symnode_tracker: _SymNodeDict
+    _autograd_saved_tensor_proxy_index: dict[object, _ProxyTensor | object]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
+    _proxy_tensor_recorded_grad_enabled: bool
 
     def __init__(self, graph: fx.graph.Graph) -> None:
         super().__init__(graph)
