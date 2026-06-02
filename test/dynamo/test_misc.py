@@ -8441,6 +8441,174 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(result.shape, expected.shape)
         self.assertEqual(result, expected)
 
+    def test_torch_compile_preserves_distribution_validation_default(self):
+        prior = torch.distributions.Distribution._validate_args
+        self.addCleanup(
+            torch.distributions.Distribution.set_default_validate_args, prior
+        )
+        torch.distributions.Distribution.set_default_validate_args(True)
+
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
+            torch.distributions.Normal(0.0, -1.0)
+
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        self.assertTrue(torch.distributions.Distribution._validate_args)
+        opt_fn(torch.ones(()))
+        self.assertTrue(torch.distributions.Distribution._validate_args)
+
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
+            torch.distributions.Normal(0.0, -1.0)
+
+        torch.distributions.Distribution.set_default_validate_args(False)
+        opt_fn(torch.ones(()))
+        self.assertFalse(torch.distributions.Distribution._validate_args)
+
+    def test_distribution_validation_scope_allows_non_lifo_cleanup(self):
+        from torch._dynamo.eval_frame import _disable_distribution_validation
+
+        prior = torch.distributions.Distribution._validate_args
+        self.addCleanup(
+            torch.distributions.Distribution.set_default_validate_args, prior
+        )
+
+        cleanups = []
+        try:
+            torch.distributions.Distribution.set_default_validate_args(True)
+            cleanup1 = _disable_distribution_validation()
+            cleanups.append(cleanup1)
+            cleanup2 = _disable_distribution_validation()
+            cleanups.append(cleanup2)
+
+            self.assertFalse(torch.distributions.Distribution._validate_args)
+            cleanup1()
+            cleanups.remove(cleanup1)
+            self.assertFalse(torch.distributions.Distribution._validate_args)
+            cleanup2()
+            cleanups.remove(cleanup2)
+            self.assertTrue(torch.distributions.Distribution._validate_args)
+
+            torch.distributions.Distribution.set_default_validate_args(False)
+            cleanup1 = _disable_distribution_validation()
+            cleanups.append(cleanup1)
+            cleanup2 = _disable_distribution_validation()
+            cleanups.append(cleanup2)
+
+            self.assertFalse(torch.distributions.Distribution._validate_args)
+            cleanup2()
+            cleanups.remove(cleanup2)
+            self.assertFalse(torch.distributions.Distribution._validate_args)
+            cleanup1()
+            cleanups.remove(cleanup1)
+            self.assertFalse(torch.distributions.Distribution._validate_args)
+        finally:
+            for cleanup in reversed(cleanups):
+                cleanup()
+
+    def test_distribution_validation_restored_if_earlier_cleanup_raises(self):
+        import torch._dynamo.eval_frame as eval_frame
+
+        class RaisingCleanupContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                raise RuntimeError("compiled autograd cleanup failed")
+
+        prior = torch.distributions.Distribution._validate_args
+
+        def restore_distribution_validation_state():
+            torch.distributions.Distribution.set_default_validate_args(prior)
+            eval_frame._distribution_validation_depth = 0
+            eval_frame._distribution_validation_prior = None
+
+        self.addCleanup(restore_distribution_validation_state)
+        torch.distributions.Distribution.set_default_validate_args(True)
+
+        def fn(x):
+            return x + 1
+
+        with (
+            torch._dynamo.config.patch(
+                compiled_autograd=True, raise_on_ctx_manager_usage=False
+            ),
+            mock.patch(
+                "torch._dynamo.compiled_autograd._enable",
+                return_value=RaisingCleanupContext(),
+            ),
+        ):
+            opt_fn = torch.compile(fn, backend="eager")
+            with self.assertRaisesRegex(
+                RuntimeError, "compiled autograd cleanup failed"
+            ):
+                opt_fn(torch.ones(()))
+
+        self.assertEqual(eval_frame._distribution_validation_depth, 0)
+        self.assertTrue(torch.distributions.Distribution._validate_args)
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
+            torch.distributions.Normal(0.0, -1.0)
+
+        with (
+            torch._dynamo.config.patch(
+                compiled_autograd=True, raise_on_ctx_manager_usage=False
+            ),
+            mock.patch(
+                "torch._dynamo.compiled_autograd._enable",
+                return_value=RaisingCleanupContext(),
+            ),
+        ):
+            ctx = torch._dynamo.optimize("eager")
+            with self.assertRaisesRegex(
+                RuntimeError, "compiled autograd cleanup failed"
+            ):
+                with ctx:
+                    self.assertFalse(torch.distributions.Distribution._validate_args)
+
+        self.assertIs(ctx.prior, eval_frame.unset)
+        self.assertEqual(eval_frame._distribution_validation_depth, 0)
+        self.assertTrue(torch.distributions.Distribution._validate_args)
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
+            torch.distributions.Normal(0.0, -1.0)
+
+    def test_distribution_validation_restored_on_fullgraph_no_compile_error(self):
+        import torch._dynamo.eval_frame as eval_frame
+
+        prior = torch.distributions.Distribution._validate_args
+
+        def restore_distribution_validation_state():
+            torch.distributions.Distribution.set_default_validate_args(prior)
+            eval_frame._distribution_validation_depth = 0
+            eval_frame._distribution_validation_prior = None
+
+        self.addCleanup(restore_distribution_validation_state)
+        torch.distributions.Distribution.set_default_validate_args(True)
+
+        def fn(x):
+            return x + 1
+
+        with torch._dynamo.config.patch(disable=True):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(RuntimeError, "found no compiled frames"):
+                opt_fn(torch.ones(()))
+
+        self.assertEqual(eval_frame._distribution_validation_depth, 0)
+        self.assertTrue(torch.distributions.Distribution._validate_args)
+        with self.assertRaisesRegex(
+            ValueError, r"Expected parameter scale .*GreaterThan"
+        ):
+            torch.distributions.Normal(0.0, -1.0)
+
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1

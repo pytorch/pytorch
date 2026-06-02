@@ -318,6 +318,7 @@ def aot_compile_fullgraph(
     backend: Callable[[torch.fx.GraphModule, list[torch.Tensor]], SerializableCallable],
     dynamic: bool | None = None,
 ) -> AOTCompiledFunction:
+    from torch._dynamo.eval_frame import _disable_distribution_validation
     from torch._dynamo.guards import CheckFunctionManager
     from torch._dynamo.package import SourceInfo
     from torch._dynamo.utils import dynamo_timed, get_metrics_context
@@ -341,7 +342,11 @@ def aot_compile_fullgraph(
         dynamic_ctx,
         torch_function_mode_stack_state_mgr,
     ):
-        capture_output = convert_frame.fullgraph_capture(model, args, kwargs)
+        cleanup = _disable_distribution_validation()
+        try:
+            capture_output = convert_frame.fullgraph_capture(model, args, kwargs)
+        finally:
+            cleanup()
         graph_capture_output = capture_output.graph_capture_output
         if graph_capture_output.output_graph is None:
             raise AssertionError("output_graph must not be None")
