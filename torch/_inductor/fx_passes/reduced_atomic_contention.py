@@ -44,10 +44,14 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch._logging import getArtifactLogger
 from torch.fx.experimental.symbolic_shapes import optimization_hint
 
 
 log = logging.getLogger(__name__)
+# Artifact logger — captured by TORCH_LOGS="+partitioned_scatter" and the
+# make_logging_test(partitioned_scatter=True) test harness.
+_artifact_log = getArtifactLogger(__name__, "partitioned_scatter")
 aten = torch.ops.aten
 prims = torch.ops.prims
 
@@ -98,9 +102,7 @@ class ScatterMemoryState:
     non_model_floor_bytes: int
     n_candidates: int = 0
     n_applied: int = 0
-    skip_reasons: dict[str, int] = field(
-        default_factory=lambda: defaultdict(int)
-    )
+    skip_reasons: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     # num_partitions chosen for each applied op, in graph order
     applied_partitions: list[int] = field(default_factory=list)
 
@@ -118,28 +120,47 @@ def _build_scatter_memory_state(graph: fx.Graph) -> "ScatterMemoryState | None":
     try:
         _, total_gpu = torch.cuda.mem_get_info()
     except Exception:
-        log.debug("partitioned_scatter: mem_get_info failed, disabling memory gating")
+        _artifact_log.debug(
+            "partitioned_scatter: mem_get_info failed, disabling memory gating"
+        )
         return None
 
     floor_bytes: int = config.partitioned_scatter_non_model_floor_bytes
     allowed_peak = max(0, total_gpu - floor_bytes)
 
     # primals are live for the full forward pass and must not be marked releasable.
-    is_releasable = lambda n: not n.name.startswith("primals")
-    tracker = MemoryTracker(graph, is_releasable=is_releasable)
+    def is_releasable(n: fx.Node) -> bool:
+        return not n.name.startswith("primals")
+
+    try:
+        tracker = MemoryTracker(graph, is_releasable=is_releasable)
+    except Exception as e:
+        _artifact_log.debug(
+            "partitioned_scatter: MemoryTracker init failed (%s), "
+            "running without memory gating",
+            e,
+        )
+        return None
 
     compute_nodes = [
-        n for n in graph.nodes
-        if n.op not in ("placeholder", "get_attr", "output")
+        n for n in graph.nodes if n.op not in ("placeholder", "get_attr", "output")
     ]
     node_to_idx: dict[fx.Node, int] = {n: i for i, n in enumerate(compute_nodes)}
     baseline_mem: list[int] = []
 
-    for node in compute_nodes:
-        tracker.schedule_node(node)
-        baseline_mem.append(tracker.get_current_memory_bytes())
+    try:
+        for node in compute_nodes:
+            tracker.schedule_node(node)
+            baseline_mem.append(tracker.get_current_memory_bytes())
+    except Exception as e:
+        _artifact_log.debug(
+            "partitioned_scatter: MemoryTracker simulation failed (%s), "
+            "running without memory gating",
+            e,
+        )
+        return None
 
-    log.debug(
+    _artifact_log.debug(
         "partitioned_scatter: memory state built — "
         "graph_nodes=%d compute_nodes=%d "
         "total_gpu=%d MB floor=%d MB allowed_peak=%d MB",
@@ -246,14 +267,19 @@ def _check_memory(
     available = state.allowed_peak_bytes - baseline - cumulative
 
     num_partitions = _compute_num_partitions(
-        available, output_size, element_bytes, min_p, max_p,
-        index_size=index_size, scatter_dim_size=scatter_dim_size,
+        available,
+        output_size,
+        element_bytes,
+        min_p,
+        max_p,
+        index_size=index_size,
+        scatter_dim_size=scatter_dim_size,
         force=force,
     )
 
-    if log.isEnabledFor(logging.DEBUG):
+    if _artifact_log.isEnabledFor(logging.DEBUG):
         overhead = output_size * element_bytes * max(0, num_partitions - 1)
-        log.debug(
+        _artifact_log.debug(
             "partitioned_scatter: memory check node=%s "
             "baseline=%d MB cumulative=%d MB available=%d MB "
             "expanded_buffer_cost=%d MB num_partitions=%d "
@@ -372,16 +398,18 @@ def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
 # ---------------------------------------------------------------------------
 
 
-def _record_skip(state: "ScatterMemoryState | None", reason: str, node_name: str, *args: Any) -> None:
+def _record_skip(
+    state: "ScatterMemoryState | None", reason: str, node_name: str, *args: Any
+) -> None:
     """Record a skip decision with structured logging and counter increment."""
     if state is not None:
         state.skip_reasons[reason] += 1
     counters["inductor"][f"partitioned_scatter_skipped_{reason}"] += 1
-    if log.isEnabledFor(logging.DEBUG):
+    if _artifact_log.isEnabledFor(logging.DEBUG):
         fmt = f"partitioned_scatter: SKIP node=%s reason={reason}"
         if args:
             fmt += " " + " ".join(str(a) for a in args)
-        log.debug(fmt, node_name)
+        _artifact_log.debug(fmt, node_name)
 
 
 def validate_match(match: Match) -> bool:
@@ -473,7 +501,9 @@ def validate_match(match: Match) -> bool:
     min_index_size: int = config.partitioned_scatter_min_index_size
     if not force and index_size < min_index_size:
         _record_skip(
-            state, "index_too_small", node_name,
+            state,
+            "index_too_small",
+            node_name,
             f"index_size={index_size} min={min_index_size}",
         )
         return False
@@ -489,7 +519,9 @@ def validate_match(match: Match) -> bool:
     min_contention: float = config.partitioned_scatter_min_contention_ratio
     if not force and contention_ratio < min_contention:
         _record_skip(
-            state, "low_contention", node_name,
+            state,
+            "low_contention",
+            node_name,
             f"contention_ratio={contention_ratio:.3f} threshold={min_contention:.3f}",
         )
         return False
@@ -501,8 +533,12 @@ def validate_match(match: Match) -> bool:
 
     if state is not None:
         num_partitions = _check_memory(
-            state, output_node, output_size, element_bytes,
-            index_size=index_size, scatter_dim_size=scatter_dim_size,
+            state,
+            output_node,
+            output_size,
+            element_bytes,
+            index_size=index_size,
+            scatter_dim_size=scatter_dim_size,
             force=force,
         )
     else:
@@ -521,7 +557,9 @@ def validate_match(match: Match) -> bool:
 
     if num_partitions < min_p:
         _record_skip(
-            state, "memory_budget", node_name,
+            state,
+            "memory_budget",
+            node_name,
             f"num_partitions={num_partitions} min={min_p}",
         )
         return False
@@ -533,8 +571,8 @@ def validate_match(match: Match) -> bool:
     match._output_size = output_size  # type: ignore[attr-defined]
     match._element_bytes = element_bytes  # type: ignore[attr-defined]
 
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug(
+    if _artifact_log.isEnabledFor(logging.DEBUG):
+        _artifact_log.debug(
             "partitioned_scatter: APPLY node=%s "
             "num_partitions=%d scatter_dim=%d "
             "contention_ratio=%.1f (index_size=%d / scatter_dim_size=%d) "
