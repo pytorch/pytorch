@@ -933,7 +933,7 @@ class MappingProxyVariable(VariableTracker):
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1087-L1095
+        # https://github.com/python/cpython/blob/60403a5409ff/Objects/descrobject.c#L1087-L1095
         return self.dv_dict.sq_contains(tx, item)
 
     def mp_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
