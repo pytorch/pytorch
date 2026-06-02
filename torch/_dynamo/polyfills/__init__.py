@@ -632,6 +632,14 @@ def foreach_pow_scalar(
     return torch._foreach_pow([scalar for _ in exps], exps)
 
 
+def logit_with_tensor_eps(self: torch.Tensor, eps: torch.Tensor) -> torch.Tensor:
+    eps = eps.to(dtype=self.dtype, device=self.device)
+    hi = 1 - eps
+    clamped = torch.where(self < eps, eps, torch.where(self > hi, hi, self))
+    z = torch.where(eps < 0, self, clamped)
+    return torch.log(torch.true_divide(z, torch.sub(1, z)))
+
+
 def predicate(obj: object) -> bool:
     # This will cause the rest of dynamo to handle the if statement correctly, so we don't have to rewrite it here.
     # We can't just use bool() here since we can't trace into that in general.

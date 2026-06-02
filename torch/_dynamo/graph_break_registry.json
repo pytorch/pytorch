@@ -1757,6 +1757,17 @@
       "Hints": []
     }
   ],
+  "GB9621": [
+    {
+      "Gb_type": "torch.logit with tensor eps and resizing out=",
+      "Context": "input shape: {fake_input.shape}, out shape: {fake_out.shape}",
+      "Explanation": "Dynamo's tensor-eps logit rewrite does not support resizing out= tensors.",
+      "Hints": [
+        "Pass an out= tensor with the same shape as the input.",
+        "Avoid passing eps as a tensor."
+      ]
+    }
+  ],
   "GB0130": [
     {
       "Gb_type": "Unsupported Tensor.sparse_resize_and_clear_() call",
