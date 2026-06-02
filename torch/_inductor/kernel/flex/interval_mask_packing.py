@@ -252,53 +252,49 @@ class PackedMaskAnalyzer:
     ) -> str | None:
         """Render an expression that is invariant across the packed KV lanes."""
         if isinstance(expr, int | sympy.Integer):
-            return self._literal_cute_expr(
-                int(expr), for_index=for_index, index_dim_size=index_dim_size
-            )
+            index = int(expr)
+            if for_index and index < 0:
+                if index_dim_size is None:
+                    return None
+                index = V.graph.sizevars.guard_int(index + index_dim_size)
+            return f"cutlass.Int32({index})"
         if not isinstance(expr, torch.fx.Node):
             return None
 
-        if expr is self.q_idx:
-            return "q_idx[0]"
         if expr is self.kv_idx:
             return None
+        direct_expr = self.render_direct_lane_uniform_node(expr)
+        if direct_expr is not None:
+            return direct_expr
+        if is_aten_index_node(expr):
+            return self._render_lane_uniform_index_expr(expr, for_index=for_index)
+        return self._render_lane_uniform_binary_expr(expr)
+
+    def render_direct_lane_uniform_node(self, expr: torch.fx.Node) -> str | None:
+        if expr is self.q_idx:
+            return "q_idx[0]"
         if len(self.placeholders) >= 2:
             if expr is self.placeholders[0]:
                 return "b_idx[0]"
             if expr is self.placeholders[1]:
                 return "h_idx[0]"
-        if expr in self.placeholders[4:]:
-            return f"aux_tensors[{self.placeholders[4:].index(expr)}]"
-
-        if is_aten_index_node(expr):
-            return self._render_lane_uniform_index_expr(expr, for_index=for_index)
-        return self._render_lane_uniform_binary_expr(expr)
-
-    def _literal_cute_expr(
-        self,
-        index: int,
-        *,
-        for_index: bool,
-        index_dim_size: int | sympy.Expr | None,
-    ) -> str | None:
-        """Render an integer literal, normalizing negative indices when needed."""
-        if for_index and index < 0:
-            if index_dim_size is None:
-                return None
-            index = V.graph.sizevars.guard_int(index + index_dim_size)
-        return f"cutlass.Int32({index})"
+        for aux_idx, placeholder in enumerate(self.placeholders[4:]):
+            if expr is placeholder:
+                return f"aux_tensors[{aux_idx}]"
+        return None
 
     def _render_lane_uniform_binary_expr(self, expr: torch.fx.Node) -> str | None:
         if expr.op != "call_function":
             return None
-        if expr.target is torch.ops.aten.div.Tensor_mode:
-            if expr.kwargs.get("rounding_mode") != "floor":
-                return None
-            op = "//"
-        else:
-            op = LANE_UNIFORM_BINARY_OPS.get(expr.target)
-            if op is None:
-                return None
+        match expr.target:
+            case torch.ops.aten.div.Tensor_mode:
+                if expr.kwargs.get("rounding_mode") != "floor":
+                    return None
+                op = "//"
+            case _:
+                op = LANE_UNIFORM_BINARY_OPS.get(expr.target)
+                if op is None:
+                    return None
         args = expr.args
         if len(args) < 2:
             return None
