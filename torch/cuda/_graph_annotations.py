@@ -92,6 +92,21 @@ def _probe_tools_id() -> bool:
     does not (bad).
     """
     if not hasattr(_cuda_runtime, "cudaGraphNodeGetToolsId"):
+        # API is missing from cuda-bindings - likely version too old
+        try:
+            import importlib.metadata
+
+            cuda_bindings_version = importlib.metadata.version("cuda-bindings")
+        except Exception:
+            cuda_bindings_version = "unknown"
+
+        logger.warning(
+            "cudaGraphNodeGetToolsId API not found in cuda-bindings. "
+            f"Current version: {cuda_bindings_version}, required: >= 13.3.0. "
+            "CUDA graph kernel annotations will be disabled. "
+            "To enable annotations, upgrade cuda-bindings: "
+            "pip install --upgrade cuda-bindings"
+        )
         return False
     err, *_ = _cuda_runtime.cudaGraphNodeGetToolsId(
         0
