@@ -215,6 +215,32 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         ):
             f(x)
 
+    def test_run_with_rng_state_graph_breaks_on_python_callable(self):
+        def fn(rng_state):
+            return torch._prims.rng_prims.run_with_rng_state(
+                rng_state, torch.rand, 3, device="cpu"
+            )
+
+        rng_state = torch.get_rng_state()
+        expected = fn(rng_state)
+
+        counters.clear()
+        result = torch.compile(fn, backend="eager", fullgraph=False)(rng_state)
+        self.assertEqual(result, expected)
+        self.assertTrue(
+            any(
+                key.startswith("HOP: unsupported run_with_rng_state argument")
+                for key in counters["graph_break"]
+            )
+        )
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "run_with_rng_state received an argument",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(rng_state)
+
     def test_no_freevars(self):
         def f(x):
             return wrap(lambda x: torch.sin(x), x)

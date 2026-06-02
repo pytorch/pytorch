@@ -871,6 +871,37 @@ class <lambda>(torch.nn.Module):
 """,
         )
 
+    def test_auto_dispatch_below_autograd_ordering(self):
+        from torch._dynamo.external_utils import (
+            enter_autodispatch_below_autograd,
+            exit_autodispatch_below_autograd,
+        )
+        from torch._dynamo.graph_deduplication import (
+            _populate_additional_deps,
+            _stable_topological_sort,
+        )
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        before = graph.call_function(torch.ops.aten.cos.default, (x,))
+        enter = graph.call_function(enter_autodispatch_below_autograd)
+        inside = graph.call_function(torch.ops.aten.sin.default, (x,))
+        exit = graph.call_function(exit_autodispatch_below_autograd, (enter,))
+        after = graph.call_function(torch.ops.aten.tan.default, (x,))
+        graph.output((before, inside, after))
+
+        additional_deps = _populate_additional_deps(graph, {})
+
+        before.append(inside)
+        inside.append(after)
+        _stable_topological_sort(graph, additional_deps)
+
+        node_names = [node.name for node in graph.nodes]
+        self.assertLess(node_names.index(before.name), node_names.index(enter.name))
+        self.assertLess(node_names.index(enter.name), node_names.index(inside.name))
+        self.assertLess(node_names.index(inside.name), node_names.index(exit.name))
+        self.assertLess(node_names.index(exit.name), node_names.index(after.name))
+
     def test_output_nodes_last(self):
         from torch._dynamo.graph_deduplication import _stable_topological_sort
 
