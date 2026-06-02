@@ -1558,3 +1558,33 @@ def generic_issubclass(
 
     # Coerce to bool (PyObject_IsTrue, abstract.c L2812).
     return generic_bool(tx, result)
+
+
+def virtual_iterator_next(
+    tx: "InstructionTranslatorBase",
+    iter_: VariableTracker,
+    null_or_idx: VariableTracker,
+) -> tuple[VariableTracker, VariableTracker]:
+    """
+    Mirrors _PyForIter_VirtualIteratorNext.
+
+    When ``null_or_idx`` is a tagged int (3.15+ virtual-iter path), dispatch
+    to the iterable's ``_tp_iteritem`` slot via ``tp_iteritem_impl`` and
+    return ``(value, next_index)``.  Otherwise fall back to the standard
+    iterator protocol (``tp_iternext``) and return ``(value, NULL)``.
+
+    Iterator exhaustion is signaled by ``ObservedUserStopIteration``
+    propagating out of the slot impl, matching the rest of Dynamo's
+    iterator protocol.
+
+    https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Python/ceval.c#L3733
+    """
+    from .misc import NullVariable
+
+    if (
+        not isinstance(null_or_idx, NullVariable)
+        and maybe_get_python_type(null_or_idx) is int
+    ):
+        return iter_.tp_iteritem_impl(tx, null_or_idx)
+    next_ = generic_iternext(tx, iter_)
+    return next_, NullVariable()
