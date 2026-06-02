@@ -98,6 +98,10 @@ class PackedMaskInterval:
         return rendered
 
 
+IntervalSet = tuple[PackedMaskInterval, ...]
+MaybeIntervalSet = IntervalSet | None
+
+
 def is_bool_full_node(node: torch.fx.Node, value: bool) -> bool:
     return (
         node.op == "call_function"
@@ -243,6 +247,209 @@ class PackedMaskAnalyzer:
     )
     next_symbol_id: int = 0
 
+    def node_to_intervals(self, node: torch.fx.Node) -> MaybeIntervalSet:
+        """Lower one supported boolean FX node into packed mask intervals."""
+        if is_bool_full_node(node, True):
+            return (PackedMaskInterval.full(),)
+        if is_bool_full_node(node, False):
+            return ()
+        if node.op != "call_function":
+            return None
+        match node.target:
+            case torch.ops.aten.bitwise_and.Tensor | torch.ops.aten.logical_and.default:
+                return self.combine_binary_intervals(node, intersect=True)
+            case torch.ops.aten.bitwise_or.Tensor | torch.ops.aten.logical_or.default:
+                return self.combine_binary_intervals(node, intersect=False)
+            case torch.ops.aten.le.Tensor | torch.ops.aten.le.Scalar:
+                return self.comparison_to_intervals(
+                    node.args[0], node.args[1], strict=False
+                )
+            case torch.ops.aten.lt.Tensor | torch.ops.aten.lt.Scalar:
+                return self.comparison_to_intervals(
+                    node.args[0], node.args[1], strict=True
+                )
+            case torch.ops.aten.ge.Tensor | torch.ops.aten.ge.Scalar:
+                return self.comparison_to_intervals(
+                    node.args[1], node.args[0], strict=False
+                )
+            case torch.ops.aten.gt.Tensor | torch.ops.aten.gt.Scalar:
+                return self.comparison_to_intervals(
+                    node.args[1], node.args[0], strict=True
+                )
+            case torch.ops.aten.eq.Tensor | torch.ops.aten.eq.Scalar:
+                return self.equality_to_intervals(node.args[0], node.args[1])
+            case _:
+                return None
+
+    def combine_binary_intervals(
+        self, node: torch.fx.Node, *, intersect: bool
+    ) -> MaybeIntervalSet:
+        lhs, rhs = node.args
+        if not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
+            return None
+        lhs_intervals = self.node_to_intervals(lhs)
+        rhs_intervals = self.node_to_intervals(rhs)
+        if lhs_intervals is None or rhs_intervals is None:
+            return None
+        if intersect:
+            return self.merge_intersection(lhs_intervals, rhs_intervals)
+        if (
+            len(lhs_intervals) + len(rhs_intervals)
+            > MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE
+        ):
+            return None
+        return lhs_intervals + rhs_intervals
+
+    def comparison_to_intervals(
+        self,
+        lhs: object,
+        rhs: object,
+        *,
+        strict: bool,
+    ) -> MaybeIntervalSet:
+        exprs = self.mask_operands_to_sympy(lhs, rhs)
+        if exprs is None:
+            return None
+        return self.lane_comparison_to_intervals(*exprs, strict=strict)
+
+    def equality_to_intervals(self, lhs: object, rhs: object) -> MaybeIntervalSet:
+        exprs = self.mask_operands_to_sympy(lhs, rhs)
+        if exprs is None:
+            return None
+        return self.lane_equality_to_intervals(*exprs)
+
+    def mask_operands_to_sympy(
+        self, lhs: object, rhs: object
+    ) -> tuple[sympy.Expr, sympy.Expr] | None:
+        lhs_expr = self.fx_mask_expr_to_sympy(lhs)
+        rhs_expr = self.fx_mask_expr_to_sympy(rhs)
+        if lhs_expr is None or rhs_expr is None:
+            return None
+        return lhs_expr, rhs_expr
+
+    def lane_comparison_to_intervals(
+        self,
+        lhs_expr: sympy.Expr,
+        rhs_expr: sympy.Expr,
+        *,
+        strict: bool,
+    ) -> MaybeIntervalSet:
+        """Convert a lane-affine comparison into one packed keep interval."""
+        diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
+        affine = decompose_affine_lane_expr(diff, self.lane_symbol)
+        if affine is None:
+            return None
+        lane_coeff, rest = affine
+        if lane_coeff == 1:
+            upper = V.graph.sizevars.simplify(-rest if strict else -rest + 1)
+            return self.interval_if_renderable(sympy.Integer(0), upper)
+        if lane_coeff == -1:
+            lower = V.graph.sizevars.simplify(rest + 1 if strict else rest)
+            return self.interval_if_renderable(lower, sympy.Integer(32))
+        return None
+
+    def lane_equality_to_intervals(
+        self, lhs_expr: sympy.Expr, rhs_expr: sympy.Expr
+    ) -> MaybeIntervalSet:
+        """Convert a lane-affine equality into singleton keep intervals."""
+        if isinstance(lhs_expr, FloorDiv) and isinstance(rhs_expr, FloorDiv):
+            intervals = self._floor_div_equality_to_intervals(lhs_expr, rhs_expr)
+            if intervals is not None:
+                return intervals
+        diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
+        affine = decompose_affine_lane_expr(diff, self.lane_symbol)
+        if affine is None:
+            return None
+        lane_coeff, rest = affine
+        if lane_coeff in (1, -1):
+            lane_value = -rest if lane_coeff == 1 else rest
+            lower = V.graph.sizevars.simplify(lane_value)
+            upper = V.graph.sizevars.simplify(lane_value + 1)
+            return self.interval_if_renderable(lower, upper)
+        return None
+
+    def _floor_div_equality_to_intervals(
+        self, lhs_expr: FloorDiv, rhs_expr: FloorDiv
+    ) -> MaybeIntervalSet:
+        """Convert matching block-id equality into a contiguous lane interval."""
+        lhs_base, lhs_divisor = lhs_expr.args
+        rhs_base, rhs_divisor = rhs_expr.args
+        if lhs_divisor != rhs_divisor:
+            return None
+        block_start = None
+        if lhs_base == self.q_symbol and rhs_base == self.kv_symbol + self.lane_symbol:
+            block_start = V.graph.sizevars.simplify(
+                lhs_expr * lhs_divisor - self.kv_symbol
+            )
+        elif (
+            rhs_base == self.q_symbol and lhs_base == self.kv_symbol + self.lane_symbol
+        ):
+            block_start = V.graph.sizevars.simplify(
+                rhs_expr * rhs_divisor - self.kv_symbol
+            )
+        if block_start is None:
+            return None
+        lower = V.graph.sizevars.simplify(block_start)
+        upper = V.graph.sizevars.simplify(block_start + lhs_divisor)
+        return self.interval_if_renderable(lower, upper)
+
+    def interval_if_renderable(
+        self, lower: sympy.Expr, upper: sympy.Expr
+    ) -> MaybeIntervalSet:
+        if (
+            sympy_to_cute_index(lower, self.symbol_codes) is not None
+            and sympy_to_cute_index(upper, self.symbol_codes) is not None
+        ):
+            return (PackedMaskInterval(lower, upper),)
+        return None
+
+    def merge_intersection(
+        self,
+        intervals: IntervalSet,
+        new_intervals: IntervalSet,
+    ) -> MaybeIntervalSet:
+        """Intersect two interval sets, falling back if code size would grow too much."""
+        if (
+            len(intervals) * len(new_intervals)
+            > MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE
+        ):
+            return None
+        return tuple(
+            PackedMaskInterval(
+                V.graph.sizevars.simplify(Max(lhs.lower_lane, rhs.lower_lane)),
+                V.graph.sizevars.simplify(
+                    Min(lhs.upper_lane_exclusive, rhs.upper_lane_exclusive)
+                ),
+            )
+            for lhs, rhs in product(intervals, new_intervals)
+        )
+
+    def fx_mask_expr_to_sympy(self, expr: object) -> sympy.Expr | None:
+        """Translate a mask expression with kv_idx expanded by mask_lane."""
+        return fx_aux_index_to_sympy(
+            expr,
+            {
+                self.q_idx: self.q_symbol,
+                self.kv_idx: self.kv_symbol + self.lane_symbol,
+            },
+            self.mask_aux_load_to_symbol,
+        )
+
+    def mask_aux_load_to_symbol(self, node: torch.fx.Node) -> sympy.Expr | None:
+        """Assign a temporary SymPy symbol to a supported aux tensor load."""
+        if not is_aten_index_node(node):
+            return None
+        if node in self.aux_load_symbols:
+            return self.aux_load_symbols[node]
+        lane_uniform_code = self.render_lane_uniform_scalar_expr(node)
+        if lane_uniform_code is None:
+            return None
+        symbol = sympy.Symbol(f"mask_bound_{self.next_symbol_id}", integer=True)
+        self.next_symbol_id += 1
+        self.symbol_codes[symbol] = lane_uniform_code
+        self.aux_load_symbols[node] = symbol
+        return symbol
+
     def render_lane_uniform_scalar_expr(
         self,
         expr: object,
@@ -263,14 +470,6 @@ class PackedMaskAnalyzer:
 
         if expr is self.kv_idx:
             return None
-        direct_expr = self.render_direct_lane_uniform_node(expr)
-        if direct_expr is not None:
-            return direct_expr
-        if is_aten_index_node(expr):
-            return self._render_lane_uniform_index_expr(expr, for_index=for_index)
-        return self._render_lane_uniform_binary_expr(expr)
-
-    def render_direct_lane_uniform_node(self, expr: torch.fx.Node) -> str | None:
         if expr is self.q_idx:
             return "q_idx[0]"
         if len(self.placeholders) >= 2:
@@ -281,9 +480,9 @@ class PackedMaskAnalyzer:
         for aux_idx, placeholder in enumerate(self.placeholders[4:]):
             if expr is placeholder:
                 return f"aux_tensors[{aux_idx}]"
-        return None
 
-    def _render_lane_uniform_binary_expr(self, expr: torch.fx.Node) -> str | None:
+        if is_aten_index_node(expr):
+            return self._render_lane_uniform_index_expr(expr, for_index=for_index)
         if expr.op != "call_function":
             return None
         match expr.target:
@@ -359,221 +558,10 @@ class PackedMaskAnalyzer:
             return load
         return f"cutlass.Int32({load})"
 
-    def fx_mask_expr_to_sympy(self, expr: object) -> sympy.Expr | None:
-        """Translate a mask expression with kv_idx expanded by mask_lane."""
-        return fx_aux_index_to_sympy(
-            expr,
-            {
-                self.q_idx: self.q_symbol,
-                self.kv_idx: self.kv_symbol + self.lane_symbol,
-            },
-            self.mask_aux_load_to_symbol,
-        )
-
-    def mask_aux_load_to_symbol(self, node: torch.fx.Node) -> sympy.Expr | None:
-        """Assign a temporary SymPy symbol to a supported aux tensor load."""
-        if not is_aten_index_node(node):
-            return None
-        if node in self.aux_load_symbols:
-            return self.aux_load_symbols[node]
-        lane_uniform_code = self.render_lane_uniform_scalar_expr(node)
-        if lane_uniform_code is None:
-            return None
-        symbol = sympy.Symbol(f"mask_bound_{self.next_symbol_id}", integer=True)
-        self.next_symbol_id += 1
-        self.symbol_codes[symbol] = lane_uniform_code
-        self.aux_load_symbols[node] = symbol
-        return symbol
-
-    def merge_intersection(
-        self,
-        intervals: tuple[PackedMaskInterval, ...],
-        new_intervals: tuple[PackedMaskInterval, ...],
-    ) -> tuple[PackedMaskInterval, ...] | None:
-        """Intersect two interval sets, falling back if code size would grow too much."""
-        if (
-            len(intervals) * len(new_intervals)
-            > MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE
-        ):
-            return None
-        return tuple(
-            PackedMaskInterval(
-                V.graph.sizevars.simplify(Max(lhs.lower_lane, rhs.lower_lane)),
-                V.graph.sizevars.simplify(
-                    Min(lhs.upper_lane_exclusive, rhs.upper_lane_exclusive)
-                ),
-            )
-            for lhs, rhs in product(intervals, new_intervals)
-        )
-
-    def lane_comparison_to_intervals(
-        self,
-        lhs_expr: sympy.Expr,
-        rhs_expr: sympy.Expr,
-        *,
-        strict: bool,
-    ) -> tuple[PackedMaskInterval, ...] | None:
-        """Convert a lane-affine comparison into one packed keep interval."""
-        diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
-        affine = decompose_affine_lane_expr(diff, self.lane_symbol)
-        if affine is None:
-            return None
-        lane_coeff, rest = affine
-        if lane_coeff == 1:
-            upper = V.graph.sizevars.simplify(-rest if strict else -rest + 1)
-            if sympy_to_cute_index(upper, self.symbol_codes) is not None:
-                return (PackedMaskInterval(sympy.Integer(0), upper),)
-            return None
-        if lane_coeff == -1:
-            lower = V.graph.sizevars.simplify(rest + 1 if strict else rest)
-            if sympy_to_cute_index(lower, self.symbol_codes) is not None:
-                return (PackedMaskInterval(lower, sympy.Integer(32)),)
-            return None
-        return None
-
-    def lane_equality_to_intervals(
-        self, lhs_expr: sympy.Expr, rhs_expr: sympy.Expr
-    ) -> tuple[PackedMaskInterval, ...] | None:
-        """Convert a lane-affine equality into singleton keep intervals."""
-        if isinstance(lhs_expr, FloorDiv) and isinstance(rhs_expr, FloorDiv):
-            intervals = self._floor_div_equality_to_intervals(lhs_expr, rhs_expr)
-            if intervals is not None:
-                return intervals
-        diff = V.graph.sizevars.simplify(lhs_expr - rhs_expr)
-        affine = decompose_affine_lane_expr(diff, self.lane_symbol)
-        if affine is None:
-            return None
-        lane_coeff, rest = affine
-        if lane_coeff in (1, -1):
-            lane_value = -rest if lane_coeff == 1 else rest
-            lower = V.graph.sizevars.simplify(lane_value)
-            upper = V.graph.sizevars.simplify(lane_value + 1)
-            if (
-                sympy_to_cute_index(lower, self.symbol_codes) is not None
-                and sympy_to_cute_index(upper, self.symbol_codes) is not None
-            ):
-                return (PackedMaskInterval(lower, upper),)
-            return None
-        return None
-
-    def _floor_div_equality_to_intervals(
-        self, lhs_expr: FloorDiv, rhs_expr: FloorDiv
-    ) -> tuple[PackedMaskInterval, ...] | None:
-        """Convert matching block-id equality into a contiguous lane interval."""
-        lhs_base, lhs_divisor = lhs_expr.args
-        rhs_base, rhs_divisor = rhs_expr.args
-        if lhs_divisor != rhs_divisor:
-            return None
-        block_start = None
-        if lhs_base == self.q_symbol and rhs_base == self.kv_symbol + self.lane_symbol:
-            block_start = V.graph.sizevars.simplify(
-                lhs_expr * lhs_divisor - self.kv_symbol
-            )
-        elif (
-            rhs_base == self.q_symbol and lhs_base == self.kv_symbol + self.lane_symbol
-        ):
-            block_start = V.graph.sizevars.simplify(
-                rhs_expr * rhs_divisor - self.kv_symbol
-            )
-        if block_start is None:
-            return None
-        lower = V.graph.sizevars.simplify(block_start)
-        upper = V.graph.sizevars.simplify(block_start + lhs_divisor)
-        if (
-            sympy_to_cute_index(lower, self.symbol_codes) is not None
-            and sympy_to_cute_index(upper, self.symbol_codes) is not None
-        ):
-            return (PackedMaskInterval(lower, upper),)
-        return None
-
-    def mask_operands_to_sympy(
-        self, lhs: object, rhs: object
-    ) -> tuple[sympy.Expr, sympy.Expr] | None:
-        lhs_expr = self.fx_mask_expr_to_sympy(lhs)
-        rhs_expr = self.fx_mask_expr_to_sympy(rhs)
-        if lhs_expr is None or rhs_expr is None:
-            return None
-        return lhs_expr, rhs_expr
-
-    def comparison_to_intervals(
-        self,
-        lhs: object,
-        rhs: object,
-        *,
-        strict: bool,
-    ) -> tuple[PackedMaskInterval, ...] | None:
-        exprs = self.mask_operands_to_sympy(lhs, rhs)
-        if exprs is None:
-            return None
-        return self.lane_comparison_to_intervals(*exprs, strict=strict)
-
-    def equality_to_intervals(
-        self, lhs: object, rhs: object
-    ) -> tuple[PackedMaskInterval, ...] | None:
-        exprs = self.mask_operands_to_sympy(lhs, rhs)
-        if exprs is None:
-            return None
-        return self.lane_equality_to_intervals(*exprs)
-
-    def node_to_intervals(
-        self, node: torch.fx.Node
-    ) -> tuple[PackedMaskInterval, ...] | None:
-        """Lower one supported boolean FX node into packed mask intervals."""
-        if is_bool_full_node(node, True):
-            return (PackedMaskInterval.full(),)
-        if is_bool_full_node(node, False):
-            return ()
-        if node.op != "call_function":
-            return None
-        match node.target:
-            case torch.ops.aten.bitwise_and.Tensor | torch.ops.aten.logical_and.default:
-                return self.combine_binary_intervals(node, intersect=True)
-            case torch.ops.aten.bitwise_or.Tensor | torch.ops.aten.logical_or.default:
-                return self.combine_binary_intervals(node, intersect=False)
-            case torch.ops.aten.le.Tensor | torch.ops.aten.le.Scalar:
-                return self.comparison_to_intervals(
-                    node.args[0], node.args[1], strict=False
-                )
-            case torch.ops.aten.lt.Tensor | torch.ops.aten.lt.Scalar:
-                return self.comparison_to_intervals(
-                    node.args[0], node.args[1], strict=True
-                )
-            case torch.ops.aten.ge.Tensor | torch.ops.aten.ge.Scalar:
-                return self.comparison_to_intervals(
-                    node.args[1], node.args[0], strict=False
-                )
-            case torch.ops.aten.gt.Tensor | torch.ops.aten.gt.Scalar:
-                return self.comparison_to_intervals(
-                    node.args[1], node.args[0], strict=True
-                )
-            case torch.ops.aten.eq.Tensor | torch.ops.aten.eq.Scalar:
-                return self.equality_to_intervals(node.args[0], node.args[1])
-            case _:
-                return None
-
-    def combine_binary_intervals(
-        self, node: torch.fx.Node, *, intersect: bool
-    ) -> tuple[PackedMaskInterval, ...] | None:
-        lhs, rhs = node.args
-        if not isinstance(lhs, torch.fx.Node) or not isinstance(rhs, torch.fx.Node):
-            return None
-        lhs_intervals = self.node_to_intervals(lhs)
-        rhs_intervals = self.node_to_intervals(rhs)
-        if lhs_intervals is None or rhs_intervals is None:
-            return None
-        if intersect:
-            return self.merge_intersection(lhs_intervals, rhs_intervals)
-        if (
-            len(lhs_intervals) + len(rhs_intervals)
-            > MAX_PACKED_MASK_INTERVALS_FOR_CODE_SIZE
-        ):
-            return None
-        return lhs_intervals + rhs_intervals
-
 
 def select_packed_mask_intervals(
     graph_module: GraphModule,
-) -> tuple[PackedMaskInterval, ...] | None:
+) -> MaybeIntervalSet:
     """Entry point for selecting packed mask intervals from a mask_mod graph.
 
     Returns ``None`` when the graph is unsupported, when interval packing would
