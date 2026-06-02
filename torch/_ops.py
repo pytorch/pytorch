@@ -374,10 +374,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
-    @staticmethod
-    def _has_python_key(tensor: torch.Tensor) -> bool:
-        return torch._C._dispatch_keys(tensor).has("Python")
-
     def _get_overloaded_args(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[torch.Tensor, ...]:
@@ -385,8 +381,11 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         # in torch/csrc/utils/python_arg_parser.cpp.
         overloaded_args: list[torch.Tensor] = []
 
+        def has_python_key(tensor):
+            return torch._C._dispatch_keys(tensor).has("Python")
+
         def check_overloaded(arg):
-            if isinstance(arg, torch.Tensor) and self._has_python_key(arg):
+            if isinstance(arg, torch.Tensor) and has_python_key(arg):
                 overloaded_args.append(arg)
 
         for arg in (*args, *kwargs.values()):
