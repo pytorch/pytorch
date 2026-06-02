@@ -316,6 +316,11 @@ class FxConverter:
             """)
             )
 
+        # Parallel compile workers strip the Python function from the pickled
+        # JITFunction. FXIR stores the JITFunction in the Triton HOP side table,
+        # so reload it in the parent before runtime execution can need it.
+        kernel._ensure_kernel_loaded()
+
         return kernel
 
     def _create_as_strided(
