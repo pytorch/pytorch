@@ -381,29 +381,9 @@ class StreamContextVariable(ContextWrappingVariable):
         # to access "torch._C.fn_name()" which does not exist. Unfortunately we
         # cannot just directly reference the stream in the generated code.
         #
-        # Instead, push a 0-arg callable that returns the ctx mgr value
-        # at runtime: functools.partial(torch.cuda.stream, <Stream>).
-        # The partial is installed as a global on the compiled function
-        # so the resume prologue can LOAD_GLOBAL it.  The standard
-        # ContextWrappingVariable.reconstruct contract then emits
-        # CALL 0 (target_values is empty), invoking the partial to
-        # produce a fresh StreamContext just in time for the prologue's
-        # BEFORE_WITH.
-        #
-        # functools.partial (rather than a freshly-defined closure)
-        # is critical: dynamo retraces the resume prologue and a
-        # closure defined inside torch/_dynamo would be classified as
-        # MOD_SKIPLIST'd and refuse-to-trace, breaking the prologue.
-        # functools.partial is a builtin that dynamo handles
-        # natively, and the wrapped target is the plainly-traceable
-        # torch.cuda.stream(<Stream>) call.
-        #
-        # Using install_global_by_id (rather than the user-object
-        # table via register_graph_created_object) keeps the value
-        # indirection in user-visible Python globals: dynamo retraces
-        # the prologue and sees LOAD_GLOBAL ; CALL 0 to a partial,
-        # which lowers cleanly without any torch/_dynamo internal
-        # functions on the call path -- no ResumePrologueTracingError.
+        # Instead, we push a 0-arg callable that returns the ctx mgr value
+        # at runtime.  The partial is installed as a global on the compiled
+        # function so the resume prologue can LOAD_GLOBAL it.
         import functools
 
         # self.stream is None when we're really a StreamVariable
