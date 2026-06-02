@@ -59,6 +59,10 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
+    # torch.func.jvp with nn.Module doesn't retrace with symbolic sizes
+    "test_jvp_compile_backward_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu", "mps"), is_skip=True
+    ),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
