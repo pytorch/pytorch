@@ -321,8 +321,8 @@ def _log_compute_estimations(
             _node_summary(node),
             _safe_float_fmt(est_b, multiplier=1e3),
             _safe_float_fmt(est_a, multiplier=1e3),
-            _safe_float_fmt((est_a / est_b) if float(est_b) > 0 else 0),
-            _safe_float_fmt((est_a - est_b), multiplier=1e3),
+            _safe_float_fmt((float(est_a) / float(est_b)) if float(est_b) > 0 else 0),
+            _safe_float_fmt((float(est_a) - float(est_b)), multiplier=1e3),
             str(count_flops_fx(node)),
         ]
         for node, est_b, est_a in zip(
