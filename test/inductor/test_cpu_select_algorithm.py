@@ -3539,6 +3539,51 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         if not torch.version.hip:
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfNoONEDNN
+    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    @unittest.skipIf(IS_WINDOWS, "Not supported on Windows")
+    @inductor_config.patch({"freezing": True})
+    @torch.no_grad
+    def test_qlinear_binary_sum_dynamic_m1_output_stride(self):
+        in_feature = 32
+        out_feature = 64
+        q_min, q_max = -32, 31
+        M = 1
+        dtype = torch.float32
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.b = torch.randint(
+                    q_min, q_max, [in_feature, out_feature], dtype=torch.int8
+                )
+                self.a_scale = torch.rand([M, 1], dtype=dtype) * 0.01 + 0.01
+                self.b_scale = (torch.rand([out_feature]) * 0.01 + 0.01).to(dtype)
+                self.additive = torch.rand([M, out_feature], dtype=dtype)
+
+            def forward(self, a):
+                a_reshaped = a.reshape(-1, a.size(-1))
+                c = torch._int_mm(a_reshaped, self.b).to(dtype)
+                c = c * self.a_scale
+                c = c * self.b_scale
+                c.add_(self.additive)
+                return c
+
+        torch._dynamo.reset()
+        torch.manual_seed(12345)
+        mod = Mod().eval()
+        a = torch.randint(q_min, q_max, [M, in_feature], dtype=torch.int8)
+        expected = mod(a)
+
+        counters.clear()
+        result = torch.compile(mod, dynamic=True)(a)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(result.shape, (M, out_feature))
+        self.assertEqual(result.stride(), (out_feature, 1))
+        if not IS_ARM64:
+            self.assertEqual(counters["inductor"]["qlinear_binary_lower_count"], 1)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
