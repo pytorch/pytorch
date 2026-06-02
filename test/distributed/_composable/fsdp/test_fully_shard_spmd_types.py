@@ -15,12 +15,14 @@ if dist._is_spmd_types_available():
     import spmd_types._checker
     import spmd_types._type_attr
 
-from torch.distributed.tensor import DTensor, init_device_mesh, Shard
+from torch.distributed.tensor import DTensor, init_device_mesh, Replicate, Shard
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import run_tests
 
 
+c10d_functional = torch.ops.c10d_functional
 device_type = torch.device(get_devtype())
 
 
@@ -36,6 +38,15 @@ class TestMLP(nn.Module):
         z = self.out_proj(z)
         z = F.relu(z)
         return z
+
+
+class TestScale(nn.Module):
+    def __init__(self, dim, device=None):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(dim, device=device))
+
+    def forward(self, x):
+        return x * self.weight
 
 
 def _tp_init(model, tp_pg):
@@ -131,7 +142,7 @@ class TestFullyShardSpmdTypes(FSDPTest):
             return check_params_at_compute
 
         for fqn, m in model.named_modules():
-            if isinstance(m, nn.Linear):
+            if any(m.named_parameters(recurse=False)):
                 m.register_forward_pre_hook(make_hook(fqn))
 
     def _run_fwd_bwd(self, model, ref_model, inp, fsdp_axis, input_type):
@@ -160,7 +171,11 @@ class TestFullyShardSpmdTypes(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_1d(self):
-        """FSDP alone: params initialized as Replicated on the FSDP mesh."""
+        """FSDP-only params start as R@FSDP plain tensors.
+
+        fully_shard should store them as Shard(0) DTensors, restore R@FSDP for
+        compute, and reduce-scatter grads back to sharded DTensor grads.
+        """
         mlp_dim = 16
         mesh = init_device_mesh(
             device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
@@ -202,7 +217,11 @@ class TestFullyShardSpmdTypes(FSDPTest):
 
     @skip_if_lt_x_gpu(4)
     def test_fsdp_tp_joint_mesh(self):
-        """FSDP + TP: params initialized on the joint mesh with Invariant on FSDP, sharded on TP."""
+        """FSDP+TP params start as R@FSDP and S(dim)@TP.
+
+        fully_shard should add FSDP sharding while preserving TP sharding, then
+        restore R@FSDP/V@TP plus PartitionSpec for compute.
+        """
         dp_size = 2
         tp_size = self.world_size // dp_size
         mesh = init_device_mesh(
@@ -227,7 +246,9 @@ class TestFullyShardSpmdTypes(FSDPTest):
         _tp_init(model, tp_pg)
 
         for fqn, param in model.named_parameters():
-            spmd._type_attr.set_local_type(param, {fsdp_axis: spmd.R, tp_axis: tp_plan[fqn]})
+            spmd._type_attr.set_local_type(
+                param, {fsdp_axis: spmd.R, tp_axis: tp_plan[fqn]}
+            )
 
         def shard_fn(param):
             lt = spmd.get_local_type(param)
@@ -271,6 +292,97 @@ class TestFullyShardSpmdTypes(FSDPTest):
         inp = torch.randn((2, 16), device=device_type)
         with spmd.set_current_mesh(mesh):
             self._run_fwd_bwd(model, ref_model, inp, fsdp_axis, input_type)
+
+    @skip_if_lt_x_gpu(4)
+    def test_fsdp_tp_unsharded_param(self):
+        """TP-replicated params handle I@TP and R@TP grads differently.
+
+        I@TP keeps grads local; R@TP infers Partial@TP grads and all-reduces
+        them back to Replicate@TP storage before accumulation.
+        """
+        dp_size = 2
+        tp_size = self.world_size // dp_size
+        mesh = init_device_mesh(
+            device_type.type,
+            (dp_size, tp_size),
+            mesh_dim_names=("fsdp", "tp"),
+        )
+        fsdp_axis = spmd.MeshAxis.of(mesh.get_group("fsdp"))
+        tp_axis = spmd.MeshAxis.of(mesh.get_group("tp"))
+        tp_pg = mesh.get_group("tp")
+        dp_pg = mesh.get_group("fsdp")
+
+        for tp_param_type, tp_input_type in (
+            (spmd.I, spmd.I),
+            (spmd.R, spmd.S(0)),
+        ):
+            # Initialize a TP-replicated parameter and annotate its SPMD type.
+            torch.manual_seed(42)
+            ref_model = TestScale(16, device=device_type)
+            model = TestScale(16, device=device_type)
+            model.load_state_dict(ref_model.state_dict())
+            spmd.assert_type(
+                model.weight,
+                {fsdp_axis: spmd.R, tp_axis: tp_param_type},
+            )
+
+            # fully_shard should add FSDP sharding while preserving TP replication.
+            fully_shard(
+                model,
+                mesh=mesh,
+                dp_mesh_dims=DataParallelMeshDims(shard="fsdp"),
+            )
+            self._check_dtensor_placements(model, {"weight": (Shard(0), Replicate())})
+            self._register_param_check_hooks(
+                model,
+                {
+                    "weight": (
+                        {fsdp_axis: spmd.R, tp_axis: tp_param_type},
+                        None,
+                    )
+                },
+            )
+
+            # Build the reference grad; only R@TP needs an explicit TP all-reduce.
+            replicate(ref_model, process_group=dp_pg)
+            if tp_input_type is spmd.I:
+                torch.manual_seed(1000 + dp_pg.rank())
+            else:
+                torch.manual_seed(1000 + dp_pg.rank() * tp_size + tp_pg.rank())
+            inp = torch.randn((2, 16), device=device_type)
+
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            if tp_param_type is spmd.R:
+                dist.all_reduce(ref_model.weight.grad, group=tp_pg)
+
+            # Run typed FSDP forward/backward with matching input annotations.
+            if tp_input_type is spmd.I:
+                input_type = {fsdp_axis: spmd.S(0), tp_axis: spmd.I}
+                input_partition_spec = None
+            else:
+                input_type = {fsdp_axis: spmd.V, tp_axis: spmd.V}
+                input_partition_spec = spmd.PartitionSpec((fsdp_axis, tp_axis), None)
+            with (
+                spmd.set_current_mesh(mesh),
+                spmd._checker.typecheck(strict_mode="strict", local=False),
+            ):
+                spmd.assert_type(inp, input_type, partition_spec=input_partition_spec)
+                loss = model(inp).sum()
+
+            # count collectives: should only AR if R@TP start.
+            with CommDebugMode() as comm_mode:
+                loss.backward()
+            expected_all_reduce_count = 1 if tp_param_type is spmd.R else 0
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_functional.all_reduce],
+                expected_all_reduce_count,
+            )
+
+            # The stored sharded DTensor grad should match the full reference grad.
+            param = dict(model.named_parameters())["weight"]
+            self.assertIsInstance(param.grad, DTensor)
+            self.assertEqual(ref_model.weight.grad, param.grad.full_tensor())
 
 
 if __name__ == "__main__":

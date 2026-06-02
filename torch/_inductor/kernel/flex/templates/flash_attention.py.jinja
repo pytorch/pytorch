@@ -23,7 +23,10 @@
             h="h_idx",
             m="q_idx",
             n="kv_idx",
-            out="tSrS_ssa"
+            out="tSrS_ssa",
+            vector_load_vec_size=SCORE_MOD_VEC_SIZE,
+            vector_load_index="kv_idx",
+            vector_load_dim=-1
         ) | indent_except_first(2) }}
         return tSrS_ssa
     {{ set_cute_hash("score_mod", "score") }}
@@ -51,9 +54,27 @@
         h="h_idx",
         m="q_idx",
         n="kv_idx",
+        vector_load_vec_size=MASK_MOD_VEC_SIZE,
+        vector_load_index="kv_idx",
+        vector_load_dim=-1,
         ) | indent_except_first(2) }}
+        {% if MASK_MOD_VEC_SIZE %}
+        mask_mod_packed = cute.make_rmem_tensor(1, dtype=cutlass.Uint32)
+        mask_mod_packed[0] = cutlass.Uint32(0)
+        for mask_lane_idx in cutlass.range_constexpr({{ MASK_MOD_VEC_SIZE }}):
+            mask_mod_packed[0] = (
+                mask_mod_packed[0] | (cutlass.Uint32(1) << mask_lane_idx)
+                if cutlass.Boolean(mask_mod_output[mask_lane_idx])
+                else mask_mod_packed[0]
+            )
+        return mask_mod_packed.load()
+        {% else %}
         return mask_mod_output
+        {% endif %}
     {{ set_cute_hash("mask_mod", "mask") }}
+    {% if MASK_MOD_VEC_SIZE %}
+    mask_mod.__vec_size__ = {{ MASK_MOD_VEC_SIZE }}
+    {% endif %}
     block_sparse_tensors = BlockSparseTensorsTorch(KV_NUM_BLKS, KV_IDX, FULL_KV_NUM_BLKS, FULL_KV_IDX, block_size=({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}))
     {% else %}
     block_sparse_tensors = None

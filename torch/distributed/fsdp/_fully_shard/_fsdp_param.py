@@ -2,9 +2,13 @@
 import inspect
 import itertools
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import auto, Enum
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from ._fsdp_api import DataParallelMeshDims
 
 import torch
 import torch.distributed as dist
@@ -19,7 +23,7 @@ from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
-from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor import DTensor, Partial, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
@@ -361,14 +365,34 @@ class FSDPParam:
         local_type = spmd.get_local_type(param)
         self._spmd_types_orig_type = dict(local_type)
 
+        dp_dim_names = mesh_info.dp_mesh_dims
+        if dp_dim_names is None:
+            raise AssertionError("dp_dim_names must not be None for SPMD mesh")
+
+        for name in dp_dim_names.shard_names + dp_dim_names.replicate_names:
+            axis = spmd.MeshAxis.of(spmd_mesh.get_group(name))
+            axis_type = local_type.get(axis)
+            if axis_type is not spmd.R:
+                raise ValueError(
+                    f"Expected spmd.R on DP mesh dim '{name}' for parameter "
+                    f"'{self._module_info.param_name}' but got {axis_type}. "
+                    "FSDP requires DP parameters to be Replicated since it "
+                    "handles the DP gradient reduction."
+                )
+
         placements: list[Placement] = []
+        grad_placements: list[Placement] = []
         for name in spmd_mesh.mesh_dim_names:
             axis = spmd.MeshAxis.of(spmd_mesh.get_group(name))
             axis_type = local_type.get(axis)
             if axis_type is None or axis_type is spmd.I or axis_type is spmd.R:
                 placements.append(Replicate())
+                grad_placements.append(
+                    Partial() if axis_type is spmd.R else Replicate()
+                )
             elif isinstance(axis_type, spmd.S):
                 placements.append(Shard(axis_type.dim))
+                grad_placements.append(Shard(axis_type.dim))
             elif axis_type is spmd.V:
                 spec = spmd.get_partition_spec(param)
                 if spec is not None:
@@ -379,6 +403,7 @@ class FSDPParam:
                     shard_info = partition_spec_get_shard(spec, axis)
                     if shard_info is not None:
                         placements.append(Shard(shard_info.dim))
+                        grad_placements.append(Shard(shard_info.dim))
                         continue
                 raise ValueError(
                     f"Parameter '{self._module_info.param_name}' has V type "
@@ -391,6 +416,7 @@ class FSDPParam:
                     f"for parameter '{self._module_info.param_name}'"
                 )
 
+        self._spmd_types_grad_placements: tuple[Placement, ...] = tuple(grad_placements)
         dtensor_param = nn.Parameter(
             DTensor.from_local(param.data, spmd_mesh, placements, run_check=False),
             requires_grad=param.requires_grad,
@@ -496,12 +522,65 @@ class FSDPParam:
 
         self._spmd_mesh = spmd_mesh
         self._spmd_placements: tuple[Placement, ...] = tuple(new_placements)
-        self._sharding_spec = DTensorSpec(
-            self._spmd_mesh,
-            self._spmd_placements,
-            tensor_meta=self._unsharded_dtensor_spec.tensor_meta,
+        self._sharding_spec = self._build_spmd_sharding_spec(
+            dp_dim_names,
+            dp_shard_indices,
+            fsdp_placement,
         )
         return cast(DTensor, param)._local_tensor
+
+    def _build_spmd_sharding_spec(
+        self,
+        dp_dim_names: "DataParallelMeshDims",
+        dp_shard_indices: list[int],
+        fsdp_placement: Shard,
+    ) -> DTensorSpec:
+        """Build the DTensorSpec for the sharded parameter/gradient.
+
+        When multiple DP shard dims exist (e.g. dp_shard + cp), flatten
+        them into one axis so the parameter and gradient DTensor have one
+        Shard axis for DP.
+        """
+        spmd_mesh = self._spmd_mesh
+        spmd_placements = self._spmd_placements
+        if self._unsharded_dtensor_spec is None:
+            raise AssertionError("_unsharded_dtensor_spec cannot be None")
+        tensor_meta = self._unsharded_dtensor_spec.tensor_meta
+
+        if len(dp_shard_indices) <= 1:
+            return DTensorSpec(spmd_mesh, spmd_placements, tensor_meta=tensor_meta)
+
+        shard_names_set = set(dp_dim_names.shard_names)
+        replicate_names_set = set(dp_dim_names.replicate_names)
+
+        # Walk spmd_mesh.mesh_dim_names in order. Replace consecutive DP
+        # shard dims with the flattened DP mesh; keep non-DP dims as-is.
+        if spmd_mesh.mesh_dim_names is None:
+            raise AssertionError("mesh_dim_names cannot be None")
+        submeshes: list[DeviceMesh] = []
+        spec_placements: list[Placement] = []
+        skip = 0
+        for i, name in enumerate(spmd_mesh.mesh_dim_names):
+            if skip > 0:
+                skip -= 1
+                continue
+            if name in shard_names_set:
+                submeshes.append(self.mesh_info.mesh)
+                if isinstance(self.mesh_info, HSDPMeshInfo):
+                    spec_placements.append(Replicate())
+                spec_placements.append(fsdp_placement)
+                skip = len(dp_dim_names.shard_names) - 1
+            elif name in replicate_names_set and isinstance(
+                self.mesh_info, HSDPMeshInfo
+            ):
+                # HSDP replicate is inserted by the shard branch above.
+                continue
+            else:
+                submeshes.append(spmd_mesh[name])
+                spec_placements.append(spmd_placements[i])
+
+        spec_mesh = DeviceMesh._concatenate(submeshes)
+        return DTensorSpec(spec_mesh, tuple(spec_placements), tensor_meta=tensor_meta)
 
     def _init_sharding_spec_tp(
         self,
@@ -691,11 +770,27 @@ class FSDPParam:
         if self.is_spmd_types:
             pass  # keep as plain tensor; spmd_types restored in to_unsharded()
         elif self._unsharded_dtensor_spec is not None:
+            unsharded_dtensor_spec = self._get_unsharded_dtensor_spec(unsharded_param)
             unsharded_param = _from_local_no_grad(
-                unsharded_param, self._unsharded_dtensor_spec
+                unsharded_param, unsharded_dtensor_spec
             )
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
+        )
+
+    def _get_unsharded_dtensor_spec(self, unsharded_param: torch.Tensor) -> DTensorSpec:
+        if self._unsharded_dtensor_spec is None:
+            raise AssertionError("Expected _unsharded_dtensor_spec for DTensor param")
+        tensor_meta = self._unsharded_dtensor_spec.tensor_meta
+        if tensor_meta is None or tensor_meta.dtype == unsharded_param.dtype:
+            return self._unsharded_dtensor_spec
+        return replace(
+            self._unsharded_dtensor_spec,
+            tensor_meta=TensorMeta(
+                tensor_meta.shape,
+                tensor_meta.stride,
+                unsharded_param.dtype,
+            ),
         )
 
     def _unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
@@ -941,7 +1036,16 @@ class FSDPParam:
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
         if self.is_spmd_types:
-            return grad
+            if self._unsharded_dtensor_spec is None:
+                raise AssertionError(
+                    "Expected _unsharded_dtensor_spec for spmd_types param"
+                )
+            grad = DTensor.from_local(
+                grad,
+                self._unsharded_dtensor_spec.mesh,
+                self._spmd_types_grad_placements,
+                run_check=False,
+            )
         if self.is_dtensor:
             if isinstance(grad, AsyncCollectiveTensor):
                 grad = grad.wait()
