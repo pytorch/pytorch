@@ -6838,6 +6838,72 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             self.assertIsNone(block_mask.full_q_indices)
 
     @supported_platform
+    def test_from_kv_blocks_unpadded_kv_indices(self, device):
+        kv_num_blocks = torch.tensor([1, 1, 1], dtype=torch.int32, device=device).view(
+            1, 1, 3
+        )
+        kv_indices = torch.tensor(
+            [[0], [1], [2]], dtype=torch.int32, device=device
+        ).view(1, 1, 3, 1)
+
+        block_mask = BlockMask.from_kv_blocks(kv_num_blocks, kv_indices, BLOCK_SIZE=32)
+
+        self.assertEqual(block_mask.shape, (1, 1, 96, 96))
+        torch.testing.assert_close(
+            block_mask.to_dense(),
+            torch.eye(3, dtype=torch.int32, device=device).view(1, 1, 3, 3),
+        )
+        torch.testing.assert_close(
+            block_mask.q_num_blocks,
+            torch.ones((1, 1, 3), dtype=torch.int32, device=device),
+        )
+        torch.testing.assert_close(
+            block_mask.q_indices[..., :1],
+            torch.tensor([[0], [1], [2]], dtype=torch.int32, device=device).view(
+                1, 1, 3, 1
+            ),
+        )
+
+    @supported_platform
+    def test_from_kv_blocks_unpadded_full_kv_indices(self, device):
+        kv_num_blocks = torch.zeros((1, 1, 3), dtype=torch.int32, device=device)
+        kv_indices = torch.zeros((1, 1, 3, 1), dtype=torch.int32, device=device)
+        full_kv_num_blocks = torch.tensor(
+            [1, 1, 1], dtype=torch.int32, device=device
+        ).view(1, 1, 3)
+        full_kv_indices = torch.tensor(
+            [[0], [1], [2]], dtype=torch.int32, device=device
+        ).view(1, 1, 3, 1)
+
+        block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            BLOCK_SIZE=32,
+        )
+
+        self.assertEqual(block_mask.shape, (1, 1, 96, 96))
+        torch.testing.assert_close(
+            block_mask.to_dense(),
+            torch.eye(3, dtype=torch.int32, device=device).view(1, 1, 3, 3),
+        )
+        torch.testing.assert_close(
+            block_mask.q_num_blocks,
+            torch.zeros((1, 1, 3), dtype=torch.int32, device=device),
+        )
+        torch.testing.assert_close(
+            block_mask.full_q_num_blocks,
+            torch.ones((1, 1, 3), dtype=torch.int32, device=device),
+        )
+        torch.testing.assert_close(
+            block_mask.full_q_indices[..., :1],
+            torch.tensor([[0], [1], [2]], dtype=torch.int32, device=device).view(
+                1, 1, 3, 1
+            ),
+        )
+
+    @supported_platform
     def test_block_size(self, device):
         kv_num_blocks, kv_indices, _, _ = self.generate_test_inputs(False, device)
         block_mask = BlockMask.from_kv_blocks(kv_num_blocks, kv_indices)
