@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from dataclasses import dataclass
+from typing import cast
 
 import torch
+from torch._subclasses.functional_tensor import FunctionalTensor
 
 
 @dataclass
@@ -10,6 +12,7 @@ class MaskBuffer:
     data: torch.Tensor | None = None
     # refcount allows shared usage of the MaskBuffer, as long as all users have the same data
     refcount: int = 0
+    owned_by_dtensor: bool = False
 
     def materialize_mask(self, mask):
         if self.refcount == 0:
@@ -33,6 +36,12 @@ class MaskBuffer:
     def apply_mask(self, tensor):
         if self.refcount == 0 or self.data is None:
             raise RuntimeError("MaskBuffer has not been materialized")
+        if isinstance(self.data, FunctionalTensor) and not isinstance(
+            tensor, FunctionalTensor
+        ):
+            from torch._functorch._aot_autograd.functional_utils import from_fun
+
+            self.data = cast(torch.Tensor, from_fun(self.data))
 
         # NOTE: MaskPartial is being used by the embedding op and the gather op.
         # For gather, the mask has the same dimension as the output tensor, whereas

@@ -16,6 +16,7 @@ These classes work together to track tensor operations and properties during Dyn
 """
 
 import functools
+import inspect
 import logging
 import operator
 import textwrap
@@ -462,8 +463,20 @@ class TensorVariable(VariableTracker):
         if object_has_getattribute(_input_associated_real_value):
             raise NotImplementedError
 
-        if get_custom_getattr(_input_associated_real_value):
-            raise NotImplementedError
+        custom_getattr = get_custom_getattr(_input_associated_real_value)
+        if custom_getattr:
+            if not is_traceable_wrapper_subclass(_input_associated_real_value):
+                raise NotImplementedError
+            try:
+                inspect.getattr_static(_input_associated_real_value, name)
+                has_static_attr = True
+            except AttributeError:
+                has_static_attr = False
+            if (
+                not has_static_attr
+                and name not in _input_associated_real_value.__tensor_flatten__()[0]
+            ):
+                raise NotImplementedError
 
         try:
             real_value = getattr(_input_associated_real_value, name)
