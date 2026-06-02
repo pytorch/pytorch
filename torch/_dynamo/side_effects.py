@@ -1013,9 +1013,21 @@ class SideEffects:
             # Sourceless enum members registered with AttributeMutationNew
             # don't need __new__-based tempvar reconstruction -- they are
             # reconstructible as constants.
-            if var.is_python_constant() and isinstance(var.mutation_type, AttributeMutationNew) and (
-                isinstance(var.value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType))
-                or is_pybind11_enum_member(var.value)
+            if (
+                var.is_python_constant()
+                and isinstance(var.mutation_type, AttributeMutationNew)
+                and isinstance(var, variables.UserDefinedObjectVariable)
+                and (
+                    isinstance(
+                        var.value,
+                        (
+                            enum.Enum,
+                            torch.DispatchKey,
+                            torch._C._functorch.TransformType,
+                        ),
+                    )
+                    or is_pybind11_enum_member(var.value)
+                )
             ):
                 continue
 
@@ -1455,9 +1467,21 @@ class SideEffects:
 
                 # Sourceless enum members: mutations (like _inverted_ caching)
                 # already happened on the real object during tracing.
-                if var.is_python_constant() and isinstance(var.mutation_type, AttributeMutationNew) and (
-                    isinstance(var.value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType))
-                    or is_pybind11_enum_member(var.value)
+                if (
+                    var.is_python_constant()
+                    and isinstance(var.mutation_type, AttributeMutationNew)
+                    and isinstance(var, variables.UserDefinedObjectVariable)
+                    and (
+                        isinstance(
+                            var.value,
+                            (
+                                enum.Enum,
+                                torch.DispatchKey,
+                                torch._C._functorch.TransformType,
+                            ),
+                        )
+                        or is_pybind11_enum_member(var.value)
+                    )
                 ):
                     continue
 
