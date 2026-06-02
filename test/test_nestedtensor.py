@@ -32,9 +32,11 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     ops,
@@ -624,19 +626,12 @@ class TestNestedTensor(NestedTensorTestCase):
                 t, t.to(torch.empty_like(t), non_blocking=non_blocking, copy=True)
             )
 
-            devices = [t.device]
-            if t.device.type == "cuda":
-                if t.device.index == -1:
-                    devices.append(f"cuda:{torch.cuda.current_device()}")
-                elif t.device.index == torch.cuda.current_device():
-                    devices.append("cuda")
-            for device in devices:
-                self.assertIs(t, t.to(device, non_blocking=non_blocking))
-                self.assertIs(t, t.to(device, t.dtype, non_blocking=non_blocking))
-                self.assertIsNot(t, t.to(device, non_blocking=non_blocking, copy=True))
-                self.assertIsNot(
-                    t, t.to(device, t.dtype, non_blocking=non_blocking, copy=True)
-                )
+            self.assertIs(t, t.to(t.device, non_blocking=non_blocking))
+            self.assertIs(t, t.to(t.device, t.dtype, non_blocking=non_blocking))
+            self.assertIsNot(t, t.to(t.device, non_blocking=non_blocking, copy=True))
+            self.assertIsNot(
+                t, t.to(t.device, t.dtype, non_blocking=non_blocking, copy=True)
+            )
 
         test_copy_behavior(nt)
         self.assertEqual(nt.device, nt.to("cpu").device)
@@ -655,38 +650,6 @@ class TestNestedTensor(NestedTensorTestCase):
 
         test_data_ptr(lambda nt: nt.data_ptr())
 
-        if torch.cuda.is_available():
-            for non_blocking in [True, False]:
-                for cuda in [
-                    "cuda",
-                    "cuda:0" if torch.cuda.device_count() == 1 else "cuda:1",
-                ]:
-                    nt2 = random_nt(cuda, torch.float32, ntensors, (4, 4))
-                    test_copy_behavior(nt2, non_blocking)
-                    self.assertEqual(
-                        nt2.device, nt2.to(cuda, non_blocking=non_blocking).device
-                    )
-                    self.assertEqual(
-                        nt.device, nt2.to("cpu", non_blocking=non_blocking).device
-                    )
-                    self.assertEqual(
-                        nt2.device, nt.to(cuda, non_blocking=non_blocking).device
-                    )
-                    self.assertIs(
-                        torch.int32,
-                        nt2.to(
-                            "cpu", dtype=torch.int32, non_blocking=non_blocking
-                        ).dtype,
-                    )
-                    self.assertEqual(
-                        nt.device,
-                        nt2.to(
-                            "cpu", dtype=torch.int32, non_blocking=non_blocking
-                        ).device,
-                    )
-                    self.assertIs(torch.int32, nt2.to(dtype=torch.int32).dtype)
-                    self.assertEqual(nt2.device, nt2.to(dtype=torch.int32).device)
-
     def test_copy_(self):
         ntensors = 4
         nt = random_nt(torch.device("cpu"), torch.float32, ntensors, (4, 4))
@@ -702,19 +665,6 @@ class TestNestedTensor(NestedTensorTestCase):
             "copy_ only supports tensors that are the same size for Nested implementations",
             lambda: nt_error.copy_(nt),
         )
-
-        if torch.cuda.is_available():
-            nt = random_nt(torch.device("cuda"), torch.float32, ntensors, (4, 4))
-            nt_copy = torch.empty_like(nt, device=torch.device("cpu"))
-            nt_copy.copy_(nt, non_blocking=True)
-            torch.cuda.current_stream(torch.cuda.current_device()).synchronize()
-            for nt_ub, nt_copy_ub in zip(nt.unbind(), nt_copy):
-                self.assertEqual(nt_ub, nt_copy_ub)
-
-            nt_copy = torch.empty_like(nt, device=torch.device("cpu"))
-            nt_copy.copy_(nt, non_blocking=False)
-            for nt_ub, nt_copy_ub in zip(nt.unbind(), nt_copy):
-                self.assertEqual(nt_ub, nt_copy_ub)
 
     def test_fill_(self):
         ntensors = 4
@@ -928,6 +878,101 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             torch.nested.nested_tensor(ts1, device=device, dtype=dtype),
             torch.nested.nested_tensor(ts2, device=device, dtype=dtype),
         )
+
+    # @deviceCountAtLeast(1) is used only to change the injected parameter from a
+    # single `device` string to a `devices` list;
+    @onlyAccelerator
+    @deviceCountAtLeast(1)
+    def test_to(self, devices):
+        def test_copy_behavior(t, non_blocking=False):
+            self.assertIs(t, t.to(t, non_blocking=non_blocking))
+            self.assertIs(t, t.to(t.dtype, non_blocking=non_blocking))
+            self.assertIs(t, t.to(torch.empty_like(t), non_blocking=non_blocking))
+            self.assertIsNot(t, t.to(t, non_blocking=non_blocking, copy=True))
+            self.assertIsNot(t, t.to(t.dtype, non_blocking=non_blocking, copy=True))
+            self.assertIsNot(
+                t, t.to(torch.empty_like(t), non_blocking=non_blocking, copy=True)
+            )
+
+            devs = [t.device]
+            if t.device.index == -1:
+                devs.append(
+                    f"{t.device.type}:{torch.accelerator.current_device_index()}"
+                )
+            elif t.device.index == torch.accelerator.current_device_index():
+                devs.append(t.device.type)
+            for device in devs:
+                self.assertIs(t, t.to(device, non_blocking=non_blocking))
+                self.assertIs(t, t.to(device, t.dtype, non_blocking=non_blocking))
+                self.assertIsNot(t, t.to(device, non_blocking=non_blocking, copy=True))
+                self.assertIsNot(
+                    t, t.to(device, t.dtype, non_blocking=non_blocking, copy=True)
+                )
+
+        ntensors = 4
+        nt_cpu = random_nt(torch.device("cpu"), torch.float32, ntensors, (4, 4))
+
+        # Build a list of device strings to exercise:
+        #   - self.device_type: bare type string (e.g. "cuda"), which resolves
+        #     to the current device.
+        #   - a fully-qualified "type:index" string. On single-device systems this
+        #     is the current device; on multi-device systems we choose a non-current
+        #     device to cover both forms of device specification.
+        devs = [self.device_type]
+        if len(devices) == 1:
+            devs.append(devices[0])
+        else:
+            current_idx = torch.accelerator.current_device_index()
+            non_current = next(
+                dev for dev in devices if torch.device(dev).index != current_idx
+            )
+            devs.append(non_current)
+
+        for non_blocking in [True, False]:
+            for dev in devs:
+                nt_dev = random_nt(dev, torch.float32, ntensors, (4, 4))
+                test_copy_behavior(nt_dev, non_blocking)
+
+                self.assertEqual(
+                    nt_dev.device, nt_dev.to(dev, non_blocking=non_blocking).device
+                )
+                self.assertEqual(
+                    nt_cpu.device, nt_dev.to("cpu", non_blocking=non_blocking).device
+                )
+                self.assertEqual(
+                    nt_dev.device, nt_cpu.to(dev, non_blocking=non_blocking).device
+                )
+                self.assertIs(
+                    torch.int32,
+                    nt_dev.to(
+                        "cpu", dtype=torch.int32, non_blocking=non_blocking
+                    ).dtype,
+                )
+                self.assertEqual(
+                    nt_cpu.device,
+                    nt_dev.to(
+                        "cpu", dtype=torch.int32, non_blocking=non_blocking
+                    ).device,
+                )
+                self.assertIs(torch.int32, nt_dev.to(dtype=torch.int32).dtype)
+                self.assertEqual(nt_dev.device, nt_dev.to(dtype=torch.int32).device)
+
+    @onlyAccelerator
+    def test_copy_(self, device):
+        ntensors = 4
+        nt = random_nt(device, torch.float32, ntensors, (4, 4))
+        nt_copy = torch.empty_like(nt, device=torch.device("cpu"))
+        nt_copy.copy_(nt, non_blocking=True)
+        torch.accelerator.current_stream(
+            torch.accelerator.current_device_index()
+        ).synchronize()
+        for nt_ub, nt_copy_ub in zip(nt.unbind(), nt_copy):
+            self.assertEqual(nt_ub, nt_copy_ub)
+
+        nt_copy = torch.empty_like(nt, device=torch.device("cpu"))
+        nt_copy.copy_(nt, non_blocking=False)
+        for nt_ub, nt_copy_ub in zip(nt.unbind(), nt_copy):
+            self.assertEqual(nt_ub, nt_copy_ub)
 
     @dtypes(*floating_types_and_half())
     def test_detach(self, device, dtype):
