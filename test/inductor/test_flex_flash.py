@@ -110,7 +110,7 @@ def force_flex_flash_score_mod_vec_size(vec_size: int):
 
 
 @contextmanager
-def force_flex_flash_mask_mod_vec_size(vec_size: int | None):
+def use_explicit_flex_flash_mask_mod_vec_size(vec_size: int | None):
     def configs(
         has_score_mod,
         has_aux_tensors,
@@ -124,10 +124,7 @@ def force_flex_flash_mask_mod_vec_size(vec_size: int | None):
     ):
         if has_mask_mod:
             return [
-                flex_flash_attention_module.FlexFlashConfig(
-                    mask_mod_vec_size=vec_size,
-                    mask_mod_vec_size_forced=True,
-                )
+                flex_flash_attention_module.FlexFlashConfig(mask_mod_vec_size=vec_size)
             ]
         return [flex_flash_attention_module.FlexFlashConfig()]
 
@@ -1488,7 +1485,7 @@ class TestFlexFlash(InductorTestCase):
         expect_autovec: bool = True,
     ):
         expected = fn(*args)
-        with force_flex_flash_mask_mod_vec_size(None):
+        with use_explicit_flex_flash_mask_mod_vec_size(None):
             torch._dynamo.reset()
             scalar, scalar_code = run_and_get_code(
                 torch.compile(fn, fullgraph=True, dynamic=False), *args
@@ -1546,7 +1543,7 @@ class TestFlexFlash(InductorTestCase):
 
         args = (q, k, v, score_bias, mask_bias)
         expected = fn(*args)
-        with force_flex_flash_mask_mod_vec_size(None):
+        with use_explicit_flex_flash_mask_mod_vec_size(None):
             torch._dynamo.reset()
             scalar_mask, scalar_code = run_and_get_code(
                 torch.compile(fn, fullgraph=True, dynamic=False), *args
@@ -1637,7 +1634,166 @@ class TestFlexFlash(InductorTestCase):
         "SM100/SM110 only",
     )
     @torch._inductor.config.patch(force_disable_caches=True)
-    def test_flash_attention_sm100_mask_mod_forced_vec_size(self):
+    @parametrize("dynamic", [False, True], name_fn=lambda dynamic: str(dynamic))
+    def test_flash_attention_sm100_sliding_window_uses_packed_shift_mask(self, dynamic):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        if dynamic:
+            for tensor in (q, k, v):
+                torch._dynamo.mark_dynamic(tensor, 2, min=seq_len, max=seq_len)
+
+        def fn(q, k, v):
+            q_len = q.size(2) if dynamic else seq_len
+            kv_len = k.size(2) if dynamic else seq_len
+
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) & (q_idx - kv_idx <= 32)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, q_len, kv_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v)
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=dynamic), q, k, v
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertIn("mask_mod.__vec_size__ = 32", src)
+        self.assertIn("utils.shr_u32", src)
+        self.assertIn("utils.shl_u32", src)
+        self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_packed_mask_disabled_by_explicit_vec_config(self):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+
+        def fn(q, k, v):
+            def mask_mod(_b, _h, q_idx, kv_idx):
+                return (q_idx >= kv_idx) & (q_idx - kv_idx <= 32)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, seq_len, seq_len, device="cuda"
+            )
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        expected = fn(q, k, v)
+        torch._dynamo.reset()
+        with use_explicit_flex_flash_mask_mod_vec_size(16):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=False), q, k, v
+            )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        self.assertIn("mask_mod.__vec_size__ = 16", src)
+        self.assertNotIn("utils.shr_u32", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    @parametrize(
+        "dynamic, expect_packed",
+        [(False, True), (True, False)],
+        name_fn=lambda dynamic, expect_packed: f"dynamic_{dynamic}",
+    )
+    def test_flash_attention_sm100_document_offsets_packed_mask(
+        self, dynamic, expect_packed
+    ):
+        seq_len = 128
+        q, k, v = create_test_tensors(
+            batch_size=1,
+            num_heads=1,
+            seq_len=seq_len,
+            dim=64,
+            dtype=torch.float16,
+            device="cuda",
+        )
+        if dynamic:
+            for tensor in (q, k, v):
+                torch._dynamo.mark_dynamic(tensor, 2, min=seq_len, max=seq_len)
+        positions = torch.arange(seq_len, device="cuda", dtype=torch.int32)
+        doc_ids = (positions // 32).expand(1, -1).contiguous()
+        if dynamic:
+            torch._dynamo.mark_dynamic(doc_ids, 1, min=seq_len, max=seq_len)
+        offsets = torch.arange(0, seq_len + 32, 32, device="cuda", dtype=torch.int32)
+        score_bias = torch.randn(seq_len, device="cuda", dtype=torch.float16)
+
+        def fn(q, k, v, doc_ids, offsets, score_bias):
+            q_len = q.size(2) if dynamic else seq_len
+            kv_len = k.size(2) if dynamic else seq_len
+
+            def score_mod(score, _b, _h, _q_idx, kv_idx):
+                return score + score_bias[kv_idx]
+
+            def mask_mod(b, _h, q_idx, kv_idx):
+                doc = doc_ids[b, q_idx]
+                start = offsets[doc]
+                return (kv_idx >= start) & (kv_idx <= q_idx)
+
+            block_mask = _create_block_mask_for_device(
+                mask_mod, 1, 1, q_len, kv_len, device="cuda"
+            )
+            return flex_attention(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+        args = (q, k, v, doc_ids, offsets, score_bias)
+        expected = fn(*args)
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=dynamic), *args
+        )
+
+        self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+        src = "\n".join(code)
+        if expect_packed:
+            self.assertIn("utils.shr_u32", src)
+            self.assertIn("score_mod.__vec_size__ = 8", src)
+            self.assertNotIn("for mask_lane_idx in cutlass.range_constexpr", src)
+        else:
+            self.assertNotIn("utils.shr_u32", src)
+            self.assertIn("for mask_lane_idx in cutlass.range_constexpr", src)
+
+    @unittest.skipUnless(
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in (10, 11),
+        "SM100/SM110 only",
+    )
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_flash_attention_sm100_mask_mod_explicit_vec_size(self):
         seq_len = 128
         q, k, v = create_test_tensors(
             batch_size=1,
@@ -1664,7 +1820,7 @@ class TestFlexFlash(InductorTestCase):
 
         expected = fn(q, k, v)
         torch._dynamo.reset()
-        with force_flex_flash_mask_mod_vec_size(8):
+        with use_explicit_flex_flash_mask_mod_vec_size(8):
             actual, code = run_and_get_code(
                 torch.compile(fn, fullgraph=True, dynamic=False), q, k, v
             )
