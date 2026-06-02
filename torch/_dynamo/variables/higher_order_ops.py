@@ -4167,14 +4167,27 @@ class RunWithRNGStateHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         p_args = tuple(arg.as_proxy() for arg in args)
         p_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
+        try:
+            proxy = tx.output.create_proxy(
                 "call_function",
                 self.value,
                 args=p_args,
                 kwargs=p_kwargs,
-            ),
+            )
+        except NotImplementedError as exc:
+            unimplemented(
+                gb_type="HOP: unsupported run_with_rng_state argument",
+                context=str(exc),
+                explanation=(
+                    "run_with_rng_state received an argument that cannot be "
+                    "represented in the FX graph."
+                ),
+                hints=[],
+                from_exc=exc,
+            )
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=proxy,
             example_value=None,
         )
 

@@ -35,6 +35,10 @@ from torch._logging import warning_once
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented
+from ..external_utils import (
+    enter_autodispatch_below_autograd,
+    exit_autodispatch_below_autograd,
+)
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from ..utils import _get_error_on_graph_break, _set_error_on_graph_break
@@ -786,6 +790,64 @@ class InferenceModeVariable(ContextWrappingVariable):
 
     def python_type(self) -> type:
         return torch.inference_mode
+
+
+class AutoDispatchBelowAutogradVariable(ContextWrappingVariable):
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", **kwargs: Any
+    ) -> "AutoDispatchBelowAutogradVariable":
+        var = AutoDispatchBelowAutogradVariable(
+            target_values=[], initial_values=[], **kwargs
+        )
+        var.initialize(tx)
+        return var
+
+    def __init__(
+        self,
+        target_values: Sized,
+        initial_values: Sized | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if len(target_values) != 0:
+            raise AssertionError(f"expected 0 target_values, got {len(target_values)}")
+        if initial_values is None:
+            raise AssertionError("initial_values must not be None")
+        if len(initial_values) != 0:
+            raise AssertionError(
+                f"expected 0 initial_values, got {len(initial_values)}"
+            )
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def initialize(self, tx: "InstructionTranslatorBase") -> None:
+        cm_obj = enter_autodispatch_below_autograd()
+        self.set_cleanup_hook(tx, lambda: exit_autodispatch_below_autograd(cm_obj))
+        self.proxy = tx.output.create_node(
+            "call_function", enter_autodispatch_below_autograd, (), {}
+        )
+
+    def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return variables.ConstantVariable.create(None)
+
+    def exit(
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
+    ) -> VariableTracker:
+        self.cleanup_assert()
+        tx.output.create_node(
+            "call_function", exit_autodispatch_below_autograd, (self.proxy,), {}
+        )
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self) -> str:
+        return "torch._C"
+
+    def fn_name(self) -> str:
+        return "_AutoDispatchBelowAutograd"
+
+    def python_type(self) -> type:
+        return torch._C._AutoDispatchBelowAutograd  # pyrefly: ignore[bad-return]
 
 
 class GenericDeviceVariable(ContextWrappingVariable):

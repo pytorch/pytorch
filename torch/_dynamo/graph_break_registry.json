@@ -272,6 +272,14 @@
       ]
     }
   ],
+  "GB6360": [
+    {
+      "Gb_type": "HOP: unsupported run_with_rng_state argument",
+      "Context": "str(exc)",
+      "Explanation": "run_with_rng_state received an argument that cannot be represented in the FX graph.",
+      "Hints": []
+    }
+  ],
   "GB0022": [
     {
       "Gb_type": "Bad import result",
