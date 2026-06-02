@@ -4708,6 +4708,13 @@ class TestProfilerEventsParity(TestCase):
             "ptr",
             "src",
             "dst",
+            # Preemptive: an upcoming kineto change will start emitting
+            # CUPTI's channel / channel_type on kernel-launch, memcpy, memset,
+            # and p2p activities. The matching EventMetadata fields already
+            # exist; the _EVENT_METADATA_KEYS mapping lands alongside the
+            # kineto pin update.
+            "channel",
+            "channel_type",
         }
         supported_trace_keys = set(_EVENT_METADATA_KEYS).union(
             allowed_non_structured_trace_keys
