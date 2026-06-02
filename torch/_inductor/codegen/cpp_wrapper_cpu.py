@@ -31,7 +31,14 @@ from ..utils import _align, make_codegen_buffer, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
-from .cpp_utils import cexpr, DEVICE_TO_ATEN, DEVICE_TO_INT, DTYPE_TO_ATEN, DTYPE_TO_CPP
+from .cpp_utils import (
+    cexpr,
+    DEVICE_TO_ATEN,
+    DEVICE_TO_INT,
+    DTYPE_TO_ATEN,
+    DTYPE_TO_CPP,
+    LAYOUT_TO_ATEN,
+)
 from .wrapper import (
     codegen_reinterpret_view_helper,
     EnterSubgraphLine,
@@ -291,6 +298,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.device_codegen = get_device_op_overrides(self.device)
         self._included_extra_headers: OrderedSet[str] = OrderedSet()
         self.codegen_int_array_var_cache = {}
+        self.needs_vec_isa = self.device == "cpu"
 
     @staticmethod
     def create(
@@ -1434,6 +1442,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
             return
         if cpp_definition is not None:
+            self.needs_vec_isa = True
             self.header.splice(cpp_definition)
             self.kernel_declarations.splice(f"\n{kernel_body}\n")
         else:
@@ -1556,7 +1565,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # Close the wrapper code block
             result.splice('"""\n)')
 
-        kernel_code = "kernel_src" if config.cpp_wrapper_build_separate else "None"
+        if config.cpp_wrapper_build_separate:
+            kernel_code = "kernel_src"
+            needs_vec_isa = "False"
+            kernel_needs_vec_isa = str(self.needs_vec_isa)
+        else:
+            kernel_code = "None"
+            needs_vec_isa = str(self.needs_vec_isa)
+            kernel_needs_vec_isa = "None"
         # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
@@ -1564,6 +1580,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 argtypes=["std::vector<AtenTensorHandle>"],
                 main_code=cpp_wrapper_src,
                 device_type="{self.device}",
+                needs_vec_isa={needs_vec_isa},
+                kernel_needs_vec_isa={kernel_needs_vec_isa},
                 num_outputs={len(V.graph.graph_outputs)},
                 kernel_code={kernel_code},
             )
@@ -1915,15 +1933,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def codegen_cpp_sizevar(self, x: sympy.Expr, *, simplify: bool = True) -> str:
         maybe_simplified_x = V.graph.sizevars.simplify(x) if simplify else x
         # In AOT mode, emit runtime checks for potential division/modulo by zero
-        # to prevent SIGFPE crashes when symbolic tensor shapes can be 0
+        # to prevent SIGFPE crashes when symbolic tensor shapes can be 0.
         if V.graph.aot_mode:
-            divisors = self._extract_divisors_from_expr(maybe_simplified_x)
-            for divisor, op_name in divisors:
-                divisor_str = cexpr(divisor)
-                self.writeline(
-                    f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
-                )
+            for divisor, op_name in self._extract_divisors_from_expr(
+                maybe_simplified_x
+            ):
+                self.write_assert_div_by_zero(cexpr(divisor), op_name)
         return cexpr(maybe_simplified_x)
+
+    def _codegen_assert_div_by_zero(
+        self, code: IndentedBuffer, divisor_str: str, op_name: str
+    ) -> None:
+        """Emit one div-by-zero AOTI check to `code` (replay-phase target)."""
+        code.writeline(
+            f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
+        )
 
     def codegen_sizevar(self, x: sympy.Expr) -> str:
         return self.codegen_cpp_sizevar(x)
@@ -2049,9 +2073,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"auto {new_name} = std::move({old_name});  // reuse"
-
-    def generate_debug_sync(self, buffer):
-        pass
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
@@ -2428,6 +2449,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
         )
 
+    def sync_d2h_copy(self, buffer_name: str) -> None:
+        # TODO: add AOTI C API for event-based D2H copy synchronization
+        pass
+
     def codegen_multi_output(self, node: ir.MultiOutput):
         # in the abi_compatible mode, outputs are retrieved by passing
         # output pointers, so we skip its codegen here.
@@ -2467,6 +2492,43 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # before (e.g., in the while_loop codegen)
                 self.writeline(f"{outer_output}.reset();")
             self.writeline(f"{outer_output} = {src};")
+
+    @staticmethod
+    def _get_while_loop_carried_output_names(while_loop):
+        mutation_output_names = {
+            mutation_name: mutation_output.get_name()
+            for mutation_output in while_loop.mutation_outputs
+            for mutation_name in mutation_output.get_mutation_names()
+        }
+
+        def resolve_mutation_output_name(name):
+            seen = OrderedSet()
+            while name in mutation_output_names:
+                assert name not in seen, "while_loop mutation outputs contain a cycle"
+                seen.add(name)
+                name = mutation_output_names[name]
+            return name
+
+        output_names = []
+        output_idx = 0
+        for carried_input in while_loop.carried_inputs:
+            carried_input_name = carried_input.get_name()
+            mutation_output_name = resolve_mutation_output_name(carried_input_name)
+            if mutation_output_name != carried_input_name:
+                output_names.append(mutation_output_name)
+                continue
+
+            assert output_idx < len(while_loop.outputs), (
+                "while_loop has fewer non-mutated outputs than carried inputs"
+            )
+            output_names.append(while_loop.outputs[output_idx].get_name())
+            output_idx += 1
+
+        assert output_idx == len(while_loop.outputs), (
+            "while_loop has unused non-mutated outputs"
+        )
+
+        return output_names
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
         raise NotImplementedError(
@@ -2539,6 +2601,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         outer_additional_inputs = [
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
+        carried_output_names = self._get_while_loop_carried_output_names(while_loop)
         cond_result_name = f"{name}_cond_result"
         if is_bool_pred:
             self.writeline(f"bool {cond_result_name};")
@@ -2546,12 +2609,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
 
         cond_outer_inputs = []
-        for inp, out in zip(outer_carried_inputs, while_loop.outputs):
+        for inp, out_name in zip(outer_carried_inputs, carried_output_names):
             # in ABI-compatible mode, the carried inputs are codegened
             # as buffers outside the while loop and set to the initial
             # values. at the end of each while_loop iteration, they
             # will be assigned the carried values.
-            out_name = out.get_name()
             self.writeline(f"AtenTensorHandle {out_name}_handle;")
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({inp}, &{out_name}_handle));"
@@ -2787,6 +2849,46 @@ class CppWrapperCpu(PythonWrapperCodegen):
             for a in chain(op._schema.arguments, op._schema.returns)
         )
 
+    @staticmethod
+    def _compatible_with_cpp_boxed_dispatch(op: torch._ops.OpOverload) -> bool:
+        """Returns true if cpp_wrapper JIT can directly codegen c10::IValue boxing
+        for this schema and can unpack the returned values into tensor handles.
+
+        Unlike the StableIValue path, this is only used for JIT cpp_wrapper, where
+        we can include ATen/c10 headers and call the dispatcher directly.
+        """
+
+        def arg_supported(t: torch.JitType) -> bool:
+            if isinstance(t, torch.OptionalType):
+                return arg_supported(t.getElementType())
+            if isinstance(t, torch.ListType):
+                return arg_supported(t.getElementType())
+            if isinstance(t, torch.TupleType):
+                return all(arg_supported(e) for e in t.elements())
+            return isinstance(
+                t,
+                (
+                    torch.BoolType,
+                    torch.DeviceObjType,
+                    torch.FloatType,
+                    torch.IntType,
+                    torch.NumberType,
+                    torch.StringType,
+                    torch.SymBoolType,
+                    torch.SymIntType,
+                    torch.TensorType,
+                ),
+            ) or repr(t) in ("Layout", "MemoryFormat", "ScalarType", "SymFloat")
+
+        def return_supported(t: torch.JitType) -> bool:
+            if isinstance(t, torch.OptionalType):
+                return isinstance(t.getElementType(), torch.TensorType)
+            return isinstance(t, (torch.NoneType, torch.TensorType))
+
+        return all(arg_supported(a.real_type) for a in op._schema.arguments) and all(
+            return_supported(r.real_type) for r in op._schema.returns
+        )
+
     def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name: str,
@@ -2886,6 +2988,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.generate_fallback_kernel_with_runtime_lookup_nopython(
                 get_args,
                 op_overload,
+                output_args,  # type: ignore[arg-type]
+                outputs,
+            )
+            return
+
+        # For cpp_wrapper JIT, fall back to direct boxed dispatcher calls for
+        # schemas the StableIValue bridge cannot represent, such as Tensor[].
+        if self._compatible_with_cpp_boxed_dispatch(op_overload):
+            self.generate_fallback_kernel_with_runtime_lookup_boxed(
+                op_overload,
+                raw_args,
                 output_args,  # type: ignore[arg-type]
                 outputs,
             )
@@ -3170,6 +3283,242 @@ if (!custom_op_wrapper) {
                     continue
                 dispatch_lines.writeline(
                     f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                )
+
+        dispatch_lines.writeline("}")
+        self.writelines(dispatch_lines.getvalue().splitlines())
+
+    def generate_fallback_kernel_with_runtime_lookup_boxed(
+        self,
+        op_overload: torch._ops.OpOverload,
+        raw_args: Sequence[Any],
+        output_args: Sequence[str | None],
+        raw_outputs: Sequence[ir.Buffer],
+    ) -> None:
+        """Generate a JIT-only fallback call through c10::Dispatcher.
+
+        This covers custom C++ ops whose schemas are outside StableIValue's
+        supported subset without routing through Python.
+        """
+        self.include_extra_header("ATen/core/dispatch/Dispatcher.h")
+        self.include_extra_header("ATen/core/ivalue.h")
+        self.include_extra_header("ATen/core/jit_type.h")
+        self.include_extra_header("torch/csrc/inductor/aoti_torch/utils.h")
+
+        if raw_outputs:
+            declarations_before_scope = [
+                f"RAIIAtenTensorHandle {output_arg};"
+                for output_arg, raw_output_arg in zip(output_args, raw_outputs)
+                if output_arg is not None
+                and not isinstance(raw_output_arg, ir.MutationOutput)
+            ]
+        else:
+            declarations_before_scope = [
+                f"RAIIAtenTensorHandle {output_arg};"
+                for output_arg in output_args
+                if output_arg is not None
+            ]
+
+        dispatch_lines = IndentedBuffer()
+        dispatch_lines.writelines(declarations_before_scope)
+        dispatch_lines.writeline("{")
+
+        with dispatch_lines.indent():
+            tmp_var_number = count()
+
+            def next_tmp(prefix: str) -> str:
+                return f"{prefix}_{next(tmp_var_number)}"
+
+            def type_expr(t: torch.JitType) -> str:
+                if isinstance(t, torch.OptionalType):
+                    return f"c10::OptionalType::create({type_expr(t.getElementType())})"
+                if isinstance(t, torch.ListType):
+                    return f"c10::ListType::create({type_expr(t.getElementType())})"
+                if isinstance(t, torch.TupleType):
+                    elems = ", ".join(type_expr(e) for e in t.elements())
+                    var_name = next_tmp("tmp_type")
+                    dispatch_lines.writeline(
+                        f"std::vector<c10::TypePtr> {var_name}{{{elems}}};"
+                    )
+                    return f"c10::TupleType::create(std::move({var_name}))"
+                if isinstance(t, torch.BoolType):
+                    return "c10::BoolType::get()"
+                if isinstance(t, torch.DeviceObjType):
+                    return "c10::DeviceObjType::get()"
+                if isinstance(t, torch.FloatType):
+                    return "c10::FloatType::get()"
+                if isinstance(t, torch.IntType):
+                    return "c10::IntType::get()"
+                if isinstance(t, torch.NumberType):
+                    return "c10::NumberType::get()"
+                if isinstance(t, torch.StringType):
+                    return "c10::StringType::get()"
+                if isinstance(t, torch.SymBoolType):
+                    return "c10::SymBoolType::get()"
+                if isinstance(t, torch.SymIntType):
+                    return "c10::SymIntType::get()"
+                if isinstance(t, torch.TensorType):
+                    return "c10::TensorType::get()"
+                type_repr = repr(t)
+                if type_repr == "Layout":
+                    return "c10::LayoutType::get()"
+                if type_repr == "MemoryFormat":
+                    return "c10::MemoryFormatType::get()"
+                if type_repr == "ScalarType":
+                    return "c10::ScalarTypeType::get()"
+                if type_repr == "SymFloat":
+                    return "c10::SymFloatType::get()"
+                raise AssertionError(f"Unsupported list element type: {t}")
+
+            def codegen_memory_format(memory_format: torch.memory_format) -> str:
+                return {
+                    torch.contiguous_format: "c10::MemoryFormat::Contiguous",
+                    torch.channels_last: "c10::MemoryFormat::ChannelsLast",
+                    torch.channels_last_3d: "c10::MemoryFormat::ChannelsLast3d",
+                    torch.preserve_format: "c10::MemoryFormat::Preserve",
+                }[memory_format]
+
+            def codegen_tensor_ivalue(raw_arg: Any, arg_type: torch.JitType) -> str:
+                if hasattr(raw_arg, "codegen_reference"):
+                    codegen_arg = raw_arg.codegen_reference()
+                else:
+                    codegen_arg = self.val_to_arg_str(raw_arg, arg_type)
+
+                raii_var = self.create_tmp_raii_handle_var_if_needed(
+                    codegen_arg, dispatch_lines
+                )
+                return (
+                    "c10::IValue(*torch::aot_inductor::"
+                    f"tensor_handle_to_tensor_pointer({raii_var}))"
+                )
+
+            def codegen_ivalue(raw_arg: Any, arg_type: torch.JitType) -> str:
+                if raw_arg is None:
+                    return "c10::IValue()"
+
+                if isinstance(arg_type, torch.OptionalType):
+                    return codegen_ivalue(raw_arg, arg_type.getElementType())
+
+                if isinstance(raw_arg, torch.device):
+                    assert raw_arg.type in DEVICE_TO_ATEN, (
+                        raw_arg.type + " not found in DEVICE_TO_ATEN"
+                    )
+                    return (
+                        "c10::IValue(c10::Device("
+                        f"{DEVICE_TO_ATEN[raw_arg.type]}, "
+                        f"{raw_arg.index if raw_arg.index is not None else 0}))"
+                    )
+                if isinstance(raw_arg, torch.dtype):
+                    return f"c10::IValue({DTYPE_TO_ATEN[raw_arg]})"
+                if isinstance(raw_arg, torch.layout):
+                    return f"c10::IValue({LAYOUT_TO_ATEN[raw_arg]})"
+                if isinstance(raw_arg, torch.memory_format):
+                    return f"c10::IValue({codegen_memory_format(raw_arg)})"
+
+                if isinstance(arg_type, torch.TensorType):
+                    return codegen_tensor_ivalue(raw_arg, arg_type)
+
+                if isinstance(arg_type, torch.ListType):
+                    assert isinstance(raw_arg, (list, tuple)), type(raw_arg)
+                    list_var = next_tmp("tmp_list")
+                    elem_type = arg_type.getElementType()
+                    dispatch_lines.writeline(
+                        f"c10::impl::GenericList {list_var}({type_expr(elem_type)});"
+                    )
+                    dispatch_lines.writeline(f"{list_var}.reserve({len(raw_arg)});")
+                    for elem in raw_arg:
+                        dispatch_lines.writeline(
+                            f"{list_var}.emplace_back({codegen_ivalue(elem, elem_type)});"
+                        )
+                    return f"c10::IValue(std::move({list_var}))"
+
+                if isinstance(arg_type, torch.TupleType):
+                    assert isinstance(raw_arg, (list, tuple)), type(raw_arg)
+                    tuple_var = next_tmp("tmp_tuple")
+                    dispatch_lines.writeline(f"std::vector<c10::IValue> {tuple_var};")
+                    dispatch_lines.writeline(f"{tuple_var}.reserve({len(raw_arg)});")
+                    for elem, elem_type in zip(raw_arg, arg_type.elements()):
+                        dispatch_lines.writeline(
+                            f"{tuple_var}.emplace_back({codegen_ivalue(elem, elem_type)});"
+                        )
+                    return (
+                        "c10::IValue(c10::ivalue::Tuple::create("
+                        f"std::move({tuple_var})))"
+                    )
+
+                if isinstance(arg_type, torch.BoolType):
+                    return (
+                        "c10::IValue(static_cast<bool>("
+                        f"{self.val_to_arg_str_for_prim_type(raw_arg, bool)}))"
+                    )
+                if isinstance(arg_type, torch.IntType):
+                    return (
+                        "c10::IValue(static_cast<int64_t>("
+                        f"{self.val_to_arg_str_for_prim_type(raw_arg, int)}))"
+                    )
+                if isinstance(arg_type, torch.FloatType):
+                    return (
+                        "c10::IValue(static_cast<double>("
+                        f"{self.val_to_arg_str_for_prim_type(raw_arg, float)}))"
+                    )
+                if isinstance(arg_type, torch.StringType):
+                    return (
+                        "c10::IValue(std::string("
+                        f"{self.val_to_arg_str_for_prim_type(raw_arg, str)}))"
+                    )
+                if isinstance(arg_type, torch.SymBoolType):
+                    return (
+                        "c10::IValue(c10::SymBool(static_cast<bool>("
+                        f"{self.val_to_arg_str_for_prim_type(raw_arg, bool)})))"
+                    )
+                if isinstance(arg_type, torch.SymIntType):
+                    return (
+                        "c10::IValue(c10::SymInt(static_cast<int64_t>("
+                        f"{self.val_to_arg_str_for_prim_type(raw_arg, int)})))"
+                    )
+                if isinstance(arg_type, torch.NumberType):
+                    return f"c10::IValue({self.val_to_arg_str_for_prim_type(raw_arg, None)})"
+
+                arg_type_repr = repr(arg_type)
+                if arg_type_repr == "Layout":
+                    assert isinstance(raw_arg, torch.layout), type(raw_arg)
+                    return f"c10::IValue({LAYOUT_TO_ATEN[raw_arg]})"
+                if arg_type_repr == "MemoryFormat":
+                    assert isinstance(raw_arg, torch.memory_format), type(raw_arg)
+                    return f"c10::IValue({codegen_memory_format(raw_arg)})"
+                if arg_type_repr == "ScalarType":
+                    assert isinstance(raw_arg, torch.dtype), type(raw_arg)
+                    return f"c10::IValue({DTYPE_TO_ATEN[raw_arg]})"
+                if arg_type_repr == "SymFloat":
+                    return (
+                        "c10::IValue(c10::SymFloat(static_cast<double>("
+                        f"{self.val_to_arg_str_for_prim_type(raw_arg, float)})))"
+                    )
+
+                raise AssertionError(f"Unsupported boxed dispatcher arg: {arg_type}")
+
+            stack_var = next_tmp("dispatch_stack")
+            dispatch_lines.writeline(f"std::vector<c10::IValue> {stack_var};")
+            dispatch_lines.writeline(
+                f"{stack_var}.reserve({len(op_overload._schema.arguments)});"
+            )
+            for raw_arg, schema_arg in zip(raw_args, op_overload._schema.arguments):
+                dispatch_lines.writeline(
+                    f"{stack_var}.emplace_back({codegen_ivalue(raw_arg, schema_arg.real_type)});"
+                )
+
+            dispatch_lines.writeline(
+                "static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("
+                f'"{op_overload._schema.name}", "{op_overload._schema.overload_name}");'
+            )
+            dispatch_lines.writeline(f"op.callBoxed(&{stack_var});")
+
+            for idx, output_arg in enumerate(output_args):
+                if output_arg is None:
+                    continue
+                dispatch_lines.writeline(
+                    f"{output_arg} = torch::aot_inductor::new_tensor_handle("
+                    f"std::move({stack_var}[{idx}]).toTensor());"
                 )
 
         dispatch_lines.writeline("}")
