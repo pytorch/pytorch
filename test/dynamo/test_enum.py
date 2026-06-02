@@ -673,6 +673,25 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, torch.DispatchKey.CPU)
         self.assertEqual(ref, res)
 
+    def test_dispatch_key_sourceless(self):
+        """Test DispatchKey used as a literal inside the compiled function."""
+
+        def fn(x):
+            if x.device.type == "cpu":
+                key = torch.DispatchKey.CPU
+            else:
+                key = torch.DispatchKey.CUDA
+            # Use the key in a branch to ensure it's traced, not eliminated.
+            if key == torch.DispatchKey.CPU:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

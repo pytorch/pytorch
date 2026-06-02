@@ -519,7 +519,7 @@ class NbUnaryTests(TestCase):
 
     # --- UserDefinedObjectVariable wrapping a Python constant (enum) ---
 
-    def test_invert_flag_enum_constant_fold(self):
+    def test_invert_flag_enum(self):
         import enum
 
         class Flags(enum.Flag):

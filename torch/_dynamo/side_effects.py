@@ -1450,7 +1450,8 @@ class SideEffects:
                 # Sourceless enum members: mutations (like _inverted_ caching)
                 # already happened on the real object during tracing.
                 if (
-                    isinstance(var.mutation_type, AttributeMutationNew)
+                    isinstance(var, variables.UserDefinedObjectVariable)
+                    and isinstance(var.mutation_type, AttributeMutationNew)
                     and var.is_python_constant()
                 ):
                     continue
