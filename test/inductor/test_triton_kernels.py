@@ -6373,6 +6373,37 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
 
     @requires_cuda_and_triton
+    def test_wrap_fusion_nested_store_codegen_aliases_indentation(self):
+        # tl.store stored at different indentation level to kernel body.
+        @triton.jit
+        def add_kernel_nested(
+            in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+        ):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            if BLOCK_SIZE > 0:
+                tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b, c):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            wrap_triton(add_kernel_nested, output_tile=("BLOCK_SIZE",))[grid](
+                a, b, out, a.numel(), BLOCK_SIZE=1024
+            )
+            return out * c
+
+        a = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        b = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+        c = torch.randn(8, 16, dtype=torch.float32, device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), a, b, c)
+        self.assertEqual(out, fn(a, b, c))
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    @requires_cuda_and_triton
     def test_wrap_fusion_2d_tile_reduction_no_fuse(self):
         @triton.jit
         def tile2d_kernel(

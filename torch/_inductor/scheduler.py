@@ -3126,6 +3126,8 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
                 return False
             if not isinstance(arg.data.data, ir.ComputedBuffer):
                 return False
+            if not isinstance(arg.data.data.data, ir.Pointwise):
+                return False
             if not all(r == 0 for r in arg.data.data.data.ranges):
                 return False
             return True
@@ -3166,10 +3168,8 @@ class UserTritonSchedulerNode(ExternKernelSchedulerNode):
                 if len(self.output_tile) != 1:
                     why("reduction epilogue fusion only supports a 1D output_tile")
                     return False
-                tile_val = self.node.kwargs.get(self.output_tile[0])
-                if tile_val is not None and not V.graph.sizevars.statically_known_geq(
-                    tile_val, rnumel_ep
-                ):
+                tile_val = self.node.kwargs[self.output_tile[0]]
+                if not V.graph.sizevars.statically_known_geq(tile_val, rnumel_ep):
                     why("user kernel does not support 1d persistent reduction")
                     return False
             k = len(self.output_tile)
