@@ -366,6 +366,16 @@
       ]
     }
   ],
+  "GB1082": [
+    {
+      "Gb_type": "Read RemovableHandle.next_id after handle allocation",
+      "Context": "RemovableHandle.next_id",
+      "Explanation": "Dynamo cannot trace reads of RemovableHandle.next_id after a modeled RemovableHandle allocation in the same frame.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0030": [
     {
       "Gb_type": "ComptimeContext graph break",
@@ -1261,6 +1271,16 @@
       "Explanation": "Attempted to read a cell variable that has not been populated yet.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3755": [
+    {
+      "Gb_type": "Unsupported RemovableHandle hooks dict",
+      "Context": "hooks_dict={dict_var}",
+      "Explanation": "Dynamo only supports RemovableHandle construction for OrderedDict hook stores.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -2521,6 +2541,16 @@
       "Explanation": "Dynamo does not support copy.deepcopy()",
       "Hints": [
         "Avoid calling copy.deepcopy()",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4678": [
+    {
+      "Gb_type": "Read RemovableHandle.id",
+      "Context": "handle.id",
+      "Explanation": "Dynamo cannot trace user-visible reads of RemovableHandle.id because the id is allocated from RemovableHandle.next_id at runtime.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

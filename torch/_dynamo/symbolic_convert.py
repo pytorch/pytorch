@@ -906,7 +906,18 @@ def generic_jump(
             self.jump(inst)
             return
 
-        if value.is_python_constant():
+        if isinstance(value, ConstDictVariable):
+            # Dict truthiness only depends on length. Avoid materializing keys
+            # here; nn.Module hook dictionaries can contain internal
+            # RemovableHandle id keys that are intentionally not exposed as
+            # Python constants.
+            if value.source:
+                install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            if truth_fn(bool(value.items)):
+                if push:
+                    self.push(value)
+                self.jump(inst)
+        elif value.is_python_constant():
             # ConstDictVariable is optimized to be very lazy about insertion of
             # guards, so we have to manually insert a SEQUENCE_LENGTH guard
             # here.

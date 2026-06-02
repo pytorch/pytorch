@@ -3052,6 +3052,22 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             args = [
                 a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
             ]
+        if (
+            len(args) in (2, 3)
+            and not kwargs
+            and isinstance(args[0], variables.UserDefinedClassVariable)
+            and args[0].value is torch.utils.hooks.RemovableHandle
+            and args[1].is_python_constant()
+            and args[1].as_python_constant() == "next_id"
+            and tx.output.side_effects.removable_handle_next_id_increments
+        ):
+            unimplemented(
+                gb_type="Read RemovableHandle.next_id after handle allocation",
+                context="RemovableHandle.next_id",
+                explanation="Dynamo cannot trace reads of RemovableHandle.next_id after "
+                "a modeled RemovableHandle allocation in the same frame.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         try:
             return self._call_getattr(tx, args, kwargs)
         except Unsupported:

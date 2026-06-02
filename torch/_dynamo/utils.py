@@ -5310,6 +5310,10 @@ def invalid_removeable_handle() -> RemovableHandle:
     return RemovableHandle(Invalid())
 
 
+def increment_removable_handle_next_id(count: int) -> None:
+    RemovableHandle.next_id += count
+
+
 # Returns a "proxy" (new object with the same class and dict) for (non-GraphModule) nn.Module's.
 # Attribute changes to the original object/proxy will be reflected in the other.
 # This is useful for cases where we want a keep-alive reference to a module without increasing

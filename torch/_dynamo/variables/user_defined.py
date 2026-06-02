@@ -529,6 +529,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         source = AttrSource(self.source, name) if self.source is not None else None
 
         # --- Dynamo-specific pre-checks ---
+        if (
+            self.value is torch.utils.hooks.RemovableHandle
+            and name == "next_id"
+            and tx.output.side_effects.removable_handle_next_id_increments
+        ):
+            unimplemented(
+                gb_type="Read RemovableHandle.next_id after handle allocation",
+                context="RemovableHandle.next_id",
+                explanation="Dynamo cannot trace reads of RemovableHandle.next_id after "
+                "a modeled RemovableHandle allocation in the same frame.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         # Custom metaclasses that override __getattribute__ replace the entire
         # lookup algorithm; bail out for those. Standard metaclasses (ABCMeta,
@@ -1248,6 +1260,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     f"{self.value.__module__}.{self.value.__qualname__} requires a constant argument",
                 )
             return variable_cls.create(tx, args[0].as_python_constant())
+        elif self.value is torch.utils.hooks.RemovableHandle:
+            return variables.RemovableHandleVariable.create_for_nn_module_hook(
+                tx, args, kwargs
+            )
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -4179,6 +4195,80 @@ class IntWrapperVariable(UserDefinedObjectVariable):
         return mod is not None and type(obj) is mod._IntWrapper
 
 
+class RemovableHandleIdVariable(VariableTracker):
+    _nonvar_fields = {
+        "handle_id",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(self, handle_id: VariableTracker, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.handle_id = handle_id
+
+    @staticmethod
+    def _graph_break(tx: "InstructionTranslatorBase") -> NoReturn:
+        unimplemented(
+            gb_type="Read RemovableHandle.id",
+            context="handle.id",
+            explanation="Dynamo cannot trace user-visible reads of "
+            "RemovableHandle.id because the id is allocated from "
+            "RemovableHandle.next_id at runtime.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def _graph_break_current_tx(self) -> NoReturn:
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        self._graph_break(InstructionTranslator.current_tx())
+
+    def python_type(self) -> type:
+        return int
+
+    def is_python_constant(self) -> bool:
+        return False
+
+    def as_python_constant(self) -> Any:
+        self._graph_break_current_tx()
+
+    def as_proxy(self) -> object:
+        self._graph_break_current_tx()
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        self._graph_break(codegen.tx)
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        self._graph_break(tx)
+
+    def container_key_hash_impl(
+        self, tx: "InstructionTranslatorBase"
+    ) -> tuple[int, bool]:
+        return self.handle_id.container_key_hash_impl(tx)
+
+    def is_python_equal(self, other: object) -> bool:
+        if isinstance(other, RemovableHandleIdVariable):
+            return self.handle_id.is_python_equal(other.handle_id)
+        self._graph_break_current_tx()
+
+    def nb_add_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        self._graph_break(tx)
+
+    def nb_subtract_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        self._graph_break(tx)
+
+    def nb_int_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._graph_break(tx)
+
+
 class RemovableHandleVariable(VariableTracker):
     REMOVED = -1
 
@@ -4187,11 +4277,97 @@ class RemovableHandleVariable(VariableTracker):
         mutation_type: MutationType | None = None,
         # index of the registration in the side_effects owned register_hook/handle list, used during removal.
         idx: int | None = None,
+        handle_id: VariableTracker | None = None,
+        hooks_dict: ConstDictVariable | None = None,
+        extra_dicts: tuple[ConstDictVariable, ...] = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.mutation_type = mutation_type
         self.idx = idx
+        self.handle_id = handle_id
+        self.hooks_dict = hooks_dict
+        self.extra_dicts = extra_dicts
+
+    @staticmethod
+    def _unwrap_hook_dict(
+        tx: "InstructionTranslatorBase", dict_var: VariableTracker
+    ) -> ConstDictVariable:
+        if isinstance(dict_var, variables.UserDefinedDictVariable):
+            dict_var = dict_var._base_vt  # type: ignore[assignment]
+        if isinstance(dict_var, variables.NNModuleHooksDictVariable):
+            return dict_var
+        if (
+            isinstance(dict_var, ConstDictVariable)
+            and dict_var.python_type() is collections.OrderedDict
+        ):
+            return dict_var
+        if isinstance(dict_var, ConstDictVariable) and dict_var.python_type() is dict:
+            raise_type_error(tx, "cannot create weak reference to 'dict' object")
+        unimplemented(
+            gb_type="Unsupported RemovableHandle hooks dict",
+            context=f"hooks_dict={dict_var}",
+            explanation="Dynamo only supports RemovableHandle construction for OrderedDict hook stores.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    @classmethod
+    def create_for_nn_module_hook(
+        cls,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> "RemovableHandleVariable":
+        if len(args) != 1 or any(k != "extra_dict" for k in kwargs):
+            raise_args_mismatch(
+                tx,
+                "RemovableHandle",
+                "1 positional argument and optional extra_dict kwarg",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+
+        hooks_dict = cls._unwrap_hook_dict(tx, args[0])
+        handle_id = variables.ConstantVariable.create(
+            tx.output.side_effects.allocate_removable_handle_id()
+        )
+        extra_dicts: tuple[ConstDictVariable, ...] = ()
+        extra_dict = kwargs.get("extra_dict")
+        if extra_dict is not None and not extra_dict.is_constant_none():
+            if isinstance(extra_dict, variables.ListVariable):
+                extra_dicts = tuple(
+                    cls._unwrap_hook_dict(tx, item) for item in extra_dict.items
+                )
+            elif isinstance(extra_dict, variables.TupleVariable):
+                # Eager RemovableHandle intentionally ignores tuple extra_dict values.
+                pass
+            else:
+                extra_dicts = (cls._unwrap_hook_dict(tx, extra_dict),)
+
+        return cls(
+            mutation_type=ValueMutationNew(),
+            handle_id=handle_id,
+            hooks_dict=hooks_dict,
+            extra_dicts=extra_dicts,
+        )
+
+    def _internal_id_key(self) -> RemovableHandleIdVariable:
+        if self.handle_id is None:
+            raise AssertionError("handle_id must not be None")
+        return RemovableHandleIdVariable(self.handle_id)
+
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "id" and self.handle_id is not None:
+            return self._internal_id_key()
+        return super().var_getattr(tx, name)
+
+    def _remove_from_dict(
+        self, tx: "InstructionTranslatorBase", dict_var: ConstDictVariable
+    ) -> None:
+        handle_id = self._internal_id_key()
+        if handle_id in dict_var:
+            dict_var.mp_ass_subscript_impl(tx, handle_id, None)
 
     def call_method(
         self,
@@ -4200,11 +4376,20 @@ class RemovableHandleVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name == "__enter__" and not args and not kwargs:
+            return self
+        if name == "__exit__" and len(args) == 3 and not kwargs:
+            return self.call_method(tx, "remove", [], {})
         if name == "remove":
             if self.idx != self.REMOVED:
-                if self.idx is None:
+                if self.hooks_dict is not None:
+                    self._remove_from_dict(tx, self.hooks_dict)
+                    for extra_dict in self.extra_dicts:
+                        self._remove_from_dict(tx, extra_dict)
+                elif self.idx is None:
                     raise AssertionError("idx must not be None for hook removal")
-                tx.output.side_effects.remove_hook(self.idx)
+                else:
+                    tx.output.side_effects.remove_hook(self.idx)
                 self.idx = self.REMOVED
             return variables.ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
@@ -4873,6 +5058,26 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None in set_items")
         return self._base_vt.set_items  # pyrefly: ignore[missing-attribute]
+
+    def _has_removable_handle_id_key(self) -> bool:
+        if self._base_vt is None:
+            raise AssertionError(
+                "_base_vt must not be None in _has_removable_handle_id_key"
+            )
+        return cast(SetVariable, self._base_vt)._has_removable_handle_id_key()
+
+    def _check_removable_handle_id_set_op(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> None:
+        if self._base_vt is None:
+            raise AssertionError(
+                "_base_vt must not be None in _check_removable_handle_id_set_op"
+            )
+        if isinstance(other, UserDefinedSetVariable):
+            if other._base_vt is None:
+                raise AssertionError("other._base_vt must not be None")
+            other = other._base_vt
+        cast(SetVariable, self._base_vt)._check_removable_handle_id_set_op(tx, other)
 
     @property
     def items(self) -> dict[HashableTracker, VariableTracker]:

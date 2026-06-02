@@ -1835,10 +1835,9 @@ class VariableBuilder:
             )
 
             # Only track user-defined classes for mutation, not torch
-            # internals. Tracking torch classes (e.g. RemovableHandle) causes
-            # side effects like next_id increments to be replayed incorrectly,
-            # and source chains through C-level descriptors break guard
-            # evaluation.
+            # internals. Tracking torch classes causes side effects to be
+            # replayed incorrectly, and source chains through C-level
+            # descriptors break guard evaluation.
             mod = getattr(value, "__module__", None) or ""
             if not mod.startswith(("torch.", "torch_")):
                 if value not in self.tx.output.side_effects:

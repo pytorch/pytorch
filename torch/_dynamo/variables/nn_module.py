@@ -71,7 +71,7 @@ from ..utils import (
     unpatched_nn_module_call,
     unpatched_nn_module_call_impl,
 )
-from .base import typestr, ValueMutationNew, VariableTracker
+from .base import typestr, ValueMutationExisting, ValueMutationNew, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
 from .user_defined import UserDefinedObjectVariable
@@ -1315,6 +1315,15 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
+                        if hooks_dict in tx.output.side_effects:
+                            return tx.output.side_effects[hooks_dict]
+                        result = variables.NNModuleHooksDictVariable(
+                            {},
+                            type(hooks_dict),
+                            source=hooks_source,
+                            mutation_type=ValueMutationExisting(),
+                        )
+                        return tx.output.side_effects.track_mutable(hooks_dict, result)
                     return variables.ConstDictVariable({})
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
@@ -1334,6 +1343,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
         ):
             hooks_dict = getattr(self.value, name)
+            if hooks_dict in tx.output.side_effects:
+                return tx.output.side_effects[hooks_dict]
             hooks_dict_source = AttrSource(self.source, name)
             install_guard(hooks_dict_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             tx.output.guard_on_key_order.add(hooks_dict_source)
@@ -1356,9 +1367,13 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 for i, k, v in enumerate_items_with_dict_position(hooks_dict)
             )
 
-            return variables.NNModuleHooksDictVariable(
-                result, type(hooks_dict), source=hooks_dict_source
+            result = variables.NNModuleHooksDictVariable(
+                result,
+                type(hooks_dict),
+                source=hooks_dict_source,
+                mutation_type=ValueMutationExisting(),
             )
+            return tx.output.side_effects.track_mutable(hooks_dict, result)
         return super().var_getattr(tx, name)
 
     def manually_trace_nn_module_getattr(

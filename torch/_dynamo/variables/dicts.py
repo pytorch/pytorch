@@ -20,9 +20,10 @@ in sets.py.
 import collections
 import functools
 import types
-from collections.abc import Callable, Iterator
-from typing import Any, TYPE_CHECKING, Union
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, cast, NoReturn, TYPE_CHECKING, Union
 
+import torch
 from torch.utils._pytree import MappingKey
 
 from .. import graph_break_hints, polyfills, variables
@@ -90,6 +91,156 @@ def _is_set_or_dictview(obj: VariableTracker) -> bool:
     return issubclass(t, (set, frozenset, dict_keys, dict_items))
 
 
+def _is_removable_handle_id_key(vt: VariableTracker) -> bool:
+    if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
+        return False
+
+    # Local import avoids a circular import with user_defined.py.
+    from .user_defined import RemovableHandleIdVariable
+
+    return isinstance(vt, RemovableHandleIdVariable)
+
+
+def _removable_handle_id_value(vt: VariableTracker) -> int | None:
+    if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
+        return None
+
+    # Local import avoids a circular import with user_defined.py.
+    from .user_defined import RemovableHandleIdVariable
+
+    if not isinstance(vt, RemovableHandleIdVariable):
+        return None
+    if not vt.handle_id.is_python_constant():
+        return None
+    value = vt.handle_id.as_python_constant()
+    return value if isinstance(value, int) else None
+
+
+def _graph_break_removable_handle_id(tx: "InstructionTranslatorBase") -> NoReturn:
+    # Local import avoids a circular import with user_defined.py.
+    from .user_defined import RemovableHandleIdVariable
+
+    RemovableHandleIdVariable._graph_break(tx)
+
+
+def _graph_break_removable_handle_id_current_tx() -> NoReturn:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    _graph_break_removable_handle_id(InstructionTranslator.current_tx())
+
+
+def _iter_code_objects(code: types.CodeType) -> Iterator[types.CodeType]:
+    yield code
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType):
+            yield from _iter_code_objects(const)
+
+
+@functools.lru_cache(None)
+def _nn_module_call_impl_code_ids() -> frozenset[int]:
+    import torch.nn
+
+    call_impl_code = torch.nn.Module._call_impl.__code__
+    return frozenset(id(code) for code in _iter_code_objects(call_impl_code))
+
+
+def _is_internal_nn_module_call_impl_tx(tx: "InstructionTranslatorBase") -> bool:
+    return id(tx.f_code) in _nn_module_call_impl_code_ids()
+
+
+@functools.lru_cache(None)
+def _nn_module_hook_registration_code_ids() -> frozenset[int]:
+    import torch.nn
+
+    hook_method_names = (
+        "register_backward_hook",
+        "register_forward_hook",
+        "register_forward_pre_hook",
+        "register_full_backward_hook",
+        "register_full_backward_pre_hook",
+    )
+    return frozenset(
+        id(code)
+        for name in hook_method_names
+        for code in _iter_code_objects(getattr(torch.nn.Module, name).__code__)
+    )
+
+
+def _is_internal_nn_module_hook_registration_tx(
+    tx: "InstructionTranslatorBase",
+) -> bool:
+    return id(tx.f_code) in _nn_module_hook_registration_code_ids()
+
+
+def _hashable_tracker_vt(key: object) -> VariableTracker:
+    if isinstance(key, HashableTracker):
+        return key.vt
+    if not isinstance(key, VariableTracker):
+        raise AssertionError(f"Expected VariableTracker key, got {type(key)}")
+    return key
+
+
+def _set_items_have_removable_handle_id_key(items: Iterable[object]) -> bool:
+    return any(_is_removable_handle_id_key(_hashable_tracker_vt(key)) for key in items)
+
+
+def _min_removable_handle_id_key(items: Iterable[object]) -> int | None:
+    values = [
+        value
+        for key in items
+        if (value := _removable_handle_id_value(_hashable_tracker_vt(key))) is not None
+    ]
+    return min(values) if values else None
+
+
+def _ordinary_key_may_equal_future_removable_handle_id(key: object) -> bool:
+    vt = _hashable_tracker_vt(key)
+    return not _is_removable_handle_id_key(vt)
+
+
+def _int_like_constant_key(key: object) -> int | None:
+    vt = _hashable_tracker_vt(key)
+    if _is_removable_handle_id_key(vt) or not vt.is_python_constant():
+        return None
+    value = vt.as_python_constant()
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
+def _set_items_have_non_removable_handle_id_key(
+    items: Iterable[object], min_handle_id: int | None = None
+) -> bool:
+    if min_handle_id is None:
+        return any(
+            not _is_removable_handle_id_key(_hashable_tracker_vt(key)) for key in items
+        )
+    return any(
+        _ordinary_key_may_equal_future_removable_handle_id(key) for key in items
+    )
+
+
+def _max_int_like_non_removable_handle_id_key(
+    items: Iterable[object],
+) -> tuple[int | None, bool]:
+    max_key: int | None = None
+    has_unhandled_key = False
+    for key in items:
+        vt = _hashable_tracker_vt(key)
+        if _is_removable_handle_id_key(vt):
+            continue
+        key_value = _int_like_constant_key(vt)
+        if key_value is None:
+            has_unhandled_key = True
+            continue
+        max_key = key_value if max_key is None else max(max_key, key_value)
+    return max_key, has_unhandled_key
+
+
 class ConstDictVariable(VariableTracker):
     # PyDict_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4825
     _cpython_type = dict
@@ -136,6 +287,12 @@ class ConstDictVariable(VariableTracker):
             return key if isinstance(key, Hashable) else Hashable(key)
 
         dict_cls = self._get_dict_cls_from_user_cls(user_cls)
+        raw_keys = set(items.keys())
+        min_handle_id = _min_removable_handle_id_key(raw_keys)
+        if min_handle_id is not None and _set_items_have_non_removable_handle_id_key(
+            raw_keys, min_handle_id
+        ):
+            _graph_break_removable_handle_id_current_tx()
         self.items = dict_cls({make_hashable(x): v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
@@ -208,6 +365,94 @@ class ConstDictVariable(VariableTracker):
         return key in self.items and not isinstance(
             self.items[key], variables.DeletedVariable
         )
+
+    def _has_removable_handle_id_key(self) -> bool:
+        return any(_is_removable_handle_id_key(key.vt) for key in self.items)
+
+    def _min_removable_handle_id_key(self) -> int | None:
+        return _min_removable_handle_id_key(self.items.keys())
+
+    def _has_non_removable_handle_id_key(
+        self, min_handle_id: int | None = None
+    ) -> bool:
+        return _set_items_have_non_removable_handle_id_key(
+            self.items.keys(), min_handle_id
+        )
+
+    def _max_int_like_non_removable_handle_id_key(self) -> tuple[int | None, bool]:
+        return _max_int_like_non_removable_handle_id_key(self.items.keys())
+
+    def _constant_key_tuple_or_graph_break(
+        self, tx: "InstructionTranslatorBase"
+    ) -> tuple[object, ...]:
+        expected_keys: list[object] = []
+        for key in self.items:
+            if not key.vt.is_python_constant():
+                _graph_break_removable_handle_id(tx)
+            expected_keys.append(key.vt.as_python_constant())
+        return tuple(expected_keys)
+
+    def _install_removable_handle_dict_keys_guard(
+        self, tx: "InstructionTranslatorBase", max_existing_key: int
+    ) -> None:
+        if torch.utils.hooks.RemovableHandle.next_id <= max_existing_key:
+            _graph_break_removable_handle_id(tx)
+        source = self.source
+        if source is None:
+            _graph_break_removable_handle_id(tx)
+        expected_keys = self._constant_key_tuple_or_graph_break(tx)
+        install_guard(source.make_guard(GuardBuilder.REMOVABLE_HANDLE_DICT_KEYS_MATCH))
+        install_guard(
+            source.make_guard(
+                functools.partial(
+                    GuardBuilder.NN_MODULE_HOOKS_DICT_KEYS_MATCH,
+                    expected_keys=expected_keys,
+                )
+            )
+        )
+
+    def _check_removable_handle_id_lookup(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> None:
+        min_handle_id = self._min_removable_handle_id_key()
+        if (
+            min_handle_id is not None
+            and _ordinary_key_may_equal_future_removable_handle_id(key)
+        ):
+            if HashableTracker(key) in self.items:
+                return
+            _graph_break_removable_handle_id(tx)
+
+    def _check_removable_handle_id_dict_merge(
+        self, tx: "InstructionTranslatorBase", other: "ConstDictVariable"
+    ) -> None:
+        self_min_handle_id = self._min_removable_handle_id_key()
+        other_min_handle_id = other._min_removable_handle_id_key()
+        if (
+            self_min_handle_id is not None
+            and other._has_non_removable_handle_id_key(self_min_handle_id)
+        ) or (
+            other_min_handle_id is not None
+            and self._has_non_removable_handle_id_key(other_min_handle_id)
+        ):
+            _graph_break_removable_handle_id(tx)
+
+    def _check_removable_handle_id_insert(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> None:
+        if _is_internal_nn_module_hook_registration_tx(
+            tx
+        ) and _is_removable_handle_id_key(key):
+            max_existing_key, has_unhandled_key = (
+                self._max_int_like_non_removable_handle_id_key()
+            )
+            if has_unhandled_key:
+                _graph_break_removable_handle_id(tx)
+            if max_existing_key is not None:
+                self._install_removable_handle_dict_keys_guard(tx, max_existing_key)
+            return
+        if _is_removable_handle_id_key(key) and self._has_non_removable_handle_id_key():
+            _graph_break_removable_handle_id(tx)
 
     def call_tree_map_branch(
         self,
@@ -332,6 +577,19 @@ class ConstDictVariable(VariableTracker):
             return id(value.realize()) != id(other.realize())
         return id(value) != id(other)
 
+    def _items_match_original(self) -> bool:
+        if len(self.items) != len(self.original_items):
+            return False
+        if list(self.items.keys()) != [
+            HashableTracker(key) for key in self.original_items
+        ]:
+            return False
+        return all(
+            (original := self.original_items.get(key.vt)) is not None
+            and not self.is_new_item(original, value)
+            for key, value in self.items.items()
+        )
+
     def reconstruct_kvs_into_new_dict(self, codegen: "PyCodegen") -> None:
         # Build a dictionary that contains the keys and values.
         num_args = 0
@@ -402,6 +660,7 @@ class ConstDictVariable(VariableTracker):
     def getitem_const_raise_exception_if_absent(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
+        self._check_removable_handle_id_lookup(tx, arg)
         key = HashableTracker(arg)
         if key not in self.items:
             raise_observed_exception(KeyError, tx, args=[arg])
@@ -410,6 +669,7 @@ class ConstDictVariable(VariableTracker):
     def getitem_const(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
+        self._check_removable_handle_id_lookup(tx, arg)
         key = HashableTracker(arg)
         if key not in self.items:
             msg = f"Dictionary key {arg.value} not found during tracing"  # type: ignore[attr-defined]
@@ -447,6 +707,7 @@ class ConstDictVariable(VariableTracker):
     def install_dict_contains_guard(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
+        self._check_removable_handle_id_lookup(tx, args[0])
         # Key guarding - These are the cases to consider
         # 1) The dict has been mutated. In this case, we would have already
         # inserted a DICT_KEYS_MATCH guard, so we can skip.
@@ -501,6 +762,7 @@ class ConstDictVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
         if not is_hashable(item):
             raise_type_error(tx, f"unhashable type: '{item.python_type_name()}'")
+        self._check_removable_handle_id_lookup(tx, item)
         self.install_dict_contains_guard(tx, [item])
         contains = item in self
         return VariableTracker.build(tx, contains)
@@ -535,6 +797,8 @@ class ConstDictVariable(VariableTracker):
             temp_dict_vt = DictBuiltinVariable.call_custom_dict(
                 tx, dict, *args, **kwargs
             )
+            if isinstance(temp_dict_vt, ConstDictVariable):
+                self._check_removable_handle_id_dict_merge(tx, temp_dict_vt)
             tx.output.side_effects.mutation(self)
             self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
             return ConstantVariable.create(None)
@@ -587,6 +851,7 @@ class ConstDictVariable(VariableTracker):
             if len(args) not in (1, 2):
                 raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
 
+            self._check_removable_handle_id_lookup(tx, args[0])
             if args[0] not in self:
                 self.install_dict_contains_guard(tx, args)
                 if len(args) == 1:
@@ -599,6 +864,7 @@ class ConstDictVariable(VariableTracker):
             if len(args) not in (1, 2):
                 raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
 
+            self._check_removable_handle_id_lookup(tx, args[0])
             if args[0] not in self:
                 # missing item, return the default value. Install no DICT_CONTAINS guard.
                 self.install_dict_contains_guard(tx, args)
@@ -610,6 +876,42 @@ class ConstDictVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
+        elif (
+            name == "move_to_end"
+            and self.is_mutable()
+            and self.user_cls is collections.OrderedDict
+        ):
+            if (
+                len(args) not in (1, 2)
+                or any(k != "last" for k in kwargs)
+                or (len(args) == 2 and "last" in kwargs)
+            ):
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 or 2 args and optional last kwarg",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+
+            self.install_dict_keys_match_guard()
+            self._check_removable_handle_id_lookup(tx, args[0])
+            hkey = Hashable(args[0])
+            if hkey not in self.items:
+                raise_observed_exception(
+                    KeyError, tx, args=[args[0].as_python_constant()]
+                )
+
+            if "last" in kwargs:
+                last = bool(kwargs["last"].as_python_constant())
+            elif len(args) == 2:
+                last = bool(args[1].as_python_constant())
+            else:
+                last = True
+
+            self.items.move_to_end(hkey, last=last)
+            self.should_reconstruct_all = True
+            tx.output.side_effects.mutation(self)
+            return ConstantVariable.create(None)
         elif name == "popitem" and self.is_mutable():
             # dict.popitem() takes no args. OrderedDict.popitem(last=) is
             # handled by OrderedDictVariable.call_method.
@@ -661,8 +963,12 @@ class ConstDictVariable(VariableTracker):
                         dict_vt = DictBuiltinVariable.call_custom_dict(
                             tx, dict, args[0]
                         )
+                    if isinstance(dict_vt, ConstDictVariable):
+                        self._check_removable_handle_id_dict_merge(tx, dict_vt)
                     self.items.update(dict_vt.items)  # type: ignore[attr-defined]
                 if has_kwargs:
+                    if self._has_removable_handle_id_key():
+                        _graph_break_removable_handle_id(tx)
                     # Handle kwargs
                     kwargs_hashable = {
                         Hashable(VariableTracker.build(tx, k)): v
@@ -689,10 +995,12 @@ class ConstDictVariable(VariableTracker):
                     "at most 2 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            self._check_removable_handle_id_lookup(tx, args[0])
             value = self.maybe_getitem_const(args[0])
             if value is not None:
                 return value
             else:
+                self._check_removable_handle_id_insert(tx, args[0])
                 if len(args) == 1:
                     x = ConstantVariable.create(None)
                 else:
@@ -718,6 +1026,10 @@ class ConstDictVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4643-L4658
         self_, other_ = (other, self) if reverse else (self, other)
         if pydict_check(self_) and pydict_check(other_):
+            if isinstance(self_, ConstDictVariable) and isinstance(
+                other_, ConstDictVariable
+            ):
+                self_._check_removable_handle_id_dict_merge(tx, other_)
             new = self_.call_method(tx, "copy", [], {})
             new.call_method(tx, "update", [other_], {})
             return new
@@ -746,14 +1058,16 @@ class ConstDictVariable(VariableTracker):
         if not is_hashable(key):
             raise_unhashable(key, tx)
         self.install_dict_keys_match_guard()
+        self._check_removable_handle_id_lookup(tx, key)
         hkey = HashableTracker(key)
         tx.output.side_effects.mutation(self)
         if value is None:
             if hkey not in self.items:
                 raise_observed_exception(KeyError, tx, args=[key.as_python_constant()])
-            self.should_reconstruct_all = True
             del self.items[hkey]
+            self.should_reconstruct_all = not self._items_match_original()
         else:
+            self._check_removable_handle_id_insert(tx, key)
             self.items[hkey] = value
         return ConstantVariable.create(None)
 
@@ -819,8 +1133,14 @@ class ConstDictVariable(VariableTracker):
                 other = other._base_vt
             else:
                 return ConstantVariable.create(NotImplemented)
+        other_dict = cast(ConstDictVariable, other)
+        if (
+            self._has_removable_handle_id_key()
+            or other_dict._has_removable_handle_id_key()
+        ):
+            _graph_break_removable_handle_id(tx)
         eq_result = SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
-            tx, [self, other], {}
+            tx, [self, other_dict], {}
         )
         if op == "__ne__":
             return VariableTracker.build(tx, not eq_result.as_python_constant())
@@ -957,10 +1277,108 @@ class NNModuleHooksDictVariable(ConstDictVariable):
     def install_dict_keys_match_guard(self) -> None:
         pass
 
+    def _install_public_dict_keys_match_guard(
+        self, tx: "InstructionTranslatorBase"
+    ) -> None:
+        if _is_internal_nn_module_call_impl_tx(
+            tx
+        ) or _is_internal_nn_module_hook_registration_tx(tx):
+            return
+        ConstDictVariable.install_dict_keys_match_guard(self)
+        expected_keys = self._constant_key_tuple_or_graph_break(tx)
+        source = self.source
+        if source is None:
+            _graph_break_removable_handle_id(tx)
+        install_guard(
+            source.make_guard(
+                functools.partial(
+                    GuardBuilder.NN_MODULE_HOOKS_DICT_KEYS_MATCH,
+                    expected_keys=expected_keys,
+                )
+            )
+        )
+        if self.source and not is_constant_source(self.source):
+            tx.output.guard_on_key_order.add(self.source)
+
     def install_dict_contains_guard(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
         pass
+
+    def getitem_const_raise_exception_if_absent(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        self._install_public_dict_keys_match_guard(tx)
+        return super().getitem_const_raise_exception_if_absent(tx, arg)
+
+    def getitem_const(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        self._install_public_dict_keys_match_guard(tx)
+        return super().getitem_const(tx, arg)
+
+    def sq_contains(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        self._install_public_dict_keys_match_guard(tx)
+        return super().sq_contains(tx, item)
+
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._install_public_dict_keys_match_guard(tx)
+        return super().tp_iter_impl(tx)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        self._install_public_dict_keys_match_guard(tx)
+        return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
+        self._install_public_dict_keys_match_guard(tx)
+        return super().unpack_var_sequence(tx)
+
+    def nb_or_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        self._install_public_dict_keys_match_guard(tx)
+        return super().nb_or_impl(tx, other, reverse)
+
+    def nb_inplace_or_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        self._install_public_dict_keys_match_guard(tx)
+        return super().nb_inplace_or_impl(tx, other)
+
+    def richcompare_impl(self, tx, other, op):
+        self._install_public_dict_keys_match_guard(tx)
+        return super().richcompare_impl(tx, other, op)
+
+    def _check_removable_handle_id_lookup(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> None:
+        if _is_internal_nn_module_call_impl_tx(tx):
+            return
+        if not _is_removable_handle_id_key(key) and HashableTracker(key) in self.items:
+            return
+        return super()._check_removable_handle_id_lookup(tx, key)
+
+    def _check_removable_handle_id_dict_merge(
+        self, tx: "InstructionTranslatorBase", other: "ConstDictVariable"
+    ) -> None:
+        if _is_internal_nn_module_call_impl_tx(tx):
+            return
+        return super()._check_removable_handle_id_dict_merge(tx, other)
 
 
 class DictViewVariable(VariableTracker):
@@ -1141,8 +1559,21 @@ class DictKeysVariable(DictViewVariable):
             "__ixor__",
         ):
             # These methods always returns a set
+            other_items = args[0].set_items  # type: ignore[attr-defined]
+            self_min_handle_id = self.dv_dict._min_removable_handle_id_key()
+            other_min_handle_id = _min_removable_handle_id_key(other_items)
+            if (
+                self_min_handle_id is not None
+                and _set_items_have_non_removable_handle_id_key(
+                    other_items, self_min_handle_id
+                )
+            ) or (
+                other_min_handle_id is not None
+                and self.dv_dict._has_non_removable_handle_id_key(other_min_handle_id)
+            ):
+                _graph_break_removable_handle_id(tx)
             m = getattr(self.set_items, name)
-            r = m(args[0].set_items)  # type: ignore[attr-defined]
+            r = m(other_items)
             return SetVariable(r)
         return super().call_method(tx, name, args, kwargs)
 
@@ -1254,6 +1685,7 @@ class DictItemsVariable(DictViewVariable):
         # Fast path: if item is a known (key, value) pair, use O(1) dict lookup.
         if isinstance(item, variables.TupleVariable) and len(item.items) == 2:
             key, val = item.items
+            self.dv_dict._check_removable_handle_id_lookup(tx, key)
             key_ht = HashableTracker(key)
             if key_ht not in self.dv_dict.items:
                 return VariableTracker.build(tx, False)

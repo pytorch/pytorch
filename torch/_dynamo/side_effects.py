@@ -114,6 +114,7 @@ class SideEffects:
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     attr_mutation_kinds: dict[VariableTracker, dict[str, AttrMutationKind]]
     keepalive: list[Any]
+    removable_handle_next_id_increments: int
     # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
     mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
 
@@ -142,6 +143,7 @@ class SideEffects:
             ],
         ]
         | None = None,
+        removable_handle_next_id_increments: int = 0,
     ) -> None:
         super().__init__()
         self.output_graph_weakref = weakref.ref(output_graph)
@@ -152,6 +154,7 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        self.removable_handle_next_id_increments = removable_handle_next_id_increments
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
         self._has_existing_dict_mutation = False
@@ -277,6 +280,8 @@ class SideEffects:
             and self.attr_mutation_kinds == other.attr_mutation_kinds
             and self.save_for_backward == other.save_for_backward
             and self.tensor_hooks == other.tensor_hooks
+            and self.removable_handle_next_id_increments
+            == other.removable_handle_next_id_increments
         )
 
     def diff(self, other: "SideEffects") -> str | None:
@@ -300,6 +305,11 @@ class SideEffects:
             return "save_for_backward"
         elif self.tensor_hooks != other.tensor_hooks:
             return "tensor_hooks"
+        elif (
+            self.removable_handle_next_id_increments
+            != other.removable_handle_next_id_increments
+        ):
+            return "removable_handle_next_id_increments"
         else:
             return None
 
@@ -321,6 +331,7 @@ class SideEffects:
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
+            removable_handle_next_id_increments=self.removable_handle_next_id_increments,
         )
 
     def __contains__(self, item: Any) -> bool:
@@ -849,6 +860,14 @@ class SideEffects:
         self.keepalive.append(item)
         return variable
 
+    def allocate_removable_handle_id(self) -> int:
+        handle_id = (
+            torch.utils.hooks.RemovableHandle.next_id
+            + self.removable_handle_next_id_increments
+        )
+        self.removable_handle_next_id_increments += 1
+        return handle_id
+
     def track_save_for_backward(
         self, ctx: VariableTracker, args: list[VariableTracker]
     ) -> None:
@@ -1312,6 +1331,16 @@ class SideEffects:
                 side_effect_messages.append(msg)
 
         suffixes = []
+        if config.replay_side_effects and self.removable_handle_next_id_increments:
+            cg.add_push_null(
+                lambda: cg.load_import_from(
+                    utils.__name__, "increment_removable_handle_next_id"
+                )
+            )
+            cg(variables.ConstantVariable(self.removable_handle_next_id_increments))
+            cg.call_function(1, False)
+            cg.pop_top()
+
         for var in self._get_modified_vars():
             # When replay_side_effects=False, only update variables with TempLocalSource
             if not config.replay_side_effects and not isinstance(
@@ -1722,11 +1751,13 @@ class SideEffects:
             or self.tensor_hooks
             or self.save_for_backward
             or self.tensor_hooks
+            or self.removable_handle_next_id_increments
         )
 
     def clear(self) -> None:
         self.keepalive.clear()
         self.id_to_variable.clear()
+        self.removable_handle_next_id_increments = 0
 
 
 @contextlib.contextmanager

@@ -17,8 +17,9 @@ dictionaries with None values.
 
 import functools
 import operator
+import types
 from collections.abc import Iterable
-from typing import Any, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -60,6 +61,67 @@ def pyset_check(obj: VariableTracker) -> bool:
     return issubclass(obj.python_type(), set)
 
 
+def _is_removable_handle_id_key(vt: VariableTracker) -> bool:
+    if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
+        return False
+
+    # Local import avoids a circular import with user_defined.py.
+    from .user_defined import RemovableHandleIdVariable
+
+    return isinstance(vt, RemovableHandleIdVariable)
+
+
+def _removable_handle_id_value(vt: VariableTracker) -> int | None:
+    if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
+        return None
+
+    # Local import avoids a circular import with user_defined.py.
+    from .user_defined import RemovableHandleIdVariable
+
+    if not isinstance(vt, RemovableHandleIdVariable):
+        return None
+    if not vt.handle_id.is_python_constant():
+        return None
+    value = vt.handle_id.as_python_constant()
+    return value if isinstance(value, int) else None
+
+
+def _graph_break_removable_handle_id(tx: "InstructionTranslatorBase") -> NoReturn:
+    # Local import avoids a circular import with user_defined.py.
+    from .user_defined import RemovableHandleIdVariable
+
+    RemovableHandleIdVariable._graph_break(tx)
+
+
+def _graph_break_removable_handle_id_current_tx() -> NoReturn:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    _graph_break_removable_handle_id(InstructionTranslator.current_tx())
+
+
+def _ordinary_key_may_equal_future_removable_handle_id(key: VariableTracker) -> bool:
+    return not _is_removable_handle_id_key(key)
+
+
+def _iter_code_objects(code: types.CodeType) -> Iterable[types.CodeType]:
+    yield code
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType):
+            yield from _iter_code_objects(const)
+
+
+@functools.lru_cache(None)
+def _nn_module_call_impl_code_ids() -> frozenset[int]:
+    import torch.nn
+
+    call_impl_code = torch.nn.Module._call_impl.__code__
+    return frozenset(id(code) for code in _iter_code_objects(call_impl_code))
+
+
+def _is_internal_nn_module_call_impl_tx(tx: "InstructionTranslatorBase") -> bool:
+    return id(tx.f_code) in _nn_module_call_impl_code_ids()
+
+
 class SetVariable(VariableTracker):
     """Represents a Python set during symbolic execution."""
 
@@ -86,14 +148,37 @@ class SetVariable(VariableTracker):
         # For VariableTrackers, realize them to ensure aliasing guards are installed
         # when the same object appears multiple times.
         hashable_items = []
+        min_handle_id: int | None = None
+        raw_items: list[VariableTracker] = []
         for item in items:
             if isinstance(item, HashableTracker):
+                raw_items.append(item.vt)
+                handle_id_value = _removable_handle_id_value(item.vt)
+                if handle_id_value is not None:
+                    min_handle_id = (
+                        handle_id_value
+                        if min_handle_id is None
+                        else min(min_handle_id, handle_id_value)
+                    )
                 # Already a HashableTracker from a set operation
                 hashable_items.append(item)
             else:
+                raw_items.append(item)
+                handle_id_value = _removable_handle_id_value(item)
+                if handle_id_value is not None:
+                    min_handle_id = (
+                        handle_id_value
+                        if min_handle_id is None
+                        else min(min_handle_id, handle_id_value)
+                    )
                 # VariableTracker - realize to install guards, then wrap
                 # pyrefly: ignore [bad-argument-type]
                 hashable_items.append(HashableTracker(item.realize()))
+        if min_handle_id is not None and any(
+            _ordinary_key_may_equal_future_removable_handle_id(item)
+            for item in raw_items
+        ):
+            _graph_break_removable_handle_id_current_tx()
         # Internal representation as dict allows for simple integration with
         # OrderedSet, notably polyfills. Using set moves complexity to OrderedSet
         self.items = dict.fromkeys(hashable_items, SetVariable._default_value())
@@ -155,6 +240,59 @@ class SetVariable(VariableTracker):
         key = HashableTracker(vt)
         return key in self.items
 
+    def _has_removable_handle_id_key(self) -> bool:
+        return any(_is_removable_handle_id_key(key.vt) for key in self.items)
+
+    def _min_removable_handle_id_key(self) -> int | None:
+        values = [
+            value
+            for key in self.items
+            if (value := _removable_handle_id_value(key.vt)) is not None
+        ]
+        return min(values) if values else None
+
+    def _has_non_removable_handle_id_key(
+        self, min_handle_id: int | None = None
+    ) -> bool:
+        if min_handle_id is None:
+            return any(not _is_removable_handle_id_key(key.vt) for key in self.items)
+        return any(
+            _ordinary_key_may_equal_future_removable_handle_id(key.vt)
+            for key in self.items
+        )
+
+    def _check_removable_handle_id_lookup(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> None:
+        if _is_internal_nn_module_call_impl_tx(tx):
+            return
+        min_handle_id = self._min_removable_handle_id_key()
+        if (
+            min_handle_id is not None
+            and _ordinary_key_may_equal_future_removable_handle_id(key)
+        ):
+            if HashableTracker(key) in self.items:
+                return
+            _graph_break_removable_handle_id(tx)
+
+    def _check_removable_handle_id_set_op(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> None:
+        if _is_internal_nn_module_call_impl_tx(tx):
+            return
+        if not isinstance(other, SetVariable):
+            return
+        self_min_handle_id = self._min_removable_handle_id_key()
+        other_min_handle_id = other._min_removable_handle_id_key()
+        if (
+            self_min_handle_id is not None
+            and other._has_non_removable_handle_id_key(self_min_handle_id)
+        ) or (
+            other_min_handle_id is not None
+            and self._has_non_removable_handle_id_key(other_min_handle_id)
+        ):
+            _graph_break_removable_handle_id(tx)
+
     def has_new_items(self) -> bool:
         return self.should_reconstruct_all or any(
             # pyrefly: ignore [bad-argument-type]
@@ -204,6 +342,7 @@ class SetVariable(VariableTracker):
     def install_set_contains_guard(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
+        self._check_removable_handle_id_lookup(tx, args[0])
         if not self.source:
             return
 
@@ -255,6 +394,7 @@ class SetVariable(VariableTracker):
             # container types, set allows membership testing with a set key, even
             # though it is not hashable.
             item = FrozensetVariable(item.items)  # type: ignore[missing-attribute]
+        self._check_removable_handle_id_lookup(tx, item)
         self.install_set_contains_guard(tx, [item])
         contains = item in self
         return VariableTracker.build(tx, contains)
@@ -304,6 +444,13 @@ class SetVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             # Convert add to __setitem__ with None value
+            if (
+                _is_removable_handle_id_key(args[0])
+                and self._has_non_removable_handle_id_key()
+                and not _is_internal_nn_module_call_impl_tx(tx)
+            ):
+                _graph_break_removable_handle_id(tx)
+            self._check_removable_handle_id_lookup(tx, args[0])
             tx.output.side_effects.mutation(self)
             self.items[HashableTracker(args[0])] = SetVariable._default_value()
             return ConstantVariable.create(None)
@@ -332,12 +479,15 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            self._check_removable_handle_id_set_op(tx, args[0])
             return SourcelessBuilder.create(tx, polyfills.set_isdisjoint).call_function(
                 tx, [self, args[0]], {}
             )
         elif name == "intersection":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            for arg in args:
+                self._check_removable_handle_id_set_op(tx, arg)
             return SourcelessBuilder.create(
                 tx, polyfills.set_intersection
             ).call_function(
@@ -348,12 +498,16 @@ class SetVariable(VariableTracker):
         elif name == "intersection_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            for arg in args:
+                self._check_removable_handle_id_set_op(tx, arg)
             return SourcelessBuilder.create(
                 tx, polyfills.set_intersection_update
             ).call_function(tx, [self, *args], {})
         elif name == "union":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            for arg in args:
+                self._check_removable_handle_id_set_op(tx, arg)
             return SourcelessBuilder.create(tx, polyfills.set_union).call_function(
                 tx,
                 [self, *args],
@@ -364,6 +518,8 @@ class SetVariable(VariableTracker):
                 raise_args_mismatch(
                     tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
                 )
+            for arg in args:
+                self._check_removable_handle_id_set_op(tx, arg)
             return SourcelessBuilder.create(tx, polyfills.set_difference).call_function(
                 tx,
                 [self, *args],
@@ -372,6 +528,8 @@ class SetVariable(VariableTracker):
         elif name == "difference_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            for arg in args:
+                self._check_removable_handle_id_set_op(tx, arg)
             return SourcelessBuilder.create(
                 tx, polyfills.set_difference_update
             ).call_function(tx, [self, *args], {})
@@ -383,6 +541,7 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            self._check_removable_handle_id_set_op(tx, args[0])
             return SourcelessBuilder.create(
                 tx, polyfills.set_symmetric_difference
             ).call_function(
@@ -398,12 +557,15 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            self._check_removable_handle_id_set_op(tx, args[0])
             return SourcelessBuilder.create(
                 tx, polyfills.set_symmetric_difference_update
             ).call_function(tx, [self, *args], {})
         elif name == "update" and self.is_mutable():
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
+            for arg in args:
+                self._check_removable_handle_id_set_op(tx, arg)
             return SourcelessBuilder.create(tx, polyfills.set_update).call_function(
                 tx, [self, *args], {}
             )
@@ -415,6 +577,7 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            self._check_removable_handle_id_lookup(tx, args[0])
             if args[0] not in self:
                 raise_observed_exception(KeyError, tx, args=args)
             self.should_reconstruct_all = True
@@ -429,6 +592,7 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
+            self._check_removable_handle_id_lookup(tx, args[0])
             if args[0] in self:
                 self.should_reconstruct_all = True
                 tx.output.side_effects.mutation(self)
@@ -586,6 +750,7 @@ class SetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
+        self_._check_removable_handle_id_set_op(tx, other_)  # type: ignore[attr-defined]
         result = self_.call_method(tx, "copy", [], {})
         if self_ is other_:
             return result
@@ -599,6 +764,7 @@ class SetVariable(VariableTracker):
         if not pyanyset_check(other):
             return ConstantVariable.create(NotImplemented)
 
+        self._check_removable_handle_id_set_op(tx, other)
         tx.output.side_effects.mutation(self)
         self.items.update(other.items)  # type: ignore[missing-attribute]
         return self
@@ -615,6 +781,7 @@ class SetVariable(VariableTracker):
         if not pyanyset_check(self_) or not pyanyset_check(other_):
             return ConstantVariable.create(NotImplemented)
 
+        self_._check_removable_handle_id_set_op(tx, other_)  # type: ignore[attr-defined]
         result = self_.call_method(tx, "copy", [], {})
         for k in list(other_.items.keys()):  # type: ignore[missing-attribute]
             result.items.pop(k, None)  # type: ignore[missing-attribute]
@@ -627,6 +794,7 @@ class SetVariable(VariableTracker):
         if not pyanyset_check(other):
             return ConstantVariable.create(NotImplemented)
 
+        self._check_removable_handle_id_set_op(tx, other)
         tx.output.side_effects.mutation(self)
         for k in list(other.items.keys()):  # type: ignore[missing-attribute]
             self.items.pop(k, None)
@@ -662,6 +830,10 @@ class SetVariable(VariableTracker):
         # https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L2093-L2130
         self_items = self.set_items
         other_items = other.set_items  # type: ignore[attr-defined]
+        if (
+            self._has_removable_handle_id_key() or other._has_removable_handle_id_key()  # type: ignore[attr-defined]
+        ):
+            _graph_break_removable_handle_id(tx)
         if op == "__eq__":
             # len check + issubset: same length and subset implies equality.
             if len(self_items) != len(other_items):

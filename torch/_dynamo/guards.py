@@ -856,6 +856,36 @@ def get_verbose_code_parts(
     return verbose_code_parts
 
 
+def _removable_handle_int_like_key(key: object) -> int | None:
+    if isinstance(key, bool):
+        return int(key)
+    if isinstance(key, int):
+        return key
+    if isinstance(key, float) and key.is_integer():
+        return int(key)
+    return None
+
+
+def _removable_handle_dict_keys_match(hooks_dict: object) -> bool:
+    if not isinstance(hooks_dict, collections.abc.Mapping):
+        return False
+
+    next_id = torch.utils.hooks.RemovableHandle.next_id
+    for key in hooks_dict:
+        key_value = _removable_handle_int_like_key(key)
+        if key_value is None or key_value >= next_id:
+            return False
+    return True
+
+
+def _dict_keys_exact_match(
+    hooks_dict: object, expected_keys: tuple[object, ...]
+) -> bool:
+    if not isinstance(hooks_dict, collections.abc.Mapping):
+        return False
+    return tuple(hooks_dict) == expected_keys
+
+
 def _get_closure_var_hint(source: Source | None) -> str | None:
     """
     Walk up the source chain to find a CellContentsSource ancestor.
@@ -2517,6 +2547,35 @@ class GuardBuilder(GuardBuilderBase):
 
         self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @skip_guard_check_spec
+    def REMOVABLE_HANDLE_DICT_KEYS_MATCH(self, guard: Guard) -> None:
+        ref = self.arg_ref(guard)
+        code = [f"___removable_handle_dict_keys_match({ref})"]
+        self._set_guard_export_info(guard, code)
+        self.add_python_lambda_leaf_guard_to_root(
+            code,
+            get_verbose_code_parts(code, guard),
+            closure_vars={
+                "___removable_handle_dict_keys_match": _removable_handle_dict_keys_match
+            },
+        )
+
+    @skip_guard_check_spec
+    def NN_MODULE_HOOKS_DICT_KEYS_MATCH(
+        self, guard: Guard, expected_keys: tuple[object, ...]
+    ) -> None:
+        ref = self.arg_ref(guard)
+        code = [f"___dict_keys_exact_match({ref}, ___expected_keys)"]
+        self._set_guard_export_info(guard, code)
+        self.add_python_lambda_leaf_guard_to_root(
+            code,
+            get_verbose_code_parts(code, guard),
+            closure_vars={
+                "___dict_keys_exact_match": _dict_keys_exact_match,
+                "___expected_keys": expected_keys,
+            },
         )
 
     # Global state guard — not source-specific, checked separately at runtime.
