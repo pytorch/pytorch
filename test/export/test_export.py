@@ -6683,6 +6683,34 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
+    def test_data_dependent_fstring_moduledict_key_strict(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.classifiers = torch.nn.ModuleDict(
+                    {
+                        "domain1": torch.nn.Linear(128, 10),
+                        "domain2": torch.nn.Linear(128, 5),
+                    }
+                )
+
+            def forward(self, inputs, output_domains):
+                return [
+                    self.classifiers[f"domain{idx.item() + 1}"](inputs)
+                    for idx in output_domains
+                ]
+
+        with self.assertRaisesRegex(
+            torchdynamo.exc.UserError,
+            r"data-dependent expression .* \+ 1",
+        ) as cm:
+            export(
+                M(),
+                (torch.randn(2, 128), torch.tensor([0, 1])),
+                strict=True,
+            )
+        self.assertNotIn("KeyError", str(cm.exception))
+
     def test_unbacked_infer_size(self):
         class Foo(torch.nn.Module):
             def forward(self, x):

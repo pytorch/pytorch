@@ -2023,6 +2023,35 @@ class StringFormatVariable(VariableTracker):
             return repr(self)
         return repr(rendered)
 
+    @staticmethod
+    def _constant_format_arg(arg: VariableTracker) -> object:
+        if isinstance(arg, variables.SymNodeVariable):
+            return arg.evaluate_expr()
+        return arg.as_python_constant()
+
+    def _constant_string(self) -> str:
+        return self.format_string.format(
+            *[self._constant_format_arg(arg) for arg in self.sym_args],
+            **{
+                key: self._constant_format_arg(value)
+                for key, value in self.sym_kwargs.items()
+            },
+        )
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        return hash(self._constant_string()), False
+
+    def is_python_equal(self, other: object) -> bool:
+        if isinstance(other, StringFormatVariable):
+            return self._constant_string() == other._constant_string()
+        if isinstance(other, VariableTracker):
+            try:
+                other_constant = other.as_python_constant()
+            except NotImplementedError:
+                return False
+            return self._constant_string() == other_constant
+        return False
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.extend_output(
