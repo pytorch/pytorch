@@ -1150,6 +1150,7 @@ if(USE_NCCL)
 endif()
 
 # ---[ NCCL EP
+# Static-link libnccl_ep.a into libtorch_cuda.so.
 if(USE_NCCL_EP)
   message(STATUS "USE_NCCL_EP is ON")
   include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)
