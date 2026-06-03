@@ -122,7 +122,7 @@ static void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
-  if (std::none_of(orig_arguments.begin(), orig_arguments.end(), ivalueParticipatesInCurrentLevel)) {
+  if (std::ranges::none_of(orig_arguments, ivalueParticipatesInCurrentLevel)) {
     c10::impl::ExcludeDispatchKeyGuard guard_2(DispatchKey::FuncTorchBatched);
     op.callBoxed(stack);
     return;

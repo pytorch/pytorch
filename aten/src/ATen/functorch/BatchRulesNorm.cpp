@@ -6,7 +6,7 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
-#include "core/MemoryFormat.h"
+#include <core/MemoryFormat.h>
 
 namespace at::functorch {
 
