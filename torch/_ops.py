@@ -5,6 +5,7 @@ import ctypes
 import importlib
 import inspect
 import sys
+import threading
 import types
 from collections.abc import Callable, Iterator
 from functools import cached_property
@@ -31,6 +32,30 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T", default=Any)
 _P = ParamSpec("_P", default=...)
+
+
+# TLS holding the active redispatch chain entry: [op, chain, idx]
+# where op is the target OpOverload, chain is a tuple of callables
+# (autograd_impl, [adinplaceorview_impl,] backend_dispatch), and idx
+# is the next position to dispatch.
+_redispatch_chain_tls = threading.local()
+_fast_redispatch_count: int = 0
+
+
+def _set_fast_redispatch(op: "OpOverload", chain: tuple):
+    """Set up fast redispatch chain. Returns previous entry for restore.
+
+    Split into set/unset instead of a context manager to avoid __enter__/__exit__
+    overhead on the custom_op fast path.
+    """
+    prev = getattr(_redispatch_chain_tls, "entry", None)
+    _redispatch_chain_tls.entry = [op, chain, 0]
+    return prev
+
+
+def _unset_fast_redispatch(prev):
+    """Restore previous redispatch chain entry."""
+    _redispatch_chain_tls.entry = prev
 
 
 # Query `hasattr` only once.
@@ -875,6 +900,14 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     def redispatch(
         self, /, keyset: torch._C.DispatchKeySet, *args: _P.args, **kwargs: _P.kwargs
     ) -> _T:
+        global _fast_redispatch_count
+        entry = getattr(_redispatch_chain_tls, "entry", None)
+        if entry is not None:
+            target_op, chain, idx = entry
+            if target_op is self and idx < len(chain):
+                entry[2] += 1
+                _fast_redispatch_count += 1
+                return chain[idx](keyset, *args, **kwargs)
         return self._handle.redispatch_boxed(keyset, *args, **kwargs)  # type: ignore[return-value]
 
     def __hash__(self):
