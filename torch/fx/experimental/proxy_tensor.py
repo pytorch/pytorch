@@ -2084,31 +2084,29 @@ def _sym_register(
         set_proxy_slot(out, tracer, p_out_thunk)
 
 
+def _sym_op_arg_node(tracer: _ProxyTracer, a: object) -> object:
+    # Constant sym values carry no proxy slot; fold them to a literal so
+    # untracked constants don't hit "is not tracked with proxy".
+    if not isinstance(a, py_sym_types):
+        return a
+    if a.node.expr.is_number:
+        if isinstance(a, SymBool):
+            return bool(a.node.expr)
+        if isinstance(a, SymInt):
+            return int(a.node.expr)
+        return float(a.node.expr)
+    return get_proxy_slot(a, tracer).force().node
+
+
 def _compute_proxy(
     tracer: _ProxyTracer, func: OpOverload, args: tuple[object, ...], out: PySymType
 ) -> Proxy:
     # Handle torch.sym_sum
     n_args: tuple[object, ...]
     if len(args) == 1 and isinstance(args[0], (list, tuple)):
-        n_args = (
-            tuple(
-                (
-                    get_proxy_slot(a, tracer).force().node
-                    if isinstance(a, py_sym_types)
-                    else a
-                )
-                for a in args[0]
-            ),
-        )
+        n_args = (tuple(_sym_op_arg_node(tracer, a) for a in args[0]),)
     else:
-        n_args = tuple(
-            (
-                get_proxy_slot(a, tracer).force().node
-                if isinstance(a, py_sym_types)
-                else a
-            )
-            for a in args
-        )
+        n_args = tuple(_sym_op_arg_node(tracer, a) for a in args)
 
     # func doesn't have a __torch_function__ that Proxy can interpose, so
     # we gotta do it manually
