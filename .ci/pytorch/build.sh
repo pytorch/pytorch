@@ -10,6 +10,10 @@ set -ex -o pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # shellcheck source=./rocm_utils.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
+fi
 
 echo "Python version:"
 python --version
@@ -101,7 +105,18 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_MKLDNN=0
 
   export SLEEF_TARGET_EXEC_USE_QEMU=ON
-  sudo chown -R jenkins /var/lib/jenkins/workspace /opt
+  # Restrict chown to the workspace and the cross-compile sysroot/venv we
+  # actually write into. The workspace path differs by runner: EC2 docker
+  # mounts it at /var/lib/jenkins/workspace and GITHUB_WORKSPACE points at
+  # the host path that doesn't exist inside the container; OSDC k8s has it
+  # at ${GITHUB_WORKSPACE} (/__w/pytorch/pytorch) and no /var/lib/jenkins.
+  # Recursing into all of /opt would also fail on OSDC because /opt/git-cache
+  # is a read-only hostPath mount.
+  for dir in "${GITHUB_WORKSPACE:-}" /var/lib/jenkins/workspace /opt/sysroot /opt/riscv-cross-env; do
+    if [ -n "$dir" ] && [ -d "$dir" ]; then
+      sudo chown -R jenkins "$dir"
+    fi
+  done
 
 fi
 
@@ -290,6 +305,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     install_torchcomms
   fi
 
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *spmd_types* ]]; then
+    install_spmd_types
+  fi
+
   if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
     echo "Checking that xpu is compiled"
     pushd dist/
@@ -330,6 +349,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
       sudo rm -rf original
       popd
     fi
+
+    # Build rocm-composable-kernel (ck4inductor) wheel alongside PyTorch.
+    # Placed outside the /opt/rocm/llvm/bin pushd so `dist/` resolves to the repo root.
+    build_rocm_ck_wheel dist/
   fi
 
   if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then

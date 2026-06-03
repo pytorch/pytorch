@@ -74,7 +74,9 @@ from ._aot_autograd.utils import (
     _is_fwd_seed_offset,
     _is_primal,
     _is_tangent,
-    get_cuda_generator_meta_val,
+    get_default_generator,
+    get_device_rng_state,
+    supports_graphsafe_rng,
 )
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
@@ -1364,6 +1366,8 @@ def default_partition(
             continue
         if node.target in (
             torch.ops.aten._assert_scalar.default,
+            torch.ops.aten._assert_async.default,
+            torch.ops.aten._assert_async.msg,
             # Profiler record_function ops are technically impure (they set up
             # profiling spans), but they're safe to duplicate during AC recompute.
             # We skip both enter and exit to keep profiling spans balanced.
@@ -1500,12 +1504,15 @@ def _size_of(node: fx.Node) -> int:
         elif isinstance(val, (list, tuple)):
             return sum(object_nbytes(n) for n in val)
         elif isinstance(val, dict):
-            return sum(object_nbytes(n) for _, n in val.items())
+            return sum(object_nbytes(n) for n in val.values())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
 
         raise RuntimeError(f"Unknown metadata type {type(val)} on node {node}")
-    if node.op == "get_attr" or node.target is torch.ops.aten._assert_scalar.default:
+    if node.op == "get_attr" or (
+        isinstance(node.target, torch._ops.OpOverload)
+        and len(node.target._schema.returns) == 0
+    ):
         return 0
     raise RuntimeError(
         f"Node {node} didn't have `val` metadata; we should always have `val` metadata on the nodes."
@@ -1683,14 +1690,14 @@ def apply_graphsafe_rng_functionalization(
     # functionalization. See note above [CUDA Graph Safe RNG Functionalization]
     with fw_module.graph.inserting_after(last_fwd_input):
         fwd_rng_state = fw_module.graph.placeholder(f"fwd_rng_state_{rng_count}")
-        fwd_rng_state.meta["val"] = get_cuda_generator_meta_val(device_idx)
+        fwd_rng_state.meta["val"] = get_default_generator(device).clone_state()
         last_fwd_input = fwd_rng_state
 
     # Handle backward pass
     with bw_module.graph.inserting_after(last_bwd_input):
         bwd_rng_state = bw_module.graph.placeholder(f"bwd_rng_state_{rng_count}")
         # as above, clone so that meta val generator will not contain tensors
-        bwd_rng_state.meta["val"] = get_cuda_generator_meta_val(device_idx)
+        bwd_rng_state.meta["val"] = get_default_generator(device).clone_state()
         last_bwd_input = bwd_rng_state
 
     # Update forward node
@@ -1773,7 +1780,7 @@ def functionalize_rng_ops(
 
         for candidate in candidates:
             if isinstance(candidate, torch.Tensor):
-                if candidate.device.type == "cuda":
+                if supports_graphsafe_rng(candidate.device):
                     return candidate.device
 
         return torch.device("cpu")
@@ -1785,8 +1792,8 @@ def functionalize_rng_ops(
         if fake_mode is None:
             raise AssertionError("fake_mode must not be None")
         with fake_mode:
-            if device is not None and device.type == "cuda":
-                return fake_mode.from_tensor(torch.cuda.get_rng_state())
+            if device is not None and supports_graphsafe_rng(device):
+                return fake_mode.from_tensor(get_device_rng_state(device))
             return fake_mode.from_tensor(torch.get_rng_state())
 
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
@@ -1833,16 +1840,16 @@ def functionalize_rng_ops(
     )
     # pyrefly: ignore [unbound-name]
     devices.discard(torch.device("cpu"))
-    # multiple cuda devices won't work with cudagraphs anyway,
+    # multiple graphsafe devices won't work with cudagraphs anyway,
     # fallback to non graphsafe rng checkpointing
-    multi_cuda_devices = len(devices) > 1
+    multi_graphsafe_devices = len(devices) > 1
 
     # this changes numerics, so if fallback_random is set we will not use it
     # pyrefly: ignore [unbound-name]
     ind_config = torch._inductor.config
     use_rng_graphsafe_rng_functionalization = (
         config.graphsafe_rng_functionalization
-        and not multi_cuda_devices
+        and not multi_graphsafe_devices
         and (
             not ind_config.fallback_random
             or ind_config.test_configs.graphsafe_rng_func_ignores_fallback_random
@@ -1861,7 +1868,7 @@ def functionalize_rng_ops(
         if (
             use_rng_graphsafe_rng_functionalization
             and device is not None
-            and device.type == "cuda"
+            and supports_graphsafe_rng(device)
         ):
             last_fwd_input, last_bwd_input = apply_graphsafe_rng_functionalization(
                 fw_module,
@@ -3906,9 +3913,16 @@ def draw_graph(
         dot_graph_shape=dot_graph_shape,
     )
     x = g.get_main_dot_graph()
-    write_method = getattr(x, "write_" + ext.lstrip("."))
     fname = f"{base}{ext}"
-    if prog is None:
+    graph_format = ext.lstrip(".")
+    if graph_format in {"dot", "raw"}:
+        # pydot's write_dot() invokes Graphviz with -Tdot.  For large FX graphs
+        # that layout step can dominate compile debugging, so write raw DOT
+        # source directly for text graph dumps.
+        x.write(fname)
+    elif prog is None:
+        write_method = getattr(x, "write_" + graph_format)
         write_method(fname)
     else:
+        write_method = getattr(x, "write_" + graph_format)
         write_method(fname, prog=prog)
