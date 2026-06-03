@@ -904,7 +904,6 @@ class TestExportDynamicSpecInternalAPIs(TestCase):
 class GraphModule(torch.nn.Module):
     def forward(self, x):
         arg_0: "f32[u0, 3]";
-
         arg_0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
         l_flat_args_0_ = arg_0
         res: "f32[3]" = l_flat_args_0_.sum(0);  l_flat_args_0_ = None
