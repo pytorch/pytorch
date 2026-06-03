@@ -73,6 +73,8 @@ export PYTORCH_BUILD_NUMBER=1
 # Set triton version as part of PYTORCH_EXTRA_INSTALL_REQUIREMENTS
 TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
 TRITON_CONSTRAINT="platform_system == 'Linux' and python_version < '3.15'"
+# Remove when issue https://github.com/pytorch/pytorch/issues/186099 is resolved
+TRITON_XPU_CONSTRAINT="python_version < '3.15'"
 
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" && ! "$PYTORCH_BUILD_VERSION" =~ .*xpu.* ]]; then
   TRITON_REQUIREMENT="triton==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
@@ -100,10 +102,10 @@ fi
 # Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton xpu package
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*xpu.* ]]; then
     TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_xpu_version.txt)
-    TRITON_REQUIREMENT="triton-xpu==${TRITON_VERSION}"
+    TRITON_REQUIREMENT="triton-xpu==${TRITON_VERSION}; ${TRITON_XPU_CONSTRAINT}"
     if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
         TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton-xpu.txt)
-        TRITON_REQUIREMENT="triton-xpu==${TRITON_VERSION}+git${TRITON_SHORTHASH}"
+        TRITON_REQUIREMENT="triton-xpu==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_XPU_CONSTRAINT}"
     fi
     if [[ -z "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
         export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${TRITON_REQUIREMENT}"
