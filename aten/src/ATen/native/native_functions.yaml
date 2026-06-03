@@ -2887,7 +2887,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lcm_out
+    CPU, CUDA, MPS: lcm_out
   tags: pointwise
 
 - func: lcm(Tensor self, Tensor other) -> Tensor
@@ -3021,7 +3021,7 @@
 
 - func: native_group_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, SymInt N, SymInt C, SymInt HxW, int group, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU, CUDA: native_group_norm_backward
+    CPU, CUDA, MPS: native_group_norm_backward
   autogen: native_group_norm_backward.out
   tags: core
 
@@ -6883,6 +6883,7 @@
   dispatch:
     CPU: _dirichlet_grad_cpu
     CUDA: _dirichlet_grad_cuda
+    MPS: _dirichlet_grad_mps
   autogen: _dirichlet_grad.out
 
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
@@ -6891,6 +6892,7 @@
   dispatch:
     CPU: _s_dirichlet_cpu
     CUDA: _s_dirichlet_cuda
+    MPS: _s_dirichlet_mps
   autogen: _sample_dirichlet.out
 
 - func: poisson(Tensor self, Generator? generator=None) -> Tensor
