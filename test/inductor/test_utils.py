@@ -9,7 +9,7 @@ from sympy import I, Max, Min, Symbol, sympify
 import torch
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
-from torch._inductor.compile_fx import _get_subgraph_names
+from torch._inductor.compile_fx import _get_subgraph_names, fake_tensor_prop
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
     count_flops_fx,
@@ -547,6 +547,76 @@ class TestFakeTensorUpdater(TestCase):
         # tensors.
         for m in mul_nodes:
             self.assertEqual(len(m.meta["val"].size()), 4)
+
+    def test_layout_constraints(self):
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return aten.view_as_complex.default(aten.clone.default(x))
+
+        graph = self._get_graph(fn, torch.randn(2, 3, 2))
+        updater = FakeTensorUpdater(graph)
+        clone_node = graph.graph.find_nodes(
+            op="call_function", target=aten.clone.default
+        )[0]
+        view_node = graph.graph.find_nodes(
+            op="call_function", target=aten.view_as_complex.default
+        )[0]
+
+        with graph.graph.inserting_before(view_node):
+            bad_stride_node = graph.graph.call_function(
+                aten.as_strided.default,
+                (clone_node, (2, 3, 2), (6, 1, 3)),
+            )
+        view_node.replace_input_with(clone_node, bad_stride_node)
+        graph.graph.lint()
+        graph.recompile()
+
+        with V.set_fake_mode(self._get_faketensormode(graph)):
+            num_updated = updater.incremental_update()
+
+        self.assertGreaterEqual(num_updated, 2)
+        self.assertEqual(view_node.meta["val"].stride(), (3, 1))
+
+    def test_fake_tensor_prop_layout_constraints(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        permute = graph.call_function(aten.permute.default, (x, [0, 2, 1]))
+        view_as_complex = graph.call_function(aten.view_as_complex.default, (permute,))
+        graph.output(view_as_complex)
+        gm = torch.fx.GraphModule({}, graph)
+
+        fake_tensor_prop(gm, [torch.randn(2, 2, 3)])
+
+        self.assertEqual(view_as_complex.meta["val"].stride(), (3, 1))
+        self.assertEqual(
+            len(graph.find_nodes(op="call_function", target=aten.clone.default)), 0
+        )
+
+    def test_fake_tensor_prop_layout_constraints_invoke_subgraph(self):
+        subgraph = torch.fx.Graph()
+        sub_x = subgraph.placeholder("sub_x")
+        permute = subgraph.call_function(aten.permute.default, (sub_x, [0, 2, 1]))
+        view_as_complex = subgraph.call_function(
+            aten.view_as_complex.default, (permute,)
+        )
+        subgraph.output(view_as_complex)
+        submodule = torch.fx.GraphModule({}, subgraph)
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        submodule_node = graph.get_attr("submodule")
+        invoke_subgraph = graph.call_function(
+            torch.ops.higher_order.invoke_subgraph,
+            (submodule_node, "submodule", x),
+        )
+        graph.output(invoke_subgraph)
+        gm = torch.fx.GraphModule({"submodule": submodule}, graph)
+
+        fake_tensor_prop(gm, [torch.randn(2, 2, 3)])
+
+        self.assertEqual(view_as_complex.meta["val"].stride(), (3, 1))
+        self.assertEqual(
+            len(subgraph.find_nodes(op="call_function", target=aten.clone.default)), 0
+        )
 
     def test_fake_tensor_same_recursion(self):
         l = [1, 2, 3]

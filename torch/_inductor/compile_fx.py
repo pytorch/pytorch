@@ -119,6 +119,7 @@ from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
+from .fx_utils import maybe_fake_layout_constraints
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
 from .triton_bundler import TritonBundler
@@ -710,6 +711,54 @@ def maybe_disable_graph_partition(
         return contextlib.nullcontext()
 
 
+class _InductorFakeTensorProp(FakeTensorProp):
+    _current_node: torch.fx.Node | None = None
+
+    def run_node(self, n: torch.fx.Node) -> Any:
+        if (
+            n.op == "call_function"
+            and n.target is torch.ops.higher_order.invoke_subgraph
+            and n.args[1] not in self.seen_subgraphs
+        ):
+            if not isinstance(n.args[1], str):
+                raise AssertionError(f"Expected str, got {type(n.args[1])}")
+            if not (
+                isinstance(n.args[0], torch.fx.Node)
+                and n.args[0].op == "get_attr"
+                and isinstance(n.args[0].target, str)
+            ):
+                raise AssertionError(
+                    "Expected n.args[0] to be a get_attr Node with str target"
+                )
+            self.seen_subgraphs.add(n.args[1])
+            example_inputs = []
+            for operand in n.args[2:]:
+                if not (isinstance(operand, torch.fx.Node) and "val" in operand.meta):
+                    raise AssertionError("Expected Node with 'val' in meta")
+                example_inputs.append(operand.meta["val"])
+            return _InductorFakeTensorProp(
+                getattr(self.module, n.args[0].target), mode=self._mode
+            ).propagate(*example_inputs)
+
+        self._current_node = n
+        try:
+            return super().run_node(n)
+        finally:
+            self._current_node = None
+
+    def call_function(
+        self,
+        target: torch.fx.node.Target,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> Any:
+        if self._current_node is not None:
+            args, kwargs = maybe_fake_layout_constraints(
+                self._current_node, args, kwargs
+            )
+        return super().call_function(target, args, kwargs)
+
+
 def fake_tensor_prop(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -725,7 +774,7 @@ def fake_tensor_prop(
         fake_mode = detect_fake_mode(example_inputs)
         if not fake_mode:
             fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
-            FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+            _InductorFakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
         else:
             ctx = (
                 contextlib.nullcontext()
@@ -733,9 +782,9 @@ def fake_tensor_prop(
                 else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
             )
             with ctx:  # type: ignore[attr-defined]
-                FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
-                    *example_inputs
-                )
+                _InductorFakeTensorProp(
+                    gm, mode=fake_mode
+                ).propagate_dont_convert_inputs(*example_inputs)
 
     return fake_mode
 

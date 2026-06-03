@@ -544,6 +544,8 @@ class FakeTensorUpdater:
                 if not any_output_updated and "val" in node.meta:
                     continue
 
+            args, kwargs = maybe_fake_layout_constraints(node, args, kwargs)
+
             with V.fake_mode, enable_python_dispatcher():
                 new_fake_tensor = node.target(*args, **kwargs)
 
@@ -619,6 +621,39 @@ def get_fake_args_kwargs(
     ):
         return False, args, kwargs
     return True, args, kwargs
+
+
+def maybe_fake_layout_constraints(
+    node: torch.fx.Node, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Apply fake-side equivalents for layout constraints used during lowering."""
+    if not (
+        node.op == "call_function" and isinstance(node.target, torch._ops.OpOverload)
+    ):
+        return args, kwargs
+
+    # Import locally to avoid a circular dependency during Inductor startup.
+    from torch._inductor.lowering import (
+        maybe_layout_constraints,
+        require_contiguous,
+        require_contiguous_strides,
+    )
+
+    layout_constraint = maybe_layout_constraints(node.target)
+    if layout_constraint not in (require_contiguous, require_contiguous_strides):
+        return args, kwargs
+
+    # Lowering will materialize these constraints with copy_input/clone-like
+    # nodes. Fake execution needs the same input metadata, without mutating FX.
+    def maybe_contiguous(t: torch.Tensor) -> torch.Tensor:
+        if t.layout != torch.strided:
+            return t
+        return t.contiguous()
+
+    new_args, new_kwargs = pytree.tree_map_only(
+        torch.Tensor, maybe_contiguous, (args, kwargs)
+    )
+    return new_args, new_kwargs
 
 
 def is_node_realized(node: torch.fx.Node) -> bool:
