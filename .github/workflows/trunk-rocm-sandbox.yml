@@ -1,10 +1,10 @@
 name: trunk-rocm-sandbox
 
 on:
-  #push:
-  #  branches:
-  #    - main
-  #    - release/*
+  push:
+    tags:
+      # temporary for triggering trunk-rocm-sandbox in this PR
+      - ciflow/trunk/*
   workflow_dispatch:
   schedule:
     - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
