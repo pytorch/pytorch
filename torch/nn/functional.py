@@ -3691,10 +3691,10 @@ def linear_cross_entropy(
         linear_bias (Tensor, optional): bias added to the linear
             projection (shape ``(C,)`` or ``(C, d_1, ..., d_K)`` for
             K-dimensional loss, matching :attr:`linear_weight`).
-            Currently supported only on the reference path
-            (``options=None``); setting ``linear_bias`` with a
-            non-``None`` ``options`` warns and falls back to the
-            reference path. Default: ``None``.
+            With ``options != None``, K-dimensional bias
+            (``out_features != ()``) falls back to the reference
+            implementation with a warning; the chunked path supports
+            only ``(C,)``-shaped bias. Default: ``None``.
         weight (Tensor, optional): a manual rescaling weight given to each class.
         reduction (str, optional): Specifies the reduction to apply to
             the output: ``'none'`` | ``'mean'`` |
@@ -3850,7 +3850,7 @@ def linear_cross_entropy(
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
             "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
-            " == int64, out_features == (), linear_bias is None. Got "
+            " == int64, out_features == (). Got "
             f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
             f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
             f", tracing={torch.jit.is_tracing()}"
@@ -3906,6 +3906,7 @@ def linear_cross_entropy(
             input,
             linear_weight,
             target,
+            linear_bias,
             weight,
             reduction,
             ignore_index,
@@ -3916,6 +3917,9 @@ def linear_cross_entropy(
             options.allow_retain_graph,
             input.requires_grad and torch.is_grad_enabled(),
             linear_weight.requires_grad and torch.is_grad_enabled(),
+            linear_bias is not None
+            and linear_bias.requires_grad
+            and torch.is_grad_enabled(),
         )[0]
 
         if not has_batches:
