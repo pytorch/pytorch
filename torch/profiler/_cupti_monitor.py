@@ -3,22 +3,18 @@ from __future__ import annotations
 
 import atexit
 import ctypes
-import ctypes.util
-import glob
 import json
 import os
 import queue
 import struct
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable, Iterable  # noqa: TC003
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
-from cupti import cupti as _cc  # pyrefly: ignore[missing-import]
 
 import torch
 
@@ -63,93 +59,139 @@ _OVERHEAD_KIND_NAMES = {
     8 << 16: "UVM Activity Init",
 }
 _DEMANGLE_CACHE: dict[str, str] = {}
-_USER_EXTERNAL_CORRELATION_KIND = int(_cc.ExternalCorrelationKind.CUSTOM1)
-_CUPTI_ACTIVITY_KIND_MEMCPY = int(_cc.ActivityKind.MEMCPY)
-_CUPTI_ACTIVITY_KIND_MEMSET = int(_cc.ActivityKind.MEMSET)
-_CUPTI_ACTIVITY_KIND_DRIVER = int(_cc.ActivityKind.DRIVER)
-_CUPTI_ACTIVITY_KIND_RUNTIME = int(_cc.ActivityKind.RUNTIME)
-_CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL = int(_cc.ActivityKind.CONCURRENT_KERNEL)
-_CUPTI_ACTIVITY_KIND_OVERHEAD = int(_cc.ActivityKind.OVERHEAD)
-_CUPTI_ACTIVITY_KIND_CUDA_EVENT = int(_cc.ActivityKind.CUDA_EVENT)
-_CUPTI_ACTIVITY_KIND_SYNCHRONIZATION = int(_cc.ActivityKind.SYNCHRONIZATION)
-_CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION = int(_cc.ActivityKind.EXTERNAL_CORRELATION)
-
-_DISABLED_RUNTIME_CBIDS = tuple(
-    int(cbid)
-    for cbid in (
-        _cc.Runtime_api_trace_cbid.cudaGetDevice_v3020,
-        _cc.Runtime_api_trace_cbid.cudaSetDevice_v3020,
-        _cc.Runtime_api_trace_cbid.cudaGetLastError_v3020,
-        _cc.Runtime_api_trace_cbid.cudaEventCreate_v3020,
-        _cc.Runtime_api_trace_cbid.cudaEventCreateWithFlags_v3020,
-        _cc.Runtime_api_trace_cbid.cudaEventDestroy_v3020,
-    )
-)
-_DISABLED_DRIVER_CBIDS = tuple(
-    int(cbid)
-    for cbid in (
-        _cc.Driver_api_trace_cbid.cuKernelGetAttribute,
-        _cc.Driver_api_trace_cbid.cuDevicePrimaryCtxGetState,
-        _cc.Driver_api_trace_cbid.cuCtxGetCurrent,
-    )
-)
-
-_KERNEL_DTYPE = _cc.activity_kernel11_dtype
-_MEMCPY_DTYPE = _cc.activity_memcpy6_dtype
-_MEMSET_DTYPE = _cc.activity_memset4_dtype
-_API_DTYPE = _cc.activity_api_dtype
-_EXTERNAL_CORRELATION_DTYPE = _cc.activity_external_correlation_dtype
-_OVERHEAD_DTYPE = _cc.activity_overhead3_dtype
-_CUDA_EVENT_DTYPE = _cc.activity_cuda_event2_dtype
-_SYNCHRONIZATION_DTYPE = _cc.activity_synchronization2_dtype
-
-_DEFAULT_ALWAYS_ON_ACTIVITIES = (
-    _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL,
-    _CUPTI_ACTIVITY_KIND_MEMCPY,
-    _CUPTI_ACTIVITY_KIND_MEMSET,
-)
-
-_DEFAULT_TRACE_WINDOW_ACTIVITIES = (
-    _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL,
-    _CUPTI_ACTIVITY_KIND_MEMCPY,
-    _CUPTI_ACTIVITY_KIND_MEMSET,
-    _CUPTI_ACTIVITY_KIND_RUNTIME,
-    _CUPTI_ACTIVITY_KIND_DRIVER,
-    _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION,
-    _CUPTI_ACTIVITY_KIND_OVERHEAD,
-    _CUPTI_ACTIVITY_KIND_CUDA_EVENT,
-    _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION,
-)
+_cc = None
+_USER_EXTERNAL_CORRELATION_KIND: int | None = None
+_CUPTI_ACTIVITY_KIND_MEMCPY: int | None = None
+_CUPTI_ACTIVITY_KIND_MEMSET: int | None = None
+_CUPTI_ACTIVITY_KIND_DRIVER: int | None = None
+_CUPTI_ACTIVITY_KIND_RUNTIME: int | None = None
+_CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL: int | None = None
+_CUPTI_ACTIVITY_KIND_OVERHEAD: int | None = None
+_CUPTI_ACTIVITY_KIND_CUDA_EVENT: int | None = None
+_CUPTI_ACTIVITY_KIND_SYNCHRONIZATION: int | None = None
+_CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION: int | None = None
+_DISABLED_RUNTIME_CBIDS: tuple[int, ...] = ()
+_DISABLED_DRIVER_CBIDS: tuple[int, ...] = ()
+_KERNEL_DTYPE = None
+_MEMCPY_DTYPE = None
+_MEMSET_DTYPE = None
+_API_DTYPE = None
+_EXTERNAL_CORRELATION_DTYPE = None
+_OVERHEAD_DTYPE = None
+_CUDA_EVENT_DTYPE = None
+_SYNCHRONIZATION_DTYPE = None
 
 
 def _find_cupti_library() -> str:
     override = os.environ.get(_LIBCUPTI_PATH_ENV)
     if override:
         return override
-
-    found = ctypes.util.find_library("cupti")
-    if found:
-        return found
-
-    candidate_patterns = [
-        os.path.join(path, "nvidia", "cuda_cupti", "lib", "libcupti.so.*[0-9]")
-        for path in sys.path
-    ]
-    candidate_patterns.extend(
-        os.path.join(path, "nvidia", "cu*", "lib", "libcupti.so.*[0-9]")
-        for path in sys.path
-    )
-    candidate_patterns.extend(
-        os.path.join(path, "cuda_cupti", "lib", "libcupti.so.*[0-9]")
-        for path in sys.path
+    from cuda.pathfinder import (
+        load_nvidia_dynamic_lib,  # pyrefly: ignore[missing-import]
     )
 
-    for pattern in candidate_patterns:
-        matches = glob.glob(pattern)
-        if matches:
-            return matches[0]
+    return load_nvidia_dynamic_lib("cupti").abs_path
 
-    return "libcupti.so"
+
+def _require_cupti_python():
+    global _cc
+    global _USER_EXTERNAL_CORRELATION_KIND
+    global _CUPTI_ACTIVITY_KIND_MEMCPY
+    global _CUPTI_ACTIVITY_KIND_MEMSET
+    global _CUPTI_ACTIVITY_KIND_DRIVER
+    global _CUPTI_ACTIVITY_KIND_RUNTIME
+    global _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL
+    global _CUPTI_ACTIVITY_KIND_OVERHEAD
+    global _CUPTI_ACTIVITY_KIND_CUDA_EVENT
+    global _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION
+    global _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION
+    global _DISABLED_RUNTIME_CBIDS
+    global _DISABLED_DRIVER_CBIDS
+    global _KERNEL_DTYPE
+    global _MEMCPY_DTYPE
+    global _MEMSET_DTYPE
+    global _API_DTYPE
+    global _EXTERNAL_CORRELATION_DTYPE
+    global _OVERHEAD_DTYPE
+    global _CUDA_EVENT_DTYPE
+    global _SYNCHRONIZATION_DTYPE
+
+    if _cc is not None:
+        return _cc
+
+    try:
+        from cupti import cupti as imported_cc  # pyrefly: ignore[missing-import]
+    except ModuleNotFoundError as exc:
+        raise ImportError(
+            "torch.profiler._cupti_monitor requires the cupti-python package. "
+            "Install cupti-python to use the experimental CUPTI monitor."
+        ) from exc
+
+    _cc = imported_cc
+    _USER_EXTERNAL_CORRELATION_KIND = int(_cc.ExternalCorrelationKind.CUSTOM1)
+    _CUPTI_ACTIVITY_KIND_MEMCPY = int(_cc.ActivityKind.MEMCPY)
+    _CUPTI_ACTIVITY_KIND_MEMSET = int(_cc.ActivityKind.MEMSET)
+    _CUPTI_ACTIVITY_KIND_DRIVER = int(_cc.ActivityKind.DRIVER)
+    _CUPTI_ACTIVITY_KIND_RUNTIME = int(_cc.ActivityKind.RUNTIME)
+    _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL = int(_cc.ActivityKind.CONCURRENT_KERNEL)
+    _CUPTI_ACTIVITY_KIND_OVERHEAD = int(_cc.ActivityKind.OVERHEAD)
+    _CUPTI_ACTIVITY_KIND_CUDA_EVENT = int(_cc.ActivityKind.CUDA_EVENT)
+    _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION = int(_cc.ActivityKind.SYNCHRONIZATION)
+    _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION = int(
+        _cc.ActivityKind.EXTERNAL_CORRELATION
+    )
+    _DISABLED_RUNTIME_CBIDS = tuple(
+        int(cbid)
+        for cbid in (
+            _cc.Runtime_api_trace_cbid.cudaGetDevice_v3020,
+            _cc.Runtime_api_trace_cbid.cudaSetDevice_v3020,
+            _cc.Runtime_api_trace_cbid.cudaGetLastError_v3020,
+            _cc.Runtime_api_trace_cbid.cudaEventCreate_v3020,
+            _cc.Runtime_api_trace_cbid.cudaEventCreateWithFlags_v3020,
+            _cc.Runtime_api_trace_cbid.cudaEventDestroy_v3020,
+        )
+    )
+    _DISABLED_DRIVER_CBIDS = tuple(
+        int(cbid)
+        for cbid in (
+            _cc.Driver_api_trace_cbid.cuKernelGetAttribute,
+            _cc.Driver_api_trace_cbid.cuDevicePrimaryCtxGetState,
+            _cc.Driver_api_trace_cbid.cuCtxGetCurrent,
+        )
+    )
+    _KERNEL_DTYPE = _cc.activity_kernel11_dtype
+    _MEMCPY_DTYPE = _cc.activity_memcpy6_dtype
+    _MEMSET_DTYPE = _cc.activity_memset4_dtype
+    _API_DTYPE = _cc.activity_api_dtype
+    _EXTERNAL_CORRELATION_DTYPE = _cc.activity_external_correlation_dtype
+    _OVERHEAD_DTYPE = _cc.activity_overhead3_dtype
+    _CUDA_EVENT_DTYPE = _cc.activity_cuda_event2_dtype
+    _SYNCHRONIZATION_DTYPE = _cc.activity_synchronization2_dtype
+    return _cc
+
+
+def _default_always_on_activities() -> tuple[int, ...]:
+    _require_cupti_python()
+    return (
+        int(cast(int, _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL)),
+        int(cast(int, _CUPTI_ACTIVITY_KIND_MEMCPY)),
+        int(cast(int, _CUPTI_ACTIVITY_KIND_MEMSET)),
+    )
+
+
+def _default_trace_window_activities() -> tuple[int, ...]:
+    _require_cupti_python()
+    return (
+        int(cast(int, _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL)),
+        int(cast(int, _CUPTI_ACTIVITY_KIND_MEMCPY)),
+        int(cast(int, _CUPTI_ACTIVITY_KIND_MEMSET)),
+        int(cast(int, _CUPTI_ACTIVITY_KIND_RUNTIME)),
+        int(cast(int, _CUPTI_ACTIVITY_KIND_DRIVER)),
+        int(cast(int, _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION)),
+        int(cast(int, _CUPTI_ACTIVITY_KIND_OVERHEAD)),
+        int(cast(int, _CUPTI_ACTIVITY_KIND_CUDA_EVENT)),
+        int(cast(int, _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION)),
+    )
 
 
 def _has_active_cuda_context() -> bool:
@@ -247,8 +289,9 @@ class CuptiMonitor:
         flush_period_s: float = _DEFAULT_FLUSH_PERIOD_S,
         annotation_resolver: Callable[[int, int, int], Any | None] | None = None,
     ) -> None:
+        _require_cupti_python()
         self.output_dir = Path(output_dir)
-        self.activities = tuple(activities or _DEFAULT_ALWAYS_ON_ACTIVITIES)
+        self.activities = tuple(activities or _default_always_on_activities())
         self.buffer_size = buffer_size
         self.flush_period_s = flush_period_s
         self.annotation_resolver = (
@@ -572,7 +615,7 @@ class CuptiMonitor:
             )
         if self._trace_window_prepared:
             raise RuntimeError("A trace window is already prepared")
-        activities = tuple(activities or _DEFAULT_TRACE_WINDOW_ACTIVITIES)
+        activities = tuple(activities or _default_trace_window_activities())
         self._record_current_thread_info()
         newly_enabled = self.enable_activities(activities)
         with self._lock:
@@ -880,9 +923,17 @@ class CuptiMonitor:
         return retained_events
 
     def _decode_record(self, record_addr: int) -> dict[str, Any] | None:
+        kernel_dtype = cast(np.dtype, _KERNEL_DTYPE)
+        memcpy_dtype = cast(np.dtype, _MEMCPY_DTYPE)
+        memset_dtype = cast(np.dtype, _MEMSET_DTYPE)
+        api_dtype = cast(np.dtype, _API_DTYPE)
+        external_correlation_dtype = cast(np.dtype, _EXTERNAL_CORRELATION_DTYPE)
+        overhead_dtype = cast(np.dtype, _OVERHEAD_DTYPE)
+        cuda_event_dtype = cast(np.dtype, _CUDA_EVENT_DTYPE)
+        synchronization_dtype = cast(np.dtype, _SYNCHRONIZATION_DTYPE)
         kind = int(ctypes.c_int.from_address(record_addr).value)
         if kind == _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL:
-            record = _dtype_record(record_addr, _KERNEL_DTYPE)
+            record = _dtype_record(record_addr, kernel_dtype)
             annotation = self.annotation_resolver(
                 int(record["graph_node_id"]),
                 _RECORD_KIND_KERNEL,
@@ -911,7 +962,7 @@ class CuptiMonitor:
             return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_MEMCPY:
-            record = _dtype_record(record_addr, _MEMCPY_DTYPE)
+            record = _dtype_record(record_addr, memcpy_dtype)
             annotation = self.annotation_resolver(
                 int(record["graph_node_id"]),
                 _RECORD_KIND_MEMCPY,
@@ -941,7 +992,7 @@ class CuptiMonitor:
             return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_MEMSET:
-            record = _dtype_record(record_addr, _MEMSET_DTYPE)
+            record = _dtype_record(record_addr, memset_dtype)
             annotation = self.annotation_resolver(
                 int(record["graph_node_id"]),
                 _RECORD_KIND_MEMSET,
@@ -969,7 +1020,7 @@ class CuptiMonitor:
             return trace_event
 
         if kind in (_CUPTI_ACTIVITY_KIND_RUNTIME, _CUPTI_ACTIVITY_KIND_DRIVER):
-            record = _dtype_record(record_addr, _API_DTYPE)
+            record = _dtype_record(record_addr, api_dtype)
             start_ns = self._convert_time(int(record["start"]))
             end_ns = self._convert_time(int(record["end"]))
             trace_event = {
@@ -988,7 +1039,7 @@ class CuptiMonitor:
             return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION:
-            record = _dtype_record(record_addr, _EXTERNAL_CORRELATION_DTYPE)
+            record = _dtype_record(record_addr, external_correlation_dtype)
             trace_event = {
                 "kind": "external_correlation",
                 "external_kind": int(record["external_kind"]),
@@ -999,7 +1050,7 @@ class CuptiMonitor:
             return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_OVERHEAD:
-            record = _dtype_record(record_addr, _OVERHEAD_DTYPE)
+            record = _dtype_record(record_addr, overhead_dtype)
             start_ns = self._convert_time(int(record["start"]))
             end_ns = self._convert_time(int(record["end"]))
             trace_event = {
@@ -1018,7 +1069,7 @@ class CuptiMonitor:
             return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_CUDA_EVENT:
-            record = _dtype_record(record_addr, _CUDA_EVENT_DTYPE)
+            record = _dtype_record(record_addr, cuda_event_dtype)
             event_ts = self._convert_time(int(record["device_timestamp"]))
             trace_event = {
                 "kind": "cuda_event",
@@ -1034,7 +1085,7 @@ class CuptiMonitor:
             return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION:
-            record = _dtype_record(record_addr, _SYNCHRONIZATION_DTYPE)
+            record = _dtype_record(record_addr, synchronization_dtype)
             start_ns = self._convert_time(int(record["start"]))
             end_ns = self._convert_time(int(record["end"]))
             trace_event = {
