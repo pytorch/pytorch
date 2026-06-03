@@ -331,7 +331,7 @@ def _full_post_state_dict_hook(
             try:
                 state_dict[fqn] = state_dict[fqn].detach().clone()
                 state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
-            except BaseException as e:  # noqa: B036
+            except BaseException as e:
                 warnings.warn(
                     f"Failed to clone() tensor with name {fqn} on rank {fsdp_state.rank}. "
                     "This may mean that this state_dict entry could point to invalid "
@@ -801,9 +801,9 @@ def _set_use_dtensor(fsdp_state: _FSDPState) -> None:
         state_dict_type = fsdp_state._state_dict_type
         if state_dict_type == StateDictType.LOCAL_STATE_DICT:
             raise RuntimeError(
-                "Found state_dict_type LOCAL_STATE_DICT",
-                "DeviceMesh is not compatible with LOCAL_STATE_DICT.",
-                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict.",
+                "Found state_dict_type LOCAL_STATE_DICT. "
+                "DeviceMesh is not compatible with LOCAL_STATE_DICT. "
+                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict."
             )
         else:
             fsdp_state._state_dict_config._use_dtensor = True

@@ -27,9 +27,10 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_FBCODE,
+    MI350_ARCH,
     parametrize,
     serialTest,
-    skipIfRocm,
+    skipIfRocmArch,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
 )
@@ -58,34 +59,29 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
+    # torch.func.jvp with nn.Module doesn't retrace with symbolic sizes
+    "test_jvp_compile_backward_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu", "mps"), is_skip=True
+    ),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     # Bool argmax/argmin fix is Triton-only (see #174069), skip on CPU
     "test_max_min_bool_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
-    # calling div on only symint args
+    # With tensorify enabled, SymInt div no longer graph-breaks; the full
+    # model compiles but Inductor hangs on the complex dynamic-shape graph.
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu", "mps")
+        ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
-    "test_batch_norm_2d_2_dynamic_shapes": TestFailure(("mps",)),
-    "test_buffer_batch_norm_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    "test_multilayer_var_dynamic_shapes": TestFailure(("mps",)),
-    "test_multilayer_var_lowp_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
-    "test_select_scatter_dtype_consistency_dynamic_shapes": TestFailure(("mps",)),
-    "test_std_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure(("mps",)),
-    "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),
@@ -135,6 +131,16 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
     copy_tests(
         DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
     )
+
+    if HAS_GPU and hasattr(
+        DynamicShapesGPUTests, "test_conv_with_as_strided_dynamic_shapes_cuda"
+    ):
+        # gfx950 shows a deterministic numerical mismatch for this generated test.
+        DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda = (
+            skipIfRocmArch(MI350_ARCH)(
+                DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda
+            )
+        )
 
 
 class TestInductorDynamic(TestCase):
@@ -633,7 +639,6 @@ class TestInductorDynamic(TestCase):
         torch.compile(fullgraph=True)(f)(x, w).sum().backward()
         self.assertEqual(orig_w, w.grad)
 
-    @skipIfRocm  # regression in ROCm 7.2, XBLOCK should remain 64 (got 256)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )

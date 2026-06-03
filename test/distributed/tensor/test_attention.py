@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+import contextlib
 import itertools
 import random
 import unittest
@@ -190,7 +191,9 @@ class RingAttentionTest(DTensorTestBase):
         for target in [cp_q, cp_k, cp_v]:
             target.requires_grad = True
 
-        with CommDebugMode() as comm_mode:
+        check_comm_counts = not compiled and rotater == _RotateMethod.ALL_TO_ALL
+        comm_mode = CommDebugMode() if check_comm_counts else contextlib.nullcontext()
+        with comm_mode:
             with sdpa_kernel(backend):
                 cp_out = fn_eval(
                     attention,
@@ -200,8 +203,7 @@ class RingAttentionTest(DTensorTestBase):
                     is_causal=is_causal,
                 )
 
-            if not compiled and rotater == _RotateMethod.ALL_TO_ALL:
-                # Compiler and CommDebugMode do not work well together.
+            if check_comm_counts:
                 expect_all2all_count = (
                     self.world_size - 1
                     if test_forward_only
@@ -242,6 +244,14 @@ class RingAttentionTest(DTensorTestBase):
                 return out
 
         if load_balance and not is_causal:
+            return
+
+        # Compilation with context_parallel doesn't work yet — both paths
+        # (use_context=True monkey-patch and use_context=False parallelize_module)
+        # fail during tracing because DTensor dispatch interferes with sdpa.
+        # Previously CommDebugMode was active for all subtests, which caused
+        # the frame to be silently skipped, masking this limitation.
+        if compiled:
             return
 
         set_rotate_method(rotater_enum_to_str[rotater])
@@ -353,6 +363,57 @@ class RingAttentionTest(DTensorTestBase):
                     _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
                     behavior,
                 )
+
+    @skip_if_lt_x_gpu(2)
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @with_comms
+    def test_context_parallel_sdpa_short_sequence(self) -> None:
+        old_load_balance = _cp_options.enable_load_balance
+        try:
+            _cp_options.enable_load_balance = True
+            device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+            qkv_len = self.world_size
+            for dim in [1, 2, 4, 8]:
+                with self.subTest(dim=dim):
+                    qkv = [
+                        torch.rand(
+                            (1, 1, qkv_len, dim),
+                            device=self.device_type,
+                            dtype=torch.bfloat16,
+                        )
+                        for _ in range(3)
+                    ]
+
+                    with torch.no_grad():
+                        for t in qkv:
+                            dist.broadcast(t, src=0)
+
+                    with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                        out = F.scaled_dot_product_attention(*qkv, is_causal=True)
+
+                    cp_qkv = [t.detach().clone() for t in qkv]
+                    with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                        with context_parallel(
+                            device_mesh, buffers=cp_qkv, buffer_seq_dims=[2, 2, 2]
+                        ):
+                            self.assertFalse(_cp_options.enable_load_balance)
+                            cp_out = F.scaled_dot_product_attention(
+                                *cp_qkv, is_causal=True
+                            )
+
+                        (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [2])
+
+                    torch.testing.assert_close(
+                        cp_out,
+                        out,
+                        atol=8e-3 * self.world_size,
+                        rtol=1e-3 * self.world_size,
+                    )
+        finally:
+            _cp_options.enable_load_balance = old_load_balance
 
 
 # Compile the flex_attention function
@@ -1211,6 +1272,7 @@ RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
         # Need to make attention implementation local tensor friendly, e.g.
         # rewrite "rank local" logic
         "test_ring_attention_sdpa",
+        "test_context_parallel_sdpa_short_sequence",
     ],
 )
 

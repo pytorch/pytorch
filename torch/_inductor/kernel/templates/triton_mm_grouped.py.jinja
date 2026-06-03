@@ -294,10 +294,10 @@ def do_mma(a, b, accumulator):
 {%- endif %}
                     accumulator = do_mma(a, b, accumulator)
 {%- else %}
-                offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
-                offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
+                offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+                offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N).to(INDEX_DTYPE)
                 for k_block_offset in range(0, k_size, BLOCK_K):
-                    block_offs_k = k_block_offset + tl.arange(0, BLOCK_K)
+                    block_offs_k = k_block_offset + tl.arange(0, BLOCK_K).to(INDEX_DTYPE)
                     offs_k = block_offs_k + k_start_offset
                     a_ptrs = (
                         a_ptr
@@ -328,8 +328,8 @@ def do_mma(a, b, accumulator):
                     b_ptrs += BLOCK_K
 {%- endif %}
 
-                offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
-                offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
+                offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+                offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N).to(INDEX_DTYPE)
 {%- if SCALED %}
                 scale_a = tl.load(
                     scale_a_ptr

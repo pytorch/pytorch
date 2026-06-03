@@ -1,8 +1,10 @@
 # Owner(s): ["module: pytree"]
 
+import copy
 import enum
 import inspect
 import os
+import pickle
 import re
 import subprocess
 import sys
@@ -21,6 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -817,6 +820,38 @@ class TestGenericPytree(TestCase):
         deserialized_spec = pytree.treespec_loads(serialized)
         self.assertEqual(spec, deserialized_spec)
 
+    @parametrize_pytree_module
+    def test_treespec_deepcopy_roundtrip(self, pytree):
+        cases = [
+            1,
+            (1, 2),
+            [1, 2, 3],
+            {"a": 1, "b": 2},
+            (1, [2, {"a": 3}]),
+            {"a": [1, 2], "b": (3, 4)},
+        ]
+
+        for tree in cases:
+            treespec = pytree.tree_structure(tree)
+            reconstructed = copy.deepcopy(treespec)
+            self.assertEqual(treespec, reconstructed)
+
+    @parametrize_pytree_module
+    def test_treespec_pickle_roundtrip(self, pytree):
+        cases = [
+            1,
+            (1, 2),
+            [1, 2, 3],
+            {"a": 1, "b": 2},
+            (1, [2, {"a": 3}]),
+            {"a": [1, 2], "b": (3, 4)},
+        ]
+
+        for tree in cases:
+            treespec = pytree.tree_structure(tree)
+            reconstructed = pickle.loads(pickle.dumps(treespec))
+            self.assertEqual(treespec, reconstructed)
+
 
 class TestPythonPytree(TestCase):
     def test_deprecated_register_pytree_node(self):
@@ -1306,6 +1341,7 @@ if "optree" in sys.modules:
         finally:
             python_pytree._deregister_pytree_node(CustomClass)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182645")
     def test_constant(self):
         # Either use `frozen=True` or `unsafe_hash=True` so we have a
         # non-default `__hash__`.
@@ -1347,6 +1383,7 @@ if "optree" in sys.modules:
             msg = "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
             self.assertIn(msg, str(e))
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/184507")
     def test_tree_map_with_path_multiple_trees(self):
         @dataclass
         class ACustomPytree:
@@ -1499,6 +1536,7 @@ if "optree" in sys.modules:
 
 class TestCxxPytree(TestCase):
     def setUp(self):
+        super().setUp()
         if IS_FBCODE:
             raise unittest.SkipTest("C++ pytree tests are not supported in fbcode")
 

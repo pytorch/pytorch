@@ -356,6 +356,7 @@ DEFINE_DISPATCH(stack_serial_stub);
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
   TORCH_CHECK(shape_tensor.dim() == 1);
   std::vector<int64_t> shape;
+  shape.reserve(shape_tensor.numel());
   auto accessor = shape_tensor.accessor<int64_t, 1>();
   for (const auto i : c10::irange(shape_tensor.numel())) {
     shape.push_back(accessor[i]);
@@ -872,6 +873,8 @@ static Tensor cat_sparse_impl(
   int64_t dense_dim = tensors[0].get().dense_dim();
   IntArrayRef sizes = tensors[0].get().sizes();
   if (wrapped < sparse_dim) {
+    indices.reserve(tensors.size());
+    values.reserve(tensors.size());
     for (const auto i : c10::irange(tensors.size())) {
       const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
@@ -946,6 +949,8 @@ static Tensor cat_sparse_impl(
     int64_t cumulative_size = 0;
     std::vector<Tensor> vals_pieces;
     std::vector<Tensor> idxs_pieces;
+    vals_pieces.reserve(tensors.size());
+    idxs_pieces.reserve(tensors.size());
     for (const auto i : c10::irange(tensors.size())) {
       const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
@@ -1422,11 +1427,12 @@ Tensor as_strided_tensorimpl(
 }
 
 template <typename T>
-static inline void setStridedUnchecked(
+static void setStridedUnchecked(
     const Tensor& self,
     ArrayRef<T> size,
     ArrayRef<T> stride,
     T&& storage_offset) {
+  checkAsStridedArgsAllowUnbackedSymInts(size, stride, storage_offset);
   auto* self_ = self.unsafeGetTensorImpl();
   self_->set_sizes_and_strides(size, stride, std::forward<T>(storage_offset));
 }
@@ -1958,7 +1964,7 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   auto range_a = at::arange(xtensor.dim(), at::TensorOptions(at::kLong));
   auto range_b = range_a + n_dims;
   auto stacked = stack({std::move(range_a), std::move(range_b)}, 1).flatten();
-  auto permutation = IntArrayRef(stacked.data_ptr<int64_t>(), n_dims * 2);
+  auto permutation = IntArrayRef(stacked.const_data_ptr<int64_t>(), n_dims * 2);
   // Permute from [a0, ..., ad-1, b0, ..., bd-1] to [a0, b0, ..., ad-1, bd-1]
   urtensor = urtensor.permute(permutation);
   // Reshape from [a0, b0, ..., ad-1, bd-1] to [a0 * b0, ..., ad-1 * bd-1]
@@ -2173,6 +2179,13 @@ Tensor _reshape_alias(
   // duplicates some of the work that's already been done (`infer_size_dv` and
   // `computeStride`).
 
+  return alias_with_sizes_and_strides(self, sizes, strides);
+}
+
+Tensor _reshape_alias_symint(
+    const Tensor& self,
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides) {
   return alias_with_sizes_and_strides(self, sizes, strides);
 }
 
@@ -2454,7 +2467,7 @@ Tensor index_select_sparse_cpu(
       const auto index_contiguous = index.contiguous();
       auto nneg_index = at::empty_like(index_contiguous);
       // nneg_index = (index < 0) * (index + size) + (index >= 0) * index
-      auto* ptr_index = index_contiguous.data_ptr<int64_t>();
+      const auto* ptr_index = index_contiguous.const_data_ptr<int64_t>();
       auto* ptr_nneg_index = nneg_index.data_ptr<int64_t>();
       at::parallel_for(
           0,
@@ -4101,6 +4114,20 @@ static inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
   return alias_with_sizes_and_strides(self, inferred_size, *stride);
 }
 
+static inline Tensor view_impl_symint(
+    const Tensor& self,
+    c10::SymIntArrayRef size) {
+  c10::SymDimVector inferred_size = at::infer_size_dv(size, self.sym_numel());
+  auto stride = at::detail::computeStride(
+      self.sym_sizes(), self.sym_strides(), inferred_size);
+  TORCH_CHECK(
+      stride.has_value(),
+      "view size is "
+      "not compatible with input tensor's size and stride (at least one dimension"
+      " spans across two contiguous subspaces). Use .reshape(...) instead.");
+  return alias_with_sizes_and_strides(self, inferred_size, *stride);
+}
+
 Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
   return view_impl(self, size);
 }
@@ -4561,6 +4588,10 @@ Tensor adjoint(const Tensor& self) {
 
 Tensor view(const Tensor& self, at::IntArrayRef size) {
   return view_impl(self, size);
+}
+
+Tensor view_symint(const Tensor& self, c10::SymIntArrayRef size) {
+  return view_impl_symint(self, size);
 }
 
 Tensor alias(const Tensor& self) {

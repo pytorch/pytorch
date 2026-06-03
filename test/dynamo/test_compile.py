@@ -9,6 +9,7 @@ from unittest.mock import patch
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_utils import munge_exc
 
 
 class ToyModel(torch.nn.Module):
@@ -188,21 +189,6 @@ class InPlaceCompilationTests(TestCase):
         with self.assertRaises(AttributeError):
             fn(x)
 
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    def test_compilation_nn_module_invalid_method(self):
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return x + self.doesnotexist
-
-        mod = Mod()
-        opt_mod = torch.compile(mod, backend="eager")
-        x = torch.randn(1, 1)
-        with self.assertRaises(AttributeError):
-            opt_mod(x)
-
     def test_torch_script_compilation(self):
         @torch.jit.script
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -211,6 +197,57 @@ class InPlaceCompilationTests(TestCase):
         a = torch.randn(1, 1)
         out = torch.compile(fn, backend="eager")(a)
         self.assertEqual(out, a)
+
+    def test_compile_script_module_error(self):
+        model = torch.nn.Sequential(torch.nn.Linear(3, 3))
+        model.eval()
+        scripted = torch.jit.script(model)
+        with self.assertRaisesRegex(
+            RuntimeError, "torch.compile does not support compiling torch.jit.script"
+        ):
+            torch.compile(scripted, backend="eager")
+
+    def test_compile_frozen_module_error(self):
+        model = torch.nn.Sequential(torch.nn.Linear(3, 3))
+        model.eval()
+        scripted = torch.jit.script(model)
+        with self.assertWarns(DeprecationWarning):
+            frozen = torch.jit.freeze(scripted)
+        with self.assertRaisesRegex(
+            RuntimeError, "torch.compile does not support compiling torch.jit.script"
+        ):
+            torch.compile(frozen, backend="eager")
+
+    def test_compile_frozen_module_inductor_error(self):
+        model = torch.nn.Sequential(torch.nn.Linear(3, 3))
+        model.eval()
+        scripted = torch.jit.script(model)
+        with self.assertWarns(DeprecationWarning):
+            frozen = torch.jit.freeze(scripted)
+        with self.assertRaisesRegex(
+            RuntimeError, "torch.compile does not support compiling torch.jit.script"
+        ):
+            torch.compile(frozen, backend="inductor")
+
+    def test_inline_script_module_graph_break(self):
+        class OuterModule(torch.nn.Module):
+            def __init__(self, sub):
+                super().__init__()
+                self.sub = sub
+
+            def forward(self, x):
+                return self.sub(x)
+
+        inner = torch.nn.Linear(3, 3)
+        scripted_inner = torch.jit.script(inner)
+        outer = OuterModule(scripted_inner)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(outer, backend=cnt)
+        inputs = torch.randn(2, 3)
+        compiled(inputs)
+        # ScriptModule submodule causes a graph break
+        self.assertEqual(cnt.frame_count, 0)
 
     def test_to_sparse_to_dense_with_graph_break(self):
         def fn(x):
@@ -270,6 +307,80 @@ class PublicTorchCompilerTests(TestCase):
 
         for fn_name in function_names:
             self.check_signature(fn_name, fn_name, torch._dynamo)
+
+
+class FullgraphTests(TestCase):
+    def test_fullgraph_errors_on_frame_skip_with_dispatch_mode(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class SkipMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **kwargs)
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with SkipMode():
+            with self.assertRaisesRegex(
+                RuntimeError, "non-infra torch dispatch mode present"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_fullgraph_errors_on_frame_skip_dynamo_disabled(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with torch._dynamo.config.patch(disable=True):
+            with self.assertRaisesRegex(RuntimeError, "Dynamo tracing is disabled"):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_fullgraph_empty_graph_no_error(self):
+        def fn(x):
+            return len(x)
+
+        x = torch.randn(5)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, 5)
+
+    def test_fullgraph_skip_reason_message(self):
+        def my_function(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with torch._dynamo.config.patch(disable=True):
+            try:
+                torch.compile(my_function, backend="eager", fullgraph=True)(x)
+                self.fail("Expected RuntimeError")
+            except RuntimeError as e:
+                self.assertExpectedInline(
+                    munge_exc(str(e)),
+                    """\
+torch.compile with fullgraph=True found no compiled frames. Skipped frames:
+  - my_function (test_compile.py:N): Dynamo tracing is disabled""",
+                )
+
+    def test_fullgraph_no_error_with_non_default_stance(self):
+        @torch.compile(fullgraph=True, backend="eager", dynamic=False)
+        def fn(x, n):
+            return x + n
+
+        fn(torch.ones(3), 1)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            result = fn(torch.ones(3), 2)
+        self.assertEqual(result, torch.ones(3) + 2)
+
+    def test_fullgraph_exported_module_no_error(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        m = M()
+        x = torch.randn(5)
+        exported = torch.export.export(m, (x,))
+        result = exported.module()(x)
+        self.assertEqual(result, x + 1)
 
 
 if __name__ == "__main__":

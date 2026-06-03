@@ -215,12 +215,11 @@ static void moveConstantTensorsOutOfSubgraph(
     const std::shared_ptr<Graph>& tensorexpr_graph) {
   auto parent = tensorexpr_graph_node->owningGraph();
 
-  auto env = [&](Value* v) {
+  auto env = [&](Value* v) -> Value* {
     TORCH_INTERNAL_ASSERT(
         false,
         "this should never happen since constant nodes do not have any inputs",
         v->debugName());
-    return v;
   };
 
   WithInsertPoint wip(tensorexpr_graph_node);
@@ -609,8 +608,7 @@ static RegisterOperators reg_guard({
                   flattened_input_dims,
                   flattened_input_striding,
                   num_symbolic_dims](Stack& stack) {
-            at::ArrayRef<IValue> inputs = last(stack, num_inputs);
-            drop(stack, num_inputs);
+            auto inputs = pop(stack, num_inputs);
             // each invocation we need to reset what value of each symbolic
             // symbol is.
             // TODO: could this be a reference and not allocated on

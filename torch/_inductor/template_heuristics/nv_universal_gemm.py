@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
+from torch._inductor import config
 from torch._inductor.utils import ensure_nvmatmul_heuristics_available
 from torch._logging import getArtifactLogger
 from torch.utils._ordered_set import OrderedSet
@@ -23,10 +24,10 @@ log = logging.getLogger(__name__)
 autotuning_log = getArtifactLogger(__name__, "autotuning")
 
 # Type alias for kernel config key tuple.
-# Currently matches on (tile_m, tile_n, tile_k, cluster_m, cluster_n).
-# #TODO(nikhilap) When cutlass_api adds support for stages/split_k, extend this tuple and
-# update the _make_config_key_* helper functions below.
-ConfigKey = tuple[int, int, int, int, int]
+# Currently matches on (tile_m, tile_n, cluster_m, cluster_n).
+# tile_k excluded because nvMatmulHeuristics and cutlass_api use it to mean different things.
+# TODO(nikhilap): Extend config key for stages/split_k https://github.com/pytorch/pytorch/issues/177578
+ConfigKey = tuple[int, int, int, int]
 
 
 @dataclass
@@ -48,21 +49,20 @@ class HeuristicConfig:
 
 def _make_config_key_from_heuristic(cfg: HeuristicConfig) -> ConfigKey:
     """Build config key from HeuristicConfig returned by nvMatmulHeuristics."""
-    return (cfg.tile_m, cfg.tile_n, cfg.tile_k, cfg.cluster_m, cfg.cluster_n)
+    return (cfg.tile_m, cfg.tile_n, cfg.cluster_m, cfg.cluster_n)
 
 
 def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
     """Build config key from cutlass_api kernel metadata.design."""
     if (
         hasattr(design, "tile_shape")
-        and len(design.tile_shape) >= 3
+        and len(design.tile_shape) >= 2
         and hasattr(design, "cluster_shape")
         and len(design.cluster_shape) >= 2
     ):
         return (
             design.tile_shape[0],
             design.tile_shape[1],
-            design.tile_shape[2],
             design.cluster_shape[0],
             design.cluster_shape[1],
         )
@@ -74,7 +74,6 @@ def _make_config_key_from_heuristics_kernel(kernel) -> ConfigKey:
     return (
         kernel.cta[0],
         kernel.cta[1],
-        kernel.cta[2],
         kernel.cluster[0],
         kernel.cluster[1],
     )
@@ -175,6 +174,48 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         selected = matched[:count]
         result = [k for k, _ in selected]
 
+        # Supplement with hand-picked configs in the space nvMatmulHeuristics doesn't currently explore.
+        if config.nvgemm_supplement_configs:
+            _SUPPLEMENT_CONFIGS: OrderedSet[ConfigKey] = OrderedSet(
+                [
+                    (64, 128, 1, 1),
+                    (64, 128, 1, 2),
+                    (64, 128, 1, 4),
+                    (64, 128, 1, 8),
+                    (64, 128, 1, 16),
+                    (64, 256, 1, 8),
+                    (64, 256, 1, 16),
+                    (64, 32, 1, 2),
+                    (64, 32, 1, 4),
+                    (128, 64, 1, 1),
+                    (128, 64, 2, 1),
+                    (128, 128, 1, 8),
+                    (128, 128, 1, 16),
+                    (128, 128, 2, 2),
+                    (128, 128, 2, 4),
+                    (128, 128, 2, 8),
+                    (128, 256, 1, 4),
+                    (128, 256, 1, 8),
+                    (128, 256, 1, 16),
+                    (128, 256, 2, 1),
+                    (128, 256, 2, 8),
+                    (256, 256, 2, 1),
+                    (256, 256, 2, 4),
+                    (256, 256, 4, 2),
+                    (256, 256, 4, 4),
+                    (256, 256, 8, 1),
+                    (256, 256, 8, 2),
+                    (256, 128, 2, 1),
+                    (256, 128, 2, 2),
+                ]
+            )
+            selected_keys = OrderedSet(
+                [_make_config_key_from_kernel_design(k.metadata.design) for k in result]
+            )
+            for key, key_kernels in config_to_kernels.items():
+                if key not in selected_keys and key in _SUPPLEMENT_CONFIGS:
+                    result.append(key_kernels[0])
+
         log.debug(
             "Heuristic filtered to %d kernels from %d total", len(result), len(kernels)
         )
@@ -268,16 +309,20 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             torch.bfloat16: "T",
             torch.float8_e4m3fn: "Q",
             torch.float8_e5m2: "R",
+            torch.float4_e2m1fn_x2: "F4",
         }
         a_char = dtype_to_cublas.get(dtype_a, "H")
         b_char = dtype_to_cublas.get(dtype_b or dtype_a, a_char)
         out_char = dtype_to_cublas.get(out_dtype or dtype_a, a_char)
         acc_char = dtype_to_cublas.get(accumulator_type, "S")
 
-        # 3-letter {input}{compute}{output}: used when A=B (standard GEMM).
-        # 5-letter {A}{B}{C}{compute}{D}: used when A≠B or for FP8/FP4
-        # (nvMatmulHeuristics discovery sets only have 5-letter entries for these).
-        if a_char != b_char or a_char in ("Q", "R", "O"):
+        # nvMatmulHeuristics precision string formats:
+        # - 3-letter {A}{B}{out}: used for standard GEMM and multi-char tokens (F4, BF)
+        # - 5-letter {A}{B}{C}{compute}{D}: used for single-char FP8 types (Q, R, O)
+        has_multichar = any(len(c) > 1 for c in (a_char, b_char, out_char))
+        if has_multichar:
+            precision = f"{a_char}{b_char}{out_char}"
+        elif a_char != b_char or a_char in ("Q", "R", "O"):
             precision = f"{a_char}{b_char}{out_char}{acc_char}{out_char}"
         else:
             precision = f"{a_char}{acc_char}{out_char}"

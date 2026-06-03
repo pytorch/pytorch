@@ -14,6 +14,16 @@
 #include <cstdint>
 
 #if AT_CUSPARSELT_ENABLED()
+// ROCm 7.0.2's amd_hip_bf16.h (pulled in via hipsparselt.h -> hip_fp8.h ->
+// amd_hip_fp8.h -> amd_hip_bf16.h) contains device-only builtins (warpSize,
+// __shfl_*_sync) that fail during host compilation. Pre-define the hip_fp8.h
+// include guard to prevent this chain. The hipsparselt C API uses opaque
+// handles and enum types, not C++ fp8 types directly.
+#if defined(USE_ROCM) && !defined(__HIP_DEVICE_COMPILE__)
+#ifndef HIP_INCLUDE_HIP_HIP_FP8_H
+#define HIP_INCLUDE_HIP_HIP_FP8_H
+#endif
+#endif
 #include <cusparseLt.h>
 #endif
 

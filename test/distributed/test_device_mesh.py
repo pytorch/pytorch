@@ -11,7 +11,7 @@ import torch.distributed._functional_collectives as funcol
 from torch._C._distributed_c10d import Backend as C10dBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed import config as dist_config
-from torch.distributed._mesh_layout import _MeshLayout as _Layout
+from torch.distributed._mesh_layout import _FlatLayout, _MeshLayout
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
@@ -73,6 +73,11 @@ def _with_torchcomm_env(func):
         os.environ["TORCHCOMM_RANK"] = str(self.rank)
         os.environ["TORCHCOMM_SIZE"] = str(self.world_size)
         os.environ["TORCHCOMM_STORE_PATH"] = self.file_name
+        # torchcomms' StoreManager unconditionally requires MASTER_ADDR /
+        # MASTER_PORT (TORCHCOMM_STORE_PATH no longer suffices after the
+        # StoreManager refactor in torchcomms #971).
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "25901"
         try:
             return func(self, *args, **kwargs)
         finally:
@@ -179,13 +184,6 @@ class DeviceMeshTest(DTensorTestBase):
         DeviceMesh(self.device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_assert_invalid_mesh_tensor(self):
-        mesh = torch.arange(self.world_size).to(self.rank)
-        with self.assertRaises(ValueError):
-            DeviceMesh(self.device_type, mesh)
 
     @with_comms()
     def test_2d_mesh_non_eager_init_subgroup(self):
@@ -958,9 +956,11 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         flatten_mesh_layout = root_mesh._flatten_mapping["dp_cp"]._layout
         self.assertEqual(flatten_mesh_layout, flattened_dp_cp_mesh._layout)
         self.assertEqual(
-            flattened_dp_cp_mesh._layout.global_ranks(8),
+            flattened_dp_cp_mesh._layout.collapse().global_ranks(8),
             [[0, 2, 4, 6], [1, 3, 5, 7]],
         )
+        # This should not raise as they are well separated
+        mesh_3d["dp_cp", "tp"]
 
         ref_pg_count = _world.group_count
         # Calling flatten again should not create a new pg.
@@ -978,13 +978,13 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         flatten_mesh_root_layout = root_mesh._flatten_mapping["dp_tp"]._layout
         self.assertEqual(flatten_mesh_root_layout, flattened_dp_tp_mesh._layout)
         self.assertEqual(
-            flattened_dp_tp_mesh._layout.global_ranks(8),
+            flattened_dp_tp_mesh._layout.collapse().global_ranks(8),
             [[0, 1, 4, 5], [2, 3, 6, 7]],
         )
         with self.assertRaisesRegex(
-            NotImplementedError,
-            "Currently, this only allows slicing out a contiguous flattened dim",
+            KeyError, "Mesh dim indices should be in ascending order"
         ):
+            # dp_tp is partly "above" and partly "below" cp
             mesh_3d["dp_tp", "cp"]
 
         # Test flatten with a flattened mesh_dim_name
@@ -1518,11 +1518,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
     @dist_config.patch(use_torchcomms=True)
     @_with_torchcomm_env
-    @with_comms(backend="cpu:gloo,cuda:ncclx")
+    @with_comms(backend="cpu:gloo,cuda:nccl")
     def test_pg_api_w_torchcomms(self) -> None:
         ranks = list(range(self.world_size))
         pg = new_group(
-            backend="cpu:gloo,cuda:ncclx",
+            backend="cpu:gloo,cuda:nccl",
             ranks=ranks,
             group_desc="new_pg",
         )
@@ -1541,14 +1541,42 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         )
         self.assertEqual(gpu_tensor, expected_gpu_tensor)
 
+        # No-op split should preserve both backends and produce identical
+        # results to the parent.
+        split_group_no_op = dist.split_group(pg, [ranks])
+        cpu_tensor = torch.ones(3, 3)
+        dist.all_reduce(cpu_tensor, group=split_group_no_op)
+        self.assertEqual(cpu_tensor, expected_cpu_tensor)
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=split_group_no_op)
+        self.assertEqual(gpu_tensor, expected_gpu_tensor)
+
+        # Real split with multiple sub-groups; each sub-group must keep both
+        # cpu:gloo and cuda:nccl backends and dispatch to the right one based
+        # on tensor device.
+        pg_ranks_by_dim = torch.arange(self.world_size).view(2, 4)
+        split_pg = dist.split_group(pg, pg_ranks_by_dim.tolist())
+        expected_split_size = self.world_size // 2
+
+        cpu_tensor = torch.ones(3, 3)
+        dist.all_reduce(cpu_tensor, group=split_pg)
+        self.assertEqual(cpu_tensor, torch.ones(3, 3) * expected_split_size)
+
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=split_pg)
+        self.assertEqual(
+            gpu_tensor,
+            torch.ones(3, 3, device=self.device_type) * expected_split_size,
+        )
+
     @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
     @dist_config.patch(use_torchcomms=True)
     @_with_torchcomm_env
-    @with_comms(backend="cuda:ncclx")
-    def test_pg_api_w_torchcomms_ncclx(self) -> None:
+    @with_comms(backend="nccl")
+    def test_pg_api_w_torchcomms_nccl(self) -> None:
         ranks = list(range(self.world_size))
         pg = new_group(
-            backend="cuda:ncclx",
+            backend="nccl",
             ranks=ranks,
             group_desc="new_pg",
         )
@@ -1593,7 +1621,41 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
     @dist_config.patch(use_torchcomms=True)
     @_with_torchcomm_env
-    @with_comms(backend="cpu:gloo,cuda:ncclx")
+    @with_comms(eager_init=True, backend="cpu:gloo,cuda:nccl")
+    def test_split_group_backend_filter_w_torchcomms(self) -> None:
+        # Hybrid parent (cpu:gloo + cuda:nccl); request only cuda:nccl in the
+        # child via the `backend` arg. eager_init=True binds device_id=cuda so
+        # nccl is the parent's default backend, satisfying the C++ check that
+        # the filter must include the default backend's device.
+        ranks = list(range(self.world_size))
+        pg = dist.distributed_c10d._get_default_group()
+
+        pg_ranks_by_dim = torch.arange(self.world_size).view(2, 4)
+        ng = dist.split_group(pg, pg_ranks_by_dim.tolist(), backend="cuda:nccl")
+        self.assertIsNotNone(ng)
+        self.assertEqual(
+            dist.distributed_c10d._world.pg_backend_config[ng], "cuda:nccl"
+        )
+        gpu_tensor = torch.ones(3, 3, device=self.device_type)
+        dist.all_reduce(gpu_tensor, group=ng)
+        expected_split_size = self.world_size // 2
+        self.assertEqual(
+            gpu_tensor,
+            torch.ones(3, 3, device=self.device_type) * expected_split_size,
+        )
+
+        # Backend name mismatch (parent has cuda:nccl, request cuda:gloo).
+        with self.assertRaisesRegex(ValueError, "Backend mismatch"):
+            dist.split_group(pg, [ranks], backend="cuda:gloo")
+
+        # Device type not present in parent.
+        with self.assertRaisesRegex(ValueError, "is not present in the parent"):
+            dist.split_group(pg, [ranks], backend="xpu:nccl")
+
+    @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+    @dist_config.patch(use_torchcomms=True)
+    @_with_torchcomm_env
+    @with_comms(backend="cpu:gloo,cuda:nccl")
     def test_device_mesh_w_torchcomms(self) -> None:
         mesh_shape = (2, 2, self.world_size // 4)
         mesh_3d = init_device_mesh(
@@ -1620,28 +1682,88 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         expected_tensor = torch.ones(3, 3) * 28
         self.assertEqual(tensor, expected_tensor)
 
+    @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
+    @dist_config.patch(use_torchcomms=True)
+    @_with_torchcomm_env
+    @with_comms(backend="cpu:gloo,cuda:nccl")
+    def test_fake_backend_pg_names_w_torchcomms(self) -> None:
+        """Fake-backend PG names must be hash-based when torchcomms is enabled.
+
+        When torchcomms is enabled, split_group produces hash-based PG names
+        for real backends. Fake-backend dimensions (from backend_override)
+        must also use hash-based names; sequential integer names are not
+        resolvable from compiled code via the C++ GroupRegistry.
+        """
+        world_mesh = init_device_mesh(
+            self.device_type, (self.world_size,), mesh_dim_names=("world",)
+        )
+        # One fake dim and one real dim, mimicking torchtitan's
+        # unflatten_mesh for disabled parallelism dimensions.
+        mesh = world_mesh._unflatten(
+            0,
+            (1, self.world_size),
+            ("fake_dim", "real_dim"),
+            backend_override={"fake_dim": "fake"},
+        )
+        fake_pg_name = mesh._dim_group_names[0]
+        self.assertFalse(
+            fake_pg_name.isdigit(),
+            f"Fake-backend PG name '{fake_pg_name}' is a sequential integer; "
+            f"expected a hash-based name for torchcomms compatibility.",
+        )
+
 
 class CuTeLayoutTest(TestCase):
     def test_coalesce(self):
         # ((3,2),(2,1)) -> (6,1)
-        l = _Layout((3, 2), (2, 1))
-        l = l.coalesce()
+        l = _FlatLayout((3, 2), (2, 1))
         self.assertEqual(list(l.sizes_and_strides), [(6, 1)])
 
         # ((2,12),(3,4),(4,1)) -> (24,1)
-        l = _Layout((2, 3, 4), (12, 4, 1))
-        l = l.coalesce()
+        l = _FlatLayout((2, 3, 4), (12, 4, 1))
         self.assertEqual(list(l.sizes_and_strides), [(24, 1)])
 
     def test_coalesce_non_coalescible(self):
         # ((3,4),(2,1)) stays as-is (4 ≠ 2*1)
-        l = _Layout((3, 2), (4, 1))
-        l = l.coalesce()
+        l = _FlatLayout((3, 2), (4, 1))
         self.assertEqual(list(l.sizes_and_strides), [(3, 4), (2, 1)])
+
+    def test_coalesce_singleton_dims(self):
+        # Dimensions with size=1 are removed, even if it's all of them
+        l = _FlatLayout((1, 3, 1, 5, 1), (0, 10, 17, 2, 1))
+        self.assertEqual(list(l.sizes_and_strides), [(15, 2)])
+
+        l = _FlatLayout((1, 1, 1), (1, 42, 0))
+        self.assertEqual(list(l.sizes_and_strides), [])
+
+    def test_flatten(self):
+        l = _FlatLayout(((7, (5, 3)), 2), ((900, (36, 4)), 1))
+        self.assertEqual(list(l.sizes_and_strides), [(7, 900), (5, 36), (3, 4), (2, 1)])
+
+        l = _FlatLayout(((7, (5, 3)), 2), ((30, (6, 2)), 1))
+        self.assertEqual(list(l.sizes_and_strides), [(7 * 5 * 3 * 2, 1)])
+
+    def test_optional_strides(self):
+        l = _FlatLayout((7, 5, 3, 2))
+        # Strides default to suffix_product, which means they're coalescible
+        self.assertEqual(list(l.sizes_and_strides), [(7 * 5 * 3 * 2, 1)])
+
+    def test_mismatch_sizes_strides(self):
+        with self.assertRaisesRegex(ValueError, "sizes .* and strides .* don't match"):
+            _FlatLayout(42, (1,))
+
+        with self.assertRaisesRegex(ValueError, "sizes .* and strides .* don't match"):
+            _FlatLayout((3, 2), 1)
+
+        with self.assertRaisesRegex(ValueError, "sizes .* and strides .* don't match"):
+            _FlatLayout((5, 3, 2), (2, 1))
+
+        with self.assertRaisesRegex(ValueError, "sizes .* and strides .* don't match"):
+            _FlatLayout((5, (3, 2)), ((5, 3), 2))
 
     def test_complement_n_group_layout(self):
         # complement((4,2), 8) = (2,1); together form (8,1)
-        pg_layout = _Layout(
+        pg_layout = _FlatLayout(
             (4,),
             (2,),
         )
@@ -1687,7 +1809,7 @@ class CuTeLayoutTest(TestCase):
         )
 
         # Complement ((2,4), (2,1)) under world_size=16 → complement ((2,8), (2,2))
-        pg_layout = _Layout((2, 2), (4, 1))
+        pg_layout = _FlatLayout((2, 2), (4, 1))
         self.assertEqual(
             pg_layout.all_ranks_from_zero(),
             [0, 1, 4, 5],
@@ -1709,7 +1831,7 @@ class CuTeLayoutTest(TestCase):
         )
 
         # Test layout_to_global_ranks and layout_to_all_ranks_from_zero
-        pg_layout = _Layout((2, 2), (4, 2))
+        pg_layout = _FlatLayout((2, 2), (4, 2))
         self.assertEqual(
             pg_layout.all_ranks_from_zero(),
             [0, 2, 4, 6],
@@ -1727,7 +1849,7 @@ class CuTeLayoutTest(TestCase):
         self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
         # Test when stride is not monotonically decreasing, the complement layout
         # is same as the one sorted its stride.
-        pg_layout_r = _Layout((2, 2), (2, 4))
+        pg_layout_r = _FlatLayout((2, 2), (2, 4))
         outer = pg_layout_r.complement(world_size=16)
         self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
         self.assertEqual(
@@ -1741,7 +1863,7 @@ class CuTeLayoutTest(TestCase):
         )
 
         # Test just all_ranks_from_zero and global_ranks.
-        pg_layout = _Layout((4,), (2,))
+        pg_layout = _FlatLayout((4,), (2,))
         self.assertEqual(
             pg_layout.all_ranks_from_zero(),
             [0, 2, 4, 6],
@@ -1758,9 +1880,9 @@ class CuTeLayoutTest(TestCase):
 
     def test_composition(self):
         # self = ((4,2), (2,1)), l = (2,1)  → self o l = (2,1)
-        orig_l = _Layout((4, 2), (2, 1))
-        right_l = _Layout((2,), (1,))
-        composed_layout = orig_l.composition(right_l)
+        orig_l = _FlatLayout((4, 2), (2, 1))
+        right_l = _MeshLayout.from_sizes_strides((2,), (1,))
+        (composed_layout,) = orig_l.composition(right_l)
         self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 1)])
         self.assertEqual(
             composed_layout.global_ranks(8),
@@ -1773,9 +1895,9 @@ class CuTeLayoutTest(TestCase):
         )
 
         # self = (4,2), l = (2,1)  → self o l = (2,2)
-        orig_l = _Layout((4,), (2,))
-        right_l = _Layout((2,), (1,))
-        composed_layout = orig_l.composition(right_l)
+        orig_l = _FlatLayout((4,), (2,))
+        right_l = _MeshLayout.from_sizes_strides((2,), (1,))
+        (composed_layout,) = orig_l.composition(right_l)
         self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 2)])
         self.assertEqual(
             composed_layout.global_ranks(8),
@@ -1789,9 +1911,10 @@ class CuTeLayoutTest(TestCase):
 
         # self = (4,2), l = ((2,2), (2,1))  → self o l = ((2,4), (2,2))
         # This is to mimic the un-flatten from a 2D mesh to a 1D mesh.
-        right_l = _Layout((2, 2), (2, 1))
+        right_l = _MeshLayout.from_sizes_strides((2, 2), (2, 1))
         composed_layout = orig_l.composition(right_l)
-        self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 4), (2, 2)])
+        self.assertEqual(list(composed_layout[0].sizes_and_strides), [(2, 4)])
+        self.assertEqual(list(composed_layout[1].sizes_and_strides), [(2, 2)])
         self.assertEqual(
             composed_layout[0].global_ranks(8),
             [
@@ -1812,94 +1935,133 @@ class CuTeLayoutTest(TestCase):
         )
 
         # Error case.
-        orig_l = _Layout((4, 2), (4, 1))
+        orig_l = _FlatLayout((4, 2), (4, 1))
         with self.assertRaises(
             AssertionError,
         ):
-            right_l = _Layout((2,), (3,))
+            right_l = _MeshLayout.from_sizes_strides((2,), (3,))
             orig_l.composition(right_l)
 
-    def test_check_non_overlap(self):
-        """Test the check_non_overlap method for various layout configurations."""
+    def test_check_orthogonal(self):
+        """Test the check_orthogonal method for various layout configurations."""
         # Test 1: Valid layout - no overlap
         # sizes=(2,3), strides=(6,1) - stride 6 > span 3, so no overlap
-        layout1 = _Layout((2, 3), (6, 1))
-        self.assertTrue(layout1.check_non_overlap())
+        layout1 = _FlatLayout((2, 3), (6, 1))
+        self.assertTrue(layout1.check_orthogonal())
 
         # Test 2: Invalid layout - overlap due to stride < previous span
         # sizes=(2,3), strides=(2,1) - stride 2 < span 3, causes overlap
-        layout2 = _Layout((2, 3), (2, 1))
-        self.assertFalse(layout2.check_non_overlap())
+        layout2 = _FlatLayout((2, 3), (2, 1))
+        self.assertFalse(layout2.check_orthogonal())
 
         # Test 3: Invalid layout - duplicate strides
         # sizes=(2,3), strides=(1,1) - same stride, causes overlap
-        layout3 = _Layout((2, 3), (1, 1))
-        self.assertFalse(layout3.check_non_overlap())
+        layout3 = _FlatLayout((2, 3), (1, 1))
+        self.assertFalse(layout3.check_orthogonal())
 
         # Test 4: Valid layout - single dimension
-        layout4 = _Layout((4,), (1,))
-        self.assertTrue(layout4.check_non_overlap())
+        layout4 = _FlatLayout((4,), (1,))
+        self.assertTrue(layout4.check_orthogonal())
 
         # Test 5: Valid layout - exact boundary case
         # sizes=(2,3), strides=(3,1) - stride 3 == span 3, valid
-        layout5 = _Layout((2, 3), (3, 1))
-        self.assertTrue(layout5.check_non_overlap())
+        layout5 = _FlatLayout((2, 3), (3, 1))
+        self.assertTrue(layout5.check_orthogonal())
 
         # Test 6: Valid layout - multi-dimensional with proper spacing
-        layout6 = _Layout((2, 2, 2), (8, 4, 1))
-        self.assertTrue(layout6.check_non_overlap())
+        layout6 = _FlatLayout((2, 2, 2), (8, 4, 1))
+        self.assertTrue(layout6.check_orthogonal())
 
         # Test 7: Valid layout - stride not ordered
-        layout7 = _Layout((2, 2, 2), (4, 1, 2))
-        self.assertTrue(layout7.check_non_overlap())
+        layout7 = _FlatLayout((2, 2, 2), (4, 1, 2))
+        self.assertTrue(layout7.check_orthogonal())
 
-        # Test 8: Valid layout - Interleaved but no overlap
-        layout8 = _Layout((3, 2), (2, 3))
-        self.assertTrue(layout8.check_non_overlap())
+        # Test 8: Invalid layout - dimensions are not "comparable", neither
+        # can be "stacked" above or below the other.
+        layout8 = _FlatLayout((3, 2), (2, 3))
+        self.assertFalse(layout8.check_orthogonal())
+
+        # Test 9: Valid layout - dimensions can be dropped, shuffled, coalesced
+        layout9 = _FlatLayout((2, (11, 3), 7), (1, (210, 2), 30))
+        self.assertTrue(layout9.check_orthogonal())
 
     def test_remap_to_tensor(self):
         """Test the remap_to_tensor method for various scenarios."""
         # Test 1: Consecutive ranks, full world - should return logical groups directly
         original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
-        layout1 = _Layout((2, 2), (2, 1))  # row-major 2x2
+        layout1 = _MeshLayout.from_sizes_strides((2, 2), (2, 1))  # row-major 2x2
         result1 = layout1.remap_to_tensor(original_mesh)
         expected1 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
         self.assertEqual(result1, expected1)
 
         # Test 2: Non-consecutive ranks - should map to actual ranks
         original_mesh = torch.tensor([10, 20, 30, 40], dtype=torch.int)
-        layout2 = _Layout((2, 2), (2, 1))
+        layout2 = _MeshLayout.from_sizes_strides((2, 2), (2, 1))
         result2 = layout2.remap_to_tensor(original_mesh)
         expected2 = torch.tensor([[[10, 20], [30, 40]]], dtype=torch.int)
         self.assertEqual(result2, expected2)
 
         # Test 4: 1D layout with consecutive ranks
         original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
-        layout4 = _Layout((4,), (1,))
+        layout4 = _MeshLayout.from_sizes_strides((4,), (1,))
         result4 = layout4.remap_to_tensor(original_mesh)
         expected4 = torch.tensor([[0, 1, 2, 3]], dtype=torch.int)
         self.assertEqual(result4, expected4)
 
         # Test 5: Complex strided layout with non-consecutive ranks
         original_mesh = torch.tensor([5, 10, 15, 20], dtype=torch.int)
-        layout5 = _Layout((2, 2), (2, 1))
+        layout5 = _MeshLayout.from_sizes_strides((2, 2), (2, 1))
         result5 = layout5.remap_to_tensor(original_mesh)
         expected5 = torch.tensor([[[5, 10], [15, 20]]], dtype=torch.int)
         self.assertEqual(result5, expected5)
 
         # Test 6: Tensor Cute representation of a 2D mesh
         original_mesh = torch.tensor([0, 2, 1, 3], dtype=torch.int)
-        layout6 = _Layout((2, 2), (1, 2))  # column-major style
+        layout6 = _MeshLayout.from_sizes_strides((2, 2), (1, 2))  # column-major style
         result6 = layout6.remap_to_tensor(original_mesh)
         expected6 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
         self.assertEqual(result6, expected6)
 
         # Test 7: Layout with different stride pattern
         original_mesh = torch.tensor([0, 2, 1, 4], dtype=torch.int)
-        layout7 = _Layout((2, 2), (1, 2))  # column-major style
+        layout7 = _MeshLayout.from_sizes_strides((2, 2), (1, 2))  # column-major style
         result7 = layout7.remap_to_tensor(original_mesh)
         expected7 = torch.tensor([[[0, 1], [2, 4]]], dtype=torch.int)
         self.assertEqual(result7, expected7)
+
+
+class ProcessGroupOpaqueTypeTest(TestCase):
+    """Test that ProcessGroup opaque type members are registered and exist on the class."""
+
+    def test_registered_members_exist_on_process_group(self):
+        from torch._library.opaque_object import get_member_type
+
+        # Every member registered in _register_distributed_opaque_types()
+        # must actually exist on ProcessGroup. This catches renames or
+        # removals of C++ attributes that would cause torch.compile
+        # (fullgraph=True) to silently register a stale name while the
+        # real attribute has moved.
+        registered_members = [
+            "size",
+            "rank",
+            "_get_backend_name",
+            "group_name",
+            "group_desc",
+            "__eq__",
+        ]
+        for member_name in registered_members:
+            self.assertIsNotNone(
+                get_member_type(ProcessGroup, member_name),
+                f"'{member_name}' is not registered as a ProcessGroup opaque "
+                f"type member. Add it to _register_distributed_opaque_types() "
+                f"in torch/distributed/device_mesh.py",
+            )
+            self.assertTrue(
+                hasattr(ProcessGroup, member_name),
+                f"'{member_name}' is registered as a ProcessGroup opaque type "
+                f"member but does not exist on the ProcessGroup class. "
+                f"Was it renamed or removed?",
+            )
 
 
 if __name__ == "__main__":

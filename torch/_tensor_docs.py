@@ -1516,11 +1516,36 @@ In-place version of :meth:`~Tensor.cumsum`
 )
 
 add_docstr_all(
+    "const_data_ptr",
+    r"""
+const_data_ptr() -> int
+
+Returns the address of the first element of :attr:`self` tensor.
+
+Unlike :meth:`data_ptr`, this is guaranteed to be a read-only access
+that will not trigger copy-on-write materialization. For regular
+(non-COW) tensors, the return value is identical to :meth:`data_ptr`.
+
+.. warning::
+
+    The returned pointer must not be used to mutate the tensor data.
+    Use :meth:`data_ptr` when write access is needed.
+""",
+)
+
+add_docstr_all(
     "data_ptr",
     r"""
 data_ptr() -> int
 
 Returns the address of the first element of :attr:`self` tensor.
+
+.. note::
+
+    If the tensor is a copy-on-write tensor (e.g. created via
+    :meth:`_lazy_clone`), calling this method will materialize the
+    copy. Use :meth:`const_data_ptr` if you only need read-only access
+    to the data pointer.
 """,
 )
 
@@ -3627,52 +3652,9 @@ See :func:`torch.nonzero`
 add_docstr_all(
     "nonzero_static",
     r"""
-nonzero_static(input, *, size, fill_value=-1) -> Tensor
+nonzero_static(*, size, fill_value=-1) -> LongTensor
 
-Returns a 2-D tensor where each row is the index for a non-zero value.
-The returned Tensor has the same `torch.dtype` as `torch.nonzero()`.
-
-Args:
-    input (Tensor): the input tensor to count non-zero elements.
-
-Keyword args:
-    size (int): the size of non-zero elements expected to be included in the out
-        tensor. Pad the out tensor with `fill_value` if the `size` is larger
-        than total number of non-zero elements, truncate out tensor if `size`
-        is smaller. The size must be a non-negative integer.
-    fill_value (int, optional): the value to fill the output tensor with when `size` is larger
-        than the total number of non-zero elements. Default is `-1` to represent
-        invalid index.
-
-Example:
-
-    # Example 1: Padding
-    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
-    >>> static_size = 4
-    >>> t = torch.nonzero_static(input_tensor, size=static_size)
-    tensor([[  0,   0],
-            [  1,   0],
-            [  1,   1],
-            [  -1, -1]], dtype=torch.int64)
-
-    # Example 2: Truncating
-    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
-    >>> static_size = 2
-    >>> t = torch.nonzero_static(input_tensor, size=static_size)
-    tensor([[  0,   0],
-            [  1,   0]], dtype=torch.int64)
-
-    # Example 3: 0 size
-    >>> input_tensor = torch.tensor([10])
-    >>> static_size = 0
-    >>> t = torch.nonzero_static(input_tensor, size=static_size)
-    tensor([], size=(0, 1), dtype=torch.int64)
-
-    # Example 4: 0 rank input
-    >>> input_tensor = torch.tensor(10)
-    >>> static_size = 2
-    >>> t = torch.nonzero_static(input_tensor, size=static_size)
-    tensor([], size=(2, 0), dtype=torch.int64)
+See :func:`torch.nonzero_static`
 """,
 )
 
@@ -6276,7 +6258,7 @@ Args:
 add_docstr_all(
     "expand",
     r"""
-expand(*sizes) -> Tensor
+expand(*size) -> Tensor
 
 Returns a new view of the :attr:`self` tensor with singleton dimensions expanded
 to a larger size.
@@ -6294,8 +6276,14 @@ expanded to a larger size by setting the ``stride`` to 0. Any dimension
 of size 1 can be expanded to an arbitrary value without allocating new
 memory.
 
+.. note::
+
+    Operations on an expanded view may still allocate memory if they need to
+    materialize the expanded values. For example, changing dtype after
+    :meth:`expand` can allocate memory for the full expanded shape.
+
 Args:
-    *sizes (torch.Size or int...): the desired expanded size
+    *size (torch.Size or int...): the desired expanded size
 
 .. warning::
 
@@ -6919,7 +6907,7 @@ add_docstr_all(
 Returns a new tensor containing real values of the :attr:`self` tensor for a complex-valued input tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
-Returns :attr:`self` if :attr:`self` is a real-valued tensor tensor.
+Returns :attr:`self` if :attr:`self` is a real-valued tensor.
 
 Example::
 

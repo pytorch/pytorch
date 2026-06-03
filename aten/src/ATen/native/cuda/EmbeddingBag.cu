@@ -31,8 +31,6 @@
 
 #include <c10/macros/Macros.h>
 
-#include <thrust/iterator/reverse_iterator.h>
-
 namespace at::native {
 
 
@@ -202,18 +200,18 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
     auto range = at::arange(num_indices, indices.options());
-    // int64_t nbits = cuda::cub::get_num_bits(num_weights);
+    int64_t nbits = padding_idx >= 0
+      ? cuda::cub::get_num_bits(num_weights)
+      : cuda::cub::get_num_bits(num_weights - 1 - padding_idx);
     cuda::cub::radix_sort_pairs(
       indices.const_data_ptr<index_t>(), sorted_indices.mutable_data_ptr<index_t>(),
       range.const_data_ptr<index_t>(), orig_indices.mutable_data_ptr<index_t>(),
-      num_indices, false/*, 0, nbits*/);
+      num_indices, false, 0, nbits);
   });
 
   if (scale_grad_by_freq) {
     count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_backward_cuda_sum_avg", [&] () {
-      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
       // Compute an increasing sequence per unique item in sortedIndices:
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 1 2 3 1 2 1 1 2
@@ -230,9 +228,9 @@ Tensor embedding_bag_backward_cuda_sum_avg(
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 3 3 3 2 2 1 2 2
       cuda::cub::inclusive_scan_by_key(
-        thrust::make_reverse_iterator(sorted_data + num_indices),
-        thrust::make_reverse_iterator(count_data + num_indices),
-        thrust::make_reverse_iterator(count_data + num_indices),
+        cccl_make_reverse_iterator(sorted_data + num_indices),
+        cccl_make_reverse_iterator(count_data + num_indices),
+        cccl_make_reverse_iterator(count_data + num_indices),
         ATEN_CUB_MAXIMUM(),
         num_indices
       );
@@ -420,7 +418,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             weight.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
             offset2bag.mutable_data_ptr<index_t>(), numIndices, numBags, featureSize,
             weight.stride(0), weight.stride(1), mode, bag_size.mutable_data_ptr<index_t>(),
-            per_sample_weights.defined() ? per_sample_weights.const_data_ptr<scalar_t>() : NULL,
+            per_sample_weights.defined() ? per_sample_weights.const_data_ptr<scalar_t>() : nullptr,
             per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
             padding_idx, weight.size(0));
         C10_CUDA_KERNEL_LAUNCH_CHECK();

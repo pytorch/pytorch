@@ -1,9 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
+#include <tuple>
 #include <type_traits>
-
-#include <thrust/tuple.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
@@ -27,18 +26,16 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/env.h>
 
+#ifdef USE_ROCM
+#include <ATen/cuda/detail/ROCmMacros.cuh>
+#endif
+
 
 namespace at::native {
 
 namespace {
 
 constexpr int kCUDANumThreads = 256;
-#ifdef USE_ROCM
-// C10_WARP_SIZE is not constexpr for host code.
-#define kWarpSize C10_WARP_SIZE
-#else
-constexpr unsigned int kWarpSize = C10_WARP_SIZE;
-#endif
 constexpr int vec_size = 4; //we could make it dependent on dtype, but that would lead to different results between float and low-p types
 
 // aligned vector generates vectorized load/store on CUDA (copy-pasted from MemoryAccess.cuh)
@@ -66,9 +63,8 @@ __global__ void RowwiseMomentsCUDAKernel(
   using WelfordOp =
       WelfordOps<T_ACC, T_ACC, int64_t, std::pair<T_ACC, T_ACC>>;
 
-  __shared__
-      typename std::aligned_storage<sizeof(WelfordType), alignof(WelfordType)>::
-          type val_shared[C10_WARP_SIZE];
+  alignas(WelfordType) __shared__
+      char val_shared[sizeof(WelfordType) * C10_WARP_SIZE_UPPER_BOUND];
   WelfordType* val_shared_ptr = reinterpret_cast<WelfordType*>(val_shared);
 
   const int64_t i = blockIdx.x;
@@ -139,11 +135,15 @@ WelfordDataLN cuWelfordOnlineSum(
   if constexpr (!rms_norm){
     U delta = val - curr_sum.mean;
     U new_count = curr_sum.count + 1.f;
-//Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
-#if defined(USE_ROCM) && !defined(__gfx90a__) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
-    U new_mean = curr_sum.mean + delta * __builtin_amdgcn_rcpf(new_count);
+    // TODO: should this use __fdividef?
+    auto fn_rcp_mul = [](auto a, auto b) {return a * (1.0f / b);};
+#if defined(USE_ROCM) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
+    //Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
+    U new_mean =  curr_sum.mean +  (__builtin_amdgcn_processor_is("gfx90a") ? fn_rcp_mul(delta, new_count)
+                           : delta * __builtin_amdgcn_rcpf(new_count));
 #else
-    U new_mean = curr_sum.mean + delta * (1.f/new_count); //proper division is slow, this is less accurate but noticeably faster
+    //proper division is slow, this is less accurate but noticeably faster:
+    U new_mean = curr_sum.mean + fn_rcp_mul(delta, new_count);
 #endif
     return {new_mean, curr_sum.sigma2 + delta * (val - new_mean), new_count};
   } else{
@@ -162,11 +162,13 @@ WelfordDataLN cuWelfordCombine(
     U count = dataA.count + dataB.count;
     U mean, sigma2;
     if (count > decltype(dataB.count){0}) {
+      // TODO: should this use __fdividef?
+      auto fn_rcp = [](auto a) {return 1.0f / a;};
+#if defined(USE_ROCM) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
 //Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
-#if defined(USE_ROCM) && !defined(__gfx90a__) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
-      auto coef = __builtin_amdgcn_rcpf(count);
+      auto coef = __builtin_amdgcn_processor_is("gfx90a") ? fn_rcp(count): __builtin_amdgcn_rcpf(count);
 #else
-      auto coef = 1.f/count; //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
+      auto coef = fn_rcp(count); //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
 #endif
       auto nA = dataA.count * coef;
       auto nB = dataB.count * coef;
@@ -259,14 +261,15 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
     extern __shared__ float s_data[]; //if we made smem WelfordDataLN type, there would be bank conflicts,
     //as one thread would have to write 3 consecutive floats
     auto i1 = blockIdx.x;
-    const T * block_row = X + i1 * N;
+    const int64_t row_offset = static_cast<int64_t>(i1) * static_cast<int64_t>(N);
+    const T * block_row = X + row_offset;
     WelfordDataLN wd = compute_stats<T, rms_norm>(block_row, N, s_data);
 
     using vec_t = aligned_vector<T, vec_size>;
     const vec_t * X_vec = reinterpret_cast<const vec_t*>(block_row);
     const vec_t * gamma_vec = (gamma != nullptr) ? reinterpret_cast<const vec_t*>(gamma) : nullptr;
     const vec_t * beta_vec = (beta != nullptr) ? reinterpret_cast<const vec_t*>(beta) : nullptr;
-    vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + i1 * N);
+    vec_t * Y_vec = reinterpret_cast<vec_t*>(Y + row_offset);
 
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
@@ -364,6 +367,7 @@ __device__ __inline__ void compute_gI(
   const int N,
   T_ACC * buf){
     const auto i1 = blockIdx.x;
+    const int64_t row_offset = static_cast<int64_t>(i1) * static_cast<int64_t>(N);
     T_ACC mean_val = 0;
     if constexpr (!rms_norm){
       mean_val = mean[i1];
@@ -372,9 +376,9 @@ __device__ __inline__ void compute_gI(
     T_ACC stats_x1{0}, stats_x2{0};
     constexpr int unroll = 4;
     auto l = unroll * threadIdx.x;
-    const T * X_i = X + i1 * N;
-    const T * dY_i = dY + i1 * N;
-    T * dX_i = dX + i1 * N;
+    const T * X_i = X + row_offset;
+    const T * dY_i = dY + row_offset;
+    T * dX_i = dX + row_offset;
     //vectorized reads don't improve perf, so use regular unrolling
 
     for (; l+unroll - 1 < N; l += blockDim.x * unroll){
@@ -473,14 +477,15 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   T_ACC* reduce_buf = reinterpret_cast<T_ACC*>(&shared_data);
 
   const auto bIdx = blockIdx.x;
+  const int64_t row_offset = static_cast<int64_t>(bIdx) * static_cast<int64_t>(N);
   T_ACC mean_val = 0;
   if constexpr (!rms_norm){
     mean_val = mean[bIdx];
   }
   const T_ACC rstd_val = rstd[bIdx];
-  const T* X_i = X + bIdx * N;
-  const T* dY_i = dY + bIdx * N;
-  T* dX_i = dX + bIdx * N;
+  const T* X_i = X + row_offset;
+  const T* dY_i = dY + row_offset;
+  T* dX_i = dX + row_offset;
 
   using vec_t = aligned_vector<T, vec_size>;
   const vec_t* const X_i_vec_ptr = reinterpret_cast<const vec_t*>(X_i);
@@ -663,7 +668,7 @@ blockReduceGammaBetaBackwardsHelper(
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
   int64_t thread_x = blockIdx.x * block_dim_x + threadIdx.x;
 
-    int lane_id = (threadIdx.y * blockDim.x + threadIdx.x) & (kWarpSize - 1);
+    int lane_id = (threadIdx.y * blockDim.x + threadIdx.x) & (C10_WARP_SIZE - 1);
     int64_t mean_index = M_start + threadIdx.y * rows_per_thread_y;
     T_ACC warp_mean = 0, warp_rstd = 0;
     if (lane_id < rows_per_thread_y && mean_index + lane_id < M) {
@@ -696,9 +701,9 @@ blockReduceGammaBetaBackwardsHelper(
 
     #pragma unroll
     for (int i = 0; i < rows_per_thread_y; ++i) {
-      T_ACC rstd_reg = WARP_SHFL(warp_rstd, i, kWarpSize);
+      T_ACC rstd_reg = WARP_SHFL(warp_rstd, i, C10_WARP_SIZE);
       if constexpr (!rms_norm){
-        T_ACC mean_reg = WARP_SHFL(warp_mean, i, kWarpSize);
+        T_ACC mean_reg = WARP_SHFL(warp_mean, i, C10_WARP_SIZE);
         dg_sum += dY_regs[i] * (X_regs[i] - mean_reg) * rstd_reg;
         db_sum += dY_regs[i];
       } else{
@@ -747,10 +752,16 @@ blockReduceGammaBetaBackwardsWithChecks(
 // block_dim_y is the number of threads in the y dimension per block.
 // rows_per_block_y is the size of the tile (number of data elements)
 // in the y dimension per block.
-// partial_reduction indicates whether we need to reduce across threads
-// or not. If set to true, we will not reduce across threads. This can
-// be faster in the M >> N case but requires another kernel to do a full
-// final reduction.
+// skip_block_reduction indicates whether we want to skip the block reduction
+// step.
+// Current usage:
+//   M >> N  (skip=true, block_dim_y==1, gridDim.y>1):
+//           It's faster to use two-pass process. Write partial sums and use
+//           another kernel to do a full final reduction.
+//   M < 64  (skip=true, block_dim_y==1, gridDim.y==1):
+//           Use 1 y-thread to sum each column. No need to further reduce.
+//   M >=64  (skip=false, block_dim_y>1, gridDim.y==1):
+//           Use multiple y-threads. Requires block reduce.
 // aligned_grid means the data size is a multiple of tile size. In that
 // case we don't need to check for boundary conditions which can provide
 // a further speedup by not needing instructions to check for edge cases
@@ -758,7 +769,7 @@ blockReduceGammaBetaBackwardsWithChecks(
 template <typename T, typename T_ACC,
 unsigned int block_dim_x, unsigned int block_dim_y,
 unsigned int rows_per_block_y,
-bool partial_reduction,
+bool skip_block_reduction,
 bool aligned_grid,
 bool rms_norm
 >
@@ -774,9 +785,15 @@ __launch_bounds__(block_dim_x * block_dim_y)
     const T_ACC* __restrict__ rstd,
     T* __restrict__ dg,
     T* __restrict__ db) {
+
   // This assert is a compile-time check only.
   constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
-  static_assert(rows_per_thread_y <= kWarpSize);
+  static_assert(rows_per_thread_y <= C10_WARP_SIZE_LOWER_BOUND);
+
+  // skip_block_reduction must match (block_dim_y == 1).
+  // See the parameter comments above.
+  static_assert(skip_block_reduction == (block_dim_y == 1),
+                "skip_block_reduction must match (block_dim_y == 1)");
 
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
@@ -804,9 +821,12 @@ __launch_bounds__(block_dim_x * block_dim_y)
 
   int64_t thread_x = ((int64_t)blockIdx.x) * block_dim_x + threadIdx.x;
 
-  // When partial_reduction is requested, we don't reduce within a block.
-  // We also don't reduce if we are only a single block in the y dimension.
-  if (partial_reduction || (blockDim.y == 1 && gridDim.y == 1)) {
+  if constexpr (skip_block_reduction) {
+    // Direct write path (no block reduction needed):
+    //   gridDim.y == 1 (M < 64):   dg_sum is the final per-column total.
+    //   gridDim.y >  1 (M >> N):   dg_sum is a per-block partial; the launcher
+    //                              runs .sum(0) afterwards.
+    // Note, currently blockDim.y == 1 for both cases above.
     if (aligned_grid || thread_x < N) {
       int64_t thread_y = ((int64_t)blockIdx.y) * blockDim.y + threadIdx.y;
       if (dg) {
@@ -817,9 +837,10 @@ __launch_bounds__(block_dim_x * block_dim_y)
       }
     }
   } else {
-    // The caller requested a full reduction so we must reduce across
-    // warps using shared memory and warp shuffles.
-    static_assert(rows_per_thread_y <= C10_WARP_SIZE);
+    // Block reduce path: block_dim_y > 1 means multiple y-threads share each
+    // column. Transpose through shmem so a warp holds an entire column, then
+    // warp shuffle reduce.
+    static_assert(rows_per_thread_y <= C10_WARP_SIZE_LOWER_BOUND);
     alignas(sizeof(double)) extern __shared__ char s_data1[];
     T_ACC* s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
     T_ACC* s_dg;
@@ -835,8 +856,8 @@ __launch_bounds__(block_dim_x * block_dim_y)
     // Load transposed so that a warp holds an entire column
     // Because block_dim_x != block_dim_y in the general case, we need
     // some code to handle the general case.
-    static_assert(block_dim_x * block_dim_y % C10_WARP_SIZE == 0);
-    constexpr int warps_available_to_reduce = block_dim_x * block_dim_y / C10_WARP_SIZE;
+    static_assert(block_dim_x * block_dim_y % C10_WARP_SIZE_LOWER_BOUND == 0);
+    const int warps_available_to_reduce = block_dim_x * block_dim_y / C10_WARP_SIZE;
     int thread_id = threadIdx.y * block_dim_x + threadIdx.x;
     int warp_id = thread_id / C10_WARP_SIZE;
     int lane_id = thread_id & (C10_WARP_SIZE - 1);
@@ -849,8 +870,8 @@ __launch_bounds__(block_dim_x * block_dim_y)
       }
       #pragma unroll
       for (unsigned delta = block_dim_y >> 1; delta >= 1; delta >>= 1) {
-        reg_dg += WARP_SHFL_XOR(reg_dg, delta, kWarpSize);
-        reg_db += WARP_SHFL_XOR(reg_db, delta, kWarpSize);
+        reg_dg += WARP_SHFL_XOR(reg_dg, delta, C10_WARP_SIZE);
+        reg_db += WARP_SHFL_XOR(reg_db, delta, C10_WARP_SIZE);
       }
       // Reduce is done. Now write it out to global memory.
       int64_t out_index = ((int64_t)blockIdx.x) * block_dim_x + i;
@@ -869,7 +890,7 @@ __launch_bounds__(block_dim_x * block_dim_y)
 template<typename T, typename T_ACC,
 int block_dim_x, int block_dim_y,
 int rows_per_block_y,
-bool partial_reduction,
+bool skip_block_reduction,
 bool rms_norm>
 void LaunchAndCheckGammaBetaBackwardKernel(
   bool aligned_grid,
@@ -886,7 +907,7 @@ void LaunchAndCheckGammaBetaBackwardKernel(
   T* dgamma_data,
   T* dbeta_data) {
 if (aligned_grid) {
-    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, partial_reduction, true, rms_norm>
+    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, true, rms_norm>
         <<<blocks, threads, shmem_sz, cuda_stream>>>(
             M,
             N,
@@ -897,7 +918,7 @@ if (aligned_grid) {
             dgamma_data,
             dbeta_data);
   } else {
-    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, partial_reduction, false, rms_norm>
+    GammaBetaBackwardCUDAKernelTemplate<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, skip_block_reduction, false, rms_norm>
         <<<blocks, threads, shmem_sz, cuda_stream>>>(
             M,
             N,
@@ -933,19 +954,25 @@ void ConfigureAndLaunchGammaBetaBackwardKernel(
   blocks.x = (N + block_dim_x - 1) / block_dim_x;
   blocks.y = 1;
   size_t shmem_sz = (block_dim_x + 1) * block_dim_y * sizeof(T_ACC) * 2;
-  if (blocks.y == 1 && threads.y == 1) {
-    // Optimization: since there is just one thread doing all the summation, we don't need a reduction
-    // across threads. So we set partial_reduction to true.
+  // Note, blocks.y is a fixed value of 1 (see above) meaning gridDim.y == 1.
+  // So block_dim_y alone decides whether we need to do block reduction.
+  if constexpr (block_dim_y == 1) {
+    // There is only 1 y-thread per column.
+    // The accumulated result is the full per column sum; skip the block reduction.
     LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true, rms_norm>(
       aligned_grid, blocks, threads, shmem_sz, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_data, dbeta_data);
   } else {
+    // block_dim_y > 1: multiple y-threads working on each column.
+    // Need to perform block reduction to get the final result.
     LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, false, rms_norm>(
       aligned_grid, blocks, threads, shmem_sz, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_data, dbeta_data);
   }
 
 }
 
-template<typename T, typename T_ACC, bool rms_norm>
+// Accept block_dim_x as a template parameter so ROCm can dispatch launch
+// shapes based on runtime warp size while preserving compile-time specialization.
+template<typename T, typename T_ACC, int block_dim_x, bool rms_norm>
 void LaunchGammaBetaBackwardCUDAKernel(
     const T* dY_data,
     const T* X_data,
@@ -956,13 +983,13 @@ void LaunchGammaBetaBackwardCUDAKernel(
     Tensor* dgamma,
     Tensor* dbeta,
     cudaStream_t cuda_stream) {
-  constexpr int block_dim_x = 32;
   const int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   if (M > 64 * 1024 && N / block_dim_x < sm_count / 2) {
     // We have a situation where M >> N and N is small.
     // In this case we can speed up the computation by parallelizing in the M dimension.
     // We launch multiple blocks in the y-dimension, and compute partial sums for the
-    // gradient in the first pass. Then we do a .sum(0) to do a final reduction.
+    // gradient in the first pass (skip_block_reduction=true). Then we do a .sum(0) to
+    // do a final reduction.
     // Although we launch 2 kernels, we can get up to a 10x speedup for large M.
     constexpr int block_dim_y = 1;
     constexpr int rows_per_block_y = 32;
@@ -988,7 +1015,7 @@ void LaunchGammaBetaBackwardCUDAKernel(
       dbeta_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
       dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
     }
-    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true, rms_norm>(
+    LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, /*skip_block_reduction=*/true, rms_norm>(
       aligned_grid, blocks, threads, 0, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_blocks_ptr, dbeta_blocks_ptr);
 
     if (dgamma_blocks.defined()) {
@@ -1011,7 +1038,22 @@ void LaunchGammaBetaBackwardCUDAKernel(
     } else if (M < 256) {
       ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 16, 128, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
     } else {
+#ifdef USE_ROCM
+      if constexpr (block_dim_x == 64) {
+        // GCN/CDNA devices use warp size 64 in ROCm.
+        // Cap block_dim_y at 16 to keep total threads (64*16=1024) within GPU limits.
+        // rows_per_thread_y = 256/16 = 16, still within warp size constraint.
+        ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 16, 256, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      } else {
+        static_assert(block_dim_x == 32);
+        // RDNA devices (gfx10, gfx11, gfx12) use warp size 32 in ROCm.
+        // Use block_dim_y = 32 to keep total threads at 32*32=1024 within GPU limits.
+        // rows_per_thread_y = 256/32 = 8, still within warp size constraint.
+        ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 32, 256, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      }
+#else
       ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, block_dim_x, 32, 256, rms_norm>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+#endif
     }
   }
 }
@@ -1193,7 +1235,7 @@ void cuLoadWriteStridedInputs(
     T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
-      int load_idx = i1*N+i2;
+      int64_t load_idx = static_cast<int64_t>(i1)*static_cast<int64_t>(N)+i2;
       int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
       if (i2<N) {
         T curr_input = static_cast<T>(input[load_idx]);
@@ -1240,7 +1282,7 @@ void cuLoadAddStridedInputs(
     T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
-      int load_idx = i1*N+i2;
+      int64_t load_idx = static_cast<int64_t>(i1)*static_cast<int64_t>(N)+i2;
       int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
       if (i2<N) {
         T_ACC curr_input = static_cast<T_ACC>(input[load_idx]);
@@ -1274,7 +1316,7 @@ void cuComputePartGradGammaBeta(
     const int i2_off = blockIdx.x * blockDim.x + thr_load_col_off;
     alignas(sizeof(double)) extern __shared__ char shared[];
     T_ACC * buf = reinterpret_cast<T_ACC*>(&shared); // buf has at least blockDim.x * blockDim.y * blockDim.y + (blockDim.y - 1)*(blockDim.x/blockDim.y) elements
-    T_ACC* warp_buf1 = (T_ACC*)buf;
+    T_ACC* warp_buf1 = buf;
     T_ACC* warp_buf2 = warp_buf1 + blockDim.y * blockDim.y * row_stride;
     // compute partial sums from strided inputs
     // do this to increase number of loads in flight
@@ -1396,6 +1438,7 @@ void cuComputeGradInput(
     T* grad_input)
 {
   for (int i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
+    const int64_t row_offset = static_cast<int64_t>(i1) * static_cast<int64_t>(N);
     T_ACC sum_loss1 = T_ACC(0);
     T_ACC sum_loss2 = T_ACC(0);
     T_ACC c_mean = 0;
@@ -1403,8 +1446,8 @@ void cuComputeGradInput(
       c_mean = mean[i1];
     }
     const T_ACC c_rstd = rstd[i1];
-    const T* k_input = input + i1*N;
-    const T* k_dout = dout + i1*N;
+    const T* k_input = input + row_offset;
+    const T* k_dout = dout + row_offset;
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
     if (gamma != NULL) {
@@ -1482,7 +1525,7 @@ void cuComputeGradInput(
     // all threads now have the two sums over l
     T_ACC fH = (T_ACC)N;
     T_ACC term1 = (T_ACC(1) / fH) * c_rstd;
-    T* k_grad_input = grad_input + i1*N;
+    T* k_grad_input = grad_input + row_offset;
     if (gamma != NULL) {
       for (int l = thrx;  l < N;  l+=numx) {
         const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
@@ -1598,12 +1641,12 @@ void LayerNormBackwardKernelImplInternal(
   }
 
   if (dgamma->defined() || dbeta->defined()) {
-    T* dgamma_data =
-        dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
-    T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
-
 #if defined(USE_ROCM)
     if (M < 128) {
+      T* dgamma_data =
+          dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
+      T* dbeta_data =
+          dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
       // For small batch size, do colwise reduce directly.
       const int64_t B = (N + kCUDANumThreads - 1) / kCUDANumThreads;
       GammaBetaBackwardSimpleCUDAKernel<T, T_ACC, rms_norm>
@@ -1618,43 +1661,25 @@ void LayerNormBackwardKernelImplInternal(
               dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      // For small batch size, do colwise reduce directly.
-      const int part_size = warp_size;
-      const dim3 threads2(warp_size, 4, 1);
-      const dim3 blocks2((N + threads2.x - 1) / threads2.x, part_size, 1);
-      const int nshared2_a = 2 * sizeof(T_ACC) * threads2.y * threads2.y * (threads2.x + 1);
-      const int nshared2_b = threads2.x * threads2.y * sizeof(T_ACC);
-      const int nshared2 = nshared2_a > nshared2_b ? nshared2_a : nshared2_b;
-
-      const auto part_grad_dtype = at::toAccumulateType(X.scalar_type(), true);
-      Tensor part_grad_gamma = at::empty({part_size,N}, gamma.options().dtype(part_grad_dtype));
-      Tensor part_grad_beta = at::native::empty_like(part_grad_gamma);
-
-      cuComputePartGradGammaBeta<T, T_ACC, rms_norm><<<blocks2, threads2, nshared2, cuda_stream>>>(
-                      dY_data,
-                      X_data,
-                      M,N,
-                      mean_data,
-                      rstd_data,
-                      part_grad_gamma.template data_ptr<T_ACC>(),
-                      part_grad_beta.template data_ptr<T_ACC>());
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-      const dim3 threads3(warp_size, 8, 1); // Optimization for ROCm
-      const dim3 blocks3((N + threads3.x - 1) / threads3.x, 1, 1);
-      const int nshared3 = threads3.x * threads3.y * sizeof(T_ACC);
-
-      cuComputeGradGammaBeta<T, T_ACC, rms_norm><<<blocks3, threads3, nshared3, cuda_stream>>>(
-                      part_grad_gamma.template data_ptr<T_ACC>(),
-                      part_grad_beta.template data_ptr<T_ACC>(),
-                      part_size,
-                      M,N,
-                      dgamma_data,
-                      dbeta_data);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      // Use the optimized tiled kernel adapted for the current warp size.
+      // This replaces the legacy two-pass cuComputePartGradGammaBeta +
+      // cuComputeGradGammaBeta approach with a single-pass tiled reduction
+      // that has coalesced memory access and adaptive tile sizing.
+      if (warp_size == 64) {
+        LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 64, rms_norm>(
+          dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      } else if (warp_size == 32) {
+        LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 32, rms_norm>(
+          dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Unexpected ROCm warp size: ",
+            warp_size);
+      }
     }
 #else
-    LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, rms_norm>(
+    LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 32, rms_norm>(
       dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
 #endif
   }

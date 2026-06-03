@@ -60,7 +60,7 @@ fetch_secret() {
         set +x
     fi
 
-    if ! gcloud secrets versions access latest --secret="torchtpu-readonly-key" --project="ml-velocity-actions-testing" > "temp_ssh_key"; then
+    if ! gcloud secrets versions access latest --secret="torchtpu-read-key" --project="ml-velocity-actions-testing" > "temp_ssh_key"; then
         echo "Error: Failed to fetch secret. Ensure you are authenticated with gcloud."
 
         # Restore xtrace if it was enabled, before exiting
@@ -82,7 +82,7 @@ clone_repo() {
 
     # Use GIT_SSH_COMMAND to specify the key and disable strict host key checking for automation
     export GIT_SSH_COMMAND="ssh -i temp_ssh_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=no"
-    if git clone --recursive "git@github.com:google-ml-infra/torch_tpu.git"; then
+    if git clone --recursive "git@github.com:google-pytorch/torch_tpu.git"; then
         echo "Repository cloned successfully."
     else
         echo "Error: Failed to clone repository."
@@ -110,7 +110,7 @@ pull_torch_tpu() {
 # sleep 28800 # Debug sleep to connect to runner to streamline debugging, do not submit
 
 # 3. Configuration
-TORCH_TPU_REPO="${TORCH_TPU_REPO:-https://github.com/google-ml-infra/torch_tpu.git}"
+TORCH_TPU_REPO="${TORCH_TPU_REPO:-https://github.com/google-pytorch/torch_tpu.git}"
 TORCH_TPU_BRANCH="${TORCH_TPU_BRANCH:-main}"
 
 # Pin File Configuration
@@ -178,14 +178,22 @@ fi
 # Using the confirmed path: requirements/requirements.txt
 # Filter out torch pins to prevent downgrading the CI build
 grep -vE "torch|torchvision|torchaudio" requirements/requirements.txt > requirements_no_torch.txt
-pip_install -r requirements_no_torch.txt
+# The requirements file is fully hash-locked, so every dependency is already
+# pinned explicitly. Use --no-deps so pip does not try to re-resolve the
+# torch* packages we just stripped out (e.g. torchvision pulled in by timm),
+# which would fail in pip's --require-hashes mode.
+pip_install --no-deps -r requirements_no_torch.txt
 rm requirements_no_torch.txt
 
 # 10. Build
 echo "Building TorchTPU Wheel..."
 export TORCH_SOURCE=$(python -c "import torch; import os; print(os.path.dirname(os.path.dirname(torch.__file__)))")
 
-as_jenkins env TORCH_SOURCE="${TORCH_SOURCE}" bazel build //ci/wheel:torch_tpu_wheel --config=local --define WHEEL_VERSION=0.1.0 --define TORCH_SOURCE=local
+# --repo_env is required so the torch_tpu repository rule can see TORCH_SOURCE
+# and locate the local torch install's ATen headers. Bazel sanitizes the
+# ambient environment for hermeticity, so a plain `env TORCH_SOURCE=...` is not
+# visible to repository rules (only --define TORCH_SOURCE=local is not enough).
+as_jenkins env TORCH_SOURCE="${TORCH_SOURCE}" bazel build //ci/wheel:torch_tpu_wheel --config=local --define WHEEL_VERSION=0.1.0 --define TORCH_SOURCE=local --repo_env=TORCH_SOURCE="${TORCH_SOURCE}" --action_env=JAX_PLATFORMS=cpu
 
 # 11. Install
 pip_install bazel-bin/ci/wheel/*.whl

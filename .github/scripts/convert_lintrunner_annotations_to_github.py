@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import json
 import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 
 # From: https://docs.github.com/en/rest/reference/checks
@@ -17,12 +19,12 @@ class GitHubAnnotation(NamedTuple):
     path: str
     start_line: int
     end_line: int
-    start_column: Optional[int]
-    end_column: Optional[int]
+    start_column: int | None
+    end_column: int | None
     annotation_level: GitHubAnnotationLevel
     message: str
-    title: Optional[str]
-    raw_details: Optional[str]
+    title: str | None
+    raw_details: str | None
 
 
 PYTORCH_ROOT = Path(

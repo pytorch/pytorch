@@ -11,7 +11,7 @@ import sys
 import warnings
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import Any, cast, Optional
+from typing import Any, cast, ClassVar, Optional
 
 import sympy
 
@@ -36,6 +36,7 @@ from ..scheduler import (
     Scheduler,
     SchedulerNode,
 )
+from ..sizevars import stride_at_vec_range
 from ..utils import (
     cache_on_self,
     get_bounds_index_expr,
@@ -210,7 +211,7 @@ def reduction_combine(
     var,
     next_value,
     helper_val=None,
-    index: sympy.Symbol | None = None,
+    index: sympy.Expr | CSEVariable | None = None,
     src_dtype=None,
 ):
     is_bool = src_dtype == torch.bool
@@ -385,90 +386,6 @@ def replace_cascade_sum_with_add(buffer: IndentedBuffer):
                 line.line = new_content
             else:
                 buffer._lines[i] = new_content
-
-
-@functools.lru_cache
-def stride_at(index: sympy.Expr, var: sympy.Symbol):
-    if not index.has(var):
-        # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
-        # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool) and fails below calculation.
-        # in this case, there is no dependencies between index and var.
-        return sympy.S.Zero
-    replacement = {var: var + 1}
-    new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
-    return sympy.simplify(new_index - index)
-
-
-@functools.lru_cache
-def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: int):
-    """
-    Simplifies the index expression within the range of a vectorized loop.
-    Given a vectorized loop variable `var` in the range of a loop with `vec_length`,
-    this function transforms the `index` into an equivalent form. It handles
-    simplifications for cases where `var` can be expressed as `vec_length * a + b`,
-    where `b` ranges from 0 to `vec_length - 1`. The function reduces occurrences
-    of `FloorDiv` and `ModularIndexing` in the `index` with best-effort optimizations.
-
-    NOTE:
-    The simplified index expression is intended for analysis purposes only, not
-    for code generation. It replaces `FloorDiv` and `ModularIndexing` with free variables
-    which are not dependent on the loop variable `var` in the vectorized range. Check
-    https://github.com/pytorch/pytorch/pull/117221#discussion_r1449746217 for more details.
-
-    Examples:
-    1. If `var` is `x3` and `vec_length` is 16, and `x3 = 16*a + b`, then
-       `FloorDiv(x3, div)` or `ModularIndexing(x3, div, mod)` becomes a free variable
-       when `div` is divisible by 16.
-    2. `ModularIndexing(x3, 1, mod)` can be simplified to `x3 + c` where `c` is a free
-       variable when `mod` is divisible by 16.
-    """
-
-    div_freevar_id = 0
-    mod_freevar_id = 0
-
-    def visit_indexing_div(divisor):
-        nonlocal div_freevar_id
-        result = FloorDiv(var, divisor)
-        if sympy.gcd(divisor, vec_length) == vec_length:
-            result = sympy.Symbol(f"{var}_div_c{div_freevar_id}")
-            div_freevar_id += 1
-        return result
-
-    def visit_modular_indexing(divisor, modulus):
-        nonlocal mod_freevar_id
-        result = ModularIndexing(var, divisor, modulus)
-        if sympy.gcd(divisor, vec_length) == vec_length:
-            result = sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
-            mod_freevar_id += 1
-        elif divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length:
-            result = var + sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
-            mod_freevar_id += 1
-        return result
-
-    original_index = index
-
-    div = sympy.Wild("divisor", integer=True)
-    if index.has(FloorDiv):
-        index = index.replace(FloorDiv(var, div), visit_indexing_div)
-
-    mod = sympy.Wild("modulus", integer=True)
-    if index.has(ModularIndexing):
-        index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
-
-    index = sympy.simplify(index)
-    if index != original_index:
-        return simplify_index_in_vec_range(index, var, vec_length)
-
-    return index
-
-
-@functools.lru_cache
-def stride_at_vec_range(
-    index: sympy.Expr, var: sympy.Symbol, vec_length: int | None = None
-):
-    if vec_length:
-        index = simplify_index_in_vec_range(index, var, vec_length)
-    return stride_at(index, var)
 
 
 @dataclasses.dataclass
@@ -710,7 +627,12 @@ class CppOverrides(OpOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+        if (
+            use_compute_types
+            and dtype in DTYPE_LOWP_FP
+            and src_dtype == torch.float
+            and not config.emulate_precision_casts
+        ):
             """
             https://github.com/pytorch/pytorch/issues/115260
             For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
@@ -741,11 +663,16 @@ class CppOverrides(OpOverrides):
                 store(buf, node1_output_lowp)
                 node2_input_lowp = node_output_lowp # hit store cache
                 node2_input = node1_output # hit cse cache
+
+            This cache trick skips the lowp->fp32 round-trip rounding, so it is
+            disabled under emulate_precision_casts, where that rounding must be
+            preserved (e.g. an explicit fp32->fp16->fp32 user cast). See #185337.
             """
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def round_to_int(x, dtype, src_dtype=None, use_compute_types=True):
         assert isinstance(x, CppCSEVariable)
         if src_dtype is None:
@@ -753,7 +680,11 @@ class CppOverrides(OpOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype, rounding=True)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("round_to_int", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+        if (
+            dtype in DTYPE_LOWP_FP
+            and src_dtype == torch.float
+            and not config.emulate_precision_casts
+        ):
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
 
@@ -763,14 +694,17 @@ class CppOverrides(OpOverrides):
         return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def abs(x):
         return f"std::abs({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sin(x):
         return f"std::sin({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cos(x):
         return f"std::cos({x})"
 
@@ -779,6 +713,7 @@ class CppOverrides(OpOverrides):
         return f"decltype({x})(-{x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def exp(x):
         # return f"Sleef_expf_u10({x})"
         return f"std::exp({x})"
@@ -792,6 +727,7 @@ class CppOverrides(OpOverrides):
         return f"std::expm1({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def erf(x):
         return f"std::erf({x})"
 
@@ -800,14 +736,17 @@ class CppOverrides(OpOverrides):
         return f"std::erfc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def erfinv(x):
         return f"calc_erfinv({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sqrt(x):
         return f"std::sqrt({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def rsqrt(x):
         return f"1 / std::sqrt({x})"
 
@@ -824,14 +763,17 @@ class CppOverrides(OpOverrides):
             )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tan(x):
         return f"std::tan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def tanh(x):
         return f"std::tanh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def signbit(x):
         """
         On windows std::signbit only support float type.
@@ -848,14 +790,17 @@ class CppOverrides(OpOverrides):
         return f"std::pow({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def log(x):
         return f"std::log({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def round(x):
         return f"std::nearbyint({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def floor(x):
         return f"std::floor({x})"
 
@@ -867,75 +812,93 @@ class CppOverrides(OpOverrides):
         return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ceil(x):
         return f"std::ceil({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def trunc(x):
         return f"std::trunc({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def truncdiv(a, b):
         # a and b are integer type
         return f"{a} / {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def fmod(a, b):
         return f"std::fmod({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isinf(x):
         return f"std::isinf({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def isnan(x):
         return f"std::isnan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def lgamma(x):
         return f"std::lgamma({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def acos(x):
         return f"std::acos({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def acosh(x):
         return f"std::acosh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def cosh(x):
         return f"std::cosh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sinh(x):
         return f"std::sinh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def asin(x):
         return f"std::asin({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def asinh(x):
         return f"std::asinh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan2(x, y):
         return f"std::atan2({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atan(x):
         return f"std::atan({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def atanh(x):
         return f"std::atanh({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def copysign(x, y):
         return f"std::copysign({x}, {y})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x):
         cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
         if all(V.kernel.cse.try_get(cache_key) is not None for cache_key in cache_keys):
@@ -953,6 +916,7 @@ class CppOverrides(OpOverrides):
         return mantissa, exponent
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def hypot(x, y):
         return f"std::hypot({x}, {y})"
 
@@ -965,10 +929,12 @@ class CppOverrides(OpOverrides):
         return f"std::log2({x})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def ldexp(x, n):
         return f"std::ldexp({x}, {n})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def nextafter(x, y):
         return f"std::nextafter({x}, {y})"
 
@@ -989,14 +955,17 @@ class CppOverrides(OpOverrides):
             )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def minimum(a, b):
         return f"min_propagate_nan({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def maximum(a, b):
         return f"max_propagate_nan({a}, {b})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         return f"{a} ? {b} : {c}"
 
@@ -1017,6 +986,12 @@ class CppOverrides(OpOverrides):
         return ops.to_dtype(var, dtype)
 
     @staticmethod
+    def value_expr(expr, dtype):
+        # C++ index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return CppOverrides.index_expr(expr, dtype)
+
+    @staticmethod
     def masked(mask, body, other):
         code = BracesBuffer()
 
@@ -1034,6 +1009,7 @@ class CppOverrides(OpOverrides):
         return f"{mask} ? {body_var}() : {other_code}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_and(a, b):
         return f"{a} && {b}"
 
@@ -1042,10 +1018,12 @@ class CppOverrides(OpOverrides):
         return f"!{a}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_or(a, b):
         return f"{a} || {b}"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def logical_xor(a, b):
         return f"{a} != {b}"
 
@@ -1108,6 +1086,19 @@ class CppOverrides(OpOverrides):
         return f"normalized_rand_cpu({seed}, {offset})"
 
     @staticmethod
+    def rand_eager(
+        seed: sympy.Expr,
+        base_offset: sympy.Expr,
+        threads_per_round: sympy.Expr,
+        tid: sympy.Expr,
+        vec: sympy.Expr,
+    ):
+        # NOTE: This is a codegen fallback used by the C++ backend for eager random.
+        # It is not intended to provide CPU parity; parity target is CUDA eager vs compiled.
+        # Keep this hook to satisfy codegen paths and CI.
+        return f"normalized_rand_cpu({seed}, {base_offset})"
+
+    @staticmethod
     def randn(seed: sympy.Expr, offset: sympy.Expr):
         return f"randn_cpu({seed}, {offset})"
 
@@ -1120,6 +1111,7 @@ class CppOverrides(OpOverrides):
         return f"decltype({x})(1) / (decltype({x})(1) + std::exp(-{x}))"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sign(x):
         code = BracesBuffer()
         scalar_zero = f"decltype({x})(0)"
@@ -1236,6 +1228,7 @@ class CppVecOverrides(CppOverrides):
             if getattr(method, "__class__", None) is staticmethod and name not in [
                 "masked",
                 "index_expr",
+                "value_expr",
             ]:
                 setattr(self, name, wrap(method.__func__))
 
@@ -1465,6 +1458,12 @@ class CppVecOverrides(CppOverrides):
         assert a.dtype == b.dtype, (
             "remainder vec implementation expect the same inputs' dtype."
         )
+        if is_integer_dtype(a.dtype):
+            # Doing blend to set the remaining bits of b to non-zero
+            _t = f"decltype({a})"
+            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
+                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+            return f"remainder_integral({a}, {b})"
         return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod
@@ -1540,7 +1539,26 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def asinh(x):
-        return f"{x}.asinh()"
+        vec_t = f"decltype({x})"
+        code = BracesBuffer()
+        code.writeline("[&]()")
+        with code.indent():
+            # Avoid Vectorized::asinh/SLEEF here: it overflows internally for
+            # large finite fp32 inputs where eager std::asinh remains finite.
+            # This is asinh(x) = sign(x) * log(abs(x) + sqrt(abs(x)^2 + 1)),
+            # rewritten with 1 / abs(x) to avoid squaring large values.
+            code.writeline(f"auto abs_x = {x}.abs();")
+            code.writeline(f"auto one = {vec_t}(1);")
+            code.writeline("auto inv_abs_x = one / abs_x;")
+            code.writeline(
+                "auto correction = "
+                "(one / (one + inv_abs_x)) / "
+                "((one + inv_abs_x * inv_abs_x).sqrt() + inv_abs_x);"
+            )
+            code.writeline("auto result = abs_x.log1p() + correction.log1p();")
+            code.writeline(f"return result.copysign({x});")
+        code.writeline("()")
+        return code
 
     @staticmethod
     def acosh(x):
@@ -1668,7 +1686,12 @@ class CppVecOverrides(CppOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+        if (
+            use_compute_types
+            and dtype in DTYPE_LOWP_FP
+            and src_dtype == torch.float
+            and not config.emulate_precision_casts
+        ):
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
 
@@ -1684,7 +1707,11 @@ class CppVecOverrides(CppOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype, rounding=True)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("round_to_int", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+        if (
+            dtype in DTYPE_LOWP_FP
+            and src_dtype == torch.float
+            and not config.emulate_precision_casts
+        ):
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
 
@@ -1803,6 +1830,12 @@ class CppVecOverrides(CppOverrides):
         # pyrefly: ignore [missing-attribute]
         csevar.update_on_args("index_expr", (expr, dtype), {})
         return csevar
+
+    @staticmethod
+    def value_expr(expr, dtype):
+        # C++ index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return CppVecOverrides.index_expr(expr, dtype)
 
     @staticmethod
     def frexp(x):
@@ -1939,6 +1972,12 @@ class CppTile2DOverrides(CppVecOverrides):
         assert isinstance(V.kernel, CppTile2DKernel)
         expr = V.kernel.transform_indexing(expr)
         return CppVecOverrides.index_expr(expr, dtype)
+
+    @staticmethod
+    def value_expr(expr, dtype):
+        # C++ index_expr already emits the requested dtype, so value_expr has
+        # the same lowering here.
+        return CppTile2DOverrides.index_expr(expr, dtype)
 
 
 class CppKernel(Kernel):
@@ -2131,14 +2170,24 @@ class CppKernel(Kernel):
             csevar = ops.index_expr(expr, torch.int64).value
             buffer = V.kernel.compute
         else:
-            # indexing in loads
-            prior_compute = V.kernel.compute
-            try:
-                V.kernel.compute = self.loads
+            # Prefer to put the assert in loads so it runs before the actual
+            # memory access.  However, if the index expression may have already
+            # been CSE'd into compute by a prior ops.index_expr call, placing a
+            # reference to it in loads would be a forward reference (loads are
+            # emitted before compute in the kernel body).  In that case fall
+            # back to compute.
+            idx_str = cexpr(self.rename_indexing(expr))
+            if self.cse.try_get(idx_str) is not None:
                 csevar = ops.index_expr(expr, torch.int64).value
-            finally:
-                V.kernel.compute = prior_compute
-            buffer = self.loads
+                buffer = V.kernel.compute
+            else:
+                prior_compute = V.kernel.compute
+                try:
+                    V.kernel.compute = self.loads
+                    csevar = ops.index_expr(expr, torch.int64).value
+                finally:
+                    V.kernel.compute = prior_compute
+                buffer = self.loads
 
         size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
 
@@ -2311,7 +2360,15 @@ class CppKernel(Kernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
-        reduction_key = src_dtype, reduction_type, value
+        logical_index = None
+        if argmax_or_argmin and isinstance(value, tuple):
+            value, logical_index = value
+
+        if logical_index is not None:
+            logical_index_key = cast(CSEVariable, logical_index)
+            reduction_key = src_dtype, reduction_type, (value, logical_index_key)
+        else:
+            reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
 
@@ -2356,10 +2413,13 @@ class CppKernel(Kernel):
                 f"{acc} = {reduction_combine(reduction_type, acc, value, scalar_helper_val)};"
             )
         else:
-            assert self.reduction_depth is not None
-            index = self.itervars[self.reduction_depth]
-            for i in range(self.reduction_depth + 1, len(self.itervars)):
-                index = index * self.ranges[i] + self.itervars[i]
+            if logical_index is not None:
+                index = logical_index
+            else:
+                assert self.reduction_depth is not None
+                index = self.itervars[self.reduction_depth]
+                for i in range(self.reduction_depth + 1, len(self.itervars)):
+                    index = index * self.ranges[i] + self.itervars[i]
             self.stores.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, value, index=index)};"
             )
@@ -3010,6 +3070,9 @@ class CppVecKernel(CppKernel):
         else:
             raise NotImplementedError(f"store mode={mode}")
 
+    def _adjust_argreduce_index(self, index: sympy.Expr) -> sympy.Expr:
+        return index
+
     def reduction(self, dtype, src_dtype, reduction_type, value):
         """
         Perform vectorized reduction operation.
@@ -3031,14 +3094,23 @@ class CppVecKernel(CppKernel):
         # Fix issue: https://github.com/pytorch/pytorch/issues/143568
         assert reduction_type in VECTORIZABLE_RTYPES
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
+        logical_index = None
+        if argmax_or_argmin and isinstance(value, tuple):
+            value, logical_index = value
+
         horizontal_reduction = self.tiling_idx >= self.reduction_depth
         init_dtype = src_dtype if argmax_or_argmin else dtype
         assert isinstance(value, CppCSEVariable), value
+        assert isinstance(logical_index, (CppCSEVariable, type(None))), logical_index
 
         if not value.is_vec:
             value = self.broadcast(value)
 
-        reduction_key = src_dtype, reduction_type, value
+        if logical_index is not None:
+            logical_index_key = cast(CppCSEVariable, logical_index)
+            reduction_key = src_dtype, reduction_type, (value, logical_index_key)
+        else:
+            reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
 
@@ -3073,6 +3145,7 @@ class CppVecKernel(CppKernel):
 
         use_acc_helper = self.need_use_acc_helper(reduction_type, dtype, False)
         if use_acc_helper:
+            assert logical_index is None, logical_index
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix_generators.append(
                 self._gen_reduction_prefix(
@@ -3150,14 +3223,19 @@ class CppVecKernel(CppKernel):
                     f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, helper_val_)};"
                 )
         else:
-            assert self.reduction_depth is not None
-            index = self.itervars[self.reduction_depth]
-            for i in range(self.reduction_depth + 1, len(self.itervars)):
-                index = index * self.ranges[i] + self.itervars[i]
+            if logical_index is not None:
+                index = logical_index
+                index_horizontal_reduction = False
+            else:
+                assert self.reduction_depth is not None
+                index = self.itervars[self.reduction_depth]
+                for i in range(self.reduction_depth + 1, len(self.itervars)):
+                    index = index * self.ranges[i] + self.itervars[i]
+                index_horizontal_reduction = horizontal_reduction
             kwargs = {
                 "next_value": value,
                 "index": index,
-                "horizontal_reduction": horizontal_reduction,
+                "horizontal_reduction": index_horizontal_reduction,
                 "src_dtype": src_dtype,
             }
             self.stores.writeline(
@@ -3331,18 +3409,20 @@ class CppVecKernel(CppKernel):
             return f"Welford<{vec_type}>()"
 
         if reduction_type in ("argmin", "argmax"):
-            cdtype = DTYPE_TO_CPP[scalar_type]
+            # For bool argmin/argmax, we use float for computations
+            compute_dtype = torch.float if dtype == torch.bool else scalar_type
+            cdtype = DTYPE_TO_CPP[compute_dtype]
             acc_type = self.reduction_acc_type_vec(reduction_type, dtype)
             if reduction_type == "argmin":
                 val = (
                     f"std::numeric_limits<{cdtype}>::infinity()"
-                    if is_float_dtype(dtype)
+                    if is_float_dtype(dtype) or dtype == torch.bool
                     else f"std::numeric_limits<{cdtype}>::max()"
                 )
             else:
                 val = (
                     f"-std::numeric_limits<{cdtype}>::infinity()"
-                    if is_float_dtype(dtype)
+                    if is_float_dtype(dtype) or dtype == torch.bool
                     else f"std::numeric_limits<{cdtype}>::min()"
                 )
             return f"{acc_type}({val})"
@@ -3363,10 +3443,13 @@ class CppVecKernel(CppKernel):
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>"
         if reduction_type in ("argmin", "argmax"):
-            n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
             if dtype == torch.bool:
+                # For bool argmin/argmax, we use float for computations
+                # so n_src must be computed from float, not bool
+                n_src = self._get_num_vectors(torch.float)
                 return f"IndexValueVec<{DTYPE_TO_CPP[torch.float]}, {n_src}, {n_idx}>"
+            n_src = self._get_num_vectors(scalar_type)
             return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
         if dtype == torch.bool:
             assert reduction_type in ("min", "max", "any", "sum")
@@ -3379,10 +3462,11 @@ class CppVecKernel(CppKernel):
         var,
         next_value,
         helper_val=None,
-        index: sympy.Symbol | None = None,
+        index: sympy.Expr | CppCSEVariable | None = None,
         horizontal_reduction: bool | None = None,
         src_dtype: torch.dtype | None = torch.float32,
     ):
+        """Emit the C++ expression for combining vector reduction values."""
         is_bool = src_dtype == torch.bool
         if reduction_type == "max":
             if self.tail_size:
@@ -3449,16 +3533,29 @@ class CppVecKernel(CppKernel):
         elif reduction_type in ("argmin", "argmax"):
             assert src_dtype is not None
             cdtype = DTYPE_TO_CPP[src_dtype]
+            compute_dtype = src_dtype
             if src_dtype == torch.bool:
+                # For bool argmin/argmax, we use float for computations
                 cdtype = DTYPE_TO_CPP[torch.float]
-            n_src = self._get_num_vectors(src_dtype)
+                compute_dtype = torch.float
+                # Convert bool VecMask to float vector for argmax_combine_vec
+                if isinstance(next_value, CppCSEVariable) and next_value.is_vec:
+                    (next_value,) = unify_mask_base_type(self.compute, (next_value,))
+            n_src = self._get_num_vectors(compute_dtype)
             n_idx = self._get_num_vectors(torch.int64)
             t_extra = ""
             arg_extra = ""
             if index is not None:
-                assert horizontal_reduction is not None
-                t_extra = f", {str(horizontal_reduction).lower()}"
-                arg_extra = f", {index}"
+                if isinstance(index, CppCSEVariable):
+                    if index.is_vec:
+                        arg_extra = f", {index}"
+                    else:
+                        t_extra = ", false"
+                        arg_extra = f", {index}"
+                else:
+                    assert horizontal_reduction is not None
+                    t_extra = f", {str(horizontal_reduction).lower()}"
+                    arg_extra = f", {self._adjust_argreduce_index(index)}"
             if self.tail_size:
                 return (
                     f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>"
@@ -3503,7 +3600,7 @@ class CppVecKernel(CppKernel):
         cond = f"{self._get_mask_type(var.dtype)}({cond})"
         if mask:
             if not mask.is_vec:
-                mask = f"{self._get_mask_type(var.dtype)}({mask})"
+                mask = f"{self._get_mask_type(var.dtype)}::from({mask})"
             # We need not check when the mask is False
             cond = f"({cond}) | ~({mask})"
         if self.tail_size:
@@ -3609,6 +3706,10 @@ class CppTile2DKernel(CppVecKernel):
     def need_vec_transpose(self, index):
         outer_var = self.itervars[self.outer_idx]
         inner_var = self.itervars[self.tiling_idx]
+        # Indirect indexing (SymT.TMP) variables are declared inside the inner
+        # loop, but transpose_mxn is emitted into preloads (before the loop).
+        if free_symbol_is_type(index, SymT.TMP):
+            return False
         outer_stride = stride_at_vec_range(index, outer_var, self.tiling_factor)
         inner_stride = stride_at_vec_range(index, inner_var, self.tiling_factor)
         return (
@@ -3768,6 +3869,9 @@ class CppTile2DKernel(CppVecKernel):
             offset=self.inner_itervar(),
         )
 
+    def _adjust_argreduce_index(self, index: sympy.Expr) -> sympy.Expr:
+        return self.transform_indexing(index)
+
 
 def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[torch.dtype | None, bool]:
     """
@@ -3784,6 +3888,7 @@ def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[torch.dtype | None, bool]:
             if _node.op == "placeholder" or _node.target in (
                 "get_index",
                 "index_expr",
+                "value_expr",
             ):
                 continue
 
@@ -3813,6 +3918,22 @@ def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[torch.dtype | None, bool]:
     return _lowp_fp_type, _use_fp32
 
 
+@dataclasses.dataclass
+class KernelOpStats:
+    """Op statistics collected during tiling selection."""
+
+    # Ratio of non-contiguous/mask ops to total ops above which vectorization
+    # is considered unprofitable (used both for disabling vectorization entirely
+    # and for deciding whether tail vectorization is worthwhile).
+    OVERHEAD_RATIO_THRESHOLD: ClassVar[float] = 0.12
+
+    op_counter: dict[str, int] = dataclasses.field(default_factory=dict)
+    non_contig_indexing_op_counter: dict[str, int] = dataclasses.field(
+        default_factory=dict
+    )
+    mask_op_count: int = 0
+
+
 class TilingSelect:
     """
     Implement the heuristic to select the tiling factors and tiling indices.
@@ -3823,13 +3944,13 @@ class TilingSelect:
         self,
         fn_list,
         var_sizes_list,
-    ) -> tuple[list[int], list[int]]:
+    ) -> tuple[list[int], list[int], KernelOpStats]:
         # TODO(jgong5): support alternative tiling factors and data types
         loop_bodies = _get_loop_body(fn_list)
         all_dtypes = _get_dtype_from_loopbodies(loop_bodies)
         assert all_dtypes
         if any(dtype not in VECTORIZABLE_DTYPES for dtype in all_dtypes):
-            return [], []
+            return [], [], KernelOpStats()
         dtype = torch.float
         _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])[0]
         if _lowp_fp_dtype and all(
@@ -3849,6 +3970,7 @@ class TilingSelect:
             )
             call_ranges = tuple(group) + tuple(reduction_group)
 
+            stats = KernelOpStats()
             if config.cpp.enable_tiling_heuristics:
 
                 def _try_get_stride(
@@ -3893,17 +4015,22 @@ class TilingSelect:
                     itervars[:reduction_depth],
                     itervars[reduction_depth:],
                 )
-                op_counter: dict[str, int] = {}
-                # ops may cause overhead with vectorization, like non-contiguous
-                # index_expr, load, store
-                non_contig_indexing_op_counter: dict[str, int] = {}
                 for _body in loop_bodies:
                     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
                     for sub_block in sub_blocks:
                         for _node in sub_block.graph.nodes:
-                            if _node.target in ["index_expr", "load", "store"]:
+                            if _node.target in [
+                                "index_expr",
+                                "value_expr",
+                                "load",
+                                "store",
+                            ]:
                                 # get the index and replace prefix from z to x
-                                arg_idx = 1 if _node.target == "index_expr" else 2
+                                arg_idx = (
+                                    1
+                                    if _node.target in ("index_expr", "value_expr")
+                                    else 2
+                                )
                                 index = sub_block.body.indexing_from_args(
                                     (vars, reduction_vars)
                                 )[_node.args[arg_idx].args[0]]
@@ -3913,36 +4040,42 @@ class TilingSelect:
                                     )
                                     if (
                                         stride is None
-                                        if _node.target == "index_expr"
+                                        if _node.target in ("index_expr", "value_expr")
                                         else stride not in [0, 1]
                                     ):
                                         _update_negative_op_count(
-                                            _node.target, non_contig_indexing_op_counter
+                                            _node.target,
+                                            stats.non_contig_indexing_op_counter,
                                         )
-                            if isinstance(_node.target, str) and not (
-                                _node.target.startswith("masked_subblock")
-                                or _node.target
-                                in ["ops", "output", "constant", "get_index"]
-                            ):
-                                if _node.target not in op_counter:
-                                    op_counter[_node.target] = 1
-                                else:
-                                    op_counter[_node.target] += 1
+                            if isinstance(_node.target, str):
+                                # Only count "where" and "masked" as mask ops —
+                                # they generate actual mask/blend instructions.
+                                if _node.target in ("where", "masked"):
+                                    stats.mask_op_count += 1
+                                if not (
+                                    _node.target.startswith("masked_subblock")
+                                    or _node.target
+                                    in ["ops", "output", "constant", "get_index"]
+                                ):
+                                    if _node.target not in stats.op_counter:
+                                        stats.op_counter[_node.target] = 1
+                                    else:
+                                        stats.op_counter[_node.target] += 1
 
-                op_num = sum(op_counter.values())
+                op_num = sum(stats.op_counter.values())
                 non_contig_indexing_op_num = sum(
-                    non_contig_indexing_op_counter.values()
+                    stats.non_contig_indexing_op_counter.values()
                 )
-                ratio_threshold = 0.12
                 quantity_threshold = 35
                 if non_contig_indexing_op_num >= quantity_threshold or (
                     op_num > 0
-                    and non_contig_indexing_op_num / op_num >= ratio_threshold
+                    and non_contig_indexing_op_num / op_num
+                    >= stats.OVERHEAD_RATIO_THRESHOLD
                 ):
-                    # Too many non-contiguous load/store/index_expr which hurts the
+                    # Too many non-contiguous load/store/index/value_expr which hurts the
                     # vectorization performance. Disable vectorization when exceeding
                     # the thresholds.
-                    return [], []
+                    return [], [], stats
 
                 if (
                     not reduction_group
@@ -3961,7 +4094,7 @@ class TilingSelect:
                     # not large(< 10), vectorization is not efficient.
                     # And found that `#pragma GCC ivdep` has better performance than
                     # `#pragma omp simd simdlen(8)` for these cases.
-                    return [], []
+                    return [], [], stats
 
             if dtype in DTYPE_LOWP_FP:
                 # For lower precision data type, if the call_range is not long enough,
@@ -3985,10 +4118,10 @@ class TilingSelect:
                         break
 
             if len(tiling_indices) == 1:
-                return [tiling_factor], tiling_indices
+                return [tiling_factor], tiling_indices, stats
             if len(tiling_indices) == 2:
-                return [tiling_factor, tiling_factor], tiling_indices
-        return [], []
+                return [tiling_factor, tiling_factor], tiling_indices, stats
+        return [], [], KernelOpStats()
 
     def _select_tiling_indices(
         self,
@@ -4095,7 +4228,12 @@ class CppKernelProxy(CppKernel):
                 if node.target == "load":
                     assert len(node.args) == 3
                     return V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
-                elif node.target in ["to_dtype", "constant", "index_expr"]:
+                elif node.target in [
+                    "to_dtype",
+                    "constant",
+                    "index_expr",
+                    "value_expr",
+                ]:
                     return node.args[-1]  # type: ignore[return-value]
                 elif node.target == "to_dtype_bitcast":
                     return node.args[2]  # type: ignore[return-value]
@@ -4130,7 +4268,7 @@ class CppKernelProxy(CppKernel):
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if (
-                    _node.target in ["load", "index_expr"]
+                    _node.target in ["load", "index_expr", "value_expr"]
                     and (dt := get_output_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     # No need to promote to float if all users are ops that accepts lowp fp input
@@ -4334,6 +4472,7 @@ class CppKernelProxy(CppKernel):
                 self.legalize_lowp_fp_dtype_loopbody(body)
 
     def codegen_functions(self, fn_list, var_sizes_list):
+        """Generate scalar and vectorized C++ kernels with tiling for the given functions."""
         assert len(fn_list) == len(var_sizes_list)
         kernel_group = self.kernel_group
         group, reduction_group = max(var_sizes_list, key=lambda sizes: len(sizes[1]))
@@ -4387,11 +4526,30 @@ class CppKernelProxy(CppKernel):
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
             tiling_select = TilingSelect()
-            tiling_factors, tiling_indices = tiling_select.select_tiling(
+            tiling_factors, tiling_indices, tiling_stats = tiling_select.select_tiling(
                 fn_list, var_sizes_list
             )
+
+            def _tail_vec_worthwhile(tail_size, tiling_factor) -> bool:
+                # Tail vectorization has non-trivial mask/cast/blend overhead.
+                # Only vectorize tail when it is large enough to amortize overhead.
+                op_num = sum(tiling_stats.op_counter.values())
+                if (
+                    op_num > 0
+                    and (
+                        tiling_stats.mask_op_count
+                        + sum(tiling_stats.non_contig_indexing_op_counter.values())
+                    )
+                    / op_num
+                    > tiling_stats.OVERHEAD_RATIO_THRESHOLD
+                ):
+                    hint_tail_size = V.graph.sizevars.optimization_hint(tail_size)
+                    return 2 * hint_tail_size > tiling_factor
+                return True
+
             assert len(tiling_factors) == len(tiling_indices)
             _inner_loop_reduction_outer_not = False
+            _tiled_loop_reduction_descendant = False
             _outer_loop = None
             if tiling_indices:
                 inner_loop_reduction = False
@@ -4407,6 +4565,10 @@ class CppKernelProxy(CppKernel):
                     _inner_loop_reduction_outer_not = (
                         inner_loop_reduction and not outer_loop_reduction
                     )
+                    _tiled_loop_reduction_descendant = not outer_loop_reduction and any(
+                        loop.is_reduction
+                        for loop in self.loop_nest.loops[inner_loop_level:]
+                    )
 
             if len(tiling_indices) == 1:
                 # pyrefly: ignore [bad-assignment]
@@ -4417,7 +4579,9 @@ class CppKernelProxy(CppKernel):
                 )
                 tail_size = loop.size - loop.tiled_size
                 vec_kernel.active_ranges = {loop.var: (0, loop.tiled_size)}
-                if config.cpp.enable_loop_tail_vec:
+                if config.cpp.enable_loop_tail_vec and _tail_vec_worthwhile(
+                    tail_size, tiling_factors[0]
+                ):
                     tail_kernel = codegen_kernel(
                         self.vec_kernel_cls,
                         tiling_factors[0],
@@ -4464,7 +4628,9 @@ class CppKernelProxy(CppKernel):
                     inner_loop.var: inner_ranges["main"],
                 }
                 tail_kernel = []
-                if config.cpp.enable_loop_tail_vec:
+                if config.cpp.enable_loop_tail_vec and _tail_vec_worthwhile(
+                    inner_tail_size, tiling_factors[0]
+                ):
                     for outer_r, inner_r in (
                         ("main", "tail"),
                         ("tail", "main"),
@@ -4508,8 +4674,12 @@ class CppKernelProxy(CppKernel):
                 _outer_loop = outer_loop
             else:
                 self.kernels = [scalar_kernel]
+            # A non-reduction tiled loop with a nested reduction needs its
+            # reduction suffix selected by the same main/tail active range.
             self.aggregate_reduction_buffers(
-                _inner_loop_reduction_outer_not, _outer_loop
+                _inner_loop_reduction_outer_not
+                or (len(tiling_indices) == 1 and _tiled_loop_reduction_descendant),
+                _outer_loop,
             )
             self.loop_nest.set_kernel(self)
 
@@ -4733,6 +4903,77 @@ class CppScheduling(BaseScheduling):
     def reset_kernel_group(self):
         self.kernel_group = KernelGroup()
 
+    def _get_indexing_ranges_exprs(self, node):
+        if isinstance(node, FusedSchedulerNode):
+            assert len(node.snodes) > 0, node.snodes
+            var_ranges = None
+            indexing_exprs = OrderedSet[Any]()
+            for snode in node.snodes:
+                v, exprs = self._get_indexing_ranges_exprs(snode)
+                if var_ranges is None:
+                    var_ranges = v
+                assert var_ranges == v, (var_ranges, v, node.snodes)
+                indexing_exprs.update(exprs)
+            return var_ranges, list(indexing_exprs)
+
+        assert isinstance(node, SchedulerNode)
+        comp_buffer = node.node
+        assert isinstance(comp_buffer, ir.ComputedBuffer)
+        _, body, _ = comp_buffer.get_default_sizes_body()
+        return body.var_ranges, list(body.indexing_exprs.values())
+
+    def _snapshot_node_loop_states(self, node):
+        if isinstance(node, SchedulerNode):
+            return [(node, node.snapshot_loop_state())]
+
+        assert isinstance(node, FusedSchedulerNode)
+        snapshots = []
+        for snode in node.snodes:
+            assert isinstance(snode, SchedulerNode)
+            snapshots.append((snode, snode.snapshot_loop_state()))
+        return snapshots
+
+    def _align_compatible_range_nodes(self, node1, node2):
+        assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
+        assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
+
+        _, (vars1, reduce1) = node1.group
+        _, (vars2, reduce2) = node2.group
+        assert reduce1 == () and reduce2 == (), (reduce1, reduce2)
+
+        node_to_recomp = node1 if len(vars1) < len(vars2) else node2
+        ref_node = node2 if len(vars1) < len(vars2) else node1
+        assert isinstance(node_to_recomp, SchedulerNode)
+
+        ref_indexing_constraints = self._get_indexing_ranges_exprs(ref_node)
+        node_to_recomp.recompute_size_and_body(
+            extra_indexing_constraints=ref_indexing_constraints
+        )
+
+        _, (vars1, _) = node1.group
+        _, (vars2, _) = node2.group
+        if vars1 == vars2:
+            return True
+
+        node_to_recomp_indexing_constraints = self._get_indexing_ranges_exprs(
+            node_to_recomp
+        )
+        if isinstance(ref_node, SchedulerNode):
+            ref_node.recompute_size_and_body(
+                extra_indexing_constraints=node_to_recomp_indexing_constraints
+            )
+        else:
+            assert isinstance(ref_node, FusedSchedulerNode)
+            for snode in ref_node.snodes:
+                assert isinstance(snode, SchedulerNode)
+                snode.recompute_size_and_body(
+                    extra_indexing_constraints=node_to_recomp_indexing_constraints
+                )
+
+        _, (vars1, _) = node1.group
+        _, (vars2, _) = node2.group
+        return vars1 == vars2
+
     def fuse(self, node1, node2):
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.fuse(node1, node2)
@@ -4744,69 +4985,10 @@ class CppScheduling(BaseScheduling):
                 self._why_fuse_nodes(node1, node2)
                 == ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION
             ):
-                assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
-                assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
-
-                _, (vars1, reduce1) = node1.group
-                _, (vars2, reduce2) = node2.group
-                assert reduce1 == () and reduce2 == (), (reduce1, reduce2)
-
-                def get_indexing_ranges_exprs(node):
-                    if isinstance(node, FusedSchedulerNode):
-                        assert len(node.snodes) > 0, node.snodes
-                        var_ranges = None
-                        indexing_exprs = OrderedSet[Any]()
-                        for snode in node.snodes:
-                            v, exprs = get_indexing_ranges_exprs(snode)
-                            if var_ranges is None:
-                                var_ranges = v
-                            assert var_ranges == v, (var_ranges, v, node.snodes)
-                            indexing_exprs.update(exprs)
-                        return var_ranges, list(indexing_exprs)
-                    else:
-                        assert isinstance(node, SchedulerNode)
-                        comp_buffer = node.node
-                        assert isinstance(comp_buffer, ir.ComputedBuffer)
-                        _, body, _ = comp_buffer.get_default_sizes_body()
-                        return body.var_ranges, list(body.indexing_exprs.values())
-
-                node_to_recomp = node1 if len(vars1) < len(vars2) else node2
-                assert isinstance(node_to_recomp, SchedulerNode)
-
-                ref_node = node2 if len(vars1) < len(vars2) else node1
-
-                ref_indexing_constraints = get_indexing_ranges_exprs(ref_node)
-
-                node_to_recomp.recompute_size_and_body(
-                    extra_indexing_constraints=ref_indexing_constraints
+                assert self._align_compatible_range_nodes(node1, node2), (
+                    node1.group,
+                    node2.group,
                 )
-
-                _, (vars1, _) = node1.group
-                _, (vars2, _) = node2.group
-
-                if vars1 == vars2:
-                    return FusedSchedulerNode.fuse(node1, node2)
-
-                # recompute ref_node if its ranges are also changed
-                node_to_recomp_indexing_constraints = get_indexing_ranges_exprs(
-                    node_to_recomp
-                )
-                if isinstance(ref_node, SchedulerNode):
-                    ref_node.recompute_size_and_body(
-                        extra_indexing_constraints=node_to_recomp_indexing_constraints
-                    )
-                else:
-                    assert isinstance(ref_node, FusedSchedulerNode)
-                    for snode in ref_node.snodes:
-                        assert isinstance(snode, SchedulerNode)
-                        snode.recompute_size_and_body(
-                            extra_indexing_constraints=node_to_recomp_indexing_constraints
-                        )
-                    ref_node = FusedSchedulerNode(ref_node.scheduler, ref_node.snodes)
-
-                _, (vars1, _) = node1.group
-                _, (vars2, _) = node2.group
-                assert vars1 == vars2, (vars1, vars2)
                 return FusedSchedulerNode.fuse(node1, node2)
             elif self.can_fuse_vertical_outer_loop(node1, node2):
                 return OuterLoopFusedSchedulerNode.fuse(
@@ -4865,6 +5047,7 @@ class CppScheduling(BaseScheduling):
         if isinstance(ref_node, FusedSchedulerNode):
             ranges_set = OrderedSet[tuple[Any, ...]]()
             for snode in ref_node.snodes:
+                assert isinstance(snode, SchedulerNode)
                 if isinstance(snode.node, ir.TemplateBuffer):
                     break
                 assert isinstance(snode.node, ir.ComputedBuffer)
@@ -4882,7 +5065,13 @@ class CppScheduling(BaseScheduling):
         if ranges1 != ranges2:
             return False
 
-        return True
+        snapshots = self._snapshot_node_loop_states(node_to_recomp)
+        snapshots.extend(self._snapshot_node_loop_states(ref_node))
+        try:
+            return self._align_compatible_range_nodes(node1, node2)
+        finally:
+            for node, state in reversed(snapshots):
+                node.restore_loop_state(state)
 
     def _can_fuse_horizontal_impl(self, node1, node2):
         assert isinstance(
@@ -5179,7 +5368,7 @@ class CppScheduling(BaseScheduling):
                 for _node in node.get_outer_nodes()
             ):
                 # Ref to the typical case of local buffer in
-                # https://github.com/pytorch/pytorch/blob/1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159 # noqa: B950
+                # https://github.com/pytorch/pytorch/blob/1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159
                 # where the buffer is with size of last dim and contiguous.
                 # Only support this typical case at first.
                 visited_scheduler_nodes: OrderedSet[str] = OrderedSet()
@@ -5346,7 +5535,7 @@ class CppScheduling(BaseScheduling):
         node: OuterLoopFusedSchedulerNode | FusedSchedulerNode | SchedulerNode,
     ):
         """
-        Turn an set of pre-fused nodes into a C++ kernel.
+        Turn a set of pre-fused nodes into a C++ kernel.
         """
         kernel_group = self.kernel_group
 
@@ -5594,6 +5783,10 @@ class KernelGroup:
 
         # 3. Function body
         with code.indent():
+            code.writeline("std::atomic<int> inductor_cpu_integer_div_error{0};")
+            code.writeline(
+                "inductor_cpu_integer_div_error_flag = &inductor_cpu_integer_div_error;"
+            )
             if enable_kernel_profile:
                 graph_id = V.graph.graph_id
                 prefix = "graph_" + str(graph_id) + "_" if graph_id is not None else ""
@@ -5608,6 +5801,10 @@ class KernelGroup:
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
+            code.writeline("inductor_cpu_integer_div_error_flag = nullptr;")
+            code.writeline(
+                "inductor_cpu_throw_if_integer_div_error(inductor_cpu_integer_div_error);"
+            )
         return code.getvalue()
 
     def call_kernel(self, wrapper, kernel_name):

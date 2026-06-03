@@ -516,7 +516,6 @@ void unmergeNode(Node* n, Node* subgraphNode) {
         false,
         "all inputs should've been mapped. Couldn't map %",
         v->debugName());
-    return v;
   };
 
   for (auto i : c10::irange(subgraph->outputs().size())) {

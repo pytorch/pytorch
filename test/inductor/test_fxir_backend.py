@@ -15,8 +15,12 @@ import torch._inductor.codegen.common as common
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.utils import same
-from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._higher_order_ops.triton_kernel_wrap import (
+    kernel_side_table,
+    triton_kernel_wrapper_mutation,
+)
 from torch._inductor import config
+from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
 from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
@@ -26,6 +30,7 @@ from torch._inductor.codegen.wrapper_fxir import (
     WrapperFxCodegen,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import fresh_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -324,6 +329,35 @@ class FxirTestCase(InductorTestCase):
         num_as_strided = self._count_ops(gm, torch.as_strided)
         self.assertEqual(num_as_strided, 1)
 
+    def test_reinterpret_view_floordiv_offset_dynamic(self):
+        """
+        Test that ReinterpretView with a FloorDiv offset emits valid FX IR
+        with SymInt metadata when dynamic shapes are enabled.
+        """
+
+        def foo(x):
+            n = x.shape[0]
+            return x.narrow(0, n // 2, n // 2).contiguous() + 1
+
+        args = [torch.randn(16, 4, device=self.device)]
+        (gm,) = self._compile_and_check(
+            foo, args, compile_kwargs={"dynamic": True}, metadata_only=True
+        )
+
+        as_strided_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.as_strided
+        )
+        for node in as_strided_nodes:
+            offset = node.args[3] if len(node.args) > 3 else None
+            if offset is not None and isinstance(offset, torch.fx.Node):
+                val = offset.meta.get("val")
+                if val is not None:
+                    self.assertNotIsInstance(
+                        val,
+                        torch.SymFloat,
+                        "ReinterpretView offset should be SymInt, not SymFloat",
+                    )
+
     def test_reshape_fallback(self):
         """
         Test falling back to aten.reshape. This uses a custom pass to enable more fallbacks.
@@ -394,7 +428,7 @@ class FxirTestCase(InductorTestCase):
 
         # Expect separate forward and backward graphs.
         (forward_gm, backward_gm) = self._compile_and_check(
-            foo, (x, y), expected_num_triton_kernels=3
+            foo, (x, y), expected_num_triton_kernels=4
         )
 
     def test_custom_compiler(self):
@@ -874,6 +908,54 @@ class AOTFxirTestCase(InductorTestCase):
         inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
         self.check(M(), inp)
 
+    @requires_gpu()
+    def test_aoti_fx_parallel_compile_reloads_triton_kernel(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        shutdown_compile_workers()
+        try:
+            with config.patch(worker_start_method="subprocess", compile_threads=4):
+                with fresh_cache():
+                    AsyncCompile.wait_pool_ready()
+                    self.assertTrue(AsyncCompile.use_process_pool())
+
+                    inp = (
+                        torch.ones(3, device=self.device),
+                        torch.ones(3, device=self.device),
+                    )
+                    with torch.no_grad():
+                        ep = torch.export.export(M(), inp)
+                        gm = torch._inductor.aot_compile(
+                            ep.module(),
+                            inp,
+                            options={
+                                "fx_wrapper": True,
+                                **test_config,
+                                "compile_threads": 4,
+                            },
+                        )
+
+                    triton_nodes = [
+                        node
+                        for node in gm.graph.nodes
+                        if (
+                            node.op == "call_function"
+                            and node.target == triton_kernel_wrapper_mutation
+                        )
+                    ]
+                    self.assertEqual(len(triton_nodes), 1)
+                    kernel = kernel_side_table.get_kernel(
+                        triton_nodes[0].kwargs["kernel_idx"]
+                    )
+                    self.assertIsNotNone(kernel.fn)
+
+                    flat_args, _ = pytree.tree_flatten(inp)
+                    self.assertTrue(same(M().to(self.device)(*inp), gm(*flat_args)))
+        finally:
+            shutdown_compile_workers()
+
     def test_aoti_fx_const(self):
         class M(torch.nn.Module):
             def __init__(self, device):
@@ -1043,7 +1125,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     cond = torch.ops.higher_order.cond(arg0_1, true_graph_0, false_graph_0, (arg1_1, arg2_1));  arg0_1 = true_graph_0 = false_graph_0 = arg1_1 = arg2_1 = None
     buf1 = cond[0]
     buf2 = cond[1];  cond = None
-    return [buf1, buf2]""",  # noqa: B950
+    return [buf1, buf2]""",
         )
 
     def test_dims_dynamic_outer_static_padded_inner(self):

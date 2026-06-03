@@ -15,6 +15,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
+from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -56,6 +57,13 @@ class ControlDeps(HigherOrderOperator):
 
 
 control_deps = ControlDeps()
+
+# control_deps wraps side-effecting ops (e.g. record_event, wait_event)
+# and must not be eliminated by DCE even when its outputs are unused.
+from torch.fx.node import has_side_effect
+
+
+has_side_effect(control_deps)
 
 
 # Register fake implementation for tracing
@@ -219,6 +227,8 @@ def _create_subgraph_for_node(
     """
     # Get the owning module
     owning_module = graph.owning_module
+    if owning_module is None:
+        raise AssertionError("graph.owning_module must not be None")
 
     # Create a new graph for the subgraph
     subgraph = fx.Graph(owning_module)
@@ -270,4 +280,4 @@ def _create_subgraph_for_node(
         if "val" in result.meta:
             out.meta["val"] = result.meta["val"]
 
-    return fx.GraphModule(owning_module, subgraph)
+    return _LazyGraphModule(owning_module, subgraph)

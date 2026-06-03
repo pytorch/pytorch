@@ -22,9 +22,8 @@ from torch.overrides import (
 from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
 )
-from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.common_utils import skipIfXpu, TEST_ACCELERATOR
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -160,10 +159,12 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         super().tearDownClass()
 
     def setUp(self):
+        super().setUp()
         torch.set_default_device(None)
         torch._dynamo.reset()
 
     def tearDown(self):
+        super().tearDown()
         torch.set_default_device(None)
         torch._dynamo.reset()
 
@@ -207,7 +208,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     def test_torch_function_mode_guards_cpp(self):
         self._run_torch_function_mode_guard_test()
 
-    @requires_gpu
     def test_torch_function_mode_preserves_cuda_rng_state(self):
         class ConstantReturnMode(TorchFunctionMode):
             def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -223,21 +223,24 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     def test_stack_state_mutation_default_device(self):
         m = BaseTorchFunctionMode()
         m1 = BaseTorchFunctionMode()
-        with m, m1:
+        try:
+            with m, m1:
 
-            @torch.compile(fullgraph=True)
-            def fn(x):
-                torch.set_default_device("cpu")
-                _pop_torch_function_stack()
+                @torch.compile(fullgraph=True)
+                def fn(x):
+                    torch.set_default_device("cpu")
+                    _pop_torch_function_stack()
 
-            fn(torch.ones(2, 2))
-            _push_on_torch_function_stack(m1)
+                fn(torch.ones(2, 2))
+                _push_on_torch_function_stack(m1)
 
-            stack = _get_current_function_mode_stack()
-            self.assertIsInstance(stack[0], DeviceContext)
-            self.assertEqual(stack[0].device, torch.device("cpu"))
-            self.assertIs(stack[1], m)
-            self.assertIs(stack[2], m1)
+                stack = _get_current_function_mode_stack()
+                self.assertIsInstance(stack[0], DeviceContext)
+                self.assertEqual(stack[0].device, torch.device("cpu"))
+                self.assertIs(stack[1], m)
+                self.assertIs(stack[2], m1)
+        finally:
+            torch.set_default_device(None)
 
     def test_stack_state_clear_default_device(self):
         @torch.compile(fullgraph=True)
@@ -599,6 +602,33 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(expected, actual)
 
+    def test_torch_function_mode_mutated_state(self):
+        class CounterMode(TorchFunctionMode):
+            def __init__(self):
+                self.count = 0
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                self.count += 1
+                return func(*args, **(kwargs or {}))
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return x.sin()
+
+        with CounterMode() as mode:
+            f(torch.randn(3))
+            first_count = mode.count
+            first_frame_count = cnt.frame_count
+
+            # count changed, should recompile
+            f(torch.randn(3))
+
+        self.assertEqual(first_frame_count, 1)
+        self.assertGreater(first_count, 0)
+        self.assertEqual(cnt.frame_count, 2)
+
     # Needs larger cache size since we recompile for each op
     @patch.object(torch._dynamo.config, "recompile_limit", 48)
     def test_builtin_equivalent_funcs(self):
@@ -718,24 +748,27 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
             func(torch.randn(3))
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     def test_flex_attention(self):
         import torch
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
-        torch.set_default_device(device_type)
+        try:
+            torch.set_default_device(device_type)
 
-        flex_attention = torch.compile(flex_attention, dynamic=False)
+            flex_attention = torch.compile(flex_attention, dynamic=False)
 
-        prefix_lengths = torch.arange(8)
+            prefix_lengths = torch.arange(8)
 
-        def prefix_lm(b, h, q, kv):
-            return prefix_lengths[b] >= kv
+            def prefix_lm(b, h, q, kv):
+                return prefix_lengths[b] >= kv
 
-        # This runs in fullgraph already
-        create_block_mask(
-            prefix_lm, 8, None, 512, 512, _compile=True, device=device_type
-        )
+            # This runs in fullgraph already
+            create_block_mask(
+                prefix_lm, 8, None, 512, 512, _compile=True, device=device_type
+            )
+        finally:
+            torch.set_default_device(None)
 
     def test_register_hook(self):
         import functools
@@ -758,7 +791,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         with torch.device("cpu"):
             torch.compile(mod, fullgraph=True)(x)
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop(self):
         import torch
@@ -767,12 +800,12 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             flex_attention as flex_attention_eager,
         )
 
-        with torch.device(GPU_TYPE):
+        with torch.device(device_type):
             flex_attention = torch.compile(flex_attention_eager, dynamic=False)
 
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+                "raised exception HopDetectionError\\('test'\\)",
             ):
                 # This runs in fullgraph already
                 with TestModeRaises():
@@ -782,7 +815,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                     )
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop_eager(self):
         import torch
@@ -791,10 +824,10 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             flex_attention as flex_attention_eager,
         )
 
-        with torch.device(GPU_TYPE):
+        with torch.device(device_type):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+                "raised exception HopDetectionError\\('test'\\)",
             ):
                 with TestModeRaises():
                     flex_attention_eager(
@@ -802,6 +835,97 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                         torch.ones(2, 2, 2, 2),
                     )
+
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
+    def test_default_device_factory_functions(self):
+        """Test that factory functions respect default device in compiled code"""
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def random_func(
+            x: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            # Test various factory functions
+            rnd = torch.randint(0, 2**32, size=x.shape, dtype=torch.uint32)
+            zeros = torch.zeros_like(rnd, device="cpu")
+            zeros_matched = torch.zeros_like(rnd)
+            return x + rnd, rnd, zeros, zeros_matched
+
+        try:
+            torch.set_default_device(device_type)
+            (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
+
+            # Verify tensors are on the current accelerator
+            self.assertEqual(rnd.device.type, device_type)
+            self.assertEqual(result.device.type, device_type)
+            self.assertEqual(zeros.device.type, "cpu")
+            self.assertEqual(zeros_matched.device.type, rnd.device.type)
+
+            torch.set_default_device("cpu")
+            (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
+
+            # Verify tensors are on cpu
+            self.assertEqual(rnd.device.type, "cpu")
+            self.assertEqual(result.device.type, "cpu")
+            self.assertEqual(zeros.device.type, "cpu")
+            self.assertEqual(zeros_matched.device.type, rnd.device.type)
+        finally:
+            torch.set_default_device(None)
+
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
+    def test_default_device_factory_functions_priority(self):
+        try:
+            torch.set_default_device(device_type)
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def with_explicit_device(
+                x: torch.Tensor,
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                rnd = torch.randint(
+                    0, 2**32, size=x.shape, dtype=torch.uint32, device="cpu"
+                )
+                return x + rnd, rnd
+
+            (result, rnd) = with_explicit_device(torch.randn(()))
+            self.assertEqual(rnd.device.type, "cpu")
+            self.assertEqual(result.device.type, device_type)
+        finally:
+            torch.set_default_device(None)
+
+    def test_torch_function_mode_no_leak_on_graph_break(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/182317
+        # The resume function's except handler referenced a variable from
+        # the first compiled graph's scope, causing a KeyError that masked
+        # the original exception and left the mode on the C-level stack.
+        @torch.compile(backend="eager")
+        def fn():
+            class A(TorchFunctionMode):
+                def __torch_function__(self, *args, **kwargs):
+                    return -1
+
+            with A():
+                x = torch.tensor([1])
+            return x
+
+        fn()
+        self.assertEqual(_len_torch_function_stack(), 0)
+
+    def test_torch_function_mode_no_leak_nested_graph_break(self):
+        @torch.compile(backend="eager")
+        def fn():
+            class A(TorchFunctionMode):
+                def __torch_function__(self, *args, **kwargs):
+                    return -1
+
+            with A():
+                _x = torch.tensor([1])
+
+                torch._dynamo.graph_break()
+
+                y = torch.tensor([2])
+            return y
+
+        fn()
+        self.assertEqual(_len_torch_function_stack(), 0)
 
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
@@ -851,7 +975,7 @@ class outer_fn(torch.nn.Module):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
             add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, arg1_1);  mul = arg1_1 = None
             return (add,)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -905,9 +1029,10 @@ class outer_fn(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]"):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
             return (mul,)
-""",  # noqa: B950
+""",
         )
 
+    @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
     def test_invoke_subgraph_seq_nr(self):
         """
@@ -972,7 +1097,8 @@ class outer_fn(torch.nn.Module):
             [
                 ["add"],  # seq_nr 21
                 [
-                    "clone",
+                    "copy",
+                    "empty_strided",
                     "getitem",
                     "getitem_1",
                     "getitem_2",
@@ -1023,37 +1149,30 @@ class GraphModule(torch.nn.Module):
             # Annotation: {'seq_nr': 10} File: test_modes.py:921 in inner_fn, code: return y / 2
             div: "f32[3, 3]" = torch.ops.aten.div.Tensor(cos, 2);  cos = None
             return (div, arg0_1)
-        """,  # noqa: B950
+        """,
             ignore_comments=True,
             ignore_empty_lines=True,
         )
 
         self.assertExpectedInline(
             normalize_gm(bw_graph.print_readable(print_output=False)),
-            """
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, getitem_1: "f32[3, 3]", tangents_1: "f32[]"):
-        # Annotation: {'seq_nr': 15} No stacktrace found for following nodes
         expand: "f32[3, 3]" = torch.ops.aten.expand.default(tangents_1, [3, 3]);  tangents_1 = None
-
-        # Annotation: {'seq_nr': 14} No stacktrace found for following nodes
-        clone: "f32[3, 3]" = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
+        empty_strided: "f32[3, 3]" = torch.ops.aten.empty_strided.default([3, 3], [3, 1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+        copy: "f32[3, 3]" = torch.ops.aten.copy.default(empty_strided, expand);  empty_strided = expand = None
         repeated_subgraph1 = self.repeated_subgraph1
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'invoke_subgraph_1', getitem_1, clone);  repeated_subgraph1 = getitem_1 = clone = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'invoke_subgraph_1', getitem_1, copy);  repeated_subgraph1 = getitem_1 = copy = None
         getitem_2: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         return (getitem_2,)
-
     class repeated_subgraph1(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
-            # Annotation: {'seq_nr': 10} File: test_modes.py:921 in inner_fn, code: return y / 2
             div: "f32[3, 3]" = torch.ops.aten.div.Tensor(arg1_1, 2);  arg1_1 = None
-
-            # Annotation: {'test': 'test', 'seq_nr': 9} File: test_modes.py:920 in inner_fn, code: y = x.cos()
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
             neg: "f32[3, 3]" = torch.ops.aten.neg.default(sin);  sin = None
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(div, neg);  div = neg = None
-            return (mul,)
-        """,  # noqa: B950
+            return (mul,)""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -1113,7 +1232,7 @@ class outer_fn(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]"):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
             return (mul,)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1160,7 +1279,7 @@ class outer_fn(torch.nn.Module):
             mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg2_1, arg3_1);  arg2_1 = arg3_1 = None
             add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
             return (add,)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1210,7 +1329,7 @@ class outer_fn(torch.nn.Module):
             sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(arg0_1, arg1_1)
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
             return (add, sub, mul)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1261,7 +1380,7 @@ class outer_fn(torch.nn.Module):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
             mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(mul, arg2_1);  mul = arg2_1 = None
             return (add_1, mul_1)
-""",  # noqa: B950
+""",
         )
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -1422,7 +1541,7 @@ class outer_fn(torch.nn.Module):
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     def test_nested_compile_dynamic(self):
         """Test that wrap_compiled_regions works with dynamic shapes."""
 
@@ -1438,7 +1557,7 @@ class outer_fn(torch.nn.Module):
 
         torch._dynamo.reset()
 
-        layer = MMLayer(d_model).to(GPU_TYPE)
+        layer = MMLayer(d_model).to(device_type)
         compiled_mm = torch.compile(
             layer,
             backend="inductor",
@@ -1446,18 +1565,18 @@ class outer_fn(torch.nn.Module):
             dynamic=True,
         )
 
-        x = torch.randn(2, d_model, device=GPU_TYPE)
+        x = torch.randn(2, d_model, device=device_type)
         result = compiled_mm(x)
         self.assertEqual(result.shape, (2, d_model))
         torch.testing.assert_close(result, layer(x))
 
         # Different batch size reuses the same compiled code
-        x2 = torch.randn(5, d_model, device=GPU_TYPE)
+        x2 = torch.randn(5, d_model, device=device_type)
         result2 = compiled_mm(x2)
         self.assertEqual(result2.shape, (5, d_model))
         torch.testing.assert_close(result2, layer(x2))
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     def test_nested_compile_input_mutation(self):
         """Test nested compile with input mutation inside a compiled region.
 
@@ -1528,9 +1647,9 @@ class outer_fn(torch.nn.Module):
         ):
             torch._dynamo.reset()
 
-            model = StackedMutating(d_model, n_layers=2).to(GPU_TYPE)
+            model = StackedMutating(d_model, n_layers=2).to(device_type)
 
-            x = torch.randn(2, d_model, device=GPU_TYPE, requires_grad=True)
+            x = torch.randn(2, d_model, device=device_type, requires_grad=True)
 
             fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             saved_params = list(model.parameters())
@@ -1569,7 +1688,7 @@ class outer_fn(torch.nn.Module):
             out = wrapped_fn(x)
             out.sum().backward()
 
-    @requires_gpu
+    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
     def test_nested_compile_output_aliases_input(self):
         """Test nested compile where output is a view-alias of input.
 
@@ -1640,9 +1759,9 @@ class outer_fn(torch.nn.Module):
         ):
             torch._dynamo.reset()
 
-            model = StackedView(d_model, n_layers=2).to(GPU_TYPE)
+            model = StackedView(d_model, n_layers=2).to(device_type)
 
-            x = torch.randn(2, d_model, device=GPU_TYPE, requires_grad=True)
+            x = torch.randn(2, d_model, device=device_type, requires_grad=True)
 
             fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             saved_params = list(model.parameters())
@@ -1728,7 +1847,7 @@ class outer_fn(torch.nn.Module):
         batch_size, seq_len = 2, 32
 
         # dumb mask mod that closes over a tensor
-        mask_bias = torch.tensor(0, device=GPU_TYPE, dtype=torch.int32)
+        mask_bias = torch.tensor(0, device=device_type, dtype=torch.int32)
 
         def mask_mod(b_idx, h_idx, q_idx, k_idx):
             return (q_idx >= k_idx) | (mask_bias == 1)
@@ -1740,7 +1859,7 @@ class outer_fn(torch.nn.Module):
             H=None,  # Broadcast over heads
             Q_LEN=seq_len,
             KV_LEN=seq_len,
-            device=GPU_TYPE,
+            device=device_type,
         )
 
         # Transformer layer with flex_attention
@@ -1841,7 +1960,7 @@ class outer_fn(torch.nn.Module):
 
         fake_store = FakeStore()
         dist.init_process_group("fake", store=fake_store, rank=0, world_size=2)
-        device_mesh = init_device_mesh(GPU_TYPE, (2,))
+        device_mesh = init_device_mesh(device_type, (2,))
 
         with (
             # Needed when wrapping a compiled region with FX tracing
@@ -1855,7 +1974,7 @@ class outer_fn(torch.nn.Module):
             torch._dynamo.reset()
 
             model = SmallTransformer(d_model, n_heads, d_ff, n_layers=4)
-            model = model.to(GPU_TYPE)
+            model = model.to(device_type)
 
             def replicate_all(name, module, device_mesh):
                 for param_name, param in module.named_parameters(recurse=False):
@@ -1870,7 +1989,7 @@ class outer_fn(torch.nn.Module):
                 batch_size,
                 seq_len,
                 d_model,
-                device=GPU_TYPE,
+                device=device_type,
                 dtype=torch.float32,
                 requires_grad=True,
             )
@@ -1934,6 +2053,142 @@ class outer_fn(torch.nn.Module):
             out.sum().backward()
 
         dist.destroy_process_group()
+
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
+    def test_2tier_blockmask_tensor_closure_nested_compile_aot_export(self):
+        """2-tier AOT export with BlockMask whose mask_mod captures tensors.
+
+        Reproduces the sixlib/mango pattern where:
+        - BlockMask is pytree-registered (as in sixlib/attention_mask.py)
+        - BlockMask with tensor closure is created inside forward
+        - aot_export flattens intermediates via pytree, exposing the
+          mask_mod callable (with captured tensors) in the context
+
+        visibility is a model input -> FunctionalTensor during outer trace.
+        mask_mod closure captures derived slices (lower, upper).
+        """
+        import contextlib
+
+        import torch.fx.traceback as fx_traceback
+        from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
+        from torch._subclasses import FakeTensorMode
+        from torch.nn.attention.flex_attention import (
+            BlockMask,
+            create_block_mask,
+            flex_attention,
+        )
+        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+
+        # Register BlockMask as pytree node (same as sixlib/attention_mask.py)
+        if BlockMask not in SUPPORTED_NODES:
+            register_pytree_node(
+                BlockMask,
+                BlockMask._flatten,
+                BlockMask._unflatten,
+                flatten_with_keys_fn=BlockMask._flatten_with_keys,
+                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+            )
+
+        d_model, n_heads = 64, 4
+        batch_size, seq_len = 2, 32
+
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q_proj = torch.nn.Linear(d_model, d_model)
+                self.k_proj = torch.nn.Linear(d_model, d_model)
+                self.v_proj = torch.nn.Linear(d_model, d_model)
+
+            def forward(self, x, visibility):
+                bs, sl, _ = x.shape
+                lower = visibility[:, 0, :]
+                upper = visibility[:, 1, :]
+
+                def mask_mod(b_idx, h_idx, q_idx, k_idx):
+                    return (lower[b_idx, q_idx] <= k_idx) & (
+                        k_idx <= upper[b_idx, q_idx]
+                    )
+
+                bm = create_block_mask(
+                    mask_mod,
+                    B=bs,
+                    H=None,
+                    Q_LEN=sl,
+                    KV_LEN=sl,
+                    device=x.device,
+                )
+
+                q = (
+                    self.q_proj(x)
+                    .view(bs, sl, n_heads, d_model // n_heads)
+                    .transpose(1, 2)
+                )
+                k = (
+                    self.k_proj(x)
+                    .view(bs, sl, n_heads, d_model // n_heads)
+                    .transpose(1, 2)
+                )
+                v = (
+                    self.v_proj(x)
+                    .view(bs, sl, n_heads, d_model // n_heads)
+                    .transpose(1, 2)
+                )
+
+                with fx_traceback.annotate({"compile_with_inductor": 1}):
+                    attn_out = flex_attention(q, k, v, block_mask=bm)
+
+                out = attn_out.transpose(1, 2).contiguous().view(bs, sl, -1)
+                # Return BlockMask alongside output so it appears in the
+                # output pytree spec — this matches how sixlib's decoder
+                # returns context alongside outputs.
+                return out, bm
+
+        with (
+            torch._dynamo.config.patch(force_compile_during_fx_trace=True),
+            torch._inductor.config.patch(wrap_inductor_compiled_regions=True),
+            torch._functorch.config.patch(force_non_lazy_backward_lowering=True),
+        ):
+            torch._dynamo.reset()
+
+            model = SimpleModel().to(device_type)
+            x = torch.randn(
+                batch_size,
+                seq_len,
+                d_model,
+                device=device_type,
+                dtype=torch.float32,
+                requires_grad=True,
+            )
+            visibility = torch.zeros(
+                batch_size,
+                2,
+                seq_len,
+                device=device_type,
+                dtype=torch.int64,
+            )
+            visibility[:, 1, :] = seq_len - 1
+
+            fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(fake_mode)
+                result = aot_export_joint_with_descriptors(
+                    stack,
+                    model,
+                    args=(x, visibility),
+                    kwargs={},
+                    keep_inference_input_mutations=True,
+                    _disable_torch_fn_metadata_mode=True,
+                )
+
+            print("=== Outer (aot_export) graph ===")
+            print(result.graph_module.graph)
+            for name, submod in result.graph_module.named_modules():
+                if name and hasattr(submod, "graph"):
+                    print(f"\n=== Submodule: {name} ===")
+                    print(submod.graph)
 
 
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):

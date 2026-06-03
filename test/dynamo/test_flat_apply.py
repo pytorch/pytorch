@@ -55,7 +55,7 @@ class InputData:
     values: Tensor
 
 
-torch.utils._pytree.register_dataclass(InputData)
+pytree.register_dataclass(InputData)
 
 
 @dataclass
@@ -73,7 +73,7 @@ class OutputData:
     result2: Tensor
 
 
-torch.utils._pytree.register_dataclass(OutputData)
+pytree.register_dataclass(OutputData)
 
 
 @dataclass
@@ -198,7 +198,7 @@ class GraphModule(torch.nn.Module):
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(trace_point_tensor_callable, trace_point_tensor_input_spec, l_x_, l_y_, t);  trace_point_tensor_callable = trace_point_tensor_input_spec = l_x_ = l_y_ = t = None
         res: "f32[10]" = flat_apply_capture[0];  flat_apply_capture = None
         return (res,)
-""",  # NOQA: B950
+""",
         )
 
     def test_nonstrict_trace_captured_tensor_post_aot_graph(self):
@@ -225,7 +225,7 @@ class <lambda>(torch.nn.Module):
         _tensor_constant0: "f32[1]" = self._tensor_constant0
         add: "f32[10]" = torch.ops.aten.add.Tensor(mul, _tensor_constant0);  mul = _tensor_constant0 = None
         return (add,)
-""",  # NOQA: B950
+""",
         )
 
 
@@ -281,7 +281,7 @@ class GraphModule(torch.nn.Module):
         add_1: "f32[4, 4]" = add + z_result1;  add = z_result1 = None
         add_2: "f32[4, 4]" = add_1 + z_result2;  add_1 = z_result2 = None
         return (add_2,)
-""",  # NOQA: B950
+""",
         )
 
     def test_dataclass_input(self):
@@ -334,7 +334,7 @@ class GraphModule(torch.nn.Module):
         add_1: "f32[4, 4]" = add + z_result1;  add = z_result1 = None
         add_2: "f32[4, 4]" = add_1 + z_result2;  add_1 = z_result2 = None
         return (add_2,)
-""",  # NOQA: B950
+""",
         )
 
     def test_invalid_input(self):
@@ -416,7 +416,7 @@ class GraphModule(torch.nn.Module):
         add_1: "f32[4, 4]" = add + value;  add = value = None
         add_2: "f32[4, 4]" = add_1 + value_1;  add_1 = value_1 = None
         return (add_2,)
-""",  # NOQA: B950
+""",
         )
 
     def test_invalid_output(self):

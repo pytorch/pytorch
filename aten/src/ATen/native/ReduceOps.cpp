@@ -84,6 +84,7 @@
 #include <ATen/ops/mean.h>
 #include <ATen/ops/mean_meta.h>
 #include <ATen/ops/mean_native.h>
+#include <ATen/ops/nan_to_num.h>
 #include <ATen/ops/nanmean_native.h>
 #include <ATen/ops/nansum.h>
 #include <ATen/ops/nansum_native.h>
@@ -117,6 +118,7 @@
 #include <ATen/ops/var_mean.h>
 #include <ATen/ops/var_mean_native.h>
 #include <ATen/ops/var_native.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #endif
@@ -645,7 +647,12 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
   // O(n) implementation. The derivative of this implementation is _not_
   // the second derivative of cumprod. As such, we fallback to a less efficient
   // O(n^2) implementation when at::GradMode::is_enabled().
-  if (!at::GradMode::is_enabled() && !are_inputs_tensors_sublcass) {
+  //
+  // NOTE: We use at::where instead of masked_scatter_/masked_select to make
+  // this path composite compliant for tensor subclasses (e.g., FakeTensors
+  // used by torch.compile). masked_select has dynamic output shape which
+  // causes issues with tracing. See https://github.com/pytorch/pytorch/issues/136263
+  if (!at::GradMode::is_enabled()) {
     // n.b. This could probably be implemented much faster with a kernel
 
     // From here on we need to use some mask gymnastics to
@@ -669,9 +676,16 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // case k < z1
     // select everything before the first zero [0, z1)
     auto mask = cumsum == 0;
-    // equiv to grad_input[mask] = deriv[grad]
-    grad_input.masked_scatter_(mask,
-        reversed_cumsum(w.masked_fill(~mask, 0.), dim).div_(input_conj).masked_select(mask));
+    // Compute gradient for positions before the first zero
+    // Using at::where instead of masked_scatter_ for composite compliance
+    auto grad_before_first_zero = reversed_cumsum(w.masked_fill(~mask, 0.), dim);
+    if (!are_inputs_tensors_sublcass) {
+      grad_before_first_zero = grad_before_first_zero.div_(input_conj);
+    } else {
+      grad_before_first_zero = grad_before_first_zero.div(input_conj);
+    }
+    grad_input = at::where(mask, grad_before_first_zero, grad_input);
+
     // select everything from the first zero to the second zero [z1, z2)
     mask = cumsum == 1;
 
@@ -693,13 +707,21 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // dy_j / dx_z1 = sum(cumprod(input[z1+1:z2] * grad[z1+1:z2])) * prod(output[z1-1])
     // relu_() necessary as gather does not support negative indices
     // finally, we do grad_input[z1] = dy_j / dx_z1
-    grad_input.masked_scatter_(first_zero_mask,
-                               input_conj.masked_fill(~mask, 1.).cumprod(dim)
-                                    .mul_(grad.masked_fill(cumsum != 1, 0.))
-                                    .sum(dim, /*keepdim*/true)
-                                    .mul_(at::gather(output_conj, dim, (first_zero_index - 1).relu_())
-                                          .masked_fill_(first_zero_index == 0, 1.))
-                                    .masked_select(first_zero_mask));
+    // Using at::where instead of masked_scatter_ for composite compliance
+    auto grad_at_first_zero = input_conj.masked_fill(~mask, 1.).cumprod(dim);
+    const auto grad_masked = grad.masked_fill(cumsum != 1, 0.);
+    const auto output_before_zero = at::gather(output_conj, dim, (first_zero_index - 1).relu_())
+                                      .masked_fill_(first_zero_index == 0, 1.);
+    if (!are_inputs_tensors_sublcass) {
+      grad_at_first_zero = grad_at_first_zero.mul_(grad_masked)
+                             .sum(dim, /*keepdim*/true)
+                             .mul_(output_before_zero);
+    } else {
+      grad_at_first_zero = grad_at_first_zero.mul(grad_masked)
+                             .sum(dim, /*keepdim*/true)
+                             .mul(output_before_zero);
+    }
+    grad_input = at::where(first_zero_mask, grad_at_first_zero, grad_input);
     return grad_input;
   } else { // GradMode::enabled()
     /*
@@ -840,7 +862,7 @@ std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
   auto values = at::empty(self.sizes(), self.options());
   auto indices = at::empty(self.sizes(), self.options().dtype(at::kLong));
   at::cummax_out(values, indices, self, dim);
-  return std::make_tuple(values, indices);
+  return std::make_tuple(std::move(values), std::move(indices));
 }
 
 void cummin_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
@@ -879,7 +901,7 @@ std::tuple<Tensor, Tensor> cummin(const Tensor& self, int64_t dim) {
   auto values = at::empty(self.sizes(), self.options());
   auto indices = at::empty(self.sizes(), self.options().dtype(at::kLong));
   at::cummin_out(values, indices, self, dim);
-  return std::make_tuple(values, indices);
+  return std::make_tuple(std::move(values), std::move(indices));
 }
 
 Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor& indices, int64_t dim) {
@@ -1063,6 +1085,7 @@ static std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordi
   }
 
   std::vector<Tensor> result;
+  result.reserve(dim.size());
   for (const auto i : c10::irange(dim.size())) {
     TORCH_CHECK( coordinates[i].dim() == 1, "torch.gradient expected each element of spacing to have one dimension, but got an element with ", coordinates[i].dim(), " dimensions!");
     int64_t direction = maybe_wrap_dim(dim[i], self.dim());
@@ -1100,6 +1123,7 @@ static std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordi
 
 static std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> spacing, IntArrayRef dim, int64_t edge_order) {
   std::vector<Tensor> result;
+  result.reserve(dim.size());
   for (const auto i : c10::irange(dim.size())) {
       int64_t direction = maybe_wrap_dim(dim[i], self.dim());
       const auto& ax_dx = spacing[i];
@@ -1273,6 +1297,11 @@ Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
   }
 
   ScalarType dtype = get_dtype_from_result(result, opt_dtype);
+  // Integer dtype: NaN is unrepresentable, replace with 0 and use sum (#183318).
+  if (opt_dtype.has_value() && c10::isIntegralType(dtype, /*includeBool=*/true)) {
+    return at::sum_out(
+        result, at::nan_to_num(self, /*nan=*/0.0), dim, keepdim, opt_dtype);
+  }
   auto iter = make_reduction("nansum", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {
     result = result.zero_();
@@ -1309,7 +1338,8 @@ Tensor trace_cpu(const Tensor& self) {
   // is set to true
   ScalarType dtype = get_dtype_from_self(self, std::nullopt, true);
   result = at::empty({}, self.options().dtype(dtype));
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "trace", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+       at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "trace", [&] {
     using accscalar_t = at::acc_type<scalar_t, false>;
     accscalar_t sum = 0;
     const auto* t_data = self.const_data_ptr<scalar_t>();
@@ -1461,7 +1491,7 @@ Tensor& nanmean_out(
     bool keepdim,
     std::optional<ScalarType> opt_dtype,
     Tensor& result) {
-  // Check if dtype is an integral type or Bool and raise an error
+  // Check if input dtype is an integral type or Bool and raise an error
   TORCH_CHECK(
     !at::isIntegralType(self.scalar_type(), /*includeBool=*/true),
     "nanmean(): integral types and 'Bool' are not supported for nanmean, even for empty tensors.");
@@ -1469,6 +1499,13 @@ Tensor& nanmean_out(
       self.is_floating_point() || self.is_complex(),
       "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
+  // Check if opt_dtype (output dtype) is valid - must be floating point or complex
+  if (opt_dtype.has_value()) {
+    TORCH_CHECK(
+        at::isFloatingType(opt_dtype.value()) || at::isComplexType(opt_dtype.value()),
+        "nanmean(): could not infer output dtype. Optional dtype must be either a floating point or complex dtype. Got: ",
+        opt_dtype.value());
+  }
   const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
   at::nansum_out(result, self, dim, keepdim, opt_dtype).div_(factor);
   return result;
@@ -1483,6 +1520,13 @@ Tensor nanmean(
       self.is_floating_point() || self.is_complex(),
       "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
+  // Check if opt_dtype (output dtype) is valid - must be floating point or complex
+  if (opt_dtype.has_value()) {
+    TORCH_CHECK(
+        at::isFloatingType(opt_dtype.value()) || at::isComplexType(opt_dtype.value()),
+        "nanmean(): could not infer output dtype. Optional dtype must be either a floating point or complex dtype. Got: ",
+        opt_dtype.value());
+  }
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
   return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
@@ -1615,11 +1659,12 @@ static inline TensorIterator get_allany_iter(
     const Tensor& result,
     OptionalIntArrayRef dims,
     bool keepdim) {
-  if (self.is_cuda()) {
+  if (self.is_cuda() || self.is_mps()) {
     // As CUDA supports dynamic type casting, we use this overload of
     // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
     // otherwise we use the overload below which casts the input to kBool (which is
-    // an extra operation).
+    // an extra operation). MPS reads input via the Metal kernel without iter
+    // casting, so it can take the same fast path.
     return meta::make_reduction(self, result, dims, keepdim, self.scalar_type());
   }
   return meta::make_reduction_from_out_ty(
@@ -1864,8 +1909,8 @@ static Tensor& std_var_out(
     const char* fname, Tensor& result, const Tensor& self,
     at::OptionalIntArrayRef dim, const std::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
-  TORCH_CHECK(self.device().is_cpu() || self.device().is_cuda() || self.device().is_xpu(),
-              "std and var supports tensors on a CPU, CUDA, or XPU device only, but got: ",
+  TORCH_CHECK(self.device().is_cpu() || self.device().is_cuda() || self.device().is_xpu() || self.device().is_privateuseone(),
+              "std and var supports tensors on a CPU, CUDA, XPU or PrivateUse1 device only, but got: ",
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std and var only supports strided layout, got: ", self.layout());
@@ -1937,8 +1982,8 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     at::OptionalIntArrayRef dim, const std::optional<Scalar>& correction_opt,
     bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu(),
-              fname, " supports tensors on a CPU, CUDA, or XPU device only, got: ",
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu() || self.is_privateuseone(),
+              fname, " supports tensors on a CPU, CUDA, XPU or PrivateUse1 device only, got: ",
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());
@@ -2351,10 +2396,14 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
 Tensor value_selecting_reduction_backward_symint(const Tensor& grad, int64_t dim, const Tensor& indices, c10::SymIntArrayRef sizes, bool keepdim) {
   auto inplace_scatter_if_not_tensor_subclass =
       [&](const Tensor& grad_out, const Tensor& indices_) {
-        auto grad_in = at::zeros_symint(sizes, grad_out.options());
         if (areAnyTensorSubclassLike({grad, indices})) {
+          // Use new_zeros_symint so that tensor subclasses (e.g. DTensor)
+          // can intercept the zeros creation through dispatch, ensuring
+          // the result has matching subclass type for subsequent scatter.
+          auto grad_in = grad_out.new_zeros_symint(sizes);
           return grad_in.scatter(dim, indices_, grad_out);
         }
+        auto grad_in = at::zeros_symint(sizes, grad_out.options());
         return grad_in.scatter_(dim, indices_, grad_out);
       };
 

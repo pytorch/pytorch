@@ -1,8 +1,8 @@
-# mypy: allow-untyped-defs
 import functools
 import logging
 import operator
 import sys
+from collections.abc import Callable
 from typing import Any, Optional, TYPE_CHECKING
 
 
@@ -98,12 +98,12 @@ def insert_deferred_runtime_asserts(
         _get_placeholder_expr,
         _has_uninterpretable_sympy_function,
         CallMethodKey,
-        cast_symbool_to_symint_guardless,
         ConvertIntKey,
         DivideByKey,
         free_symbols,
         InnerTensorKey,
         resolve_unbacked_bindings,
+        RuntimeAssert,
     )
     from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.reference import (
@@ -207,7 +207,9 @@ def insert_deferred_runtime_asserts(
 
     Analysis = PythonReferenceAnalysis if export else OptimizedPythonReferenceAnalysis
 
-    def _sympy_interp(expr_to_proxy, expr):
+    def _sympy_interp(
+        expr_to_proxy: dict[sympy.Expr, fx.Proxy], expr: sympy.Expr
+    ) -> fx.Proxy:
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
         from sympy.logic.boolalg import BooleanAtom
@@ -240,7 +242,7 @@ def insert_deferred_runtime_asserts(
             isinstance(rhs, sympy.Symbol) and isinstance(lhs, sympy.Number)
         )
 
-    def add_runtime_asserts(ras):
+    def add_runtime_asserts(ras: list[RuntimeAssert]) -> None:
         for ra in ras:
             if (
                 # redundant
@@ -310,7 +312,7 @@ def insert_deferred_runtime_asserts(
                 and (example_value := _get_example_value(node)) is not None
             ):
 
-                def match_symbol(symint, cb):
+                def match_symbol(symint: object, cb: Callable[[], fx.Node]) -> None:
                     if (
                         isinstance(symint, torch.SymInt)
                         and isinstance(symint.node, SymNode)
@@ -391,7 +393,7 @@ def insert_deferred_runtime_asserts(
                 and (sym_expr := _get_sym_val(node)) is not None
             ):
                 # this guards against deleting calls like item() that produce new untracked symbols
-                def has_new_untracked_symbols():
+                def has_new_untracked_symbols() -> bool:
                     # pyrefly: ignore [missing-attribute]
                     for symbol in sym_expr.free_symbols:
                         if symbol not in expr_to_proxy:
@@ -405,7 +407,7 @@ def insert_deferred_runtime_asserts(
                     shape_env, node.meta.get("unbacked_bindings", {})
                 )
 
-                def has_new_unbacked_bindings():
+                def has_new_unbacked_bindings() -> bool:
                     if resolved_unbacked_bindings is None:
                         raise AssertionError("resolved_unbacked_bindings is None")
                     for key in resolved_unbacked_bindings:
@@ -482,7 +484,7 @@ def insert_deferred_runtime_asserts(
 
                     # TODO: some CSE when generating these nodes can probably
                     # help reduce graph size and improve compile time
-                    def go(node, keypath):
+                    def go(node: fx.Node, keypath: tuple[object, ...]) -> fx.Node:
                         if keypath == ():
                             return node
                         if (
@@ -535,9 +537,7 @@ def insert_deferred_runtime_asserts(
                             )
                         elif isinstance(keypath[0], ConvertIntKey):
                             return go(
-                                graph.call_function(
-                                    cast_symbool_to_symint_guardless, (node,)
-                                ),
+                                graph.call_function(torch.sym_ite, (node, 1, 0)),
                                 keypath[1:],
                             )
                         elif isinstance(keypath[0], DivideByKey):
@@ -629,7 +629,7 @@ def insert_deferred_runtime_asserts(
                     # assert and also explicitly refine the range
                     # (refinement should not be necessary once runtime
                     # asserts cause refinement, but that's NYI)
-                    def convert(s):
+                    def convert(s: Any) -> int | None:
                         if s in (int_oo, -int_oo):
                             return None
                         try:
@@ -637,44 +637,37 @@ def insert_deferred_runtime_asserts(
                         except TypeError:
                             return None
 
-                    if (
-                        expr_to_proxy[i0].node.target
-                        is not cast_symbool_to_symint_guardless
+                    with _set_node_metadata_hook(
+                        gm,
+                        functools.partial(
+                            _node_metadata_hook,
+                            stack_trace=node.meta.get("stack_trace"),
+                            nn_module_stack=node.meta.get("nn_module_stack"),
+                            # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                            # as the input node to the assertion
+                            custom=node.meta.get("custom"),
+                        ),
                     ):
-                        # TODO(pianpwk): calling sym_constrain_range_for_size or adding bound asserts
-                        # raises AOTAutograd errors on cast_symbool_to_symint_guardless
-
-                        with _set_node_metadata_hook(
-                            gm,
-                            functools.partial(
-                                _node_metadata_hook,
-                                stack_trace=node.meta.get("stack_trace"),
-                                nn_module_stack=node.meta.get("nn_module_stack"),
-                                # nodes added in `apply_runtime_assertion_pass` will have the same annotation
-                                # as the input node to the assertion
-                                custom=node.meta.get("custom"),
-                            ),
-                        ):
-                            if (min_val := convert(vr.lower)) is not None:
-                                ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
-                                graph.call_function(
-                                    torch.ops.aten._assert_scalar.default,
-                                    (
-                                        ge,
-                                        f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
-                                    ),
-                                )
-                                added_asserts.add(i0 >= min_val)
-                            if (max_val := convert(vr.upper)) is not None:
-                                le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
-                                graph.call_function(
-                                    torch.ops.aten._assert_scalar.default,
-                                    (
-                                        le,
-                                        f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
-                                    ),
-                                )
-                                added_asserts.add(i0 <= max_val)
+                        if (min_val := convert(vr.lower)) is not None:
+                            ge = _sympy_interp(expr_to_proxy, i0 >= min_val).node
+                            graph.call_function(
+                                torch.ops.aten._assert_scalar.default,
+                                (
+                                    ge,
+                                    f"Runtime assertion failed for expression {i0 >= min_val} on node '{ge}'",
+                                ),
+                            )
+                            added_asserts.add(i0 >= min_val)
+                        if (max_val := convert(vr.upper)) is not None:
+                            le = _sympy_interp(expr_to_proxy, i0 <= max_val).node
+                            graph.call_function(
+                                torch.ops.aten._assert_scalar.default,
+                                (
+                                    le,
+                                    f"Runtime assertion failed for expression {i0 <= max_val} on node '{le}'",
+                                ),
+                            )
+                            added_asserts.add(i0 <= max_val)
 
                 constrained_unbacked_symbols.add(i0)
                 add_runtime_asserts(ras)

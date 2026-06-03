@@ -41,6 +41,9 @@ project-excludes = [
   "torch/overrides.py",
   "*/__pycache__/**",
   "*/.*",
+  "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**",
+  "torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py",
+  "torch/_vendor/quack/**",
 ]
 ignore-missing-imports = [
     # XPU memory symbols not present for builds without XPU support
@@ -95,6 +98,7 @@ ignore-missing-imports = [
     "boto3.*",
     "dill.*",
     "usort.*",
+    "cutlass.*",
     "cutlass_library.*",
     "cutlass_api.*",
     "deeplearning.*",
@@ -107,6 +111,7 @@ ignore-missing-imports = [
     "onnxruntime.*",
     "onnxscript.*",
     "redis.*",
+    "tabulate.*",
 ]
 # By default, mypy does not check untyped definitions.
 # However, mypy has a configuration called check_untyped_defs which is used
@@ -155,3 +160,13 @@ matches = "torch/_functorch/**"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
+
+[[sub-config]]
+matches = "torch/fx/**"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+bad-param-name-override = false
+unannotated-return = true
+unannotated-parameter = true
+unannotated-attribute = true

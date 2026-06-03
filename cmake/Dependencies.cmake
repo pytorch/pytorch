@@ -47,14 +47,20 @@ if(USE_CUDA)
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS )
-    if(NOT CAFFE2_USE_NVRTC)
-      caffe2_update_option(USE_NVRTC OFF)
-    endif()
     list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::curand caffe2::cufft caffe2::cublas)
     if(CAFFE2_USE_CUDNN)
+      if(NOT CAFFE2_USE_NVRTC)
+        message(FATAL_ERROR
+          "USE_CUDNN requires USE_NVRTC (required by cudnn_frontend 1.21+). "
+          "Please set -DUSE_NVRTC=ON or disable cuDNN with -DUSE_CUDNN=OFF.")
+      endif()
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cudnn)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::nvrtc_runtime)
     else()
       caffe2_update_option(USE_CUDNN OFF)
+    endif()
+    if(NOT CAFFE2_USE_NVRTC)
+      caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUSPARSELT)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cusparselt)
@@ -131,7 +137,10 @@ if(USE_ASAN OR USE_LSAN OR USE_TSAN)
   endif()
   if(USE_TSAN)
     if(TARGET Sanitizer::thread)
-      list(APPEND Caffe2_DEPENDENCY_LIBS Sanitizer::thread)
+      # Use global flags so that all targets (including executables like
+      # torch_shm_manager that don't link torch_cpu) get TSan instrumentation.
+      add_compile_options(-fsanitize=thread)
+      add_link_options(-fsanitize=thread)
     else()
       message(WARNING "TSAN not found. Suppress this warning with -DUSE_TSAN=OFF.")
       caffe2_update_option(USE_TSAN OFF)
@@ -556,15 +565,6 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       set(XNNPACK_ENABLE_AVX512FP16  OFF CACHE BOOL "")
     ENDIF()
 
-    # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
-    # XNNPACK does conditionally compile this based on GCC version. Once it also does
-    # so based on Clang version, this logic can be removed.
-    IF(CMAKE_C_COMPILER_ID STREQUAL "Clang")
-      IF(CMAKE_C_COMPILER_VERSION VERSION_LESS "11")
-        set(XNNPACK_ENABLE_AVX512AMX OFF CACHE BOOL "")
-      ENDIF()
-    ENDIF()
-
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
     # be PIC to successfully link this static libXNNPACK with pytorch
@@ -984,22 +984,12 @@ if(USE_ROCM)
       caffe2_update_option(USE_SYSTEM_NCCL ON)
     endif()
 
-    if(WIN32)
-      if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-        if(CMAKE_BUILD_TYPE MATCHES Debug)
-          list(APPEND HIP_CXX_FLAGS -fms-runtime-lib=static_dbg)
-        else()
-          list(APPEND HIP_CXX_FLAGS -fms-runtime-lib=static)
-        endif()
-      else()
-        if(CMAKE_BUILD_TYPE MATCHES Debug)
-          list(APPEND HIP_CXX_FLAGS -fms-runtime-lib=dll_dbg)
-        else()
-          list(APPEND HIP_CXX_FLAGS -fms-runtime-lib=dll)
-        endif()
-      endif()
-    else()
-      list(APPEND HIP_CXX_FLAGS -fPIC)
+    # HIP_CXX_FLAGS: applied to targets via target_compile_options (definitions, warnings).
+    # These are used for both HIP device code and C++ code that needs HIP defines.
+    # MSVC runtime library flags for HIP are handled via CMAKE_HIP_COMPILE_OPTIONS_MSVC_RUNTIME_LIBRARY_*
+    # mappings in LoadHIP.cmake (Windows) or -fPIC (Linux).
+    if(NOT WIN32)
+      string(APPEND CMAKE_HIP_FLAGS " -fPIC")
     endif()
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_AMD__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
@@ -1022,15 +1012,16 @@ if(USE_ROCM)
     if(USE_ROCM_CK_GEMM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
-    list(APPEND HIP_HIPCC_FLAGS --offload-compress)
-    list(APPEND HIP_HIPCC_FLAGS -std=c++17)
+    # CMAKE_HIP_FLAGS: flags passed to the HIP compiler for device code.
+    # Architecture is handled by CMAKE_HIP_ARCHITECTURES (set in LoadHIP.cmake).
+    string(APPEND CMAKE_HIP_FLAGS " --offload-compress -std=c++20")
     # Pass device library path for theRock nightly builds
     if(DEFINED ENV{HIP_DEVICE_LIB_PATH})
       file(TO_CMAKE_PATH "$ENV{HIP_DEVICE_LIB_PATH}" _hip_device_lib_path)
-      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=${_hip_device_lib_path})
+      string(APPEND CMAKE_HIP_FLAGS " --rocm-device-lib-path=${_hip_device_lib_path}")
     elseif(EXISTS "${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
       file(TO_CMAKE_PATH "${ROCM_PATH}/lib/llvm/amdgcn/bitcode" _rocm_device_lib_path)
-      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=${_rocm_device_lib_path})
+      string(APPEND CMAKE_HIP_FLAGS " --rocm-device-lib-path=${_rocm_device_lib_path}")
     endif()
     if(WIN32)
       add_definitions(-DROCM_ON_WINDOWS)
@@ -1045,7 +1036,7 @@ if(USE_ROCM)
     if(CMAKE_BUILD_TYPE MATCHES Debug)
        list(APPEND HIP_CXX_FLAGS -g2)
        list(APPEND HIP_CXX_FLAGS -O0)
-       list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
+       string(APPEND CMAKE_HIP_FLAGS " -fdebug-info-for-profiling")
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
     # Get EnVar 'USE_LAYERNORM_FAST_RECIPROCAL' (or default to on).
@@ -1060,24 +1051,15 @@ if(USE_ROCM)
     endif()
 
     # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
-    list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
-
-    set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
-    set(CMAKE_HIP_FLAGS ${HIP_HIPCC_FLAGS})
-    # Ask hcc to generate device code during compilation so we can use
-    # host linker to link.
-    list(APPEND HIP_CLANG_FLAGS -fno-gpu-rdc)
-    foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
-      list(APPEND HIP_CLANG_FLAGS --offload-arch=${pytorch_rocm_arch})
-    endforeach()
+    string(APPEND CMAKE_HIP_FLAGS " -fclang-abi-compat=17")
+    # Use host linker instead of device linker (no relocatable device code by default)
+    string(APPEND CMAKE_HIP_FLAGS " -fno-gpu-rdc")
 
     set(Caffe2_HIP_INCLUDE
        $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
-    # This is needed for library added by hip_add_library (same for hip_add_executable)
-    hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
+      hip::host MIOpen hiprtc::hiprtc)
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
@@ -1086,6 +1068,16 @@ if(USE_ROCM)
     if(hipsparselt_FOUND)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::hipsparselt
+      )
+      if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
+          set(CAFFE2_USE_HIPSPARSELT ON)
+      endif()
+    endif()
+
+    # ROCM-SMI needed to support symmetric memory
+    if(USE_DISTRIBUTED AND UNIX)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        rocm_smi64
       )
     endif()
 
@@ -1247,6 +1239,40 @@ if(USE_GLOO)
       endif()
       message("Found gloo: ${Gloo_NATIVE_LIBRARY}, cuda lib: ${Gloo_CUDA_LIBRARY}, hip lib: ${Gloo_HIP_LIBRARY}")
       message("Found gloo include directories: ${Gloo_INCLUDE_DIRS}")
+
+      # Validate that the system-installed gloo was built with the GPU flavor
+      # PyTorch is requesting. A mismatch (e.g. a CUDA-only gloo used in a
+      # ROCm build) causes cryptic compile errors deep in the build; catch it
+      # here with a clear message instead.
+      set(_gloo_config_h "${Gloo_INCLUDE_DIRS}/gloo/config.h")
+      if(EXISTS "${_gloo_config_h}")
+        file(READ "${_gloo_config_h}" _gloo_config_contents)
+        if(USE_CUDA)
+          string(REGEX MATCH "#define GLOO_USE_CUDA ([01])" _match "${_gloo_config_contents}")
+          if(NOT "${CMAKE_MATCH_1}" STREQUAL "1")
+            message(FATAL_ERROR
+              "USE_SYSTEM_GLOO: the gloo found at ${Gloo_INCLUDE_DIRS} was not "
+              "built with CUDA support (GLOO_USE_CUDA=${CMAKE_MATCH_1} in "
+              "${_gloo_config_h}). Rebuild gloo with -DUSE_CUDA=ON or point "
+              "CMAKE_PREFIX_PATH at a CUDA-enabled gloo installation.")
+          endif()
+        elseif(USE_ROCM)
+          string(REGEX MATCH "#define GLOO_USE_ROCM ([01])" _match "${_gloo_config_contents}")
+          if(NOT "${CMAKE_MATCH_1}" STREQUAL "1")
+            message(FATAL_ERROR
+              "USE_SYSTEM_GLOO: the gloo found at ${Gloo_INCLUDE_DIRS} was not "
+              "built with ROCm support (GLOO_USE_ROCM=${CMAKE_MATCH_1} in "
+              "${_gloo_config_h}). Rebuild gloo with -DUSE_ROCM=ON or point "
+              "CMAKE_PREFIX_PATH at a ROCm-enabled gloo installation.")
+          endif()
+        endif()
+      else()
+        message(WARNING
+          "USE_SYSTEM_GLOO: could not find ${_gloo_config_h} to verify GPU "
+          "flavor; proceeding, but the build may fail if gloo was compiled "
+          "for a different GPU backend.")
+      endif()
+
       add_library(gloo SHARED IMPORTED)
       set_target_properties(gloo PROPERTIES IMPORTED_LOCATION ${Gloo_NATIVE_LIBRARY})
       if(USE_CUDA)
@@ -1459,9 +1485,6 @@ if(NOT INTERN_BUILD_MOBILE)
     caffe2_update_option(USE_MAGMA OFF)
   endif()
 
-  # ARM specific flags
-  find_package(ARM)
-
   find_package(LAPACK)
   if(LAPACK_FOUND)
     set(USE_LAPACK 1)
@@ -1586,6 +1609,17 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 # shouldn't be too bad to just disable the checks.
 set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
+# Keep fmt's header-only type layout stable across mixed C++ modes by forcing
+# one no_unique_address spelling for all translation units.
+if(MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  set(_fmt_no_unique_address "[[msvc::no_unique_address]]")
+else()
+  set(_fmt_no_unique_address "[[no_unique_address]]")
+endif()
+target_compile_definitions(fmt PUBLIC "FMT_NO_UNIQUE_ADDRESS=${_fmt_no_unique_address}")
+target_compile_definitions(fmt-header-only INTERFACE "FMT_NO_UNIQUE_ADDRESS=${_fmt_no_unique_address}")
+unset(_fmt_no_unique_address)
+
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 
@@ -1602,28 +1636,17 @@ if(USE_KINETO AND INTERN_BUILD_MOBILE AND USE_LITE_INTERPRETER_PROFILER AND (USE
 endif()
 
 if(USE_KINETO)
-  if(NOT USE_CUDA)
-    set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)
-  else()
-    set(LIBKINETO_NOCUPTI OFF CACHE STRING "")
+  if(USE_CUDA)
+    set(KINETO_BACKEND "cuda" CACHE STRING "" FORCE)
     message(STATUS "Using Kineto with CUPTI support")
-  endif()
-
-  if(NOT USE_ROCM)
-    set(LIBKINETO_NOROCTRACER ON CACHE STRING "" FORCE)
-  else()
-    set(LIBKINETO_NOROCTRACER OFF CACHE STRING "")
+  elseif(USE_ROCM)
+    set(KINETO_BACKEND "rocm" CACHE STRING "" FORCE)
     message(STATUS "Using Kineto with Roctracer support")
-  endif()
-
-  if((NOT USE_XPU) OR (NOT XPU_ENABLE_KINETO))
-    set(LIBKINETO_NOXPUPTI ON CACHE STRING "" FORCE)
-  else()
-    set(LIBKINETO_NOXPUPTI OFF CACHE STRING "")
+  elseif(USE_XPU AND XPU_ENABLE_KINETO)
+    set(KINETO_BACKEND "xpu" CACHE STRING "" FORCE)
     message(STATUS "Using Kineto with XPUPTI support")
-  endif()
-
-  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER AND LIBKINETO_NOXPUPTI)
+  else()
+    set(KINETO_BACKEND "cpu" CACHE STRING "" FORCE)
     message(STATUS "Using CPU-only version of Kineto")
   endif()
 
@@ -1636,10 +1659,11 @@ if(USE_KINETO)
   message(STATUS "  KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
   message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
   message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
+  message(STATUS "  KINETO_BACKEND = ${KINETO_BACKEND}")
 
-  if(NOT LIBKINETO_NOROCTRACER)
+  if(KINETO_BACKEND STREQUAL "rocm")
     if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
-      set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
+      set(ENV{ROCM_SOURCE_DIR} "${ROCM_PATH}")
     endif()
   endif()
 
@@ -1649,18 +1673,17 @@ if(USE_KINETO)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
-  if(LIBKINETO_NOCUPTI)
-    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOCUPTI")
+  # Propagate the backend macro globally so PyTorch TUs outside torch_cpu's
+  # link closure (e.g. torch_python) see it. torch_cpu links kineto PRIVATE,
+  # so kineto's own PUBLIC HAS_* compile-def doesn't reach those TUs.
+  if(KINETO_BACKEND STREQUAL "cuda")
+    string(APPEND CMAKE_CXX_FLAGS " -DHAS_CUPTI")
+  elseif(KINETO_BACKEND STREQUAL "rocm")
+    string(APPEND CMAKE_CXX_FLAGS " -DHAS_ROCTRACER")
+  elseif(KINETO_BACKEND STREQUAL "xpu")
+    string(APPEND CMAKE_CXX_FLAGS " -DHAS_XPUPTI")
   endif()
-  if(LIBKINETO_NOROCTRACER)
-    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOROCTRACER")
-  endif()
-  if(LIBKINETO_NOXPUPTI)
-    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOXPUPTI=ON")
-  else()
-    string(APPEND CMAKE_CXX_FLAGS " -DLIBKINETO_NOXPUPTI=OFF")
-  endif()
-  if(LIBKINETO_NOCUPTI AND LIBKINETO_NOROCTRACER AND LIBKINETO_NOXPUPTI)
+  if(KINETO_BACKEND STREQUAL "cpu")
     message(STATUS "Configured Kineto (CPU)")
   else()
     message(STATUS "Configured Kineto")

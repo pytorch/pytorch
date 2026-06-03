@@ -22,6 +22,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     pad_mm_precondition,
 )
 from torch._inductor.runtime.caching import encoders, memoizers
+from torch._prims_common import is_contiguous_or_false
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -84,11 +85,13 @@ def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
 
 
-def realize_symbols(
-    ds: torch.Size | tuple[torch.SymInt, ...],
+def hint_symbols(
+    ds: Sequence[int | torch.SymInt],
 ) -> list[int]:
     """Helper to convert symbolic dimensions to their concrete hint values."""
-    return [d if isinstance(d, int) else d.node.hint for d in ds]
+    from torch.fx.experimental.symbolic_shapes import optimization_hint
+
+    return [optimization_hint(d) for d in ds]
 
 
 def can_pad(
@@ -102,31 +105,15 @@ def can_pad(
     All logic related to whether it's safe to pad should be here.
     """
 
-    # It's fine we have symbolic shapes or strides as long as they
-    # have hints. Later, we will make sure we only pad non-symbolic dimensions.
-    def valid_shape_and_stride(t: Tensor | None) -> bool:
-        if t is None:
-            return True
-
-        symbolic_cnt = 0
+    # Can't pad if there is no static dims, we pad static dims only.
+    def has_one_static_dim(t: Tensor) -> bool:
+        """Return False if all dimensions are symbolic — nothing concrete to pad."""
         for x in t.size():
             if isinstance(x, int):
-                continue
-            elif utils.is_symbolic(x):
-                # pyrefly: ignore [missing-attribute]
-                if not x.node.has_hint():
-                    return False
-                symbolic_cnt += 1
-            else:
-                return False
-        # filter out cases where all dimensions are symbolic
-        if symbolic_cnt == len(t.size()):
-            return False
-        return all(
-            # pyrefly: ignore [missing-attribute]
-            isinstance(x, int) or (utils.is_symbolic(x) and x.node.has_hint())
-            for x in t.stride()
-        )
+                return True
+            elif not isinstance(x, torch.SymInt):
+                raise RuntimeError("not expected size")
+        return False
 
     # Basic safety checks
     if not torch._inductor.config.shape_padding:
@@ -138,15 +125,16 @@ def can_pad(
     if not check_dtype(mat1, mat2):
         return False
 
-    if not all(valid_shape_and_stride(t) for t in (mat1, mat2, input)):
+    # For padding to be vaible each tensor should have at least one static dim.
+    tensors = [t for t in (mat1, mat2, input) if t is not None]
+    if not all(has_one_static_dim(t) for t in tensors):
         return False
 
-    # Check for zero dimensions - not safe to pad
+    # Skip zero-sized dimensions — padding would be wasteful (mm on empty tensors)
+    from torch.fx.experimental.symbolic_shapes import optimization_hint
+
     if any(
-        dim == 0
-        for dim in itertools.chain(
-            realize_symbols(mat1.shape), realize_symbols(mat2.shape)
-        )
+        optimization_hint(dim) == 0 for dim in itertools.chain(mat1.shape, mat2.shape)
     ):
         return False
 
@@ -171,11 +159,17 @@ def can_pad(
         if m_padded_length == k_padded_length == n_padded_length == 0:
             return False
 
+        if _padding_would_materialize_non_contiguous_tf32_input(
+            mat1, mat2, op, m_padded_length, k_padded_length, n_padded_length
+        ):
+            return False
+
     # In deterministic mode, we can't safely benchmark - disallow padding
-    # Check this after other basic checks so force_shape_pad can override
+    # Check this after other basic checks so force_shape_pad/autoheuristic can override
     if (
         torch._inductor.config.deterministic
         and not torch._inductor.config.force_shape_pad
+        and not torch._inductor.config.use_autoheuristic("pad_mm")
     ):
         return False
 
@@ -196,6 +190,39 @@ def get_padded_length(x: int | torch.SymInt, alignment_size: int) -> int:
         return 0
 
     return int((x // alignment_size + 1) * alignment_size) - x
+
+
+def _padding_would_materialize_non_contiguous_tf32_input(
+    mat1: Tensor,
+    mat2: Tensor,
+    op: torch._ops.OpOverloadPacket,
+    m_padded_length: int,
+    k_padded_length: int,
+    n_padded_length: int,
+) -> bool:
+    if (
+        not mat1.is_cuda
+        or mat1.dtype != torch.float32
+        or mat2.dtype != torch.float32
+        or torch.backends.cuda.matmul.fp32_precision != "tf32"
+    ):
+        return False
+
+    if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
+        mat1_would_be_padded = m_padded_length != 0 or k_padded_length != 0
+        mat2_would_be_padded = k_padded_length != 0 or n_padded_length != 0
+    elif op is torch.ops.aten.bmm:
+        mat1_would_be_padded = m_padded_length != 0 or k_padded_length != 0
+        mat2_would_be_padded = k_padded_length != 0 or n_padded_length != 0
+    else:
+        return False
+
+    # Padding materializes non-contiguous inputs with a different layout.  For
+    # fp32 TF32 matmuls that can select a different cuBLAS accumulation path and
+    # move results outside the tolerances expected for the unpadded operation.
+    return (mat1_would_be_padded and not is_contiguous_or_false(mat1)) or (
+        mat2_would_be_padded and not is_contiguous_or_false(mat2)
+    )
 
 
 def pad_dim(x: Tensor, padded_length: int, dim: int) -> Tensor:
@@ -374,7 +401,7 @@ def should_pad_bench_key(
 
 
 def get_non_view_def(node: torch.fx.Node) -> torch.fx.Node:
-    if node.op is operator.getitem:
+    if node.op == "call_function" and node.target is operator.getitem:
         return get_non_view_def(node.args[0])  # type: ignore[arg-type]
 
     if (
@@ -388,11 +415,15 @@ def get_non_view_def(node: torch.fx.Node) -> torch.fx.Node:
 
 
 def should_exclude_padding_time(match: Match, arg_name: str) -> bool:
+    from torch._prims_common import is_contiguous_or_false
+
     node_def = get_non_view_def(match.kwargs[arg_name])
 
     # constant padding converts tensors to contiguous so even if the input tensor
     # can be planned layout transform is not free. TODO - way to pad and preserve layout ?
-    if not fetch_fake_tensors(match, (arg_name,))[0].is_contiguous():
+    # Use is_contiguous_or_false to avoid guarding on data-dependent expressions
+    # with unbacked symints - returns False instead of raising an error.
+    if not is_contiguous_or_false(fetch_fake_tensors(match, (arg_name,))[0]):
         return False
 
     # TODO - see issue https://github.com/pytorch/pytorch/issues/128889
@@ -519,15 +550,19 @@ def _should_pad(
         if torch._inductor.config.force_shape_pad:
             return True
 
+        # Resolve symbolic dims to concrete hints for heuristic checks below.
+        # These are performance decisions, not correctness — optimization_hint is safe.
+        m_concrete, k_concrete, n_concrete = hint_symbols((m, k, n))
+
         # Performance heuristic for bf16 large K scenarios
         if (
             "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
-            and should_pad_mm_bf16(mat1.dtype, m, n, k)
+            and should_pad_mm_bf16(mat1.dtype, m_concrete, n_concrete, k_concrete)
         ):
             return True
 
         # Check if operation is compute bound (performance check)
-        if not is_mm_compute_bound(m, k, n, mat1.dtype):
+        if not is_mm_compute_bound(m_concrete, k_concrete, n_concrete, mat1.dtype):
             return False
 
         # We don't want to look up the cache for cases that are trivially false
@@ -540,9 +575,9 @@ def _should_pad(
 
         def realize_tensor(t):
             if isinstance(t, FakeTensor):
-                size_hints = realize_symbols(t.size())
+                size_hints = hint_symbols(t.size())
                 # pyrefly: ignore [bad-argument-type]
-                stride_hint = realize_symbols(t.stride())
+                stride_hint = hint_symbols(t.stride())
                 real_size = (
                     sum((d - 1) * s for d, s in zip(size_hints, stride_hint)) + 1
                 )
@@ -676,6 +711,10 @@ def _should_pad(
             )
             if ah_should_pad is not None:
                 return ah_should_pad
+
+        # AH didn't make a decision, so if we're in deterministic mode, we should return false
+        if torch._inductor.config.deterministic:
+            return False
 
         if ori_time is None:
             ori_time = do_bench(orig_bench_fn)

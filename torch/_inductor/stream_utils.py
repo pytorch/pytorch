@@ -7,8 +7,6 @@ import functools
 from torch._inductor.stream_constants import (
     DEFAULT_STREAM,
     DEFAULT_STREAM_IDX,
-    ENTRANCE_EVENT,
-    EVENT_NAME_TEMPLATE,
     STREAM_NAME_TEMPLATE,
 )
 
@@ -16,9 +14,8 @@ from torch._inductor.stream_constants import (
 __all__ = [
     "DEFAULT_STREAM",
     "DEFAULT_STREAM_IDX",
-    "ENTRANCE_EVENT",
-    "EVENT_NAME_TEMPLATE",
     "STREAM_NAME_TEMPLATE",
+    "get_raw_stream_name",
     "get_stream_name",
 ]
 
@@ -35,3 +32,9 @@ def get_stream_name(stream_idx: int) -> str:
         return DEFAULT_STREAM
     else:
         return STREAM_NAME_TEMPLATE.format(stream_idx=stream_idx)
+
+
+@functools.lru_cache
+def get_raw_stream_name(device_idx: int) -> str:
+    """Generate variable name for a raw stream handle on the given device."""
+    return f"raw_stream{device_idx}"

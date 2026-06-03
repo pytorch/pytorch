@@ -340,6 +340,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     "is not a python module, please check and correct it.",
                 )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/114831")
     @unittest.skip(
         "This test keeps getting broken and our disable infra is not handling well. see #120627"
     )
@@ -474,6 +475,8 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             "handle_assert",  # No global state (constant)
             "handle_nested_tensor",  # No global state
             "handle_current_stream",  # Safely implemented
+            "handle_synchronize",  # Device type from function identity or arg
+            "handle_functorch_autograd_grad",  # Only inspects placeholder metadata
         )
         for fn in handlers:
             if isinstance(fn, staticmethod) or inspect.ismethod(fn):
@@ -494,7 +497,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             )
 
     def test_almost_impossible_missing_name(self):
-        class weird:  # noqa: UP004
+        class weird:
             def __getattribute__(self, name):
                 if name == "__name__":
                     raise AttributeError("test")

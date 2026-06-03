@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import copy
+import ctypes
 import functools
 import itertools
 import math
@@ -18,11 +19,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.cpp import CppOverrides, CppVecOverrides
-from torch._inductor.compile_fx import (
-    compile_fx,
-    compile_fx_inner,
-    complex_memory_overlap,
-)
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import timed
@@ -31,17 +28,29 @@ from torch.autograd.functional import vjp
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    get_gcc_major_version,
     instantiate_parametrized_tests,
+    IS_ARM64,
+    IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
     MI200_ARCH,
     parametrize,
+    requires_mkl,
+    skipIfNoLapack,
+    skipIfRocm,
     skipIfRocmArch,
     slowTest,
-    TEST_MKL,
+    TEST_WITH_ROCM,
+    xfailIf,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+if TEST_WITH_ROCM:
+    config.force_layout_optimization = 1
+    os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
 
 
 try:
@@ -64,6 +73,7 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
 check_model = test_torchinductor.check_model
+skip_if_cpp_wrapper = test_torchinductor.skip_if_cpp_wrapper
 
 requires_vectorization = unittest.skipUnless(
     cpu_vec_isa.valid_vec_isa_list() and os.getenv("ATEN_CPU_CAPABILITY") != "default",
@@ -133,6 +143,7 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
         def fn(x):
             return torch.linalg.qr(x)[:1]
@@ -147,10 +158,8 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
-    @torch._inductor.config.patch({"layout_optimization": True})
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_conv_stride_constraints(self):
-        for fmt in [torch.contiguous_format, torch.channels_last]:
+    def _check_conv_stride_constraints(self, formats):
+        for fmt in formats:
             # TorchDispatch doesn't work in our cuda invocation for some reason
             m = torch.nn.Conv2d(5, 6, [3, 3])
 
@@ -172,15 +181,20 @@ class CPUReproTests(TestCase):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
                     if func == torch.ops.aten.convolution.default:
-                        # For CPU and mkldnn enable, we always using channels last
-                        nonlocal fmt
-                        if (
+                        expected_fmt = fmt
+                        if config.force_layout_optimization or (
                             torch.backends.mkldnn.enabled
                             and torch.backends.mkldnn.is_available()
                         ):
-                            fmt = torch.channels_last
-                        test_self.assertTrue(args[0].is_contiguous(memory_format=fmt))
-                        test_self.assertTrue(args[1].is_contiguous(memory_format=fmt))
+                            expected_fmt = torch.channels_last
+                        test_self.assertTrue(
+                            args[0].is_contiguous(memory_format=expected_fmt),
+                            f"input stride {args[0].stride()} is not {expected_fmt}",
+                        )
+                        test_self.assertTrue(
+                            args[1].is_contiguous(memory_format=expected_fmt),
+                            f"weight stride {args[1].stride()} is not {expected_fmt}",
+                        )
                         nonlocal conv_seen
                         conv_seen = True
 
@@ -190,6 +204,33 @@ class CPUReproTests(TestCase):
                 fn_compiled(inps)
 
             self.assertTrue(conv_seen)
+
+    @torch._inductor.config.patch({"layout_optimization": True})
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_stride_constraints(self):
+        self._check_conv_stride_constraints(
+            [torch.contiguous_format, torch.channels_last]
+        )
+
+    @torch._inductor.config.patch(
+        {"layout_optimization": True, "force_layout_optimization": True}
+    )
+    @patch("torch.backends.mkldnn.is_available", lambda: False)
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_stride_constraints_forced_without_mkldnn(self):
+        self._check_conv_stride_constraints([torch.contiguous_format])
+
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_bias_flattened_view(self):
+        def fn(x):
+            bias = x.to(torch.bool).float().flatten()
+            return F.conv2d(x, x, bias, stride=1, padding=0)
+
+        x = torch.ones(1, 1, 1, 1)
+        expected = fn(x)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        self.assertEqual(compiled(x), expected)
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_bn_mixed_dtype(self):
@@ -222,6 +263,8 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    @skipIfNoLapack
+    @skip_if_cpp_wrapper("conj issue, to be fixed")
     def test_complex_cholesky_mh_view_fallback(self):
         torch.manual_seed(0)
 
@@ -344,8 +387,30 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(x_comp.grad, grad_x_eager)
         torch.testing.assert_close(w_comp.grad, grad_w_eager)
 
+    def test_compile_dynamic_grad_conv_transpose2d(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181175
+        batch_norm = torch.nn.BatchNorm2d(5).eval()
+        conv_transpose = torch.nn.ConvTranspose2d(5, 2, 3)
+        max_pool = torch.nn.MaxPool2d(2)
+
+        torch.manual_seed(0)
+        x = torch.randn(3, 5, 14, 15)
+
+        def fn(x):
+            y = batch_norm(x)
+            y = conv_transpose(y)
+            y = max_pool(y)
+            return torch.softmax(y, dim=0).mean()
+
+        expected = torch.func.grad(fn)(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad(fn), backend="inductor", dynamic=True)
+        result = compiled(x)
+        torch.testing.assert_close(result, expected)
+
     @config.patch(freezing=True)
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @patch("torch.cuda.is_available", lambda: False)
     def test_mkl_linear(self):
         dtypes = [torch.float32]
@@ -706,6 +771,10 @@ class CPUReproTests(TestCase):
             ]
         ),
     )
+    @unittest.skipIf(
+        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED,
+        "flaky on AArch64 (no SVE)",
+    )
     def test_lstm_packed(
         self,
         unbatched,
@@ -752,6 +821,10 @@ class CPUReproTests(TestCase):
     @parametrize(
         "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
         _test_lstm_packed_change_input_sizes_cpu_params,
+    )
+    @unittest.skipIf(
+        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED,
+        "flaky on AArch64 (no SVE)",
     )
     def test_lstm_packed_change_input_sizes_cpu(
         self,
@@ -854,6 +927,27 @@ class CPUReproTests(TestCase):
             result, code = run_and_get_cpp_code(fn_opt, inp)
             self.assertNotIn("kernel_src", code)
             self.assertEqual(expected, result)
+
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
+    def test_set_source_tensor_with_view_source(self):
+        def fn(x):
+            x = torch.sigmoid(x).view(x.size(0), -1)
+            param1 = nn.Parameter(x)
+            with torch.no_grad():
+                x.mul_(1.4386868137611386)
+            y = torch.cat([x, x], dim=1)
+            param2 = nn.Parameter(y)
+            z = torch.zeros_like(x) + x
+            param3 = nn.Parameter(z)
+            return param1, param2, param3
+
+        inp = torch.randn(2, 3, 4)
+        with torch.no_grad():
+            expected = fn(inp)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        with torch.no_grad():
+            result = opt_fn(inp)
+        self.assertEqual(expected, result)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -1026,6 +1120,91 @@ class CPUReproTests(TestCase):
                     self.common(fn, (_x,))
                     check_metrics_vec_kernel_count(1)
 
+    @requires_vectorization
+    def test_asinh_large_float32_inplace(self):
+        # https://github.com/pytorch/pytorch/issues/152299
+
+        def fn(input):
+            return input.asinh_()
+
+        x = torch.tensor(
+            [
+                [
+                    -1e30,
+                    1e30,
+                    -5e28,
+                    5e28,
+                    -7.5e29,
+                    7.5e29,
+                    -2e30,
+                    2e30,
+                    0.0,
+                ]
+            ],
+            dtype=torch.float32,
+        ).repeat(3, 1)
+
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for simdlen in bit_widths:
+            with torch.no_grad(), config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x.clone(),))
+                check_metrics_vec_kernel_count(1)
+
+    @config.patch(fallback_random=True)
+    def test_rrelu_fallback_random(self):
+        rrelu = nn.RReLU().train()
+        x = torch.randn(1, 1, 100, 100)
+
+        def fn(x):
+            return rrelu(x)
+
+        compiled = torch.compile(fn, backend="inductor")
+
+        with torch.no_grad():
+            torch.manual_seed(0)
+            expected = fn(x)
+            torch.manual_seed(0)
+            actual = compiled(x)
+
+        self.assertEqual(actual, expected)
+
+    @config.patch(fallback_random=True)
+    def test_rrelu_with_noise_functional_fallback_random(self):
+        x = torch.randn(64, 64)
+
+        def fn(x):
+            noise = torch.empty_like(x)
+            return torch.ops.aten.rrelu_with_noise_functional.default(
+                x, noise, 0.125, 1.0 / 3.0, True
+            )
+
+        compiled = torch.compile(fn, backend="inductor")
+
+        with torch.no_grad():
+            torch.manual_seed(123)
+            expected = fn(x)
+            torch.manual_seed(123)
+            actual = compiled(x)
+
+        self.assertEqual(actual, expected)
+
+        def fn_eval(x):
+            noise = torch.full_like(x, 7)
+            return torch.ops.aten.rrelu_with_noise_functional.default(
+                x, noise, 0.125, 1.0 / 3.0, False
+            )
+
+        compiled_eval = torch.compile(fn_eval, backend="inductor")
+
+        with torch.no_grad():
+            expected = fn_eval(x)
+            actual = compiled_eval(x)
+
+        self.assertEqual(actual, expected)
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179957")
     @config.patch(fallback_random=True)
     def test_require_stride_order_non_owning(self):
         def test_concat_with_conv():
@@ -1068,6 +1247,52 @@ class CPUReproTests(TestCase):
             fn,
             (a,),
         )
+
+    def test_codegen_int_array_var_cache(self):
+        """
+        Test for the bug in codegen_int_array_var where bound method ids could collide,
+        leading to undefined 'int_array_XXX' identifiers in generated C++ code.
+        """
+        from unittest.mock import MagicMock
+
+        from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+        from torch._inductor.virtualized import V
+
+        class MockBuffer:
+            def __init__(self):
+                self.lines = []
+
+            def writeline(self, line):
+                self.lines.append(line)
+
+        # Mock V.graph to avoid needing to compile a real model
+        mock_graph = MagicMock()
+        mock_graph.cpp_wrapper = True
+        mock_graph.aot_mode = False
+        mock_graph.is_const_graph = False
+        mock_graph.device_types = []
+
+        with V.set_graph_handler(mock_graph):
+            wrapper = CppWrapperCpu()
+            buffer = MockBuffer()
+
+            # Bound methods in Python are instantiated on access.
+            # Storing them ensures they have different ids.
+            w1 = buffer.writeline
+            w2 = buffer.writeline
+
+            # The bug: without the fix, codegen_int_array_var uses id(writeline)
+            # as the cache key, which leads to cache misses for bound methods.
+            var1 = wrapper.codegen_int_array_var("{1, 2, 3}", w1)
+            var2 = wrapper.codegen_int_array_var("{1, 2, 3}", w2)
+
+            # They should return the same variable name because it's the same buffer
+            self.assertEqual(
+                var1,
+                var2,
+                "codegen_int_array_var should cache based on the bound method's __self__, "
+                "not the transient bound method id itself.",
+            )
 
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
@@ -1487,7 +1712,12 @@ class CPUReproTests(TestCase):
     def test_decomposed_dequant_relu_quant_int8(self):
         self._test_decomposed_dequant_relu_quant_helper(torch.int8)
 
-    def _test_dequant_quant_lowering_helper(self, dtype, dequant_out_dtype=None):
+    def _test_dequant_quant_lowering_helper(
+        self,
+        dtype,
+        input_dtype=torch.float32,
+        dequant_out_dtype=None,
+    ):
         def fn(
             x,
             scale,
@@ -1548,7 +1778,7 @@ class CPUReproTests(TestCase):
             use_tensor_overload_list,
         ):
             x = torch.clamp(
-                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
+                torch.randn((1, 7, 7, 9), dtype=input_dtype) * 100,
                 quant_min,
                 quant_max,
             )
@@ -1586,12 +1816,16 @@ class CPUReproTests(TestCase):
     def test_dequant_quant_lowering_uint8(self):
         self._test_dequant_quant_lowering_helper(torch.uint8)
         self._test_dequant_quant_lowering_helper(
+            torch.uint8, input_dtype=torch.bfloat16
+        )
+        self._test_dequant_quant_lowering_helper(
             torch.uint8, dequant_out_dtype=torch.bfloat16
         )
 
     @requires_vectorization
     def test_dequant_quant_lowering_int8(self):
         self._test_dequant_quant_lowering_helper(torch.int8)
+        self._test_dequant_quant_lowering_helper(torch.int8, input_dtype=torch.bfloat16)
         self._test_dequant_quant_lowering_helper(
             torch.int8, dequant_out_dtype=torch.bfloat16
         )
@@ -2165,23 +2399,6 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_timed_cpu_only(self):
         timed(lambda: torch.randn(10), ())
-
-    def test_complex_memory_overlap(self):
-        dense = torch.zeros(64, 32)
-        self.assertFalse(complex_memory_overlap(dense))
-        self.assertFalse(complex_memory_overlap(dense.t()))
-
-        strided = dense.split(4, dim=1)
-        self.assertFalse(complex_memory_overlap(strided[0]))
-        self.assertFalse(complex_memory_overlap(strided[0].t()))
-
-        unsqueezed = dense.unsqueeze(1)
-        self.assertFalse(complex_memory_overlap(unsqueezed))
-        self.assertFalse(complex_memory_overlap(unsqueezed.permute(1, 2, 0)))
-
-        gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
-        self.assertFalse(complex_memory_overlap(gathered))
-        self.assertFalse(complex_memory_overlap(gathered.t()))
 
     @requires_vectorization
     def test_vec_dynamic_shapes(self):
@@ -3265,6 +3482,20 @@ class CPUReproTests(TestCase):
             )
         check_metrics_vec_kernel_count(1)
 
+    def test_emulate_precision_casts_explicit_lowp_round_trip(self):
+        # An explicit fp32->fp16->fp32 round-trip must keep its intermediate
+        # rounding under emulate_precision_casts. The CPU codegen used to collapse
+        # it via the reverse lowp-fp->fp32 CSE cache (populated at to_dtype time),
+        # silently dropping the fp16 rounding. See issue #185337.
+        def fn(x):
+            y = x.to(torch.float16).to(torch.float32)
+            return y, y.sum(dim=1)
+
+        x = torch.arange(20, dtype=torch.float32).reshape(5, 4).t() / 7.0
+        with config.patch({"emulate_precision_casts": True}):
+            torch._dynamo.reset()
+            self.common(fn, (x,))
+
     def test_memory_copy_with_fusion(self):
         def fn(x):
             res = x.relu()
@@ -3487,8 +3718,10 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
-            atol = None
-            rtol = None
+            # Outer-loop fusion changes fp32 reduction order enough to exceed
+            # the default tolerance on numerically sensitive inputs.
+            atol = 1e-5
+            rtol = 2e-6
             if (
                 not cpu_vec_isa.valid_vec_isa_list()
                 or os.getenv("ATEN_CPU_CAPABILITY") == "default"
@@ -3646,6 +3879,62 @@ class CPUReproTests(TestCase):
                 raise AssertionError(
                     f"Expected generated_cpp_vec_kernel_count == 1, got {metrics.generated_cpp_vec_kernel_count}"
                 )
+
+    def test_argmax_argmin_transpose_logical_index_cpu(self):
+        def issue_fn(x):
+            x = x.clone()
+            x.sin_()
+            return x.t().argmax()
+
+        x = torch.tensor(
+            [
+                [-1.5256, -0.7502, -0.6540, -1.6095, -0.1002, -0.6092, -0.9798],
+                [-1.6091, -0.7121, 0.3037, -0.7773, -0.2515, -0.2223, 1.6871],
+                [0.2284, 0.4676, -0.6970, -1.1608, 0.6995, 0.1991, 0.8657],
+                [0.2444, -0.6629, 0.8073, 1.1017, -0.1759, -2.2456, -1.4465],
+                [0.0612, -0.6177, -0.7981, -0.1316, -0.7984, 0.3357, 0.2753],
+            ]
+        )
+        self.assertEqual(issue_fn(x).item(), 31)
+        self.common(issue_fn, (x,))
+
+        def argmin_argmax_fn(x):
+            return (x.t().argmin(), x.t().argmax())
+
+        x = torch.arange(24, dtype=torch.float32).reshape(6, 4)
+        x[4, 0] = -100
+        x[1, 3] = 100
+        self.common(argmin_argmax_fn, (x,))
+
+    @requires_vectorization
+    def test_argmax_argmin_cpptile2d_2d_input(self):
+        def fn(a, b):
+            return (a + b).max(dim=1)
+
+        def fn_min(a, b):
+            return (a + b).min(dim=1)
+
+        torch.manual_seed(0)
+        for sz in [8, 32, 35]:
+            for f in [fn, fn_min]:
+                torch._dynamo.reset()
+                a = torch.randn(sz, sz).transpose(0, 1)
+                b = torch.randn(sz, sz)
+                self.common(f, (a, b))
+
+    @requires_vectorization
+    def test_argmax_argmin_cpptile2d_3d_input(self):
+        def fn_3d(a, b):
+            return (a + b).max(dim=2)
+
+        def fn_3d_min(a, b):
+            return (a + b).min(dim=2)
+
+        for f in [fn_3d, fn_3d_min]:
+            torch._dynamo.reset()
+            a = torch.randn(4, 16, 16).permute(0, 2, 1)
+            b = torch.randn(4, 16, 16)
+            self.common(f, (a, b))
 
     # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
     # supported, the vectorization will not work and skip this test case. For ARM or
@@ -3987,6 +4276,39 @@ class CPUReproTests(TestCase):
         FileCheck().check_count(
             "cpp_fused", 3 if config.cpp_wrapper else 2, exactly=True
         ).run(code)
+
+    @requires_vectorization
+    def test_vertical_reduction_tail_store_uses_tail_width(self):
+        def fn(x, y, z, residual, weight, bias):
+            x = F.leaky_relu(x * y + z)
+            x = x.permute(1, 0).unsqueeze(1)
+            return F.layer_norm(x + residual, (14,), weight, bias)
+
+        torch.manual_seed(0)
+        x = torch.randn(14, 2)
+        y = torch.randn(14, 2)
+        z = torch.randn(14, 2)
+        residual = torch.randn(2, 2, 14)
+        weight = torch.randn(14)
+        bias = torch.randn(14)
+        opt_fn = torch.compile(fn, backend="inductor")
+
+        actual, code = run_and_get_cpp_code(opt_fn, x, y, z, residual, weight, bias)
+
+        self.assertTrue(same(fn(x, y, z, residual, weight, bias), actual))
+        self.assertIn("sum_masked_reduce", code)
+        self.assertIn(
+            "tmp_acc0_vec.store(tmpbuf.data(), static_cast<int64_t>(2L));",
+            code,
+        )
+        self.assertIn(
+            "out_ptr0[static_cast<int64_t>(x1 + 2L*x0 + 2L*x0_inner)] = tmpbuf[x0_inner];",
+            code,
+        )
+        self.assertNotIn(
+            ".store(tmpbuf.data(), static_cast<int64_t>(16));",
+            code,
+        )
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
@@ -4410,6 +4732,117 @@ class CPUReproTests(TestCase):
             res2 = jit_func(x)
         self.assertEqual(res1, res2)
 
+    def test_sdpa_closure_mask_recompile(self):
+        # Regression test for closure-composed attention masks on CPU Inductor.
+        def causal_fn(b, h, q, kv):
+            return kv <= q
+
+        def padding_fn(padding_mask):
+            def inner(b, h, q, kv):
+                return padding_mask[b, kv]
+
+            return inner
+
+        def and_masks(f1, f2):
+            def combined(b, h, q, kv):
+                return f1(b, h, q, kv) & f2(b, h, q, kv)
+
+            return combined
+
+        def make_mask_closure(batch_size, q_len, kv_len, q_offset, padding_mask):
+            fn = and_masks(causal_fn, padding_fn(padding_mask))
+            b = torch.arange(batch_size)[:, None, None, None]
+            h = torch.arange(1)[None, :, None, None]
+            q = (torch.arange(q_len) + q_offset)[None, None, :, None]
+            kv = torch.arange(kv_len)[None, None, None, :]
+            return fn(b, h, q, kv).expand(batch_size, 1, q_len, kv_len)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = torch.nn.Linear(32, 32, bias=False)
+
+            def forward(self, x, past_k, past_v, padding_mask, q_offset):
+                B, S, _ = x.shape
+                q = self.proj(x).view(B, S, 4, 8).transpose(1, 2)
+                k = x.view(B, S, 4, 8).transpose(1, 2)
+                v = k.clone()
+                if past_k is not None:
+                    k = torch.cat([past_k, k], dim=2)
+                    v = torch.cat([past_v, v], dim=2)
+
+                mask = make_mask_closure(B, S, k.shape[2], q_offset, padding_mask)
+                out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+                return out.transpose(1, 2).reshape(B, S, 32), k, v
+
+        torch._dynamo.reset()
+        torch.manual_seed(0)
+
+        eager_model = Model().eval()
+        compiled_model = Model().eval()
+        compiled_model.load_state_dict(eager_model.state_dict())
+        compiled = torch.compile(compiled_model, backend="inductor")
+
+        pad_mask = torch.ones(1, 8, dtype=torch.bool)
+        pad_mask[0, :2] = False
+
+        # Prefill: seq_len=8
+        x = torch.randn(1, 8, 32)
+        with torch.no_grad():
+            ref_out, ref_k, ref_v = eager_model(x, None, None, pad_mask, q_offset=0)
+            out, k, v = compiled(x, None, None, pad_mask, q_offset=0)
+        torch.testing.assert_close(out, ref_out)
+        torch.testing.assert_close(k, ref_k)
+        torch.testing.assert_close(v, ref_v)
+
+        # Decode: seq_len=1 and kv grows, which exercises recompilation.
+        for _ in range(3):
+            pad_mask = torch.cat([pad_mask, torch.ones(1, 1, dtype=torch.bool)], dim=1)
+            x = torch.randn(1, 1, 32)
+            with torch.no_grad():
+                ref_out, ref_k, ref_v = eager_model(
+                    x,
+                    ref_k,
+                    ref_v,
+                    pad_mask,
+                    q_offset=ref_k.shape[2],
+                )
+                out, k, v = compiled(
+                    x,
+                    k,
+                    v,
+                    pad_mask,
+                    q_offset=k.shape[2],
+                )
+            torch.testing.assert_close(out, ref_out)
+            torch.testing.assert_close(k, ref_k)
+            torch.testing.assert_close(v, ref_v)
+
+    def test_issue_181624_cpu_fusion_with_constant_index_expr(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.hardswish = torch.nn.Hardswish()
+                self.layernorm = torch.nn.LayerNorm([2])
+
+            def forward(self, x):
+                out = self.hardswish(x)
+                out = out.unfold(1, 2, 1)
+                out = F.scaled_dot_product_attention(out, out, out)
+                out = torch.roll(out, 1, 2)
+                out = self.layernorm(out)
+                return torch.nan_to_num(out)
+
+        torch.manual_seed(0)
+        model = Model().eval()
+        x = torch.randn([2, 6])
+
+        with torch.no_grad():
+            expected = model(x)
+            actual = torch.compile(model, backend="inductor")(x)
+
+        torch.testing.assert_close(actual, expected)
+
     def test_scalar_mul_bfloat16(self):
         def f(x):
             return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
@@ -4533,6 +4966,34 @@ class CPUReproTests(TestCase):
                         "__at_align__ std::array", 0, exactly=True
                     ).run(code)
 
+    @requires_vectorization
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    def test_group_norm_sum_conv1d_tail_reduction_store(self):
+        # https://github.com/pytorch/pytorch/issues/181618
+        torch.manual_seed(0)
+        m_norm = nn.GroupNorm(1, 9).eval()
+        m_conv1 = nn.Conv1d(9, 1, 3)
+        m_conv2 = nn.Conv1d(1, 7, 3)
+        x = torch.randn(8, 9, 14, 12)
+
+        def model():
+            out = m_norm(x)
+            out = out.sum(dim=3)
+            out = m_conv1(out)
+            return m_conv2(out)
+
+        expected = model()
+        actual, code = run_and_get_cpp_code(torch.compile(model, backend="inductor"))
+
+        torch.testing.assert_close(actual, expected, atol=2e-4, rtol=1e-3)
+        self.assertIn("sum_masked_reduce", code)
+        vec_width = cpu_vec_isa.pick_vec_isa().nelements()
+        tail_width = 9 if vec_width > 9 else 9 % vec_width or vec_width
+        self.assertIn(
+            f"tmp_acc0_vec.store(tmpbuf.data(), static_cast<int64_t>({tail_width}L));",
+            code,
+        )
+
     @unittest.skipIf(
         os.getenv("ATEN_CPU_CAPABILITY") == "default",
         "Failing in periodic nogpu_NO_AVX2, see #150059 for example",
@@ -4627,6 +5088,72 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(weight_cmp.grad, weight_ref.grad)
         torch.testing.assert_close(bias_cmp.grad, bias_ref.grad)
 
+    def test_group_norm_torch_func_grad_dynamic(self):
+        avg_pool = nn.AvgPool2d(2)
+        layer_norm = nn.LayerNorm([5])
+        batch_norm = nn.BatchNorm2d(12).eval()
+        group_norm = nn.GroupNorm(12, 12).eval()
+
+        def fn(x):
+            x = avg_pool(x)
+            x = layer_norm(x)
+            x = batch_norm(x)
+            x = group_norm(x)
+            return x.abs().mean()
+
+        torch.manual_seed(0)
+        x = torch.randn([2, 12, 10, 10])
+
+        expected = torch.func.grad(fn)(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad(fn), backend="inductor", dynamic=True)
+        actual = compiled(x)
+
+        self.assertEqual(actual, expected)
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_backward_dynamic_item_from_size1_tensor(self):
+        def fn(x, w):
+            num = x.nonzero().numel()
+            num = x.new_tensor([num]).item()
+            y = w * x
+            return y.sum() / num
+
+        torch._dynamo.reset()
+        metrics.reset()
+
+        x = torch.tensor([0.0, 1.0, -1.0, 0.5])
+        w_ref = torch.tensor(0.0, requires_grad=True)
+        w_cmp = w_ref.detach().clone().requires_grad_(True)
+
+        eager_out = fn(x, w_ref)
+        eager_out.backward()
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        compiled_out = compiled(x, w_cmp)
+        compiled_out.backward()
+
+        self.assertEqual(eager_out.shape, torch.Size([]))
+        self.assertEqual(compiled_out.shape, eager_out.shape)
+        torch.testing.assert_close(compiled_out, eager_out)
+        torch.testing.assert_close(w_cmp.grad, w_ref.grad)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_lp_pool2d_symbolic_float_min_norm_type(self):
+        def fn(x):
+            norm_type = min(4.0, 0.5 + float(x.mean().abs().detach()) * 1.5)
+            return F.lp_pool2d(x, norm_type=norm_type, kernel_size=1)
+
+        generator = torch.Generator().manual_seed(0)
+        x = torch.randn(1, 1, 4, 4, generator=generator)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="inductor")(x)
+
+        torch.testing.assert_close(actual, expected, equal_nan=True)
+
     @config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_cpp_backend_no_error(self):
         """
@@ -4661,6 +5188,25 @@ class CPUReproTests(TestCase):
         # Sanity check that gradients were computed
         self.assertIsNotNone(grad_b)
         self.assertEqual(grad_b.dtype, torch.float16)
+
+    @config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_preserves_fused_fp16_rounding(self):
+        def fn(x, c):
+            z = torch.where(c, torch.full_like(x, 0.5), torch.full_like(x, -0.5))
+            y = z.to(torch.float16) + x.to(torch.float16)
+            return y, y.float().sum()
+
+        x = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 10
+        c = (torch.arange(24) % 5 == 0).reshape(2, 3, 4)
+        expected = fn(x, c)
+
+        for simdlen in simd_lengths_to_test():
+            with config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, c)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[1], expected[1])
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
@@ -4698,6 +5244,7 @@ class CPUReproTests(TestCase):
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
 
+    @xfailIf(IS_ARM64)  # see https://github.com/pytorch/pytorch/issues/168972
     def test_float32_to_uint8(self):
         # https://github.com/pytorch/pytorch/issues/156788
         @torch.compile
@@ -4870,7 +5417,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.rand(37)
+        x = torch.rand(31)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():
@@ -5028,6 +5575,26 @@ class CPUReproTests(TestCase):
                     "at::vec::VectorizedN<int64_t,2>::loadu", 2, exactly=True
                 ).run(code)
 
+    @requires_vectorization
+    def test_indirect_assert_scalar_mask_tail_vec_no_crash(self):
+        # https://github.com/pytorch/pytorch/issues/178136
+        def fn(positions, cache):
+            x = cache[positions]
+            y = x[0].clone()
+            y[..., 1::3] = x[1, ..., 1::3]
+            y[..., 2::3] = x[2, ..., 2::3]
+            return y
+
+        positions = torch.tensor([[0, 0], [0, 0], [0, 0]], dtype=torch.int64)
+        cache = torch.arange(3, dtype=torch.float32).reshape(1, 3)
+
+        with config.patch({"cpp.enable_loop_tail_vec": True}):
+            expected = fn(positions, cache)
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            actual = compiled_fn(positions, cache)
+
+        torch.testing.assert_close(actual, expected)
+
     def test_uint64_pointwise_vec(self):
         def fn(x):
             return x * x
@@ -5162,6 +5729,10 @@ class CPUReproTests(TestCase):
                     "at::vec::VectorizedN<double,2>::loadu", 2, exactly=True
                 ).run(code)
 
+    @unittest.skipIf(
+        get_gcc_major_version() == 13,
+        "Fails under GCC 13 due to vector codegen (passes with GCC 11)",
+    )
     def test_convert_fp32_to_double_vec(self):
         def fn(x):
             return x.to(torch.double)
@@ -5342,6 +5913,34 @@ class CPUReproTests(TestCase):
             (torch.randn(1000), torch.rand(1000)),
         )
 
+    def test_max_autotune_bmm_omp_dynamic(self):
+        try:
+            omp = ctypes.CDLL("", ctypes.RTLD_GLOBAL)
+        except OSError:
+            self.skipTest("Could not access OpenMP symbols from process")
+
+        if not hasattr(omp, "omp_set_dynamic") or not hasattr(omp, "omp_get_dynamic"):
+            self.skipTest("omp_set_dynamic/omp_get_dynamic not found in OpenMP library")
+
+        def fn(x, y):
+            return torch.bmm(x, y)
+
+        B, M, K, N = 1, 32, 32, 32
+        x = torch.randn(B, M, K)
+        y = torch.randn(B, K, N)
+
+        with config.patch({"max_autotune": True}):
+            compiled_fn = torch.compile(fn)
+            original_dynamic = omp.omp_get_dynamic()
+            omp.omp_set_dynamic(1)
+            try:
+                with set_num_threads(4):
+                    actual = compiled_fn(x, y)
+                    expected = fn(x, y)
+                    torch.testing.assert_close(actual, expected)
+            finally:
+                omp.omp_set_dynamic(original_dynamic)
+
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch(freezing=True)
     def test_linear_float64(self):
@@ -5435,7 +6034,7 @@ class CPUReproTests(TestCase):
             torch.manual_seed(0)
             eager = mod(*inputs)
             torch.manual_seed(0)
-            self.assertEqual(compiler_mode(*inputs), eager)
+            self.assertEqual(compiler_mode(*inputs), eager, atol=1e-4, rtol=1.6e-2)
 
     def test_fused_node(self):
         # https://github.com/pytorch/pytorch/issues/138550.
@@ -5905,6 +6504,31 @@ class CPUReproTests(TestCase):
             "Expected convert<at::Float8_e4m3fn,1,float,2> in generated code for func1",
         )
 
+    @requires_vectorization
+    def test_bool_to_float8_e4m3fn(self):
+        """
+        Test that bool to float8_e4m3fn cast succeeds.
+        Issue: https://github.com/pytorch/pytorch/issues/178095
+        """
+
+        def fn(x):
+            return x.to(dtype=torch.float8_e4m3fn)
+
+        x = torch.ones(64, dtype=torch.bool)
+        self.common(fn, (x,))
+
+    @requires_vectorization
+    def test_bool_to_float8_e5m2(self):
+        """
+        Test that bool to float8_e5m2 cast succeeds.
+        """
+
+        def fn(x):
+            return x.to(dtype=torch.float8_e5m2)
+
+        x = torch.ones(64, dtype=torch.bool)
+        self.common(fn, (x,))
+
     @config.patch("cpp.simdlen", 256)
     @requires_vectorization
     def test_avx2_bool_constant_pad_nd(self):
@@ -5976,9 +6600,14 @@ class CPUReproTests(TestCase):
         model = torch.export.export(model, example_batch, strict=True).module()
 
         with torch.no_grad():
+            expected = model(*example_batch)
             metrics.reset()
-            torch.compile(model)(*example_batch)
-            check_metrics_vec_kernel_count(5)
+            actual, code = run_and_get_cpp_code(torch.compile(model), *example_batch)
+            self.assertTrue(same(expected, actual))
+            FileCheck().check("cpp_fused_add_native_layer_norm").run(code)
+            if _can_check_vec_metrics():
+                # The exact split of vectorized loops can vary by CPU backend.
+                self.assertGreaterEqual(metrics.generated_cpp_vec_kernel_count, 5)
 
     def test_dropout(self):
         class Model(nn.Module):
@@ -6096,6 +6725,7 @@ class CPUReproTests(TestCase):
 
         torch.compile(fn)(torch.randn(2, 2))
 
+    @xfailIf(IS_ARM64)  # https://github.com/pytorch/pytorch/issues/176285
     @skipIfRocmArch(MI200_ARCH)
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @requires_vectorization
@@ -6197,6 +6827,66 @@ class CPUReproTests(TestCase):
                 torch.tensor([1.0]),
             )
         )
+
+    def test_mutation_transpose_reshape_ordering(self):
+        def fn(x, y):
+            return x.add_(y).reshape(-1, 1, 3)
+
+        torch.manual_seed(0)
+        x1 = torch.ones([1, 2, 3]).transpose(1, 2)
+        y1 = torch.randn(1, 3, 1)
+
+        x2 = x1.clone()
+        y2 = y1.clone()
+
+        cfunc = torch.compile(fn, backend="inductor")
+
+        out1 = fn(x1, y1)
+        out2 = cfunc(x2, y2)
+
+        self.assertTrue(torch.allclose(out1, out2, equal_nan=True))
+
+    def test_indirect_index_transposed_tensor(self):
+        # https://github.com/pytorch/pytorch/issues/178521
+        # transpose_mxn was referencing a tmp variable defined inside the inner
+        # loop when the index used indirect (SymT.TMP) indexing.
+        def f(buf, idx):
+            return buf[torch.arange(buf.shape[0]), idx, :]
+
+        buf = torch.randn(16, 2, 16).permute(2, 1, 0)
+        idx = torch.randint(0, 2, (16,))
+        expected = f(buf, idx)
+        actual = torch.compile(f, backend="inductor")(buf, idx)
+        self.assertEqual(actual, expected)
+
+    def test_layernorm_nan_with_inf_cpu_float16(self):
+        # https://github.com/pytorch/pytorch/issues/173885
+        # LayerNorm with torch.compile on CPU produces NaN when input has Inf
+        # values due to inf - inf = NaN in Welford variance calculation.
+        for dtype in _lowp_fp_dtypes:
+            torch._dynamo.reset()
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.ln = torch.nn.LayerNorm(4)
+
+                def forward(self, x):
+                    return self.ln(x)
+
+            mod = Model().to(dtype).eval()
+            # Create input that overflows during Welford M2 accumulation
+            x = torch.tensor(
+                [[65504.0, 65504.0, -65504.0, -65504.0]], dtype=torch.float32
+            ).to(dtype)
+
+            with torch.no_grad():
+                eager_out = mod(x)
+                compiled_mod = torch.compile(mod, backend="inductor")
+                compiled_out = compiled_mod(x)
+                # Compiled output should match eager mode (whether Eager produces
+                # inf or finite numbers, it shouldn't degrade into unexpected NaNs).
+                self.assertEqual(eager_out, compiled_out)
 
 
 if __name__ == "__main__":

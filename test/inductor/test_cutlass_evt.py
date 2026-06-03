@@ -6,18 +6,30 @@ import sympy
 import torch
 from torch._dynamo.test_case import TestCase
 from torch._inductor.codegen.cutlass.utils import (
+    cutlass_arch,
     torch_dtype_to_cutlass_type,
     try_import_cutlass,
 )
 from torch._inductor.ir import ComputedBuffer, FixedLayout, PermuteView, Pointwise
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import IS_SM10X, IS_SM90, SM90OrLater
+from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA_AND_TRITON,
+    HAS_GPU_AND_TRITON,
     MockGraphHandler,
 )
+
+
+def _is_cuda_sm90_or_sm10x():
+    return bool(IS_SM90) or bool(IS_SM10X)
+
+
+def _expect_cuda_evt_key_error():
+    return GPU_TYPE == "cuda" and bool(IS_SM10X) and int(cutlass_arch(GPU_TYPE)) > 100
 
 
 if try_import_cutlass():
@@ -66,8 +78,16 @@ if try_import_cutlass():
         ),
     }
 
+    # For SM100
+    class MockMathInstruction:
+        def __init__(self):
+            self.opcode_class = cutlass_lib.library.OpcodeClass.TensorOp
+
     class MockTileDescription:
         threadblock_shape = (128, 128, 8)
+        # SM100 path
+        cluster_shape = (1, 1, 1)
+        math_instruction = MockMathInstruction()
 
     def _create_mock_buffer_name_map(example_tensors):
         name_to_buffer = {}
@@ -104,7 +124,10 @@ class MockComputedBuffer(ComputedBuffer):
 
 
 class TestCutlassEVT(TestCase):
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    device_type = GPU_TYPE
+
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_accumulator_return(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -161,7 +184,8 @@ def fn(accum, buf1, buf2):
 return tmp_0, tmp_2, D""",
         )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_disjoint_read_indexing(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -210,7 +234,8 @@ return tmp_0, tmp_2, D""",
 index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
             )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_broadcasting(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -270,7 +295,8 @@ def fn(accum, buf1, buf2):
 return tmp_0, tmp_2, D""",
         )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -326,7 +352,8 @@ def fn(accum, buf1, buf2):
 return tmp_1, D""",
         )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cutlass.lib_extensions.evt_extensions import (
@@ -358,21 +385,54 @@ return tmp_1, D""",
                 result["buf1"].element, torch_dtype_to_cutlass_type(torch.float32)
             )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
-        from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
+        arch = int(cutlass_arch(GPU_TYPE))
 
-        cuda_arch = int(get_cuda_arch())  # type: ignore[arg-type]
-        epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS, cuda_arch)
-
-        self.assertExpectedInline(
-            _render_argument_type(
+        def render_code():
+            epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS, arch)
+            return _render_argument_type(
                 epilogue_functor,
                 _create_mock_buffer_name_map(EXAMPLE_TENSORS),
                 lambda x: int(x),
-            )[0],
-            """\
+            )[0]
+
+        if _expect_cuda_evt_key_error():
+            with self.assertRaises(KeyError):
+                render_code()
+            return
+
+        code = render_code()
+        if GPU_TYPE == "xpu":
+            self.assertExpectedInline(
+                code,
+                """\
+{ /* thread */
+        { /* F */
+          { /* compute_1 */
+            { /* compute_0 */
+              {}, /* accum */
+              {}, /* C */
+              {}, /* compute_0 */
+            },
+            {/* ptr_aux */ (float*) (ptr_0 + ptr_0_offset), /* null_default */ float(0), /* dAux */ {2048, _1{}, _0{}}}, /* aux */
+            {}, /* compute_1 */
+          },
+          {/* ptr_aux */ (float*) (ptr_1 + ptr_1_offset), /* null_default */ float(0), /* dAux */ {2048, _1{}, _0{}}}, /* F */
+        },
+        {/* ptr_col */ (float*) (ptr_2 + ptr_2_offset), /* null_default */ float(0), /* dCol */ {}}, /* bias */
+        {}, /* compute_2 */
+        {}, /* compute_3 */
+        {}, /* compute_4 */
+      }
+""",
+            )
+        else:
+            self.assertExpectedInline(
+                code,
+                """\
 { /* thread */
         { /* F */
           { /* compute_1 */
@@ -392,12 +452,13 @@ return tmp_1, D""",
         {}, /* compute_4 */
       }
 """,
-        )
+            )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen_return_accumulator(self):
-        from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
+        arch = int(cutlass_arch(GPU_TYPE))
 
         code = """
 def fn(accum, bias):
@@ -420,16 +481,39 @@ def fn(accum, bias):
             ),
         }
 
-        cuda_arch = int(get_cuda_arch())  # type: ignore[arg-type]
-        epilogue_functor = _trace(code, example_tensors, cuda_arch)
-
-        self.assertExpectedInline(
-            _render_argument_type(
+        def render_code():
+            epilogue_functor = _trace(code, example_tensors, arch)
+            return _render_argument_type(
                 epilogue_functor,
                 _create_mock_buffer_name_map(example_tensors),
                 lambda x: int(x),
-            )[0],
-            """\
+            )[0]
+
+        if _expect_cuda_evt_key_error():
+            with self.assertRaises(KeyError):
+                render_code()
+            return
+
+        code = render_code()
+
+        if GPU_TYPE == "xpu":
+            self.assertExpectedInline(
+                code,
+                """\
+{ /* thread */
+        { /* E */
+          {}, /* accum */
+          {/* ptr_aux */ (float*) (ptr_0 + ptr_0_offset), /* null_default */ float(0), /* dAux */ {2048, _1{}, _0{}}}, /* E */
+        },
+        {/* ptr_col */ (float*) (ptr_1 + ptr_1_offset), /* null_default */ float(0), /* dCol */ {}}, /* bias */
+        {}, /* compute_0 */
+      }
+""",
+            )
+        else:
+            self.assertExpectedInline(
+                code,
+                """\
 { /* thread */
         { /* E */
           {}, /* accum */
@@ -439,24 +523,35 @@ def fn(accum, bias):
         {}, /* compute_0 */
       }
 """,
-        )
+            )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
+    @skipCUDAIf(not _is_cuda_sm90_or_sm10x(), "need sm_90 or sm_10x")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
-        _, _, code, _ = trace(
-            BIAS_CODE,
-            EXAMPLE_TENSORS,
-            DataType.f32,
-            DataType.f32,
-            MockTileDescription(),
-            EpilogueScheduleType.ScheduleAuto,
-            _create_mock_buffer_name_map(EXAMPLE_TENSORS),
-            lambda x: x,  # static shapes
-        )
-        self.assertExpectedInline(
-            code,
-            """\
+        def render_code():
+            return trace(
+                BIAS_CODE,
+                EXAMPLE_TENSORS,
+                DataType.f32,
+                DataType.f32,
+                MockTileDescription(),
+                EpilogueScheduleType.ScheduleAuto,
+                _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+                lambda x: x,  # static shapes
+                device_type=GPU_TYPE,
+            )[2]
+
+        if _expect_cuda_evt_key_error():
+            with self.assertRaises(KeyError):
+                render_code()
+            return
+
+        code = render_code()
+        if IS_SM90:
+            self.assertExpectedInline(
+                code,
+                """\
 
 using EpilogueDescriptor = cutlass::epilogue::collective::detail::EpilogueDescriptor<
   cute::Shape<_128, _128, _8>, cutlass::epilogue::collective::EpilogueTileAuto,
@@ -554,11 +649,202 @@ using ElementD = float;
 using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
 
 """,
-        )
+            )
+
+        if IS_SM10X:
+            self.assertExpectedInline(
+                code,
+                """\
+
+using EpilogueDescriptor = cutlass::epilogue::collective::detail::Sm100EpilogueDescriptor<
+  cutlass::arch::OpClassTensorOp,
+  cute::Shape<_128, _128, _8>, cutlass::epilogue::collective::EpilogueTileAuto,
+  float, float, float,
+  cutlass::epilogue::collective::EpilogueScheduleAuto, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>,
+  false /* IsPerColScaleSupported */,
+  false /* IsBlockScaleSupported */
+>;
+
+using ElementC = float;
+using StrideC = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
+using TensorC = cutlass::epilogue::fusion::Sm90SrcFetch<float>;
+
+using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
+
+using AuxDescriptor = cutlass::epilogue::collective::detail::Sm100AuxLoadDescriptor<EpilogueDescriptor, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, float>;
+
+using Aux = cutlass::epilogue::fusion::Sm90AuxLoad<
+    AuxDescriptor::Stages, typename AuxDescriptor::EpilogueTile, float,
+    cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, typename AuxDescriptor::SmemLayoutAtom, typename AuxDescriptor::CopyOpS2R
+>;
+
+using Bias = cutlass::epilogue::fusion::Sm90ColBroadcast<
+    0 /*Stages*/, typename EpilogueDescriptor::TileShape, float, float,
+    cute::Stride<cute::Int<1>, cute::Int<0>, cute::Int<0>>
+>;
+
+using Compute0 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using EVTCompute0 = cutlass::epilogue::fusion::Sm90EVT<
+    Compute0,
+    Accum,
+    TensorC>;
+
+using Compute1 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using EVTCompute1 = cutlass::epilogue::fusion::Sm90EVT<
+    Compute1,
+    EVTCompute0,
+    Aux>;
+
+using FDescriptor = cutlass::epilogue::collective::detail::Sm100AuxStoreDescriptor<
+    EpilogueDescriptor, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, float
+>;
+
+using F = cutlass::epilogue::fusion::Sm90AuxStore<
+    FDescriptor::Stages, typename FDescriptor::EpilogueTile, float,
+    cutlass::FloatRoundStyle::round_to_nearest, cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>, typename FDescriptor::SmemLayoutAtom,
+    typename FDescriptor::CopyOpR2S
+>;
+
+using EVTF = cutlass::epilogue::fusion::Sm90EVT<
+    F,
+    EVTCompute1>;
+
+using Compute2 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::epilogue::thread::ReLu, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using Compute3 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using Compute4 = cutlass::epilogue::fusion::Sm90Compute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using DagCompute4 = cutlass::epilogue::fusion::Sm90TopologicalVisitor<
+    float,
+    cute::tuple<
+        cute::seq<>,
+        cute::seq<>,
+        cute::seq<0>,
+        cute::seq<2, 1>,
+        cute::seq<3, 0>,
+    >,
+    EVTF,
+    Bias,
+    Compute2,
+    Compute3,
+    Compute4
+>;
+
+using ElementD = float;
+using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
+
+""",
+            )
+        if GPU_TYPE == "xpu":
+            self.assertExpectedInline(
+                code,
+                """\
+
+using TileShape_MNK = cute::Shape<_128, _128, _8>;
+
+using ElementC = float;
+using StrideC = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
+using TensorC = cutlass::epilogue::fusion::XeSrcFetch<float>;
+
+using Accum = cutlass::epilogue::fusion::XeAccFetch;
+
+using Aux = cutlass::epilogue::fusion::XeAuxLoad<
+    float,
+    cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>
+>;
+
+using Bias = cutlass::epilogue::fusion::XeColBroadcast<
+    0 /*Stages*/, TileShape_MNK, float, float,
+    cute::Stride<cute::Int<1>, cute::Int<0>, cute::Int<0>>
+>;
+
+using Compute0 = cutlass::epilogue::fusion::XeCompute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using EVTCompute0 = cutlass::epilogue::fusion::XeEVT<
+    Compute0,
+    Accum,
+    TensorC>;
+
+using Compute1 = cutlass::epilogue::fusion::XeCompute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using EVTCompute1 = cutlass::epilogue::fusion::XeEVT<
+    Compute1,
+    EVTCompute0,
+    Aux>;
+
+using F = cutlass::epilogue::fusion::XeAuxStore<
+    float,
+    cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>
+>;
+
+using EVTF = cutlass::epilogue::fusion::XeEVT<
+    F,
+    EVTCompute1>;
+
+using Compute2 = cutlass::epilogue::fusion::XeCompute<
+    cutlass::epilogue::thread::ReLu, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using Compute3 = cutlass::epilogue::fusion::XeCompute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using Compute4 = cutlass::epilogue::fusion::XeCompute<
+    cutlass::plus, float, float,
+    cutlass::FloatRoundStyle::round_to_nearest
+>;
+
+using DagCompute4 = cutlass::epilogue::fusion::XeTopologicalVisitor<
+    float,
+    cute::tuple<
+        cute::seq<>,
+        cute::seq<>,
+        cute::seq<0>,
+        cute::seq<2, 1>,
+        cute::seq<3, 0>
+    >,
+    EVTF,
+    Bias,
+    Compute2,
+    Compute3,
+    Compute4
+>;
+
+using ElementD = float;
+using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
+
+""",
+            )
 
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA_AND_TRITON:
+    if HAS_CPU or HAS_GPU_AND_TRITON:
         run_tests(needs="filelock")

@@ -23,6 +23,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+import warnings
 from collections.abc import (
     Callable,
     Collection,
@@ -61,6 +62,7 @@ from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
+from torch.utils._triton import has_triton_package
 
 
 OPTIMUS_EXCLUDE_POST_GRAD = [
@@ -121,6 +123,7 @@ from torch.utils._sympy.functions import (
     CleanDiv,
     FloorDiv,
     Identity,
+    Max,
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -133,6 +136,9 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+
+
+_DO_BENCH_PROFILE_EVENT_NAME = "inductor_do_bench_using_profiling"
 
 
 _T = TypeVar("_T")
@@ -189,7 +195,7 @@ def _align(nbytes: int) -> int:
 
 def _is_aligned(v: sympy.Expr) -> bool:
     """v can be statically proven to be a multiple of ALIGN_BYTES"""
-    if isinstance(v, (sympy.Add, sympy.Max)):
+    if isinstance(v, (sympy.Add, sympy.Max, Max)):
         return all(map(_is_aligned, v.args))
     return isinstance(v, align) or sympy.gcd(v, ALIGN_BYTES) == ALIGN_BYTES
 
@@ -324,6 +330,63 @@ def do_bench_using_profiling(
     )
 
 
+def _get_do_bench_profile_result(
+    kineto_events: Iterable[Any],
+    profiler_events: Iterable[Any],
+    n_repeat: int,
+    expected_device_type: DeviceType,
+) -> float:
+    benchmark_event_ids: OrderedSet[int] = OrderedSet()
+
+    def collect_cpu_event_ids(event: Any) -> None:
+        if event.device_type != DeviceType.CPU:
+            return
+
+        benchmark_event_ids.add(event.id)
+        for child in event.cpu_children:
+            collect_cpu_event_ids(child)
+
+    benchmark_events = [
+        event
+        for event in profiler_events
+        if event.name == _DO_BENCH_PROFILE_EVENT_NAME
+        and event.device_type == DeviceType.CPU
+    ]
+    if len(benchmark_events) != n_repeat:
+        raise RuntimeError(
+            f"Expected {n_repeat} {_DO_BENCH_PROFILE_EVENT_NAME} profiling events. "
+            f"Found {len(benchmark_events)} events."
+        )
+
+    for event in benchmark_events:
+        collect_cpu_event_ids(event)
+
+    device_time_us = 0.0
+    for event in kineto_events:
+        linked_correlation_id = event.linked_correlation_id()
+        correlation_id = event.correlation_id()
+        activity_type = event.activity_type()
+        if (
+            event.device_type() == expected_device_type
+            and activity_type != "gpu_user_annotation"
+            and (
+                linked_correlation_id in benchmark_event_ids
+                or (
+                    linked_correlation_id == 0 and correlation_id in benchmark_event_ids
+                )
+            )
+            and event.name() != "Context Sync"
+        ):
+            device_time_us += (event.end_ns() - event.start_ns()) / 1000.0
+
+    if device_time_us <= 0:
+        raise RuntimeError(
+            f"Failed to capture device events for {_DO_BENCH_PROFILE_EVENT_NAME}."
+        )
+
+    return device_time_us / 1000.0 / n_repeat
+
+
 def _do_bench_using_profiling(
     fn: Callable[[], Any],
     warmup: int = 25,
@@ -333,9 +396,9 @@ def _do_bench_using_profiling(
     """
     Returns benchmark results by examining torch profiler events.
     This could be more accurate as it doesn't count CPU side overhead.
-    However, this also requires manually excluding irrelevant event, e.g.
-    vectorized_elementwise_kernel which is used to fill L2 cache,
-    various CUDA events, etc, so could also be fragile.
+    The benchmarked function is wrapped in a profiler record_function so
+    cache-clearing kernels can be excluded without relying on raw CUDA event
+    grouping or kernel names.
     """
 
     if not is_vetted_benchmarking:
@@ -370,9 +433,11 @@ def _do_bench_using_profiling(
         fn()
 
     device_interface.synchronize()
+    profile_activity = getattr(torch.profiler.ProfilerActivity, device_type_upper)
     with torch.profiler.profile(
         activities=[
-            getattr(torch.profiler.ProfilerActivity, device_type_upper),
+            torch.profiler.ProfilerActivity.CPU,
+            profile_activity,
         ]
     ) as p:
         # Benchmark
@@ -380,48 +445,33 @@ def _do_bench_using_profiling(
             # we clear the L2 cache before each run
             cache.zero_()
             # record time of `fn`
-            fn()
+            with torch.profiler.record_function(_DO_BENCH_PROFILE_EVENT_NAME):
+                fn()
         # Record clocks
         device_interface.synchronize()
 
     log.debug("raw events")
-    log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
-
-    filtered_events = EventList(
-        [
-            event
-            for event in p.events()
-            if event.device_type == getattr(DeviceType, device_type_upper)
-            and event.name != "Context Sync"
-        ]
-    )
-    # Filter out cache.zero_() events by name pattern instead of relying on
-    # positional grouping. cache.zero_() may not always generate an event
-    # making positional assumptions unreliable.
-    # The kernel name contains "FillFunctor" when generated by cache.zero_().
-    actual_events = EventList(
-        [event for event in filtered_events if "FillFunctor" not in event.name]
-    )
-    if len(actual_events) == 0:
-        raise RuntimeError(
-            f"Failed to capture any events after filtering cache clearing events. "
-            f"{device_type} events: {len(filtered_events)}, repeats: {n_repeat}"
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug(
+            p.key_averages().table(sort_by="self_device_time_total", row_limit=-1)
         )
-    actual_events._build_tree()
-    actual_events = actual_events.key_averages()
+
+    result = _get_do_bench_profile_result(
+        p.profiler.kineto_results.events(),
+        p.events(),
+        n_repeat,
+        getattr(DeviceType, device_type_upper),
+    )
 
     log.debug("profiling time breakdown")
-    log.debug(actual_events.table(row_limit=-1))
-
-    res = sum(event.device_time_total for event in actual_events) / 1000.0 / n_repeat
-    log.debug("profiling results: %s ms", res)
-    return res
+    log.debug("profiling results: %s ms", result)
+    return result
 
 
 @functools.cache
 def has_torchvision_roi_align() -> bool:
     try:
-        from torchvision.ops import roi_align  # noqa: F401
+        from torchvision.ops import roi_align
 
         torch._C._dispatch_has_kernel_for_dispatch_key("torchvision::nms", "Meta")
         return roi_align is not None and hasattr(
@@ -452,6 +502,29 @@ def sympy_product(it: Iterable[sympy.Expr]) -> sympy.Expr:
 def sympy_dot(seq1: Sequence[sympy.Expr], seq2: Sequence[sympy.Expr]) -> sympy.Expr:
     assert len(seq1) == len(seq2)
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
+
+
+def flatten_index(
+    indices: Sequence[sympy.Expr],
+    sizes: Sequence[sympy.Expr],
+) -> sympy.Expr:
+    """Row-major flatten: per-dimension indices -> flat index."""
+    assert len(indices) == len(sizes)
+    flat = sympy.S.Zero
+    for index, size in zip(indices, sizes):
+        flat = flat * size + index
+    return flat
+
+
+def decompose_index(
+    index: sympy.Expr,
+    sizes: Sequence[sympy.Expr],
+) -> list[sympy.Expr]:
+    """Row-major decomposition: flat index -> per-dimension indices."""
+    return [
+        ModularIndexing(index, sympy_product(sizes[i + 1 :]), size)
+        for i, size in enumerate(sizes)
+    ]
 
 
 def unique(it: Iterable[_T]) -> ValuesView[_T]:
@@ -486,6 +559,8 @@ def _type_of(key: torch.dtype | None) -> str:
         "float8e4b15x4": "fp8e4b15x4",
         "float8_e4m3fn": "fp8e4nv",
         "float8_e5m2": "fp8e5",
+        "float8_e4m3fnuz": "fp8e4b8",
+        "float8_e5m2fnuz": "fp8e5b16",
         # TODO: remove when support is added in triton
         # https://github.com/triton-lang/triton/issues/6054
         "float8_e8m0fnu": "u8",
@@ -1016,9 +1091,17 @@ def get_kernel_metadata(
                         all_writes.append("%" + output_name)
 
         for node in inductor_nodes:
-            detailed_metadata.append(
-                f"{wrapper.comment}   {node.format_node(include_tensor_metadata=True)}"
-            )
+            formatted_node = node.format_node(include_tensor_metadata=True)
+            if formatted_node is not None and torch.version.hip:
+                # AMDGCN asm strings can contain newlines, which propagate
+                # into format_node() output.  Split so every line gets the
+                # comment prefix; otherwise bare newlines break the wrapper.
+                detailed_metadata.extend(
+                    f"{wrapper.comment}   {line}"
+                    for line in formatted_node.splitlines()
+                )
+            else:
+                detailed_metadata.append(f"{wrapper.comment}   {formatted_node}")
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
@@ -1139,6 +1222,10 @@ def prefix_is_reduction(prefix: str) -> bool:
     return prefix[0] == "r"
 
 
+def prefix_is_pointwise(prefix: str) -> bool:
+    return prefix[0] in ("x", "y", "z")
+
+
 def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     """
     Used to generate an integer-nonnegative symbol.
@@ -1202,6 +1289,15 @@ FORBIDDEN_CUDAGRAPH_OPS = frozenset(
         # constant arguments, so might as well ban
         "aten._assert_scalar",
     ]
+    + (
+        # rocm workaround: topk kernels fault under cudagraph trees
+        # on the 2nd replay of a recorded graph.
+        [
+            "aten.topk.default",
+        ]
+        if torch.version.hip is not None
+        else []
+    )
 )
 
 
@@ -1546,6 +1642,20 @@ class IndentedBuffer:
         else:
             self._lines.append("")
 
+    def writeline_jit(self, line: LineContext | DeferredLineBase | str) -> None:
+        """Write to JIT buffer only. On a plain IndentedBuffer, same as writeline."""
+        self.writeline(line)
+
+    def writeline_aot(self, line: LineContext | DeferredLineBase | str) -> None:
+        """Write to AOTI buffer only. No-op on a plain IndentedBuffer."""
+
+    def splice_jit(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
+        """Splice to JIT buffer only. On a plain IndentedBuffer, same as splice."""
+        self.splice(other_code, strip=strip)
+
+    def splice_aot(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
+        """Splice to AOTI buffer only. No-op on a plain IndentedBuffer."""
+
     def writelines(self, lines: Sequence[LineContext | DeferredLineBase | str]) -> None:
         for line in lines:
             self.writeline(line)
@@ -1589,7 +1699,7 @@ class IndentedBuffer:
                 return
             other_code = other_code.rstrip()
             for s in other_code.split("\n"):
-                self.writeline(s)
+                IndentedBuffer.writeline(self, s)
 
     def map(self, func: Callable[[Any], Any]) -> IndentedBuffer:
         res = IndentedBuffer(initial_indent=self._indent)
@@ -1609,6 +1719,120 @@ class IndentedBuffer:
 
     def contains(self, new_line: DeferredLineBase | LineContext | str) -> bool:
         return new_line in self._lines
+
+
+class DualIndentedBuffer(IndentedBuffer):
+    """IndentedBuffer that simultaneously accumulates JIT and AOTI output.
+
+    The base class (self._lines) holds JIT content. self.aot holds AOTI content.
+    By default, writeline/splice write to both. Use _jit/_aot variants for
+    mode-specific writes.
+    """
+
+    def __init__(self, initial_indent: int = 0) -> None:
+        super().__init__(initial_indent)
+        self.aot = IndentedBuffer(initial_indent)
+
+    @property
+    def jit(self) -> IndentedBuffer:
+        """Read-only accessor for JIT buffer (for splicing into result).
+
+        WARNING: Do NOT use jit for writing — writes would go to both buffers
+        because self.writeline is overridden. Use writeline_jit/splice_jit instead.
+        """
+        return self  # type: ignore[return-value]
+
+    def writeline(self, line):  # type: ignore[override]
+        IndentedBuffer.writeline(self, line)
+        self.aot.writeline(line)
+
+    def writeline_jit(self, line) -> None:
+        IndentedBuffer.writeline(self, line)
+
+    def writeline_aot(self, line) -> None:
+        self.aot.writeline(line)
+
+    def writelines(self, lines):  # type: ignore[override]
+        for line in lines:
+            self.writeline(line)
+
+    def splice(self, other_code, strip: bool = False) -> None:  # type: ignore[override]
+        # Splice into each buffer independently. When other_code is itself a
+        # DualIndentedBuffer, each side reads from the matching side.
+        IndentedBuffer.splice(self, other_code, strip=strip)
+        aot_other = (
+            other_code.aot if isinstance(other_code, DualIndentedBuffer) else other_code
+        )
+        self.aot.splice(aot_other, strip=strip)
+
+    def splice_jit(self, other_code, strip: bool = False) -> None:
+        IndentedBuffer.splice(self, other_code, strip=strip)
+
+    def splice_aot(self, other_code, strip: bool = False) -> None:
+        aot_other = (
+            other_code.aot if isinstance(other_code, DualIndentedBuffer) else other_code
+        )
+        self.aot.splice(aot_other, strip=strip)
+
+    def indent(self, offset: int = 1):
+        @contextlib.contextmanager
+        def ctx():
+            self._indent += offset
+            self.aot._indent += offset
+            try:
+                yield
+            finally:
+                self._indent -= offset
+                self.aot._indent -= offset
+
+        return ctx()
+
+    def do_indent(self, offset: int = 1) -> None:
+        self._indent += offset
+        self.aot._indent += offset
+
+    def do_unindent(self, offset: int = 1) -> None:
+        self._indent -= offset
+        self.aot._indent -= offset
+
+    def clear(self) -> None:
+        super().clear()
+        self.aot.clear()
+
+
+class AotOnlyBuffer(IndentedBuffer):
+    """IndentedBuffer for pure-AOTI codegen.
+
+    Mirror of the base class's pure-JIT defaults: writeline_aot/splice_aot
+    write to the buffer; writeline_jit/splice_jit are no-ops. Lets call
+    sites use writeline_jit/writeline_aot uniformly across pure-JIT,
+    pure-AOTI, and dual-wrapper modes.
+    """
+
+    def writeline_jit(self, line) -> None:
+        pass
+
+    def writeline_aot(self, line) -> None:
+        self.writeline(line)
+
+    def splice_jit(self, other_code, strip: bool = False) -> None:
+        pass
+
+    def splice_aot(self, other_code, strip: bool = False) -> None:
+        self.splice(other_code, strip=strip)
+
+
+def make_codegen_buffer() -> IndentedBuffer:
+    """Construct the IndentedBuffer subclass matching the current codegen mode.
+
+    Pure AOTI -> AotOnlyBuffer (writeline_aot writes; writeline_jit drops).
+    Pure JIT  -> IndentedBuffer  (writeline_jit writes; writeline_aot drops).
+    """
+    from .virtualized import V
+
+    if V.graph.aot_mode:
+        return AotOnlyBuffer()
+    return IndentedBuffer()
 
 
 class FakeIndentedBuffer(IndentedBuffer):
@@ -1728,6 +1952,15 @@ def using_b200() -> bool:
     return device_properties.major == 10
 
 
+def is_nvidia_sm100_or_later() -> bool:
+    """Return true for NVIDIA CUDA devices with compute capability SM100+."""
+    return (
+        torch.cuda.is_available()
+        and torch.version.hip is None
+        and torch.cuda.get_device_capability() >= (10, 0)
+    )
+
+
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
@@ -1757,6 +1990,14 @@ def get_tma_workspace_arg(
     )
 
 
+def get_default_kpack(block_k: int = 16) -> int:
+    if not torch.version.hip:
+        return 0
+    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
+        return 1
+    return 2
+
+
 def _use_template_for_gpu(
     layout: Layout, allowed_layout_dtypes: list[torch.dtype]
 ) -> bool:
@@ -1782,6 +2023,20 @@ def _use_autotune_backend(backend: str) -> bool:
 def _use_conv_autotune_backend(backend: str) -> bool:
     return backend.upper() in [
         x.strip() for x in config.max_autotune_conv_backends.upper().split(",")
+    ]
+
+
+def _use_conv_bwd_weight_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip()
+        for x in config.max_autotune_conv_bwd_weight_backends.upper().split(",")
+    ]
+
+
+def _use_conv_bwd_input_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip()
+        for x in config.max_autotune_conv_bwd_input_backends.upper().split(",")
     ]
 
 
@@ -1947,15 +2202,53 @@ def can_use_tma(
     )
 
 
+def _descriptor_shape_fits_in_int32(
+    sizes: Sequence[sympy.Expr], add_guards: bool = False
+) -> bool:
+    int32_max = torch.iinfo(torch.int32).max
+    conditions = []
+    for size in sizes:
+        if isinstance(size, (int, sympy.Integer)):
+            if size > int32_max:
+                return False
+        else:
+            conditions.append(sympy.Le(size, int32_max))
+
+    if not conditions:
+        return True
+
+    from .virtualized import V
+
+    condition = conditions[0] if len(conditions) == 1 else sympy.And(*conditions)
+    return (
+        V.graph.sizevars.guard_or_false(condition)
+        if add_guards
+        else V.graph.sizevars.statically_known_true(condition)
+    )
+
+
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:
+    if not config.triton.enable_persistent_tma_matmul:
+        return False
+    if not all(len(m.get_size()) == 2 for m in matrices):
+        return False
+    if not all(
+        _descriptor_shape_fits_in_int32(m.get_size(), add_guards=add_guards)
+        for m in matrices
+    ):
+        return False
+    if config.triton.enable_template_tma_store and not _descriptor_shape_fits_in_int32(
+        output_layout.size, add_guards=add_guards
+    ):
+        return False
+    # On AMD (HIP), TMA is not available but we still use non-TMA persistent
+    # kernels, so skip the TMA compatibility checks.
+    if torch.version.hip is not None:
+        return True
     layout = output_layout if config.triton.enable_template_tma_store else None
-    return (
-        all(len(m.get_size()) == 2 for m in matrices)
-        and can_use_tma(*matrices, output_layout=layout, add_guards=add_guards)
-        and config.triton.enable_persistent_tma_matmul
-    )
+    return can_use_tma(*matrices, output_layout=layout, add_guards=add_guards)
 
 
 def use_triton_blackwell_tma_template(
@@ -2003,9 +2296,36 @@ def ensure_nv_universal_gemm_available() -> bool:
     in the same interpreter to retry the import.
     """
     try:
-        return importlib.util.find_spec("cutlass_api") is not None
+        available = importlib.util.find_spec("cutlass_api") is not None
     except ImportError:
         return False
+    if available:
+        _ensure_fp4_dtype_registered()
+    return available
+
+
+def _ensure_fp4_dtype_registered():
+    """Patch cutlass_api to handle torch.float4_e2m1fn_x2 -> cutlass.Float4E2M1FN.
+
+    NOTE: cutlass_api doesn't natively map this dtype. We patch the lookup function
+    in-place so all callers (including TensorWrapper) pick up the change.
+    Remove once cutlass_api adds native FP4 support.
+    """
+    import cutlass_api.utils
+
+    try:
+        cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+    except (KeyError, AttributeError):
+        import cutlass
+
+        _orig = cutlass_api.utils.cutlass_type_from_torch_type
+
+        def _patched(dtype):
+            if dtype == torch.float4_e2m1fn_x2:
+                return cutlass.Float4E2M1FN
+            return _orig(dtype)
+
+        cutlass_api.utils.cutlass_type_from_torch_type = _patched
 
 
 @functools.lru_cache(maxsize=1)
@@ -2101,9 +2421,9 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     # for the compiled CUTLASS .so, similar to how the triton branch uses
     # static CUfunction + loadKernel for non-AOT mode.
     if V.graph.cpp_wrapper and not V.graph.aot_mode:
-        log.warning(
+        warnings.warn(
             "CUTLASS backend is not supported with non-AOT cpp_wrapper mode. "
-            "Skipping CUTLASS backend."
+            "Skipping CUTLASS backend.",
         )
         return False
 
@@ -2531,7 +2851,7 @@ class DebugDirManager:
         self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
         torch._dynamo.config.debug_dir_root = self.new_name
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         shutil.rmtree(self.new_name)
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
@@ -2562,7 +2882,12 @@ def run_and_get_kernels(
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
-        kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
+        if config.cpp_wrapper and config.triton.autotune_at_compile_time is not True:
+            # With lazy Triton kernel compilation, kernel sources are embedded
+            # inside C++ R"TRITON(...)TRITON" raw strings.
+            kernels.extend(re.findall(r'R"TRITON\((.*?)\)TRITON"', code, re.DOTALL))
+        else:
+            kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
         if remove_quote:
             kernels = [kernel[3:-3] for kernel in kernels]
     return result, kernels
@@ -2725,7 +3050,7 @@ def get_benchmark_name() -> str | None:
     It works for torchbench.py/hugginface.py/timm_models.py. But for ad-hoc
     scripts, this function may return None.
 
-    There are 2 flavors of --only argument we need handle:
+    There are 2 flavors of --only argument we need to handle:
     1. --only model_name
     2. --only=model_name
     """
@@ -2809,6 +3134,13 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     if ds_tops is not None:
         return ds_tops
 
+    if not torch.cuda.is_available():
+        log.warning(
+            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
+            "Returning 0.0; roofline estimates will use memory bandwidth only."
+        )
+        return 0.0
+
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
     SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
@@ -2872,7 +3204,11 @@ def is_welford_reduction(reduction_type: str) -> bool:
 def reduction_num_outputs(reduction_type: str) -> int:
     if is_welford_reduction(reduction_type):
         return 3
-    elif reduction_type == "online_softmax_reduce":
+    elif reduction_type in (
+        "argmax_with_value",
+        "argmin_with_value",
+        "online_softmax_reduce",
+    ):
         return 2
     else:
         return 1
@@ -3154,6 +3490,22 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
     return len(static_arg_idxs)
 
 
+def get_static_bw_input_idxs(fx_g: torch.fx.GraphModule) -> list[int]:
+    """
+    Returns indices of backward graph inputs that are always at fixed
+    addresses: primals (parameters/buffers/user inputs saved for backward).
+    Excludes saved activations which may not be at fixed addresses when
+    the forward is partitioned for CUDA graphs.
+    """
+    static_idxs = []
+    for idx, n in enumerate(fx_g.graph.nodes):
+        if n.op != "placeholder":
+            break
+        if n.name.startswith("primals_"):
+            static_idxs.append(idx)
+    return static_idxs
+
+
 @dataclasses.dataclass
 class BoxedBool:
     value: bool
@@ -3203,6 +3555,81 @@ def is_gpu(device: str | None) -> bool:
 def is_rocm() -> bool:
     """Check if we're running on ROCm/HIP platform."""
     return torch.version.hip is not None
+
+
+@functools.lru_cache(None)
+def _triton_supported_fp8_dtypes(
+    backend_name: str, arch: int | str, warp_size: int
+) -> tuple[str, ...] | None:
+    if not has_triton_package():
+        return None
+
+    try:
+        from triton.backends.compiler import GPUTarget
+        from triton.compiler.compiler import make_backend
+
+        # This is the same option Triton checks when lowering tl.float8* types.
+        target = GPUTarget(backend_name, arch, warp_size)
+        options = make_backend(target).parse_options({})
+    except (AttributeError, ImportError, KeyError, TypeError):
+        return None
+
+    supported_fp8_dtypes = getattr(options, "supported_fp8_dtypes", None)
+    if supported_fp8_dtypes is None:
+        return None
+    return tuple(supported_fp8_dtypes)
+
+
+def is_triton_fp8_dtype_supported(
+    dtype: torch.dtype,
+    device: torch.device | str | None = None,
+    *,
+    triton_backend: str | None = None,
+    triton_arch: int | str | None = None,
+    warp_size: int | None = None,
+) -> bool:
+    if dtype not in (
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2fnuz,
+    ):
+        return True
+
+    triton_dtype = _type_of(dtype).removeprefix("*")
+
+    if triton_backend is None:
+        if device is None:
+            return True
+        device = torch.device(device)
+        if device.type != "cuda":
+            return True
+        if not torch.cuda.is_available():
+            return True
+
+        device_index = device.index
+        if device_index is None:
+            device_index = torch.cuda.current_device()
+        properties = torch.cuda.get_device_properties(device_index)
+        if is_rocm():
+            triton_backend = "hip"
+            triton_arch = properties.gcnArchName.split(":")[0]
+        else:
+            triton_backend = "cuda"
+            triton_arch = properties.major * 10 + properties.minor
+        warp_size = getattr(properties, "warp_size", None)
+
+    if triton_arch is None:
+        raise ValueError("triton_arch must be provided with triton_backend")
+    if warp_size is None:
+        warp_size = 64 if triton_backend == "hip" else 32
+
+    supported_fp8_dtypes = _triton_supported_fp8_dtypes(
+        triton_backend, triton_arch, warp_size
+    )
+    if supported_fp8_dtypes is None:
+        return True
+    return triton_dtype in supported_fp8_dtypes
 
 
 def device_need_guard(device: str) -> bool:
@@ -3679,6 +4106,13 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.tpu_backend
     else:
         return config.cuda_backend
+
+
+def device_supports_fp64(device: torch.device | None) -> bool:
+    """Check if the given device supports float64."""
+    if device is not None and device.type == "xpu":
+        return torch.xpu.get_device_properties(device).has_fp64
+    return True
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
@@ -4261,17 +4695,28 @@ def set_customized_partition_wrappers(wrapper: CUDAGraphWrapperType) -> None:
 
 
 def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, Any]]:
-    args = snode.node.inputs  # type: ignore[union-attr]
-    args = snode.node.fill_non_provided_args(  # type: ignore[union-attr]
-        [*args, *snode.node.constant_args],  # type: ignore[union-attr]
-        snode.node.kwargs,  # type: ignore[union-attr]
-    )
-    kwargs = snode.node.kwargs  # type: ignore[union-attr]
+    node = cast("ExternKernel", snode.node)
+    if isinstance(node, torch._inductor.ir.FallbackKernel):
+        args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
+    else:
+        args = [*node.inputs, *node.constant_args]
+        kwargs = node.kwargs
+
+    args = node.fill_non_provided_args(args, kwargs)
+    kwargs = dict(kwargs)
+    op_overload = getattr(node, "op_overload", None)
+    if isinstance(op_overload, torch._ops.OpOverload):
+        positional_arg_names = [
+            arg.name for arg in op_overload._schema.arguments if not arg.kwarg_only
+        ]
+        for arg_name in positional_arg_names[: len(args)]:
+            kwargs.pop(arg_name, None)
     flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
 
     def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
         return isinstance(x, torch._inductor.ir.IRNode) and not isinstance(
-            x, torch._inductor.ir.GeneratorState
+            x,
+            (torch._inductor.ir.GeneratorState, torch._inductor.ir.OpaqueObjectState),
         )
 
     flat_args = [
@@ -4364,6 +4809,9 @@ COLLECTIVE_OPS = OrderedSet(
         "torch.ops._c10d_functional_autograd.all_gather_into_tensor.default",
         "torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default",
         "torch.ops._c10d_functional_autograd.all_to_all_single.default",
+        "torch.ops._c10d_functional.isend.default",
+        "torch.ops._c10d_functional.irecv.default",
+        "torch.ops._c10d_functional.batch_p2p_ops.default",
     ]
 )
 

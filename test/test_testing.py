@@ -405,6 +405,7 @@ if __name__ == '__main__':
             self.assertIn('errors=1', stderr)
 
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/106308")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
@@ -574,6 +575,61 @@ if __name__ == '__main__':
         env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
         self.assertNotIn('OK', stderr.decode('ascii'))
+
+
+class TestEnvironmentDefFlag(TestCase):
+    """Verify env-var-vs-implication precedence in TestEnvironment.def_flag."""
+
+    def setUp(self):
+        super().setUp()
+        import torch.testing._internal.common_utils as _cu
+        self._cu = _cu
+        self._defined: list[str] = []
+
+    def tearDown(self):
+        for name in self._defined:
+            if hasattr(self._cu, name):
+                delattr(self._cu, name)
+
+    def _def_flag(self, name, **kwargs):
+        from torch.testing._internal.common_utils import TestEnvironment
+        self._defined.append(name)
+        kwargs.setdefault("include_in_repro", False)
+        return TestEnvironment.def_flag(name, **kwargs)
+
+    def test_explicit_zero_overrides_implication(self):
+        # Regression: PYTORCH_TEST_WITH_ROCM=0 must override
+        # implied_by_fn=lambda: torch.version.hip is not None.
+        with unittest.mock.patch.dict(os.environ, {"FOO_DF_1": "0"}):
+            self.assertFalse(self._def_flag(
+                "FOO_DF_1", env_var="FOO_DF_1",
+                implied_by_fn=lambda: True))
+
+    def test_explicit_one_with_no_implication(self):
+        with unittest.mock.patch.dict(os.environ, {"FOO_DF_2": "1"}):
+            self.assertTrue(self._def_flag(
+                "FOO_DF_2", env_var="FOO_DF_2",
+                implied_by_fn=lambda: False))
+
+    def test_unset_with_implication_true(self):
+        env = {k: v for k, v in os.environ.items() if k != "FOO_DF_3"}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            self.assertTrue(self._def_flag(
+                "FOO_DF_3", env_var="FOO_DF_3",
+                implied_by_fn=lambda: True))
+
+    def test_unset_with_implication_false(self):
+        env = {k: v for k, v in os.environ.items() if k != "FOO_DF_4"}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            self.assertFalse(self._def_flag(
+                "FOO_DF_4", env_var="FOO_DF_4",
+                implied_by_fn=lambda: False))
+
+    def test_default_true_explicit_zero_overrides_implication(self):
+        with unittest.mock.patch.dict(os.environ, {"FOO_DF_5": "0"}):
+            self.assertFalse(self._def_flag(
+                "FOO_DF_5", env_var="FOO_DF_5",
+                default=True, implied_by_fn=lambda: True))
 
 
 def make_assert_close_inputs(actual: Any, expected: Any) -> list[tuple[Any, Any]]:
@@ -2139,7 +2195,7 @@ class TestTestParametrizationDeviceType(TestCase):
         for op in op_db:
             for dtype in op.supported_dtypes(torch.device(device).type):
                 for flag_part in ('flag_disabled', 'flag_enabled'):
-                    expected_name = f'{device_cls.__name__}.test_op_parametrized_{op.formatted_name}_{flag_part}_{device}_{dtype_name(dtype)}'  # noqa: B950
+                    expected_name = f'{device_cls.__name__}.test_op_parametrized_{op.formatted_name}_{flag_part}_{device}_{dtype_name(dtype)}'
                     expected_test_names.append(expected_name)
 
         test_names = _get_test_names_for_test_class(device_cls)
@@ -2397,6 +2453,8 @@ class TestImports(TestCase):
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
 
     @skipIfXpu(msg="The test is flaky on XPU, see https://github.com/pytorch/pytorch/issues/110040")
+    # The test is flaky on ROCm/XPU and has been open and close multiple times
+    # https://github.com/pytorch/pytorch/issues/110040
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
@@ -2408,6 +2466,9 @@ class TestImports(TestCase):
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
+                           "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
+                           "torch._native.ops.scatter_add",  # depends on cutlass
+                           "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
@@ -2417,7 +2478,8 @@ class TestImports(TestCase):
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
-                           "torch._inductor.kernel.vendored_templates.cutedsl_grouped_gemm",  # depends on cutlass
+                           "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
+                           "torch._vendor.quack",  # depends on cutlass / cuda-python
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac

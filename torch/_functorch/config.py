@@ -93,7 +93,7 @@ autograd_cache_normalize_inputs = not is_fbcode()
 #   - When False: Emits UserWarning on aliasing violations.
 #
 # Deprecated: Custom ops returning aliased outputs is deprecated and will
-# become an error in PyTorch 2.12. Currently error_on_custom_op_aliasing
+# become an error in a future version of PyTorch. Currently error_on_custom_op_aliasing
 # is True only in CI.
 check_custom_op_aliasing = True
 error_on_custom_op_aliasing = bool(os.getenv("CI"))
@@ -230,6 +230,10 @@ activation_offload_sink_wait = False
 # activation reloading with prefetching when using separate streams (bwd graph)
 activation_reload_prefetch = False
 
+# CPU ↔ GPU bandwidth in GB/s, used to estimate transfer times for prefetch
+# scheduling. This is hardware-specific and should be set by the user.
+activation_offload_cpu_gpu_bw: float = 50.0
+
 # If FakeTensor.data_ptr() should error.
 # This option is independent of AOTAutograd and torch.compile, but our policy
 # is to turn it off during torch.compile.
@@ -329,8 +333,9 @@ backward_pass_autocast = "same_as_forward"
 # False if a user wants to retain_graph=True for backward.
 donated_buffer = not is_fbcode()
 
-# Controls the default graph output format used by draw_graph
-# Supported formats are defined here https://graphviz.org/docs/outputs/
+# Controls the default graph output format used by draw_graph.
+# Most supported formats are defined here https://graphviz.org/docs/outputs/.
+# The "dot" and "raw" formats write raw DOT text without invoking Graphviz.
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 
 # Valid only if fake_tensor_propagate_real_tensors = True; if a fake-real
@@ -399,7 +404,8 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 # At runtime non contiguous tangents will be coerced to be contiguous.
 # This config changes this guess for tangents strides to be the same as outputs.
 # TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
-guess_tangent_strides_as_outputs = False
+guess_tangent_strides_as_outputs = not is_fbcode()
+
 
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
 # it will ultimately be removed once we share size_hints across ranks through compiler collectives
@@ -430,9 +436,16 @@ force_autograd_cache = False
 # on to explicitly annotate. This is currently only used by inductor lite mode.
 selective_decompose: bool = False
 
+# Complex Support
+# This config disallows decomposition of complex-valued Tensors using
+# `torch._subclasses.complex_tensor.ComplexTensor` by decomposing everything into
+# real-valued operations, passing through the regular pipeline as necessary,
+# then converting back to a regular tensor.
+enable_complex_wrapper: bool = False
+
 
 if TYPE_CHECKING:
-    from torch.utils._config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F403
 
 
 # adds patch, save_config, invalid config checks, etc

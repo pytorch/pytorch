@@ -270,17 +270,13 @@ if sys.version_info < python_min_version:
     )
     sys.exit(-1)
 
-import filecmp
-import glob
 import importlib
 import itertools
-import json
 import shutil
 import subprocess
 import sysconfig
 import tempfile
 import textwrap
-import time
 import zipfile
 from collections import defaultdict
 from pathlib import Path
@@ -288,7 +284,6 @@ from typing import Any, ClassVar, IO
 
 import setuptools.command.bdist_wheel
 import setuptools.command.build_ext
-import setuptools.command.sdist
 import setuptools.errors
 from setuptools import Command, Extension, find_packages, setup
 from setuptools.dist import Distribution
@@ -315,15 +310,10 @@ os.environ["PYTHONPATH"] = os.pathsep.join(
 ).rstrip(os.pathsep)
 
 from tools.build_pytorch_libs import build_pytorch
+from tools.clean import clean as _clean
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake, CMakeValue
-from tools.setup_helpers.env import (
-    BUILD_DIR,
-    build_type,
-    IS_DARWIN,
-    IS_LINUX,
-    IS_WINDOWS,
-)
+from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
 
 
 def str2bool(value: str | None) -> bool:
@@ -503,161 +493,6 @@ TORCH_VERSION = get_torch_version()
 report(f"Building wheel {TORCH_PACKAGE_NAME}-{TORCH_VERSION}")
 
 cmake = CMake()
-
-
-def get_submodule_folders() -> list[Path]:
-    git_modules_file = CWD / ".gitmodules"
-    default_modules_path = [
-        THIRD_PARTY_DIR / name
-        for name in [
-            "gloo",
-            "cpuinfo",
-            "onnx",
-            "fbgemm",
-            "cutlass",
-        ]
-    ]
-    if not git_modules_file.exists():
-        return default_modules_path
-    with git_modules_file.open(encoding="utf-8") as f:
-        return [
-            CWD / line.partition("=")[-1].strip()
-            for line in f
-            if line.strip().startswith("path")
-        ]
-
-
-def check_submodules() -> None:
-    def check_for_files(folder: Path, files: list[str]) -> None:
-        if not any((folder / f).exists() for f in files):
-            report("Could not find any of {} in {}".format(", ".join(files), folder))
-            report("Did you run 'git submodule update --init --recursive'?")
-            sys.exit(1)
-
-    def not_exists_or_empty(folder: Path) -> bool:
-        return not folder.exists() or (
-            folder.is_dir() and next(folder.iterdir(), None) is None
-        )
-
-    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
-        return
-    folders = get_submodule_folders()
-    # If none of the submodule folders exists, try to initialize them
-    if all(not_exists_or_empty(folder) for folder in folders):
-        try:
-            report(" --- Trying to initialize submodules")
-            start = time.time()
-            subprocess.check_call(
-                ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
-            )
-            end = time.time()
-            report(f" --- Submodule initialization took {end - start:.2f} sec")
-        except Exception:
-            report(" --- Submodule initialization failed")
-            report("Please run:\n\tgit submodule update --init --recursive")
-            sys.exit(1)
-    for folder in folders:
-        check_for_files(
-            folder,
-            [
-                "CMakeLists.txt",
-                "Makefile",
-                "setup.py",
-                "LICENSE",
-                "LICENSE.md",
-                "LICENSE.txt",
-            ],
-        )
-    check_for_files(
-        THIRD_PARTY_DIR / "fbgemm" / "external" / "asmjit",
-        ["CMakeLists.txt"],
-    )
-
-
-# Windows has very bad support for symbolic links.
-# Instead of using symlinks, we're going to copy files over
-def mirror_files_into_torchgen() -> None:
-    # (new_path, orig_path)
-    # Directories are OK and are recursively mirrored.
-    paths = [
-        (
-            CWD / "torchgen/packaged/ATen/native/native_functions.yaml",
-            CWD / "aten/src/ATen/native/native_functions.yaml",
-        ),
-        (
-            CWD / "torchgen/packaged/ATen/native/tags.yaml",
-            CWD / "aten/src/ATen/native/tags.yaml",
-        ),
-        (
-            CWD / "torchgen/packaged/ATen/templates",
-            CWD / "aten/src/ATen/templates",
-        ),
-        (
-            CWD / "torchgen/packaged/autograd",
-            CWD / "tools/autograd",
-        ),
-        (
-            CWD / "torchgen/packaged/autograd/templates",
-            CWD / "tools/autograd/templates",
-        ),
-    ]
-    for new_path, orig_path in paths:
-        # Create the dirs involved in new_path if they don't exist
-        if not new_path.exists():
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Copy the files from the orig location to the new location
-        if orig_path.is_file():
-            shutil.copyfile(orig_path, new_path)
-            continue
-        if orig_path.is_dir():
-            if new_path.exists():
-                # copytree fails if the tree exists already, so remove it.
-                shutil.rmtree(new_path)
-            shutil.copytree(orig_path, new_path)
-            continue
-        raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
-
-
-def mirror_inductor_external_kernels() -> None:
-    """
-    Copy external kernels into Inductor so they are importable.
-    """
-    cuda_is_disabled = not str2bool(os.getenv("USE_CUDA"))
-    paths = [
-        (
-            CWD / "torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py",
-            CWD
-            / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
-            True,
-        ),
-    ]
-    for new_path, orig_path, allow_missing_if_cuda_is_disabled in paths:
-        # Create the dirs involved in new_path if they don't exist
-        if not new_path.exists():
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-            # Add `__init__.py` for find_packages to see `new_path.parent` as a submodule
-            (new_path.parent / "__init__.py").touch(exist_ok=True)
-
-        # Copy the files from the orig location to the new location
-        if orig_path.is_file():
-            shutil.copyfile(orig_path, new_path)
-            continue
-        if orig_path.is_dir():
-            if new_path.exists():
-                # copytree fails if the tree exists already, so remove it.
-                shutil.rmtree(new_path)
-            shutil.copytree(orig_path, new_path)
-            continue
-        if (
-            not orig_path.exists()
-            and allow_missing_if_cuda_is_disabled
-            and cuda_is_disabled
-        ):
-            continue
-        raise RuntimeError(
-            "Check the file paths in `mirror_inductor_external_kernels()`"
-        )
 
 
 # ATTENTION: THIS IS AI SLOP
@@ -1026,7 +861,6 @@ def build_deps() -> None:
             download_and_extract_nightly_wheel(nightly_version)
             return
 
-    check_submodules()
     check_pydep("yaml", "pyyaml")
     build_pytorch(
         version=TORCH_VERSION,
@@ -1044,28 +878,6 @@ def build_deps() -> None:
             '"python -m pip install --no-build-isolation -v ." to build.'
         )
         sys.exit()
-
-    # Use copies instead of symbolic files.
-    # Windows has very poor support for them.
-    sym_files = [
-        CWD / "tools/shared/_utils_internal.py",
-        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h",
-        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h",
-    ]
-    orig_files = [
-        CWD / "torch/_utils_internal.py",
-        CWD / "third_party/valgrind-headers/callgrind.h",
-        CWD / "third_party/valgrind-headers/valgrind.h",
-    ]
-    for sym_file, orig_file in zip(sym_files, orig_files):
-        same = False
-        if sym_file.exists():
-            if filecmp.cmp(sym_file, orig_file):
-                same = True
-            else:
-                sym_file.unlink()
-        if not same:
-            shutil.copyfile(orig_file, sym_file)
 
 
 ################################################################################
@@ -1088,160 +900,6 @@ def check_pydep(importname: str, module: str) -> None:
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
-    def _wrap_headers_with_macro(self, include_dir: Path) -> None:
-        """Wrap all header files with #if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION).
-
-        Excludes:
-        - torch/headeronly/*
-        - torch/csrc/stable/*
-        - torch/csrc/inductor/aoti_torch/c/ (only shim headers)
-        - torch/csrc/inductor/aoti_torch/generated/
-
-        This method is idempotent - it will not wrap headers that are already wrapped.
-        """
-        header_extensions = (".h", ".hpp", ".cuh")
-        header_files = [
-            f for ext in header_extensions for f in include_dir.rglob(f"*{ext}")
-        ]
-
-        # Paths to exclude from wrapping (relative to include_dir)
-        exclude_dir_patterns = [
-            "torch/headeronly/",
-            "torch/csrc/stable/",
-            "torch/csrc/inductor/aoti_torch/c/",
-            "torch/csrc/inductor/aoti_torch/generated/",
-        ]
-
-        # Marker to detect if a header is already wrapped
-        wrap_start_marker = (
-            "#if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
-        )
-
-        for header_file in header_files:
-            rel_path = header_file.relative_to(include_dir).as_posix()
-
-            if any(rel_path.startswith(pattern) for pattern in exclude_dir_patterns):
-                report(f"Skipping header: {rel_path}")
-                continue
-
-            original_content = header_file.read_text(encoding="utf-8")
-
-            # Check if already wrapped (idempotency check)
-            if original_content.startswith(wrap_start_marker):
-                report(f"Already wrapped, skipping: {rel_path}")
-                continue
-
-            wrapped_content = (
-                wrap_start_marker
-                + f"{original_content}"
-                + "\n#else\n"
-                + '#error "This file should not be included when either TORCH_STABLE_ONLY or TORCH_TARGET_VERSION is defined."\n'
-                + "#endif  // !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
-            )
-
-            header_file.write_text(wrapped_content, encoding="utf-8")
-            report(f"Wrapped header: {rel_path}")
-
-    def _embed_libomp(self) -> None:
-        # Copy libiomp5.dylib/libomp.dylib inside the wheel package on MacOS
-        build_lib = Path(self.build_lib)
-        build_torch_lib_dir = build_lib / "torch" / "lib"
-        build_torch_include_dir = build_lib / "torch" / "include"
-        libtorch_cpu_path = build_torch_lib_dir / "libtorch_cpu.dylib"
-        if not libtorch_cpu_path.exists():
-            return
-        # Parse libtorch_cpu load commands
-        otool_cmds = (
-            subprocess.check_output(["otool", "-l", str(libtorch_cpu_path)])
-            .decode("utf-8")
-            .split("\n")
-        )
-        rpaths: list[str] = []
-        libs: list[str] = []
-        for idx, line in enumerate(otool_cmds):
-            if line.strip() == "cmd LC_LOAD_DYLIB":
-                lib_name = otool_cmds[idx + 2].strip()
-                if not lib_name.startswith("name "):
-                    raise AssertionError(
-                        f"Expected lib_name to start with 'name ', got: {lib_name}"
-                    )
-                libs.append(lib_name.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
-
-            if line.strip() == "cmd LC_RPATH":
-                rpath = otool_cmds[idx + 2].strip()
-                if not rpath.startswith("path "):
-                    raise AssertionError(
-                        f"Expected rpath to start with 'path ', got: {rpath}"
-                    )
-                rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
-
-        omplib_path: str = get_cmake_cache_vars()["OpenMP_libomp_LIBRARY"]  # type: ignore[assignment]
-        omplib_name: str = get_cmake_cache_vars()["OpenMP_C_LIB_NAMES"]  # type: ignore[assignment]
-        omplib_name += ".dylib"
-        omplib_rpath_path = os.path.join("@rpath", omplib_name)
-
-        # This logic is fragile and checks only two cases:
-        # - libtorch_cpu depends on `@rpath/libomp.dylib`e (happens when built inside miniconda environment)
-        # - libtorch_cpu depends on `/abs/path/to/libomp.dylib` (happens when built with libomp from homebrew)
-        if not any(c in libs for c in [omplib_path, omplib_rpath_path]):
-            return
-
-        # Copy libomp/libiomp5 from rpath locations
-        target_lib = build_torch_lib_dir / omplib_name
-        libomp_relocated = False
-        install_name_tool_args: list[str] = []
-        for rpath in rpaths:
-            source_lib = os.path.join(rpath, omplib_name)
-            if not os.path.exists(source_lib):
-                continue
-            self.copy_file(source_lib, target_lib)
-            # Delete old rpath and add @loader_lib to the rpath
-            # This should prevent deallocate from attempting to package another instance
-            # of OpenMP library in torch wheel as well as loading two libomp.dylib into
-            # the address space, as libraries are cached by their unresolved names
-            install_name_tool_args = [
-                "-rpath",
-                rpath,
-                "@loader_path",
-            ]
-            libomp_relocated = True
-            break
-        if not libomp_relocated and os.path.exists(omplib_path):
-            self.copy_file(omplib_path, target_lib)
-            install_name_tool_args = [
-                "-change",
-                omplib_path,
-                omplib_rpath_path,
-            ]
-            if "@loader_path" not in rpaths:
-                install_name_tool_args += [
-                    "-add_rpath",
-                    "@loader_path",
-                ]
-            libomp_relocated = True
-        if libomp_relocated:
-            install_name_tool_args = [
-                "install_name_tool",
-                *install_name_tool_args,
-                str(libtorch_cpu_path),
-            ]
-            subprocess.check_call(install_name_tool_args)
-        # Copy omp.h from OpenMP_C_FLAGS and copy it into include folder
-        omp_cflags: str = get_cmake_cache_vars()["OpenMP_C_FLAGS"]  # type: ignore[assignment]
-        if not omp_cflags:
-            return
-        for include_dir in [
-            Path(f.removeprefix("-I"))
-            for f in omp_cflags.split(" ")
-            if f.startswith("-I")
-        ]:
-            omp_h = include_dir / "omp.h"
-            if not omp_h.exists():
-                continue
-            target_omp_h = build_torch_include_dir / "omp.h"
-            self.copy_file(omp_h, target_omp_h)
-            break
-
     def run(self) -> None:
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists
         # and we can get an accurate report on what is used and what is not.
@@ -1315,18 +973,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         super().run()
 
-        # Wrap headers with TORCH_STABLE_ONLY and TORCH_TARGET_VERSION guards
-        build_lib = Path(self.build_lib)
-        build_torch_include_dir = build_lib / "torch" / "include"
-        if build_torch_include_dir.exists():
-            report(
-                "-- Wrapping header files with if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)"
-            )
-            self._wrap_headers_with_macro(build_torch_include_dir)
-
-        if IS_DARWIN:
-            self._embed_libomp()
-
         # Copy the essential export library to compile C++ extensions.
         if IS_WINDOWS:
             build_temp = Path(self.build_temp)
@@ -1344,92 +990,14 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_dir.mkdir(parents=True, exist_ok=True)
             self.copy_file(export_lib, target_lib)
 
-    def build_extensions(self) -> None:
-        self.create_compile_commands()
-
-        super().build_extensions()
-
     def get_outputs(self) -> list[str]:
         outputs = super().get_outputs()
         outputs.append(os.path.join(self.build_lib, "caffe2"))
         report(f"setup.py::get_outputs returning {outputs}")
         return outputs
 
-    def create_compile_commands(self) -> None:
-        def load(file: Path) -> list[dict[str, Any]]:
-            return json.loads(file.read_text(encoding="utf-8"))
 
-        ninja_files = (CWD / BUILD_DIR).glob("*compile_commands.json")
-        cmake_files = (CWD / "torch" / "lib" / "build").glob("*/compile_commands.json")
-        all_commands = [
-            entry
-            for f in itertools.chain(ninja_files, cmake_files)
-            for entry in load(f)
-        ]
-
-        # cquery does not like c++ compiles that start with gcc.
-        # It forgets to include the c++ header directories.
-        # We can work around this by replacing the gcc calls that python
-        # setup.py generates with g++ calls instead
-        for command in all_commands:
-            if command["command"].startswith("gcc "):
-                command["command"] = "g++ " + command["command"][4:]
-
-        new_contents = json.dumps(all_commands, indent=2)
-        contents = ""
-        compile_commands_json = CWD / "compile_commands.json"
-        if compile_commands_json.exists():
-            contents = compile_commands_json.read_text(encoding="utf-8")
-        if contents != new_contents:
-            compile_commands_json.write_text(new_contents, encoding="utf-8")
-
-
-class concat_license_files:
-    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
-
-    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
-    from all the licenses found in ./third_party/. We concatenate them so there
-    is a single license file in the sdist and wheels with all of the necessary
-    licensing info.
-    """
-
-    def __init__(self, include_files: bool = False) -> None:
-        self.f1 = CWD / "LICENSE"
-        self.f2 = THIRD_PARTY_DIR / "LICENSES_BUNDLED.txt"
-        self.include_files = include_files
-        self.bsd_text = ""
-
-    def __enter__(self) -> None:
-        """Concatenate files"""
-
-        old_path = sys.path
-        sys.path.append(str(THIRD_PARTY_DIR))
-        try:
-            from build_bundled import create_bundled  # type: ignore[import-not-found]
-        finally:
-            sys.path = old_path
-
-        self.bsd_text = self.f1.read_text(encoding="utf-8")
-
-        with self.f1.open(mode="a", encoding="utf-8") as f1:
-            f1.write("\n\n")
-            create_bundled(
-                str(THIRD_PARTY_DIR.resolve()),
-                f1,
-                include_files=self.include_files,
-            )
-
-    def __exit__(self, *exc_info: object) -> None:
-        """Restore content of f1"""
-        self.f1.write_text(self.bsd_text, encoding="utf-8")
-
-
-# Need to create the proper LICENSE.txt for the wheel
 class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
-    def run(self) -> None:
-        with concat_license_files(include_files=True):
-            super().run()
-
     def write_wheelfile(self, *args: Any, **kwargs: Any) -> None:
         super().write_wheelfile(*args, **kwargs)
 
@@ -1460,28 +1028,7 @@ class clean(Command):
         pass
 
     def run(self) -> None:
-        ignores = (CWD / ".gitignore").read_text(encoding="utf-8")
-        for wildcard in filter(None, ignores.splitlines()):
-            if wildcard.strip().startswith("#"):
-                if "BEGIN NOT-CLEAN-FILES" in wildcard:
-                    # Marker is found and stop reading .gitignore.
-                    break
-                # Ignore lines which begin with '#'.
-            else:
-                # Don't remove absolute paths from the system
-                wildcard = wildcard.lstrip("./")
-                for filename in glob.iglob(wildcard):
-                    try:
-                        os.remove(filename)
-                    except OSError:
-                        shutil.rmtree(filename, ignore_errors=True)
-
-
-# Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
-class sdist(setuptools.command.sdist.sdist):
-    def run(self) -> None:
-        with concat_license_files():
-            super().run()
+        _clean()
 
 
 def get_cmake_cache_vars() -> defaultdict[str, CMakeValue]:
@@ -1639,7 +1186,6 @@ def configure_extension_build() -> tuple[
         "bdist_wheel": bdist_wheel,
         "build_ext": build_ext,
         "clean": clean,
-        "sdist": sdist,
     }
 
     entry_points = {
@@ -1712,10 +1258,8 @@ def main() -> None:
         print(e, file=sys.stderr)
         sys.exit(1)
 
-    mirror_files_into_torchgen()
     if RUN_BUILD_DEPS:
         build_deps()
-        mirror_inductor_external_kernels()
 
     (
         ext_modules,
@@ -1729,6 +1273,7 @@ def main() -> None:
     torch_package_data = [
         "py.typed",
         "bin/*",
+        "bin/**/*",
         "test/*",
         "*.pyi",
         "**/*.pyi",

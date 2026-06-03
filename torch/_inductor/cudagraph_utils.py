@@ -4,7 +4,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, get_metrics_context
@@ -18,6 +18,10 @@ from .utils import is_using_cudagraph_partition
 if TYPE_CHECKING:
     from collections.abc import Sequence, Set as AbstractSet
 
+    from torch._inductor.output_code import OutputCode
+
+_OC = TypeVar("_OC", bound="OutputCode")
+
 
 cudagraphs_log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -27,6 +31,102 @@ static_inputs_log = torch._logging.getArtifactLogger(
 
 OutputType = list[int | torch.Tensor | None]
 ModelType = Callable[[list[InputType]], OutputType]
+
+
+INPUT_STORAGE_MUTATION_TARGETS = (
+    torch.ops.aten.set_.default,
+    torch.ops.aten.set_.source_Storage,
+    torch.ops.aten.set_.source_Storage_storage_offset,
+    torch.ops.aten.set_.source_Tensor,
+    torch.ops.aten.set_.source_Tensor_storage_offset,
+)
+
+
+class CUDAGraphPolicy:
+    """Pluggable policy controlling CUDA graph wrapping in Inductor's post_compile.
+
+    Override methods to customize:
+      - HOW compiled functions are cudagraph-wrapped (cudagraphify)
+      - WHETHER inner CompiledFxGraphs should be wrapped (should_wrap)
+      - OUTER wrapping of compound outputs like RegionalOutputCode (wrap_output)
+
+    Set via ``torch._inductor.config.cudagraph_policy``.  When ``None``
+    (the default), the existing built-in behaviour is used unchanged.
+
+    Example usage::
+
+        class MyCUDAGraphPolicy(CUDAGraphPolicy):
+            def cudagraphify(self, model, example_inputs, static_input_idxs, **kwargs):
+                return my_custom_wrapper(model, example_inputs, static_input_idxs)
+
+
+        with torch._inductor.config.patch("cudagraph_policy", MyCUDAGraphPolicy()):
+            compiled_fn = deserialize_artifacts(...)
+    """
+
+    def cudagraphify(
+        self,
+        model: Callable[..., Any],
+        example_inputs: Sequence[InputType],
+        static_input_idxs: Sequence[int],
+        *,
+        device_index: int,
+        is_backward: bool,
+        is_inference: bool,
+        **kwargs: Any,
+    ) -> Callable[..., Any]:
+        """Wrap a single compiled callable with CUDA graph capture/replay.
+
+        Called by ``cudagraph_post_compile`` for each ``CompiledFxGraph``.
+        The default delegates to ``compile_fx.cudagraphify`` (cudagraph_trees).
+
+        ``example_inputs`` are the example inputs at post_compile time.
+        The default implementation does not forward them because
+        ``compile_fx.cudagraphify`` defers graph recording to the first
+        real call via an inner closure.  Subclasses that need the
+        example inputs for warmup or static-input detection may use them.
+
+        When ``config.graph_partition=True``, setting a CUDAGraphPolicy
+        bypasses ``cudagraph_partition_post_compile`` (which wraps each
+        partition individually) and routes through ``cudagraph_post_compile``
+        instead, so this method wraps the *entire* callable, not individual
+        partitions.  Subclasses that need per-partition control should
+        handle partitioning internally.
+        """
+        from torch._inductor.compile_fx import cudagraphify
+
+        return cudagraphify(
+            model,
+            static_input_idxs,
+            device_index=device_index,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            **kwargs,
+        )
+
+    def should_wrap(self, compiled_graph: OutputCode) -> bool:
+        """Whether to apply cudagraph wrapping to this CompiledFxGraph.
+
+        Called for each inner ``CompiledFxGraph`` during ``post_compile``.
+        Return ``False`` to skip wrapping (e.g. when wrapping at the outer
+        level via ``wrap_output`` instead).
+
+        Default: ``True`` (wrap everything, same as current behaviour).
+        """
+        return True
+
+    def wrap_output(self, output_code: _OC) -> _OC:
+        """Optional outer-level wrapping after inner post_compile completes.
+
+        Called by ``_compile_fx_inner``, ``BundledOutputCodeLoadable.post_compile``,
+        and ``FxGraphCacheLoadable.post_compile`` on the ``OutputCode`` returned
+        from ``post_compile``.  Subclasses that only want to wrap specific
+        output types should check ``isinstance`` and return the input
+        unchanged for types they don't handle.
+
+        Default: identity (no outer wrapping).
+        """
+        return output_code
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -49,6 +149,12 @@ class PlaceholderInfo:
     # This field is recursive, but never cyclic (since a node never uses itself)
     users: list[PlaceholderInfo]
     mutating_use_stack_trace: str | None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class InputStorageMutationInfo:
+    input_idxs: OrderedSet[int]
+    stack_trace: str | None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -84,6 +190,50 @@ def get_mutating_use_stack_trace_from_node(
 
 def get_mutating_use_stack_trace(placeholder_info: PlaceholderInfo) -> str | None:
     return placeholder_info.mutating_use_stack_trace
+
+
+def get_input_storage_mutation_info(
+    gm: torch.fx.GraphModule,
+) -> InputStorageMutationInfo:
+    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    placeholder_indices = {node: idx for idx, node in enumerate(placeholders)}
+    storage_mutation_input_idxs: OrderedSet[int] = OrderedSet()
+    stack_trace: str | None = None
+
+    for node in gm.graph.nodes:
+        if (
+            node.op != "call_function"
+            or node.target not in INPUT_STORAGE_MUTATION_TARGETS
+        ):
+            continue
+
+        mutated_arg = node.args[0] if node.args else None
+        # Only direct graph-input set_ rebinds the tensor object that lives
+        # outside this graph. set_ on a temporary view/alias does not rebind the
+        # input TensorImpl and is handled by the usual mutation checks.
+        if (
+            isinstance(mutated_arg, torch.fx.Node)
+            and mutated_arg in placeholder_indices
+        ):
+            storage_mutation_input_idxs.add(placeholder_indices[mutated_arg])
+            if stack_trace is None:
+                stack_trace = node.meta.get("stack_trace", None)
+
+    return InputStorageMutationInfo(storage_mutation_input_idxs, stack_trace)
+
+
+def get_input_storage_mutation_reason(
+    storage_mutation_info: InputStorageMutationInfo,
+) -> str | None:
+    storage_mutation_input_idxs = storage_mutation_info.input_idxs
+    if not storage_mutation_input_idxs:
+        return None
+
+    msg = f"input storage mutation ({len(storage_mutation_input_idxs)} instances)"
+    if storage_mutation_info.stack_trace:
+        return f"{msg}. Found from:\n {storage_mutation_info.stack_trace}"
+
+    return msg
 
 
 def to_placeholder_info(placeholder_node: torch.fx.Node) -> PlaceholderInfo:
@@ -197,10 +347,33 @@ def check_multiple_devices_or_any_cpu_nodes(
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
 
 
+def check_caching_allocator_for_cudagraphs() -> str | None:
+    """Skip cudagraphs when the CUDA/HIP caching allocator is disabled
+    (via ``torch.cuda.caching_allocator_enable(False)`` or the env-var
+    bypass ``PYTORCH_NO_(CUDA|HIP)_MEMORY_CACHING``). Cudagraph capture
+    pools allocations through the caching allocator; with it bypassed,
+    capture appears to succeed but pool tracking diverges (see
+    check_memory_pool in cudagraph_trees.py), surfacing as 'storage data
+    ptrs not allocated in pool ...' at replay time."""
+    if (
+        torch.cuda.is_available()
+        # pyrefly: ignore [missing-attribute]
+        and not torch._C._cuda_cudaCachingAllocator_is_enabled()
+    ):
+        return format_default_skip_message(
+            "cudagraph capture requires the caching allocator; "
+            "current allocator is uncached"
+        )
+    return None
+
+
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> str | None:
-    return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
+    return (
+        check_caching_allocator_for_cudagraphs()
+        or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
+    )
 
 
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:

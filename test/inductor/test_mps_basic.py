@@ -2,6 +2,7 @@
 import importlib
 import os
 import sys
+import unittest
 
 import numpy as np
 
@@ -36,6 +37,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 # This tests basic MPS compile functionality
 
 
+@unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
 @instantiate_parametrized_tests
 class MPSBasicTests(TestCase):
     is_dtype_supported = CommonTemplate.is_dtype_supported
@@ -122,6 +124,25 @@ class MPSBasicTests(TestCase):
 
         self.common(fn, (torch.rand(10), torch.ones(10)))
 
+    def test_batchnorm_train_running_stats(self):
+        # Regression test: missing closing threadgroup_barrier in
+        # threadgroup_welford_{reduce,combine}
+        torch.manual_seed(0)
+        xs = [torch.randn(16, 8, 4, 4) for _ in range(10)]
+
+        def run(device, compile_):
+            torch.manual_seed(0)
+            bn = torch.nn.BatchNorm2d(8).to(device).train()
+            f = torch.compile(bn) if compile_ else bn
+            for x in xs:
+                f(x.to(device))
+            return bn.running_mean.cpu(), bn.running_var.cpu()
+
+        m_ref, v_ref = run("cpu", False)
+        m_mps, v_mps = run("mps", True)
+        self.assertEqual(m_mps, m_ref)
+        self.assertEqual(v_mps, v_ref)
+
     def test_compile_numpy_scalar(self):
         def fn(x, y):
             return x / y
@@ -188,6 +209,35 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    @parametrize("shape", [(4, 5000), (3, 1023), (7, 1025), (5, 32), (1, 30000)])
+    def test_welford_reduction_dynamic_shape(self, shape):
+        # (5, 32): single-stage welford_reduce
+        # (3, 1023), (4, 5000), (7, 1025): multistage welford_reduce
+        # (1, 30000): split reduction -> welford_combine
+        @torch.compile(dynamic=True)
+        def fn(x):
+            return x.var(dim=-1)
+
+        x = torch.randn(*shape, device=self.device)
+        torch._dynamo.mark_dynamic(x, 1)
+        self.assertEqual(fn(x), x.var(dim=-1))
+
+    def test_welford_multistage_sibling_redeclare(self):
+        # Regression test: BatchNorm2d-train emits two codegen passes on
+        # the same multistage reduction root (welford + running-stats
+        # update). Sibling indices (r0_1, r0_2) declared via the
+        # root_already_processed branch must be redeclared in the second
+        # loop scope; otherwise Metal compilation fails with
+        # "use of undeclared identifier 'r0_2'".
+        torch.manual_seed(0)
+        bn_ref = torch.nn.BatchNorm2d(8).train()
+        bn_mps = torch.nn.BatchNorm2d(8).to(self.device).train()
+        bn_mps.load_state_dict(bn_ref.state_dict())
+        x = torch.randn(4, 8, 32, 32)
+        y_ref = bn_ref(x)
+        y_mps = torch.compile(bn_mps)(x.to(self.device))
+        self.assertEqual(y_mps.cpu(), y_ref)
+
     def test_sdpa_split_qkv(self):
         # regression test for metal compiler bug where fused (x / A) % B
         # produces wrong results, causing incorrect reads from non-contiguous.
@@ -207,7 +257,46 @@ class MPSBasicTests(TestCase):
 
         self.common(fn, (q, k, v), atol=1e-4, rtol=1e-4, check_lowp=False)
 
+    def test_nested_masked_cat(self):
+        # Regression test for YOLOv3 compilation failure on MPS.
+        # See https://github.com/pytorch/pytorch/actions/runs/23477894502
+        # YOLOv3 detection heads do view/permute/clone, then in-place slice
+        # assignment (sigmoid+grid, exp*anchor, sigmoid) followed by cat across
+        # scales. The slice_scatter decomposition fused with cat produces nested
+        # ops.masked calls in Metal codegen. Without depth-aware variable
+        # prefixes, inner scoped variables shadow outer ones, causing:
+        #   "variable 'tmp_scoped_1' declared with deduced type 'auto'
+        #    cannot appear in its own initializer"
+        na, no = 3, 5
 
+        def head(p, grid, anchor_wh):
+            bs, _, ny, nx = p.shape
+            p = p.view(bs, na, no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+            io = p.clone()
+            io[..., :2] = torch.sigmoid(io[..., :2]) + grid
+            io[..., 2:4] = torch.exp(io[..., 2:4]) * anchor_wh
+            torch.sigmoid_(io[..., 4:])
+            return io.view(bs, -1, no)
+
+        def fn(p1, p2, grid1, grid2, anchor_wh1, anchor_wh2):
+            return torch.cat(
+                [head(p1, grid1, anchor_wh1), head(p2, grid2, anchor_wh2)], dim=1
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(1, na * no, 4, 4, device="mps"),
+                torch.randn(1, na * no, 8, 8, device="mps"),
+                torch.randn(1, 1, 4, 4, 2, device="mps"),
+                torch.randn(1, 1, 8, 8, 2, device="mps"),
+                torch.randn(1, na, 1, 1, 2, device="mps"),
+                torch.randn(1, na, 1, 1, 2, device="mps"),
+            ),
+        )
+
+
+@unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
 class MPSBasicTestsAOTI(TestCase):
     def check_model(self, m, inp, dynamic_shapes=None):
         res2 = m(*inp)
