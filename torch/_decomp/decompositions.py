@@ -206,9 +206,14 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
 
 @register_decomposition(aten.hardtanh_backward)
 @out_wrapper("grad_input")
+@pw_cast_for_opmath
 def hardtanh_backward(
     grad_output: Tensor, self: Tensor, min_val: float, max_val: float
 ):
+    # Compare in opmath (compute) dtype to match the eager kernel, which casts
+    # self to opmath_t before comparing against the float bounds. Comparing in
+    # the low-precision input dtype would round the bound and misclassify
+    # boundary values (e.g. bf16(0.7) == 0.69921875 vs max_val=0.7).
     return torch.where((self <= min_val) | (self >= max_val), 0.0, grad_output)
 
 
