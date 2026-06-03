@@ -525,6 +525,19 @@ def _get_proxies(t: torch.Tensor | TraceableWrapperSubclass) -> list[Proxy]:
     return proxies
 
 
+# sympy Max/Min are n-ary (they flatten, e.g. Max(a, Max(b, c)) -> Max(a, b, c)),
+# but torch.sym_max/sym_min are binary. Reduce so _build_proxy_for_sym_expr can
+# rebuild flattened expressions as nested binary ops. These are module-level
+# (not lambdas) so they have a qualified name and survive FX codegen/pickling
+# when used as a graph node target.
+def _nary_sym_max(*args: Any) -> Any:
+    return functools.reduce(torch.sym_max, args)
+
+
+def _nary_sym_min(*args: Any) -> Any:
+    return functools.reduce(torch.sym_min, args)
+
+
 @functools.cache
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
@@ -540,6 +553,15 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
         op = getattr(operator, v, None)
         if op is not None:
             handlers[k] = op
+        # sympy Max/Min have no operator.* equivalent. Map them to n-ary-safe
+        # wrappers over torch.sym_max/sym_min. Without this,
+        # _build_proxy_for_sym_expr cannot rebuild expressions like Max(1, u2)
+        # that escape a disable_proxy_modes_tracing region (e.g. DTensor shard
+        # propagation size inference).
+        elif v == "maximum":
+            handlers[k] = _nary_sym_max
+        elif v == "minimum":
+            handlers[k] = _nary_sym_min
 
     # sympy.Add is n-ary (e.g. Add(a, b, c)) but operator.add is binary.
     # torch.sym_sum handles n-ary integer addition and accepts both
@@ -2062,31 +2084,29 @@ def _sym_register(
         set_proxy_slot(out, tracer, p_out_thunk)
 
 
+def _sym_op_arg_node(tracer: _ProxyTracer, a: object) -> object:
+    # Constant sym values carry no proxy slot; fold them to a literal so
+    # untracked constants don't hit "is not tracked with proxy".
+    if not isinstance(a, py_sym_types):
+        return a
+    if a.node.expr.is_number:
+        if isinstance(a, SymBool):
+            return bool(a.node.expr)
+        if isinstance(a, SymInt):
+            return int(a.node.expr)
+        return float(a.node.expr)
+    return get_proxy_slot(a, tracer).force().node
+
+
 def _compute_proxy(
     tracer: _ProxyTracer, func: OpOverload, args: tuple[object, ...], out: PySymType
 ) -> Proxy:
     # Handle torch.sym_sum
     n_args: tuple[object, ...]
     if len(args) == 1 and isinstance(args[0], (list, tuple)):
-        n_args = (
-            tuple(
-                (
-                    get_proxy_slot(a, tracer).force().node
-                    if isinstance(a, py_sym_types)
-                    else a
-                )
-                for a in args[0]
-            ),
-        )
+        n_args = (tuple(_sym_op_arg_node(tracer, a) for a in args[0]),)
     else:
-        n_args = tuple(
-            (
-                get_proxy_slot(a, tracer).force().node
-                if isinstance(a, py_sym_types)
-                else a
-            )
-            for a in args
-        )
+        n_args = tuple(_sym_op_arg_node(tracer, a) for a in args)
 
     # func doesn't have a __torch_function__ that Proxy can interpose, so
     # we gotta do it manually
