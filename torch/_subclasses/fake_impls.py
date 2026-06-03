@@ -739,21 +739,17 @@ def _compute_stride(
     new_shape: Sequence[IntLikeType],
     size_oblivious: bool = False,
 ) -> list[IntLikeType] | None:
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_or_true,
-        sym_eq,
-    )
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
     def maybe_guard_or_false(x: Any) -> Any:
         if size_oblivious:
-            return guard_or_false(x)
+            return statically_known_true(x)
 
         return x
 
     def maybe_guard_or_true(x: Any) -> Any:
         if size_oblivious:
-            return guard_or_true(x)
+            return statically_known_true(x)
 
         return x
 
@@ -786,12 +782,22 @@ def _compute_stride(
     for tensor_d in range(len(old_shape) - 1, -1, -1):
         tensor_numel *= old_shape[tensor_d]
 
-        if tensor_d == 0 or (
-            maybe_guard_or_true(old_shape[tensor_d - 1] != 1)
-            and maybe_guard_or_true(
-                old_stride[tensor_d - 1] != tensor_numel * chunk_base_stride
+        if size_oblivious:
+            is_boundary = tensor_d == 0 or not (
+                statically_known_true(old_shape[tensor_d - 1] == 1)
+                or statically_known_true(
+                    old_stride[tensor_d - 1] == tensor_numel * chunk_base_stride
+                )
             )
-        ):
+        else:
+            is_boundary = tensor_d == 0 or (
+                maybe_guard_or_true(old_shape[tensor_d - 1] != 1)
+                and maybe_guard_or_true(
+                    old_stride[tensor_d - 1] != tensor_numel * chunk_base_stride
+                )
+            )
+
+        if is_boundary:
             while view_d >= 0 and (
                 maybe_guard_or_true(view_numel < tensor_numel)
                 or maybe_guard_or_false(new_shape[view_d] == 1)
@@ -800,7 +806,10 @@ def _compute_stride(
                 view_numel *= new_shape[view_d]
                 view_d -= 1
 
-            if maybe_guard_or_true(view_numel != tensor_numel):
+            if size_oblivious:
+                if not statically_known_true(view_numel == tensor_numel):
+                    return None
+            elif maybe_guard_or_true(view_numel != tensor_numel):
                 return None
 
             if tensor_d > 0:
@@ -1852,7 +1861,7 @@ def register_fast_op_impl(
 def infer_size(
     a: Sequence[IntLikeType], b: Sequence[IntLikeType]
 ) -> tuple[IntLikeType, ...]:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
 
     dimsA = len(a)
     dimsB = len(b)
@@ -1877,12 +1886,14 @@ def infer_size(
         # were not the case, we'd need to write this using torch.sym_or() or
         # something like that).
         torch._check(
-            guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
+            statically_known_true(sizeA == 1)
+            or statically_known_true(sizeB == 1)
+            or sizeA == sizeB,
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
             f"at non-singleton dimension {i})",
         )
-        expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
+        expandedSizes[i] = sizeB if statically_known_true(sizeA == 1) else sizeA
     return tuple(expandedSizes)
 
 
@@ -1922,7 +1933,7 @@ def make_fast_binary_impl(
         if final_shape is None:
             raise AssertionError("final_shape must not be None")
 
-        from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
+        from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
         # Do some extra safety checks to see if the output
         # stride is obvious
@@ -1931,7 +1942,7 @@ def make_fast_binary_impl(
                 isinstance(op, torch.Tensor)
                 and len(op.shape) == len(final_shape)
                 # take the slow path if result is not determined.
-                and guard_or_false(sym_eq(op.shape, final_shape))  # type: ignore[arg-type]
+                and statically_known_true(sym_eq(op.shape, final_shape))  # type: ignore[arg-type]
             ):
                 break
         else:

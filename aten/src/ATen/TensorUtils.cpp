@@ -301,6 +301,7 @@ void check_dim_size(
 
 namespace detail {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
   std::vector<int64_t> strides(sizes.size());
   int64_t stride = 1;
@@ -365,15 +366,17 @@ inline static std::optional<ResultVec> computeStride_impl(
   Numel tensor_numel = 1;
   Numel view_numel = 1;
 
- // The usages of TORCH_GUARD_OR_TRUE/TORCH_GUARD_OR_FALSE below could result in returning
- // std::nullopt which has an effect of falling back to a clone when unbacked symints are present.
- // But it will not result in returning different or wrong results.
+  // The usages of TORCH_STATICALLY_KNOWN_TRUE below avoid specializing reshape
+  // viewability on whether a size-like symbolic dimension happens to be 0/1.
+  // If we cannot prove the view stride is valid without a guard, returning
+  // std::nullopt has the effect of falling back to a clone.
   for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
     tensor_numel *= oldshape[tensor_d];
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
-        (TORCH_GUARD_OR_TRUE(sym_ne(oldshape[tensor_d - 1], 1)) &&
-        TORCH_GUARD_OR_TRUE(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
+        !(TORCH_STATICALLY_KNOWN_TRUE(sym_eq(oldshape[tensor_d - 1], 1)) ||
+          TORCH_STATICALLY_KNOWN_TRUE(sym_eq(
+              oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
      // We want to accumulate stuff in view_numel until view_numel == tensor_numel, if we do not
      // know if that is satisfied we keep accumulating. For example if view_numel = 1 and tensor_numel = u1,
      // we want to take that path, view_numel will become u0. Next iteration if u0==u1 we want to stop.
@@ -385,12 +388,12 @@ inline static std::optional<ResultVec> computeStride_impl(
      // and u0==u1, then want to stop unless newshape[view_d]==1. taking one more iteration will keep [view_numel = u0
      // and tensor_numel = u1].
       while (view_d >= 0 &&
-            (TORCH_GUARD_OR_TRUE(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_OR_FALSE(sym_eq(newshape[view_d], 1)))) {
+            (TORCH_STATICALLY_KNOWN_TRUE(sym_lt(view_numel, tensor_numel)) || TORCH_STATICALLY_KNOWN_TRUE(sym_eq(newshape[view_d], 1)))) {
         newstride[view_d] = view_numel * chunk_base_stride;
         view_numel *= newshape[view_d];
         view_d--;
       }
-      if (TORCH_GUARD_OR_TRUE(sym_ne(view_numel, tensor_numel))) {
+      if (!TORCH_STATICALLY_KNOWN_TRUE(sym_eq(view_numel, tensor_numel))) {
         return std::nullopt;
       }
       if (tensor_d > 0) {
@@ -406,6 +409,7 @@ inline static std::optional<ResultVec> computeStride_impl(
   return newstride;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 std::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,

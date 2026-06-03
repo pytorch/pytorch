@@ -2065,7 +2065,8 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
-  if (self.is_contiguous_or_false() && !self.is_mkldnn()) {
+  if (self.sym_is_contiguous().statically_known_true(__FILE__, __LINE__) &&
+      !self.is_mkldnn()) {
     return self.view_symint(proposed_shape);
   }
 
@@ -2121,7 +2122,7 @@ Tensor _reshape_copy_symint(
     TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
   }
 
-  if (self.is_contiguous_or_false()) {
+  if (self.sym_is_contiguous().statically_known_true(__FILE__, __LINE__)) {
     return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
   } else {
     return at::_unsafe_view_symint(

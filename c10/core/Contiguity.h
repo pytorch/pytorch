@@ -42,7 +42,7 @@ inline static c10::SymBool _compute_contiguous_sym(
   // If this return true, the tensor is contiguous indeed. Otherwise it could be
   // either.
   auto is_contiguous_or_false = [&]() {
-    if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
+    if (TORCH_STATICALLY_KNOWN_TRUE(sym_eq(numel, 0))) {
       return true;
     }
 
@@ -63,12 +63,13 @@ inline static c10::SymBool _compute_contiguous_sym(
     c10::SymInt expected_stride_max = 1;
     // NB: make sure we do signed arithmetic
     for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
-      if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
+      if (TORCH_STATICALLY_KNOWN_TRUE(sym_eq(sizes[d], 1))) {
         continue;
       }
 
-      if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride)) &&
-          TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride_max))) {
+      if (!TORCH_STATICALLY_KNOWN_TRUE(sym_eq(strides[d], expected_stride)) &&
+          !TORCH_STATICALLY_KNOWN_TRUE(
+              sym_eq(strides[d], expected_stride_max))) {
         return false;
       }
       expected_stride_max *= sizes[d].max(1);

@@ -387,10 +387,10 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 def _broadcast_shapes(*_shapes):
     from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
         guarding_hint_or_throw,
         has_guarding_hint,
         is_nested_int,
+        statically_known_true,
     )
 
     backed_so = torch.fx.experimental._config.backed_size_oblivious
@@ -420,7 +420,7 @@ def _broadcast_shapes(*_shapes):
             if is_nested_int(shape[idx]):
                 # Broadcasting is allowed for (j0, 1) or (j0, j0);
                 # not (j0, j1), (j0, 5), etc.
-                if is_nested_int(common_shape[idx]) and guard_or_false(
+                if is_nested_int(common_shape[idx]) and statically_known_true(
                     shape[idx] == common_shape[idx]
                 ):
                     continue
@@ -445,17 +445,17 @@ def _broadcast_shapes(*_shapes):
                         torch._check(shape[idx] == 1)
                     if b == 1 and a != 1:
                         torch._check(common_shape[idx] == 1)
-                if guard_or_false(shape[idx] == common_shape[idx]):
+                if statically_known_true(shape[idx] == common_shape[idx]):
                     continue
 
-            if guard_or_false(common_shape[idx] == 1):
+            if statically_known_true(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
 
-            if not is_nested_int(shape[idx]) and guard_or_false(shape[idx] == 1):
+            if not is_nested_int(shape[idx]) and statically_known_true(shape[idx] == 1):
                 # broadcast case .
                 continue
             else:
@@ -478,7 +478,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
 
     def should_expand(a: ShapeType, b: ShapeType) -> bool:
         from torch.fx.experimental.symbolic_shapes import (
-            guard_or_false,
+            statically_known_true,
             sym_and,
             sym_or,
         )
@@ -487,16 +487,16 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             return True
 
         for x, y in zip(a, b):
-            if guard_or_false(x != y):
+            if statically_known_true(x != y):
                 # We know they are not the same.
                 return True
 
             # They are the same or we do not know if they are the same or not.
             # 1==1 no-broadcast
             # u0==1 and 1==u0 cases. We broadcast!
-            if guard_or_false(sym_and(x == 1, y == 1)):
+            if statically_known_true(sym_and(x == 1, y == 1)):
                 pass
-            elif guard_or_false(sym_or(x == 1, y == 1)):
+            elif statically_known_true(sym_or(x == 1, y == 1)):
                 # assume broadcasting.
                 return True
 
@@ -3928,6 +3928,8 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 def _reshape_view_helper_core_alg(
     a: TensorLikeType, shape, allow_copy: bool
 ) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
     # NOTE [Reshape Algorithm]
     # This algorithm works by attempting to greedily construct the desired dimensions in
     # the output shape, left to right. It does this by, conceptually, accumulating
@@ -3961,14 +3963,23 @@ def _reshape_view_helper_core_alg(
             idx = idx + 1
             continue
 
-        # Skips dimensions that are already the correct length
-        if length == a_.shape[idx]:
+        # Skips dimensions that are already the correct length. Use static
+        # reasoning here so reshape metadata does not specialize on 0/1 hints.
+        if statically_known_true(length == a_.shape[idx]):
+            idx = idx + 1
+            continue
+
+        # A target dimension of length 1 can always be produced by splitting
+        # the current source dimension with an outer length of 1. Avoid
+        # branching on whether the source dimension is also currently 1.
+        if statically_known_true(length == 1):
+            a_ = prims.split_dim(a_, idx, 1)
             idx = idx + 1
             continue
 
         accum = a_.shape[idx]
         end = idx
-        while accum % length != 0:
+        while not statically_known_true(accum % length == 0):
             end += 1
             accum *= a_.shape[end]
         if end != idx:

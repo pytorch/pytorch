@@ -1281,6 +1281,7 @@ def _broadcast_in_dim_meta(
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
         guard_or_true,
+        statically_known_true,
         sym_or,
     )
 
@@ -1338,8 +1339,8 @@ def _broadcast_in_dim_meta(
         if idx in broadcast_dimensions:
             # Assigns a stride of zero to dimensions
             # which were actually broadcast
-            if guard_or_false(a.shape[original_idx] == 1):
-                if guard_or_false(a.shape[original_idx] == shape[idx]):
+            if statically_known_true(a.shape[original_idx] == 1):
+                if statically_known_true(a.shape[original_idx] == shape[idx]):
                     new_strides.append(a.stride()[original_idx])
                 else:
                     new_strides.append(0)
@@ -1437,6 +1438,7 @@ def _collapse_view_helper(
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
         guard_or_true,
+        statically_known_true,
         sym_and,
         sym_or,
     )
@@ -1455,7 +1457,7 @@ def _collapse_view_helper(
         return shape, strides
 
     valid_op = True
-    if guard_or_false(a.numel() != 0):
+    if not statically_known_true(a.numel() == 0):
         for idx in range(end - 1, start - 1, -1):
             valid_op = sym_and(
                 valid_op,
@@ -1476,23 +1478,31 @@ def _collapse_view_helper(
     if must_be_valid:
         torch._check(valid_op, lambda: must_be_valid)
     else:
-        if not guard_or_false(valid_op):
+        if not statically_known_true(valid_op):
             return None, None
 
     # compute stride
     stride = strides[end]
     for idx in range(end - 1, start - 1, -1):
-        if shape[idx] != 1:
+        if must_be_valid:
+            if shape[idx] != 1:
+                # TODO with unbacked we should really exclude when shape[idx] == 1
+                # something like
+                # min(stride[end], torch.ite(shape[x]!=1,stride[idx], inf), ...)
+                stride = min(stride, strides[idx])
+        elif statically_known_true(shape[idx] != 1):
             # TODO with unbacked we should really exclude when shape[idx] == 1
             # something like
             # min(stride[end], torch.ite(shape[x]!=1,stride[idx], inf), ...)
             stride = min(stride, strides[idx])
+        elif not statically_known_true(shape[idx] == 1):
+            return None, None
 
     # compute length
     length = shape[end]
-    if guard_or_true(length != 0):
+    if not statically_known_true(length == 0):
         for idx in range(end - 1, start - 1, -1):
-            if guard_or_false(shape[idx] == 0):
+            if statically_known_true(shape[idx] == 0):
                 length = 0
                 stride = 0
                 break
@@ -1505,7 +1515,7 @@ def _collapse_view_helper(
 
     # NOTE: when the input has no elements it's restrided as if it were contiguous
     # except for unbacked.
-    if guard_or_false(a.numel() == 0):
+    if statically_known_true(a.numel() == 0):
         new_strides = utils.make_contiguous_strides_for(new_shape)
 
     return new_shape, new_strides
