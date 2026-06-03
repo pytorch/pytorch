@@ -5660,6 +5660,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
+    @skipIfTorchDynamo("recursive dynamo")
     def test_safe_aot_autograd_check_checks_gradients_for_non_leaf_inputs(self):
         original_assert_close = torch.testing.assert_close
         gradient_asserts = []
