@@ -628,7 +628,7 @@ PyObject* dynamo__custom_eval_frame(
     guarded_code = callback_result.attr("guarded_code").ptr();
   } catch (py::error_already_set& e) {
     // internal exception, returning here will leak the exception into user
-    // code this is useful for debugging -- but we dont want it to happen
+    // code this is useful for debugging -- but we don't want it to happen
     // outside of testing NB: we intentionally DO NOT re-enable custom
     // behavior to prevent cascading failure from internal exceptions.  The
     // upshot is if Dynamo barfs, that's it for Dynamo, even if you catch the

@@ -63,7 +63,7 @@ class DAG:
 
 
 class PartitionResult(NamedTuple):
-    """NameTuple used for returning DAG and a new fx module"""
+    """NamedTuple used for returning DAG and a new fx module"""
 
     dag: DAG
     module_with_submodules: GraphModule
@@ -108,8 +108,8 @@ def set_parents_and_children(partitions: list[Partition]) -> None:
             # For each node in the current partition, find its users
             users = node.users
             for n in users:
-                # Find which the partition the user node belongs to.
-                # Note that if the node itself is also belongs to that partition,
+                # Find which partition the user node belongs to.
+                # Note that if the node itself also belongs to that partition,
                 # that partition is not the child of the current partition
                 for p in partitions:
                     if p != partition and n in p.nodes and node not in p.nodes:
@@ -342,7 +342,7 @@ class Partitioner:
                 total_size_of_graph, logical_device_id=device_with_max_mem.logical_id
             )
         elif total_size_of_graph > sum(d.available_mem_bytes for d in self.devices):
-            raise RuntimeError("Devices have no enough memory for the module")
+            raise RuntimeError("Devices do not have enough memory for the module")
         else:
             # Sparse nn based partition
             if partitioner_config.mode == PartitionMode.sparse_nn:
@@ -429,7 +429,7 @@ class Partitioner:
                     device = d
                     break
             if device.available_mem_bytes < 0:
-                raise RuntimeError(str(node) + "is too large to fit any device")
+                raise RuntimeError(str(node) + " is too large to fit any device")
             occupied_devices.append(device)
             return device
 
@@ -621,10 +621,10 @@ class Partitioner:
         it only works when all the devices have same memory size (available_mem_bytes).
         In the future, devices with different mem sizes will be supported like size_based_partition.
         It first traverse all the nodes and do the partitions based on the same memory size.
-        If the current partition has no enough memory left for a new op node
+        If the current partition does not have enough memory left for a new op node
         (call_module, call_method, call_function), a new partition is created.
         When crossing the boundary between non-embedding nodes and embedding nodes,
-        a new partition is created regardlessly.
+        a new partition is created regardless.
         For example, if the current node is a non-embedding node but the next node is an
         embedding node, a new partition is created for the next node.
         After the partition, the partitions are combined as much as possible.
@@ -751,7 +751,7 @@ class Partitioner:
                     total_size_of_input_nodes = get_extra_size_of(node, partition.nodes)
                     if total_size_of_input_nodes > available_mem_bytes:
                         raise RuntimeError(
-                            node.target + "is too large to fit into a device"
+                            node.target + " is too large to fit into a device"
                         )
                 partition.add_node(node)
         finalize_partition(partition)
