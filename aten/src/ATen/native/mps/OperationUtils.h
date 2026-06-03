@@ -9,11 +9,14 @@
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
 #include <fmt/format.h>
 #include <torch/library.h>
+#include <limits>
+#include <type_traits>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -75,6 +78,27 @@ static inline std::string scalarToMetalTypeString(const TensorBase& t) {
 }
 static inline std::string scalarToMetalTypeString(const std::optional<Tensor>& t) {
   return t.has_value() ? scalarToMetalTypeString(t.value()) : "void";
+}
+
+// True iff every tensor's max element offset fits in Offset32 (signed -> 2^31, unsigned -> 2^32).
+template <typename Offset32, typename... Tensors>
+inline bool offsetsFitIn(const Tensors&... tensors) {
+  constexpr int64_t kMaxOffset = std::numeric_limits<Offset32>::max();
+  return (... && at::native::canUse32BitIndexMath(tensors, kMaxOffset));
+}
+
+inline const char* mtlIdxSuffix(bool use32) {
+  return use32 ? "_u32" : "_u64";
+}
+
+// Lower the runtime use32 bool to a compile-time offset type and pass it to fn as a std::type_identity tag.
+template <typename Offset32, typename Offset64, typename Fn>
+inline void mtlDispatchByIndexWidth(bool use32, Fn&& fn) {
+  if (use32) {
+    fn(std::type_identity<Offset32>{});
+  } else {
+    fn(std::type_identity<Offset64>{});
+  }
 }
 NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
