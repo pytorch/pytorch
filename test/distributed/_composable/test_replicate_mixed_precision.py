@@ -220,10 +220,10 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
                 # Use reduce-scatter -> all-gather to implement all-reduce
                 # since for world size >2, bf16 all-reduce and reduce-scatter
                 # have numeric differences
-                sharded_grad = funcol.reduce_scatter_tensor(
+                sharded_grad = funcol.reduce_scatter_single(
                     param_grad, scatter_dim=0, reduceOp="avg", group=group
                 )  # bf16 reduction
-                param.grad = funcol.all_gather_tensor(
+                param.grad = funcol.all_gather_single(
                     sharded_grad, gather_dim=0, group=group
                 ).to(param.dtype)  # upcast to fp32
             ref_optim.step()  # fp32 optimizer step
