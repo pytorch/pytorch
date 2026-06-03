@@ -387,6 +387,22 @@ Range constraints: {u0: VR[0, int_oo]}""",
                 strict=True,
             )
 
+    def test_explicit_none_spec_for_passed_arg_does_not_raise(self):
+        """Explicit ``None`` in ParamsSpec for a passed arg means "static"
+        and must not be flagged as an unmatched spec key (regression: a
+        prior `.get()` check conflated key-absent with value-is-None).
+        """
+        ep = export(
+            _ModXPlus(),
+            args=(torch.randn(8, 3),),
+            dynamic_shapes=ShapesSpec(
+                params=ParamsSpec({"x": None}),  # explicit static spec for x
+            ),
+            strict=True,
+        )
+        shape = _first_tensor_placeholder_shape(ep.graph_module)
+        self.assertEqual(tuple(shape), (8, 3))
+
     def test_non_strict_raises_not_implemented(self):
         """Non-strict export does not yet support ShapesSpec/ParamsSpec."""
         with self.assertRaisesRegex(

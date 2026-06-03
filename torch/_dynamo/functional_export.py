@@ -1054,27 +1054,32 @@ def _flatten_shapes_spec(
     # corresponding signature param name in `params_spec_named_args`.
     for i, arg_value in enumerate(args[:varargs_idx]):
         arg_name = pos_params[i].name
-        user_spec = params_spec_named_args.get(arg_name)
-        if user_spec is not None:
+        # Note: distinguish "key absent" from "key present with value None"
+        # (the latter means the user explicitly marked this arg static).
+        # Both skip spec binding, but the explicit-None form still counts
+        # as matched so it isn't reported in `unmatched` below.
+        if arg_name in params_spec_named_args:
             matched_named_keys.add(arg_name)
+            user_spec = params_spec_named_args[arg_name]
+        else:
+            user_spec = None
+        if user_spec is not None:
             _check_leaf_spec_matches_value(
                 user_spec,
                 arg_value,
                 where=f"ParamsSpec entry for forward param {arg_name!r}",
             )
-            # Validation guarantees arg_value is a single leaf (n=1).
             out_leaf_specs[flat_idx] = user_spec
             flat_idx += 1
         else:
-            # No spec for this arg — just advance past its flat slots.
+            # No spec (or explicit-None spec) for this arg — just advance
+            # past its flat slots.
             leaves, _ = pytree.tree_flatten(arg_value)
             flat_idx += len(leaves)
 
     # Pad params_spec_varargs to match the actual `*args` count, filling
     # missing tail entries with None ("static"). Lets Loop 2 below index
-    # uniformly without a bounds check. TODO(next PR): extend this
-    # normalization to rewrite container specs into structurally-matching
-    # leaf-spec lists.
+    # uniformly without a bounds check.
     n_actual_varargs = len(args) - varargs_idx
     params_spec_varargs = list(params_spec_varargs or [])
     params_spec_varargs += [None] * max(0, n_actual_varargs - len(params_spec_varargs))
