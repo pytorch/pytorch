@@ -1000,7 +1000,7 @@ class GraphModule(torch.nn.Module):
 
         real_fn : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.real_fn
         fake_fn : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.fake_fn
-        input_spec : torch.utils._pytree.TreeSpec = self.input_spec
+        input_spec : torch.utils.pytree.python.PyTreeSpec = self.input_spec
         invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(real_fn, fake_fn, input_spec, '', 0, l_self_modules_linear_parameters_weight_, l_self_modules_linear_parameters_bias_, l_x_);  real_fn = fake_fn = input_spec = l_self_modules_linear_parameters_weight_ = l_self_modules_linear_parameters_bias_ = l_x_ = None
         getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem,)
@@ -1246,7 +1246,7 @@ class GraphModule(torch.nn.Module):
 
         real_fn : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.real_fn
         fake_fn : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.fake_fn
-        input_spec : torch.utils._pytree.TreeSpec = self.input_spec
+        input_spec : torch.utils.pytree.python.PyTreeSpec = self.input_spec
         invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(real_fn, fake_fn, input_spec, '', 0, l_self_parameters_offset_, l_self_modules_linear_parameters_weight_, l_self_modules_linear_parameters_bias_, l_x_);  real_fn = fake_fn = input_spec = l_self_parameters_offset_ = l_self_modules_linear_parameters_weight_ = l_self_modules_linear_parameters_bias_ = l_x_ = None
         getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem,)
@@ -1375,7 +1375,7 @@ class GraphModule(torch.nn.Module):
 
         real_fn : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.real_fn
         fake_fn : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.fake_fn
-        input_spec : torch.utils._pytree.TreeSpec = self.input_spec
+        input_spec : torch.utils.pytree.python.PyTreeSpec = self.input_spec
         invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(real_fn, fake_fn, input_spec, '', 0, l_self_modules_inner_modules_linear_parameters_weight_, l_self_modules_inner_modules_linear_parameters_bias_, l_self_modules_linear_parameters_weight_, l_self_modules_linear_parameters_bias_, l_x_);  real_fn = fake_fn = input_spec = l_self_modules_inner_modules_linear_parameters_weight_ = l_self_modules_inner_modules_linear_parameters_bias_ = l_self_modules_linear_parameters_weight_ = l_self_modules_linear_parameters_bias_ = l_x_ = None
         getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem,)
@@ -2099,7 +2099,7 @@ class GraphModule(torch.nn.Module):
 
         real_fn : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.real_fn
         fake_fn : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.fake_fn
-        input_spec : torch.utils._pytree.TreeSpec = self.input_spec
+        input_spec : torch.utils.pytree.python.PyTreeSpec = self.input_spec
         invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(real_fn, fake_fn, input_spec, '', l_x_);  real_fn = fake_fn = input_spec = invoke_leaf_function = None
 
         linear: "f32[3, 3]" = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight_, l_self_modules_linear_parameters_bias_);  l_x_ = l_self_modules_linear_parameters_weight_ = l_self_modules_linear_parameters_bias_ = None
