@@ -25746,7 +25746,7 @@ python_ref_db = [
             # AssertionError: Tensor-likes are not equal!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool),
+                dtypes=(torch.uint8, torch.bool),
             ),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
@@ -25754,7 +25754,7 @@ python_ref_db = [
             ),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool),
+                dtypes=(torch.uint8, torch.bool),
             ),
         ),
     ),

@@ -14893,6 +14893,9 @@ class TestConsistency(TestCaseMPS):
                 # fp16; one unlucky seeded angle can produce ~0.1 absolute
                 # drift on a single element while the rest match.
                 atol, rtol = 0.15, 0.1
+            if op.name == "nn.functional.mse_loss" and dtype == torch.float16:
+                # Metal kernel computes in float32 but stores float16; 1 ULP difference expected
+                atol, rtol = 1e-3, 1e-3
 
             if isinstance(cpu_sample.input, torch.Tensor):
                 equal_input_types = cpu_sample.input.dtype == mps_sample.input.dtype
