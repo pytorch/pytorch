@@ -9444,6 +9444,12 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             packed.outputs = [outputs]
 
+        if kernel is torch.ops.aten._efficientzerotensor.default:
+            V.graph.never_reuse_buffers.add(packed.get_name())
+            for output in pytree.tree_leaves(outputs):
+                if isinstance(output, IRNode):
+                    V.graph.never_reuse_buffers.add(output.get_name())
+
         return outputs
 
 

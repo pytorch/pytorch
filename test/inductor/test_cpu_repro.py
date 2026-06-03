@@ -3482,6 +3482,20 @@ class CPUReproTests(TestCase):
             )
         check_metrics_vec_kernel_count(1)
 
+    def test_emulate_precision_casts_explicit_lowp_round_trip(self):
+        # An explicit fp32->fp16->fp32 round-trip must keep its intermediate
+        # rounding under emulate_precision_casts. The CPU codegen used to collapse
+        # it via the reverse lowp-fp->fp32 CSE cache (populated at to_dtype time),
+        # silently dropping the fp16 rounding. See issue #185337.
+        def fn(x):
+            y = x.to(torch.float16).to(torch.float32)
+            return y, y.sum(dim=1)
+
+        x = torch.arange(20, dtype=torch.float32).reshape(5, 4).t() / 7.0
+        with config.patch({"emulate_precision_casts": True}):
+            torch._dynamo.reset()
+            self.common(fn, (x,))
+
     def test_memory_copy_with_fusion(self):
         def fn(x):
             res = x.relu()
@@ -6711,7 +6725,6 @@ class CPUReproTests(TestCase):
 
         torch.compile(fn)(torch.randn(2, 2))
 
-    @xfailIf(IS_ARM64)  # https://github.com/pytorch/pytorch/issues/176285
     @skipIfRocmArch(MI200_ARCH)
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @requires_vectorization
