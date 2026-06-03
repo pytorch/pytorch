@@ -1299,6 +1299,43 @@ class DecompOneOffTests(TestCase):
         for o_ref, o in zip(out_ref, out):
             self.assertEqual(o_ref.dtype, o.dtype)
 
+    @onlyCPU
+    def test_native_group_norm_cpu_affine_decomp(self, device):
+        torch.manual_seed(0)
+        bn = torch.nn.BatchNorm1d(10).eval()
+        elu = torch.nn.ELU()
+        gn = torch.nn.GroupNorm(10, 10).eval()
+
+        x = torch.ones([6, 10, 12], device=device)
+        input = elu(bn(x))
+        decomp = decomposition_table[torch.ops.aten.native_group_norm.default]
+        cases = (
+            (gn.weight, gn.bias, "weight_bias"),
+            (gn.weight, None, "weight_only"),
+            (None, torch.zeros_like(gn.bias), "bias_only"),
+            (None, torch.linspace(0.1, 1.0, 10, device=device), "bias_only_nonzero"),
+            (None, None, "no_affine"),
+        )
+        for weight, bias, name in cases:
+            with self.subTest(name=name):
+                args = (
+                    input,
+                    weight,
+                    bias,
+                    input.shape[0],
+                    input.shape[1],
+                    input.shape[2],
+                    gn.num_groups,
+                    gn.eps,
+                )
+
+                native_out = torch.ops.aten.native_group_norm.default(*args)[0]
+                decomp_out = decomp(*args)[0]
+
+                native_out = torch.log(torch.clamp(native_out, min=1e-6))
+                decomp_out = torch.log(torch.clamp(decomp_out, min=1e-6))
+                torch.testing.assert_close(native_out, decomp_out, atol=1e-4, rtol=1e-4)
+
     @onlyCUDA
     @unittest.skipIf(not SM70OrLater, "triton")
     def test_rms_norm_decomp_cuda(self, device):

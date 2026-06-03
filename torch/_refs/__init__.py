@@ -3389,11 +3389,20 @@ def native_group_norm(
         input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
-    if input.device.type == "cpu" and weight is not None:
-        weight_reshaped = torch.reshape(
-            weight, [1, num_groups, num_channels // num_groups, 1]
-        )
-        w = rstd * weight_reshaped
+    if (
+        input.device.type == "cpu"
+        and input.dtype in (torch.float32, torch.float64)
+        and (weight is not None or bias is not None)
+    ):
+        if weight is not None:
+            weight_reshaped = torch.reshape(
+                weight, [1, num_groups, num_channels // num_groups, 1]
+            )
+            w = rstd * weight_reshaped
+        else:
+            w = torch.broadcast_to(
+                rstd, [batch_size, num_groups, num_channels // num_groups, 1]
+            )
         b = -mean * w
         if bias is not None:
             bias_reshaped = torch.reshape(
@@ -3405,7 +3414,7 @@ def native_group_norm(
         broadcast_dims = list(range(2, input.ndim))
         unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
         unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
-        out = input_acc * unsqueeze_w + unsqueeze_b
+        out = torch.addcmul(unsqueeze_b, input_acc, unsqueeze_w, value=1)
     else:
         out = (input_reshaped - mean) * rstd
         out = out.view(input.shape)
