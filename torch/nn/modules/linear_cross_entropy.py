@@ -39,9 +39,17 @@ def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
     ctx.compute_linear_weight_grad = compute_linear_weight_grad
     ctx.compute_linear_bias_grad = compute_linear_bias_grad
     _, grad_input, grad_linear_weight, grad_linear_bias = output
-    ctx._gi = grad_input if compute_input_grad else None
-    ctx._gw = grad_linear_weight if compute_linear_weight_grad else None
-    ctx._gb = grad_linear_bias if compute_linear_bias_grad else None
+    # ``.detach()`` the stashed grads: they are forward OUTPUTS, so they
+    # carry ``grad_fn`` back to this custom-op node. Holding them as raw
+    # ctx attributes would form a reference cycle (node -> ctx -> grad ->
+    # grad_fn -> node) that refcounting can't break, leaking the tensors
+    # until a GC pass -- which the CUDA mem-leak check flags. Detaching
+    # drops the grad_fn link so the tensors free promptly when the loss's
+    # graph is. Backward only multiplies them by the upstream grad, so the
+    # lost autograd history is irrelevant (double-backward is unsupported).
+    ctx._gi = grad_input.detach() if compute_input_grad else None
+    ctx._gw = grad_linear_weight.detach() if compute_linear_weight_grad else None
+    ctx._gb = grad_linear_bias.detach() if compute_linear_bias_grad else None
 
 
 @dataclasses.dataclass
