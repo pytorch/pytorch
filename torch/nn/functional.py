@@ -1,5 +1,6 @@
 """Functional interface."""
 
+import dataclasses
 import importlib
 import math
 import warnings
@@ -36,6 +37,7 @@ ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
 
 if TYPE_CHECKING:
+    from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
     from torch.types import _dtype as DType
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
@@ -3658,10 +3660,12 @@ def linear_cross_entropy(
     linear_weight: Tensor,
     target: Tensor,
     *,
+    linear_bias: Tensor | None = None,
     weight: Tensor | None = None,
     reduction: str = "mean",
     ignore_index: int | None = None,
     label_smoothing: float = 0.0,
+    options: "LinearCrossEntropyOptions | None" = None,
 ) -> Tensor:
     r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
 
@@ -3684,6 +3688,13 @@ def linear_cross_entropy(
         input (Tensor) : input samples.
         linear_weight (Tensor) : linear weight.
         target (Tensor) : Ground truth class indices or class probabilities;
+        linear_bias (Tensor, optional): bias added to the linear
+            projection (shape ``(C,)`` or ``(C, d_1, ..., d_K)`` for
+            K-dimensional loss, matching :attr:`linear_weight`).
+            Currently supported only on the reference path
+            (``options=None``); setting ``linear_bias`` with a
+            non-``None`` ``options`` warns and falls back to the
+            reference path. Default: ``None``.
         weight (Tensor, optional): a manual rescaling weight given to each class.
         reduction (str, optional): Specifies the reduction to apply to
             the output: ``'none'`` | ``'mean'`` |
@@ -3709,6 +3720,37 @@ def linear_cross_entropy(
             Architecture for Computer Vision
             <https://arxiv.org/abs/1512.00567>`__.
             Default: :math:`0.0`.
+        options (LinearCrossEntropyOptions, optional): Specify
+            chunking strategy options, see
+            :class:`~torch.nn.LinearCrossEntropyOptions`
+            for more details. Enabling chunking will decrease the
+            memory usage.  To enable reference implementation of
+            ``linear_cross_entropy``, use `options=None`. Default:
+            ``None``. See the autograd / compile note below for
+            which higher-level APIs (``torch.compile``,
+            ``torch.func.grad``, ``torch.func.vmap(grad(...))``,
+            higher-order or forward-mode AD) only work on the
+            ``options=None`` reference path.
+
+    .. note::
+        **Limitations of the chunked path** (``options`` not ``None``).
+        The chunked op precomputes gradients inside forward and consumes
+        them via in-place backward mutation, which puts it outside the
+        standard autograd contract:
+
+        - Higher-order AD (``create_graph=True``, ``hessian``) is
+          unsupported.
+        - Forward-mode AD (``jvp``, ``jacfwd``) is unsupported.
+        - ``torch.func.grad`` / ``vmap(grad(...))`` does not work, but
+          plain ``output.backward()`` does.
+        - ``torch.compile`` falls back to eager at the chunked op;
+          ``allow_retain_graph=True`` is forced internally to keep
+          double-backward correct (with a warning).
+        - ``torch.jit.trace`` falls back to the reference path with a
+          warning.
+        - :class:`LinearCrossEntropyOptions` is not TorchScript-scriptable.
+
+        The reference path (``options=None``) supports all of the above.
 
     Shape:
         - Input: :math:`(in_features)` or :math:`(N, in\_features)`.
@@ -3739,17 +3781,19 @@ def linear_cross_entropy(
         where :math:`N` is batch size and :math:`C` is number of classes.
 
     """
-    if has_torch_function_variadic(input, linear_weight, target, weight):
+    if has_torch_function_variadic(input, linear_weight, target, linear_bias, weight):
         return handle_torch_function(
             linear_cross_entropy,
-            (input, linear_weight, target, weight),
+            (input, linear_weight, target, linear_bias, weight),
             input,
             linear_weight,
             target,
+            linear_bias=linear_bias,
             weight=weight,
             reduction=reduction,
             ignore_index=ignore_index,
             label_smoothing=label_smoothing,
+            options=options,
         )
     if input.dim() < 1 or input.dim() > 2:
         raise RuntimeError(
@@ -3768,6 +3812,14 @@ def linear_cross_entropy(
         )
     num_classes = linear_weight.shape[0]
     out_features = linear_weight.shape[1:-1]
+    if linear_bias is not None and tuple(linear_bias.shape) != (
+        num_classes,
+        *out_features,
+    ):
+        raise RuntimeError(
+            "expected linear_bias shape "
+            f"{(num_classes, *out_features)}, got {tuple(linear_bias.shape)}"
+        )
     if len(out_features) > 0 and len(num_batches) == 0:
         raise RuntimeError(
             f"K-dimensional loss defined by linear_weight shape {tuple(linear_weight.shape)} requires"
@@ -3785,12 +3837,101 @@ def linear_cross_entropy(
         )
     ignore_index = ignore_index if ignore_index is not None else -100
 
+    # K-dim loss falls back: the chunked op softmaxes over the full
+    # linear_weight.shape[0], not per-position over num_classes.
+    if options is not None and (
+        out_features
+        or reduction not in {"mean", "sum"}
+        or label_smoothing != 0.0
+        or target.dtype != torch.int64
+        or torch.jit.is_tracing()
+        or linear_bias is not None
+    ):
+        warnings.warn(
+            "linear_cross_entropy: ``options`` ignored; chunked path needs "
+            "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
+            " == int64, out_features == (), linear_bias is None. Got "
+            f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
+            f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
+            f", tracing={torch.jit.is_tracing()}"
+            f", linear_bias.shape="
+            f"{tuple(linear_bias.shape) if linear_bias is not None else None}.",
+            stacklevel=2,
+        )
+
+    if (
+        options is not None
+        and reduction in {"mean", "sum"}
+        and label_smoothing == 0.0
+        and target.dtype == torch.int64
+        and not out_features
+        and not torch.jit.is_tracing()
+        and linear_bias is None
+    ):
+        if input.dim() == 2:
+            num_batches = input.shape[0]
+            has_batches = True
+        else:
+            num_batches = 1
+            has_batches = False
+            input = input.unsqueeze(0)
+            target = target.unsqueeze(0)
+
+        options = options._adjust(
+            num_batches=num_batches,
+            in_features=in_features,
+            num_classes=num_classes,
+            dtype=input.dtype,
+            device=input.device,
+        )
+
+        # Force allow_retain_graph=True under torch.compile: the default
+        # second-backward guard uses a Python ``ctx._gi = None`` mutation
+        # that Dynamo doesn't preserve, breaking double-backward.
+        if not options.allow_retain_graph and torch.compiler.is_compiling():
+            warnings.warn(
+                "linear_cross_entropy: forcing allow_retain_graph=True under "
+                "torch.compile (adds one gradient-sized allocation/call). "
+                "Construct options with allow_retain_graph=True to silence.",
+                stacklevel=2,
+            )
+            options = dataclasses.replace(options, allow_retain_graph=True)
+
+        # Local import avoids a circular init via torch.library.custom_op.
+        from torch.nn.modules.linear_cross_entropy import (
+            _linear_cross_entropy_batch_chunked,
+        )
+
+        result = _linear_cross_entropy_batch_chunked(
+            input,
+            linear_weight,
+            target,
+            weight,
+            reduction,
+            ignore_index,
+            label_smoothing,
+            options.batch_chunk_size,
+            options.acc_policy,
+            options.acc_dtype,
+            options.allow_retain_graph,
+            input.requires_grad and torch.is_grad_enabled(),
+            linear_weight.requires_grad and torch.is_grad_enabled(),
+        )[0]
+
+        if not has_batches:
+            result = result.squeeze(0)
+        return result
+
     if out_features:
-        # reshape linear_weight to 2D required by linear
         linear_weight = linear_weight.reshape(
             (math.prod(out_features, start=num_classes), in_features)
         )
-    logits = linear(input, linear_weight)
+        if linear_bias is not None:
+            linear_bias = linear_bias.reshape(
+                math.prod(out_features, start=num_classes)
+            )
+
+    logits = linear(input, linear_weight, linear_bias)
     # recover logits shape that corresponds to the shape of specified
     # linear_weight:
     logits = logits.reshape(logits_shape)
@@ -6841,9 +6982,7 @@ def multi_head_attention_forward(
         if not torch.jit.is_scripting():
             del v
 
-        attn_output = (
-            attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
-        )
+        attn_output = attn_output.transpose(0, 1).reshape(tgt_len * bsz, embed_dim)
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
         attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
 
@@ -6878,14 +7017,12 @@ def multi_head_attention_forward(
             q, k, v, attn_mask, dropout_p, is_causal
         )
         # Free q, k, v and their backing projection storage before the
-        # .contiguous() call below allocates.  In self-attention the three
-        # tensors are views of a single packed projection, so releasing all
-        # references here lets the allocator reclaim that memory immediately.
+        # reshape() below allocates.  In self-attention the three tensors are
+        # views of a single packed projection, so releasing all references
+        # here lets the allocator reclaim that memory immediately.
         if not torch.jit.is_scripting():
             del q, k, v
-        attn_output = (
-            attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
-        )
+        attn_output = attn_output.permute(2, 0, 1, 3).reshape(bsz * tgt_len, embed_dim)
 
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
         attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
