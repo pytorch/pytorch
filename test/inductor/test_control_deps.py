@@ -490,6 +490,44 @@ class TestControlDeps(InductorTestCase):
             "expected MutationOutput entries for pass-through values in control_deps",
         )
 
+    def test_stream_cache_setup_only_once(self):
+        """When codegen_device_guard_enter is called multiple times on the same
+        wrapper instance (e.g., forward + backward sharing a wrapper in
+        activation offloading), only the first call should set
+        setup_stream_cache=True."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        codegen = MagicMock(spec=PythonWrapperCodegen)
+        codegen._stream_cache_setup_done = False
+        codegen.last_seen_device_guard_index = None
+        codegen.writeline = MagicMock()
+
+        stream_map = {1: 10}
+
+        # Call the real method twice on the same instance
+        PythonWrapperCodegen.codegen_device_guard_enter(
+            codegen,
+            device_idx=0,
+            num_streams=2,
+            stream_idx_to_user_obj_idx=stream_map,
+        )
+        first_call_line = codegen.writeline.call_args_list[0][0][0]
+        self.assertTrue(first_call_line.setup_stream_cache)
+
+        PythonWrapperCodegen.codegen_device_guard_enter(
+            codegen,
+            device_idx=0,
+            num_streams=2,
+            stream_idx_to_user_obj_idx=stream_map,
+        )
+        second_call_line = codegen.writeline.call_args_list[1][0][0]
+        self.assertFalse(
+            second_call_line.setup_stream_cache,
+            "Second device guard entry should not re-execute stream cache setup",
+        )
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:
