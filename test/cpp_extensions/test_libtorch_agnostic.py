@@ -469,6 +469,25 @@ class TestLibtorchAgnostic(TestCase):
 
         self.assertEqual(nh, expected)
 
+    @skipIfTorchVersionLessThan(2, 13)
+    @onlyCUDA
+    def test_kernel_launch_on_custom_stream(self, device):
+        import libtorch_agn_2_13 as libtorch_agnostic
+
+        device_idx = torch.cuda.current_device()
+        magic_value = 42
+
+        input_tensor = torch.zeros(1, dtype=torch.int32, device=f"cuda:{device_idx}")
+        custom_stream = torch.cuda.Stream(device=device_idx)
+
+        with torch.cuda.stream(custom_stream):
+            output = libtorch_agnostic.ops.test_kernel_launch_on_stream(
+                input_tensor, magic_value
+            )
+
+        custom_stream.synchronize()
+        self.assertEqual(output.item(), magic_value)
+
     @onlyCUDA
     @deviceCountAtLeast(2)
     def test_get_current_device_index(self, device):

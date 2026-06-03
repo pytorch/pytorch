@@ -66,6 +66,7 @@ def get_extension():
         extra_compile_args["nvcc"] = [
             "-O2",
             "-DUSE_CUDA",
+            "-DLAE_USE_CUDA",
             "-DTORCH_TARGET_VERSION=0x020d000000000000",
             "-DSTABLE_LIB_NAME=libtorch_agn_2_13",
         ]
