@@ -4,7 +4,7 @@ import math
 import numbers
 import warnings
 import weakref
-from typing import overload
+from typing import cast, overload
 from typing_extensions import deprecated
 
 import torch
@@ -35,6 +35,17 @@ _rnn_impls = {
 
 def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
+
+
+def _get_packed_sequence_batch_size(
+    batch_sizes: Tensor, sorted_indices: Tensor | None
+) -> int:
+    # TorchScript treats SymInt as int and cannot compile int | torch.SymInt.
+    if not torch.jit.is_scripting() and sorted_indices is not None:
+        return cast(int, sorted_indices.size(0))
+    if not torch.jit.is_scripting():
+        return cast(int, batch_sizes[0].item())
+    return batch_sizes[0]  # pyrefly: ignore [bad-return]
 
 
 @deprecated(
@@ -683,7 +694,9 @@ class RNN(RNNBase):
 
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
-            max_batch_size = batch_sizes[0]
+            max_batch_size = _get_packed_sequence_batch_size(
+                batch_sizes, sorted_indices
+            )
             # script() is unhappy when max_batch_size is different type in cond branches, so we duplicate
             if hx is None:
                 hx = torch.zeros(
@@ -736,7 +749,18 @@ class RNN(RNNBase):
 
         if hx is None:
             raise AssertionError("hx must not be None")
-        self.check_forward_args(input, hx, batch_sizes)
+        if batch_sizes is not None:
+            self.check_input(input, batch_sizes)
+            self.check_hidden_size(
+                hx,
+                (
+                    self.num_layers * num_directions,
+                    max_batch_size,
+                    self.hidden_size,
+                ),
+            )
+        else:
+            self.check_forward_args(input, hx, batch_sizes)
         if self.mode != "RNN_TANH" and self.mode != "RNN_RELU":
             raise AssertionError(f"mode must be RNN_TANH or RNN_RELU, got {self.mode}")
         if batch_sizes is None:
@@ -1088,7 +1112,9 @@ class LSTM(RNNBase):
         real_hidden_size = self.proj_size if self.proj_size > 0 else self.hidden_size
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
-            max_batch_size = batch_sizes[0]
+            max_batch_size = _get_packed_sequence_batch_size(
+                batch_sizes, sorted_indices
+            )
             if hx is None:
                 h_zeros = torch.zeros(
                     self.num_layers * num_directions,
@@ -1379,12 +1405,14 @@ class GRU(RNNBase):
         self._update_flat_weights()
 
         orig_input = input
+        num_directions = 2 if self.bidirectional else 1
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
-            max_batch_size = batch_sizes[0]
+            max_batch_size = _get_packed_sequence_batch_size(
+                batch_sizes, sorted_indices
+            )
             if hx is None:
-                num_directions = 2 if self.bidirectional else 1
                 hx = torch.zeros(
                     self.num_layers * num_directions,
                     max_batch_size,
@@ -1421,7 +1449,6 @@ class GRU(RNNBase):
             sorted_indices = None
             unsorted_indices = None
             if hx is None:
-                num_directions = 2 if self.bidirectional else 1
                 hx = torch.zeros(
                     self.num_layers * num_directions,
                     max_batch_size,
@@ -1434,7 +1461,18 @@ class GRU(RNNBase):
                 # the user believes he/she is passing in.
                 hx = self.permute_hidden(hx, sorted_indices)
 
-        self.check_forward_args(input, hx, batch_sizes)
+        if batch_sizes is not None:
+            self.check_input(input, batch_sizes)
+            self.check_hidden_size(
+                hx,
+                (
+                    self.num_layers * num_directions,
+                    max_batch_size,
+                    self.hidden_size,
+                ),
+            )
+        else:
+            self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
             # pyrefly: ignore [no-matching-overload]
             result = _VF.gru(
