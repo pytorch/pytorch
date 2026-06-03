@@ -2556,6 +2556,7 @@ class CatchErrorsWrapper:
                 and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):
+            skip_due_to_dispatch_mode = False
             if has_started_execution:
                 skip_reason = "frame has already started executing"
             elif is_skipfile:
@@ -2563,11 +2564,18 @@ class CatchErrorsWrapper:
             elif config.disable:
                 skip_reason = "Dynamo tracing is disabled"
             else:
+                skip_due_to_dispatch_mode = True
                 skip_reason = (
                     "non-infra torch dispatch mode present, this is not"
                     " supported today in torch.compile"
                 )
-            return self._handle_skip(ConvertFrameReturn(skip_reason=skip_reason), frame)
+            return self._handle_skip(
+                ConvertFrameReturn(
+                    apply_to_code=not skip_due_to_dispatch_mode,
+                    skip_reason=skip_reason,
+                ),
+                frame,
+            )
 
         if (
             frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__"
