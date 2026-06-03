@@ -920,22 +920,109 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(torch.sinh(a).imag, zero)
         self.assertEqual(torch.cosh(a).imag, zero)
 
-    @xfailIf(MACOS_VERSION > 15.0)
-    def test_conv_raises_error(self, device='mps', dtype=torch.float):
-        conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
-
-        x = torch.ones([1, 1, 3])
-        with self.assertRaises(NotImplementedError):
-            y = conv(x.to("mps"))
-
-    @xfailIf(MACOS_VERSION < 15.1)
     def test_conv_high_channel_size(self):
+        # out_channels > 2**16. On macOS < 15.1 this takes the im2col path
+        # (conv2d_needs_im2col_path's weight_size[0] > 65536 branch); on 15.1+
+        # it runs natively. Both must match CPU.
         out_channels = 65537
         weight = torch.randn(out_channels, 1, 1)
         x = torch.ones([1, 1, 1])
         y_cpu = F.conv1d(x.to("cpu"), weight.to("cpu"))
         y_mps = F.conv1d(x.to("mps"), weight.to("mps"))
         self.assertEqual(y_cpu, y_mps)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_conv2d_large_kernel(self, dtype):
+        # Regression for #129207 / #142515: MPSGraph's conv2d kernel produces
+        # silently wrong results once the effective kernel size approaches
+        # 2**16. Forward fp16/bf16 fails earlier than fp32. The fix routes
+        # affected shapes through im2col + matmul.
+        torch.manual_seed(0)
+        weight = torch.randn(10, 10, 1, 65536, dtype=dtype)
+        x = torch.randn(1, 10, 1, 65536, dtype=dtype)
+        y_cpu = F.conv2d(x.float(), weight.float())
+        y_mps = F.conv2d(x.to("mps"), weight.to("mps")).float().cpu()
+        # Half-precision needs a looser tolerance (precision, not the kernel bug).
+        atol = 5e-4 if dtype == torch.float32 else 5e-1
+        rtol = 1e-4 if dtype == torch.float32 else 1e-1
+        self.assertEqual(y_cpu, y_mps, atol=atol, rtol=rtol)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_conv2d_half_kernel_corruption_gap(self, dtype):
+        # half/bf16 MPSGraph conv corrupts above an effective kernel extent of
+        # 2**15, well before fp32's 2**16. Pins the routing threshold: a kernel
+        # width of 40000 (in (2**15, 2**16)) must take the im2col path. If the
+        # half/bf16 limit regresses upward, MPSGraph runs natively and this fails.
+        torch.manual_seed(0)
+        weight = torch.randn(4, 4, 1, 40000, dtype=dtype)
+        x = torch.randn(1, 4, 1, 40000, dtype=dtype)
+        y_cpu = F.conv2d(x.float(), weight.float())
+        y_mps = F.conv2d(x.to("mps"), weight.to("mps")).float().cpu()
+        self.assertEqual(y_cpu, y_mps, atol=5e-1, rtol=1e-1)
+
+    def test_conv2d_large_kernel_backward(self):
+        # Regression for the backward path: grad_input and grad_weight both
+        # corrupt under MPSGraph for spatial dim >= 2**16; the im2col path
+        # restores correctness for autograd.
+        torch.manual_seed(0)
+        weight_cpu = torch.randn(2, 2, 1, 65536, requires_grad=True)
+        x_cpu = torch.randn(1, 2, 1, 65536, requires_grad=True)
+        y_cpu = F.conv2d(x_cpu, weight_cpu)
+        gout = torch.randn_like(y_cpu)
+        gx_cpu, gw_cpu = torch.autograd.grad(y_cpu, (x_cpu, weight_cpu), gout)
+
+        weight_mps = weight_cpu.detach().to("mps").requires_grad_()
+        x_mps = x_cpu.detach().to("mps").requires_grad_()
+        y_mps = F.conv2d(x_mps, weight_mps)
+        gx_mps, gw_mps = torch.autograd.grad(y_mps, (x_mps, weight_mps), gout.to("mps"))
+        self.assertEqual(gx_cpu, gx_mps.cpu())
+        self.assertEqual(gw_cpu, gw_mps.cpu())
+
+    def test_conv_transpose2d_large_kernel(self):
+        # ConvTranspose2d.forward dispatches through mps_convolution_backward_input;
+        # the same im2col routing must keep that path correct.
+        torch.manual_seed(0)
+        weight = torch.randn(2, 2, 1, 65536)
+        x = torch.randn(1, 2, 1, 4)
+        y_cpu = F.conv_transpose2d(x, weight)
+        y_mps = F.conv_transpose2d(x.to("mps"), weight.to("mps")).cpu()
+        self.assertEqual(y_cpu, y_mps)
+
+    def test_conv2d_large_kernel_groups_and_bias(self):
+        # Exercises the groups > 1 branch in the im2col helpers and the bias
+        # path in mps_conv2d_fwd_via_im2col.
+        torch.manual_seed(0)
+        weight = torch.randn(4, 1, 1, 65536)
+        x = torch.randn(1, 2, 1, 65536)
+        bias = torch.randn(4)
+        y_cpu = F.conv2d(x, weight, bias=bias, groups=2)
+        y_mps = F.conv2d(x.to("mps"), weight.to("mps"), bias=bias.to("mps"), groups=2).cpu()
+        self.assertEqual(y_cpu, y_mps)
+
+    def test_conv2d_large_kernel_channels_last(self):
+        # im2col routing must preserve channels_last for output and grads;
+        # compared against the contiguous path on-device, so values match exactly.
+        torch.manual_seed(0)
+        cl = torch.channels_last
+        weight = torch.randn(4, 2, 2, 65536)
+        x = torch.randn(1, 2, 3, 65540)
+        gout = torch.randn(1, 4, 2, 5)
+
+        def run(memory_format):
+            xm = x.detach().to("mps").contiguous(memory_format=memory_format).requires_grad_()
+            wm = weight.detach().to("mps").requires_grad_()
+            ym = F.conv2d(xm, wm)
+            gx, gw = torch.autograd.grad(ym, (xm, wm), gout.to("mps").contiguous(memory_format=memory_format))
+            return ym, gx, gw
+
+        y_ref, gx_ref, gw_ref = run(torch.contiguous_format)
+        y_cl, gx_cl, gw_cl = run(cl)
+        self.assertTrue(y_cl.is_contiguous(memory_format=cl))
+        self.assertTrue(gx_cl.is_contiguous(memory_format=cl))
+        self.assertTrue(gw_cl.is_contiguous(memory_format=cl))
+        self.assertEqual(y_ref, y_cl)
+        self.assertEqual(gx_ref, gx_cl)
+        self.assertEqual(gw_ref, gw_cl)
 
     def test_triu_inf(self, device="mps", dtype=torch.float):
         for diag in [-1, 0, 1]:

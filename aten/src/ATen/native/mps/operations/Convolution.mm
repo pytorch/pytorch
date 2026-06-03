@@ -4,6 +4,9 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_mps_convolution_native.h>
 #include <ATen/ops/_mps_convolution_transpose_native.h>
+#include <ATen/ops/col2im.h>
+#include <ATen/ops/im2col.h>
+#include <ATen/ops/matmul.h>
 #include <ATen/ops/mps_convolution_backward_native.h>
 #include <ATen/ops/mps_convolution_transpose_backward_native.h>
 #include <fmt/format.h>
@@ -144,6 +147,126 @@ static void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
   descriptor_.groups = groups;
 }
 
+static bool conv2d_needs_im2col_path(IntArrayRef weight_size, c10::ScalarType dtype, IntArrayRef dilation) {
+  if (weight_size.size() != 4) {
+    return false;
+  }
+  const int64_t eff_kh = (weight_size[2] - 1) * dilation[0] + 1;
+  const int64_t eff_kw = (weight_size[3] - 1) * dilation[1] + 1;
+  // MPSGraph's conv2d silently corrupts once the effective kernel extent reaches
+  // these limits: half/bf16 break at 2**15, fp32 not until ~2**16. The fp32 limit
+  // is kept deliberately conservative to also cover older OSes we cannot probe.
+  const int64_t spatial_limit = (dtype == kHalf || dtype == kBFloat16) ? 32768 : 65535;
+  if (std::max(eff_kh, eff_kw) >= spatial_limit) {
+    return true;
+  }
+  return weight_size[0] > 65536 && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS);
+}
+
+static Tensor mps_conv2d_fwd_via_im2col(const Tensor& input_t,
+                                        const Tensor& weight_t,
+                                        const std::optional<Tensor>& bias_opt,
+                                        IntArrayRef padding,
+                                        IntArrayRef stride,
+                                        IntArrayRef dilation,
+                                        int64_t groups) {
+  const auto input = input_t.contiguous();
+  const auto weight = weight_t.contiguous();
+  const auto out_shape = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
+
+  const int64_t N = out_shape[0];
+  const int64_t O = out_shape[1];
+  const int64_t L = out_shape[2] * out_shape[3];
+  const int64_t KH = weight.size(2);
+  const int64_t KW = weight.size(3);
+  const int64_t C_per_g = weight.size(1);
+
+  auto cols = at::im2col(input, {KH, KW}, dilation, padding, stride);
+  Tensor output;
+  if (groups == 1) {
+    auto w_flat = weight.reshape({O, C_per_g * KH * KW});
+    output = at::matmul(w_flat, cols).reshape(out_shape);
+  } else {
+    const int64_t O_per_g = O / groups;
+    auto w_g = weight.reshape({groups, O_per_g, C_per_g * KH * KW});
+    auto cols_g = cols.reshape({N, groups, C_per_g * KH * KW, L});
+    output = at::matmul(w_g, cols_g).reshape(out_shape);
+  }
+
+  if (bias_opt && bias_opt->defined()) {
+    output.add_(bias_opt->view({1, O, 1, 1}));
+  }
+  return output;
+}
+
+// Reached both as the true grad_input and as ConvTranspose2d.forward (the latter
+// routes here through mps_convolution_backward_input).
+static Tensor mps_conv2d_bwd_input_via_im2col(IntArrayRef input_size,
+                                              const Tensor& grad_output_t,
+                                              const Tensor& weight_t,
+                                              IntArrayRef padding,
+                                              IntArrayRef stride,
+                                              IntArrayRef dilation,
+                                              int64_t groups) {
+  const auto grad_output = grad_output_t.contiguous();
+  const auto weight = weight_t.contiguous();
+
+  const int64_t N = grad_output.size(0);
+  const int64_t O = grad_output.size(1);
+  const int64_t L = grad_output.size(2) * grad_output.size(3);
+  const int64_t KH = weight.size(2);
+  const int64_t KW = weight.size(3);
+  const int64_t C_per_g = weight.size(1);
+  const int64_t C_in = input_size[1];
+
+  auto grad_output_flat = grad_output.reshape({N, O, L});
+  Tensor grad_cols;
+  if (groups == 1) {
+    auto w_flat_t = weight.reshape({O, C_per_g * KH * KW}).t().contiguous();
+    grad_cols = at::matmul(w_flat_t, grad_output_flat);
+  } else {
+    const int64_t O_per_g = O / groups;
+    auto w_gt = weight.reshape({groups, O_per_g, C_per_g * KH * KW}).transpose(1, 2).contiguous();
+    auto go_g = grad_output_flat.reshape({N, groups, O_per_g, L});
+    grad_cols = at::matmul(w_gt, go_g).reshape({N, C_in * KH * KW, L});
+  }
+
+  return at::col2im(grad_cols, {input_size[2], input_size[3]}, {KH, KW}, dilation, padding, stride);
+}
+
+// Folds N into the contraction dim so the reduction over batch happens inside
+// a single matmul rather than via a separate sum.
+static Tensor mps_conv2d_bwd_weight_via_im2col(IntArrayRef weight_size,
+                                               const Tensor& grad_output_t,
+                                               const Tensor& input_t,
+                                               IntArrayRef padding,
+                                               IntArrayRef stride,
+                                               IntArrayRef dilation,
+                                               int64_t groups) {
+  const auto grad_output = grad_output_t.contiguous();
+  const auto input = input_t.contiguous();
+
+  const int64_t N = grad_output.size(0);
+  const int64_t O = grad_output.size(1);
+  const int64_t L = grad_output.size(2) * grad_output.size(3);
+  const int64_t C_per_g = weight_size[1];
+  const int64_t KH = weight_size[2];
+  const int64_t KW = weight_size[3];
+
+  auto cols = at::im2col(input, {KH, KW}, dilation, padding, stride);
+
+  if (groups == 1) {
+    auto go_2d = grad_output.permute({1, 0, 2, 3}).reshape({O, N * L});
+    auto cols_2d = cols.permute({1, 0, 2}).reshape({C_per_g * KH * KW, N * L});
+    return at::matmul(go_2d, cols_2d.t().contiguous()).reshape({O, C_per_g, KH, KW});
+  }
+  const int64_t O_per_g = O / groups;
+  auto go_g = grad_output.reshape({N, groups, O_per_g, L}).permute({1, 2, 0, 3}).reshape({groups, O_per_g, N * L});
+  auto cols_g =
+      cols.reshape({N, groups, C_per_g * KH * KW, L}).permute({1, 2, 0, 3}).reshape({groups, C_per_g * KH * KW, N * L});
+  return at::matmul(go_g, cols_g.transpose(1, 2).contiguous()).reshape({O, C_per_g, KH, KW});
+}
+
 static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     const Tensor& weight_t,
                                     const std::optional<Tensor>& bias_opt,
@@ -174,6 +297,12 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2};
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
+
+  if (!is3DConv && !input_shape.has_value() &&
+      conv2d_needs_im2col_path(weight_t.sizes(), input_t.scalar_type(), dilation)) {
+    auto out = mps_conv2d_fwd_via_im2col(input_t, weight_t, bias_opt, padding, stride, dilation, groups);
+    return is_channels_last ? out.contiguous(at::MemoryFormat::ChannelsLast) : out;
+  }
 
   auto output_t =
       at::empty(input_shape.has_value() ? input_shape.value()
@@ -371,6 +500,13 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   using namespace at::native::mps;
   using namespace mps;
   bool is3DConv = grad_output_t.dim() == 5;
+  TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
+  if (!is3DConv && conv2d_needs_im2col_path(weight_t.sizes(), grad_output_t.scalar_type(), dilation)) {
+    auto grad_input =
+        mps_conv2d_bwd_input_via_im2col(input_size, grad_output_t, weight_t, padding, stride, dilation, groups);
+    return mps_conv_use_channels_last(grad_output_t, weight_t) ? grad_input.contiguous(at::MemoryFormat::ChannelsLast)
+                                                               : grad_input;
+  }
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS)) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
     for (auto elem : grad_output_t.sizes()) {
@@ -378,7 +514,6 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
     }
   }
 
-  TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_input";
   TensorArg grad_output{grad_output_t, "grad_output", 1}, weight{weight_t, "weight", 2};
   checkAllSameType(c, {grad_output, weight});
@@ -535,6 +670,12 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   using namespace mps;
   const bool is3DConv = input_t.dim() == 5;
   TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
+  if (!is3DConv && conv2d_needs_im2col_path(weight_size, grad_output_t.scalar_type(), dilation)) {
+    auto grad_weight =
+        mps_conv2d_bwd_weight_via_im2col(weight_size, grad_output_t, input_t, padding, stride, dilation, groups);
+    return mps_conv_use_channels_last(input_t, grad_output_t) ? grad_weight.contiguous(at::MemoryFormat::ChannelsLast)
+                                                              : grad_weight;
+  }
   CheckedFrom c = "mps_convolution_backward_weights";
   constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
   constexpr auto kChannelsLast3d = at::MemoryFormat::ChannelsLast3d;
