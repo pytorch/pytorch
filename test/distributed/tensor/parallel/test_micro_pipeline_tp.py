@@ -253,7 +253,7 @@ class MicroPipelineTPTest(TestCase):
         group = dist.group.WORLD
 
         def func(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
-            A = all_gather_tensor(A_shard, gather_dim=1, group=group)
+            A = all_gather_single(A_shard, gather_dim=1, group=group)
             return A @ B
 
         # batch=1: after all_gather, shape[0] == world_size == group_size,
