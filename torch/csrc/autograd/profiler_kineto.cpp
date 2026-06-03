@@ -297,7 +297,7 @@ struct AddGenericMetadata : public MetadataBase {
         continue;
       }
 
-      // Until needed, lets limit the kwargs to only ints, doubles, strings,
+      // Until needed, let's limit the kwargs to only ints, doubles, strings,
       // bools, and list of strings
       bool isValidType =
           val.isInt() || val.isDouble() || val.isString() || val.isBool();
