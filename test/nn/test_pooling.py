@@ -358,6 +358,7 @@ class TestPoolingNN(NNTestCase):
 
 
 class TestPoolingNNDeviceType(NNTestCase):
+    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_adaptive_pooling_avg_nhwc(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
         input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
@@ -378,6 +379,7 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
 
+    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     def test_adaptive_pooling_avg_nhwc_non_contiguous(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
         input = input.contiguous(memory_format=torch.channels_last)
@@ -401,6 +403,7 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertEqual(input.grad, ref_input.grad)
 
     @onlyAccelerator
+    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     @largeTensorTest("12GB")
     def test_adaptive_pooling_avg_nhwc_launch_config_backward(self, device):
         input = torch.randint(
@@ -426,6 +429,7 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertEqual(input.grad, ref_input.grad)
 
     @onlyAccelerator
+    @expectedFailureMPS  # MPS adaptive avg pool requires divisible input/output sizes
     @largeTensorTest("12GB")
     def test_adaptive_pooling_avg_nhwc_launch_config_forward(self, device):
         input = torch.randint(
@@ -1250,7 +1254,7 @@ torch.cuda.synchronize()
     def test_max_pool2d(self, device):
         def helper(n, c, h, w, ks):
             x = torch.randn(
-                n, c, h, w, device="cuda", dtype=torch.float, requires_grad=True
+                n, c, h, w, device=device, dtype=torch.float, requires_grad=True
             )
             ref_x = x.detach().clone().cpu().requires_grad_()
 
@@ -1470,11 +1474,11 @@ torch.cuda.synchronize()
         def helper(n, c, h, w, ks):
             if n is None:
                 x = torch.randn(
-                    c, h, w, device="cuda", dtype=torch.float, requires_grad=True
+                    c, h, w, device=device, dtype=torch.float, requires_grad=True
                 )
             else:
                 x = torch.randn(
-                    n, c, h, w, device="cuda", dtype=torch.float, requires_grad=True
+                    n, c, h, w, device=device, dtype=torch.float, requires_grad=True
                 )
 
             ref_x = x.detach().clone().cpu().requires_grad_()
@@ -1691,9 +1695,9 @@ torch.cuda.synchronize()
         )
         y = torch.nn.functional.max_pool3d(x, 5)
         g = torch.randn_like(y, dtype=torch.half)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         y.backward(g)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         ref_x = x.detach().cpu().float()  # max_pool3d_cpu is not implemented for half
         ref_x.requires_grad = True
@@ -2083,11 +2087,11 @@ torch.cuda.synchronize()
     def test_pooling_large(self, device):
         def helper(pool):
             inp = torch.randn(
-                2**7 + 10, 2**8, 2**8, 2**8, dtype=torch.half, device="cuda"
+                2**7 + 10, 2**8, 2**8, 2**8, dtype=torch.half, device=device
             )
             self.assertTrue(inp.numel() > 2**31 - 1)
             pool(inp)
-            torch.cuda.synchronize()  # asserts test finishes normally without raising errors
+            torch.accelerator.synchronize()  # asserts test finishes normally without raising errors
 
         helper(nn.MaxPool2d(4, 4))
         helper(nn.AvgPool2d(4, 4))
