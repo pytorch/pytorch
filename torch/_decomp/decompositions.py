@@ -5570,6 +5570,7 @@ def multilabel_margin_loss_forward(
     z = z.clamp_min(0)
     z = z / dim
     # masks loss
+    z = torch.where(target_mask.T.unsqueeze(dim=-1), z, 0)
     z = torch.where(is_target, 0, z)
     # reduction
     if reduction == Reduction.MEAN.value:
@@ -5578,6 +5579,8 @@ def multilabel_margin_loss_forward(
         z = z.sum()
     else:
         z = z.sum(dim=(0, -1))
+        if len(orig_target_shape) <= 1:
+            z = z.squeeze(0)
     # result
     is_target = is_target.to(input.dtype).reshape(orig_target_shape)
     return z, is_target
