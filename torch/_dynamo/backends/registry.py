@@ -101,9 +101,11 @@ def register_backend(
     if compiler_fn is None:
         # @register_backend(name="") syntax
         return functools.partial(register_backend, name=name, tags=tags)  # type: ignore[return-value]
-    assert callable(compiler_fn)
+    if not callable(compiler_fn):
+        raise AssertionError(f"compiler_fn must be callable, got {type(compiler_fn)}")
     name = name or compiler_fn.__name__
-    assert name not in _COMPILER_FNS, f"duplicate name: {name}"
+    if name in _COMPILER_FNS:
+        raise AssertionError(f"duplicate name: {name}")
     if compiler_fn not in _BACKENDS:
         _BACKENDS[name] = None
     _COMPILER_FNS[name] = compiler_fn
@@ -163,7 +165,8 @@ def _lazy_import() -> None:
 
     from ..repro.after_dynamo import dynamo_minifier_backend
 
-    assert dynamo_minifier_backend is not None
+    if dynamo_minifier_backend is None:
+        raise AssertionError("dynamo_minifier_backend failed to load")
 
     _discover_entrypoint_backends()
 

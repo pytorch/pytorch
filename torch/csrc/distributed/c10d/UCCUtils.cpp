@@ -165,7 +165,7 @@ CommUCC::CommUCC(
   if (st != UCC_OK) {
     TORCH_UCC_CHECK(
         ucc_finalize(lib),
-        "failed to finalize UCC library when failing to creat UCC context");
+        "failed to finalize UCC library when failing to create UCC context");
     TORCH_UCC_LOG_ERROR(
         TORCH_UCC_INIT,
         c10::str("UCC failed to create UCC context: ", ucc_status_string(st)));

@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import warnings
 from abc import ABC, abstractmethod
@@ -78,6 +79,7 @@ from torch._inductor.output_code import (
     CompiledAOTI,
     CompiledFxGraph,
     CompiledFxGraphConstantsWithGm,
+    copy_strided_storage_,
     get_expanded_dims,
     index_expanded_dims,
     OutputCode,
@@ -119,7 +121,6 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
-from .output_code import complex_memory_overlap  # noqa: F401
 from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
@@ -1120,9 +1121,10 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
+        cache_event_metadata: dict[str, Any] = dict(cache_info) if cache_info else {}
         CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
-            metadata=cache_info or {},
+            metadata=cache_event_metadata,
             time_ns=start_time,
         )
         # Add event data about cache hits/miss
@@ -1331,7 +1333,7 @@ class _InProcessFxCompile(FxCompile):
             # Convert view to reshape in the graph. This is necessary primarily for
             # layout optimization. Do it unconditionally for uniformity.
             #
-            # It's needed because when we do layout optimization, an contiguous tensor
+            # It's needed because when we do layout optimization, a contiguous tensor
             # in eager mode may becomes a channels last tensor. A view op previously
             # can be applied to the contiguous tensor may not be able to be applied
             # on the channels tensor any more. An error like
@@ -1912,13 +1914,14 @@ def cudagraphify(
     else:
         cudagraphify_fn = cudagraphify_impl
 
-    compiled_fn = None
+    thread_local = threading.local()
 
     def run(new_inputs: Sequence[InputType]) -> Any:
-        nonlocal compiled_fn
+        compiled_fn = getattr(thread_local, "compiled_fn", None)
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
+            thread_local.compiled_fn = compiled_fn
         return compiled_fn(new_inputs)  # type: ignore[arg-type]
 
     return run
@@ -1937,9 +1940,15 @@ def index_expanded_dims_and_copy_(
     expanded_dims: list[int],
 ) -> None:
     "Index into expanded dimensions of both dst and src then copy_"
-    dst = index_expanded_dims(dst, expanded_dims)
-    src = index_expanded_dims(src, expanded_dims)
-    dst.copy_(src)
+    indexed_dst = index_expanded_dims(dst, expanded_dims)
+    if torch._debug_has_internal_overlap(indexed_dst) != 0:
+        # dst still self-overlaps after dropping expanded dims (rare). A regular
+        # copy_ would have ambiguous semantics; bytewise-copy the strided extent
+        # instead so dst's overlap pattern is reproduced verbatim.
+        copy_strided_storage_(dst, src)
+        return
+    indexed_src = index_expanded_dims(src, expanded_dims)
+    indexed_dst.copy_(indexed_src)
 
 
 def cudagraphify_impl(
@@ -2264,6 +2273,13 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
 def partition_fn(
     gm: GraphModule,
     joint_inputs: Sequence[object],
+    *,
+    # When set, replaces the default partitioner (`config.custom_partitioner_fn`
+    # or `min_cut_rematerialization_partition`) while still running Inductor's
+    # joint-graph passes first. Used by `_get_partition_fn` so HOP subgraphs
+    # go through the same joint-pass + raw-partitioner pipeline as the outer
+    # Inductor compile.
+    partitioner_fn_override: Callable[..., Any] | None = None,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
     cuda_context = get_cuda_device_context(gm)
@@ -2281,6 +2297,14 @@ def partition_fn(
     static_lifetime_input_indices: list[int] | None = kwargs.pop(  # type: ignore[assignment]
         "static_lifetime_input_indices", None
     )
+
+    if partitioner_fn_override is not None:
+        return partitioner_fn_override(
+            gm,
+            joint_inputs,
+            static_lifetime_input_indices=static_lifetime_input_indices,
+            **kwargs,
+        )
 
     if config.custom_partitioner_fn is None:
         with dynamo_utils.dynamo_timed(
@@ -3108,7 +3132,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         from torch._dynamo.exc import SkipFrame
 
         assert device is not None
-
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
         warnings.warn(
@@ -3126,8 +3149,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
             or node.get_dtype() != torch.bfloat16
         ):
             continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
         device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return

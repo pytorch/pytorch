@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import TEST_WITH_ROCM
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
+from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -262,7 +263,9 @@ class OptimizeForInferenceTemplate(TestCase):
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
-    @torch._inductor.config.patch("cpp.enable_concat_linear", True)
+    @torch._inductor.config.patch(
+        {"cpp.enable_concat_linear": True, "shape_padding": False}
+    )
     def test_mm_concat(self):
         class MM(torch.nn.Module):
             def __init__(self) -> None:
@@ -762,6 +765,8 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180128")
+    @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/106557")
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
         TEST_WITH_SLOW_GRADCHECK,
