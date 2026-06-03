@@ -166,6 +166,16 @@ class SIMDKernelFeatures:
             ):
                 reduction_hint_val = ReductionHint.DEFAULT
 
+            if (
+                reduction_hint_val != ReductionHint.INNER
+                and self.has_compatible_reduction_epilogue()
+                and (
+                    tiling_scores is None
+                    or self._tiling_scores_prefer_inner(tiling_scores)
+                )
+            ):
+                reduction_hint_val = ReductionHint.INNER
+
             # Upgrade DEFAULT to INNER for inner reductions based on tiling scores
             if (
                 reduction_hint_val == ReductionHint.DEFAULT
@@ -197,13 +207,97 @@ class SIMDKernelFeatures:
 
         return dict(read_counts)  # Convert defaultdict to regular dict
 
-    def has_non_contiguous_pw_in_reduction_kernel(self) -> bool:
-        pointwise_nodes = [
+    @staticmethod
+    def _is_non_contiguous_dep(dep: Dep) -> bool:
+        return (
+            isinstance(dep, MemoryDep)
+            and not dep.is_contiguous()
+            and not isinstance(dep.index, (sympy.Integer, int))
+            and not dep.stride1_for_last_dim()
+        )
+
+    @staticmethod
+    def _has_coalesced_reduction_read(reads: Sequence[MemoryDep]) -> bool:
+        return any(dep.stride1_for_last_dim(False) for dep in reads)
+
+    @staticmethod
+    def _tiling_scores_prefer_inner(tiling_scores: dict[str, int]) -> bool:
+        if "x" not in tiling_scores or "r0_" not in tiling_scores:
+            return False
+
+        from ..codegen.triton import INNER_REDUCTION_RATIO_THRESHOLD
+
+        r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
+        return r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
+
+    @classmethod
+    def _is_compatible_recomputed_read(
+        cls, dep: MemoryDep, reduction_reads: Sequence[MemoryDep]
+    ) -> bool:
+        return dep in reduction_reads
+
+    @classmethod
+    def _reduction_reads_for_recomputed_pointwise(
+        cls, reduction_nodes: Iterable[SchedulerNode]
+    ) -> list[MemoryDep]:
+        reduction_reads = [
+            dep
+            for node in reduction_nodes
+            if node.is_reduction()
+            for dep in node.read_writes.reads
+            if isinstance(dep, MemoryDep)
+        ]
+        if not cls._has_coalesced_reduction_read(reduction_reads):
+            return []
+        return reduction_reads
+
+    @classmethod
+    def is_compatible_reduction_epilogue(
+        cls,
+        pointwise_nodes: Iterable[SchedulerNode],
+        reduction_nodes: Iterable[SchedulerNode],
+    ) -> bool:
+        pointwise_nodes = list(pointwise_nodes)
+        if not pointwise_nodes:
+            return False
+
+        reduction_reads = cls._reduction_reads_for_recomputed_pointwise(reduction_nodes)
+        if not reduction_reads:
+            return False
+
+        has_recomputed_read = False
+        for node in pointwise_nodes:
+            if node.is_reduction():
+                return False
+            for dep in node.read_writes.reads:
+                if cls._is_non_contiguous_dep(dep):
+                    dep = typing.cast(MemoryDep, dep)
+                    if not cls._is_compatible_recomputed_read(dep, reduction_reads):
+                        return False
+                    has_recomputed_read = True
+            if any(cls._is_non_contiguous_dep(dep) for dep in node.read_writes.writes):
+                return False
+        return has_recomputed_read
+
+    def pointwise_nodes_in_reduction_kernel(self) -> list[SchedulerNode]:
+        return [
             n
             for n in self.scheduler_nodes()
             if not n.is_reduction()
             and n.group[1][0] == self.numel * self.reduction_numel
         ]
+
+    def has_compatible_reduction_epilogue(self) -> bool:
+        return self.is_compatible_reduction_epilogue(
+            self.pointwise_nodes_in_reduction_kernel(), self.reduction_nodes()
+        )
+
+    def has_non_contiguous_pw_in_reduction_kernel(self) -> bool:
+        reduction_nodes = self.reduction_nodes()
+        pointwise_nodes = self.pointwise_nodes_in_reduction_kernel()
+        reduction_reads = self._reduction_reads_for_recomputed_pointwise(
+            reduction_nodes
+        )
         for node in pointwise_nodes:
             # An index can be an integer when loading a random seed.
             if not all(
@@ -211,6 +305,11 @@ class SIMDKernelFeatures:
                 or dep.is_contiguous()
                 or isinstance(dep.index, (sympy.Integer, int))
                 or dep.stride1_for_last_dim()
+                or (
+                    reduction_reads
+                    and dep in node.read_writes.reads
+                    and self._is_compatible_recomputed_read(dep, reduction_reads)
+                )
                 for dep in itertools.chain(
                     node.read_writes.reads, node.read_writes.writes
                 )

@@ -2140,6 +2140,17 @@ class SIMDScheduling(BaseScheduling):
                         (numel1, 1),
                         (numel2, rnumel2, 1),
                     )
+                    if (
+                        not is_reduction_tiling_valid
+                        and SIMDKernelFeatures.is_compatible_reduction_epilogue(
+                            node1.get_nodes(), node2.get_nodes()
+                        )
+                    ):
+                        # If a pointwise epilogue only repeats non-contiguous
+                        # reads that the reduction already performs, standalone
+                        # pointwise tiling should not force a separate epilogue
+                        # kernel.
+                        is_reduction_tiling_valid = True
                     if not is_reduction_tiling_valid:
                         why("invalid tiling for reduction")
                     return is_reduction_tiling_valid
