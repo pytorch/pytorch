@@ -2000,6 +2000,31 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                         counters["inductor"]["fix_auto_functionalized_dtype_views"], 0
                     )
 
+            # Two mutations through the same dtype view: counter is 1, not 2 -
+            # reinplace_inplaceable_ops already inplaces the second.
+            def f_twice(cache, data1, data2):
+                v = cache.view(torch.float32)
+                torch.ops.mylib.mutate_inplace(v, data1)
+                torch.ops.mylib.mutate_inplace(v, data2)
+                return cache
+
+            data1 = torch.randn((10, 10), dtype=torch.float32)
+            data2 = torch.randn((10, 10), dtype=torch.float32)
+            cache_eager = cache.clone()
+            f_twice(cache_eager, data1, data2)
+
+            with torch.no_grad():
+                counters.clear()
+                torch._dynamo.reset()
+                compiled_f = torch.compile(f_twice, fullgraph=True, backend="inductor")
+                cache_compiled = cache.clone()
+                compiled_f(cache_compiled, data1, data2)
+
+                self.assertEqual(cache_compiled, cache_eager)
+                self.assertEqual(
+                    counters["inductor"]["fix_auto_functionalized_dtype_views"], 1
+                )
+
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_dtype_view_clone_elimination_shared_storage(self):
         """
