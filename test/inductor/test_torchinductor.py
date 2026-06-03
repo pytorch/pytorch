@@ -5410,6 +5410,54 @@ class CommonTemplate:
         with config.patch({"triton.use_block_ptr": use_block_ptr}):
             self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
+    def test_low_memory_max_pool_offsets_ties_padding_ceil(self):
+        prims = torch.ops.prims
+
+        def fn(x):
+            return prims._low_memory_max_pool_with_offsets(
+                x,
+                [3, 3],
+                [2, 2],
+                [1, 1],
+                [1, 1],
+                True,
+            )
+
+        x = torch.ones(1, 1, 3, 3, device=self.device)
+        self.common(fn, (x,))
+
+        actual_vals, actual_offsets = torch.compile(fn)(x)
+        expected_vals, expected_offsets = fn(x)
+        self.assertEqual(actual_vals, expected_vals)
+        self.assertEqual(actual_offsets, expected_offsets)
+        self.assertEqual(
+            actual_offsets.cpu(),
+            torch.tensor([[[[4, 3], [1, 0]]]], dtype=torch.int8),
+        )
+
+    def test_low_memory_max_pool_offsets_nan(self):
+        prims = torch.ops.prims
+
+        def fn(x):
+            return prims._low_memory_max_pool_with_offsets(
+                x,
+                [2, 2],
+                [1, 1],
+                [0, 0],
+                [1, 1],
+                False,
+            )
+
+        x = torch.tensor(
+            [[[[1.0, float("nan")], [0.0, 2.0]]]],
+            device=self.device,
+        )
+        actual_vals, actual_offsets = torch.compile(fn)(x)
+        expected_vals, expected_offsets = fn(x)
+        self.assertEqual(torch.isnan(actual_vals), torch.isnan(expected_vals))
+        self.assertEqual(actual_offsets, expected_offsets)
+        self.assertEqual(actual_offsets.item(), 1)
+
     @xfail_if_mps  # aten::full with zero-sized dim triggers AcceleratorError on MPS
     def test_max_unpool_empty_output(self):
         class Unpool1d(nn.Module):
