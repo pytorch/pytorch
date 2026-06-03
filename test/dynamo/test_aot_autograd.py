@@ -21,9 +21,9 @@ from torch._dynamo.testing import (
 )
 from torch._functorch._aot_autograd.graph_compile import (
     _get_backward_output_order,
-    _remap_backward_output_order_to_outer_inputs,
+    _get_subclass_backward_output_order,
 )
-from torch._functorch._aot_autograd.schemas import PlainTensorMeta, SubclassCreationMeta
+from torch._functorch._aot_autograd.schemas import SubclassCreationMeta
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
 from torch._guards import CompileContext, StorageOverlap, TracingContext
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -119,36 +119,62 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
             )
         )
 
-    def test_remap_backward_output_order_to_outer_subclass_inputs(self):
+    def test_subclass_backward_output_order_collapses_flat_grad_outputs(self):
+        graph = torch.fx.Graph()
+        grad = graph.placeholder("grad")
+        output0 = graph.call_function(operator.neg, args=(grad,))
+        output0.meta["seq_nr"] = 3
+        output1 = graph.call_function(operator.add, args=(grad, grad))
+        output1.meta["seq_nr"] = 1
+        output2 = graph.call_function(operator.mul, args=(grad, grad))
+        output2.meta["seq_nr"] = 4
+        output3 = graph.call_function(operator.sub, args=(grad, grad))
+        output3.meta["seq_nr"] = 2
+        graph.output((output0, output1, output2, output3))
+
+        bw_module = torch.fx.GraphModule(torch.nn.Module(), graph)
         with FakeTensorMode() as fake_mode:
             fake_subclass = fake_mode.from_tensor(torch.ones(()))
 
-        outer_meta = SimpleNamespace(
-            input_info=[object(), object(), object()],
-            subclass_inp_meta=[
-                PlainTensorMeta(0),
+        subclass_meta = SimpleNamespace(
+            grad_input_metas=[
                 SubclassCreationMeta(
-                    flat_tensor_start_idx=1,
+                    flat_tensor_start_idx=0,
                     arg_count=2,
-                    included_subclass_symints=False,
+                    included_subclass_symints=True,
                     attrs={},
                     outer_size=(),
                     outer_stride=(),
                     meta=None,
                     original_subclass=fake_subclass,
                 ),
-                PlainTensorMeta(3),
-            ],
+                SubclassCreationMeta(
+                    flat_tensor_start_idx=2,
+                    arg_count=2,
+                    included_subclass_symints=True,
+                    attrs={},
+                    outer_size=(),
+                    outer_stride=(),
+                    meta=None,
+                    original_subclass=fake_subclass,
+                ),
+            ]
         )
-        inner_meta = SimpleNamespace(
-            input_info=[object(), object(), object(), object()]
+        fw_metadata = SimpleNamespace(
+            input_info=[
+                SimpleNamespace(is_leaf=True, requires_grad=True),
+                SimpleNamespace(is_leaf=True, requires_grad=True),
+            ]
         )
 
         self.assertEqual(
-            _remap_backward_output_order_to_outer_inputs(
-                [2, 0, 3, 1], outer_meta, inner_meta
+            _get_subclass_backward_output_order(
+                bw_module,
+                [output0, output1, output2, output3],
+                subclass_meta,
+                fw_metadata,
             ),
-            [1, 0, 2],
+            [1, 0],
         )
 
     def test_LSTM(self):

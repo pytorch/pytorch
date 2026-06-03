@@ -152,7 +152,12 @@ std::vector<uint32_t> get_backward_next_edges_order(
     order.push_back(compressed_idx);
   }
 
-  TORCH_INTERNAL_ASSERT(order.size() == num_next_edges);
+  TORCH_CHECK(
+      order.size() == num_next_edges,
+      "autograd.Function._backward_next_edges_order maps to ",
+      order.size(),
+      " differentiable inputs, expected ",
+      num_next_edges);
   if (is_identity) {
     order.clear();
   }

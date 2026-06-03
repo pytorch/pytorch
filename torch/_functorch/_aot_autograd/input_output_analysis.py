@@ -48,6 +48,11 @@ def remap_backward_output_order(
 ) -> list[int] | None:
     if backward_output_order is None:
         return None
+    if len(backward_output_order) != len(add_dupe_map):
+        raise AssertionError(
+            "expected len(backward_output_order) == "
+            f"{len(add_dupe_map)}, got {len(backward_output_order)}"
+        )
 
     num_inputs = sum(keep_arg_mask)
     remapped: list[int] = []

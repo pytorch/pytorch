@@ -316,53 +316,68 @@ def _get_backward_output_order(
     return None if order == list(range(len(bw_outs))) else order
 
 
-def _remap_backward_output_order_to_outer_inputs(
-    inner_order: list[int] | None,
-    outer_meta: ViewAndMutationMeta,
-    inner_meta: ViewAndMutationMeta,
+def _num_flat_subclass_args(meta: PlainTensorMeta | SubclassCreationMeta) -> int:
+    if isinstance(meta, PlainTensorMeta):
+        return 1
+    if isinstance(meta, SubclassCreationMeta):
+        return meta.arg_count
+    raise AssertionError(f"unexpected subclass metadata: {meta}")
+
+
+def _get_subclass_backward_output_order(
+    bw_module: GraphModule,
+    bw_outs: Any,
+    subclass_meta: SubclassMeta,
+    fw_metadata: ViewAndMutationMeta,
 ) -> list[int] | None:
-    if not outer_meta.subclass_inp_meta:
-        return inner_order
-
-    inner_to_outer: list[int] = []
-    for outer_idx, inp_meta in enumerate(outer_meta.subclass_inp_meta):
-        if isinstance(inp_meta, PlainTensorMeta):
-            inner_to_outer.append(outer_idx)
-        elif isinstance(inp_meta, SubclassCreationMeta):
-            inner_to_outer.extend([outer_idx] * inp_meta.arg_count)
-        else:
-            raise AssertionError(f"unexpected subclass input metadata: {inp_meta}")
-
-    if len(inner_to_outer) != len(inner_meta.input_info):
+    if subclass_meta.grad_input_metas is None:
+        raise AssertionError("subclass_meta.grad_input_metas must not be None")
+    if len(subclass_meta.grad_input_metas) != len(fw_metadata.input_info):
         raise AssertionError(
-            f"expected len(inner_to_outer) == {len(inner_meta.input_info)}, "
-            f"got {len(inner_to_outer)}"
+            "expected len(subclass_meta.grad_input_metas) == "
+            f"{len(fw_metadata.input_info)}, got "
+            f"{len(subclass_meta.grad_input_metas)}"
         )
 
-    if inner_order is None:
-        inner_order = list(range(len(inner_meta.input_info)))
+    bw_out_idx_to_input_idx: list[int] = []
+    for input_idx, grad_input_meta in enumerate(subclass_meta.grad_input_metas):
+        bw_out_idx_to_input_idx.extend(
+            [input_idx] * _num_flat_subclass_args(grad_input_meta)
+        )
 
-    outer_order: list[int] = []
+    if len(bw_out_idx_to_input_idx) != len(bw_outs):
+        raise AssertionError(
+            f"expected {len(bw_out_idx_to_input_idx)} subclass backward outputs, "
+            f"got {len(bw_outs)}"
+        )
+
+    flat_order = _get_backward_output_order(
+        bw_module,
+        bw_outs,
+        leaf_input_grads=[
+            fw_metadata.input_info[input_idx].is_leaf
+            and fw_metadata.input_info[input_idx].requires_grad
+            for input_idx in bw_out_idx_to_input_idx
+        ],
+    )
+    if flat_order is None:
+        flat_order = list(range(len(bw_outs)))
+
+    input_order: list[int] = []
     seen: set[int] = set()
-    for inner_idx in inner_order:
-        outer_idx = inner_to_outer[inner_idx]
-        if outer_idx in seen:
+    for bw_out_idx in flat_order:
+        input_idx = bw_out_idx_to_input_idx[bw_out_idx]
+        if input_idx in seen:
             continue
-        seen.add(outer_idx)
-        outer_order.append(outer_idx)
+        seen.add(input_idx)
+        input_order.append(input_idx)
 
-    for outer_idx in range(len(outer_meta.input_info)):
-        if outer_idx not in seen:
-            outer_order.append(outer_idx)
-
-    if len(outer_order) != len(outer_meta.input_info):
-        raise AssertionError(
-            f"expected len(outer_order) == {len(outer_meta.input_info)}, "
-            f"got {len(outer_order)}"
-        )
+    for input_idx in range(len(fw_metadata.input_info)):
+        if input_idx not in seen:
+            input_order.append(input_idx)
 
     return (
-        None if outer_order == list(range(len(outer_meta.input_info))) else outer_order
+        None if input_order == list(range(len(fw_metadata.input_info))) else input_order
     )
 
 
@@ -2342,10 +2357,17 @@ def _compute_indices_of_inps_to_detach(
     bw_outs = bw_output.args[0]
 
     num_backward_tokens = inner_meta.num_backward_tokens
+    num_backward_outputs = (
+        sum(
+            _num_flat_subclass_args(grad_input_meta)
+            for grad_input_meta in maybe_subclass_meta.grad_input_metas
+        )
+        if maybe_subclass_meta is not None
+        and maybe_subclass_meta.grad_input_metas is not None
+        else len(inner_meta.input_info)
+    )
     expected_bw_outs = (
-        len(inner_meta.input_info)
-        + inner_meta.num_outputs_rng_offset
-        + num_backward_tokens
+        num_backward_outputs + inner_meta.num_outputs_rng_offset + num_backward_tokens
     )
     if len(bw_outs) != expected_bw_outs:
         raise AssertionError(
@@ -2357,25 +2379,24 @@ def _compute_indices_of_inps_to_detach(
         bw_outs_no_rng_no_tokens = bw_outs[
             : -(inner_meta.num_outputs_rng_offset + num_backward_tokens)
         ]
-    if len(bw_outs_no_rng_no_tokens) != len(inner_meta.input_info):
+    if len(bw_outs_no_rng_no_tokens) != num_backward_outputs:
         raise AssertionError(
-            f"expected len(bw_outs_no_rng_no_tokens) == {len(inner_meta.input_info)}, "
+            f"expected len(bw_outs_no_rng_no_tokens) == {num_backward_outputs}, "
             f"got {len(bw_outs_no_rng_no_tokens)}"
         )
-    inner_backward_output_order = _get_backward_output_order(
-        bw_module,
-        bw_outs_no_rng_no_tokens,
-        leaf_input_grads=[
-            input_info.is_leaf and input_info.requires_grad
-            for input_info in inner_meta.input_info
-        ],
-    )
     fw_metadata.backward_output_order = (
-        _remap_backward_output_order_to_outer_inputs(
-            inner_backward_output_order, fw_metadata, inner_meta
+        _get_subclass_backward_output_order(
+            bw_module, bw_outs_no_rng_no_tokens, maybe_subclass_meta, fw_metadata
         )
         if maybe_subclass_meta is not None
-        else inner_backward_output_order
+        else _get_backward_output_order(
+            bw_module,
+            bw_outs_no_rng_no_tokens,
+            leaf_input_grads=[
+                input_info.is_leaf and input_info.requires_grad
+                for input_info in inner_meta.input_info
+            ],
+        )
     )
 
     # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
