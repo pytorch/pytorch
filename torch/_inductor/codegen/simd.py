@@ -2118,26 +2118,30 @@ class SIMDScheduling(BaseScheduling):
             # check for a bad combined tiling
             tiling1 = self._get_node_tiling(node1, numel1, rnumel1)
             tiling2 = self._get_node_tiling(node2, numel1, rnumel1)
-            tiling3 = self.select_tiling(
-                node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
-            )
             if config.triton.tiling_prevents_pointwise_fusion:
-                cond = True
-                if len(tiling1) > 2:
-                    if len(tiling2) > 2:
-                        cond = tiling1 == tiling2 == tiling3
-                    else:
-                        cond = tiling1 == tiling3
-                elif len(tiling2) > 2:
-                    cond = tiling2 == tiling3
-                if not cond:
-                    why(
-                        "tiling mismatch (%s, %s, %s)",
-                        tiling1,
-                        tiling2,
-                        tiling3,
+                # tiling3 is only consulted when at least one tiling
+                # has >2 dims; for <=2D the check always passes.
+                if len(tiling1) > 2 or len(tiling2) > 2:
+                    tiling3 = self.select_tiling(
+                        node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
                     )
-                    return False
+                    cond = True
+                    if len(tiling1) > 2:
+                        cond = (
+                            tiling1 == tiling2 == tiling3
+                            if len(tiling2) > 2
+                            else tiling1 == tiling3
+                        )
+                    else:
+                        cond = tiling2 == tiling3
+                    if not cond:
+                        why(
+                            "tiling mismatch (%s, %s, %s)",
+                            tiling1,
+                            tiling2,
+                            tiling3,
+                        )
+                        return False
 
             return True
 
