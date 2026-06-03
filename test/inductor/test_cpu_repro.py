@@ -3482,6 +3482,20 @@ class CPUReproTests(TestCase):
             )
         check_metrics_vec_kernel_count(1)
 
+    def test_emulate_precision_casts_explicit_lowp_round_trip(self):
+        # An explicit fp32->fp16->fp32 round-trip must keep its intermediate
+        # rounding under emulate_precision_casts. The CPU codegen used to collapse
+        # it via the reverse lowp-fp->fp32 CSE cache (populated at to_dtype time),
+        # silently dropping the fp16 rounding. See issue #185337.
+        def fn(x):
+            y = x.to(torch.float16).to(torch.float32)
+            return y, y.sum(dim=1)
+
+        x = torch.arange(20, dtype=torch.float32).reshape(5, 4).t() / 7.0
+        with config.patch({"emulate_precision_casts": True}):
+            torch._dynamo.reset()
+            self.common(fn, (x,))
+
     def test_memory_copy_with_fusion(self):
         def fn(x):
             res = x.relu()
@@ -4942,8 +4956,9 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
                 self.assertEqual(expected, actual)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
+                # fp32 generates three kernels (one for var_mean, two for
+                # result), while low-precision dtypes fuse the result kernels.
+                check_metrics_vec_kernel_count(3 if dtype is torch.float else 2)
 
                 # check loop split optimization
                 if fmt == torch.channels_last:
@@ -4951,56 +4966,6 @@ class CPUReproTests(TestCase):
                     FileCheck().check_count(
                         "__at_align__ std::array", 0, exactly=True
                     ).run(code)
-
-    @config.patch(force_disable_caches=True)
-    def test_group_norm_affine_decomp_precision(self):
-        torch.manual_seed(0)
-        bn = nn.BatchNorm1d(10).eval()
-        elu = nn.ELU()
-        gn = nn.GroupNorm(10, 10).eval()
-
-        def make_model(length):
-            def model():
-                x = torch.ones([6, 10, length])
-                t = bn(x)
-                t = elu(t)
-                t = gn(t)
-                return torch.log(torch.clamp(t, min=1e-6))
-
-            return model
-
-        def make_bias_only_model(length, bias):
-            def bias_only_model():
-                x = torch.ones([6, 10, length])
-                t = bn(x)
-                t = elu(t)
-                t = F.group_norm(t, 10, weight=None, bias=bias)
-                return torch.log(torch.clamp(t, min=1e-6))
-
-            return bias_only_model
-
-        cases = (
-            make_model(12),
-            make_model(80),
-            make_bias_only_model(12, torch.zeros(10)),
-            make_bias_only_model(80, torch.zeros(10)),
-        )
-        for fn in cases:
-            expected = fn()
-            actual = torch.compile(fn, backend="inductor", fullgraph=True)()
-            torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
-
-    @config.patch(force_disable_caches=True)
-    def test_layer_norm_4d_large_reduction_uses_two_step_variance(self):
-        def fn(x):
-            return F.layer_norm(x, x.shape[2:])
-
-        x = torch.randn(2, 3, 8, 10)
-        expected = fn(x)
-        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        actual, code = run_and_get_cpp_code(compiled_fn, x)
-        self.assertTrue(same(actual, expected))
-        self.assertNotIn("welford", code)
 
     @requires_vectorization
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")

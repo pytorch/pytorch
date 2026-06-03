@@ -23,6 +23,10 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._functorch._aot_autograd.descriptors import (
+    SavedForBackwardsAOTOutput,
+    SavedForBackwardsNoVcCheckAOTOutput,
+)
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
@@ -87,6 +91,7 @@ from .utils import (
     is_gpu,
     is_nvidia_sm100_or_later,
     is_pointwise_use,
+    is_triton_fp8_dtype_supported,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
@@ -134,6 +139,10 @@ foreach_ops = OrderedSet[torch._ops.OpOverload](
 inplace_foreach_ops = OrderedSet[torch._ops.OpOverload]()
 inplaceable_foreach_ops: dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
+_SAVED_FOR_BACKWARDS_OUTPUT_DESC_TYPES = (
+    SavedForBackwardsAOTOutput,
+    SavedForBackwardsNoVcCheckAOTOutput,
+)
 
 
 def cur_node_has_non_foreach_users() -> bool:
@@ -666,6 +675,37 @@ def _add_with_alpha_fma(a, b, alpha):
     )
 
 
+def _has_saved_lowp_output_use(node: torch.fx.Node | None) -> bool:
+    if node is None:
+        return False
+
+    has_non_output_user = False
+    for user in node.users:
+        if user.op != "output":
+            has_non_output_user = True
+            break
+
+    if not has_non_output_user:
+        return False
+
+    for user in node.users:
+        if user.op != "output":
+            continue
+
+        descs = user.meta.get("desc")
+        if descs is None:
+            continue
+
+        output_values = pytree.tree_leaves(user.args[0])
+        for output_value, desc in zip(output_values, descs):
+            if output_value is node and isinstance(
+                desc, _SAVED_FOR_BACKWARDS_OUTPUT_DESC_TYPES
+            ):
+                return True
+
+    return False
+
+
 def make_pointwise(
     fn: Callable[..., Any],
     override_return_dtype: torch.dtype | None = None,
@@ -720,13 +760,23 @@ def make_pointwise(
         # a pointwise node that would have been run in eager. intermediary pointwise nodes
         # during decompositions are not annotated.
         low_pr_fp = (torch.bfloat16, torch.float16)
-        emulate_precision_casts = (
-            V.graph is not None
-            and getattr(V.graph, "current_node", None) is not None
-            and V.graph.current_node.meta is not None
-            and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
+        current_node = (
+            getattr(V.graph, "current_node", None) if V.graph is not None else None
         )
-        emulate_output_cast = emulate_precision_casts and dtype in low_pr_fp
+        emulate_precision_casts = (
+            current_node is not None
+            and current_node.meta is not None
+            and current_node.meta.get("low_precision_pointwise_barrier", False)
+        )
+        truncate_saved_output = (
+            config.emulate_precision_casts_on_saved_tensors
+            and not emulate_precision_casts
+            and dtype in low_pr_fp
+            and _has_saved_lowp_output_use(current_node)
+        )
+        emulate_output_cast = (
+            emulate_precision_casts or truncate_saved_output
+        ) and dtype in low_pr_fp
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
@@ -2120,6 +2170,21 @@ def cat(inputs, dim=0):
     if len(inputs) == 1:
         return clone(inputs[0])
 
+    # ATen's cat skips 1-D empty tensors (cat_should_skip_tensor) during
+    # dimension validation and concatenation. Replicate that here.
+    def _cat_should_skip(t):
+        size = t.get_size()
+        return len(size) == 1 and V.graph.sizevars.statically_known_equals(size[0], 0)
+
+    skip_mask = [_cat_should_skip(t) for t in inputs]
+    if any(skip_mask):
+        valid_inputs = [t for t, skip in zip(inputs, skip_mask) if not skip]
+        if not valid_inputs:
+            return clone(inputs[0])
+        if len(valid_inputs) == 1:
+            return clone(valid_inputs[0])
+        inputs = valid_inputs
+
     dim = _validate_dim(inputs[0], dim, 0)
     dtype = get_promoted_dtype(
         *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -2238,6 +2303,9 @@ def cat(inputs, dim=0):
                 input_nodes = [fx_args]
             else:
                 return False
+
+            if any(skip_mask):
+                input_nodes = [n for n, skip in zip(input_nodes, skip_mask) if not skip]
 
             def is_unrealized_pointwise(x):
                 if isinstance(x, (TensorBox, ir.StorageBox)):
@@ -2578,6 +2646,9 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
     if t.is_sparse:
         return True
 
+    if not is_triton_fp8_dtype_supported(t.dtype, t.device):
+        return True
+
     if t.dtype == torch.float8_e8m0fnu:
         if not node:
             return True
@@ -2592,6 +2663,7 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
                 aten.cat.default,
                 aten.clone.default,
                 aten._scaled_mm.default,
+                aten._scaled_mm_v2.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
         )
@@ -2975,8 +3047,8 @@ def inductor_randint(
         return ops.randint64(
             seed_loader([]),
             ops.index_expr(random_pos(index), torch.int32),
-            ops.index_expr(low, torch.int64),
-            ops.index_expr(high, torch.int64),
+            ops.value_expr(low, torch.int64),
+            ops.value_expr(high, torch.int64),
         )
 
     return Pointwise.create(
@@ -7000,34 +7072,11 @@ def use_two_step_variance(x, axis, keepdim):
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-    if not isinstance(reduction_numel, sympy.Integer):
-        return False
-    reduction_numel = int(reduction_numel)
-    return reduction_numel <= threshold and sympy_product(ranges) != 1
-
-
-def _is_current_node_native_group_norm():
-    current_node = V.graph.current_node
-    original_aten = (
-        current_node.meta.get("original_aten")
-        if current_node is not None and current_node.meta is not None
-        else None
-    )
     return (
-        isinstance(original_aten, torch._ops.OpOverload)
-        and original_aten._schema.name == "aten::native_group_norm"
-        and original_aten._overloadname == "default"
+        isinstance(reduction_numel, sympy.Integer)
+        and int(reduction_numel) <= threshold
+        and sympy_product(ranges) != 1
     )
-
-
-def preserve_welford_mean(x, axis, keepdim):
-    device = x.get_device()
-    if device is None or device.type != "cpu" or not keepdim:
-        return False
-
-    # native_group_norm's CPU affine path consumes this mean, so keep Welford
-    # across the two-step threshold to match native RowwiseMoments.
-    return _is_current_node_native_group_norm()
 
 
 def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
@@ -7084,15 +7133,12 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
         keepdim=keepdim,
         return_mean=return_mean,
     )
-    use_two_step = use_two_step_variance(x, axis=axis, keepdim=keepdim)
-    # Preserve eager var_mean's Welford-style mean for native norm patterns
-    # where small rounding differences can be amplified by downstream
-    # clamp/log operations.
-    if return_mean and use_two_step and preserve_welford_mean(x, axis, keepdim):
-        use_two_step = False
     output = (
         var_mean_sum_(**kwargs)
-        if (config.mtia.disable_welford_reduction or use_two_step)
+        if (
+            config.mtia.disable_welford_reduction
+            or use_two_step_variance(x, axis=axis, keepdim=keepdim)
+        )
         else var_mean_welford_(**kwargs)
     )
     output = tuple(to_dtype(x, out_dtype, copy=False) for x in output)
@@ -7915,20 +7961,13 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         and device is not None
         and device.type in ["cuda", "xpu"]
     )
-    use_cpu_native_group_norm_fma = (
-        value == 1
-        and dtype in [torch.float32, torch.float64]
-        and device is not None
-        and device.type == "cpu"
-        and _is_current_node_native_group_norm()
-    )
 
     def inner_fn(idx):
         self_val = self_loader(idx)
         t1_val = t1_loader(idx)
         t2_val = t2_loader(idx)
 
-        if value == 1 and (use_fma or use_cpu_native_group_norm_fma):
+        if value == 1 and use_fma:
             return ops.fma(t1_val, t2_val, self_val)
 
         # Match eager order: self + value * (tensor1 * tensor2)
