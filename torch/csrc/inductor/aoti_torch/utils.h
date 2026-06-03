@@ -3,11 +3,6 @@
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/List.h>
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#else
-#include <ATen/ops/zeros.h>
-#endif
 #include <c10/core/DeviceType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/ArrayRef.h>
@@ -57,13 +52,6 @@ inline AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
 
 inline at::Tensor resolve_tensor_dispatch_flags(AtenTensorHandle handle) {
   at::Tensor* tensor{tensor_handle_to_tensor_pointer(handle)};
-  if (tensor->_is_zerotensor()) {
-    // ZeroTensors have null storage and rely on the ZeroTensor boxed fallback
-    // to materialize themselves before reaching a native ATen function.  Since
-    // the C-shim calls the native function directly, that fallback never runs,
-    // so we materialize here exactly as it does (see ZeroTensorFallback.cpp).
-    return at::zeros({}, tensor->options()).expand(tensor->sizes());
-  }
   if (tensor->is_conj() || tensor->is_neg()) {
     // If the conjugation or negation dispatch flags are set, runtime dispatch
     // handles them by cloning the tensor before passing them to the native ATen
