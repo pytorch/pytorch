@@ -3017,7 +3017,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 signature=self.signature,
                 module_call_graph=module_call_graph,
                 names_to_symbols=self.symbol_name_to_symbol,
-                state_dict=deserialize_torch_artifact(serialized_state_dict),
+                state_dict=deserialize_torch_artifact(serialized_state_dict, weights_only=weights_only),
                 constants=self.constants,
                 example_inputs=self.example_inputs,
             )

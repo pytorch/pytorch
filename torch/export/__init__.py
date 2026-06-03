@@ -435,7 +435,7 @@ def load(
         )
 
         # Deserialize ExportedProgram
-        ep = deserialize(artifact, expected_opset_version)
+        ep = deserialize(artifact, expected_opset_version, weights_only=weights_only)
 
         return ep
 
