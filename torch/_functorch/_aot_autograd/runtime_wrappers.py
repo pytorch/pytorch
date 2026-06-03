@@ -3201,13 +3201,14 @@ def _codegen_compiled_forward(
 def _codegen_compiled_backward(
     num_rng: int,
     num_tensors_no_vc_check: int | None,
+    inputs_require_grad: bool,
 ) -> Callable[..., Any]:
     from .subclass_codegen import _compile_and_exec_source
 
     lines: list[str] = [
         "def _compiled_backward("
         "_flat_args_, _ctx_, _prologue_,"
-        " _rng_add_, _impl_, _epilogue_, _double_bw_, _needs_grad_):"
+        " _rng_add_, _impl_, _epilogue_, _double_bw_):"
     ]
     code_globals: dict[str, object] = {
         "torch": torch,
@@ -3248,7 +3249,14 @@ def _codegen_compiled_backward(
     )
     lines.append("        impl_fn = functools.partial(_cc.run, impl_fn)")
 
-    lines.append("    if _needs_grad_(all_args):")
+    if inputs_require_grad:
+        lines.append("    if torch.is_grad_enabled():")
+    else:
+        lines.append("    _ng = torch.is_grad_enabled() and any(")
+        lines.append(
+            "        t.requires_grad for t in all_args if isinstance(t, torch.Tensor))"
+        )
+        lines.append("    if _ng:")
     lines.append("        return _double_bw_(_ctx_, impl_fn, all_args)")
     lines.append("    return impl_fn()")
 
@@ -3325,6 +3333,7 @@ class _AOTDispatchAutogradFunctionFactory:
         _codegen_bwd = _codegen_compiled_backward(
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
+            any(inp.requires_grad for inp in fw_metadata.input_info),
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
@@ -3469,22 +3478,6 @@ class _AOTDispatchAutogradFunctionFactory:
                     CompiledFunction._backward_impl,
                     CompiledFunction._bw_epilogue_fn,
                     CompiledFunction._double_backward,
-                    CompiledFunction._needs_grad,
-                )
-
-            @staticmethod
-            def _needs_grad(all_args: list[Any]) -> bool:
-                if not torch.is_grad_enabled():
-                    return False
-                if any(
-                    t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
-                ):
-                    return True
-                # autograd.Function.forward runs in no-grad context, so saved
-                # tensors always have requires_grad=False. Fall back to
-                # metadata.input_info to detect create_graph=True.
-                return any(
-                    inp.requires_grad for inp in CompiledFunction.metadata.input_info
                 )
 
             @staticmethod
@@ -3513,6 +3506,10 @@ class _AOTDispatchAutogradFunctionFactory:
                     CompiledFunction._compiled_autograd_key
                 )
 
+                # Saved tensors are detached (forward runs under no-grad), so no
+                # real arg requires grad.  Prepend a dummy requires_grad=True
+                # input so CompiledFunctionBackward.apply attaches a grad_fn and
+                # gradient outputs report requires_grad=True for create_graph=True.
                 if not any(
                     t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
                 ):
