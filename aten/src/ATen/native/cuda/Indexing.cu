@@ -23,6 +23,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_assert_async.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/zeros_like.h>
@@ -557,8 +558,9 @@ static ReduceMaximum reduce_maximum;
 static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size, bool check_range=true) {
 //we don't need to check range in backward - if there were out of bounds indices forward should already have errored out
   if (index.numel() != 0 && check_range) {
-    at::_assert_async(index.max() < dim_size);
-    at::_assert_async(index.min() >= -dim_size);
+    auto [index_min, index_max] = at::aminmax(index);
+    at::_assert_async(index_max < dim_size);
+    at::_assert_async(index_min >= -dim_size);
   }
   return index.remainder(dim_size);
 }
@@ -637,7 +639,7 @@ makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
   }
   auto [linearIndex, nElemBefore, strideBefore, nElemAfter, dims_before, dims_indexed] =
     computeLinearIndex(self, indices, check_range);
-  return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, inversePerm,
+  return std::make_tuple(std::move(linearIndex), std::move(self), nElemBefore, strideBefore, nElemAfter, std::move(inversePerm),
                          dims_before, dims_indexed);
 }
 namespace {
@@ -1149,7 +1151,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   if (globalContext().deterministicAlgorithms()){
     torch::List<std::optional<Tensor>> indices;
     indices.reserve(dim + 1);
-    for (const auto i: c10::irange(dim)) {
+    for ([[maybe_unused]] const auto i : c10::irange(dim)) {
       indices.emplace_back();
     }
     indices.emplace_back(index.to(at::kLong));
@@ -1175,6 +1177,35 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   const bool indContig = index.is_contiguous();
 
   const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+  // Fast path: index_add_(0, idx, src) with alpha == 1 is equivalent to
+  // self.scatter_add_(0, idx.view({n, 1, ...}).expand_as(src), src). Delegate
+  // so scatter_add's own TMA/vectorized eligibility check + dispatch is the
+  // single source of truth (see PR #182675). Pattern from
+  // pytorch/pytorch#180430.
+  // Gated on CUDA >= 12.8: pre-12.8 builds compile out the TMA branch in
+  // scatter_add and fall back to its vectorized atomicAdd path, which
+  // regresses skewed/high-contention workloads vs indexFunc{Small,Large}Index
+  // (warp-per-entry scheduling concentrates atomic contention on hot rows).
+  // Older builds therefore stay on the existing indexFunc dispatch.
+  // index_add supports {complex64, complex128, ComplexHalf, Bool} that
+  // scatter_add does not, so exclude those and let them use indexFunc.
+  // The dtype check is ordered FIRST so short-circuit evaluation skips
+  // alpha.equal(1) for complex `self`, where alpha may itself be a
+  // complex Scalar and the equality comparison would be ill-defined.
+  const auto stype = self_.scalar_type();
+  const bool dtype_supported_by_scatter_add =
+      !c10::isComplexType(stype) && stype != at::kBool;
+  if (dtype_supported_by_scatter_add && dim == 0 &&
+      alpha.equal(1) && numIndex > 0 &&
+      index.dim() <= 1 && indContig) {
+    std::vector<int64_t> idx_shape(source_.dim(), 1);
+    idx_shape[0] = static_cast<int64_t>(numIndex);
+    self_.scatter_add_(0, index.view(idx_shape).expand_as(source_), source_);
+    return;
+  }
+#endif
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
@@ -1860,12 +1891,12 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
 
     const auto dim_indices = indices[dim].contiguous();
     const auto idx_nneg_index = at::arange(index_len, nneg_index.options());
-    const auto idx_dim_indices = at::arange(nnz, dim_indices.options());
+    auto idx_dim_indices = at::arange(nnz, dim_indices.options());
 
     Tensor sorted_dim_indices, argsort_dim_indices;
     std::tie(sorted_dim_indices, argsort_dim_indices) = [&]() -> std::tuple<Tensor, Tensor> {
       if (dim == 0 && self.is_coalesced()) {
-        return std::make_tuple(dim_indices, idx_dim_indices);
+        return std::make_tuple(dim_indices, std::move(idx_dim_indices));
       }
       else {
         return dim_indices.sort();
@@ -1910,7 +1941,9 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
           );
       });
 
-      return std::make_tuple(intrsc_counts_nneg_index, intrsc_first_match_nneg_index);
+      return std::make_tuple(
+          std::move(intrsc_counts_nneg_index),
+          std::move(intrsc_first_match_nneg_index));
     }();
 
     // Unavoidable sync since the shape of the result is not known in advance
@@ -1963,7 +1996,8 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
           );
       });
 
-      return std::make_tuple(selected_dim_indices, res_dim_indices);
+      return std::make_tuple(
+          std::move(selected_dim_indices), std::move(res_dim_indices));
     }();
 
     return make_output(selected_dim_indices, res_dim_indices);

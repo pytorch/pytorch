@@ -63,6 +63,14 @@ def sync_functional_tensor(t: torch.Tensor) -> None:
         torch._sync(t)
 
 
+def resolve_input_view_bits(t: torch.Tensor) -> torch.Tensor:
+    if t.is_conj():
+        t = t.resolve_conj()
+    if t.is_neg():
+        t = t.resolve_neg()
+    return t
+
+
 # When subclasses are involved, t here will usually look something like:
 # SubclassA(SubclassB(FunctionalTensor(_to_fun_tensor(FakeTensor))))
 def from_fun(t: object) -> object:
@@ -309,6 +317,8 @@ def gen_alias_from_base(
     target_view_meta_sequence: ViewMetaSequence | None = None,
     *,
     replay_views: bool,
+    target_is_conj: bool | None = None,
+    target_is_neg: bool | None = None,
 ) -> Tensor:
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -318,6 +328,17 @@ def gen_alias_from_base(
             out = out.detach()
         elif not aliased_base_tensor.requires_grad and target_requires_grad:
             out.requires_grad_(True)
+        return out
+
+    def patch_view_bits(out: Tensor) -> Tensor:
+        is_conj = (
+            target_meta_tensor.is_conj() if target_is_conj is None else target_is_conj
+        )
+        is_neg = target_meta_tensor.is_neg() if target_is_neg is None else target_is_neg
+        if out.is_conj() != is_conj:
+            out = out.conj()
+        if out.is_neg() != is_neg:
+            out = out._neg_view()
         return out
 
     # If provided, use the target functional tensor for replaying the views.
@@ -341,7 +362,7 @@ def gen_alias_from_base(
                 "incorrect out shape after application of ViewMeta sequence: "
                 f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
             )
-        return patch_requires_grad(out)
+        return patch_view_bits(patch_requires_grad(out))
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
@@ -369,7 +390,7 @@ def gen_alias_from_base(
         #
         # As a stopgap, we'll fall back to as_strided.
         if out is not None and out.shape == target_meta_tensor.shape:
-            return patch_requires_grad(out)
+            return patch_view_bits(patch_requires_grad(out))
 
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
@@ -390,7 +411,7 @@ def gen_alias_from_base(
     # as_strided() is the "most generic" view, but it does not cover cross-dtype views
     if aliased_out.dtype != target_meta_tensor.dtype:
         aliased_out = aliased_out.view(target_meta_tensor.dtype)
-    return aliased_out
+    return patch_view_bits(aliased_out)
 
 
 def has_same_metadata(t1: Tensor, t2: Tensor) -> bool:

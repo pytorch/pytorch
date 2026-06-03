@@ -1651,6 +1651,65 @@ class TestOverlapSchedulingFixes(InductorTestCase):
             "Cycle: pre_bucket <-> new_start via data + extra deps",
         )
 
+    def test_graphsafe_rng_state_with_insert_overlap_deps(self):
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import V
+        from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+        torch.cuda.init()
+
+        def func(a, b, rng_state):
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(a, 1, "0")
+            rng = graphsafe_run_with_rng_state(
+                torch.ops.aten.mm.default, a, b, rng_state=rng_state
+            )
+            wait = torch.ops._c10d_functional.wait_tensor(ag)
+            return rng + wait
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            a = torch.empty(4, 4, device=self.device)
+            b = torch.empty(4, 4, device=self.device)
+            gen = torch.cuda.default_generators[0].clone_state()
+            traced = make_fx(func)(a, b, gen)
+
+        def custom_runtime_estimation(
+            node: fx.Node, override_size: int | None
+        ) -> float | None:
+            if node.op != "call_function":
+                return None
+            if node.target is graphsafe_run_with_rng_state:
+                return 10.0
+            if node.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
+                return 10.0
+            return None
+
+        schedule_overlap_bucketing(
+            traced,
+            insert_overlap_deps=True,
+            collective_bucketing=False,
+            custom_runtime_estimation=custom_runtime_estimation,
+            collective_estimator="analytical",
+            compute_estimator="analytical",
+            pre_bucketing_fsdp_collectives=False,
+        )
+
+        rng_placeholder = next(
+            n
+            for n in traced.graph.nodes
+            if n.op == "placeholder" and isinstance(n.meta.get("val"), torch.Generator)
+        )
+        user = next(iter(rng_placeholder.users))
+        self.assertIs(user.target, control_deps)
+
+        graph = GraphLowering(traced, [a, b, gen])
+        with V.set_fake_mode(fake_mode), V.set_graph_handler(graph):
+            graph.run(a, b, gen)
+
 
 class TestForeachGroupsUnit(InductorTestCase):
     """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
@@ -1684,6 +1743,25 @@ class TestForeachGroupsUnit(InductorTestCase):
             ag_ins, 2, torch.float32, out_dtype_ints, 0, None
         )
         self.assertTrue(torch.allclose(result_with, result_without))
+
+
+class TestNodeRuntimeEstimationUnit(InductorTestCase):
+    def test_compute_estimation_logging_handles_symbolic_scalar_meta(self):
+        from torch._inductor.fx_passes.node_runtime_estimation import (
+            _log_compute_estimations,
+        )
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        x.meta["val"] = torch.empty(2, 3)
+        y.meta["val"] = ShapeEnv().create_unbacked_symint()
+        add = graph.call_function(torch.ops.aten.add.Tensor, (x, y))
+        add.meta["val"] = torch.empty(2, 3)
+        graph.output(add)
+
+        _log_compute_estimations([add], [1.0], [1.0])
 
 
 def _make_pge_trace(
@@ -2303,6 +2381,131 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
         pre_bucket_fsdp_collectives(traced, bucket_cap_mb=2000.0)
 
         self.assertEqual(count_ag(fsdp_group), 1)
+
+
+class TestBitsetAncestors(TestCase):
+    """Tests for BitsetAncestors -- int-bitset transitive ancestor sets."""
+
+    def _make_graph(self):
+        """Build a small diamond graph for testing.
+
+        Graph topology (edges go downward):
+              a
+             / \\
+            b   c
+             \\ /
+              d
+              |
+              e
+        """
+        g = fx.Graph()
+        a = g.placeholder("a")
+        b = g.call_function(torch.relu, (a,))
+        c = g.call_function(torch.neg, (a,))
+        d = g.call_function(torch.add, (b, c))
+        e = g.call_function(torch.abs, (d,))
+        g.output(e)
+        return g, [a, b, c, d, e]
+
+    def test_membership(self):
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        self.assertTrue(ancestors.is_ancestor(a, b))
+        self.assertTrue(ancestors.is_ancestor(a, c))
+        self.assertTrue(ancestors.is_ancestor(a, d))
+        self.assertTrue(ancestors.is_ancestor(b, d))
+        self.assertTrue(ancestors.is_ancestor(c, d))
+        self.assertTrue(ancestors.is_ancestor(a, e))
+        self.assertTrue(ancestors.is_ancestor(d, e))
+
+        self.assertFalse(ancestors.is_ancestor(b, c))
+        self.assertFalse(ancestors.is_ancestor(c, b))
+        self.assertFalse(ancestors.is_ancestor(d, a))
+        self.assertFalse(ancestors.is_ancestor(e, a))
+
+    def test_empty_ancestors(self):
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        self.assertEqual(list(ancestors.iter_ancestors(a)), [])
+
+    def test_iteration(self):
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        d_ancestors = list(ancestors.iter_ancestors(d))
+        self.assertEqual(len(d_ancestors), 3)
+        self.assertIn(a, d_ancestors)
+        self.assertIn(b, d_ancestors)
+        self.assertIn(c, d_ancestors)
+
+    def test_len(self):
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        self.assertEqual(len(list(ancestors.iter_ancestors(a))), 0)
+        self.assertEqual(len(list(ancestors.iter_ancestors(b))), 1)
+        self.assertEqual(len(list(ancestors.iter_ancestors(d))), 3)
+        self.assertEqual(len(list(ancestors.iter_ancestors(e))), 4)
+
+    def test_has_dep(self):
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        self.assertTrue(ancestors.has_dep(a, d))
+        self.assertTrue(ancestors.has_dep(d, a))
+        self.assertFalse(ancestors.has_dep(b, c))
+        self.assertFalse(ancestors.has_dep(c, b))
+
+    def test_intersection(self):
+        """Verifies bitwise AND of ancestor sets matches expected common ancestors."""
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g, [a, b, c, d, e] = self._make_graph()
+        ancestors = BitsetAncestors([a, b, c, d, e])
+
+        common_bits = ancestors.get_ancestor_bits(d) & ancestors.get_ancestor_bits(e)
+        self.assertEqual(common_bits.bit_count(), 3)
+
+    def test_extra_inputs(self):
+        """Extra edges beyond the FX graph (e.g. hiding-interval deps)."""
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+        from torch.utils._ordered_set import OrderedSet
+
+        g, [a, b, c, d, e] = self._make_graph()
+        extra = {e: OrderedSet([c])}
+        ancestors = BitsetAncestors([a, b, c, d, e], extra_inputs=extra)
+
+        self.assertTrue(ancestors.is_ancestor(c, e))
+        self.assertTrue(ancestors.is_ancestor(a, e))
+
+    def test_linear_chain(self):
+        """N-node linear chain: node i's ancestors are 0..i-1."""
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        g = fx.Graph()
+        nodes = [g.placeholder("x")]
+        for i in range(99):
+            nodes.append(g.call_function(torch.relu, (nodes[-1],)))
+        g.output(nodes[-1])
+
+        ancestors = BitsetAncestors(nodes)
+        self.assertEqual(len(list(ancestors.iter_ancestors(nodes[0]))), 0)
+        self.assertEqual(len(list(ancestors.iter_ancestors(nodes[50]))), 50)
+        self.assertEqual(len(list(ancestors.iter_ancestors(nodes[99]))), 99)
+        self.assertTrue(ancestors.is_ancestor(nodes[0], nodes[99]))
+        self.assertFalse(ancestors.is_ancestor(nodes[99], nodes[0]))
 
 
 if __name__ == "__main__":

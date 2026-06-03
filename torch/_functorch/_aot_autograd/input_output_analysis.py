@@ -24,6 +24,7 @@ from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
+from .functional_utils import has_same_metadata
 from .schemas import (
     AOTConfig,
     BackwardSignature,
@@ -98,6 +99,8 @@ def remove_dupe_metadata(
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
+                is_conj=o.is_conj,
+                is_neg=o.is_neg,
             )
             for o in m.output_info
         ],
@@ -198,7 +201,9 @@ def create_synthetic_base_metadata(
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
-            keep_input_mutations=m.keep_input_mutations,
+            keep_input_mutations=all(
+                m.input_info[x].keep_input_mutations for x in outer_indices
+            ),
         )
         input_infos.append(inpt_info)
 
@@ -226,24 +231,43 @@ def create_synthetic_base_metadata(
             base_idx=synthetic_base_info[outer_idx][0],  # type: ignore[index]
             requires_grad=(requires_grad := outer_args[outer_idx].requires_grad),
             requires_grad_for_backward=requires_grad,
+            is_conj=outer_args[outer_idx].is_conj(),
+            is_neg=outer_args[outer_idx].is_neg(),
         )
         for outer_idx in outer_aliased_arg_idx_with_metadata_mutations
     ]
     existing_output_infos = []
     for o in m.output_info:
+        synthetic_base_info_for_output = (
+            None if o.base_idx is None else synthetic_base_info[o.base_idx]
+        )
         new_base_idx = (
             None
             if o.base_idx is None
             else (
-                synthetic_base_info[o.base_idx]
-                if isinstance(synthetic_base_info[o.base_idx], int)
-                else synthetic_base_info[o.base_idx][0]  # type: ignore[index]
+                synthetic_base_info_for_output
+                if isinstance(synthetic_base_info_for_output, int)
+                else synthetic_base_info_for_output[0]  # type: ignore[index]
             )
         )
-        # If base_idx is changed for OutputType.is_input, we need to update the output type to reflect the change
+        is_input_replaced_by_synthetic_base_view = (
+            o.base_idx is not None
+            and new_base_idx is not None
+            and isinstance(synthetic_base_info_for_output, tuple)
+            and (
+                outer_args[o.base_idx]._base is not None
+                or not has_same_metadata(
+                    outer_args[o.base_idx], inner_args[new_base_idx]
+                )
+            )
+        )
+        # If OutputType.is_input is remapped to another base, including a
+        # synthetic base replacing the original input view, the output must be
+        # regenerated as an alias of that base.
         new_output_type = (
             OutputType.alias_of_input
-            if o.output_type == OutputType.is_input and o.base_idx != new_base_idx
+            if o.output_type == OutputType.is_input
+            and (o.base_idx != new_base_idx or is_input_replaced_by_synthetic_base_view)
             else o.output_type
         )
         existing_output_infos.append(
@@ -256,6 +280,8 @@ def create_synthetic_base_metadata(
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
+                is_conj=o.is_conj,
+                is_neg=o.is_neg,
             )
         )
 

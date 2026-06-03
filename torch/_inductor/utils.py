@@ -62,6 +62,7 @@ from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
+from torch.utils._triton import has_triton_package
 
 
 OPTIMUS_EXCLUDE_POST_GRAD = [
@@ -122,6 +123,7 @@ from torch.utils._sympy.functions import (
     CleanDiv,
     FloorDiv,
     Identity,
+    Max,
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -134,6 +136,9 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+
+
+_DO_BENCH_PROFILE_EVENT_NAME = "inductor_do_bench_using_profiling"
 
 
 _T = TypeVar("_T")
@@ -190,7 +195,7 @@ def _align(nbytes: int) -> int:
 
 def _is_aligned(v: sympy.Expr) -> bool:
     """v can be statically proven to be a multiple of ALIGN_BYTES"""
-    if isinstance(v, (sympy.Add, sympy.Max)):
+    if isinstance(v, (sympy.Add, sympy.Max, Max)):
         return all(map(_is_aligned, v.args))
     return isinstance(v, align) or sympy.gcd(v, ALIGN_BYTES) == ALIGN_BYTES
 
@@ -325,6 +330,63 @@ def do_bench_using_profiling(
     )
 
 
+def _get_do_bench_profile_result(
+    kineto_events: Iterable[Any],
+    profiler_events: Iterable[Any],
+    n_repeat: int,
+    expected_device_type: DeviceType,
+) -> float:
+    benchmark_event_ids: OrderedSet[int] = OrderedSet()
+
+    def collect_cpu_event_ids(event: Any) -> None:
+        if event.device_type != DeviceType.CPU:
+            return
+
+        benchmark_event_ids.add(event.id)
+        for child in event.cpu_children:
+            collect_cpu_event_ids(child)
+
+    benchmark_events = [
+        event
+        for event in profiler_events
+        if event.name == _DO_BENCH_PROFILE_EVENT_NAME
+        and event.device_type == DeviceType.CPU
+    ]
+    if len(benchmark_events) != n_repeat:
+        raise RuntimeError(
+            f"Expected {n_repeat} {_DO_BENCH_PROFILE_EVENT_NAME} profiling events. "
+            f"Found {len(benchmark_events)} events."
+        )
+
+    for event in benchmark_events:
+        collect_cpu_event_ids(event)
+
+    device_time_us = 0.0
+    for event in kineto_events:
+        linked_correlation_id = event.linked_correlation_id()
+        correlation_id = event.correlation_id()
+        activity_type = event.activity_type()
+        if (
+            event.device_type() == expected_device_type
+            and activity_type != "gpu_user_annotation"
+            and (
+                linked_correlation_id in benchmark_event_ids
+                or (
+                    linked_correlation_id == 0 and correlation_id in benchmark_event_ids
+                )
+            )
+            and event.name() != "Context Sync"
+        ):
+            device_time_us += (event.end_ns() - event.start_ns()) / 1000.0
+
+    if device_time_us <= 0:
+        raise RuntimeError(
+            f"Failed to capture device events for {_DO_BENCH_PROFILE_EVENT_NAME}."
+        )
+
+    return device_time_us / 1000.0 / n_repeat
+
+
 def _do_bench_using_profiling(
     fn: Callable[[], Any],
     warmup: int = 25,
@@ -334,9 +396,9 @@ def _do_bench_using_profiling(
     """
     Returns benchmark results by examining torch profiler events.
     This could be more accurate as it doesn't count CPU side overhead.
-    However, this also requires manually excluding irrelevant event, e.g.
-    vectorized_elementwise_kernel which is used to fill L2 cache,
-    various CUDA events, etc, so could also be fragile.
+    The benchmarked function is wrapped in a profiler record_function so
+    cache-clearing kernels can be excluded without relying on raw CUDA event
+    grouping or kernel names.
     """
 
     if not is_vetted_benchmarking:
@@ -371,9 +433,11 @@ def _do_bench_using_profiling(
         fn()
 
     device_interface.synchronize()
+    profile_activity = getattr(torch.profiler.ProfilerActivity, device_type_upper)
     with torch.profiler.profile(
         activities=[
-            getattr(torch.profiler.ProfilerActivity, device_type_upper),
+            torch.profiler.ProfilerActivity.CPU,
+            profile_activity,
         ]
     ) as p:
         # Benchmark
@@ -381,42 +445,27 @@ def _do_bench_using_profiling(
             # we clear the L2 cache before each run
             cache.zero_()
             # record time of `fn`
-            fn()
+            with torch.profiler.record_function(_DO_BENCH_PROFILE_EVENT_NAME):
+                fn()
         # Record clocks
         device_interface.synchronize()
 
     log.debug("raw events")
-    log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
-
-    filtered_events = EventList(
-        [
-            event
-            for event in p.events()
-            if event.device_type == getattr(DeviceType, device_type_upper)
-            and event.name != "Context Sync"
-        ]
-    )
-    # Filter out cache.zero_() events by name pattern instead of relying on
-    # positional grouping. cache.zero_() may not always generate an event
-    # making positional assumptions unreliable.
-    # The kernel name contains "FillFunctor" when generated by cache.zero_().
-    actual_events = EventList(
-        [event for event in filtered_events if "FillFunctor" not in event.name]
-    )
-    if len(actual_events) == 0:
-        raise RuntimeError(
-            f"Failed to capture any events after filtering cache clearing events. "
-            f"{device_type} events: {len(filtered_events)}, repeats: {n_repeat}"
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug(
+            p.key_averages().table(sort_by="self_device_time_total", row_limit=-1)
         )
-    actual_events._build_tree()
-    actual_events = actual_events.key_averages()
+
+    result = _get_do_bench_profile_result(
+        p.profiler.kineto_results.events(),
+        p.events(),
+        n_repeat,
+        getattr(DeviceType, device_type_upper),
+    )
 
     log.debug("profiling time breakdown")
-    log.debug(actual_events.table(row_limit=-1))
-
-    res = sum(event.device_time_total for event in actual_events) / 1000.0 / n_repeat
-    log.debug("profiling results: %s ms", res)
-    return res
+    log.debug("profiling results: %s ms", result)
+    return result
 
 
 @functools.cache
@@ -1240,6 +1289,15 @@ FORBIDDEN_CUDAGRAPH_OPS = frozenset(
         # constant arguments, so might as well ban
         "aten._assert_scalar",
     ]
+    + (
+        # rocm workaround: topk kernels fault under cudagraph trees
+        # on the 2nd replay of a recorded graph.
+        [
+            "aten.topk.default",
+        ]
+        if torch.version.hip is not None
+        else []
+    )
 )
 
 
@@ -1892,6 +1950,15 @@ def using_b200() -> bool:
     # compute capability 10.0 or 10.0a is NVIDIA B200
     device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
     return device_properties.major == 10
+
+
+def is_nvidia_sm100_or_later() -> bool:
+    """Return true for NVIDIA CUDA devices with compute capability SM100+."""
+    return (
+        torch.cuda.is_available()
+        and torch.version.hip is None
+        and torch.cuda.get_device_capability() >= (10, 0)
+    )
 
 
 def get_num_sms() -> int:
@@ -3067,6 +3134,13 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     if ds_tops is not None:
         return ds_tops
 
+    if not torch.cuda.is_available():
+        log.warning(
+            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
+            "Returning 0.0; roofline estimates will use memory bandwidth only."
+        )
+        return 0.0
+
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
     SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
@@ -3130,7 +3204,11 @@ def is_welford_reduction(reduction_type: str) -> bool:
 def reduction_num_outputs(reduction_type: str) -> int:
     if is_welford_reduction(reduction_type):
         return 3
-    elif reduction_type == "online_softmax_reduce":
+    elif reduction_type in (
+        "argmax_with_value",
+        "argmin_with_value",
+        "online_softmax_reduce",
+    ):
         return 2
     else:
         return 1
@@ -3477,6 +3555,81 @@ def is_gpu(device: str | None) -> bool:
 def is_rocm() -> bool:
     """Check if we're running on ROCm/HIP platform."""
     return torch.version.hip is not None
+
+
+@functools.lru_cache(None)
+def _triton_supported_fp8_dtypes(
+    backend_name: str, arch: int | str, warp_size: int
+) -> tuple[str, ...] | None:
+    if not has_triton_package():
+        return None
+
+    try:
+        from triton.backends.compiler import GPUTarget
+        from triton.compiler.compiler import make_backend
+
+        # This is the same option Triton checks when lowering tl.float8* types.
+        target = GPUTarget(backend_name, arch, warp_size)
+        options = make_backend(target).parse_options({})
+    except (AttributeError, ImportError, KeyError, TypeError):
+        return None
+
+    supported_fp8_dtypes = getattr(options, "supported_fp8_dtypes", None)
+    if supported_fp8_dtypes is None:
+        return None
+    return tuple(supported_fp8_dtypes)
+
+
+def is_triton_fp8_dtype_supported(
+    dtype: torch.dtype,
+    device: torch.device | str | None = None,
+    *,
+    triton_backend: str | None = None,
+    triton_arch: int | str | None = None,
+    warp_size: int | None = None,
+) -> bool:
+    if dtype not in (
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2fnuz,
+    ):
+        return True
+
+    triton_dtype = _type_of(dtype).removeprefix("*")
+
+    if triton_backend is None:
+        if device is None:
+            return True
+        device = torch.device(device)
+        if device.type != "cuda":
+            return True
+        if not torch.cuda.is_available():
+            return True
+
+        device_index = device.index
+        if device_index is None:
+            device_index = torch.cuda.current_device()
+        properties = torch.cuda.get_device_properties(device_index)
+        if is_rocm():
+            triton_backend = "hip"
+            triton_arch = properties.gcnArchName.split(":")[0]
+        else:
+            triton_backend = "cuda"
+            triton_arch = properties.major * 10 + properties.minor
+        warp_size = getattr(properties, "warp_size", None)
+
+    if triton_arch is None:
+        raise ValueError("triton_arch must be provided with triton_backend")
+    if warp_size is None:
+        warp_size = 64 if triton_backend == "hip" else 32
+
+    supported_fp8_dtypes = _triton_supported_fp8_dtypes(
+        triton_backend, triton_arch, warp_size
+    )
+    if supported_fp8_dtypes is None:
+        return True
+    return triton_dtype in supported_fp8_dtypes
 
 
 def device_need_guard(device: str) -> bool:
@@ -3877,8 +4030,6 @@ def is_same_tensor(data: torch.Tensor, value: torch.Tensor) -> bool:
         and data.stride() == value.stride()
         and data.dtype == value.dtype
         and data.device == value.device
-        and data.is_conj() == value.is_conj()
-        and data.is_neg() == value.is_neg()
         and data.untyped_storage().data_ptr() == value.untyped_storage().data_ptr()
         and data.storage_offset() == value.storage_offset()
     )
@@ -4544,12 +4695,22 @@ def set_customized_partition_wrappers(wrapper: CUDAGraphWrapperType) -> None:
 
 
 def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, Any]]:
-    args = snode.node.inputs  # type: ignore[union-attr]
-    args = snode.node.fill_non_provided_args(  # type: ignore[union-attr]
-        [*args, *snode.node.constant_args],  # type: ignore[union-attr]
-        snode.node.kwargs,  # type: ignore[union-attr]
-    )
-    kwargs = snode.node.kwargs  # type: ignore[union-attr]
+    node = cast("ExternKernel", snode.node)
+    if isinstance(node, torch._inductor.ir.FallbackKernel):
+        args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
+    else:
+        args = [*node.inputs, *node.constant_args]
+        kwargs = node.kwargs
+
+    args = node.fill_non_provided_args(args, kwargs)
+    kwargs = dict(kwargs)
+    op_overload = getattr(node, "op_overload", None)
+    if isinstance(op_overload, torch._ops.OpOverload):
+        positional_arg_names = [
+            arg.name for arg in op_overload._schema.arguments if not arg.kwarg_only
+        ]
+        for arg_name in positional_arg_names[: len(args)]:
+            kwargs.pop(arg_name, None)
     flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
 
     def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]

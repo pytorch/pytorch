@@ -314,22 +314,30 @@ class TreeManagerContainer:
             return self.tree_manager
 
 
-local = threading.local()
+def _initialize_tls(local: threading.local) -> None:
+    # one tree manager per device
+    local.tree_manager_containers = {}
+    local.tree_manager_locks = defaultdict(threading.Lock)
 
-# one tree manager per device
-local.tree_manager_containers = {}
-local.tree_manager_locks = defaultdict(threading.Lock)
+    # We need to register this as an object that will be copied over as TLS when new
+    # threads are created in autograd
+    torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
+    torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
+
+
+local = threading.local()
+_initialize_tls(local)
+
+
+# CUDA graph capture and private-pool warmup are process-wide CUDA states.  Keep
+# them serialized across Python threads so a synchronize or allocator-pool switch
+# in one thread does not invalidate another thread's capture.
+graph_capture_lock = threading.Lock()
 
 
 # only incremented by user call of mark_step_begin
 class MarkStepBox:
     mark_step_counter = 0
-
-
-# We need to register this as an object that will be copied over as TLS when new
-# threads are created in autograd
-torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
-torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
 
 
 def mark_step_begin() -> None:
@@ -366,9 +374,10 @@ def reset_cudagraph_trees() -> None:
 def get_obj(local: Any, attr_name: str) -> Any:
     if hasattr(local, attr_name):
         return getattr(local, attr_name)
-    else:
-        assert torch._C._is_key_in_tls(attr_name)
-        return torch._C._get_obj_in_tls(attr_name)
+    if not torch._C._is_key_in_tls(attr_name):
+        _initialize_tls(local)
+        return getattr(local, attr_name)
+    return torch._C._get_obj_in_tls(attr_name)
 
 
 def get_container(device_index: int) -> TreeManagerContainer:
@@ -2076,7 +2085,7 @@ class CUDAGraphTreeManager:
         # will not be reused; separate recordings would have use the same memory pool, but not
         # the same memory.
 
-        with torch.cuda.device(device_index):
+        with graph_capture_lock, torch.cuda.device(device_index):
             torch.cuda.synchronize()
             self.stream = torch.cuda.Stream()
             self.stream.wait_stream(torch.cuda.current_stream())
@@ -2267,7 +2276,8 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            return self.run_eager(new_inputs, function_id)
+            with graph_capture_lock:
+                return self.run_eager(new_inputs, function_id)
 
         assert not isinstance(self.current_node, CUDAWarmupNode)
         child_nodes = (
@@ -2358,7 +2368,8 @@ class CUDAGraphTreeManager:
                 self.apply_checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
-        return self.record_function(new_inputs, function_id)
+        with graph_capture_lock:
+            return self.record_function(new_inputs, function_id)
 
     def shutdown(self) -> None:
         """
@@ -2644,10 +2655,23 @@ class CUDAGraphTreeManager:
         )
 
     @staticmethod
-    def format_dealloc_msg(stack_trace: str | None) -> str:
+    def format_dealloc_msg(
+        stack_trace: str | None, *, is_grad_output: bool = False
+    ) -> str:
         stack_trace = (
             stack_trace.strip() if stack_trace else "[Could not find stack trace]"
         )
+        if is_grad_output:
+            return (
+                "Error: accessing gradient tensor output of CUDAGraphs that has been overwritten "
+                f"by a subsequent run. Stack trace: {stack_trace}. "
+                "This can happen with torch.compile(mode='reduce-overhead') and gradient "
+                "accumulation when a .grad tensor is allocated during CUDAGraph capture. "
+                "If you need gradient accumulation, allocate stable .grad buffers outside "
+                "CUDAGraph capture before the compiled backward runs, for example by running "
+                "an eager warmup iteration or by preallocating zeroed .grad tensors. "
+                "If you do not need gradient accumulation, set .grad to None before each backward."
+            )
         return (
             "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
             f"Stack trace: {stack_trace}. "
@@ -2660,17 +2684,21 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
 
-        stor_stack_trace: dict[int, str | None] = {}
+        stor_dealloc_info: dict[int, tuple[str | None, bool]] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            is_grad_output = (
+                self.id_to_mode[node.wrapped_function.id] == CompilationMode.BACKWARD
+            )
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()
                 if ten is None:
                     continue
 
                 torch._C._set_storage_access_error_msg(
-                    ten, self.format_dealloc_msg(stack_trace)
+                    ten,
+                    self.format_dealloc_msg(stack_trace, is_grad_output=is_grad_output),
                 )
 
             # we would to enable the following assertion, but an internal model failed with a command
@@ -2686,7 +2714,10 @@ class CUDAGraphTreeManager:
                 if not storage_ref:
                     continue
 
-                stor_stack_trace[storage_ref.data_ptr()] = stack_trace
+                stor_dealloc_info[storage_ref.data_ptr()] = (
+                    stack_trace,
+                    is_grad_output,
+                )
 
         deleted = OrderedSet[Any]()
         for storage_ref in self.current_node.path_live_weakrefs():
@@ -2694,8 +2725,11 @@ class CUDAGraphTreeManager:
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
 
+                stack_trace, is_grad_output = stor_dealloc_info.get(
+                    storage_ref.data_ptr(), (None, False)
+                )
                 msg = self.format_dealloc_msg(
-                    stor_stack_trace.get(storage_ref.data_ptr())
+                    stack_trace, is_grad_output=is_grad_output
                 )
                 torch._C._free_And_Remove_DeleterFn(_storage_deref)
 

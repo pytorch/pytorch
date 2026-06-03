@@ -120,6 +120,11 @@ class OutputAliasInfo:
     # we compare the ViewMeta elements appropriately, i.e. their type and
     # the elements returned by the `as_tuple()` call.
     view_meta_sequence: ViewMetaSequence | None = None
+    # Lazy dispatcher view bits from the original user output. Backend graph
+    # outputs may be resolved before compilation, so alias replay cannot read
+    # these from the compiled output tensor.
+    is_conj: bool = False
+    is_neg: bool = False
 
 
 class MutationType(Enum):
@@ -202,6 +207,15 @@ class MemoryFormatMeta:
         )
         if not use_memory_format:
             use_memory_format = t._has_symbolic_sizes_strides
+
+        if (
+            not use_memory_format
+            and t.layout == torch.strided
+            and torch._debug_has_internal_overlap(t) == 1
+        ):
+            # An internally overlapping output, e.g. from expand(), cannot
+            # represent arbitrary incoming gradients with its own strides.
+            use_memory_format = True
 
         if use_memory_format:
             return MemoryFormatMeta(
@@ -528,6 +542,9 @@ class ViewAndMutationMeta:
     num_graphsafe_rng_states: int = 0
 
     graphsafe_rng_state_index: int | None = None
+
+    # Device for graphsafe RNG states (supports CUDA, TPU, etc.)
+    graphsafe_rng_device: torch.device | None = None
 
     # Stream indices for mutated inputs in the epilogue
     # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
@@ -1115,7 +1132,7 @@ class CacheableAOTConfig:
             raise AssertionError("Can only have pre_dispatch IR for export.")
 
 
-@dataclass
+@dataclass(frozen=True)
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -1228,8 +1245,8 @@ class AOTState:
     # detected by doing an initial trace when we created this state.
     fw_metadata: ViewAndMutationMeta
 
-    # Top-level configuration
-    # This is morally immutable but sometimes we are naughty and mutate it.
+    # Top-level configuration. Stage-local compiler choices are threaded
+    # explicitly rather than mutating this object in place.
     aot_config: AOTConfig
 
     # When performing AOTAutograd traces and other passes, we typically
