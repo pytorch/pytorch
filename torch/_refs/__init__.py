@@ -3416,10 +3416,11 @@ def native_group_norm(
     w = w.contiguous().as_strided((batch_size, num_channels), (num_channels, 1))
     b = b.contiguous().as_strided((batch_size, num_channels), (num_channels, 1))
 
-    broadcast_dims = list(range(2, input.ndim))
-    unsqueeze_w = _unsqueeze_multiple(w, broadcast_dims)
-    unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
-    out = input_acc * unsqueeze_w + unsqueeze_b
+    input_reshaped = input_reshaped.reshape(
+        (batch_size, num_channels, flattened_inner_size)
+    )
+    out = input_reshaped * w.unsqueeze(2) + b.unsqueeze(2)
+    out = out.reshape(input.shape)
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
