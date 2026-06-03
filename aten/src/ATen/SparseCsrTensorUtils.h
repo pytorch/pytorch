@@ -441,7 +441,7 @@ inline std::tuple<Tensor, Tensor> create_acc_buffer(
     return std::make_tuple(
         new_values.resize_(nnz), new_values_acc.resize_(nnz));
   } else {
-    return std::make_tuple(new_values, new_values_acc);
+    return std::make_tuple(std::move(new_values), std::move(new_values_acc));
   }
 }
 

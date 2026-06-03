@@ -8,6 +8,7 @@
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/TensorUtils.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -426,7 +427,11 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
     });
   });
 
-  return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, offset2bag, bag_size, max_indices);
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(
+      std::move(output),
+      std::move(offset2bag),
+      std::move(bag_size),
+      std::move(max_indices));
 }
 
 Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &indices,

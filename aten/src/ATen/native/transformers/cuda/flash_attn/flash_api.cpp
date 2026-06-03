@@ -352,7 +352,7 @@ std::tuple<at::Tensor, at::Tensor> set_params_splitkv(Flash_fwd_params &params, 
         TORCH_CHECK(params.num_splits <= 128, "num_splits > 128 not supported");
     }
 
-    return std::make_tuple(softmax_lse_accum, out_accum);
+    return std::make_tuple(std::move(softmax_lse_accum), std::move(out_accum));
 }
 
 void set_params_alibi(Flash_fwd_params &params, std::optional<at::Tensor> &alibi_slopes_, int batch_size, int num_heads){

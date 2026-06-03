@@ -5,6 +5,7 @@
 #include <ATen/cuda/ThrustAllocator.h>
 
 #include <c10/util/Load.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -82,7 +83,8 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
   }
 
   AT_CUDA_CHECK(cudaGetLastError());
-  return std::tuple<Tensor, Tensor, int64_t>(inverse_indices, counts, num_out);
+  return std::tuple<Tensor, Tensor, int64_t>(
+      std::move(inverse_indices), std::move(counts), num_out);
 }
 
 template <typename scalar_t>

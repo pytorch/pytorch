@@ -1112,6 +1112,7 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
   auto hidden_it = hiddens.begin();
   auto weight_it = weights.begin();
   std::vector<hidden_type> final_hiddens;
+  final_hiddens.reserve(num_layers);
   for (const auto l : c10::irange(num_layers)) {
     auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++));
     final_hiddens.push_back(std::move(layer_output.final_hidden));
@@ -1467,7 +1468,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   if (_input.is_mps()) {
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
-    std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
+    std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(
+        std::move(std::get<0>(output)),
+        std::move(std::get<1>(output)),
+        std::move(std::get<2>(output)));
     return return_values;
   }
 #endif

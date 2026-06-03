@@ -258,13 +258,13 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
       // indices: [:, Tensor[2, 2], Tensor[2, 2], :]
       // batched_indices: [:, :, Tensor[2, 2], Tensor[2, 2], :]
       // res: Tensor[B, 5, 2, 2, 8]
-      return std::make_tuple(res, 0);
+      return std::make_tuple(std::move(res), 0);
     } else {
       // self: Tensor[B, 5, 6, 7]
       // indices: [Tensor[2, 2], :, Tensor[2, 2]]
       // batched_indices: [:, Tensor[2, 2], :, Tensor[2, 2]]
       // res: Tensor[2, 2, B, 6]
-      return std::make_tuple(res, max_index_dim);
+      return std::make_tuple(std::move(res), max_index_dim);
     }
   }
 
@@ -275,13 +275,13 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
       // indices: [:, :, Tensor[B, 2, 2], Tensor[2, 2]]
       // batched_indices: indices (no change)
       // res: Tensor[5, 6, B, 2, 2]
-      return std::make_tuple(res, num_leading_nones);
+      return std::make_tuple(std::move(res), num_leading_nones);
     } else {
       // self: Tensor[5, 6, 7, 8, 9]
       // indices: [:, :, Tensor[B, 2, 2], :, Tensor[2, 2]]
       // batched_indices: indices (no change)
       // res: Tensor[B, 2, 2, 5, 6, 8]
-      return std::make_tuple(res, 0);
+      return std::make_tuple(std::move(res), 0);
     }
   }
 
@@ -292,7 +292,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
     // indices: [:, Tensor[B, 2, 2], :, Tensor[2, 2]]
     // batched_indices: [arange(B).expand(B, 2, 2), :, Tensor[B, 2, 2], :, Tensor[2, 2]]
     // res: Tensor[B, 2, 2, 5, 7]
-    return std::make_tuple(res, 0);
+    return std::make_tuple(std::move(res), 0);
   }
   // In other words, in batched_indices, advanced indices are adjacent
   if (num_leading_nones == 0) {
@@ -300,7 +300,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
     // indices: [Tensor[B, 2, 2], Tensor[2, 2], :, :]
     // batched_indices: [arange(B).expand(B, 2, 2), Tensor[B, 2, 2], Tensor[2, 2], :, :]
     // res: Tensor[B, 2, 2, 7, 8]
-    return std::make_tuple(res, 0);
+    return std::make_tuple(std::move(res), 0);
   }
   // This is the tricky case. In indices, advanced indices are adjacent.
   // In batched_indices, advanced indices are no longer adjacent
@@ -475,7 +475,13 @@ namespace {
       indices_bdims.push_back(index_bdim);
     }
     auto [values_value, values_bdim] = unwrapTensorAtLevel(values, cur_level);
-    return std::make_tuple(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim);
+    return std::make_tuple(
+        std::move(self_value),
+        self_bdim,
+        std::move(indices_value),
+        std::move(indices_bdims),
+        std::move(values_value),
+        values_bdim);
   }
 
 }  // namespace
