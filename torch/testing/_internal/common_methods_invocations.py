@@ -6976,6 +6976,17 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
             dict(ignore_index=1, options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
             dict(weight="<to be initialized>", ignore_index=1,
                  options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
+            # Chunked path exercising linear_bias; tensor built below.
+            dict(linear_bias="<to be initialized>",
+                 options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
+            dict(linear_bias="<to be initialized>",
+                 weight="<to be initialized>", reduction="sum",
+                 options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
+            # ignore_index + linear_bias: weight_chunk[n]==0 on masked
+            # rows must zero out both the logits.sum contribution and
+            # the index_add correction.
+            dict(linear_bias="<to be initialized>", ignore_index=1,
+                 options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
         ]
         if dtype in {torch.float16, torch.bfloat16}:
             kwargs_list.extend([
