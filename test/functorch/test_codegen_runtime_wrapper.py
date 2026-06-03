@@ -31,7 +31,8 @@ class TestCodegenRuntimeWrapper(TestCase):
     def test_inference_simple(self):
         """
         Simple inference: no mutations, no aliases. Generated code should
-        use the inference path (grad disabled) with empty orig_inputs.
+        use the inference path (grad disabled). orig_inputs is omitted
+        entirely when there are no aliased outputs (Fix C optimization).
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
 
@@ -45,7 +46,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(out, x * 2)
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("orig_inputs = {}", source)
+        self.assertNotIn("orig_inputs", source)
         self.assertIn("torch._C._set_grad_enabled(False)", source)
         self.assertNotIn("_force_view_tracking_", source)
 
