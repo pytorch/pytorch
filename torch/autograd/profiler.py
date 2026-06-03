@@ -888,14 +888,32 @@ class record_function(_ContextDecorator):
             Optional["torch.classes.profiler._RecordFunction"],
             None,
         )
+        self._cupti_monitor_external_id: int | None = None
 
     def __enter__(self):
         self.record = torch.ops.profiler._record_function_enter_new(
             self.name, self.args
         )
+        try:
+            from torch.profiler import _cupti_monitor
+
+            self._cupti_monitor_external_id = _cupti_monitor.push_user_annotation(
+                self.name
+            )
+        except Exception:
+            self._cupti_monitor_external_id = None
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
+        if self._cupti_monitor_external_id is not None:
+            try:
+                from torch.profiler import _cupti_monitor
+
+                _cupti_monitor.pop_user_annotation()
+            except Exception:
+                pass
+            finally:
+                self._cupti_monitor_external_id = None
         if not self.run_callbacks_on_exit:
             return
 
