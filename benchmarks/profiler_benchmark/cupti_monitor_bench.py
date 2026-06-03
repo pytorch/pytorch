@@ -148,23 +148,6 @@ def run_baseline(step_fn, warmup_steps: int, samples: int, measure_steps: int = 
     return summarize(values)
 
 
-def run_always_on_monitor(step_fn, warmup_steps: int, samples: int, measure_steps: int):
-    temp_root = Path(tempfile.mkdtemp(prefix="monitor_always_on_"))
-    output_dir = temp_root / "monitor"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    cupti_monitor.start_collection(output_dir, flush_period_s=0.0)
-    try:
-        for _ in range(warmup_steps):
-            step_fn()
-        torch.cuda.synchronize()
-        values = [time_step_block(step_fn, measure_steps) for _ in range(samples)]
-        return summarize(values)
-    finally:
-        if cupti_monitor.get_monitor() is not None:
-            cupti_monitor.stop_collection()
-        shutil.rmtree(temp_root, ignore_errors=True)
-
-
 def run_always_on_raw(step_fn, warmup_steps: int, samples: int, measure_steps: int):
     temp_root = Path(tempfile.mkdtemp(prefix="monitor_always_on_raw_"))
     output_dir = temp_root / "monitor"
@@ -172,7 +155,6 @@ def run_always_on_raw(step_fn, warmup_steps: int, samples: int, measure_steps: i
     cupti_monitor.start_collection(
         output_dir,
         flush_period_s=0.0,
-        raw_buffer_dump=True,
     )
     try:
         for _ in range(warmup_steps):
@@ -242,10 +224,8 @@ def main():
         "--mode",
         choices=[
             "baseline",
-            "always_on",
-            "always_on_raw",
-            "always_on_hw",
             "always_on_raw_hw",
+            "always_on_raw",
             "stock_profiled",
             "stock_profiled_hw",
             "monitor_profiled",
@@ -269,7 +249,6 @@ def main():
     args = parser.parse_args()
 
     if args.mode in {
-        "always_on_hw",
         "always_on_raw_hw",
         "stock_profiled_hw",
         "monitor_profiled_hw",
@@ -286,13 +265,6 @@ def main():
     }
     if args.mode == "baseline":
         result["baseline"] = run_baseline(
-            step_fn,
-            args.warmup_steps,
-            args.samples,
-            args.always_on_measure_steps,
-        )
-    elif args.mode in {"always_on", "always_on_hw"}:
-        result["always_on"] = run_always_on_monitor(
             step_fn,
             args.warmup_steps,
             args.samples,
