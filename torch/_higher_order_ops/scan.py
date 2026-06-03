@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import enum
 import functools
 import itertools
@@ -845,12 +846,22 @@ def scan_proxy_mode(mode, combine_fn, init, xs, additional_inputs):
 def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
     with mode:
         scan_length = xs[0].shape[0]
-        carry, outputs = _extract_carry_and_out(
-            combine_fn(
+        # The body may allocate unbacked symbols (e.g. from data-dependent
+        # indexing) that are internal to a single iteration and never surface in
+        # scan's outputs, whose shapes must be consistent across iterations.
+        ignore_ctx = (
+            mode.shape_env.ignore_fresh_unbacked_symbols()
+            if mode.shape_env is not None
+            else contextlib.nullcontext()
+        )
+        with ignore_ctx:
+            body_out = combine_fn(
                 *init,
                 *[first_slice_copy(inp) for inp in xs],
                 *additional_inputs,
-            ),
+            )
+        carry, outputs = _extract_carry_and_out(
+            body_out,
             len(init),
         )
         out = (

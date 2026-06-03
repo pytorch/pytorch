@@ -1659,6 +1659,51 @@ def forward(self, pred_1, x_1):
         exp_out = _fake_scan(combine_fn, init, xs, dim=dim)
         self.assertEqual(out, exp_out)
 
+    @parametrize("compile_mode", ["none", "eager"])
+    def test_scan_closed_over_indexing(self, compile_mode):
+        # The combine_fn closes over a tensor and indexes it with the per-step
+        # integer xs element (a common JAX idiom, e.g. table[:, t] in HMMs and
+        # decoding loops). The xs slice is data-dependent during tracing.
+        scan_fct = compile_mode_helper(scan, compile_mode)
+
+        table = torch.rand(2, 4)
+        transition = torch.rand(2, 2)
+
+        def combine_fn(c, t):
+            y = (c[..., None] * transition).sum(dim=0) * table[:, t]
+            return y, y.clone()
+
+        init = torch.tensor([0.6, 0.4])
+        xs = torch.arange(1, table.shape[1], dtype=torch.int64)
+
+        out = scan_fct(combine_fn, init, xs)
+        exp_out = _fake_scan(combine_fn, init, xs)
+        self.assertEqual(out, exp_out)
+
+    def test_scan_closed_over_indexing_autograd(self):
+        # Differentiate through closed-over indexing. The per-step index value is
+        # an unbacked SymInt; the backward must recompute it (rather than stack
+        # it) and use a data-dependent-friendly select_copy meta.
+        table = torch.rand(2, 4, dtype=torch.float64, requires_grad=True)
+        transition = torch.rand(2, 2, dtype=torch.float64, requires_grad=True)
+        init = torch.tensor([0.6, 0.4], dtype=torch.float64, requires_grad=True)
+        xs = torch.arange(1, table.shape[1], dtype=torch.int64)
+
+        def combine_fn(c, t):
+            y = torch.tanh((c[..., None] * transition).sum(dim=0) + table[:, t])
+            return y, y.clone()
+
+        c, ys = scan(combine_fn, init, xs)
+        c_ref, ys_ref = _fake_scan(combine_fn, init, xs)
+        self.assertEqual(c, c_ref)
+        self.assertEqual(ys, ys_ref)
+
+        loss = (c * 1.3).sum() + (ys**2).sum()
+        loss_ref = (c_ref * 1.3).sum() + (ys_ref**2).sum()
+        grads = torch.autograd.grad(loss, (table, transition, init))
+        grads_ref = torch.autograd.grad(loss_ref, (table, transition, init))
+        self.assertEqual(grads, grads_ref)
+
     # TODO: provide an implementation for all compile modes and re-enable all test
     @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
