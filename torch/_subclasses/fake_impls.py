@@ -526,6 +526,32 @@ def _spdiags(
     )
 
 
+@register_op_impl(aten._to_dense.default)
+def _to_dense(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dtype: torch.dtype | None = None,
+    masked_grad: bool | None = None,
+) -> FakeTensor:
+    if self.layout is torch.sparse_coo:
+        if dtype is not None:
+            raise RuntimeError("dtype argument is not supported by sparse_to_dense")
+        with in_kernel_invocation_manager(fake_mode):
+            out = torch.empty(
+                tuple(self.shape),
+                dtype=self.dtype,
+                device="meta",
+            )
+        return FakeTensor(fake_mode, out, self.fake_device)
+
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(self, dtype=dtype, masked_grad=masked_grad)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, self.fake_device
+    )
+
+
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags
