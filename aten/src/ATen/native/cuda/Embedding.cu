@@ -193,7 +193,7 @@ template <typename scalar_t, typename accscalar_t, typename index_t>
 __global__ void renorm_kernel(
     scalar_t* weights, index_t* indices, accscalar_t max_norm,
     accscalar_t norm_type, int64_t dim,
-    int64_t weights_stride0, int64_t weights_stride1,
+    int64_t num_weights, int64_t weights_stride0, int64_t weights_stride1,
     const int64_t *num_unique_indices) {
   if (blockIdx.x >= *num_unique_indices) {
     return;
@@ -204,7 +204,10 @@ __global__ void renorm_kernel(
   auto sdata = reinterpret_cast<accscalar_t*>(smem);
 
   int tid = threadIdx.x;
-  int base_index = indices[blockIdx.x] * weights_stride0;
+  int64_t index = static_cast<int64_t>(indices[blockIdx.x]);
+  CUDA_KERNEL_ASSERT(index >= 0 && index < num_weights &&
+      "embedding_renorm_: index out of bounds");
+  int64_t base_index = index * weights_stride0;
 
   accscalar_t v = 0;
   for (int i = tid; i < dim; i += blockDim.x) {
@@ -232,6 +235,26 @@ __global__ void renorm_kernel(
       weights[base_index + i * weights_stride1] *= factor;
     }
   }
+}
+
+template <typename index_t>
+__global__ void embedding_renorm_wrap_indices_kernel(
+    const index_t* indices,
+    index_t* wrapped_indices,
+    int64_t num_indices,
+    int64_t num_weights) {
+  auto offset = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (offset >= num_indices) {
+    return;
+  }
+
+  int64_t index = static_cast<int64_t>(indices[offset]);
+  CUDA_KERNEL_ASSERT(index >= -num_weights && index < num_weights &&
+      "embedding_renorm_: index out of bounds");
+  if (index < 0) {
+    index += num_weights;
+  }
+  wrapped_indices[offset] = static_cast<index_t>(index);
 }
 
 } // anonymous namespace
@@ -289,18 +312,18 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   Tensor count;
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
     auto range = at::arange(num_indices, indices.options());
-    int64_t nbits = cuda::cub::get_num_bits(num_weights);
+    int64_t nbits = padding_idx >= 0
+      ? cuda::cub::get_num_bits(num_weights)
+      : cuda::cub::get_num_bits(num_weights - 1 - padding_idx);
     cuda::cub::radix_sort_pairs(
       indices.const_data_ptr<index_t>(), sorted_indices.mutable_data_ptr<index_t>(),
       range.const_data_ptr<index_t>(), orig_indices.mutable_data_ptr<index_t>(),
-      num_indices, false/*, 0, nbits*/);
+      num_indices, false, 0, nbits);
   });
 
   if (scale_grad_by_freq) {
     count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
-      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
       // Compute an increasing sequence per unique item in sortedIndices:
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 1 2 3 1 2 1 1 2
@@ -335,19 +358,36 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   auto self_arg = TensorArg(self, "self", 1);
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkDim("embedding_renorm_", self_arg, 2);
+  checkScalarTypes("embedding_renorm_", indices_arg, {kLong, kInt});
   checkSameGPU("embedding_renorm", self_arg, indices_arg);
+
+  auto num_indices = indices.numel();
+  if (num_indices == 0) {
+    return self;
+  }
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_renorm_cuda_", [&] () {
 
-    auto num_indices = indices.numel();
-    auto indices_contig = std::get<0>(indices.sort()).contiguous();
-    auto unique_indices = at::empty(indices.numel(), indices.options());
+    auto indices_contig = indices.expect_contiguous();
+    const auto num_weights = self.size(0);
+    auto wrapped_indices = at::empty({num_indices}, indices.options());
+    constexpr int64_t threads = 256;
+    embedding_renorm_wrap_indices_kernel<<<
+        ceil_div(num_indices, threads), threads, 0, stream>>>(
+        (*indices_contig).const_data_ptr<index_t>(),
+        wrapped_indices.mutable_data_ptr<index_t>(),
+        num_indices,
+        num_weights);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+    auto sorted_indices = std::get<0>(wrapped_indices.sort()).contiguous();
+    auto unique_indices = at::empty({num_indices}, indices.options());
     auto num_unique_indices = at::empty({}, indices.options().dtype(kLong));
 
     cuda::cub::unique(
-      indices_contig.const_data_ptr<index_t>(),
+      sorted_indices.const_data_ptr<index_t>(),
       unique_indices.mutable_data_ptr<index_t>(),
       num_unique_indices.mutable_data_ptr<int64_t>(),
       num_indices
@@ -369,7 +409,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
         unique_indices.const_data_ptr<index_t>(),
         static_cast<accscalar_t>(max_norm),
         static_cast<accscalar_t>(norm_type),
-        dim, self.stride(0), self.stride(1),
+        dim, num_weights, self.stride(0), self.stride(1),
         num_unique_indices_ptr);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     });

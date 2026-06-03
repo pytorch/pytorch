@@ -1,3 +1,4 @@
+#include <ATen/PythonTorchFunctionTLS.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
@@ -383,6 +384,19 @@ PyObject* dynamo__custom_eval_frame(
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
     DEBUG_TRACE("throw %s", get_frame_name(frame)); // @allow-raw-throw
+    return dynamo_eval_frame_default(tstate, frame, throw_flag);
+  }
+
+  // When _skip_one_hop_torch_function has set the skip_next flag, bypass
+  // Dynamo entirely so the frame runs in eager.  Dynamo has its own
+  // symbolic handling for _skip_one_hop_torch_function when it encounters
+  // it during tracing, but when the C function calls back into Python,
+  // we must not intercept that frame: guard evaluation and compiler
+  // setup code accesses attributes on subclass tensors, which
+  // inadvertently triggers C-level has_torch_function calls that consume
+  // the skip_next flag before tracing can observe it.
+  if (at::impl::PythonTorchFunctionTLS::peek_skip_next()) {
+    DEBUG_TRACE("skip_next %s", get_frame_name(frame));
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 

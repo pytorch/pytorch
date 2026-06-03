@@ -1,5 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
+#include <ATen/native/im2col_shape_check.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -43,6 +45,17 @@ static void im2col_out_mps_template(Tensor& output,
   int64_t stride_height = stride[0];
   int64_t stride_width = stride[1];
 
+  im2col_shape_check(input_,
+                     Tensor(),
+                     kernel_height,
+                     kernel_width,
+                     dilation_height,
+                     dilation_width,
+                     pad_height,
+                     pad_width,
+                     stride_height,
+                     stride_width);
+
   Tensor input = input_;
 
   bool batched_input = true;
@@ -66,7 +79,9 @@ static void im2col_out_mps_template(Tensor& output,
   output.resize_({batch_size, n_output_plane, output_length});
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
-  auto im2colPSO = lib.getPipelineStateForFunc("im2col_" + mps::scalarToMetalTypeString(input));
+  const bool use_u32 = canUse32BitIndexMath(input) && canUse32BitIndexMath(output);
+  auto im2colPSO =
+      lib.getPipelineStateForFunc("im2col_" + mps::scalarToMetalTypeString(input) + (use_u32 ? "_u32" : "_u64"));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       std::array<int32_t, 4> kernel_dilation = {static_cast<int32_t>(kernel_width),
@@ -77,14 +92,31 @@ static void im2col_out_mps_template(Tensor& output,
                                                static_cast<int32_t>(pad_height),
                                                static_cast<int32_t>(stride_width),
                                                static_cast<int32_t>(stride_height)};
-      std::array<int64_t, 4> input_sizes = {input_width, input_height, n_input_plane, batch_size};
-      std::array<int64_t, 4> input_strides = {input.stride(3), input.stride(2), input.stride(1), input.stride(0)};
-      std::array<int64_t, 4> output_strides = {output.stride(2), output.stride(1), output.stride(0), output_width};
       getMPSProfiler().beginProfileKernel(im2colPSO, "im2col", {input, output});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:im2colPSO];
-      mtl_setArgs(
-          computeEncoder, input, output, kernel_dilation, padding_stride, input_strides, output_strides, input_sizes);
+      auto encode = [&](auto input_strides, auto output_strides, auto input_sizes) {
+        mtl_setArgs(
+            computeEncoder, input, output, kernel_dilation, padding_stride, input_strides, output_strides, input_sizes);
+      };
+      if (use_u32) {
+        encode(std::array<int32_t, 4>{static_cast<int32_t>(input.stride(3)),
+                                      static_cast<int32_t>(input.stride(2)),
+                                      static_cast<int32_t>(input.stride(1)),
+                                      static_cast<int32_t>(input.stride(0))},
+               std::array<int32_t, 4>{static_cast<int32_t>(output.stride(2)),
+                                      static_cast<int32_t>(output.stride(1)),
+                                      static_cast<int32_t>(output.stride(0)),
+                                      static_cast<int32_t>(output_width)},
+               std::array<int32_t, 4>{static_cast<int32_t>(input_width),
+                                      static_cast<int32_t>(input_height),
+                                      static_cast<int32_t>(n_input_plane),
+                                      static_cast<int32_t>(batch_size)});
+      } else {
+        encode(std::array<int64_t, 4>{input.stride(3), input.stride(2), input.stride(1), input.stride(0)},
+               std::array<int64_t, 4>{output.stride(2), output.stride(1), output.stride(0), output_width},
+               std::array<int64_t, 4>{input_width, input_height, n_input_plane, batch_size});
+      }
       [computeEncoder dispatchThreads:MTLSizeMake(output_length, n_input_plane, batch_size)
                 threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
       getMPSProfiler().endProfileKernel(im2colPSO);

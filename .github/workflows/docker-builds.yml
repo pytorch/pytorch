@@ -2,16 +2,12 @@ name: docker-builds
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .ci/docker/**
-      - .github/workflows/docker-builds.yml
-      - .lintrunner.toml
   push:
     branches:
       - main
       - release/*
-      - landchecks/*
+    tags:
+      - ciflow/docker/*
     paths:
       - .ci/docker/**
       - .github/workflows/docker-builds.yml
@@ -20,34 +16,31 @@ on:
     - cron: 1 3 * * 3
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 env:
-  ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine
+  ECR_REGISTRY: 308535385114.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: pytorch/ci-image
+  GHCR_REPOSITORY: ghcr.io/pytorch/ci-image
   AWS_DEFAULT_REGION: us-east-1
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
-  get-label-type:
-    if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-
   docker-build:
+    if: github.repository_owner == 'pytorch'
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    needs: get-label-type
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
-        runner: [linux.12xlarge]
+        # BuildKit is a *remote* builder running on OSDC; the orchestrator
+        # runner just streams context and waits, so the smallest pool fits
+        # both amd64 and arm64 builds. Only `buildkit_addr` differs per arch.
+        buildkit_addr: ["tcp://buildkitd-amd64.buildkit:1234"]
         docker-image-name: [
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm,
@@ -82,49 +75,88 @@ jobs:
         ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13
-            runner: linux.arm64.m7g.4xlarge
+            buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
-            runner: linux.arm64.m7g.4xlarge
+            buildkit_addr: "tcp://buildkitd-arm64.buildkit:1234"
             timeout-minutes: 600
-    # Docker uploads fail from LF runners, see https://github.com/pytorch/pytorch/pull/137358
-    # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
-    runs-on: "${{ matrix.runner }}"
+    # Use the release runner pool: its nodes carry osdc.io/runner-class=release,
+    # which exempts them from the cache-enforcer DaemonSet's iptables block on
+    # outbound ghcr.io traffic so the "Mirror image to GHCR" step can succeed.
+    # The regular mt-l-* pool blocks ghcr.io egress at the host iptables layer.
+    runs-on:
+      group: release-runners
+      labels: mt-rel-l-x86iavx512-8-64
+    container:
+      image: ghcr.io/actions/actions-runner:latest
     steps:
-      - name: Clean workspace
-        shell: bash
-        run: |
-          echo "${GITHUB_WORKSPACE}"
-          sudo rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-
       - name: Setup Linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
-          submodules: 'false'
+          use-arc: true
+          submodules: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to ECR
-        uses: ./.github/actions/ecr-login
-
-      - name: Build docker image
-        id: build-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@main
         with:
-          docker-image-name: ci-image:${{ matrix.docker-image-name }}
-          always-rebuild: true
-          push: true
+          aws-role-to-assume: arn:aws:iam::308535385114:role/arc
 
-      - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+      - name: Login to GHCR
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        uses: docker/login-action@v3
         with:
-          docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
+          registry: ghcr.io
+          username: pytorch
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Set up Docker Buildx (remote)
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: remote
+          endpoint: ${{ matrix.buildkit_addr }}
+
+      - name: Compute image tag
+        id: tag
+        shell: bash
+        run: |
+          set -ex
+          DOCKER_TAG=$(git rev-parse HEAD:.ci/docker)
+          DOCKER_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${{ matrix.docker-image-name }}-${DOCKER_TAG}"
+          echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "docker-image=${DOCKER_IMAGE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push to ECR
+        env:
+          REMOTE_BUILDKIT: "1"
+          CI: "1"
+          DOCKER_IMAGE: ${{ steps.tag.outputs.docker-image }}
+        shell: bash
+        working-directory: .ci/docker
+        run: |
+          set -ex
+          ./build.sh "${{ matrix.docker-image-name }}" -t "${DOCKER_IMAGE}"
+
+      - name: Mirror image to GHCR
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.tag.outputs.docker-image }}
+          DOCKER_TAG: ${{ steps.tag.outputs.docker-tag }}
+        shell: bash
+        run: |
+          set -ex
+          # `buildx imagetools create` does a server-side cross-registry copy,
+          # so we don't need a local pull/push round-trip.
+          docker buildx imagetools create \
+            -t "${GHCR_REPOSITORY}:${{ matrix.docker-image-name }}-${DOCKER_TAG}" \
+            -t "${GHCR_REPOSITORY}:${{ matrix.docker-image-name }}" \
+            "${ECR_DOCKER_IMAGE}"
 
       - name: Generate output
         if: contains(matrix.docker-image-name, 'rocm')
-        id: generate_output
         run: |
           docker_image_name="${{ matrix.docker-image-name }}"
-          docker_image_tag="${{ steps.build-docker-image.outputs.docker-image }}"
-          echo "${docker_image_name}=${docker_image_tag}" >> docker-builds-output-${docker_image_name}.txt
+          docker_image_tag="${{ steps.tag.outputs.docker-image }}"
+          echo "${docker_image_name}=${docker_image_tag}" >> "docker-builds-output-${docker_image_name}.txt"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4.4.0
@@ -133,36 +165,3 @@ jobs:
           name: docker-builds-artifacts-${{ matrix.docker-image-name }}
           retention-days: 14
           path: ./docker-builds-output-${{ matrix.docker-image-name }}.txt
-
-      - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
-        name: Push to https://ghcr.io/
-        id: push-to-ghcr-io
-        if: ${{ github.event_name == 'push' }}
-        env:
-          ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
-          GHCR_PAT: ${{ secrets.GHCR_PAT }}
-        with:
-          shell: bash
-          timeout_minutes: 60
-          max_attempts: 5
-          retry_wait_seconds: 90
-          command: |
-            ghcr_image="ghcr.io/pytorch/ci-image"
-            tag=${ECR_DOCKER_IMAGE##*:}
-            # Push docker image to the ghcr.io
-            echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
-            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${tag}"
-            docker push "${ghcr_image}:${tag}"
-            # Also push a tag without the hash for easier reference
-            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${{ matrix.docker-image-name }}"
-            docker push "${ghcr_image}:${{ matrix.docker-image-name }}"
-
-      - name: Chown workspace
-        uses: ./.github/actions/chown-workspace
-        with:
-          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ contains(matrix.runner, 'arm64') && 'arm64v8' || 'tool' }}/alpine
-        if: always()
-
-      - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always()
