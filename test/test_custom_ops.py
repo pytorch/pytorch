@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import contextlib
 import io
 import itertools
 import os
@@ -48,6 +49,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
+    IS_MACOS,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -56,6 +59,11 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     subtest,
     TemporaryFileName,
+    TEST_ACCELERATOR,
+    TEST_WITH_ASAN,
+    TEST_WITH_CROSSREF,
+    TEST_WITH_SLOW,
+    TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     TestCase,
 )
@@ -223,6 +231,21 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             torch.library.opcheck(op, (x,), {})
 
+    # https://github.com/pytorch/pytorch/issues/149468
+    def test_opcheck_cpu_stride_mismatch(self, device):
+        @torch.library.custom_op("test::stride_mismatch", mutates_args=())
+        def stride_mismatch(x: torch.Tensor) -> torch.Tensor:
+            return x.clone().permute(2, 0, 1)
+
+        @stride_mismatch.register_fake
+        def _(x):
+            c, h, w = x.shape[2], x.shape[0], x.shape[1]
+            return x.new_empty(c, h, w)
+
+        x = torch.randn(4, 4, 3, device=device)
+        with self.assertRaisesRegex(optests.OpCheckError, "Stride mismatch"):
+            torch.library.opcheck(stride_mismatch, (x,))
+
     # https://github.com/pytorch/pytorch/issues/142410
     def test_opcheck_unbacked_stride(self, device):
         @torch.library.custom_op("test::f", mutates_args=[])
@@ -263,6 +286,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         self.assertEqual(len(ret), 1)
         self.assertEqual(x, ret[0])
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179898"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TORCHDYNAMO or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/118253",
+    )
     def test_missing_abstract_impl(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -434,6 +464,38 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         # Test atol/rtol overrides
         torch.library.opcheck(op, (x,), {}, atol=3, rtol=0.01)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180338",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180323",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180301",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180262",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180214",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/180196",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/179992",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/179909",
+    )
     @ops(custom_op_db.custom_op_db, dtypes=OpDTypes.any_one)
     def test_opcheck_opinfo(self, device, dtype, op):
         for sample_input in op.sample_inputs(
@@ -443,6 +505,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             kwargs = sample_input.kwargs
             torch.library.opcheck(op.op, args, kwargs)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/179991"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TORCHDYNAMO or IS_LINUX or IS_MACOS,
+        "https://github.com/pytorch/pytorch/issues/119159",
+    )
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor: ...
@@ -826,6 +895,28 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         schema = torch.library.infer_schema(foo_impl, op_name="myop", mutates_args={})
         self.assertExpectedInline(schema, "myop(Tensor x) -> Tensor")
+
+        def inplace_fn(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        schema = torch.library.infer_schema(
+            inplace_fn,
+            mutates_args={"x"},
+            tags=torch.Tag.inplace,
+        )
+        self.assertExpectedInline(schema, "(Tensor(a0!) x) -> Tensor(a0!)")
+
+        def out_fn(x: torch.Tensor, *, out: torch.Tensor) -> torch.Tensor:
+            return out
+
+        schema = torch.library.infer_schema(
+            out_fn,
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        self.assertExpectedInline(
+            schema, "(Tensor x, *, Tensor(a1!) out) -> Tensor(a1!)"
+        )
 
         # Ensure that a global in this file is properly found & evaluated.
         def stringy_fn(x: torch.Tensor) -> "MyList[torch.Tensor]":
@@ -1679,7 +1770,9 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         with self.assertRaisesRegex(RuntimeError, r"test_custom_ops.py:\d+"):
 
-            @torch.library.register_fake(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
+            @torch.library.register_fake(
+                f"{TestCustomOp.test_ns}::foo", lib=self.lib(), allow_override=False
+            )
             def foo_meta2(x, dim):
                 output_shape = list(x.shape)
                 del output_shape[dim]
@@ -1884,7 +1977,9 @@ Dynamic shape operator
         op = self.get_op(qualname)
 
         with self.assertRaisesRegex(RuntimeError, r"already has .*Meta implementation"):
-            torch.library.register_fake(qualname, foo_impl, lib=self.lib())
+            torch.library.register_fake(
+                qualname, foo_impl, lib=self.lib(), allow_override=False
+            )
 
     def test_abstract_impl_on_existing_op_with_CompositeImplicitAutograd(self):
         lib = self.lib()
@@ -2023,6 +2118,16 @@ Dynamic shape operator
                 lib.define("foo12(int64_t a) -> Tensor")
             with self.assertRaisesRegex(RuntimeError, "Use `float`"):
                 lib.define("foo12(double a) -> Tensor")
+            with self.assertRaisesRegex(RuntimeError, "unknown type specifier"):
+                lib.define("foo12(PyObject a) -> Tensor")
+            type_name = "torch.testing.OpaqueObjectForCustomOpsTest"
+            if torch._C._is_opaque_type_registered(type_name):
+                torch._C._unregister_opaque_type(type_name)
+            torch._C._register_opaque_type(type_name)
+            try:
+                lib.define(f"foo12({type_name} a) -> Tensor")
+            finally:
+                torch._C._unregister_opaque_type(type_name)
 
     def test_is_tensorlist_like_type(self):
         tensorlists = [
@@ -2201,11 +2306,13 @@ Dynamic shape operator
         if not torch.allclose(y, x.sin()):
             raise AssertionError("expected y to equal x.sin()")
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_impl_device_cpu(self):
         self._test_impl_device("foo1", "default", "cpu")
         self._test_impl_device("foo2", ["cpu"], "cpu")
         self._test_impl_device("foo3", ["cpu", "cuda"], "cpu")
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires cuda or xpu")
     def test_impl_device_cuda(self):
         self._test_impl_device("foo4", "default", device_type)
@@ -2248,10 +2355,10 @@ Dynamic shape operator
             return torch.cat([x, x])
 
         with self.assertRaisesRegex(RuntimeError, "already a kernel registered"):
-            lib.impl("foo", foo_impl2, "CPU")
+            lib.impl("foo", foo_impl2, "CPU", allow_override=False)
 
         # Override cpu impl to foo_impl2
-        lib.impl(op_name, foo_impl2, "CPU", allow_override=True)
+        lib.impl(op_name, foo_impl2, "CPU")
         self.assertEqual(op(torch.ones(3)), torch.ones(6))
 
     def test_override_fake(self):
@@ -2274,19 +2381,19 @@ Dynamic shape operator
             return torch.cat([x, x])
 
         with self.assertRaisesRegex(RuntimeError, "already has a fake impl"):
-            torch.library.register_fake(op_name, foo_impl2, lib=lib)
+            torch.library.register_fake(
+                op_name, foo_impl2, lib=lib, allow_override=False
+            )
 
         # Override fake kernel to foo_impl2
-        torch.library.register_fake(op_name, foo_impl2, lib=lib, allow_override=True)
+        torch.library.register_fake(op_name, foo_impl2, lib=lib)
         with torch._subclasses.FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use scoped_library to temporarily register Fake kernel to foo_impl1
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
-            torch.library.register_fake(
-                op_name, foo_impl1, lib=lib2, allow_override=True
-            )
+            torch.library.register_fake(op_name, foo_impl1, lib=lib2)
             with torch._subclasses.FakeTensorMode():
                 self.assertEqual(op(torch.ones(3)).shape, [3])
             self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
@@ -2313,22 +2420,22 @@ Dynamic shape operator
             return torch.cat([x, x])
 
         with self.assertRaisesRegex(RuntimeError, "already a kernel registered"):
-            lib.impl("foo", foo_impl2, "Meta")
+            lib.impl("foo", foo_impl2, "Meta", allow_override=False)
 
         # Override Meta kernel to foo_impl2
-        lib.impl("foo", foo_impl2, "Meta", allow_override=True)
+        lib.impl("foo", foo_impl2, "Meta")
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use scoped_library to temporarily register Meta kernel to foo_impl1
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib2:
-            lib2.impl("foo", foo_impl1, "Meta", allow_override=True)
+            lib2.impl("foo", foo_impl1, "Meta")
             self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
         # Meta kernel should go back to foo_impl2
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
 
         # Use register_fake to override Meta kernel to foo_impl1
-        torch.library.register_fake(op_name, foo_impl1, lib=lib, allow_override=True)
+        torch.library.register_fake(op_name, foo_impl1, lib=lib)
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [3])
 
     def test_override_cea(self):
@@ -2350,7 +2457,7 @@ Dynamic shape operator
             return torch.cat([x, x])
 
         # Override Meta/fake kernel with foo_impl2
-        torch.library.register_fake(op_name, foo_impl2, lib=lib, allow_override=True)
+        torch.library.register_fake(op_name, foo_impl2, lib=lib)
         with torch._subclasses.FakeTensorMode():
             self.assertEqual(op(torch.ones(3)).shape, [6])
         self.assertEqual(op(torch.ones(3, device="meta")).shape, [6])
@@ -2574,6 +2681,667 @@ class MiniOpTest(CustomOpTestCaseBase):
 
 
 class TestCustomOpAPI(TestCase):
+    @parametrize(
+        "tags, opname",
+        [
+            subtest((torch.Tag.pointwise, "single"), name="single"),
+            subtest(([torch.Tag.pointwise], "list"), name="list"),
+            subtest(((torch.Tag.pointwise,), "tuple"), name="tuple"),
+        ],
+    )
+    def test_custom_op_tags(self, tags, opname):
+        @torch.library.custom_op(
+            f"_torch_testing::tags_{opname}",
+            mutates_args=(),
+            tags=tags,
+        )
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        self.assertIn(torch.Tag.pt2_compliant_tag, f._opoverload.tags)
+        self.assertIn(torch.Tag.pointwise, f._opoverload.tags)
+
+    def test_custom_op_tags_dedup_pt2_compliant(self):
+        @torch.library.custom_op(
+            "_torch_testing::tags_dedup_pt2",
+            mutates_args=(),
+            tags=[torch.Tag.pt2_compliant_tag, torch.Tag.pointwise],
+        )
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        tags = f._opoverload.tags
+        self.assertEqual(tags.count(torch.Tag.pt2_compliant_tag), 1)
+        self.assertIn(torch.Tag.pointwise, tags)
+
+    def test_custom_op_inplace_out_tags_mutually_exclusive(self):
+        def f(x: Tensor, *, out: Tensor) -> Tensor:
+            return out
+
+        with self.assertRaisesRegex(AssertionError, "mutually exclusive"):
+            torch.library.custom_op(
+                "_torch_testing::inplace_out_tags_mutually_exclusive",
+                f,
+                mutates_args={"x", "out"},
+                tags=[torch.Tag.inplace, torch.Tag.out],
+            )
+
+    def test_custom_op_inplace_tag(self):
+        @torch.library.custom_op(
+            "_torch_testing::inplace_tag",
+            mutates_args={"x"},
+            tags=torch.Tag.inplace,
+        )
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            x.add_(y)
+            return x
+
+        self.assertIn(torch.Tag.inplace, f._opoverload.tags)
+        schema = f._opoverload._schema
+        self.assertTrue(schema.arguments[0].alias_info.is_write)
+        self.assertTrue(schema.returns[0].alias_info.is_write)
+        self.assertEqual(
+            schema.arguments[0].alias_info.before_set,
+            schema.returns[0].alias_info.before_set,
+        )
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        expected = x + y
+        result = f(x, y)
+        self.assertIs(result, x)
+        self.assertEqual(x, expected)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_y = torch.randn(3)
+            fake_result = f(fake_x, fake_y)
+            self.assertIs(fake_result, fake_x)
+
+    def test_custom_op_inplace_tag_returns_wrong_tensor(self):
+        @torch.library.custom_op(
+            "_torch_testing::inplace_tag_returns_wrong_tensor",
+            mutates_args={"x"},
+            tags=torch.Tag.inplace,
+        )
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            x.add_(y)
+            return y
+
+        with self.assertRaisesRegex(RuntimeError, "must return its first argument"):
+            f(torch.randn(3), torch.randn(3))
+
+    def test_custom_op_inplace_tag_mutates_args_iterable(self):
+        def mutates_args():
+            yield "x"
+
+        @torch.library.custom_op(
+            "_torch_testing::inplace_tag_mutates_args_iterable",
+            mutates_args=mutates_args(),
+            tags=torch.Tag.inplace,
+        )
+        def f(x: Tensor) -> Tensor:
+            return x
+
+        schema = f._opoverload._schema
+        self.assertTrue(schema.arguments[0].alias_info.is_write)
+        self.assertTrue(schema.returns[0].alias_info.is_write)
+        self.assertEqual(
+            schema.arguments[0].alias_info.before_set,
+            schema.returns[0].alias_info.before_set,
+        )
+
+        x = torch.randn(3)
+        self.assertIs(f(x), x)
+
+    def test_custom_op_inplace_tag_autograd(self):
+        @torch.library.custom_op(
+            "_torch_testing::inplace_tag_autograd",
+            mutates_args={"x"},
+            tags=torch.Tag.inplace,
+        )
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            x.add_(y)
+            return x
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3)
+        expected = x.detach() + y
+        result = f(x, y)
+        self.assertEqual(x, expected)
+        self.assertTrue(result.requires_grad)
+        with self.assertRaisesRegex(RuntimeError, "no autograd formula"):
+            result.sum().backward()
+
+    def test_custom_op_inplace_tag_register_fake_warns(self):
+        @torch.library.custom_op(
+            "_torch_testing::inplace_tag_register_fake_warns",
+            mutates_args={"x"},
+            tags=torch.Tag.inplace,
+        )
+        def f(x: Tensor) -> Tensor:
+            return x
+
+        with self.assertWarnsRegex(UserWarning, "torch.Tag.inplace"):
+
+            @f.register_fake
+            def _(x):
+                return x.clone()
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            self.assertIsNot(f(fake_x), fake_x)
+
+    @skipIfTorchDynamo("recursive dynamo")
+    @requires_compile
+    @parametrize(
+        "backend, fullgraph",
+        [
+            subtest(("eager", False), name="eager"),
+            subtest(("eager", True), name="eager_fullgraph"),
+            subtest(("inductor", True), name="inductor_fullgraph"),
+        ],
+    )
+    def test_custom_op_inplace_tag_compile(self, backend, fullgraph):
+        name = f"{backend}_{'fullgraph' if fullgraph else 'default'}"
+
+        @torch.library.custom_op(
+            f"_torch_testing::inplace_tag_compile_{name}",
+            mutates_args={"x"},
+            tags=torch.Tag.inplace,
+        )
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            x.add_(y)
+            return x
+
+        def fn(x, y):
+            return f(x, y)
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        expected = x + y
+        result = torch.compile(fn, backend=backend, fullgraph=fullgraph)(x, y)
+        self.assertIs(result, x)
+        self.assertEqual(x, expected)
+
+    def test_custom_op_inplace_tag_no_positional_arg(self):
+        def f(*, x: Tensor) -> Tensor:
+            return x
+
+        with self.assertRaisesRegex(ValueError, "torch.Tag.inplace"):
+            torch.library.custom_op(
+                "_torch_testing::inplace_tag_no_positional_arg",
+                f,
+                mutates_args={"x"},
+                tags=torch.Tag.inplace,
+            )
+
+    def test_custom_op_inplace_tag_first_arg_not_tensor(self):
+        def f(x: int, y: Tensor) -> Tensor:
+            return y
+
+        with self.assertRaisesRegex(ValueError, "first positional argument"):
+            torch.library.custom_op(
+                "_torch_testing::inplace_tag_first_arg_not_tensor",
+                f,
+                mutates_args={"y"},
+                tags=torch.Tag.inplace,
+            )
+
+    def test_custom_op_inplace_tag_mutates_non_first_arg(self):
+        def f(x: Tensor, y: Tensor) -> Tensor:
+            return y
+
+        with self.assertRaisesRegex(ValueError, "mutates_args"):
+            torch.library.custom_op(
+                "_torch_testing::inplace_tag_mutates_non_first_arg",
+                f,
+                mutates_args={"y"},
+                tags=torch.Tag.inplace,
+            )
+
+    def test_custom_op_inplace_tag_return_none(self):
+        def f(x: Tensor) -> None:
+            pass
+
+        with self.assertRaisesRegex(ValueError, "return annotation"):
+            torch.library.custom_op(
+                "_torch_testing::inplace_tag_return_none",
+                f,
+                mutates_args={"x"},
+                tags=torch.Tag.inplace,
+            )
+
+    def test_custom_op_inplace_tag_multiple_returns(self):
+        def f(x: Tensor) -> tuple[Tensor, Tensor]:
+            return x, x
+
+        with self.assertRaisesRegex(ValueError, "return annotation"):
+            torch.library.custom_op(
+                "_torch_testing::inplace_tag_multiple_returns",
+                f,
+                mutates_args={"x"},
+                tags=torch.Tag.inplace,
+            )
+
+    def test_custom_op_inplace_tag_manual_schema(self):
+        @torch.library.custom_op(
+            "_torch_testing::inplace_tag_manual_schema",
+            mutates_args={"x"},
+            schema="(Tensor(a!) x, Tensor y) -> Tensor(a!)",
+            tags=torch.Tag.inplace,
+        )
+        def f(x, y):
+            x.add_(y)
+            return x
+
+        self.assertIn(torch.Tag.inplace, f._opoverload.tags)
+        schema = f._opoverload._schema
+        self.assertTrue(schema.arguments[0].alias_info.is_write)
+        self.assertTrue(schema.returns[0].alias_info.is_write)
+        self.assertEqual(
+            schema.arguments[0].alias_info.before_set,
+            schema.returns[0].alias_info.before_set,
+        )
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        expected = x + y
+        result = f(x, y)
+        self.assertIs(result, x)
+        self.assertEqual(x, expected)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_y = torch.randn(3)
+            self.assertIs(f(fake_x, fake_y), fake_x)
+
+    def test_custom_op_inplace_tag_bad_manual_schema(self):
+        with self.assertRaisesRegex(ValueError, "return must alias"):
+
+            @torch.library.custom_op(
+                "_torch_testing::inplace_tag_bad_manual_schema",
+                mutates_args={"x"},
+                schema="(Tensor(a!) x) -> Tensor",
+                tags=torch.Tag.inplace,
+            )
+            def f(x):
+                return x
+
+    def test_custom_op_out_tag(self):
+        @torch.library.custom_op(
+            "_torch_testing::out_tag",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def f(x: Tensor, y: Tensor, *, out: Tensor) -> Tensor:
+            out.copy_(x + y)
+            return out
+
+        self.assertIn(torch.Tag.out, f._opoverload.tags)
+        schema = f._opoverload._schema
+        self.assertTrue(schema.arguments[2].kwarg_only)
+        self.assertTrue(schema.arguments[2].alias_info.is_write)
+        self.assertTrue(schema.returns[0].alias_info.is_write)
+        self.assertEqual(
+            schema.arguments[2].alias_info.before_set,
+            schema.returns[0].alias_info.before_set,
+        )
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        out = torch.empty_like(x)
+        result = f(x, y, out=out)
+        self.assertIs(result, out)
+        self.assertEqual(out, x + y)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_y = torch.randn(3)
+            fake_out = torch.empty_like(fake_x)
+            fake_result = f(fake_x, fake_y, out=fake_out)
+            self.assertIs(fake_result, fake_out)
+
+    @skipIfTorchDynamo("recursive dynamo")
+    @requires_compile
+    @parametrize(
+        "backend, fullgraph",
+        [
+            subtest(("eager", False), name="eager"),
+            subtest(("eager", True), name="eager_fullgraph"),
+            subtest(("inductor", True), name="inductor_fullgraph"),
+        ],
+    )
+    def test_custom_op_out_tag_compile(self, backend, fullgraph):
+        name = f"{backend}_{'fullgraph' if fullgraph else 'default'}"
+
+        @torch.library.custom_op(
+            f"_torch_testing::out_tag_compile_{name}",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def f(x: Tensor, y: Tensor, *, out: Tensor) -> Tensor:
+            out.copy_(x + y)
+            return out
+
+        def fn(x, y, out):
+            return f(x, y, out=out)
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        out = torch.empty_like(x)
+        expected = x + y
+        result = torch.compile(fn, backend=backend, fullgraph=fullgraph)(x, y, out)
+        if backend == "eager":
+            self.assertIs(result, out)
+        self.assertEqual(out, expected)
+        self.assertEqual(result, expected)
+
+    def test_custom_op_out_tag_multiple_returns(self):
+        @torch.library.custom_op(
+            "_torch_testing::out_tag_multiple_returns",
+            mutates_args={"add_out", "mul_out"},
+            tags=torch.Tag.out,
+        )
+        def f(
+            x: Tensor, y: Tensor, *, add_out: Tensor, mul_out: Tensor
+        ) -> tuple[Tensor, Tensor]:
+            add_out.copy_(x + y)
+            mul_out.copy_(x * y)
+            return add_out, mul_out
+
+        schema = f._opoverload._schema
+        out_args = schema.arguments[2:]
+        self.assertTrue(all(arg.kwarg_only for arg in out_args))
+        self.assertEqual(len(schema.returns), 2)
+        for arg, ret in zip(out_args, schema.returns):
+            self.assertTrue(arg.alias_info.is_write)
+            self.assertTrue(ret.alias_info.is_write)
+            self.assertEqual(
+                arg.alias_info.before_set,
+                ret.alias_info.before_set,
+            )
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        add_out = torch.empty_like(x)
+        mul_out = torch.empty_like(x)
+        result = f(x, y, add_out=add_out, mul_out=mul_out)
+        self.assertIs(result[0], add_out)
+        self.assertIs(result[1], mul_out)
+        self.assertEqual(add_out, x + y)
+        self.assertEqual(mul_out, x * y)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_y = torch.randn(3)
+            fake_add_out = torch.empty_like(fake_x)
+            fake_mul_out = torch.empty_like(fake_x)
+            fake_result = f(
+                fake_x,
+                fake_y,
+                add_out=fake_add_out,
+                mul_out=fake_mul_out,
+            )
+            self.assertIs(fake_result[0], fake_add_out)
+            self.assertIs(fake_result[1], fake_mul_out)
+
+    def test_custom_op_out_tag_returns_wrong_tensor(self):
+        @torch.library.custom_op(
+            "_torch_testing::out_tag_returns_wrong_tensor",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def f(x: Tensor, *, out: Tensor) -> Tensor:
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "mutable keyword-only arguments"):
+            f(torch.randn(3), out=torch.empty(3))
+
+    def test_custom_op_out_tag_autograd(self):
+        @torch.library.custom_op(
+            "_torch_testing::out_tag_autograd",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def f(x: Tensor, *, out: Tensor) -> Tensor:
+            out.copy_(x.sin())
+            return out
+
+        error_msg = (
+            r"functions with out=\.\.\. arguments don't support automatic "
+            "differentiation"
+        )
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            f(torch.randn(3, requires_grad=True), out=torch.empty(3))
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            f(torch.randn(3), out=torch.empty(3, requires_grad=True))
+
+        x = torch.randn(3, requires_grad=True)
+        out = torch.empty(3, requires_grad=True)
+        with torch.no_grad():
+            result = f(x, out=out)
+        self.assertIs(result, out)
+        self.assertTrue(out.requires_grad)
+        self.assertIsNone(out.grad_fn)
+        self.assertEqual(out, x.sin())
+
+    def test_custom_op_out_tag_register_fake_warns(self):
+        @torch.library.custom_op(
+            "_torch_testing::out_tag_register_fake_warns",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def f(x: Tensor, *, out: Tensor) -> Tensor:
+            out.copy_(x)
+            return out
+
+        with self.assertWarnsRegex(UserWarning, "torch.Tag.out"):
+
+            @f.register_fake
+            def _(x, *, out):
+                return out.clone()
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_out = torch.empty_like(fake_x)
+            self.assertIsNot(f(fake_x, out=fake_out), fake_out)
+
+    def test_custom_op_register_fake_ordinary_op(self):
+        @torch.library.custom_op(
+            "_torch_testing::register_fake_ordinary_op",
+            mutates_args=(),
+        )
+        def f(x: Tensor) -> Tensor:
+            return x.clone()
+
+        called = False
+
+        @f.register_fake
+        def _(x):
+            nonlocal called
+            called = True
+            return x.new_empty(x.shape)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_result = f(fake_x)
+            self.assertIsNot(fake_result, fake_x)
+        self.assertTrue(called)
+
+    def test_custom_op_out_tag_register_autograd(self):
+        @torch.library.custom_op(
+            "_torch_testing::out_tag_register_autograd",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def f(x: Tensor, *, out: Tensor) -> Tensor:
+            out.copy_(x.sin())
+            return out
+
+        def backward(ctx, grad):
+            return grad
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Out variants do not support autograd"
+        ):
+            f.register_autograd(backward)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Out variants do not support autograd"
+        ):
+            torch.library.register_autograd(f, backward)
+
+    def test_library_register_autograd_out_tag_low_level(self):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define(
+                "out_tag_register_autograd_low_level(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
+                tags=torch.Tag.out,
+            )
+
+            def backward(ctx, grad):
+                return grad
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Out variants do not support autograd"
+            ):
+                torch.library.register_autograd(
+                    "_torch_testing::out_tag_register_autograd_low_level",
+                    backward,
+                    lib=lib,
+                )
+
+    def test_custom_op_out_tag_positional_mutable_arg(self):
+        def f(x: Tensor, out: Tensor) -> Tensor:
+            return out
+
+        with self.assertRaisesRegex(ValueError, "keyword-only"):
+            torch.library.custom_op(
+                "_torch_testing::out_tag_positional_mutable_arg",
+                f,
+                mutates_args={"out"},
+                tags=torch.Tag.out,
+            )
+
+    def test_custom_op_out_tag_no_mutable_out(self):
+        def f(x: Tensor, *, out: Tensor) -> Tensor:
+            return out
+
+        with self.assertRaisesRegex(ValueError, "at least one"):
+            torch.library.custom_op(
+                "_torch_testing::out_tag_no_mutable_out",
+                f,
+                mutates_args=(),
+                tags=torch.Tag.out,
+            )
+
+    def test_custom_op_out_tag_optional_mutable_out(self):
+        def f(x: Tensor, *, out: Optional[Tensor]) -> Tensor:
+            return x if out is None else out
+
+        with self.assertRaisesRegex(ValueError, "only supports"):
+            torch.library.custom_op(
+                "_torch_testing::out_tag_optional_mutable_out",
+                f,
+                mutates_args={"out"},
+                tags=torch.Tag.out,
+            )
+
+    def test_custom_op_out_tag_list_mutable_out(self):
+        def f(x: Tensor, *, out: List[Tensor]) -> Tensor:
+            return out[0]
+
+        with self.assertRaisesRegex(ValueError, "only supports"):
+            torch.library.custom_op(
+                "_torch_testing::out_tag_list_mutable_out",
+                f,
+                mutates_args={"out"},
+                tags=torch.Tag.out,
+            )
+
+    def test_custom_op_out_tag_manual_schema_requires_tensor_out(self):
+        with self.assertRaisesRegex(ValueError, "only supports Tensor"):
+
+            @torch.library.custom_op(
+                "_torch_testing::out_tag_manual_schema_requires_tensor_out",
+                mutates_args={"out"},
+                schema="(Tensor x, *, int(a!) out) -> int(a!)",
+                tags=torch.Tag.out,
+            )
+            def f(x, *, out):
+                return out
+
+    def test_custom_op_out_tag_return_mismatch(self):
+        def f(x: Tensor, *, out1: Tensor, out2: Tensor) -> Tensor:
+            return out1
+
+        with self.assertRaisesRegex(ValueError, "return annotation"):
+            torch.library.custom_op(
+                "_torch_testing::out_tag_return_mismatch",
+                f,
+                mutates_args={"out1", "out2"},
+                tags=torch.Tag.out,
+            )
+
+    def test_custom_op_out_tag_single_return_tuple_mismatch(self):
+        def f(x: Tensor, *, out: Tensor) -> tuple[Tensor]:
+            return (out,)
+
+        with self.assertRaisesRegex(ValueError, "return annotation"):
+            torch.library.custom_op(
+                "_torch_testing::out_tag_single_return_tuple_mismatch",
+                f,
+                mutates_args={"out"},
+                tags=torch.Tag.out,
+            )
+
+    def test_custom_op_out_tag_manual_schema(self):
+        @torch.library.custom_op(
+            "_torch_testing::out_tag_manual_schema",
+            mutates_args={"out"},
+            schema="(Tensor x, Tensor y, *, Tensor(a!) out) -> Tensor(a!)",
+            tags=torch.Tag.out,
+        )
+        def f(x, y, *, out):
+            out.copy_(x + y)
+            return out
+
+        self.assertIn(torch.Tag.out, f._opoverload.tags)
+        schema = f._opoverload._schema
+        self.assertTrue(schema.arguments[2].kwarg_only)
+        self.assertTrue(schema.arguments[2].alias_info.is_write)
+        self.assertTrue(schema.returns[0].alias_info.is_write)
+        self.assertEqual(
+            schema.arguments[2].alias_info.before_set,
+            schema.returns[0].alias_info.before_set,
+        )
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        out = torch.empty_like(x)
+        result = f(x, y, out=out)
+        self.assertIs(result, out)
+        self.assertEqual(out, x + y)
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            fake_x = torch.randn(3)
+            fake_y = torch.randn(3)
+            fake_out = torch.empty_like(fake_x)
+            self.assertIs(f(fake_x, fake_y, out=fake_out), fake_out)
+
+    def test_custom_op_out_tag_bad_manual_schema(self):
+        with self.assertRaisesRegex(ValueError, "keyword-only"):
+
+            @torch.library.custom_op(
+                "_torch_testing::out_tag_bad_manual_schema",
+                mutates_args={"out"},
+                schema="(Tensor x, Tensor(a!) out) -> Tensor(a!)",
+                tags=torch.Tag.out,
+            )
+            def f(x, out):
+                return out
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_basic(self):
         @torch.library.custom_op("_torch_testing::add", mutates_args=())
@@ -3503,9 +4271,9 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertTrue(called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["function", "qualname", "opoverload"]:
 
                 @torch.library.custom_op("mylib::my_sin", mutates_args=())
@@ -3529,9 +4297,9 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_low_level(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["qualname", "opoverload"]:
                 with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
                     lib.define("my_sin(Tensor x) -> Tensor")
@@ -3559,9 +4327,9 @@ with warnings.catch_warnings(record=True) as w:
                     self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_list_input(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["function", "qualname", "opoverload"]:
 
                 @torch.library.custom_op("mylib::my_add_sin", mutates_args=())
@@ -3587,9 +4355,9 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_multiple_times(self):
-        for device in ["cuda", "cpu"]:
+        for device in [torch.accelerator.current_accelerator().type, "cpu"]:
 
             @torch.library.custom_op("mylib::my_sin", mutates_args=())
             def my_sin(x: Tensor) -> Tensor:
@@ -3610,17 +4378,18 @@ with warnings.catch_warnings(record=True) as w:
             self.assertEqual(y2.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
     def test_library_register_autocast_multiple_times_different_devices(self):
         @torch.library.custom_op("mylib::my_sin", mutates_args=())
         def my_sin(x: Tensor) -> Tensor:
             return torch.sin(x)
 
-        # Register autocast for CUDA
-        torch.library.register_autocast(my_sin, "cuda", torch.float16)
+        # Register autocast for the current accelerator
+        device_type = torch.accelerator.current_accelerator().type
+        torch.library.register_autocast(my_sin, device_type, torch.float16)
 
-        x1 = torch.randn(3, dtype=torch.float32, device="cuda")
-        with torch.autocast("cuda", dtype=torch.float16):
+        x1 = torch.randn(3, dtype=torch.float32, device=device_type)
+        with torch.autocast(device_type, dtype=torch.float16):
             y1 = my_sin(x1)
         self.assertEqual(y1.dtype, torch.float16)
 
@@ -3632,10 +4401,10 @@ with warnings.catch_warnings(record=True) as w:
             y2 = my_sin(x2)
         self.assertEqual(y2.dtype, torch.float16)
 
-        # Register CUDA autocast for the second time
-        torch.library.register_autocast(my_sin, "cuda", torch.float16)
+        # Register accelerator autocast for the second time
+        torch.library.register_autocast(my_sin, device_type, torch.float16)
 
-        with torch.autocast("cuda", dtype=torch.float16):
+        with torch.autocast(device_type, dtype=torch.float16):
             y3 = my_sin(x1)
         self.assertEqual(y3.dtype, torch.float16)
 
@@ -3645,6 +4414,16 @@ with warnings.catch_warnings(record=True) as w:
         with torch.autocast("cpu", dtype=torch.float16):
             y4 = my_sin(x2)
         self.assertEqual(y4.dtype, torch.float16)
+
+        # Nested autocast: verifies no infinite redispatch when both keys are active.
+        with (
+            torch.autocast("cpu", dtype=torch.float16),
+            torch.autocast(device_type, dtype=torch.float16),
+        ):
+            y5 = my_sin(x1)
+            y6 = my_sin(x2)
+        self.assertEqual(y5.dtype, torch.float16)
+        self.assertEqual(y6.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_autograd(self):
@@ -4576,7 +5355,6 @@ Please use `add.register_fake` to add an fake impl.""",
                     "arange.start",
                     partial(conditional_arange_cpu2, new_original_kernel),
                     "CPU",
-                    allow_override=True,
                     with_keyset=True,
                 )
 
@@ -4607,6 +5385,705 @@ Please use `add.register_fake` to add an fake impl.""",
                 RuntimeError, "no kernel for CUDA for test_invalid_kernel::cpu_only_op"
             ):
                 torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
+
+
+@skipIfTorchDynamo("inline register_fake is not executed under dynamo tracing")
+class TestCustomOpFastPath(TestCase):
+    """Tests for the fast dispatch path in custom_op."""
+
+    @contextlib.contextmanager
+    def _assert_fast_path_taken(self, opdef):
+        """Assert fast path taken; checks both counters with expected redispatch count."""
+        import torch._ops
+
+        if TEST_WITH_CROSSREF:
+            yield
+            return
+        is_mutable = opdef._opoverload._schema.is_mutable
+        if is_mutable:
+            expected_redispatches = 3
+            chain_desc = "autograd + adinplaceorview + backend"
+        else:
+            expected_redispatches = 2
+            chain_desc = "autograd + backend"
+        hits_before = opdef._fast_path_hits
+        redispatch_before = torch._ops._fast_redispatch_count
+        yield
+        self.assertEqual(
+            opdef._fast_path_hits - hits_before,
+            1,
+            "fast path was not taken exactly once",
+        )
+        self.assertEqual(
+            torch._ops._fast_redispatch_count - redispatch_before,
+            expected_redispatches,
+            f"expected {expected_redispatches} redispatches ({chain_desc})",
+        )
+
+    @contextlib.contextmanager
+    def _assert_fast_path_not_taken(self, opdef):
+        """Assert that neither fast-path counter incremented (call went to C++)."""
+        import torch._ops
+
+        if TEST_WITH_CROSSREF:
+            yield
+            return
+        hits_before = opdef._fast_path_hits
+        redispatch_before = torch._ops._fast_redispatch_count
+        yield
+        self.assertEqual(
+            opdef._fast_path_hits,
+            hits_before,
+            "fast path was unexpectedly taken",
+        )
+        self.assertEqual(
+            torch._ops._fast_redispatch_count,
+            redispatch_before,
+            "fast redispatch counter unexpectedly incremented",
+        )
+
+    def test_fast_path_basic(self):
+        @torch.library.custom_op("_torch_testing::fp_add", mutates_args=())
+        def fp_add(x: Tensor, y: Tensor) -> Tensor:
+            return x + y
+
+        @fp_add.register_fake
+        def _(x, y):
+            return torch.empty_like(x)
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+
+        with self._assert_fast_path_taken(fp_add):
+            self.assertEqual(fp_add(x, y), x + y)
+        # OpOverload path (torch.ops.ns.name.default)
+        with self._assert_fast_path_taken(fp_add):
+            self.assertEqual(torch.ops._torch_testing.fp_add.default(x, y), x + y)
+        # OpOverloadPacket path (torch.ops.ns.name) does NOT hit the fast
+        # path entry; just verify correctness.
+        self.assertEqual(torch.ops._torch_testing.fp_add(x, y), x + y)
+
+    def test_fast_path_multiple_overloads(self):
+        @torch.library.custom_op("_torch_testing::fp_multi", mutates_args=())
+        def fp_multi(x: Tensor) -> Tensor:
+            return x * 2
+
+        @fp_multi.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        @torch.library.custom_op("_torch_testing::fp_multi.with_bias", mutates_args=())
+        def fp_multi_bias(x: Tensor, bias: Tensor) -> Tensor:
+            return x * 2 + bias
+
+        @fp_multi_bias.register_fake
+        def _(x, bias):
+            return torch.empty_like(x)
+
+        x = torch.randn(3)
+        bias = torch.randn(3)
+
+        # Each overload should work independently via its OpOverload._op
+        with self._assert_fast_path_taken(fp_multi):
+            self.assertEqual(torch.ops._torch_testing.fp_multi.default(x), x * 2)
+        with self._assert_fast_path_taken(fp_multi_bias):
+            self.assertEqual(
+                torch.ops._torch_testing.fp_multi.with_bias(x, bias),
+                x * 2 + bias,
+            )
+
+    def test_fast_path_counter(self):
+        @torch.library.custom_op("_torch_testing::fp_counter", mutates_args=())
+        def fp_counter(x: Tensor) -> Tensor:
+            return x + 1
+
+        x = torch.randn(3)
+        self.assertEqual(fp_counter._fast_path_hits, 0)
+        fp_counter(x)
+        fp_counter(x)
+        self.assertEqual(fp_counter._fast_path_hits, 2)
+
+        # Slow path (autocast active) should not increment
+        with torch.autocast("cpu"):
+            fp_counter(x)
+        self.assertEqual(fp_counter._fast_path_hits, 2)
+
+    def test_fast_path_redispatch_chain_counter(self):
+        import torch._ops
+
+        @torch.library.custom_op("_torch_testing::fp_redispatch_cnt", mutates_args=())
+        def fp_redispatch_cnt(x: Tensor) -> Tensor:
+            return x + 1
+
+        @fp_redispatch_cnt.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def _setup_context(ctx, inputs, output):
+            ctx.save_for_backward(*inputs)
+
+        def _backward(ctx, grad):
+            return grad
+
+        fp_redispatch_cnt.register_autograd(_backward, setup_context=_setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        before = torch._ops._fast_redispatch_count
+
+        fp_redispatch_cnt(x)
+
+        # Immutable op with autograd: chain is (autograd_impl, backend_dispatch)
+        # so redispatch is called twice (once per chain element)
+        self.assertEqual(torch._ops._fast_redispatch_count - before, 2)
+
+    def test_fast_path_redispatch_chain_counter_mutable(self):
+        import torch._ops
+
+        @torch.library.custom_op(
+            "_torch_testing::fp_redispatch_cnt_mut", mutates_args={"x"}
+        )
+        def fp_redispatch_cnt_mut(x: Tensor) -> None:
+            x.mul_(2)
+
+        x = torch.randn(3)
+        before = torch._ops._fast_redispatch_count
+
+        fp_redispatch_cnt_mut(x)
+
+        # Mutable op: chain is (autograd_impl, adinplaceorview_impl, backend_dispatch)
+        # so redispatch is called three times
+        self.assertEqual(torch._ops._fast_redispatch_count - before, 3)
+
+    def test_fast_path_multiple_torch_ops_in_body(self):
+        @torch.library.custom_op("_torch_testing::fp_multi_body", mutates_args=())
+        def fp_multi_body(x: Tensor, y: Tensor) -> Tensor:
+            # Multiple torch ops inside the body should work normally
+            z = torch.add(x, y)
+            z = torch.relu(z)
+            z = z * 2
+            z = torch.nn.functional.softmax(z, dim=0)
+            return z
+
+        @fp_multi_body.register_fake
+        def _(x, y):
+            return torch.empty_like(x)
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+        with self._assert_fast_path_taken(fp_multi_body):
+            result = fp_multi_body(x, y)
+        expected = torch.nn.functional.softmax(torch.relu(x + y) * 2, dim=0)
+        self.assertEqual(result, expected)
+
+    def test_fast_path_mutable(self):
+        @torch.library.custom_op("_torch_testing::fp_inplace", mutates_args={"x"})
+        def fp_inplace(x: Tensor) -> None:
+            x.mul_(2)
+
+        x = torch.randn(3)
+        x_orig = x.clone()
+        v_before = x._version
+        with self._assert_fast_path_taken(fp_inplace):
+            fp_inplace(x)
+        self.assertTrue(x._version > v_before)
+        self.assertEqual(x, x_orig * 2)
+
+    def test_fast_path_autograd(self):
+        @torch.library.custom_op("_torch_testing::fp_square", mutates_args=())
+        def fp_square(x: Tensor) -> Tensor:
+            return x**2
+
+        @fp_square.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def _backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * 2 * x
+
+        def _setup_context(ctx, inputs, output):
+            ctx.save_for_backward(*inputs)
+
+        fp_square.register_autograd(_backward, setup_context=_setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        with self._assert_fast_path_taken(fp_square):
+            y = fp_square(x)
+        y.sum().backward()
+        self.assertEqual(x.grad, 2 * x)
+
+    def test_fast_path_autograd_skipped_under_no_grad(self):
+        @torch.library.custom_op("_torch_testing::fp_nograd_check", mutates_args=())
+        def fp_nograd_check(x: Tensor) -> Tensor:
+            return x**2
+
+        @fp_nograd_check.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def _setup_context(ctx, inputs, output):
+            raise AssertionError("setup_context must not be called under no_grad")
+
+        def _backward(ctx, grad):
+            raise AssertionError("backward must not be called")
+
+        fp_nograd_check.register_autograd(_backward, setup_context=_setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        with torch.no_grad():
+            with self._assert_fast_path_taken(fp_nograd_check):
+                result = fp_nograd_check(x)
+        self.assertEqual(result, x**2)
+
+    def test_fast_path_falls_back_for_inference_mode(self):
+        @torch.library.custom_op("_torch_testing::fp_im", mutates_args=())
+        def fp_im(x: Tensor) -> Tensor:
+            return x.clone()
+
+        # inference_mode excludes autograd keys; fast path bails to C++ dispatcher
+        with self._assert_fast_path_not_taken(fp_im):
+            with torch.inference_mode():
+                x = torch.randn(3)
+                result = fp_im(x)
+        self.assertEqual(result, x)
+
+    def test_fast_path_with_autocast(self):
+        @torch.library.custom_op("_torch_testing::fp_ac", mutates_args=())
+        def fp_ac(x: Tensor) -> Tensor:
+            return x.clone()
+
+        fp_ac.register_autocast("cpu", torch.float16)
+
+        x = torch.randn(3, dtype=torch.float32)
+        with self._assert_fast_path_taken(fp_ac):
+            with torch.autocast("cpu", dtype=torch.float16):
+                r_direct = fp_ac(x)
+        with self._assert_fast_path_taken(fp_ac):
+            with torch.autocast("cpu", dtype=torch.float16):
+                r_packet = torch.ops._torch_testing.fp_ac(x)
+        self.assertEqual(r_direct.dtype, torch.float16)
+        self.assertEqual(r_packet.dtype, torch.float16)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_fast_path_with_autocast_cuda(self):
+        @torch.library.custom_op("_torch_testing::fp_ac_cuda", mutates_args=())
+        def fp_ac_cuda(x: Tensor) -> Tensor:
+            return x.clone()
+
+        fp_ac_cuda.register_autocast("cuda", torch.float16)
+
+        x = torch.randn(3, dtype=torch.float32, device="cuda")
+        with self._assert_fast_path_taken(fp_ac_cuda):
+            with torch.autocast("cuda", dtype=torch.float16):
+                r_direct = fp_ac_cuda(x)
+        with self._assert_fast_path_taken(fp_ac_cuda):
+            with torch.autocast("cuda", dtype=torch.float16):
+                r_packet = torch.ops._torch_testing.fp_ac_cuda(x)
+        self.assertEqual(r_direct.dtype, torch.float16)
+        self.assertEqual(r_packet.dtype, torch.float16)
+
+    def test_fast_path_falls_back_for_torch_function_mode(self):
+        @torch.library.custom_op("_torch_testing::fp_tfm", mutates_args=())
+        def fp_tfm(x: Tensor) -> Tensor:
+            return x.clone()
+
+        sentinel = torch.tensor(-1.0)
+
+        class ReplaceMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if "fp_tfm" in str(func):
+                    return sentinel
+                return func(*args, **(kwargs or {}))
+
+        x = torch.randn(3)
+        with self._assert_fast_path_not_taken(fp_tfm):
+            with ReplaceMode():
+                self.assertIs(fp_tfm(x), sentinel)
+                self.assertIs(torch.ops._torch_testing.fp_tfm(x), sentinel)
+
+    def test_fast_path_catches_aliasing(self):
+        @torch.library.custom_op("_torch_testing::fp_alias", mutates_args=())
+        def fp_alias(x: Tensor) -> Tensor:
+            return x
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            fp_alias(x)
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            torch.ops._torch_testing.fp_alias(x)
+
+    def test_fast_path_disabled_for_tensorlist_subclass(self):
+        @torch.library.custom_op("_torch_testing::fp_tl", mutates_args=())
+        def fp_tl(x: Tensor, ys: list[Tensor]) -> Tensor:
+            return x.clone()
+
+        sentinel = torch.tensor(-1.0)
+
+        class MySub(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if "fp_tl" in str(func):
+                    return sentinel
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        x = torch.randn(3)
+        y = MySub(torch.randn(3))
+        with self._assert_fast_path_not_taken(fp_tl):
+            self.assertIs(fp_tl(x, [y]), sentinel)
+            self.assertIs(torch.ops._torch_testing.fp_tl(x, [y]), sentinel)
+
+    def test_fast_path_mutable_normal_tensor_under_inference_mode_bumps_version(self):
+        @torch.library.custom_op("_torch_testing::fp_im_bump", mutates_args=("x",))
+        def fp_im_bump(x: Tensor) -> None:
+            x.data.add_(1)
+
+        x = torch.randn(3)
+        expected = x + 1
+        v_before = x._version
+        # inference_mode bails from fast path; slow path still bumps version
+        with self._assert_fast_path_not_taken(fp_im_bump):
+            with torch.inference_mode():
+                fp_im_bump(x)
+        self.assertEqual(x, expected)
+        self.assertEqual(x._version, v_before + 1)
+
+    def test_fast_path_mutable_op_under_inference_mode(self):
+        @torch.library.custom_op("_torch_testing::fp_im_mut", mutates_args=("x",))
+        def fp_im_mut(x: Tensor) -> None:
+            x.data.add_(1)
+
+        # inference_mode tensors go through slow path
+        with self._assert_fast_path_not_taken(fp_im_mut):
+            with torch.inference_mode():
+                x = torch.randn(3)
+                expected = x + 1
+                fp_im_mut(x)
+                self.assertEqual(x, expected)
+
+    def test_fast_path_disabled_for_tensorlist_dispatch_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @torch.library.custom_op("_torch_testing::fp_tl2", mutates_args=())
+        def fp_tl2(x: Tensor, ys: list[Tensor]) -> Tensor:
+            return x.clone()
+
+        called = False
+
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as m:
+
+            def twotensor_impl(cls, func, types, args, kwargs):
+                nonlocal called
+                called = True
+                return args[0].clone()
+
+            m._register_torch_dispatch_rule("fp_tl2", TwoTensor, twotensor_impl)
+
+            x = torch.randn(3)
+            tt = TwoTensor(torch.randn(3), torch.randn(3))
+            with self._assert_fast_path_not_taken(fp_tl2):
+                fp_tl2(x, [tt])
+            self.assertTrue(called)
+
+            called = False
+            with self._assert_fast_path_not_taken(fp_tl2):
+                torch.ops._torch_testing.fp_tl2(x, [tt])
+            self.assertTrue(called)
+
+    def test_fast_path_no_wrapper_nest_on_multi_device_register(self):
+        @torch.library.custom_op(
+            "_torch_testing::fp_chain", mutates_args=(), device_types="cpu"
+        )
+        def fp_chain(x: Tensor) -> Tensor:
+            return x.clone()
+
+        @fp_chain.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        overload = torch.ops._torch_testing.fp_chain.default
+        packet = overload._overloadpacket
+        orig = overload._orig_op
+
+        # Packet should not be wrapped (OpOverload-only install)
+        self.assertFalse(hasattr(packet, "_orig_op"))
+
+        @fp_chain.register_kernel("cuda")
+        def _(x: Tensor) -> Tensor:
+            return x.clone()
+
+        # After a second register_kernel, the fallback should still be the
+        # original C++ entry point, not a nested fast_op wrapper.
+        self.assertIs(overload._orig_op, orig)
+
+        # Exercise the fallback path (meta tensor forces fast_path to bail)
+        x_meta = torch.randn(3, device="meta")
+        with self._assert_fast_path_not_taken(fp_chain):
+            result = torch.ops._torch_testing.fp_chain(x_meta)
+        self.assertEqual(result.shape, x_meta.shape)
+
+        x = torch.randn(3)
+        with self._assert_fast_path_taken(fp_chain):
+            self.assertEqual(fp_chain(x), x)
+
+    def test_fast_path_falls_back_for_functorch(self):
+        @torch.library.custom_op("_torch_testing::fp_functorch", mutates_args=())
+        def fp_functorch(x: Tensor) -> Tensor:
+            return x.clone()
+
+        @fp_functorch.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.randn(3)
+        self.assertEqual(fp_functorch(x), x)
+
+        with self._assert_fast_path_not_taken(fp_functorch):
+            result = torch.vmap(fp_functorch)(x.unsqueeze(0))
+        self.assertEqual(result, x.unsqueeze(0))
+
+    def test_fast_path_falls_back_for_kwargs(self):
+        @torch.library.custom_op("_torch_testing::fp_kw", mutates_args=())
+        def fp_kw(x: Tensor, y: Tensor) -> Tensor:
+            return x + y
+
+        x, y = torch.randn(3), torch.randn(3)
+        with self._assert_fast_path_not_taken(fp_kw):
+            self.assertEqual(fp_kw(x, y=y), x + y)
+            self.assertEqual(torch.ops._torch_testing.fp_kw(x, y=y), x + y)
+
+    def test_fast_path_falls_back_for_sparse(self):
+        @torch.library.custom_op("_torch_testing::fp_sparse", mutates_args=())
+        def fp_sparse(x: Tensor) -> Tensor:
+            return x.to_dense().clone()
+
+        x = torch.randn(3, 3).to_sparse()
+        with self._assert_fast_path_not_taken(fp_sparse):
+            result = fp_sparse(x)
+        self.assertEqual(result, x.to_dense())
+
+    def test_fast_path_falls_back_for_nested_tensor(self):
+        @torch.library.custom_op("_torch_testing::fp_nested", mutates_args=())
+        def fp_nested(x: Tensor) -> Tensor:
+            return x.clone()
+
+        nt = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)])
+        with self._assert_fast_path_not_taken(fp_nested):
+            with self.assertRaisesRegex(NotImplementedError, "NestedTensorCPU"):
+                fp_nested(nt)
+
+    def test_fast_path_falls_back_for_meta(self):
+        @torch.library.custom_op("_torch_testing::fp_meta", mutates_args=())
+        def fp_meta(x: Tensor) -> Tensor:
+            return x.clone()
+
+        @fp_meta.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.randn(3, device="meta")
+        with self._assert_fast_path_not_taken(fp_meta):
+            result = fp_meta(x)
+        self.assertEqual(result.shape, x.shape)
+        self.assertEqual(result.device, x.device)
+
+    def test_custom_op_fast_path_check_c_api(self):
+        args = (torch.randn(4), torch.randn(4))
+        result = torch._C._custom_op_fast_path_check(args)
+        if TEST_WITH_CROSSREF:
+            # CrossRefMode is a TorchFunctionMode; the C API correctly rejects it
+            self.assertIsNone(result)
+            return
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "cpu")
+        # result[1] is the raw keyset; verify it contains the full dispatch chain
+        keyset = torch._C.DispatchKeySet.from_raw_repr(result[1])
+        ks_str = str(keyset)
+        self.assertIn("CPU", ks_str)
+        self.assertIn("ADInplaceOrView", ks_str)
+
+        args_grad = (torch.randn(4, requires_grad=True),)
+        result = torch._C._custom_op_fast_path_check(args_grad)
+        keyset = torch._C.DispatchKeySet.from_raw_repr(result[1])
+        self.assertIn("AutogradCPU", str(keyset))
+
+        with torch.autocast("cpu"):
+            result = torch._C._custom_op_fast_path_check(args)
+            self.assertIsNone(result)
+
+        with torch.inference_mode():
+            result = torch._C._custom_op_fast_path_check(args)
+            self.assertIsNone(result)
+
+        class MyMode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return func(*args, **(kwargs or {}))
+
+        with MyMode():
+            result = torch._C._custom_op_fast_path_check(args)
+            self.assertIsNone(result)
+
+    def test_custom_op_fast_path_check_rejects_sparse(self):
+        sparse = torch.randn(3, 3).to_sparse()
+        result = torch._C._custom_op_fast_path_check((sparse,))
+        self.assertIsNone(result)
+
+    def test_custom_op_fast_path_check_rejects_torch_dispatch_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        tt = TwoTensor(torch.randn(3), torch.randn(3))
+        result = torch._C._custom_op_fast_path_check((tt,))
+        self.assertIsNone(result)
+
+    def test_fast_path_falls_back_for_torch_dispatch_subclass(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @torch.library.custom_op("_torch_testing::fp_dispatch_sub", mutates_args=())
+        def fp_dispatch_sub(x: Tensor) -> Tensor:
+            return x.clone()
+
+        called = False
+
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as m:
+
+            def twotensor_impl(cls, func, types, args, kwargs):
+                nonlocal called
+                called = True
+                return args[0].clone()
+
+            m._register_torch_dispatch_rule(
+                "fp_dispatch_sub", TwoTensor, twotensor_impl
+            )
+
+            tt = TwoTensor(torch.randn(3), torch.randn(3))
+            with self._assert_fast_path_not_taken(fp_dispatch_sub):
+                fp_dispatch_sub(tt)
+            self.assertTrue(called)
+
+    @requires_compile
+    def test_fast_path_taken_under_torch_compile_replay(self):
+        @torch.library.custom_op("_torch_testing::fp_compile", mutates_args=())
+        def fp_compile(x: Tensor) -> Tensor:
+            return x + 1
+
+        @fp_compile.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f(x):
+            return torch.ops._torch_testing.fp_compile.default(x)
+
+        x = torch.randn(4)
+        expected = x + 1
+
+        self.assertEqual(f(x), expected)
+
+        # Each compiled replay should still hit the fast path.
+        for _ in range(3):
+            with self._assert_fast_path_taken(fp_compile):
+                self.assertEqual(f(x), expected)
+
+    def test_fast_path_nested_dispatch(self):
+        @torch.library.custom_op("_torch_testing::fp_inner", mutates_args=())
+        def fp_inner(x: Tensor) -> Tensor:
+            return x * 2
+
+        @torch.library.custom_op("_torch_testing::fp_outer", mutates_args=())
+        def fp_outer(x: Tensor) -> Tensor:
+            return fp_inner(x) + 1
+
+        # Only the outer op takes the fast path at the top level.
+        # The inner op is called from inside the outer's backend kernel where
+        # autograd keys are excluded, so it correctly falls back to slow path.
+        x = torch.randn(3)
+        with self._assert_fast_path_taken(fp_outer):
+            result = fp_outer(x)
+        self.assertEqual(result, x * 2 + 1)
+
+    def test_fast_path_error_propagation(self):
+        @torch.library.custom_op("_torch_testing::fp_err", mutates_args=())
+        def fp_err(x: Tensor) -> Tensor:
+            raise ValueError("intentional error")
+
+        x = torch.randn(3)
+        with self._assert_fast_path_taken(fp_err):
+            with self.assertRaisesRegex(ValueError, "intentional error"):
+                fp_err(x)
+
+        # Subsequent call through the same op still takes the fast path
+        with self._assert_fast_path_taken(fp_err):
+            with self.assertRaisesRegex(ValueError, "intentional error"):
+                fp_err(x)
+
+    def test_fast_path_multithreaded(self):
+        import concurrent.futures
+
+        @torch.library.custom_op("_torch_testing::fp_thread", mutates_args=())
+        def fp_thread(x: Tensor) -> Tensor:
+            return x + 1
+
+        def worker(val):
+            x = torch.full((4,), val, dtype=torch.float32)
+            for _ in range(100):
+                result = fp_thread(x)
+                torch.testing.assert_close(result, x + 1)
+            return True
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(worker, float(i)) for i in range(4)]
+            for f in concurrent.futures.as_completed(futures):
+                self.assertTrue(f.result())
+
+    def test_fast_path_rejects_mixed_device(self):
+        @torch.library.custom_op("_torch_testing::fp_mixed", mutates_args=())
+        def fp_mixed(x: Tensor, y: Tensor) -> Tensor:
+            return x.clone()
+
+        # C++ checker rejects mixed-device inputs
+        result = torch._C._custom_op_fast_path_check(
+            (torch.randn(3, device="cpu"), torch.randn(3, device="meta"))
+        )
+        self.assertIsNone(result)
+
+    def test_fast_path_double_backward(self):
+        @torch.library.custom_op("_torch_testing::fp_cube", mutates_args=())
+        def fp_cube(x: Tensor) -> Tensor:
+            return x**3
+
+        @fp_cube.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def _setup_context(ctx, inputs, output):
+            ctx.save_for_backward(*inputs)
+
+        def _backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * 3 * x**2
+
+        fp_cube.register_autograd(_backward, setup_context=_setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        with self._assert_fast_path_taken(fp_cube):
+            y = fp_cube(x)
+        (grad,) = torch.autograd.grad(y.sum(), x, create_graph=True)
+        self.assertEqual(grad, 3 * x**2)
+        grad.sum().backward()
+        self.assertIsNotNone(x.grad)
+
+    def test_fast_path_disabled_by_flag(self):
+        import torch._library.custom_ops as co
+
+        with unittest.mock.patch.object(co, "_FAST_CUSTOM_OPS_ENABLED", False):
+
+            @torch.library.custom_op("_torch_testing::fp_disabled", mutates_args=())
+            def fp_disabled(x: Tensor) -> Tensor:
+                return x.clone()
+
+        self.assertIsNone(fp_disabled._fast_path)
+        x = torch.randn(3)
+        with self._assert_fast_path_not_taken(fp_disabled):
+            self.assertEqual(fp_disabled(x), x)
 
 
 class TestLibrarySourceLocation(TestCase):

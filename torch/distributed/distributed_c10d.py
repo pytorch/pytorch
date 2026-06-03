@@ -2335,20 +2335,26 @@ def _new_process_group_helper(
         eager_backend.eager_connect_single_device(device_id)
 
     # update global state
-    _world.pg_map[pg] = (backend, prefix_store)
-    _world.pg_names[pg] = group_name
-    _register_process_group(group_name, pg)
-
-    _world.pg_backend_config[pg] = str(backend_config)
-    # "" is the default tag for user PGs
     if pg_tag in [None, ""]:
-        pg_tag = f"ptd:{group_name}"
-        _world.tags_to_pg.setdefault("", []).append(pg)
+        # Default-tagged PG: also added to the "" default tag.
+        _register_pg_in_world(
+            pg,
+            backend_name=backend,
+            store=prefix_store,
+            group_name=group_name,
+            backend_config=str(backend_config),
+            add_to_default_tag=True,
+        )
     else:
-        pg_tag = f"user:{pg_tag}"
-
-    _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
-    _world.pg_to_tag[pg] = pg_tag
+        # User-tagged PG: only added to the "user:{pg_tag}" tag.
+        _register_pg_in_world(
+            pg,
+            backend_name=backend,
+            store=prefix_store,
+            group_name=group_name,
+            backend_config=str(backend_config),
+            pg_tag=f"user:{pg_tag}",
+        )
     return pg, prefix_store
 
 
@@ -2992,9 +2998,16 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
 
     Args:
         p2p_op_list: A list of point-to-point operations(type of each operator is
-            ``torch.distributed.P2POp``). The order of the isend/irecv in the list
-            matters and it needs to match with corresponding isend/irecv on the
-            remote end.
+            ``torch.distributed.P2POp``). All operations in the list are treated as
+            a single batch -- the relative ordering of sends vs. receives in the
+            list does not matter and will not cause deadlocks. For example,
+            ``[recv_from_1, send_to_1]`` is equivalent to ``[send_to_1, recv_from_1]``.
+
+            The ordering **does** matter for multiple operations between the same
+            pair of ranks in the same direction: if rank 0 calls
+            ``[send_to_1(A), send_to_1(B)]``, rank 1 must call
+            ``[recv_from_0(A), recv_from_0(B)]`` in the same order to ensure
+            the correct tensors are matched.
 
     Returns:
         A list of distributed request objects returned by calling the corresponding
@@ -5586,6 +5599,11 @@ def split_group(
         parent_backend = parent_pg._get_backend(
             torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
         )
+    elif _use_torchcomms_enabled():
+        # torchcomms supports CPU/gloo splitting; no accelerator is required.
+        parent_backend = parent_pg._get_backend(
+            torch.device("cpu")  # pyrefly: ignore[bad-argument-type]
+        )
     else:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
@@ -5691,6 +5709,9 @@ def split_group(
         split_backend_class = split_pg._get_backend(
             torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
         )
+    elif _use_torchcomms_enabled():
+        # torchcomms supports CPU/gloo splitting; no accelerator is required.
+        split_backend_class = split_pg._get_backend(torch.device("cpu"))
     else:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
@@ -5704,19 +5725,17 @@ def split_group(
         )
 
     # update global state
-    _world.pg_map[split_pg] = (pg_backend, split_pg.get_group_store())
-    _world.pg_names[split_pg] = group_name
-    _register_process_group(group_name, split_pg)
-    _world.pg_backend_config[split_pg] = str(backend_config)
-    pg_tag = f"ptd:{group_name}"
-    _world.tags_to_pg.setdefault(pg_tag, []).append(split_pg)
-    _world.pg_to_tag[split_pg] = pg_tag
-
-    # Create the global rank to group rank mapping
-    _world.pg_group_ranks[split_pg] = {
-        global_rank: group_rank
-        for group_rank, global_rank in enumerate(global_ranks_in_my_group)
-    }
+    _register_pg_in_world(
+        split_pg,
+        backend_name=pg_backend,
+        store=split_pg.get_group_store(),
+        group_name=group_name,
+        backend_config=str(backend_config),
+        rank_mapping={
+            global_rank: group_rank
+            for group_rank, global_rank in enumerate(global_ranks_in_my_group)
+        },
+    )
 
     if _use_torchcomms_enabled():
         # pyrefly: ignore [missing-attribute]
@@ -5807,7 +5826,27 @@ def new_group(
     N.B. use_local_synchronization=True can lead to deadlocks when each rank creates
     multiple overlapping process groups. To avoid that, make sure all ranks follow the
     same global creation order.
+
+    N.B. When TorchComms is enabled (``torch.distributed.config.use_torchcomms``
+    / ``TORCH_DISTRIBUTED_USE_TORCHCOMMS=1``), this function delegates to
+    :func:`split_group` so subgroup creation goes through the TorchComms path.
+    The delegation raises ``NotImplementedError`` for arguments that
+    :func:`split_group` cannot honor (e.g. ``use_local_synchronization=True``,
+    ``sort_ranks=False``, or an explicit ``device_id`` that diverges from the
+    default group's bound device).
     """
+    if _use_torchcomms_enabled():
+        return _new_group_via_split_group(
+            ranks=ranks,
+            timeout=timeout,
+            backend=backend,
+            pg_options=pg_options,
+            use_local_synchronization=use_local_synchronization,
+            group_desc=group_desc,
+            device_id=device_id,
+            sort_ranks=sort_ranks,
+        )
+
     return _new_group_with_tag(
         ranks,
         timeout,
@@ -5818,6 +5857,73 @@ def new_group(
         group_desc=group_desc,
         device_id=device_id,
         sort_ranks=sort_ranks,
+    )
+
+
+def _new_group_via_split_group(
+    ranks,
+    timeout,
+    backend,
+    pg_options,
+    use_local_synchronization,
+    group_desc,
+    device_id,
+    sort_ranks,
+):
+    """Implement `new_group` semantics on top of `split_group`.
+
+    Used on the TorchComms path so subgroup creation goes through
+    :func:`split_group`. Raises ``NotImplementedError`` (or ``ValueError``
+    for inconsistent args) when the requested ``new_group`` configuration
+    cannot be expressed through ``split_group``.
+    """
+    if use_local_synchronization:
+        raise NotImplementedError(
+            "new_group cannot delegate to split_group with "
+            "use_local_synchronization=True; split_group requires all ranks "
+            "in the parent group to participate."
+        )
+    if not sort_ranks:
+        raise NotImplementedError(
+            "new_group cannot delegate to split_group with sort_ranks=False; "
+            "split_group always sorts the ranks of each subgroup."
+        )
+
+    default_pg = _get_default_group()
+    if device_id is not None:
+        bound = default_pg.bound_device_id
+        if bound is not None and device_id != bound:
+            raise ValueError(
+                f"device_id={device_id} does not match the default process "
+                f"group's bound_device_id={bound}; split_group inherits the "
+                "default group's device binding."
+            )
+
+    global_world_size = default_pg.size()
+    if ranks is None:
+        group_ranks = list(range(global_world_size))
+    else:
+        group_ranks = sorted(ranks)
+
+    # torchcomms backends expect every parent rank to participate in split:
+    # members pass their ranks list, non-members pass [] (NCCL_SPLIT_NOCOLOR
+    # for nccl, no-op for gloo). `ProcessGroup::splitGroup` rejects empty
+    # ranks, so for non-members invoke each underlying TorchComm directly
+    # with [] to satisfy the collective contract without creating a PG.
+    if default_pg.rank() not in group_ranks:
+        group_name = _process_group_name(group_ranks, use_hashed_name=True)
+        for device in default_pg._device_types:
+            # pyrefly: ignore[missing-attribute]
+            default_pg._get_backend(device).get_comm().split([], group_name)
+        return GroupMember.NON_GROUP_MEMBER
+
+    return split_group(
+        parent_pg=default_pg,
+        split_ranks=[group_ranks],
+        timeout=timeout,
+        pg_options=pg_options,
+        group_desc=group_desc,
+        backend=backend,
     )
 
 
@@ -5905,6 +6011,34 @@ def _new_group_with_tag(
         group_rank = global_rank
 
     group_name = _process_group_name(ranks, use_hashed_name=use_local_synchronization)
+
+    # If the default PG implements new_group, delegate to it. This allows
+    # custom Python PG subclasses to handle subgroup creation in a single
+    # call, avoiding the per-device creator iteration in
+    # _new_process_group_helper.
+    if hasattr(default_pg, "new_group") and callable(default_pg.new_group):
+        pg_or_none = default_pg.new_group(
+            ranks,
+            timeout=timeout,
+            pg_options=backend_options,
+            group_name=group_name,
+            group_desc=group_desc,
+        )
+        if pg_or_none is None:
+            return GroupMember.NON_GROUP_MEMBER
+
+        pg: ProcessGroup = pg_or_none  # pyrefly: ignore[bad-assignment]
+        _register_pg_in_world(
+            pg,
+            backend_name=backend,
+            store=PrefixStore(f"{group_name}/", default_store),
+            group_name=group_name,
+            backend_config=str(BackendConfig(backend)),
+            rank_mapping={
+                global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
+            },
+        )
+        return pg
 
     pg, pg_store = _new_process_group_helper(
         group_world_size,
@@ -6458,7 +6592,7 @@ def _finalize_shrunk_group(
         global_rank: group_rank
         for group_rank, global_rank in enumerate(remaining_ranks)
     }
-    _update_process_group_global_state(
+    _register_pg_in_world(
         pg=new_pg,
         backend_name=original_group_metadata["backend_name"],
         store=original_group_metadata["store"],
@@ -6672,7 +6806,7 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
         )
 
 
-def _update_process_group_global_state(
+def _register_pg_in_world(
     pg: ProcessGroup,
     backend_name: str,
     store: Store,
@@ -6681,6 +6815,7 @@ def _update_process_group_global_state(
     rank_mapping: dict[int, int] | None = None,
     pg_tag: str | None = None,
     user_tag: str | None = None,
+    add_to_default_tag: bool = False,
 ) -> None:
     """
     Update all global state dictionaries for a process group.
@@ -6699,6 +6834,9 @@ def _update_process_group_global_state(
         pg_tag (str, optional): Process group tag. If None, defaults to f"ptd:{group_name}".
         user_tag (str, optional): User-provided tag for special tag handling.
             If provided, creates "user:{user_tag}" tag and also adds to default "".
+        add_to_default_tag (bool): When True and user_tag is None, also appends
+            pg to the default "" tag in addition to pg_tag. Ignored when
+            user_tag is set (the "" tag is always appended in that case).
     """
     # Update main process group mappings
     _world.pg_map[pg] = (backend_name, store)
@@ -6726,6 +6864,8 @@ def _update_process_group_global_state(
         _world.pg_to_tag[pg] = user_pg_tag
     else:
         # Standard process group tag
+        if add_to_default_tag:
+            _world.tags_to_pg.setdefault("", []).append(pg)
         _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
         _world.pg_to_tag[pg] = pg_tag
 

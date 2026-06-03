@@ -1,0 +1,126 @@
+diff --git a/test/cpython/v3_13/test_types.py b/test/cpython/v3_13/test_types.py
+index d5c613b75ec..d2d79db58ae 100644
+--- a/test/cpython/v3_13/test_types.py
++++ b/test/cpython/v3_13/test_types.py
+@@ -1,3 +1,27 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_types.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# Dummy decorator for CPython test compatibility
++def no_rerun(reason):
++    def decorator(func):
++        return func
++    return decorator
++
++# ======= END DYNAMO PATCH =======
++
+ # Python test set -- part 6, built-in types
+ 
+ from test.support import (
+@@ -5,7 +29,6 @@ from test.support import (
+     iter_builtin_types, iter_slot_wrappers,
+     MISSING_C_DOCSTRINGS,
+ )
+-from test.test_import import no_rerun
+ from test.support.script_helper import assert_python_ok
+ from test.support.import_helper import import_fresh_module
+ 
+@@ -37,7 +60,7 @@ def clear_typing_caches():
+         f()
+ 
+ 
+-class TypesTests(unittest.TestCase):
++class TypesTests(CPythonTestCase):
+ 
+     def test_truth_values(self):
+         if None: self.fail('None is true instead of false')
+@@ -689,7 +712,7 @@ class TypesTests(unittest.TestCase):
+         assert_python_ok("-c", code)
+ 
+ 
+-class UnionTests(unittest.TestCase):
++class UnionTests(CPythonTestCase):
+ 
+     def test_or_types_operator(self):
+         self.assertEqual(int | str, typing.Union[int, str])
+@@ -1102,7 +1125,7 @@ class UnionTests(unittest.TestCase):
+                              msg='Check for union reference leak.')
+ 
+ 
+-class MappingProxyTests(unittest.TestCase):
++class MappingProxyTests(CPythonTestCase):
+     mappingproxy = types.MappingProxyType
+ 
+     def test_constructor(self):
+@@ -1317,7 +1340,7 @@ class MappingProxyTests(unittest.TestCase):
+         self.assertEqual(hash(view), hash(mapping))
+ 
+ 
+-class ClassCreationTests(unittest.TestCase):
++class ClassCreationTests(CPythonTestCase):
+ 
+     class Meta(type):
+         def __init__(cls, name, bases, ns, **kw):
+@@ -1807,7 +1830,7 @@ class ClassCreationTests(unittest.TestCase):
+         self.assertEqual(type(typ.__bases__), TupleSubclass)
+ 
+ 
+-class SimpleNamespaceTests(unittest.TestCase):
++class SimpleNamespaceTests(CPythonTestCase):
+ 
+     def test_constructor(self):
+         def check(ns, expected):
+@@ -2054,7 +2077,7 @@ class SimpleNamespaceTests(unittest.TestCase):
+             types.SimpleNamespace() >= FakeSimpleNamespace()
+ 
+ 
+-class CoroutineTests(unittest.TestCase):
++class CoroutineTests(CPythonTestCase):
+     def test_wrong_args(self):
+         samples = [None, 1, object()]
+         for sample in samples:
+@@ -2367,7 +2390,7 @@ class CoroutineTests(unittest.TestCase):
+             'close', 'throw'}))
+ 
+ 
+-class FunctionTests(unittest.TestCase):
++class FunctionTests(CPythonTestCase):
+     def test_function_type_defaults(self):
+         def ex(a, /, b, *, c):
+             return a + b + c
+@@ -2400,7 +2423,7 @@ class FunctionTests(unittest.TestCase):
+             )
+ 
+ 
+-class SubinterpreterTests(unittest.TestCase):
++class SubinterpreterTests(CPythonTestCase):
+ 
+     @classmethod
+     def setUpClass(cls):
+@@ -2410,6 +2433,7 @@ class SubinterpreterTests(unittest.TestCase):
+         except ModuleNotFoundError:
+             raise unittest.SkipTest('subinterpreters required')
+         import test.support.interpreters.channels
++        super().setUpClass()
+ 
+     @cpython_only
+     @no_rerun('channels (and queues) might have a refleak; see gh-122199')
+@@ -2446,4 +2470,4 @@ class SubinterpreterTests(unittest.TestCase):
+ 
+ 
+ if __name__ == '__main__':
+-    unittest.main()
++    run_tests()
