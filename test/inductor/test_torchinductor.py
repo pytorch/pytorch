@@ -7976,18 +7976,7 @@ class CommonTemplate:
                 check_lowp=False,  # accuracy issues with relatively large matmuls
             )
 
-    @skip_if_gpu_halide
-    # Constant folding was explicitly turned off due to issue #108388
-    # Turn it back on for test
-    @torch._inductor.config.patch(
-        {
-            "joint_graph_constant_folding": True,
-            # Numerical accuracy failure for triton fp16
-            "max_autotune_gemm_backends": "ATEN",
-            "triton.native_matmul": False,
-        }
-    )
-    def test_remove_no_ops(self):
+    def _test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
 
@@ -8010,6 +7999,8 @@ class CommonTemplate:
             atol, rtol = None, None
             if self.device == "cpu":
                 FileCheck().check_not("cpp_fused").run(source_codes[0])
+            elif config.triton.native_matmul:
+                FileCheck().check("triton.jit").run(source_codes[0])
             else:
                 FileCheck().check_not("triton.jit").run(source_codes[0])
 
@@ -8017,6 +8008,14 @@ class CommonTemplate:
         for lowp_dtype in [torch.float16, torch.bfloat16]:
             if not self.is_dtype_supported(lowp_dtype):
                 continue
+            atol, rtol = None, None
+            if TEST_WITH_ROCM and config.triton.native_matmul:
+                # The no-op converts the lowp matmul output to fp32, so assertEqual
+                # would otherwise use fp32 tolerances for a lowp matmul result.
+                if lowp_dtype == torch.float16:
+                    atol, rtol = 1e-1, 1e-3
+                else:
+                    atol, rtol = 5e-1, 1e-2
             inps = [
                 torch.rand([256, 256], device=self.device, dtype=lowp_dtype)
                 for _ in range(2)
@@ -8035,6 +8034,35 @@ class CommonTemplate:
             self.assertEqual(
                 out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
             )
+
+    @skip_if_gpu_halide
+    # Constant folding was explicitly turned off due to issue #108388
+    # Turn it back on for test
+    @torch._inductor.config.patch(
+        {
+            "joint_graph_constant_folding": True,
+            # Keep template Triton matmul out of the non-native case.
+            "max_autotune_gemm_backends": "ATEN",
+            "triton.native_matmul": False,
+        }
+    )
+    def test_remove_no_ops(self):
+        CommonTemplate._test_remove_no_ops(self)
+
+    @requires_gpu_and_triton
+    @skip_if_gpu_halide
+    @torch._inductor.config.patch(
+        {
+            "joint_graph_constant_folding": True,
+            # Native matmul takes priority over the configured GEMM backends.
+            "max_autotune_gemm_backends": "ATEN",
+            "triton.native_matmul": True,
+        }
+    )
+    def test_remove_no_ops_native_matmul(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+        CommonTemplate._test_remove_no_ops(self)
 
     def test_remove_noop_copy(self):
         def fn(x, y):
