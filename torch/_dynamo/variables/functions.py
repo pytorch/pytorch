@@ -45,7 +45,7 @@ from weakref import WeakKeyDictionary
 import torch
 from torch._dynamo.exc import get_stack_above_dynamo
 from torch._guards import Source
-from torch.utils._pytree import is_namedtuple_class
+from torch.utils._pytree import is_namedtuple_class, is_structseq_class
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -3614,6 +3614,10 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
 
     def _get_node_type(tree: Any) -> Any:
         node_type = type(tree)
+        # Only structseq types that are not explicitly registered should return `structseq`.
+        # If a structseq type is explicitly registered, then the actual type will be returned.
+        if node_type not in SUPPORTED_NODES and is_structseq_class(node_type):
+            return structseq
         # All namedtuple types are implicitly registered as pytree nodes.
         # XXX: Other parts of the codebase expect namedtuple types always return
         #      `namedtuple` instead of the actual namedtuple type. Even if the type
@@ -3638,6 +3642,19 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             install_guard(args[0].source.make_guard(GuardBuilder.TYPE_MATCH))
             type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
+        # Unregistered structseq types map to the generic `structseq` sentinel node.
+        # See torch.utils._pytree._get_node_type.
+        if (
+            python_type not in torch.utils._pytree.SUPPORTED_NODES
+            and is_structseq_class(python_type)
+        ):
+            structseq_source = AttrSource(
+                AttrSource(AttrSource(ImportSource("torch"), "utils"), "_pytree"),
+                "structseq",
+            )
+            return VariableTracker.build(
+                tx, torch.utils._pytree.structseq, structseq_source
+            )
         if is_namedtuple_class(python_type):
             type_source = AttrSource(ImportSource("collections"), "namedtuple")
             return VariableTracker.build(
