@@ -6712,6 +6712,120 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         pad2 = torch.tensor([-5, 9, 0, 8])
         self.assertEqual(ep.module()(x, pad2).shape, m(x, pad2).shape)
 
+    @testing.expectedFailureStrict
+    @testing.expectedFailureStrictV2
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_data_dependent_sequence_repeat_chunk_lengths(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 2, 3, padding=1)
+
+            def forward(self, x, lens):
+                chunk_num = torch.ceil(lens / 4).long()
+                chunk_lengths = torch.tensor(
+                    [4] * chunk_num.sum(),
+                    dtype=torch.long,
+                    device=lens.device,
+                )
+                tail_chunk_index = F.pad(chunk_num, (1, 0), value=-1).cumsum(0)[1:]
+                chunk_lengths[tail_chunk_index] = lens % 4
+                chunk_lengths[chunk_lengths == 0] = 4
+
+                chunks = x.split(chunk_lengths.tolist(), dim=0)
+                padded = torch.nn.utils.rnn.pad_sequence(chunks, batch_first=True)
+                return self.conv(padded.unsqueeze(1))
+
+        x = torch.randn(10, 3)
+        lens = torch.tensor([10])
+        mod = Foo()
+        ep = export(mod, (x, lens))
+        self.assertEqual(ep.module()(x, lens), mod(x, lens))
+
+    def test_data_dependent_sequence_repeat_invalidates_after_mutation(self):
+        class Foo(torch.nn.Module):
+            def forward(self, lens):
+                lens.add_(1)
+                return torch.ones([1] * lens.sum())
+
+        with self.assertRaisesRegex(
+            torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+            "Could not extract specialized integer",
+        ):
+            export(Foo(), (torch.tensor([1]),))
+        with self.assertRaisesRegex(
+            torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+            "Could not extract specialized integer",
+        ):
+            export(Foo(), (torch.tensor([1]),))
+
+    def test_data_dependent_sequence_repeat_invalidates_alias_after_mutation(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x.add_(1)
+                return torch.ones([1] * y.sum())
+
+        x = torch.tensor([1])
+        y = x[:]
+        with self.assertRaisesRegex(
+            torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+            "Could not extract specialized integer",
+        ):
+            export(Foo(), (x, y))
+
+    def test_fake_only_custom_op_does_not_run_cpu_kernel(self):
+        with torch.library._scoped_library("mylib_fake_only_export", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib_fake_only_export::fake_only",
+                "(Tensor x) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.register_fake("mylib_fake_only_export::fake_only", lib=lib)
+            def fake_only_fake(x):
+                return torch.empty_like(x)
+
+            class Foo(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib_fake_only_export.fake_only(x) + x
+
+            ep = export(Foo(), (torch.randn(2, 3),))
+
+            FileCheck().check("mylib_fake_only_export.fake_only.default").run(
+                ep.graph_module.code
+            )
+
+    def test_non_strict_export_does_not_run_random_real_kernel(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.randn_like(x)
+
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(1234)
+            before = torch.random.get_rng_state()
+            export(Foo(), (torch.zeros(2, 3),))
+            after = torch.random.get_rng_state()
+
+        self.assertEqual(before, after)
+
+    @unittest.skipIf(
+        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+    )
+    def test_non_strict_export_does_not_copy_mkldnn_buffer(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", torch.randn(2, 2).to_mkldnn())
+
+            def forward(self, x):
+                return x + 1
+
+        export(Foo(), (torch.randn(2, 2),))
+
     def test_suggested_fixes_for_data_dependent_errors_basic(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
         strict = False

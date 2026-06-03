@@ -84,6 +84,17 @@ aten = torch._ops.ops.aten
 
 CONSTANT_NUMEL_LIMIT = 1
 
+# Regular non-strict export uses this only to recover scalar values when Python
+# forces Tensor.__index__ during tracing. Keep it deterministic and side-effect
+# free; expand it only for additional explicit specialization chains.
+_REAL_TENSOR_PROP_EXPORT_SAFE_BUILTINS = {
+    aten.div.Tensor,
+    aten.ceil.default,
+    aten.to.dtype,
+    aten._to_copy.default,
+    aten.sum.default,
+}
+
 RECURSION_COUNT = 0
 
 
@@ -344,6 +355,9 @@ class FakeTensorConverter:
 
     meta_converter: MetaConverter[FakeTensor]
     constant_storage_mapping: dict[StorageWeakRef, list[ReferenceType[FakeTensor]]]
+    deferred_real_tensor_storage_mapping: dict[
+        StorageWeakRef, list[ReferenceType[FakeTensor]]
+    ]
     export: bool
 
     def __init__(self, *, copy_data: bool = False, export: bool = False) -> None:
@@ -352,6 +366,7 @@ class FakeTensorConverter:
 
         # map from to storage to corresponding constant tensors
         self.constant_storage_mapping = {}
+        self.deferred_real_tensor_storage_mapping = {}
 
     def add_constant_storage_mapping(self, fake_tensor: FakeTensor) -> None:
         # when you have a constant, aliased tensor:
@@ -384,6 +399,38 @@ class FakeTensorConverter:
                 ten.constant = None
 
         del self.constant_storage_mapping[weak_st]
+
+    def add_deferred_real_tensor_storage_mapping(self, fake_tensor: FakeTensor) -> None:
+        if (
+            not isinstance(fake_tensor, FakeTensor)
+            or fake_tensor.real_tensor_thunk is None
+        ):
+            raise AssertionError(
+                "fake_tensor must be a FakeTensor with a deferred real tensor thunk"
+            )
+
+        weak_st = StorageWeakRef(fake_tensor._typed_storage())
+        if weak_st not in self.deferred_real_tensor_storage_mapping:
+            self.deferred_real_tensor_storage_mapping[weak_st] = []
+        self.deferred_real_tensor_storage_mapping[weak_st].append(
+            weakref.ref(fake_tensor)
+        )
+
+    def invalidate_deferred_real_tensor_aliases(self, fake_tensor: FakeTensor) -> None:
+        if not isinstance(fake_tensor, FakeTensor):
+            raise AssertionError("fake_tensor must be a FakeTensor")
+
+        weak_st = StorageWeakRef(fake_tensor._typed_storage())
+        if weak_st not in self.deferred_real_tensor_storage_mapping:
+            fake_tensor.real_tensor_thunk = None
+            return
+
+        for weak_tensor_ref in self.deferred_real_tensor_storage_mapping[weak_st]:
+            ten = weak_tensor_ref()
+            if ten is not None:
+                ten.real_tensor_thunk = None
+
+        del self.deferred_real_tensor_storage_mapping[weak_st]
 
     def _get_memo(self, t: Tensor) -> FakeTensor | None:
         tid = self.meta_converter.describer.lookup_tensor.get(t)
@@ -730,6 +777,7 @@ class FakeTensor(Tensor):
     fake_mode: FakeTensorMode
     constant: Tensor | None
     real_tensor: Tensor | None
+    real_tensor_thunk: typing.Callable[[], Tensor] | None
 
     # TODO: Generalize this as needed, e.g., into a trie of memos, if
     # you do something like x[0].item()  (x[0] is fresh each time, so
@@ -866,6 +914,7 @@ class FakeTensor(Tensor):
         if isinstance(real_tensor, FakeTensor):
             raise AssertionError("real_tensor must not be a FakeTensor")
         self.real_tensor = real_tensor
+        self.real_tensor_thunk = None
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
@@ -1355,6 +1404,8 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs: bool = False,
         shape_env: ShapeEnv | None = None,
         static_shapes: bool | None = None,
+        propagate_real_tensors: bool | None = None,
+        copy_real_tensors: bool | None = None,
         # TODO: This is a temporary measure, see
         # https://github.com/pytorch/pytorch/pull/126245#discussion_r1604185748
         # We're currently solely using this to impede population of
@@ -1375,9 +1426,21 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.propagate_real_tensors = (
             torch._functorch.config.fake_tensor_propagate_real_tensors
+            if propagate_real_tensors is None
+            else propagate_real_tensors
+        )
+        # Draft export validates fake kernels against real execution. Some
+        # export paths only need real values for explicit specialization.
+        self.validate_real_tensors = (
+            torch._functorch.config.fake_tensor_propagate_real_tensors
+        )
+        self.copy_real_tensors = (
+            self.propagate_real_tensors
+            if copy_real_tensors is None
+            else copy_real_tensors
         )
         self.fake_tensor_converter = FakeTensorConverter(
-            copy_data=self.propagate_real_tensors,
+            copy_data=self.copy_real_tensors,
             export=export,
         )
 
@@ -1396,7 +1459,7 @@ class FakeTensorMode(TorchDispatchMode):
         self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
         self.cache_enabled: bool = (
             torch._dynamo.config.fake_tensor_cache_enabled
-            and not self.propagate_real_tensors
+            and not self.validate_real_tensors
         )
         self.cache_crosscheck_enabled = (
             torch._dynamo.config.fake_tensor_cache_crosscheck_enabled
@@ -2270,7 +2333,17 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self):
                 return func(*args, **kwargs)
 
-        if self.cache_enabled:
+        if self.cache_enabled and not (
+            self.propagate_real_tensors
+            and not self.validate_real_tensors
+            and (
+                func in _REAL_TENSOR_PROP_EXPORT_SAFE_BUILTINS
+                or (
+                    self.fake_tensor_converter.deferred_real_tensor_storage_mapping
+                    and get_schema_info(func).is_mutable()
+                )
+            )
+        ):
             return self._cached_dispatch_impl(func, types, args, kwargs)
         else:
             return self._dispatch_impl(func, types, args, kwargs)
@@ -2677,11 +2750,62 @@ class FakeTensorMode(TorchDispatchMode):
             free_unbacked_symbols,
         )
 
+        def can_defer_to_real_tensor(t: object) -> bool:
+            if isinstance(t, FakeTensor):
+                return t.real_tensor is not None or t.real_tensor_thunk is not None
+            elif isinstance(t, py_sym_types):
+                if self.shape_env is None:
+                    raise AssertionError(
+                        "self.shape_env must not be None for symbolic types"
+                    )
+                return not any(
+                    s not in self.shape_env.real_tensor_prop_unbacked_vals
+                    for s in free_unbacked_symbols(t)
+                )
+            elif isinstance(t, FakeScriptObject):
+                return t.real_obj is not None
+            else:
+                return True
+
+        def materialize_deferred_real_tensor(
+            t: T,
+        ) -> T | Tensor | torch._C.ScriptObject | None:
+            if isinstance(t, FakeTensor):
+                if t.real_tensor is not None:
+                    return t.real_tensor
+                thunk = t.real_tensor_thunk
+                if thunk is None:
+                    return None
+                return thunk()
+            elif isinstance(t, py_sym_types):
+                return maybe_to_real_tensor(t)
+            elif isinstance(t, FakeScriptObject):
+                return t.real_obj
+            else:
+                return t
+
+        def make_deferred_real_tensor_materializer(
+            t: T,
+        ) -> typing.Callable[[], T | Tensor | torch._C.ScriptObject | None]:
+            if isinstance(t, FakeTensor):
+                if t.real_tensor is not None:
+                    real_tensor = t.real_tensor
+                    return lambda: real_tensor
+                thunk = t.real_tensor_thunk
+                if thunk is None:
+                    raise AssertionError(
+                        "Expected deferred real tensor thunk to be present"
+                    )
+                return thunk
+            return lambda: materialize_deferred_real_tensor(t)
+
         nil = object()
 
         real_out = nil
+        deferred_real_out: typing.Callable[[], Tensor] | None = None
         if (
             self.propagate_real_tensors
+            and self.validate_real_tensors
             and all(e.real_tensor is not None for e in flat_arg_fake_tensors)
             and not any(
                 (
@@ -2721,6 +2845,33 @@ class FakeTensorMode(TorchDispatchMode):
             if not is_builtin:
                 mutation_checker.check()  # type: ignore[possibly-undefined]
                 library_utils.check_aliasing_constraint(func._name, flat_args, real_out)
+
+        elif (
+            self.propagate_real_tensors
+            and func in _REAL_TENSOR_PROP_EXPORT_SAFE_BUILTINS
+            and all(can_defer_to_real_tensor(a) for a in flat_args)
+        ):
+            log.debug("deferred propagate_real_tensors %s", func)
+            real_arg_materializers = [
+                make_deferred_real_tensor_materializer(a) for a in flat_args
+            ]
+
+            def run_deferred_real_out() -> Tensor:
+                real_flat_args = [
+                    materialize() for materialize in real_arg_materializers
+                ]
+                real_args, real_kwargs = pytree.tree_unflatten(
+                    real_flat_args, args_spec
+                )
+                with no_dispatch():
+                    real_out = func(*real_args, **real_kwargs)
+                if not isinstance(real_out, Tensor):
+                    raise AssertionError(
+                        f"Expected {func} to return a Tensor for deferred real propagation"
+                    )
+                return real_out
+
+            deferred_real_out = run_deferred_real_out
 
         elif self.propagate_real_tensors:
             # This can happen occasionally legitimately, specifically when you
@@ -2779,23 +2930,24 @@ class FakeTensorMode(TorchDispatchMode):
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
-                if not torch._functorch.config.generate_fake_kernels_from_real_mismatches:
-                    self._maybe_infer_fake_kernel_from_pytree_out(
-                        func,
-                        (args, kwargs),
-                        (real_args, real_kwargs),
-                        fake_out,
-                        real_out,
-                    )
-                else:
-                    # this can override the output only when the flag is True
-                    fake_out = self._maybe_infer_fake_kernel_from_pytree_out(  # type: ignore[assignment]
-                        func,
-                        (args, kwargs),
-                        (real_args, real_kwargs),
-                        fake_out,
-                        real_out,
-                    )
+                if self.validate_real_tensors:
+                    if not torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                        self._maybe_infer_fake_kernel_from_pytree_out(
+                            func,
+                            (args, kwargs),
+                            (real_args, real_kwargs),
+                            fake_out,
+                            real_out,
+                        )
+                    else:
+                        # this can override the output only when the flag is True
+                        fake_out = self._maybe_infer_fake_kernel_from_pytree_out(  # type: ignore[assignment]
+                            func,
+                            (args, kwargs),
+                            (real_args, real_kwargs),
+                            fake_out,
+                            real_out,
+                        )
 
                 # populate real_tensor_prop_unbacked_vals
                 if (
@@ -2817,6 +2969,12 @@ class FakeTensorMode(TorchDispatchMode):
                 # may need to get the unbacked settings "early"
                 # TODO: Is this really needed?
                 compute_unbacked_bindings(self.shape_env, fake_out, peek=True)
+
+            elif deferred_real_out is not None and isinstance(fake_out, FakeTensor):
+                fake_out.real_tensor_thunk = deferred_real_out
+                self.fake_tensor_converter.add_deferred_real_tensor_storage_mapping(
+                    fake_out
+                )
 
             return fake_out
 
@@ -2882,6 +3040,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         if (
             self.propagate_real_tensors
+            and self.validate_real_tensors
             and real_out is not nil
             and not library_utils.is_builtin(func)
             and self.shape_env is not None
@@ -2915,6 +3074,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # but there doesn't exist a profile for the existing inputs, and we are in
                 if (
                     self.propagate_real_tensors
+                    and self.validate_real_tensors
                     and real_out is not nil
                     and not library_utils.is_builtin(func)
                     and self.shape_env is not None
@@ -3184,8 +3344,11 @@ class FakeTensorMode(TorchDispatchMode):
         kwargs: Mapping[str, object],
     ) -> None:
         any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
+        any_deferred_real_tensor = bool(
+            self.fake_tensor_converter.deferred_real_tensor_storage_mapping
+        )
         schema_info = get_schema_info(func)
-        if any_constant and schema_info.is_mutable():
+        if (any_constant or any_deferred_real_tensor) and schema_info.is_mutable():
             _, new_kwargs = normalize_function(  # type: ignore[misc]
                 func,
                 args=args,  # type: ignore[arg-type]
@@ -3194,12 +3357,14 @@ class FakeTensorMode(TorchDispatchMode):
             )
             for k, v in new_kwargs.items():
                 k = k if (k != "input" or schema_info.has_argument(k)) else "self"
-                if (
-                    self.is_our_fake(v)
-                    and schema_info.is_mutable(k)
-                    and v.constant is not None
-                ):
-                    self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
+                if self.is_our_fake(v) and schema_info.is_mutable(k):
+                    if v.constant is not None:
+                        self.fake_tensor_converter.invalidate_constant_aliases(
+                            v.constant
+                        )
+                    self.fake_tensor_converter.invalidate_deferred_real_tensor_aliases(
+                        v
+                    )
 
     def from_tensor(
         self,

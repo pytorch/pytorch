@@ -3920,6 +3920,7 @@ class ShapeEnv:
         # XXX Add any new settings that could affect FakeTensor evaluation
         # to: torch._subclasses.fake_tensor._ShapeEnvSettings
         trace_asserts: bool = False,
+        allow_real_tensor_prop_evaluate: bool = True,
     ) -> None:
         if duck_shape is None:
             duck_shape = config.use_duck_shape
@@ -3953,6 +3954,9 @@ class ShapeEnv:
         # Only set when propagate_real_tensors is on.
         # Used as last resort to avoid GuardOnDataDependent error in draft export.
         self.real_tensor_prop_unbacked_vals: dict[sympy.Symbol, sympy.Integer] = {}
+        # Draft export can resolve guards from propagated real values. Regular
+        # non-strict export only uses those values at explicit specialization sites.
+        self.allow_real_tensor_prop_evaluate = allow_real_tensor_prop_evaluate
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
@@ -8414,6 +8418,7 @@ class ShapeEnv:
                     # and if they pass we add a runtime assertions and continue.
                     if (
                         not ok
+                        and self.allow_real_tensor_prop_evaluate
                         and self.real_tensor_prop_unbacked_vals
                         and not (
                             unsound_result := orig_expr.xreplace(
