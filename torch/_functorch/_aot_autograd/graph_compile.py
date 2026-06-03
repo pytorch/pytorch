@@ -56,7 +56,12 @@ from .autograd_cache import (
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
-from .descriptors import AOTOutput, PlainAOTOutput
+from .descriptors import (
+    AOTOutput,
+    InputMutationAOTOutput,
+    PlainAOTOutput,
+    TangentAOTInput,
+)
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -84,6 +89,7 @@ from .schemas import (
     FlatFn,
     FxValue,
     MutationType,
+    OutputType,
     SubclassMeta,
     ViewAndMutationMeta,
 )
@@ -2140,18 +2146,84 @@ def _compute_indices_of_inps_to_detach(
             f"got {len(bw_outs_no_rng_no_tokens)}"
         )
 
+    # Some mutated inputs are differentiable because their mutated value is
+    # copied back to the original input in the runtime epilogue. If no
+    # differentiable user-visible output aliases the mutated input, and the
+    # user-output backward does not use that input, passing a stale non-leaf
+    # input through the compiled autograd.Function can make an unrelated
+    # user-output backward traverse the input's prior freed graph.
+    #
+    # If a differentiable user output does alias the mutated input, its gradient
+    # may depend on eager's mutation-specific semantics for the old input:
+    # copy_ overwrites old history, add_/sub_ preserve it with identity
+    # derivative, and other mutations may have non-identity derivatives or
+    # version-counter constraints. Detaching here would erase information that
+    # the existing alias/mutation path may need.
+    differentiable_outputs_aliasing_inputs = {
+        info.base_idx
+        for info in fw_metadata.output_info
+        if info.output_type in (OutputType.alias_of_input, OutputType.is_input)
+        and isinstance(info.base_idx, int)
+        and info.requires_grad_for_backward
+    }
+
+    tangent_placeholders = [
+        node
+        for node in bw_module.graph.find_nodes(op="placeholder")
+        if node.name.startswith("tangents")
+    ]
+    user_output_tangent_placeholders = set()
+    if len(tangent_placeholders) == len(fw_metadata.traced_tangents_descs):
+        for tangent, tangent_desc in zip(
+            tangent_placeholders, fw_metadata.traced_tangents_descs
+        ):
+            if not (
+                isinstance(tangent_desc, TangentAOTInput)
+                and isinstance(tangent_desc.output, InputMutationAOTOutput)
+            ):
+                user_output_tangent_placeholders.add(tangent)
+
+    def depends_on_user_output_tangent(node: object) -> bool:
+        if not isinstance(node, torch.fx.Node):
+            return False
+
+        seen: set[torch.fx.Node] = set()
+        stack = [node]
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            if cur in user_output_tangent_placeholders:
+                return True
+            stack.extend(cur.all_input_nodes)
+        return False
+
     for i, bw_out in enumerate(bw_outs_no_rng_no_tokens):
+        info = fw_metadata.input_info[i]
         # If our input experiences a metadata mutation inside the graph (e.g. set_()),
         # we *must* not detach, otherwise it will be the detach'd input that gets the metadata mutation
         metadata_mutation_in_graph = (
-            fw_metadata.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH
-            and fw_metadata.input_info[i].mutates_storage_metadata
+            info.mutation_type == MutationType.MUTATED_IN_GRAPH
+            and info.mutates_storage_metadata
         )
-        is_non_leaf = (
-            fw_metadata.input_info[i].requires_grad
-            and not fw_metadata.input_info[i].is_leaf
+        is_non_leaf = info.requires_grad and not info.is_leaf
+        user_outputs_need_input = depends_on_user_output_tangent(bw_out)
+        differentiable_user_output_aliases_input = (
+            i in differentiable_outputs_aliasing_inputs
         )
-        if bw_out is None and not metadata_mutation_in_graph and is_non_leaf:
+        only_mutated_outputs_need_input = (
+            bool(user_output_tangent_placeholders)
+            and info.mutation_type == MutationType.MUTATED_OUT_GRAPH
+            and info.mutates_data
+            and not user_outputs_need_input
+            and not differentiable_user_output_aliases_input
+        )
+        if (
+            (bw_out is None or only_mutated_outputs_need_input)
+            and not metadata_mutation_in_graph
+            and is_non_leaf
+        ):
             indices_of_inps_to_detach.append(i)
 
     return indices_of_inps_to_detach

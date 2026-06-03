@@ -101,6 +101,106 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertIn(".detach()", source)
         self.assertIn("torch._C._set_view_replay_enabled(True)", source)
 
+    def test_training_non_grad_buffer_mutation_keeps_buffer_grad_history(self):
+        """
+        A non-grad buffer mutated with a grad-requiring value should keep the
+        eager autograd state on the buffer without making user-output backward
+        traverse the buffer's prior graph on the next invocation.
+        """
+        with capture_codegen_source("runtime_wrapper_orchestration") as captured:
+            w = torch.nn.Parameter(torch.tensor([2.0, 3.0, 4.0, 5.0]))
+            buf = torch.zeros(4)
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                out = x * w
+                buf.add_(out)
+                return out
+
+            x = torch.tensor([0.1, 0.2, 0.3, 0.4])
+            expected_update = x * w.detach()
+
+            out = f(x)
+            self.assertEqual(buf, expected_update)
+            self.assertTrue(buf.requires_grad)
+            self.assertFalse(buf.is_leaf)
+            self.assertEqual(torch.autograd.grad(buf.sum(), w, retain_graph=True)[0], x)
+            out.sum().backward()
+            self.assertEqual(w.grad, x)
+            w.grad = None
+
+            out = f(x)
+            self.assertEqual(buf, expected_update * 2)
+            self.assertTrue(buf.requires_grad)
+            self.assertFalse(buf.is_leaf)
+            out.sum().backward()
+
+        self.assertEqual(w.grad, x)
+        self.assertEqual(len(captured), 2)
+        self.assertIn("updated_inputs", captured[0])
+        self.assertIn(".detach()", captured[1])
+
+    def test_training_mutated_buffer_alias_output_uses_prior_history(self):
+        """
+        If a differentiable user output aliases a mutated input, do not detach
+        the stale input. The alias observes eager's add_ derivative wrt the old
+        buffer, so gradients flow through both updates.
+        """
+        with capture_codegen_source("runtime_wrapper_orchestration") as captured:
+            w = torch.nn.Parameter(torch.tensor([2.0, 3.0, 4.0, 5.0]))
+            buf = torch.zeros(4)
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                out = x * w
+                buf.add_(out)
+                return out, buf.view_as(buf)
+
+            x = torch.tensor([0.1, 0.2, 0.3, 0.4])
+            expected_update = x * w.detach()
+
+            f(x)
+            self.assertEqual(buf, expected_update)
+
+            _, y = f(x)
+            self.assertEqual(buf, expected_update * 2)
+            self.assertEqual(y.data_ptr(), buf.data_ptr())
+            y.sum().backward()
+
+        self.assertEqual(w.grad, x * 2)
+        self.assertEqual(len(captured), 2)
+        self.assertNotIn(".detach()", captured[1])
+
+    def test_training_mutated_buffer_copy_alias_output_overwrites_prior_history(self):
+        """
+        copy_ overwrites eager's old buffer history. A generic history-preserving
+        copy-back would incorrectly include the first update in this gradient.
+        """
+        with capture_codegen_source("runtime_wrapper_orchestration") as captured:
+            w = torch.nn.Parameter(torch.tensor([2.0, 3.0, 4.0, 5.0]))
+            buf = torch.zeros(4)
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                out = x * w
+                buf.copy_(out)
+                return out, buf.view_as(buf)
+
+            x = torch.tensor([0.1, 0.2, 0.3, 0.4])
+            expected_update = x * w.detach()
+
+            f(x)
+            self.assertEqual(buf, expected_update)
+
+            _, y = f(x)
+            self.assertEqual(buf, expected_update)
+            self.assertEqual(y.data_ptr(), buf.data_ptr())
+            y.sum().backward()
+
+        self.assertEqual(w.grad, x)
+        self.assertEqual(len(captured), 2)
+        self.assertNotIn(".detach()", captured[1])
+
     def test_inference_with_mutation(self):
         """
         Inference with input mutation. With keep_inference_input_mutations,
