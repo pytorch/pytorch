@@ -24,7 +24,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipMPS,
     skipXLA,
-    skipXPUIf,
     tol,
     toleranceOverride,
 )
