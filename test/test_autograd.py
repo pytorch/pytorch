@@ -26,6 +26,7 @@ from copy import deepcopy
 from functools import partial, reduce
 from itertools import product
 from operator import mul
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import torch
@@ -2734,8 +2735,37 @@ class TestAutograd(TestCase):
         z = x**2 + y * x + y**2
 
         inputs = OrderedDict([("x", x), ("y", y)])
-        with self.assertRaisesRegex(TypeError, "must be a dict"):
-            torch.autograd.grad(z.sum(), inputs)
+        result = torch.autograd.grad(z.sum(), inputs)
+        self.assertIsInstance(result, OrderedDict)
+        self.assertEqual(list(result.keys()), ["x", "y"])
+        self.assertEqual(result["x"], 2 * x + y)
+        self.assertEqual(result["y"], x + 2 * y)
+
+    def test_grad_dict_inputs_default_dict(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        # defaultdict is a dict subclass but not OrderedDict, so result is
+        # plain dict (the default_factory is not propagated).
+        inputs = defaultdict(lambda: None, {"x": x, "y": y})
+        result = torch.autograd.grad(z.sum(), inputs)
+        self.assertIs(type(result), dict)
+        self.assertEqual(result["x"], 2 * x + y)
+        self.assertEqual(result["y"], x + 2 * y)
+
+    def test_grad_dict_inputs_mapping_proxy(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        # MappingProxyType is a Mapping but not OrderedDict, so result is dict
+        inputs = MappingProxyType({"x": x, "y": y})
+        result = torch.autograd.grad(z.sum(), inputs)
+        self.assertIsInstance(result, dict)
+        self.assertNotIsInstance(result, OrderedDict)
+        self.assertEqual(result["x"], 2 * x + y)
+        self.assertEqual(result["y"], x + 2 * y)
 
     def test_grad_dict_inputs_materialize_grads(self):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
@@ -2774,10 +2804,11 @@ class TestAutograd(TestCase):
         self.assertIsInstance(result2, dict)
         self.assertEqual(result2["x"], 6 * x)
 
-    def test_grad_dict_inputs_empty(self):
+    @parametrize("mapping_cls", [dict, OrderedDict, MappingProxyType])
+    def test_grad_dict_inputs_empty(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         z = x**2
-        inputs: dict[str, torch.Tensor] = {}
+        inputs = mapping_cls({})
         self.assertRaisesRegex(
             RuntimeError,
             "cannot be empty",
@@ -2805,15 +2836,50 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad, 2 * x + y)
         self.assertEqual(y.grad, x + 2 * y)
 
-    def test_backward_dict_inputs_empty(self):
+    def test_backward_dict_inputs_ordered_dict(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        gradient = torch.ones(2, 2, dtype=torch.double)
+        inputs = OrderedDict([("x", x), ("y", y)])
+        torch.autograd.backward(z, gradient, inputs=inputs)
+        self.assertEqual(x.grad, 2 * x + y)
+        self.assertEqual(y.grad, x + 2 * y)
+
+    def test_backward_dict_inputs_default_dict(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        gradient = torch.ones(2, 2, dtype=torch.double)
+        inputs = defaultdict(lambda: None, {"x": x, "y": y})
+        torch.autograd.backward(z, gradient, inputs=inputs)
+        self.assertEqual(x.grad, 2 * x + y)
+        self.assertEqual(y.grad, x + 2 * y)
+
+    def test_backward_dict_inputs_mapping_proxy(self):
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        z = x**2 + y * x + y**2
+
+        gradient = torch.ones(2, 2, dtype=torch.double)
+        inputs = MappingProxyType({"x": x, "y": y})
+        torch.autograd.backward(z, gradient, inputs=inputs)
+        self.assertEqual(x.grad, 2 * x + y)
+        self.assertEqual(y.grad, x + 2 * y)
+
+    @parametrize("mapping_cls", [dict, OrderedDict, MappingProxyType])
+    def test_backward_dict_inputs_empty(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         z = x**2
 
         gradient = torch.ones(2, 2, dtype=torch.double)
+        inputs = mapping_cls({})
         self.assertRaisesRegex(
             RuntimeError,
             "cannot be empty",
-            lambda: torch.autograd.backward(z, gradient, inputs={}),
+            lambda: torch.autograd.backward(z, gradient, inputs=inputs),
         )
 
     @skipIfTorchDynamo("compiled autograd does not support is_grads_batched with vmap")
