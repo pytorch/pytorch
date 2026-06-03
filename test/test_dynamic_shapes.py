@@ -797,18 +797,6 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 == 10 - i1))
         self.assertExpectedInline(str(i0), """u0""")
 
-    def test_constant_symint_is_hashable(self):
-        # Constants hash by value; symbolic stays unhashable so einops's
-        # TypeError-based cache-bypass keeps working.
-        shape_env = ShapeEnv()
-        const = shape_env.create_symintnode(sympy.Integer(42), hint=42)
-        self.assertEqual(hash(const), hash(42))
-        self.assertEqual({const: "ok"}[42], "ok")
-
-        symbolic = shape_env.create_unbacked_symint()
-        with self.assertRaises(TypeError):
-            hash(symbolic)
-
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()
         ia = [shape_env.create_unbacked_symint() for _ in range(11)]  # allocate 10

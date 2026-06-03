@@ -36,7 +36,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
-device_type = get_devtype().type
+device_type = str(get_devtype())
 
 
 def get_snode_runtime_for_reorder_compute_test(snode):

@@ -618,13 +618,14 @@ class SymInt:
     def __hash__(self) -> builtins.int:
         if self.node.is_nested_int():
             return hash(self.node.nested_int())
-        if self.node.expr.is_number:
-            # Constant SymInt: hash by value; nothing to specialize.
-            return hash(builtins.int(self.node.int_()))
-        # einops relies on this TypeError to bypass its lru_cache on
-        # dynamic shapes.
-        # See https://github.com/arogozhnikov/einops/blob/6181e1e95dc58c00a3143c1726da1c6ee0463164/einops/einops.py#L237
-        raise TypeError("unhashable type: non-nested SymInt")
+        else:
+            # We could support constant SymInts as well, but not doing it for now
+            raise TypeError("unhashable type: non-nested SymInt")
+            # TODO: Force specialization
+            # This can't be done because the TypeError here is load bearing
+            # for einops
+            # https://github.com/arogozhnikov/einops/blob/6181e1e95dc58c00a3143c1726da1c6ee0463164/einops/einops.py#L237
+            # return hash(builtins.int(self))
 
     def as_integer_ratio(self) -> tuple["SymInt", builtins.int]:
         """Represent this int as an exact integer ratio"""

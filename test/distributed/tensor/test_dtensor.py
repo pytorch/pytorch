@@ -750,21 +750,6 @@ class DTensorTest(DTensorTestBase):
         self.assertNotEqual(hash(sharded_tensor._spec), hash(replica_tensor._spec))
 
     @with_comms
-    def test_dtensor_spec_hash_dynamic_shapes(self):
-        # A symbolic shape must not make DTensorSpec unhashable.
-        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        mesh = self.build_device_mesh()
-        s0 = ShapeEnv().create_unbacked_symint()
-
-        def spec():
-            meta = TensorMeta(torch.Size([s0, 4]), (4, 1), torch.float32)
-            return DTensorSpec(mesh, (Shard(0),), tensor_meta=meta)
-
-        self.assertEqual(hash(spec()), hash(spec()))
-
-    @with_comms
     def test_dtensor_properties(self):
         device_mesh = self.build_device_mesh()
         placements = [Shard(0)]
