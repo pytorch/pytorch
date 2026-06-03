@@ -492,7 +492,7 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   tls_reenable_functionalize.set_excluded(
       curr_tls.excluded_.remove(c10::DispatchKey::Functionalize));
   c10::impl::ForceDispatchKeyGuard guard_(tls_reenable_functionalize);
-  at::native::logsumexp_out(self_wrapped, dim, keepdim, out_wrapped);
+  at::logsumexp_out(out_wrapped, self_wrapped, dim, keepdim);
   auto out_unwrapped =
       at::functionalization::impl::from_functional_tensor(out_wrapped);
   // propagate mutations back to the inputs (including resizing)

@@ -554,6 +554,27 @@ class TestReductions(TestCase):
         self.assertEqual(expected, actual)
 
     @skipIfNoSciPy
+    @dtypes(torch.float32, torch.float64)
+    def test_logsumexp_all_dims(self, device, dtype):
+        from scipy.special import logsumexp
+        a = torch.randn(3, 4, device=device, dtype=dtype)
+
+        # No dim argument: reduce over all dimensions
+        actual = torch.logsumexp(a)
+        expected = logsumexp(a.cpu().numpy().flatten())
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertEqual(expected, actual)
+
+        # Equivalent to specifying all dims explicitly
+        actual_explicit = a.logsumexp(list(range(a.ndim)))
+        self.assertEqual(actual, actual_explicit)
+
+        # keepdim=True preserves all dims as size 1
+        actual_keepdim = torch.logsumexp(a, keepdim=True)
+        self.assertEqual(actual_keepdim.shape, torch.Size([1, 1]))
+        self.assertEqual(expected, actual_keepdim.squeeze())
+
+    @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
     @dtypesIfMPS(torch.complex64)
     def test_logcumsumexp_complex(self, device, dtype):

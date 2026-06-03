@@ -6425,7 +6425,7 @@ Example::
 add_docstr(
     torch.logsumexp,
     r"""
-logsumexp(input, dim, keepdim=False, *, out=None)
+logsumexp(input, dim=(), keepdim=False, *, out=None)
 
 Returns the log of summed exponentials of each row of the :attr:`input`
 tensor in the given dimension :attr:`dim`. The computation is numerically
@@ -6435,6 +6435,9 @@ For summation index :math:`j` given by `dim` and other indices :math:`i`, the re
 
     .. math::
         \text{{logsumexp}}(x)_{{i}} = \log \sum_j \exp(x_{{ij}})
+
+If :attr:`dim` is an empty tuple (the default), the reduction is performed
+over all dimensions, returning a scalar result.
 
 {keepdim_details}
 
@@ -6451,6 +6454,8 @@ Example::
     >>> a = torch.randn(3, 3)
     >>> torch.logsumexp(a, 1)
     tensor([1.4907, 1.0593, 1.5696])
+    >>> torch.logsumexp(a)
+    tensor(2.1762)
     >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
     tensor(1.6859e-07)
 """.format(**multi_dim_common),

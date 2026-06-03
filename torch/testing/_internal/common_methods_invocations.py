@@ -1622,6 +1622,9 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
         ((S, S), (1,), False),
         ((S, S), (-2,), False),
         ((S, S), (0, 1), False),
+        # dim=[] reduces over all dimensions
+        ((S, S), (), False),
+        ((S, S), (), True),
     )
     # Test large inputs to check numerical stability
     lows = (None, 1e3, 1e6) if dtype in (torch.float32, torch.float64, torch.complex64, torch.complex128) else (None,)
