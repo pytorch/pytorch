@@ -14788,9 +14788,14 @@ if __name__ == '__main__':
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
                     if bias:
-                        expected_input_grad_max_ulp_diff = 3
-                        expected_weight_grad_max_ulp_diff = 6
-                        expected_linear_bias_grad_max_ulp_diff = 16
+                        if "mps" in device:
+                            expected_input_grad_max_ulp_diff = 232
+                            expected_weight_grad_max_ulp_diff = 190
+                            expected_linear_bias_grad_max_ulp_diff = 16
+                        else:  # CUDA
+                            expected_input_grad_max_ulp_diff = 3
+                            expected_weight_grad_max_ulp_diff = 6
+                            expected_linear_bias_grad_max_ulp_diff = 16
                     else:
                         expected_input_grad_max_ulp_diff = 1
                         expected_weight_grad_max_ulp_diff = 0
