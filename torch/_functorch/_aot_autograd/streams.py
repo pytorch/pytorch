@@ -609,12 +609,17 @@ def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
                         *deps_before_sync,
                     ]
 
-                # For synchronize_event, also include the getitem nodes
-                # threaded through record_event's control_deps. This ensures
-                # subsequent ops that depend on recorded values get rewired
-                # through synchronize_event.
+                # For wait_event and synchronize_event, also include the
+                # getitem nodes threaded through record_event's control_deps.
+                # This ensures subsequent ops that depend on recorded values
+                # get rewired through the wait/synchronize so the scheduler
+                # sees the data dependency.
                 if (
-                    node.target is torch.ops.streams.synchronize_event.default
+                    node.target
+                    in (
+                        torch.ops.streams.wait_event.default,
+                        torch.ops.streams.synchronize_event.default,
+                    )
                     and event_index in event_to_passthrough
                 ):
                     deps_before_sync = [
