@@ -4492,7 +4492,7 @@ class TestVecISACheckBuild(TestCase):
     # child's loader path so the child can dlopen the probe .so
     # without importing torch.
     #
-    # These target the small helpers (_probe_load, _build_probe_env)
+    # These target the small helpers (_probe_load, _isa_dry_run_env)
     # directly so they don't depend on CppBuilder / CppTorchOptions
     # succeeding on the host, which would otherwise make the tests
     # platform-specific (the production path is fine; only the
@@ -4519,7 +4519,7 @@ class TestVecISACheckBuild(TestCase):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
-                result = instance._probe_load("/nonexistent/probe.so")
+                result = instance._probe_load("/nonexistent/probe.so", "/nonexistent")
 
         self.assertFalse(result)
         self.assertEqual(calls, [60])
@@ -4543,21 +4543,28 @@ class TestVecISACheckBuild(TestCase):
 
         instance = cpu_vec_isa.VecAVX2()
         with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
-            result = instance._probe_load("/nonexistent/probe.so")
+            result = instance._probe_load("/nonexistent/probe.so", "/nonexistent")
 
         self.assertFalse(result)
 
     def test_build_probe_env_prepends_torch_lib_dir_to_loader_path(self):
         from torch._inductor import cpu_vec_isa
 
-        env = cpu_vec_isa.VecISA._build_probe_env()
-
         torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
-        value = env.get("LD_LIBRARY_PATH", "")
+        env = cpu_vec_isa._isa_dry_run_env(torch_lib)
+
+        if sys.platform == "win32":
+            loader_path_var = "PATH"
+        elif sys.platform == "darwin":
+            loader_path_var = "DYLD_LIBRARY_PATH"
+        else:
+            loader_path_var = "LD_LIBRARY_PATH"
+
+        value = env.get(loader_path_var, "")
         self.assertEqual(
             value.split(os.pathsep)[0],
             torch_lib,
-            msg=f"LD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+            msg=f"{loader_path_var} should be prepended with {torch_lib!r}, got {value!r}",
         )
 
 

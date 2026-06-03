@@ -4,10 +4,13 @@ import copy
 import ctypes
 import functools
 import itertools
+import json
 import math
 import os
 import platform
 import sys
+import tempfile
+import types
 import unittest
 from collections.abc import Callable
 from unittest.mock import patch
@@ -2610,6 +2613,297 @@ class CPUReproTests(TestCase):
                 os.environ["ATEN_CPU_CAPABILITY"] = pre_var
             elif os.getenv("ATEN_CPU_CAPABILITY"):
                 os.environ.pop("ATEN_CPU_CAPABILITY")
+
+    @unittest.skipIf(
+        IS_FBCODE or not sys.platform.startswith("linux"),
+        "Not yet runnable in fbcode or non-Linux",
+    )
+    def test_vec_isa_check_build_loads_without_importing_torch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            input_path = os.path.join(tmp, "input.cpp")
+            output_path = os.path.join(
+                tmp, "output" + (".pyd" if sys.platform == "win32" else ".so")
+            )
+            with open(input_path, "w") as f:
+                f.write("int main() { return 0; }")
+            with open(output_path, "w") as f:
+                f.write("")
+
+            build_options_kwargs = []
+
+            class FakeCppTorchOptions:
+                def __init__(self, *args, **kwargs):
+                    build_options_kwargs.append(kwargs)
+
+            class FakeCppBuilder:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def get_target_file_path(self):
+                    return output_path
+
+                def build(self):
+                    raise AssertionError("pre-created dry-run library should be reused")
+
+            calls = []
+
+            def fake_run(cmd, cwd, stderr, env, timeout, check):
+                calls.append((cmd, cwd, stderr, env, timeout, check))
+                self.assertEqual(cmd[:2], [sys.executable, "-c"])
+                self.assertNotIn("import torch", cmd[2])
+                self.assertNotIn("from torch", cmd[2])
+                self.assertIn("import ctypes", cmd[2])
+                self.assertIn("ctypes.CDLL", cmd[2])
+                self.assertIn(json.dumps(output_path), cmd[2])
+                self.assertIn("libcudart", cmd[2])
+                self.assertNotIn("libtorch", cmd[2])
+                self.assertNotIn("torch_cpu", cmd[2])
+                self.assertNotIn("torch_global_deps", cmd[2])
+                self.assertEqual(cwd, tmp)
+
+                from torch.utils.cpp_extension import TORCH_LIB_PATH
+
+                if sys.platform == "win32":
+                    path_env_var = "PATH"
+                elif sys.platform == "darwin":
+                    path_env_var = "DYLD_LIBRARY_PATH"
+                else:
+                    path_env_var = "LD_LIBRARY_PATH"
+                self.assertEqual(env[path_env_var].split(os.pathsep)[0], TORCH_LIB_PATH)
+                self.assertEqual(timeout, 60)
+                self.assertTrue(check)
+                return object()
+
+            with (
+                patch(
+                    "torch._inductor.codecache.write",
+                    return_value=("vec_isa_check_build_test", input_path),
+                ),
+                patch("torch._inductor.codecache.get_lock_dir", return_value=tmp),
+                patch(
+                    "torch._inductor.cpp_builder.CppTorchOptions", FakeCppTorchOptions
+                ),
+                patch("torch._inductor.cpp_builder.CppBuilder", FakeCppBuilder),
+                patch(
+                    "torch._inductor.cpp_builder.normalize_path_separator",
+                    lambda path: path,
+                ),
+                patch(
+                    "torch._inductor.cpu_vec_isa.subprocess.run",
+                    fake_run,
+                ),
+                patch(
+                    "torch._inductor.cpu_vec_isa._isa_dry_run_cuda_dependency_paths",
+                    return_value=(["/tmp/fake/libcudart.so.12"], ["libcudart"]),
+                ),
+            ):
+                self.assertTrue(cpu_vec_isa.VecAVX2().check_build("int main() {}"))
+
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(len(build_options_kwargs), 1)
+            self.assertTrue(build_options_kwargs[0]["aot_mode"])
+            self.assertFalse(build_options_kwargs[0]["warning_all"])
+            self.assertIn("-Wl,--as-needed", build_options_kwargs[0]["extra_flags"])
+
+    @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    def test_vec_isa_check_build_preserves_import_torch_loader_when_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            input_path = os.path.join(tmp, "input.cpp")
+            output_path = os.path.join(
+                tmp, "output" + (".pyd" if sys.platform == "win32" else ".so")
+            )
+            with open(input_path, "w") as f:
+                f.write("int main() { return 0; }")
+            with open(output_path, "w") as f:
+                f.write("")
+
+            build_options_kwargs = []
+
+            class FakeCppTorchOptions:
+                def __init__(self, *args, **kwargs):
+                    build_options_kwargs.append(kwargs)
+
+            class FakeCppBuilder:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def get_target_file_path(self):
+                    return output_path
+
+                def build(self):
+                    raise AssertionError("pre-created dry-run library should be reused")
+
+            calls = []
+
+            def fake_run(cmd, cwd, stderr, env, timeout, check):
+                calls.append((cmd, cwd, stderr, env, timeout, check))
+                self.assertEqual(cmd[:2], [sys.executable, "-c"])
+                self.assertIn("import torch", cmd[2])
+                self.assertIn("cdll.LoadLibrary", cmd[2])
+                self.assertIn(json.dumps(output_path), cmd[2])
+                self.assertNotIn("libcudart", cmd[2])
+                self.assertEqual(cwd, tmp)
+                self.assertEqual(timeout, 60)
+                self.assertTrue(check)
+                return object()
+
+            with (
+                patch(
+                    "torch._inductor.cpu_vec_isa._use_linux_lightweight_isa_check",
+                    return_value=False,
+                ),
+                patch(
+                    "torch._inductor.codecache.write",
+                    return_value=("vec_isa_check_build_test", input_path),
+                ),
+                patch("torch._inductor.codecache.get_lock_dir", return_value=tmp),
+                patch(
+                    "torch._inductor.cpp_builder.CppTorchOptions", FakeCppTorchOptions
+                ),
+                patch("torch._inductor.cpp_builder.CppBuilder", FakeCppBuilder),
+                patch(
+                    "torch._inductor.cpp_builder.normalize_path_separator",
+                    lambda path: path,
+                ),
+                patch(
+                    "torch._inductor.cpu_vec_isa.subprocess.run",
+                    fake_run,
+                ),
+                patch(
+                    "torch._inductor.cpu_vec_isa._isa_dry_run_torch_lib_path",
+                    side_effect=AssertionError("Linux loader path should not run"),
+                ),
+                patch(
+                    "torch._inductor.cpu_vec_isa._isa_dry_run_cuda_dependency_paths",
+                    side_effect=AssertionError("Linux loader path should not run"),
+                ),
+            ):
+                self.assertTrue(cpu_vec_isa.VecAVX2().check_build("int main() {}"))
+
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(len(build_options_kwargs), 1)
+            self.assertNotIn("aot_mode", build_options_kwargs[0])
+            self.assertNotIn("extra_flags", build_options_kwargs[0])
+            self.assertFalse(build_options_kwargs[0]["warning_all"])
+
+    @unittest.skipIf(
+        IS_FBCODE or not sys.platform.startswith("linux"),
+        "Not yet runnable in fbcode or non-Linux",
+    )
+    def test_vec_isa_cuda_dependency_retry_loader(self):
+        probe_path = "/tmp/probe.so"
+        cuda_dependency_paths = [
+            "/tmp/nvidia/cuda_runtime/lib/libcudart.so.12",
+            "/tmp/nvidia/cublas/lib/libcublas.so.12",
+        ]
+        script = cpu_vec_isa.VecISA._linux_dry_run_load_script(
+            probe_path,
+            cuda_dependency_paths,
+            ["libcudart", "libcublas"],
+        )
+
+        loaded_paths = []
+
+        def fake_cdll(path):
+            loaded_paths.append(path)
+            if path == probe_path and loaded_paths.count(probe_path) == 1:
+                raise OSError("libcudart.so.12: cannot open shared object file")
+            return object()
+
+        fake_ctypes = types.SimpleNamespace(CDLL=fake_cdll)
+        with patch.dict(sys.modules, {"ctypes": fake_ctypes}):
+            exec(script, {"__name__": "__main__"})
+
+        self.assertEqual(
+            loaded_paths,
+            [
+                probe_path,
+                *cuda_dependency_paths,
+                probe_path,
+            ],
+        )
+
+        loaded_paths.clear()
+
+        def fake_cdll_non_cuda_error(path):
+            loaded_paths.append(path)
+            raise OSError("libother.so: cannot open shared object file")
+
+        fake_ctypes = types.SimpleNamespace(CDLL=fake_cdll_non_cuda_error)
+        with patch.dict(sys.modules, {"ctypes": fake_ctypes}):
+            with self.assertRaisesRegex(OSError, "libother"):
+                exec(script, {"__name__": "__main__"})
+
+        self.assertEqual(loaded_paths, [probe_path])
+
+    @unittest.skipIf(
+        IS_FBCODE or not sys.platform.startswith("linux"),
+        "Not yet runnable in fbcode or non-Linux",
+    )
+    @patch("torch._inductor.cpu_vec_isa.torch.version.cuda", "13.0")
+    def test_vec_isa_cuda_dependency_paths(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as tmp2,
+        ):
+            expected_paths = [
+                os.path.join(tmp, "nvidia", "cublas", "lib", "libcublas.so.12"),
+                os.path.join(tmp, "nvidia", "cu13", "lib", "libcudart.so.13"),
+                os.path.join(tmp, "cusparselt", "lib", "libcusparseLt.so.0"),
+                os.path.join(tmp, "nvtx", "lib", "libnvToolsExt.so.1"),
+            ]
+            for path in expected_paths:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as f:
+                    f.write("")
+
+            duplicate_cublas = os.path.join(
+                tmp2, "nvidia", "cublas", "lib", "libcublas.so.11"
+            )
+            os.makedirs(os.path.dirname(duplicate_cublas), exist_ok=True)
+            with open(duplicate_cublas, "w") as f:
+                f.write("")
+
+            with patch("torch._inductor.cpu_vec_isa.sys.path", [tmp, tmp2]):
+                cuda_dependency_paths, cuda_dependency_names = (
+                    cpu_vec_isa._isa_dry_run_cuda_dependency_paths()
+                )
+
+            for path in expected_paths:
+                self.assertIn(path, cuda_dependency_paths)
+            self.assertNotIn(duplicate_cublas, cuda_dependency_paths)
+            self.assertIn("libcublas", cuda_dependency_names)
+            self.assertIn("libcudart", cuda_dependency_names)
+            self.assertIn("libcusparseLt", cuda_dependency_names)
+            self.assertNotIn("libnvToolsExt", cuda_dependency_names)
+
+    @requires_vectorization
+    @unittest.skipIf(
+        IS_FBCODE or not sys.platform.startswith("linux"),
+        "Not yet runnable in fbcode or non-Linux",
+    )
+    def test_vec_isa_check_build_real_subprocess_without_torch_import(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "sitecustomize.py"), "w") as f:
+                f.write(
+                    """
+import builtins
+
+_original_import = builtins.__import__
+
+def _blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name == "torch" or name.startswith("torch."):
+        raise RuntimeError("dry-run subprocess imported torch")
+    return _original_import(name, globals, locals, fromlist, level)
+
+builtins.__import__ = _blocked_import
+"""
+                )
+
+            python_path = os.pathsep.join([tmp, *sys.path])
+            with patch.dict(os.environ, {"TORCH_CUSTOM_PYTHONPATH": python_path}):
+                isa = cpu_vec_isa.valid_vec_isa_list()[0]
+                self.assertTrue(isa.check_build(cpu_vec_isa.VecISA._avx_code))
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
