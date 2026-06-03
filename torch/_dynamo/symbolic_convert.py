@@ -150,7 +150,13 @@ from .utils import (
     proxy_args_kwargs,
     unpack_iterable,
 )
-from .variables.base import SourceLocation, typestr, ValueMutationNew, VariableTracker
+from .variables.base import (
+    AttributeMutationNew,
+    SourceLocation,
+    typestr,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
@@ -5674,6 +5680,480 @@ def profile_inline_call(
             output.profiler_state.add_child_time(cumtime_ns)
 
 
+@dataclasses.dataclass(frozen=True)
+class _InlineSummaryTensorSpec:
+    vt_type: type
+    dtype: torch.dtype
+    device: torch.device
+    layout: torch.layout
+    ndim: int
+    size: tuple[int, ...]
+    stride: tuple[int, ...]
+    requires_grad: bool
+    is_nested: bool
+    is_quantized: bool
+    is_sparse: bool
+    is_contiguous: Any
+    class_type: type
+    has_grad_fn: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class _InlineCallSummary:
+    code: types.CodeType
+    input_signature: tuple[Any, ...]
+    input_nodes: tuple[torch.fx.Node, ...]
+    captured_nodes: tuple[torch.fx.Node, ...]
+    nodes: tuple[torch.fx.Node, ...]
+    output: VariableTracker
+
+
+@dataclasses.dataclass(frozen=True)
+class _InlineSummaryLookup:
+    key: types.FunctionType
+    input_signature: tuple[Any, ...]
+    input_nodes: tuple[torch.fx.Node, ...]
+
+
+_INLINE_SUMMARY_MAX_PER_FUNCTION = 8
+
+
+_INLINE_SUMMARY_SIDE_EFFECT_OPS = frozenset(
+    {
+        "DELETE_ATTR",
+        "DELETE_DEREF",
+        "DELETE_GLOBAL",
+        "DELETE_NAME",
+        "DELETE_SUBSCR",
+        "IMPORT_FROM",
+        "IMPORT_NAME",
+        "MAKE_FUNCTION",
+        "STORE_ATTR",
+        "STORE_DEREF",
+        "STORE_GLOBAL",
+        "STORE_NAME",
+        "STORE_SUBSCR",
+    }
+)
+
+
+_INLINE_SUMMARY_MUTATING_METHOD_NAMES = frozenset(
+    {
+        "__delitem__",
+        "__iadd__",
+        "__iand__",
+        "__ifloordiv__",
+        "__ilshift__",
+        "__imatmul__",
+        "__imod__",
+        "__imul__",
+        "__ior__",
+        "__ipow__",
+        "__irshift__",
+        "__setitem__",
+        "__isub__",
+        "__itruediv__",
+        "__ixor__",
+        "add",
+        "append",
+        "clear",
+        "discard",
+        "extend",
+        "insert",
+        "pop",
+        "popitem",
+        "remove",
+        "reverse",
+        "setdefault",
+        "sort",
+        "update",
+    }
+)
+
+
+_INLINE_SUMMARY_ALLOWED_OPERATOR_TARGETS = frozenset(
+    {
+        operator.add,
+        operator.and_,
+        operator.floordiv,
+        operator.getitem,
+        operator.lshift,
+        operator.matmul,
+        operator.mod,
+        operator.mul,
+        operator.neg,
+        operator.or_,
+        operator.pos,
+        operator.pow,
+        operator.rshift,
+        operator.sub,
+        operator.truediv,
+        operator.xor,
+    }
+)
+
+
+def _inline_summary_static_int_tuple(
+    values: collections.abc.Sequence[Any] | None,
+) -> tuple[int, ...] | None:
+    if values is None:
+        return None
+    if not all(type(value) is int for value in values):
+        return None
+    return tuple(values)
+
+
+def _inline_summary_tensor_spec(
+    value: TensorVariable,
+) -> _InlineSummaryTensorSpec | None:
+    if not value.valid_size():
+        return None
+    size = _inline_summary_static_int_tuple(value.size)
+    stride = _inline_summary_static_int_tuple(value.stride)
+    if size is None or stride is None:
+        return None
+    return _InlineSummaryTensorSpec(
+        vt_type=type(value),
+        dtype=value.dtype,
+        device=value.device,
+        layout=value.layout,
+        ndim=value.ndim,
+        size=size,
+        stride=stride,
+        requires_grad=value.requires_grad,
+        is_nested=value.is_nested,
+        is_quantized=value.is_quantized,
+        is_sparse=value.is_sparse,
+        is_contiguous=value.is_contiguous,
+        class_type=value.class_type,
+        has_grad_fn=value.has_grad_fn,
+    )
+
+
+def _inline_summary_unwrap(value: VariableTracker) -> VariableTracker | None:
+    if isinstance(value, LazyVariableTracker):
+        if not value.is_realized():
+            return None
+        value = value.unwrap()
+    return value
+
+
+def _inline_summary_value_spec(value: VariableTracker) -> Any | None:
+    unwrapped = _inline_summary_unwrap(value)
+    if unwrapped is None:
+        return None
+    if isinstance(unwrapped, TensorVariable):
+        tensor_spec = _inline_summary_tensor_spec(unwrapped)
+        if tensor_spec is None:
+            return None
+        return ("tensor", tensor_spec)
+    if isinstance(unwrapped, ConstantVariable):
+        constant = unwrapped.as_python_constant()
+        return ("constant", type(constant), constant)
+    if isinstance(unwrapped, (TupleVariable, ListVariable)):
+        items = tuple(_inline_summary_value_spec(item) for item in unwrapped.items)
+        if any(item is None for item in items):
+            return None
+        return (unwrapped.python_type(), items)
+    return None
+
+
+def _inline_summary_call_signature(
+    symbolic_locals: dict[str, VariableTracker],
+) -> tuple[Any, ...] | None:
+    result: list[Any] = []
+    for name, value in symbolic_locals.items():
+        spec = _inline_summary_value_spec(value)
+        if spec is None:
+            return None
+        result.append((name, spec))
+    return tuple(result)
+
+
+def _inline_summary_collect_input_nodes(
+    value: VariableTracker,
+    graph: torch.fx.Graph,
+    result: list[torch.fx.Node],
+    seen: set[torch.fx.Node],
+) -> bool:
+    unwrapped = _inline_summary_unwrap(value)
+    if unwrapped is None:
+        return False
+    if isinstance(unwrapped, TensorVariable):
+        node = unwrapped.as_proxy().node
+        if node.graph is not graph:
+            return False
+        if node not in seen:
+            seen.add(node)
+            result.append(node)
+        return True
+    if isinstance(unwrapped, ConstantVariable):
+        return True
+    if isinstance(unwrapped, (TupleVariable, ListVariable)):
+        return all(
+            _inline_summary_collect_input_nodes(item, graph, result, seen)
+            for item in unwrapped.items
+        )
+    return False
+
+
+def _inline_summary_input_nodes(
+    symbolic_locals: dict[str, VariableTracker],
+    graph: torch.fx.Graph,
+) -> tuple[torch.fx.Node, ...] | None:
+    result: list[torch.fx.Node] = []
+    seen: set[torch.fx.Node] = set()
+    for value in symbolic_locals.values():
+        if not _inline_summary_collect_input_nodes(value, graph, result, seen):
+            return None
+    return tuple(result)
+
+
+def _inline_summary_output_supported(
+    value: VariableTracker,
+    created_nodes: set[torch.fx.Node],
+) -> bool:
+    unwrapped = _inline_summary_unwrap(value)
+    if unwrapped is None:
+        return False
+    if isinstance(unwrapped, TensorVariable):
+        if _inline_summary_tensor_spec(unwrapped) is None:
+            return False
+        return unwrapped.as_proxy().node in created_nodes
+    if isinstance(unwrapped, ConstantVariable):
+        return True
+    if isinstance(unwrapped, (TupleVariable, ListVariable)):
+        return all(
+            _inline_summary_output_supported(item, created_nodes)
+            for item in unwrapped.items
+        )
+    return False
+
+
+def _inline_summary_replay_output(
+    parent: InstructionTranslatorBase,
+    value: VariableTracker,
+    node_env: dict[torch.fx.Node, torch.fx.Node],
+) -> VariableTracker | None:
+    unwrapped = _inline_summary_unwrap(value)
+    if unwrapped is None:
+        return None
+    if isinstance(unwrapped, TensorVariable):
+        new_node = node_env.get(unwrapped.as_proxy().node)
+        if new_node is None:
+            return None
+        new_proxy = torch.fx.Proxy(new_node, parent.output.current_tracer)
+        result = unwrapped.clone(proxy=new_proxy, source=None, mutation_type=None)
+        parent.output.side_effects._track_obj(
+            new_proxy, result, mutation_type_cls=AttributeMutationNew
+        )
+        parent.output.current_tracer.record_proxyable_vt(result)
+        return result
+    if isinstance(unwrapped, ConstantVariable):
+        return ConstantVariable.create(unwrapped.as_python_constant())
+    if isinstance(unwrapped, (TupleVariable, ListVariable)):
+        items = [
+            _inline_summary_replay_output(parent, item, node_env)
+            for item in unwrapped.items
+        ]
+        if any(item is None for item in items):
+            return None
+        replayed_items = cast(list[VariableTracker], items)
+        mutation_type = ValueMutationNew() if unwrapped.mutation_type else None
+        if isinstance(unwrapped, TupleVariable):
+            return TupleVariable(
+                replayed_items,
+                mutation_type=mutation_type,
+                source=None,
+            )
+        return ListVariable(
+            replayed_items,
+            mutation_type=mutation_type,
+            source=None,
+        )
+    return None
+
+
+def _inline_summary_is_replayable_target(target: Any) -> bool:
+    if target in _INLINE_SUMMARY_ALLOWED_OPERATOR_TARGETS:
+        return True
+    schema = getattr(target, "_schema", None)
+    if schema is not None:
+        schema_name = getattr(schema, "name", "")
+        return isinstance(schema_name, str) and schema_name.startswith("aten::")
+    return getattr(target, "__module__", None) == "torch"
+
+
+def _inline_summary_is_replayable_node(node: torch.fx.Node) -> bool:
+    if node.op != "call_function":
+        return False
+    target = node.target
+    if not _inline_summary_is_replayable_target(target):
+        return False
+    schema = getattr(target, "_schema", None)
+    is_mutable = getattr(schema, "is_mutable", False)
+    if callable(is_mutable):
+        is_mutable = is_mutable()
+    if is_mutable:
+        return False
+    target_name = getattr(target, "__name__", "")
+    if target_name.endswith("_") or "_." in str(target):
+        return False
+    return True
+
+
+def _inline_summary_allowed_constant(value: Any) -> bool:
+    if isinstance(value, (int, float, str, bool, type(None))):
+        return True
+    if isinstance(value, tuple):
+        return all(_inline_summary_allowed_constant(item) for item in value)
+    if isinstance(value, frozenset):
+        return all(_inline_summary_allowed_constant(item) for item in value)
+    return False
+
+
+def _inline_summary_captured_nodes(
+    graph: torch.fx.Graph,
+    input_nodes: tuple[torch.fx.Node, ...],
+    nodes: tuple[torch.fx.Node, ...],
+) -> tuple[torch.fx.Node, ...] | None:
+    input_node_set = set(input_nodes)
+    node_set = set(nodes)
+    captured: list[torch.fx.Node] = []
+    seen: set[torch.fx.Node] = set()
+    ok = True
+
+    def visit(node: torch.fx.Node) -> torch.fx.Node:
+        nonlocal ok
+        if node in input_node_set or node in node_set:
+            return node
+        if node.graph is not graph:
+            ok = False
+            return node
+        if node not in seen:
+            seen.add(node)
+            captured.append(node)
+        return node
+
+    for node in nodes:
+        torch.fx.node.map_arg(node.args, visit)
+        torch.fx.node.map_arg(node.kwargs, visit)
+        if not ok:
+            return None
+    return tuple(captured)
+
+
+def _inline_summary_function_key(
+    parent: InstructionTranslatorBase,
+    func: BaseUserFunctionVariable,
+) -> types.FunctionType | None:
+    if not config.inline_user_function_summaries:
+        return None
+    if config.dont_skip_tracing or parent.strict_checks_fn:
+        return None
+    if torch._logging._internal.log_state.is_artifact_enabled("trace_call"):
+        return None
+    if parent.output.current_tracer.parent is not None:
+        return None
+    if type(func) is not UserFunctionVariable:
+        return None
+    try:
+        fn = func.get_function()
+    except NotImplementedError:
+        return None
+    if type(fn) is not types.FunctionType:
+        return None
+    if fn.__defaults__ or fn.__kwdefaults__:
+        return None
+    code = fn.__code__
+    if is_generator(code) or code.co_freevars or code.co_cellvars:
+        return None
+    instructions = tuple(dis.get_instructions(code))
+    for inst in instructions:
+        if inst.opname in _INLINE_SUMMARY_SIDE_EFFECT_OPS:
+            return None
+        if (
+            inst.opname in ("LOAD_ATTR", "LOAD_METHOD")
+            and inst.argval in _INLINE_SUMMARY_MUTATING_METHOD_NAMES
+        ):
+            return None
+        if inst.opname == "LOAD_GLOBAL":
+            global_name = inst.argval
+            if not isinstance(global_name, str):
+                return None
+            if global_name in fn.__globals__:
+                global_value = fn.__globals__[global_name]
+            elif isinstance(fn.__builtins__, dict) and global_name in fn.__builtins__:
+                global_value = fn.__builtins__[global_name]
+            else:
+                global_value = getattr(fn.__builtins__, global_name, None)
+                if global_value is None:
+                    return None
+            if global_value is torch or isinstance(global_value, types.FunctionType):
+                continue
+            if isinstance(global_value, types.BuiltinFunctionType):
+                continue
+            if isinstance(global_value, type) and global_value.__module__ == "builtins":
+                continue
+            if _inline_summary_allowed_constant(global_value):
+                continue
+            if inspect.ismodule(global_value) and getattr(
+                global_value, "__name__", ""
+            ).startswith("torch"):
+                continue
+            return None
+    return fn
+
+
+def _inline_summary_lookup(
+    parent: InstructionTranslatorBase,
+    func: BaseUserFunctionVariable,
+    args: Sequence[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> _InlineSummaryLookup | None:
+    summary_key = _inline_summary_function_key(parent, func)
+    if summary_key is None:
+        return None
+    user_func = cast(UserFunctionVariable, func)
+    try:
+        sub_locals = user_func.bind_args(
+            cast(InstructionTranslator, parent), args, kwargs
+        )
+    except TypeError:
+        return None
+
+    signature = _inline_summary_call_signature(sub_locals)
+    input_nodes = _inline_summary_input_nodes(sub_locals, parent.output.graph)
+    if signature is None or input_nodes is None or not input_nodes:
+        return None
+    return _InlineSummaryLookup(summary_key, signature, input_nodes)
+
+
+def _inline_summary_side_effects_supported(
+    before: Any,
+    after: Any,
+    allowed_tensor_nodes: set[torch.fx.Node],
+) -> bool:
+    if before.store_attr_mutations != after.store_attr_mutations:
+        return False
+    if before.save_for_backward != after.save_for_backward:
+        return False
+    if before.tensor_hooks != after.tensor_hooks:
+        return False
+
+    before_ids = set(before.id_to_variable)
+    after_ids = set(after.id_to_variable)
+    if not before_ids <= after_ids:
+        return False
+    for item_id in after_ids - before_ids:
+        value = after.id_to_variable[item_id]
+        if not isinstance(value, TensorVariable):
+            continue
+        if value.as_proxy().node not in allowed_tensor_nodes:
+            return False
+    return True
+
+
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 
@@ -5684,7 +6164,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @classmethod
     def inline_call(
         cls,
-        parent: Any,
+        parent: InstructionTranslatorBase,
         func: BaseUserFunctionVariable,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -5693,8 +6173,173 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         with profile_inline_call(
             parent.output, func.get_code(), lambda: parent.inline_depth + 1
         ):
+            summary_lookup = _inline_summary_lookup(parent, func, args, kwargs)
+            if summary_lookup is not None:
+                summary_result = cls.try_replay_inline_summary(parent, summary_lookup)
+                if summary_result is not None:
+                    return summary_result
+
+            before_nodes = (
+                set(parent.output.graph.nodes) if summary_lookup is not None else None
+            )
+            before_side_effects = (
+                parent.output.side_effects.clone()
+                if summary_lookup is not None
+                else None
+            )
+            before_inconsistent_side_effects = parent.inconsistent_side_effects
             tracer = cls.build_inline_tracer(parent, func, args, kwargs)
-            return tracer.inline_call_()
+            result = tracer.inline_call_()
+            cls.maybe_record_inline_summary(
+                parent,
+                func,
+                summary_lookup,
+                tracer,
+                result,
+                before_nodes,
+                before_side_effects,
+                before_inconsistent_side_effects,
+            )
+            return result
+
+    @staticmethod
+    def replay_inline_summary_nodes(
+        parent: InstructionTranslatorBase,
+        summary: _InlineCallSummary,
+        input_nodes: tuple[torch.fx.Node, ...],
+    ) -> tuple[dict[torch.fx.Node, torch.fx.Node], tuple[torch.fx.Node, ...]]:
+        node_env = dict(zip(summary.input_nodes, input_nodes))
+        node_env.update(zip(summary.captured_nodes, summary.captured_nodes))
+        created_nodes: list[torch.fx.Node] = []
+
+        def load(node: torch.fx.Node) -> torch.fx.Node:
+            return node_env[node]
+
+        for node in summary.nodes:
+            new_args = torch.fx.node.map_arg(node.args, load)
+            new_kwargs = torch.fx.node.map_arg(node.kwargs, load)
+            new_node = parent.output.create_node(
+                node.op,
+                node.target,
+                new_args,
+                new_kwargs,
+                name=node.name,
+                type_expr=node.type,
+            )
+            creation_timestamp = new_node.meta.get("creation_timestamp")
+            new_node.meta = copy.copy(node.meta)
+            if "nn_module_stack" in new_node.meta:
+                new_node.meta["nn_module_stack"] = copy.copy(
+                    new_node.meta["nn_module_stack"]
+                )
+            if "source_fn_stack" in new_node.meta:
+                new_node.meta["source_fn_stack"] = copy.copy(
+                    new_node.meta["source_fn_stack"]
+                )
+            if creation_timestamp is not None:
+                new_node.meta["creation_timestamp"] = creation_timestamp
+            node_env[node] = new_node
+            created_nodes.append(new_node)
+        return node_env, tuple(created_nodes)
+
+    @staticmethod
+    def try_replay_inline_summary(
+        parent: InstructionTranslatorBase,
+        lookup: _InlineSummaryLookup,
+    ) -> VariableTracker | None:
+        tracing_ctx = parent.output.tracing_context
+        summaries = tracing_ctx.inlined_call_summary_cache.get(lookup.key)
+        if not summaries:
+            return None
+
+        for summary in summaries:
+            if summary.input_signature != lookup.input_signature:
+                continue
+
+            parent.has_no_inlined_calls = False
+            node_env, created_nodes = (
+                InliningInstructionTranslator.replay_inline_summary_nodes(
+                    parent, summary, lookup.input_nodes
+                )
+            )
+            result = _inline_summary_replay_output(parent, summary.output, node_env)
+            if result is None:
+                for node in reversed(created_nodes):
+                    parent.output.remove_node(node)
+                return None
+            tracing_ctx.traced_code.append(summary.code)
+            counters["inline_call_summary"]["hit"] += 1
+            log.debug("REPLAYED INLINING SUMMARY %s", summary.code)
+            return result
+
+        counters["inline_call_summary"]["miss"] += 1
+        return None
+
+    @staticmethod
+    def maybe_record_inline_summary(
+        parent: InstructionTranslatorBase,
+        func: BaseUserFunctionVariable,
+        lookup: _InlineSummaryLookup | None,
+        tracer: InliningInstructionTranslator,
+        result: VariableTracker,
+        before_nodes: set[torch.fx.Node] | None,
+        before_side_effects: Any | None,
+        before_inconsistent_side_effects: bool,
+    ) -> None:
+        if lookup is None or before_nodes is None:
+            return
+        if before_side_effects is None:
+            return
+        if parent.output.should_exit:
+            return
+        if parent.inconsistent_side_effects != before_inconsistent_side_effects:
+            return
+
+        input_node_set = set(lookup.input_nodes)
+        nodes = tuple(
+            node
+            for node in parent.output.graph.nodes
+            if node not in before_nodes and node not in input_node_set
+        )
+        if not nodes or any(
+            not _inline_summary_is_replayable_node(node) for node in nodes
+        ):
+            return
+        created_nodes = set(nodes)
+        if not _inline_summary_side_effects_supported(
+            before_side_effects,
+            parent.output.side_effects,
+            created_nodes | input_node_set,
+        ):
+            return
+        if not _inline_summary_output_supported(result, created_nodes):
+            return
+        captured_nodes = _inline_summary_captured_nodes(
+            parent.output.graph, lookup.input_nodes, nodes
+        )
+        if captured_nodes is None:
+            return
+
+        summaries = parent.output.tracing_context.inlined_call_summary_cache.setdefault(
+            lookup.key, []
+        )
+        if any(
+            summary.input_signature == lookup.input_signature for summary in summaries
+        ):
+            return
+        if len(summaries) >= _INLINE_SUMMARY_MAX_PER_FUNCTION:
+            return
+        summaries.append(
+            _InlineCallSummary(
+                code=tracer.f_code,
+                input_signature=lookup.input_signature,
+                input_nodes=lookup.input_nodes,
+                captured_nodes=captured_nodes,
+                nodes=nodes,
+                output=result,
+            )
+        )
+        counters["inline_call_summary"]["store"] += 1
 
     @staticmethod
     def check_inlineable(

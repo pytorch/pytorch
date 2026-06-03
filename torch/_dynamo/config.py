@@ -569,6 +569,10 @@ enable_trace_load_build_class = False
 # generators upon first execution. And if True, the generator will be accessed lazily
 enable_faithful_generator_behavior = True
 
+# Trace eligible pure user functions once, then replay a hierarchical FX summary
+# for repeated calls with matching formal tensor slots.
+inline_user_function_summaries = True
+
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     default=True,

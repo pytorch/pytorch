@@ -1100,6 +1100,8 @@ class TracingContext:
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
         # Combined cache for inlined code data (instructions, indexof, code_options)
         self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
+        # Per-trace summaries for replaying eligible repeated user-function inlines.
+        self.inlined_call_summary_cache: dict[Any, Any] = dict()
         self.fake_mode: FakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
@@ -1154,6 +1156,7 @@ class TracingContext:
         self.previously_inlined_functions.clear()
         self.previously_cleaned_instructions.clear()
         self.inlined_code_cache.clear()
+        self.inlined_call_summary_cache.clear()
 
     @staticmethod
     @contextmanager

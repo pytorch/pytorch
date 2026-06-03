@@ -147,6 +147,14 @@ def inline_lru_cache_fn_with_default_args(x, y, _=None):
     return torch.sin(x * y)
 
 
+def inline_summary_leaf(x):
+    return torch.sin(x + 1.0)
+
+
+def inline_summary_outer(x):
+    return inline_summary_leaf(x) * inline_summary_leaf(x + 1.0)
+
+
 @torch.jit.script_if_tracing
 def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
     return torch.cos(x * y) + c
@@ -167,6 +175,142 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_inline_lru_cache_fn_with_default_args(a, b):
         return inline_lru_cache_fn_with_default_args(a, 2, b)
+
+    def _skip_inline_summary_dynamic_shapes(self):
+        if not torch._dynamo.config.assume_static_by_default:
+            self.skipTest("inline summaries currently require static tensor metadata")
+
+    @torch._dynamo.config.patch(inline_user_function_summaries=True)
+    def test_repeated_inline_uses_hierarchical_summary(self):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        self._skip_inline_summary_dynamic_shapes()
+        counters.clear()
+
+        def fn(x):
+            return inline_summary_outer(x) + inline_summary_outer(x + 2.0)
+
+        counts = collections.Counter()
+        orig_build_inline_tracer = InliningInstructionTranslator.build_inline_tracer
+
+        def counted_build_inline_tracer(parent, func, args, kwargs):
+            code = func.get_code()
+            if code is inline_summary_leaf.__code__:
+                counts["leaf"] += 1
+            elif code is inline_summary_outer.__code__:
+                counts["outer"] += 1
+            return orig_build_inline_tracer(parent, func, args, kwargs)
+
+        x = torch.randn(4)
+        with patch.object(
+            InliningInstructionTranslator,
+            "build_inline_tracer",
+            side_effect=counted_build_inline_tracer,
+        ):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), fn(x))
+
+        self.assertEqual(counts["leaf"], 1)
+        self.assertEqual(counts["outer"], 1)
+        self.assertGreaterEqual(counters["inline_call_summary"]["hit"], 2)
+        self.assertGreaterEqual(counters["inline_call_summary"]["store"], 2)
+
+    @torch._dynamo.config.patch(inline_user_function_summaries=False)
+    def test_inline_summary_config_disables_replay(self):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        counters.clear()
+
+        def fn(x):
+            return inline_summary_outer(x) + inline_summary_outer(x + 2.0)
+
+        counts = collections.Counter()
+        orig_build_inline_tracer = InliningInstructionTranslator.build_inline_tracer
+
+        def counted_build_inline_tracer(parent, func, args, kwargs):
+            code = func.get_code()
+            if code is inline_summary_leaf.__code__:
+                counts["leaf"] += 1
+            elif code is inline_summary_outer.__code__:
+                counts["outer"] += 1
+            return orig_build_inline_tracer(parent, func, args, kwargs)
+
+        x = torch.randn(4)
+        with patch.object(
+            InliningInstructionTranslator,
+            "build_inline_tracer",
+            side_effect=counted_build_inline_tracer,
+        ):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), fn(x))
+
+        self.assertEqual(counts["leaf"], 4)
+        self.assertEqual(counts["outer"], 2)
+        self.assertEqual(counters["inline_call_summary"]["hit"], 0)
+        self.assertEqual(counters["inline_call_summary"]["store"], 0)
+
+    @torch._dynamo.config.patch(inline_user_function_summaries=True)
+    def test_inline_summary_cache_misses_on_tensor_metadata(self):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        self._skip_inline_summary_dynamic_shapes()
+        counters.clear()
+
+        def fn(x, y):
+            return inline_summary_leaf(x) + inline_summary_leaf(y)
+
+        counts = collections.Counter()
+        orig_build_inline_tracer = InliningInstructionTranslator.build_inline_tracer
+
+        def counted_build_inline_tracer(parent, func, args, kwargs):
+            if func.get_code() is inline_summary_leaf.__code__:
+                counts["leaf"] += 1
+            return orig_build_inline_tracer(parent, func, args, kwargs)
+
+        x = torch.randn(4)
+        y = torch.randn(4, dtype=torch.float64)
+        with patch.object(
+            InliningInstructionTranslator,
+            "build_inline_tracer",
+            side_effect=counted_build_inline_tracer,
+        ):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, y), fn(x, y))
+
+        self.assertEqual(counts["leaf"], 2)
+        self.assertEqual(counters["inline_call_summary"]["miss"], 1)
+
+    @torch._dynamo.config.patch(inline_user_function_summaries=True)
+    def test_inline_summary_rejects_nested_function(self):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        def with_nested_fn(x):
+            def inner(y):
+                return y + 1.0
+
+            return torch.sin(inner(x))
+
+        def fn(x):
+            return with_nested_fn(x) + with_nested_fn(x + 2.0)
+
+        counts = collections.Counter()
+        orig_build_inline_tracer = InliningInstructionTranslator.build_inline_tracer
+
+        def counted_build_inline_tracer(parent, func, args, kwargs):
+            if func.get_code() is with_nested_fn.__code__:
+                counts["nested"] += 1
+            return orig_build_inline_tracer(parent, func, args, kwargs)
+
+        x = torch.randn(4)
+        with patch.object(
+            InliningInstructionTranslator,
+            "build_inline_tracer",
+            side_effect=counted_build_inline_tracer,
+        ):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), fn(x))
+
+        self.assertEqual(counts["nested"], 2)
 
     def test_lru_cache_warning_issued_during_tracing(self):
         import warnings
