@@ -12,7 +12,7 @@ import sympy
 import torch
 
 from ...utils._ordered_set import OrderedSet
-from ...utils._sympy.functions import FloorDiv, ModularIndexing
+from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
@@ -208,18 +208,6 @@ class SIMDKernelFeatures:
         return dict(read_counts)  # Convert defaultdict to regular dict
 
     @staticmethod
-    def _deps_match(dep1: MemoryDep, dep2: MemoryDep) -> bool:
-        if dep1 == dep2:
-            return True
-        if dep1.name != dep2.name:
-            return False
-        if dep1.num_vars == dep2.num_vars:
-            return (
-                dep1.normalize_with_stride_order() == dep2.normalize_with_stride_order()
-            )
-        return dep1.normalize() == dep2.normalize()
-
-    @staticmethod
     def _is_non_contiguous_dep(dep: Dep) -> bool:
         return (
             isinstance(dep, MemoryDep)
@@ -246,7 +234,7 @@ class SIMDKernelFeatures:
     def _is_compatible_recomputed_read(
         cls, dep: MemoryDep, reduction_reads: Sequence[MemoryDep]
     ) -> bool:
-        return any(cls._deps_match(dep, read) for read in reduction_reads)
+        return dep in reduction_reads
 
     @classmethod
     def _reduction_reads_for_recomputed_pointwise(
@@ -679,7 +667,7 @@ class StatsForReadsOrWrites:
                     numel += dep.get_numel()
                 if len(deps) > 1:
                     # can't read more elements than exist in the buffer
-                    numel = sympy.Min(numel, V.graph.get_numel(name))
+                    numel = Min(numel, V.graph.get_numel(name))
                 nbytes = numel * itemsize
                 for i in range(ndim):
                     if contiguous_or_broadcast[i]:
