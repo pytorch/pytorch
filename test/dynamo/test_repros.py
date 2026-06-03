@@ -6362,6 +6362,157 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         mod.eval()
         self.assertFalse(opt_mod.training)
 
+    def test_optimized_module_delegated_methods_use_compiled_call(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            @property
+            def linear_property(self):
+                return self.linear
+
+            @property
+            def method_property(self):
+                return self.helper
+
+            @classmethod
+            def class_method(cls):
+                return cls
+
+            @staticmethod
+            def static_method():
+                return "static"
+
+            def helper(self, x):
+                return self.linear(x)
+
+            def forward(self, x):
+                return self.helper(x)
+
+            def generate_call(self, x):
+                return self(x)
+
+            def generate_forward(self, x):
+                return self.forward(x)
+
+        mod = MyModule()
+        opt_mod = torch.compile(mod, backend=CompileCounter())
+
+        self.assertIs(opt_mod.generate_call.__self__, mod)
+        self.assertIs(opt_mod.linear_property, mod.linear)
+        self.assertIs(opt_mod.method_property.__self__, mod)
+        self.assertIs(opt_mod.class_method(), MyModule)
+        self.assertEqual(opt_mod.static_method(), "static")
+
+        for method_name in ("generate_call", "generate_forward"):
+            cnt = CompileCounter()
+            mod = MyModule()
+            opt_mod = torch.compile(mod, backend=cnt)
+
+            x = torch.randn(2)
+            ref = mod(x)
+            res = getattr(opt_mod, method_name)(x)
+
+            self.assertEqual(ref, res)
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertNotIn("_compiled_call_impl", mod.__dict__)
+            self.assertNotIn("forward", mod.__dict__)
+
+    def test_optimized_module_delegated_method_preserves_self_semantics(self):
+        class ParentModule(torch.nn.Module):
+            def generate(self, x):
+                return self(x)
+
+        class MyModule(ParentModule):
+            def __init__(self):
+                super().__init__()
+                self.type_checks = None
+
+            def forward(self, x):
+                return x + 1
+
+            def generate(self, x):
+                self.type_checks = (
+                    isinstance(self, MyModule),
+                    type(self) is MyModule,
+                    self.__class__ is MyModule,
+                )
+                return super().generate(x)
+
+        cnt = CompileCounter()
+        mod = MyModule()
+        opt_mod = torch.compile(mod, backend=cnt)
+
+        self.assertIs(opt_mod.generate.__self__, mod)
+        self.assertEqual(opt_mod.generate(torch.ones(2)), torch.ones(2) + 1)
+        self.assertEqual(mod.type_checks, (True, True, True))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_optimized_module_delegated_method_preserves_forward_mutation(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+            def generate(self, x):
+                self.forward = lambda y: y + 2
+                return self(x)
+
+        cnt = CompileCounter()
+        mod = MyModule()
+        opt_mod = torch.compile(mod, backend=cnt)
+
+        self.assertEqual(opt_mod.generate(torch.ones(2)), torch.ones(2) + 2)
+        self.assertEqual(mod.forward(torch.ones(2)), torch.ones(2) + 2)
+        self.assertEqual(cnt.frame_count, 0)
+
+    def test_optimized_module_delegated_method_concurrent_calls(self):
+        import threading
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+            def generate(self, x):
+                return self(x)
+
+        backend_runs = 0
+
+        def backend(gm, example_inputs):
+            compiled = gm.forward
+
+            def run(*args):
+                nonlocal backend_runs
+                backend_runs += 1
+                return compiled(*args)
+
+            return run
+
+        mod = MyModule()
+        opt_mod = torch.compile(mod, backend=backend)
+        barrier = threading.Barrier(2)
+        errors = []
+        results = []
+
+        def worker():
+            try:
+                barrier.wait()
+                results.append(opt_mod.generate(torch.ones(2)))
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(results), 2)
+        for result in results:
+            self.assertEqual(result, torch.ones(2) + 1)
+        self.assertEqual(backend_runs, 2)
+
     def test_optimized_module_patched_init(self):
         # A regression test for #138157, and the pattern acame from deepspeed.
         class MyModule(torch.nn.Module):
