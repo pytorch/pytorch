@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import unittest
 import warnings
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -53,6 +54,7 @@ from torch.testing._internal.common_distributed import (
     get_timeout,
     init_multigpu_helper,
     MultiProcessTestCase,
+    PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
     requires_nccl,
     requires_nccl_shrink,
@@ -66,14 +68,14 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     IS_SANDCASTLE,
-    MI300_ARCH,
     parametrize,
     retry_on_connect_failures,
     run_tests,
-    runOnRocmArch,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
@@ -89,10 +91,6 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
     torch.version.cuda is not None or torch.version.hip is not None
-)
-
-CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
-    torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
 )
 
 _start_time = time.time()
@@ -356,7 +354,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         #       exit code -6
         TEST_NAN_ASSERT_RETURN = (
             0
-            if (IS_SANDCASTLE and not (TEST_MULTIGPU and CUDA_12_AND_ABOVE))
+            if (IS_SANDCASTLE and not TEST_MULTIGPU)
             else (-signal.SIGABRT if torch.version.hip else signal.SIGABRT)
         )
         self.special_return_code_checks = {
@@ -549,11 +547,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # reset ENV
         os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "0"
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176975")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177007")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/166067")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/177006")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/164426")
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/166066")
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
-        # skip for cu126 as well due to https://github.com/pytorch/pytorch/issues/153479
-        not (TEST_MULTIGPU and CUDA_12_AND_ABOVE),
-        "NCCL test requires 2+ GPUs and Device side assert could cause unexpected errors in lower versions of CUDA",
+        not TEST_MULTIGPU,
+        "NCCL test requires 2+ GPUs",
     )
     @parametrize(
         "type",
@@ -1503,47 +1506,23 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_shrink()
-    @requires_world_size(2)
+    @requires_world_size(3)
     def test_shrink_group_multiple_comms(self):
-        """Test shrink_group with multiple communicators and subgroup invalidation."""
-
-        device, pg = self._setup_shrink_test("multiple_comms")
-
-        # Create subgroup [0, 1] and test shrinking it
-        subgroup = c10d.new_group([0, 1])
-        if self.rank <= 1:
-            # Shrink subgroup: exclude rank 1
-            if self.rank == 0:  # Only rank 0 remains
-                shrunk_subgroup = c10d.shrink_group([1], group=subgroup)
-                self.assertEqual(shrunk_subgroup.size(), 1)
-                # Test communication on shrunk subgroup
-                tensor = torch.full((1,), self.rank).cuda(device)
-                c10d.all_reduce(tensor, group=shrunk_subgroup)
-                self.assertEqual(tensor.item(), 0)  # Only rank 0
-                log_test_success(self.rank, "Subgroup shrinking successful")
-
-        dist.barrier()  # Sync before default group test
-
-        # Shrink default group: exclude last rank
+        """Test shrink_group across a subgroup and the default group."""
+        device, _ = self._setup_shrink_test("multiple_comms")
         ranks_to_exclude = [self.world_size - 1]
-        if self.rank not in ranks_to_exclude:
-            shrunk_default = c10d.shrink_group(ranks_to_exclude)
-            expected_size = self.world_size - 1
-            self.assertEqual(shrunk_default.size(), expected_size)
 
-            # Test collective on shrunk default group
-            tensor = torch.full((1,), self.rank).cuda(device)
-            c10d.all_reduce(tensor, group=shrunk_default)
-            expected_sum = sum(
-                range(self.world_size - 1)
-            )  # 0 + 1 + ... + (world_size-2)
-            self.assertEqual(tensor.item(), expected_sum)
-            log_test_success(self.rank, "Default group shrinking successful")
+        subgroup = c10d.new_group(list(range(self.world_size)))
+        self._shrink_or_destroy(ranks_to_exclude, subgroup, device, "subgroup")
 
-            # Note: After shrinking default group, the old subgroup is invalid
-            # due to global rank reassignment
+        dist.barrier()
 
-        dist.destroy_process_group()
+        self._shrink_or_destroy(
+            ranks_to_exclude,
+            c10d.distributed_c10d._get_default_group(),
+            device,
+            "default",
+        )
 
     def _test_shrink_group_with_flag(self, shrink_flag, flag_name, rank_to_exclude):
         """Helper method to test shrink_group with a specific flag."""
@@ -1837,72 +1816,44 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
         return result
 
+    def _shrink_or_destroy(
+        self,
+        ranks_to_exclude,
+        pg,
+        device,
+        test_name,
+        shrink_flags=0,
+        with_collective=True,
+    ):
+        """Run one shrink phase: excluded ranks release the parent (destroy,
+        or abort on ``NCCL_SHRINK_ABORT``); survivors shrink, validate,
+        optionally run a collective, and destroy the result.
+        """
+        if self.rank in ranks_to_exclude:
+            if shrink_flags & NCCL_SHRINK_ABORT:
+                pg._get_backend(torch.device(device)).abort()
+            else:
+                c10d.destroy_process_group(pg)
+            return
+        shrunk_pg = c10d.shrink_group(
+            ranks_to_exclude, group=pg, shrink_flags=shrink_flags
+        )
+        expected_size = self.world_size - len(ranks_to_exclude)
+        self._validate_shrunk_group(shrunk_pg, expected_size, test_name)
+        if with_collective:
+            self._test_collective_on_shrunk_group(
+                shrunk_pg, device, ranks_to_exclude, test_name
+            )
+        c10d.destroy_process_group(shrunk_pg)
+
     def _perform_shrink_test(
         self, ranks_to_exclude, test_name, shrink_flags=0, with_collective=True
     ):
-        """Complete shrink test flow: setup, shrink, validate, test collective, cleanup.
-
-        Consistent API: All ranks perform setup to initialize distributed environment.
-        ONLY non-excluded ranks call shrink_group() for both default and non-default groups.
-        Excluded ranks perform setup, then exit without calling shrink_group() or waiting.
-        """
-        log_test_info(self.rank, f"{test_name} (world_size={self.world_size})")
-
-        is_excluded = self.rank in ranks_to_exclude
-        log_test_info(
-            self.rank,
-            f"Excluding ranks: {ranks_to_exclude}, am_excluded: {is_excluded}",
-        )
-
-        # All ranks (including excluded ones) perform setup to initialize distributed environment
+        """One-shot: setup, then shrink the default group."""
         device, pg = self._setup_shrink_test(test_name.lower().replace(" ", "_"))
-        is_default_group = pg == c10d.distributed_c10d._get_default_group()
-
-        if is_excluded:
-            log_test_info(
-                self.rank,
-                f"Excluded rank {self.rank} - setup complete, skipping shrink operation",
-            )
-            if shrink_flags & NCCL_SHRINK_ABORT:
-                log_test_info(self.rank, f"Using abort for excluded rank {self.rank}")
-                pg._get_backend(torch.device(device)).abort()
-                log_test_info(
-                    self.rank, f"cleanup resources for excluded rank {self.rank}"
-                )
-                dist.destroy_process_group()
-                log_test_info(self.rank, f"Excluded rank {self.rank} - exit")
-            else:
-                log_test_info(
-                    self.rank, f"Using regular destroy for excluded rank {self.rank}"
-                )
-                dist.destroy_process_group()
-            return None
-
-        # Only non-excluded ranks proceed with shrink
-        log_test_info(
-            self.rank,
-            f"Non-excluded rank calling shrink_group (default_group={is_default_group})",
+        self._shrink_or_destroy(
+            ranks_to_exclude, pg, device, test_name, shrink_flags, with_collective
         )
-        shrunk_pg = c10d.shrink_group(ranks_to_exclude, shrink_flags=shrink_flags)
-        log_test_info(
-            self.rank,
-            f"Non-excluded rank calling shrink_group (default_group={is_default_group}) done",
-        )
-
-        # Non-excluded ranks: validate and test the new group
-        expected_size = self.world_size - len(ranks_to_exclude)
-        _ = self._validate_shrunk_group(shrunk_pg, expected_size, test_name)
-
-        if with_collective:
-            _ = self._test_collective_on_shrunk_group(
-                shrunk_pg, device, ranks_to_exclude, test_name
-            )
-            log_test_success(self.rank, f"{test_name} successful (shrink + collective)")
-        else:
-            log_test_success(self.rank, f"{test_name} successful (shrink only)")
-
-        dist.destroy_process_group()
-        return shrunk_pg
 
     def _get_default_ranks_to_exclude(self):
         """Get default ranks to exclude based on world size."""
@@ -4621,9 +4572,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 output = torch.zeros(60 * self.world_size, device=device)
                 torch.distributed.all_gather_single(output, t)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/115859")
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @runOnRocmArch(MI300_ARCH)
     @parametrize(
         "custom_group_name",
         [True, False],
@@ -4632,13 +4583,16 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
         from torch.testing._internal.common_cuda import SM80OrLater
 
+        if not PLATFORM_SUPPORTS_SYMM_MEM:
+            raise SkipTest("Test requires SymmMem support")
+
         for peer in range(self.world_size):
             if peer == self.rank:
                 continue
             if not torch._C._cuda_canDeviceAccessPeer(self.rank, peer):
                 raise SkipTest("Test requires p2p access")
 
-        if not SM80OrLater:
+        if not SM80OrLater and not TEST_WITH_ROCM:
             raise SkipTest("Test requires sm>=80")
 
         group_name = ""
@@ -5026,6 +4980,69 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             for i in range(self.world_size):
                 dist.reduce_scatter_single(output_tensors[i], input_tensors[i])
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_python_export", [False, True])
+    def test_profiler_nccl_annotations_on_gpu_kernels(self, use_python_export):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        device = torch.device(f"cuda:{self.rank}")
+        torch.cuda.set_device(device)
+
+        t = torch.ones(1024, device=device)
+        # Warmup so NCCL init doesn't land inside the profiled region
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
+            dist.all_reduce(t)
+            torch.cuda.synchronize()
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            trace_path = f.name
+        try:
+            if use_python_export:
+                from torch.profiler._chrome_trace_export import (
+                    export_chrome_trace as py_export,
+                )
+
+                py_export(prof.profiler.kineto_results, trace_path)
+            else:
+                prof.export_chrome_trace(trace_path)
+            with open(trace_path) as f:
+                trace = json.load(f)
+        finally:
+            os.unlink(trace_path)
+
+        nccl_keys = {"Collective name", "dtype", "In msg nelems", "Out msg nelems"}
+        gpu_kernels_with_nccl = []
+        for ev in trace.get("traceEvents", []):
+            if ev.get("cat") == "kernel":
+                args = ev.get("args", {})
+                if "Collective name" in args:
+                    gpu_kernels_with_nccl.append(ev)
+
+        self.assertGreater(
+            len(gpu_kernels_with_nccl),
+            0,
+            "Expected at least one GPU kernel with NCCL annotations",
+        )
+        for ev in gpu_kernels_with_nccl:
+            args = ev["args"]
+            missing = nccl_keys - set(args.keys())
+            self.assertEqual(
+                missing,
+                set(),
+                f"GPU kernel {ev['name']} missing NCCL metadata: {missing}",
+            )
 
 
 instantiate_parametrized_tests(CommTest)
