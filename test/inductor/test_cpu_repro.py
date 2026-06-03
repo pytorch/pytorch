@@ -6649,6 +6649,42 @@ class CPUReproTests(TestCase):
         res = compiled_vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
         self.assertEqual(ref, res)
 
+    def test_lp_pool_inf_norm_type_compile(self):
+        x1 = torch.tensor([[[1.0, -3.0, 2.0, 4.0]]])
+        x2 = torch.tensor([[[[1.0, -3.0, 2.0], [4.0, -5.0, 6.0], [-7.0, 8.0, -9.0]]]])
+        x3 = torch.tensor(
+            [
+                [
+                    [
+                        [[1.0, -3.0, 2.0], [4.0, -5.0, 6.0]],
+                        [[-7.0, 8.0, -9.0], [10.0, -11.0, 12.0]],
+                    ]
+                ]
+            ]
+        )
+
+        def fn(x1, x2, x3):
+            return (
+                F.lp_pool1d(x1, float("inf"), 2, 1),
+                F.lp_pool1d(x1, -float("inf"), 2, 1),
+                F.lp_pool2d(x2, float("inf"), 2, 1),
+                F.lp_pool2d(x2, -float("inf"), 2, 1),
+                F.lp_pool3d(x3, float("inf"), 2, 1),
+                F.lp_pool3d(x3, -float("inf"), 2, 1),
+            )
+
+        expected = (
+            torch.tensor([[[3.0, 3.0, 4.0]]]),
+            torch.tensor([[[1.0, 2.0, 2.0]]]),
+            torch.tensor([[[[5.0, 6.0], [8.0, 9.0]]]]),
+            torch.tensor([[[[1.0, 2.0], [4.0, 5.0]]]]),
+            torch.tensor([[[[[11.0, 12.0]]]]]),
+            torch.tensor([[[[[1.0, 2.0]]]]]),
+        )
+
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x1, x2, x3)
+        self.assertEqual(actual, expected)
+
     def test_fractional_max_pool2d_3d_input(self):
         """Test for https://github.com/pytorch/pytorch/issues/156682 - 3D input causing assertion error"""
 
