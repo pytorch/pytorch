@@ -2718,6 +2718,44 @@ def set_default_dtype(dtype):
     finally:
         torch.set_default_dtype(saved_dtype)
 
+
+class set_default_dtype_if_supported:
+    """Decorator like set_default_dtype, but only sets the dtype if the device
+    supports it.
+
+    Calls the test object's `DeviceTypeTestBase.get_primary_device()` method at
+    call time, so this only works on test classes that have had
+    `instantiate_device_type_tests` applied to them.
+    """
+
+    def __init__(self, dtype):
+        self._dtype = dtype
+
+    def __call__(self, fn):
+        @functools.wraps(fn)
+        def wrapper(test_self, *args, **kwargs):
+            device = test_self.get_primary_device()
+            dtype_supported = True
+            try:
+                torch.empty(0, device=device, dtype=self._dtype)
+            except TypeError:
+                dtype_supported = False
+
+            saved_dtype = None
+
+            if dtype_supported:
+                saved_dtype = torch.get_default_dtype()
+                torch.set_default_dtype(self._dtype)
+
+            try:
+                return fn(test_self, *args, **kwargs)
+            finally:
+                if saved_dtype is not None:
+                    torch.set_default_dtype(saved_dtype)
+
+        return wrapper
+
+
 @contextlib.contextmanager
 def set_default_tensor_type(tensor_type):
     saved_tensor_type = torch.tensor([]).type()
