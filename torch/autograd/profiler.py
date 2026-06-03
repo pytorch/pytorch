@@ -57,26 +57,8 @@ __all__ = [
     "MemRecordsAcc",
 ]
 
-try:
-    # Available in Python >= 3.2
-    from contextlib import ContextDecorator as _ContextDecorator
-except ImportError:
-    import functools
-
-    class _ContextDecorator:  # type: ignore[no-redef]
-        def __enter__(self):
-            raise NotImplementedError
-
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            raise NotImplementedError
-
-        def __call__(self, func):
-            @functools.wraps(func)
-            def wrapped(*args, **kwargs):
-                with self:
-                    return func(*args, **kwargs)
-
-            return wrapped
+# Backward-compat alias: private name used to refer to a local fallback class.
+from contextlib import ContextDecorator as _ContextDecorator
 
 
 # global python state - whether profiler is currently enabled
@@ -836,7 +818,6 @@ class profile:
         return all_function_events
 
 
-# pyrefly: ignore [invalid-inheritance]
 class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
     Label will only appear if CPU activity tracing is enabled.
