@@ -447,6 +447,7 @@ class OptimizedModule(torch.nn.Module):
         "__dict__",
         "named_children_walk",
         "_super_module_initialized",
+        "_orig_mod_call_lock",
     }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx: _TorchDynamoContext) -> None:
@@ -464,6 +465,7 @@ class OptimizedModule(torch.nn.Module):
         # Installs the params/buffer
         self._orig_mod = mod  # `super().__setattr__` will register this module
         self.dynamo_ctx = dynamo_ctx
+        self._orig_mod_call_lock = threading.RLock()
         self._initialize()
         self.training = self._orig_mod.training
 
@@ -597,7 +599,95 @@ class OptimizedModule(torch.nn.Module):
     def __getattr__(self, name: str) -> Any:
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
-        return getattr(self._orig_mod, name)
+        attr = getattr(self._orig_mod, name)
+        if isinstance(attr, types.MethodType) and attr.__self__ is self._orig_mod:
+            try:
+                static_attr = inspect.getattr_static(self._orig_mod, name)
+            except AttributeError:
+                static_attr = None
+            if isinstance(static_attr, (types.FunctionType, types.MethodType)):
+                return self._wrap_mod_method(attr)
+        return attr
+
+    def _wrap_mod_method(self, method: types.MethodType) -> types.MethodType:
+        @functools.wraps(method.__func__)
+        def wrapped(_orig_mod: torch.nn.Module, *args: Any, **kwargs: Any) -> Any:
+            with self._orig_mod_call_lock:
+                with self._optimize_orig_mod_call():
+                    return method.__func__(_orig_mod, *args, **kwargs)
+
+        return types.MethodType(wrapped, self._orig_mod)
+
+    @contextlib.contextmanager
+    def _optimize_orig_mod_call(self) -> Generator[None, None, None]:
+        orig_mod = self._orig_mod
+        current_compiled_call_impl = orig_mod.__dict__.get("_compiled_call_impl")
+        if (
+            getattr(current_compiled_call_impl, "_torchdynamo_optimized_module", None)
+            is self
+        ):
+            yield
+            return
+
+        sentinel = object()
+        old_compiled_call_impl = orig_mod.__dict__.get("_compiled_call_impl", sentinel)
+        old_forward = orig_mod.__dict__.get("forward", sentinel)
+        active = True
+
+        def has_original_state() -> bool:
+            return (
+                orig_mod.__dict__.get("_compiled_call_impl", sentinel)
+                is old_compiled_call_impl
+                and orig_mod.__dict__.get("forward", sentinel) is old_forward
+            )
+
+        def restore() -> None:
+            if (
+                orig_mod.__dict__.get("_compiled_call_impl", sentinel)
+                is compiled_call_impl
+            ):
+                if old_compiled_call_impl is sentinel:
+                    orig_mod.__dict__.pop("_compiled_call_impl", None)
+                else:
+                    object.__setattr__(
+                        orig_mod, "_compiled_call_impl", old_compiled_call_impl
+                    )
+
+            if orig_mod.__dict__.get("forward", sentinel) is compiled_call_impl:
+                if old_forward is sentinel:
+                    orig_mod.__dict__.pop("forward", None)
+                else:
+                    object.__setattr__(orig_mod, "forward", old_forward)
+
+        def install() -> None:
+            object.__setattr__(orig_mod, "_compiled_call_impl", compiled_call_impl)
+            object.__setattr__(orig_mod, "forward", compiled_call_impl)
+
+        def install_if_unmodified() -> None:
+            if has_original_state():
+                install()
+
+        @functools.wraps(self.forward)
+        def compiled_call_impl(*args: Any, **kwargs: Any) -> Any:
+            forward_was_mutated = (
+                orig_mod.__dict__.get("forward", sentinel) is not compiled_call_impl
+            )
+            restore()
+            try:
+                if forward_was_mutated:
+                    return orig_mod(*args, **kwargs)
+                return self.forward(*args, **kwargs)
+            finally:
+                if active:
+                    install_if_unmodified()
+
+        compiled_call_impl._torchdynamo_optimized_module = self  # type: ignore[attr-defined]
+        install()
+        try:
+            yield
+        finally:
+            active = False
+            restore()
 
     def __setattr__(self, name: str, value: Any) -> None:
         # Allow patching over class attributes
