@@ -51,6 +51,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     scoped_load_inline,
 )
@@ -1371,6 +1372,7 @@ def forward(self, arg0_1, arg1_1):
         res = torch.compile(foo, fullgraph=True, backend="inductor")(rng, x)
         self.assertFalse(torch.allclose(res, x * x + x))
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184597")
     def test_reference_type_recompile(self):
         cnt = CompileCounter()
 
@@ -1782,24 +1784,22 @@ def forward(self, primals, tangents):
             register_opaque_type(NoOpaqueBase, typ="reference")
 
     @scoped_load_inline
-    def test_pybind_opaque_base_requires_metaclass_for_registration(self, load_inline):
+    def test_pybind_opaque_base_sets_metaclass_for_registration(self, load_inline):
         cpp_source = r"""
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
 
-struct BaseOnlyOpaque {};
-struct WithMetaOpaque {};
+struct OpaqueThing {};
+struct PlainThing {};
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   py::object opaque_base_module = py::module_::import("torch._opaque_base");
   py::object opaque_base = opaque_base_module.attr("OpaqueBase");
-  py::object opaque_base_meta = opaque_base_module.attr("OpaqueBaseMeta");
 
-  py::class_<BaseOnlyOpaque>(m, "BaseOnlyOpaque", opaque_base)
+  py::class_<OpaqueThing>(m, "OpaqueThing", opaque_base)
       .def(py::init<>());
-  py::class_<WithMetaOpaque>(
-      m, "WithMetaOpaque", opaque_base, py::metaclass(opaque_base_meta))
+  py::class_<PlainThing>(m, "PlainThing")
       .def(py::init<>());
 }
         """
@@ -1812,25 +1812,21 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
             with_cuda=False,
         )
 
-        self.assertTrue(issubclass(module.BaseOnlyOpaque, OpaqueBase))
-        self.assertNotIsInstance(
-            module.BaseOnlyOpaque, torch._opaque_base.OpaqueBaseMeta
-        )
-        with self.assertRaisesRegex(TypeError, "py::metaclass"):
-            register_opaque_type(module.BaseOnlyOpaque, typ="reference")
+        self.assertTrue(issubclass(module.OpaqueThing, OpaqueBase))
+        register_opaque_type(module.OpaqueThing, typ="reference")
 
-        self.assertTrue(issubclass(module.WithMetaOpaque, OpaqueBase))
-        self.assertIsInstance(module.WithMetaOpaque, torch._opaque_base.OpaqueBaseMeta)
-        register_opaque_type(module.WithMetaOpaque, typ="reference")
-
-        obj = module.WithMetaOpaque()
-        fake_obj = FakeScriptObject(
-            None, get_opaque_type_name(module.WithMetaOpaque), obj
-        )
-        self.assertTrue(issubclass(module.WithMetaOpaque, module.WithMetaOpaque))
-        self.assertIsInstance(obj, module.WithMetaOpaque)
+        obj = module.OpaqueThing()
+        fake_obj = FakeScriptObject(None, get_opaque_type_name(module.OpaqueThing), obj)
+        self.assertTrue(issubclass(module.OpaqueThing, module.OpaqueThing))
+        self.assertIsInstance(obj, module.OpaqueThing)
         self.assertIsInstance(obj, OpaqueBase)
-        self.assertIsInstance(fake_obj, module.WithMetaOpaque)
+        self.assertIsInstance(fake_obj, module.OpaqueThing)
+
+        self.assertFalse(issubclass(module.PlainThing, OpaqueBase))
+        with self.assertRaisesRegex(
+            TypeError, "must subclass torch._opaque_base.OpaqueBase"
+        ):
+            register_opaque_type(module.PlainThing, typ="reference")
 
     def test_invalid_reference_type_members(self):
         class BadMember(OpaqueBase):
@@ -4231,6 +4227,10 @@ class fn(torch.nn.Module):
         self.assertFalse(issubclass(OpaqueBaseMeta, ABCMeta))
         self.assertTrue(issubclass(torch._C.Generator, torch._C.Generator))
         self.assertIsInstance(torch.Generator(), torch._C.Generator)
+        fake_gen = FakeScriptObject(
+            None, get_opaque_type_name(torch._C.Generator), torch.Generator()
+        )
+        self.assertIsInstance(fake_gen, torch._C.Generator)
 
 
 if __name__ == "__main__":

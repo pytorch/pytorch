@@ -137,6 +137,16 @@ def _install_opaque_base(_PybindOpaqueBase: type) -> tuple[type, type]:
         _PybindOpaqueBase.__init__(instance)
         object.__setattr__(instance, "_opaque_base_initialized", True)
 
+    def _pybind_instancecheck(cls, instance):
+        if OpaqueBase in getattr(cls, "__mro__", ()):
+            return _is_opaque_base_instance(
+                cls, instance, lambda obj: type.__instancecheck__(cls, obj)
+            )
+        return type.__instancecheck__(cls, instance)
+
+    type(
+        _PybindOpaqueBase
+    ).__instancecheck__ = _pybind_instancecheck  # pyrefly: ignore [bad-assignment]
     OpaqueBase._pybind_backed = True
     OpaqueBaseMeta.__qualname__ = "OpaqueBaseMeta"
     OpaqueBase.__qualname__ = "OpaqueBase"

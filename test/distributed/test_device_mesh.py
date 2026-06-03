@@ -2034,13 +2034,12 @@ class ProcessGroupOpaqueTypeTest(TestCase):
     """Test that ProcessGroup opaque type members are registered and exist on the class."""
 
     def test_process_group_subclasses_opaque_base(self):
-        from torch._opaque_base import OpaqueBase, OpaqueBaseMeta
+        from torch._opaque_base import OpaqueBase
         from torch.distributed.device_mesh import _register_distributed_opaque_types
 
         _register_distributed_opaque_types()
 
         self.assertTrue(issubclass(ProcessGroup, OpaqueBase))
-        self.assertIsInstance(ProcessGroup, OpaqueBaseMeta)
         self.assertIsInstance(ProcessGroup(0, 1), OpaqueBase)
 
     def test_process_group_python_subclass_must_initialize_pybind_base(self):

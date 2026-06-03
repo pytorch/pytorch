@@ -915,7 +915,22 @@ This class does not support ``__members__`` property.)");
             } else {
               return ::c10d::makePreMulSum(t[1].cast<at::Tensor>());
             }
-          }));
+          }))
+      .def_property_readonly(
+          "factor",
+          [](const ::c10d::ReduceOp& self) -> py::object {
+            TORCH_CHECK(
+                self.op_ == ::c10d::ReduceOp::RedOpType::PREMUL_SUM,
+                "Only PREMUL_SUM supports accessing factor");
+            const auto* preMulSupplement =
+                reinterpret_cast<::c10d::PreMulSumSupplement*>(
+                    self.supplement_.get());
+            if (!preMulSupplement->tensor_factor.defined()) {
+              return py::cast(preMulSupplement->double_factor);
+            }
+            return py::cast(preMulSupplement->tensor_factor);
+          },
+          R"(The factor of the PREMUL_SUM ReduceOp.)");
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
@@ -2142,11 +2157,10 @@ communication mechanism.
           py::arg("rank"),
           py::arg("world_size"));
 
-  // Subclass OpaqueBase and use its metaclass so pybind sees a real Python
-  // base while isinstance(fake_obj, ProcessGroup) still unwraps real_obj.
+  // Subclass OpaqueBase so pybind sees a real Python base while
+  // isinstance(fake_obj, ProcessGroup) still unwraps real_obj.
   py::object opaque_base_module = py::module_::import("torch._opaque_base");
   py::object opaque_base = opaque_base_module.attr("OpaqueBase");
-  py::object opaque_base_meta = opaque_base_module.attr("OpaqueBaseMeta");
 
   auto processGroup =
       intrusive_ptr_no_gil_destructor_trampoline_class_<
@@ -2154,7 +2168,6 @@ communication mechanism.
           module,
           "ProcessGroup",
           opaque_base,
-          py::metaclass(opaque_base_meta),
           R"(A ProcessGroup is a communication primitive that allows for
           collective operations across a group of processes.
 

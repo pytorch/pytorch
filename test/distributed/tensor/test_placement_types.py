@@ -3,7 +3,7 @@ import copy
 import itertools
 
 import torch
-from torch._opaque_base import OpaqueBase, OpaqueBaseMeta
+from torch._opaque_base import OpaqueBase
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Partial,
@@ -19,7 +19,6 @@ class PlacementTypesTestCase(TestCase):
     def test_placements_subclass_opaque_base(self):
         for cls in (Placement, Shard, _StridedShard, Partial, Replicate):
             self.assertTrue(issubclass(cls, OpaqueBase))
-            self.assertIsInstance(cls, OpaqueBaseMeta)
 
         self.assertIsInstance(Shard(0), OpaqueBase)
         self.assertIsInstance(Replicate(), OpaqueBase)
