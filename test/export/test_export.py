@@ -17485,6 +17485,92 @@ def forward(self, x):
                 # Verify no tensor constants in graph signature
                 self.assertEqual(len(ep.graph_signature.lifted_tensor_constants), 0)
 
+    def test_export_packed_sequence_rnn_variants(self):
+        rnn_types = [
+            (torch.nn.RNN, torch.ops.aten.rnn_tanh.data),
+            (torch.nn.LSTM, torch.ops.aten.lstm.data),
+            (torch.nn.GRU, torch.ops.aten.gru.data),
+        ]
+
+        class PackedRNN(torch.nn.Module):
+            def __init__(self, rnn_cls, enforce_sorted):
+                super().__init__()
+                self.enforce_sorted = enforce_sorted
+                self.rnn = rnn_cls(10, 20, batch_first=True)
+
+            def forward(self, x, lengths):
+                packed = torch.nn.utils.rnn.pack_padded_sequence(
+                    x,
+                    lengths,
+                    batch_first=True,
+                    enforce_sorted=self.enforce_sorted,
+                )
+                output, _ = self.rnn(packed)
+                output, _ = torch.nn.utils.rnn.pad_packed_sequence(
+                    output, batch_first=True
+                )
+                return output
+
+        data = torch.randn(3, 5, 10)
+        length_cases = [
+            (False, torch.tensor([5, 3, 2])),
+            (False, torch.tensor([3, 1, 2])),
+            (True, torch.tensor([5, 3, 2])),
+            (True, torch.tensor([3, 2, 1])),
+        ]
+
+        for rnn_cls, expected_op in rnn_types:
+            for enforce_sorted, lengths in length_cases:
+                with self.subTest(
+                    rnn_type=rnn_cls.__name__, enforce_sorted=enforce_sorted
+                ):
+                    model = PackedRNN(rnn_cls, enforce_sorted).eval()
+                    eager_out = model(data, lengths)
+                    self.assertEqual(eager_out.shape[1], lengths.max().item())
+
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore",
+                            message=r"The tensor attributes self\.rnn\._flat_weights.*",
+                            category=UserWarning,
+                        )
+                        ep = torch.export.export(model, (data, lengths))
+
+                    ep_out = ep.module()(data, lengths)
+                    self.assertEqual(ep_out.shape, eager_out.shape)
+                    self.assertEqual(ep_out.stride(), eager_out.stride())
+                    self.assertEqual(ep_out.is_contiguous(), eager_out.is_contiguous())
+                    self.assertEqual(ep_out, eager_out)
+                    self.assertTrue(
+                        any(
+                            node.op == "call_function" and node.target == expected_op
+                            for node in ep.graph.nodes
+                        )
+                    )
+
+    def test_export_packed_sequence_pad_batch_first_stride(self):
+        class PackedPad(torch.nn.Module):
+            def forward(self, x, lengths):
+                packed = torch.nn.utils.rnn.pack_padded_sequence(
+                    x, lengths, batch_first=True, enforce_sorted=True
+                )
+                output, _ = torch.nn.utils.rnn.pad_packed_sequence(
+                    packed, batch_first=True
+                )
+                return output
+
+        data = torch.randn(3, 5, 10)
+        lengths = torch.tensor([3, 2, 1])
+        model = PackedPad().eval()
+        eager_out = model(data, lengths)
+        self.assertFalse(eager_out.is_contiguous())
+
+        ep = torch.export.export(model, (data, lengths))
+        ep_out = ep.module()(data, lengths)
+        self.assertEqual(ep_out, eager_out)
+        self.assertEqual(ep_out.stride(), eager_out.stride())
+        self.assertEqual(ep_out.is_contiguous(), eager_out.is_contiguous())
+
     @contextmanager
     def distributed_env(self, world_size):
         try:

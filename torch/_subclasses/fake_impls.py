@@ -34,6 +34,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     in_kernel_invocation_manager,
     run_fallback_kernel,
+    unset_fake_temporarily,
     UnsupportedOperatorException,
 )
 from torch.fx.operator_schemas import _normalize_function_or_error
@@ -57,6 +58,7 @@ pytree = torch.utils._pytree
 __all__ = [
     "op_implementations_checks",
     "get_fast_op_impls",
+    "lookup_proxy_metadata_impl",
     "stride_incorrect_op",
     "has_meta",
 ]
@@ -1816,24 +1818,51 @@ def _pack_padded_sequence(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    new_batch_size = fake_mode.shape_env.create_unbacked_symint()
+    from torch.fx.experimental.symbolic_shapes import (
+        _constrain_range_for_size,
+        has_free_symbols,
+    )
 
-    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
-
-    _constrain_range_for_size(new_batch_size)
+    new_packed_size = fake_mode.shape_env.create_unbacked_symint()
+    _constrain_range_for_size(new_packed_size)
 
     if not batch_first:
         # Inputs should have shape (batch_size, seq_len, *)
         inputs = inputs.transpose(0, 1)  # type: ignore[assignment]
 
-    res_size = inputs.shape[1:]
-    packed_data = inputs.new_empty(res_size)
-    batch_size = inputs.new_empty((new_batch_size,))
-    return (packed_data, batch_size)  # type: ignore[return]
+    new_max_seq_length = fake_mode.shape_env.create_unbacked_symint()
+    max_seq_length_bound = None
+    if not has_free_symbols(inputs.shape[1]):
+        max_seq_length_bound = int(inputs.shape[1])
+    _constrain_range_for_size(new_max_seq_length, max=max_seq_length_bound)
+
+    real_lengths = lengths.real_tensor
+    if real_lengths is None:
+        real_lengths = lengths.constant
+    if real_lengths is not None:
+        real_lengths = real_lengths.to(device="cpu", dtype=torch.int64)
+        max_seq_length = int(real_lengths[0].item())
+        packed_size = int(real_lengths.sum().item())
+        batch_sizes = torch.empty(
+            max_seq_length, dtype=torch.int64, device=real_lengths.device
+        )
+        for i in range(max_seq_length):
+            batch_sizes[i] = (real_lengths > i).sum()
+
+        packed_data = inputs.new_empty((packed_size, *inputs.shape[2:]))
+        fake_batch_sizes = fake_mode.fake_tensor_converter.from_real_tensor(
+            fake_mode, batch_sizes, make_constant=True
+        )
+        return (packed_data, fake_batch_sizes)  # type: ignore[return-value]
+
+    packed_data = inputs.new_empty((new_packed_size, *inputs.shape[2:]))
+    batch_sizes = lengths.new_empty((new_max_seq_length,))
+    return (packed_data, batch_sizes)  # type: ignore[return]
 
 
 # pyrefly: ignore [implicit-any]
 FAST_OP_IMPLEMENTATIONS = {}
+PROXY_METADATA_IMPLEMENTATIONS: dict[OpOverload, Callable[..., Any]] = {}
 
 
 # Unlike register_op_impl, these don't do the slow iteration for
@@ -1846,6 +1875,223 @@ def register_fast_op_impl(
         return op_impl
 
     return impl_decorator
+
+
+def register_proxy_metadata_impl(
+    func: OpOverload,
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    """Register a FakeTensor metadata implementation for proxy tracing.
+
+    Proxy metadata implementations are used only after proxy tracing has
+    already emitted the real operator node. They must only synthesize fake
+    output metadata for operators whose kernels/decompositions cannot run for
+    metadata propagation, and must not create proxy nodes or replace the
+    traced operator semantics. Each operator can have at most one metadata
+    implementation.
+    """
+
+    def impl_decorator(op_impl: Callable[_P, _R]) -> Callable[_P, _R]:
+        if func in PROXY_METADATA_IMPLEMENTATIONS:
+            raise RuntimeError(f"Duplicate proxy metadata implementation for {func}")
+        PROXY_METADATA_IMPLEMENTATIONS[func] = op_impl
+        return op_impl
+
+    return impl_decorator
+
+
+def lookup_proxy_metadata_impl(func: OpOverload) -> Callable[..., Any] | None:
+    """Return the proxy metadata implementation for ``func``, if registered."""
+    return PROXY_METADATA_IMPLEMENTATIONS.get(func)
+
+
+def _packed_sequence_batch_size(
+    fake_mode: FakeTensorMode, func: OpOverload, batch_sizes: FakeTensor
+) -> int | torch.SymInt:
+    real_batch_sizes = batch_sizes.real_tensor
+    if real_batch_sizes is None:
+        real_batch_sizes = batch_sizes.constant
+    if real_batch_sizes is not None:
+        with unset_fake_temporarily():
+            return int(real_batch_sizes[0].item())
+
+    if fake_mode.shape_env is None:
+        raise DynamicOutputShapeException(func)
+
+    batch_size = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(batch_size)
+    return batch_size
+
+
+def _pad_packed_sequence_output(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    batch_first: bool,
+    total_length: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    max_batch_size = _packed_sequence_batch_size(fake_mode, func, batch_sizes)
+    max_seq_length = batch_sizes.shape[0] if total_length <= 0 else total_length
+    output = data.new_empty((max_seq_length, max_batch_size, *data.shape[1:]))
+    if batch_first:
+        output = output.transpose(0, 1)
+    return output, batch_sizes.new_empty((max_batch_size,))
+
+
+@register_fast_op_impl(aten._pad_packed_sequence.default)
+def _pad_packed_sequence_fast(
+    fake_mode: FakeTensorMode,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    batch_first: bool,
+    padding_value: float,
+    total_length: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _pad_packed_sequence_output(
+        fake_mode,
+        aten._pad_packed_sequence.default,
+        data,
+        batch_sizes,
+        batch_first,
+        total_length,
+    )
+
+
+@register_proxy_metadata_impl(aten._pad_packed_sequence.default)
+@register_op_impl(aten._pad_packed_sequence.default)
+def _pad_packed_sequence(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    batch_first: bool,
+    padding_value: float,
+    total_length: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _pad_packed_sequence_output(
+        fake_mode,
+        func,
+        data,
+        batch_sizes,
+        batch_first,
+        total_length,
+    )
+
+
+def _rnn_data_output(
+    data: FakeTensor, hx: FakeTensor, bidirectional: bool
+) -> tuple[torch.Tensor, torch.Tensor]:
+    num_directions = 2 if bidirectional else 1
+    output = data.new_empty((data.shape[0], hx.shape[2] * num_directions))
+    return output, hx.new_empty(hx.shape)
+
+
+@register_fast_op_impl(aten.rnn_tanh.data)
+@register_fast_op_impl(aten.rnn_relu.data)
+def _rnn_data_fast(
+    fake_mode: FakeTensorMode,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    hx: FakeTensor,
+    params: list[FakeTensor],
+    has_biases: bool,
+    num_layers: int,
+    dropout: float,
+    train: bool,
+    bidirectional: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _rnn_data_output(data, hx, bidirectional)
+
+
+@register_proxy_metadata_impl(aten.rnn_tanh.data)
+@register_proxy_metadata_impl(aten.rnn_relu.data)
+def _rnn_data_proxy_metadata(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    hx: FakeTensor,
+    params: list[FakeTensor],
+    has_biases: bool,
+    num_layers: int,
+    dropout: float,
+    train: bool,
+    bidirectional: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _rnn_data_output(data, hx, bidirectional)
+
+
+@register_fast_op_impl(aten.gru.data)
+def _gru_data_fast(
+    fake_mode: FakeTensorMode,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    hx: FakeTensor,
+    params: list[FakeTensor],
+    has_biases: bool,
+    num_layers: int,
+    dropout: float,
+    train: bool,
+    bidirectional: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _rnn_data_output(data, hx, bidirectional)
+
+
+@register_proxy_metadata_impl(aten.gru.data)
+def _gru_data_proxy_metadata(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    hx: FakeTensor,
+    params: list[FakeTensor],
+    has_biases: bool,
+    num_layers: int,
+    dropout: float,
+    train: bool,
+    bidirectional: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _rnn_data_output(data, hx, bidirectional)
+
+
+@register_fast_op_impl(aten.lstm.data)
+def _lstm_data_fast(
+    fake_mode: FakeTensorMode,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    hx: list[FakeTensor],
+    params: list[FakeTensor],
+    has_biases: bool,
+    num_layers: int,
+    dropout: float,
+    train: bool,
+    bidirectional: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    num_directions = 2 if bidirectional else 1
+    output = data.new_empty((data.shape[0], hx[0].shape[2] * num_directions))
+    return output, hx[0].new_empty(hx[0].shape), hx[1].new_empty(hx[1].shape)
+
+
+@register_proxy_metadata_impl(aten.lstm.data)
+def _lstm_data_proxy_metadata(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    data: FakeTensor,
+    batch_sizes: FakeTensor,
+    hx: list[FakeTensor],
+    params: list[FakeTensor],
+    has_biases: bool,
+    num_layers: int,
+    dropout: float,
+    train: bool,
+    bidirectional: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    num_directions = 2 if bidirectional else 1
+    output = data.new_empty((data.shape[0], hx[0].shape[2] * num_directions))
+    return output, hx[0].new_empty(hx[0].shape), hx[1].new_empty(hx[1].shape)
 
 
 # infer_size_impl in ExpandUtils

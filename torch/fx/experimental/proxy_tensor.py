@@ -50,7 +50,7 @@ from torch._library.opaque_object import (
 )
 from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator, OpOverload
-from torch._subclasses.fake_impls import fast_detach
+from torch._subclasses.fake_impls import fast_detach, lookup_proxy_metadata_impl
 from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
@@ -1282,8 +1282,24 @@ def proxy_call(
         name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
     )
 
-    with _enable_thunkify(proxy_mode.tracer):
-        out = func(*args, **kwargs)
+    proxy_metadata_impl = lookup_proxy_metadata_impl(func)
+    fake_tensor_mode = getattr(proxy_mode.tracer, "fake_tensor_mode", None)
+    if fake_tensor_mode is None:
+        for arg in flat_args_kwargs:
+            if isinstance(arg, FakeTensor):
+                fake_tensor_mode = arg.fake_mode
+                break
+    # The proxy node has already been created.  These implementations only
+    # supply fake metadata for opaque ops whose kernels cannot run on FakeTensor.
+    if (
+        proxy_metadata_impl is not None
+        and fake_tensor_mode is not None
+        and pytree.tree_any_only(Tensor, is_fake, (args, kwargs))
+    ):
+        out = proxy_metadata_impl(fake_tensor_mode, func, *args, **kwargs)
+    else:
+        with _enable_thunkify(proxy_mode.tracer):
+            out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if

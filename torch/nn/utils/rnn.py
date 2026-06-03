@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Callable, Iterable
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, cast, NamedTuple, TypeVar
 from typing_extensions import Self
 
 import torch
@@ -324,6 +324,39 @@ def pack_padded_sequence(
     return _packed_sequence_init(data, batch_sizes, sorted_indices, None)
 
 
+def _decomposed_pad_packed_sequence(
+    data: Tensor,
+    batch_sizes: Tensor,
+    batch_first: bool,
+    padding_value: float,
+    total_length: int | torch.SymInt,
+    max_batch_size: int | torch.SymInt,
+) -> tuple[Tensor, Tensor]:
+    output = data.new_full(
+        (total_length, max_batch_size, *data.shape[1:]), padding_value
+    )
+    packed_indices = torch.arange(data.size(0), device=batch_sizes.device)
+    time_indices = torch.repeat_interleave(
+        torch.arange(batch_sizes.size(0), device=batch_sizes.device),
+        batch_sizes,
+        output_size=data.size(0),
+    )
+    batch_offsets = batch_sizes.cumsum(0) - batch_sizes
+    batch_indices = packed_indices - batch_offsets.index_select(0, time_indices)
+
+    output = output.index_put(
+        (time_indices.to(data.device), batch_indices.to(data.device)), data
+    )
+    length_indices = torch.arange(  # pyrefly: ignore [no-matching-overload]
+        max_batch_size, device=batch_sizes.device
+    )
+    lengths = (batch_sizes.unsqueeze(0) > length_indices.unsqueeze(1)).sum(1)
+    lengths = lengths.to(dtype=torch.int64)
+    if batch_first:
+        output = output.transpose(0, 1)
+    return output, lengths
+
+
 def pad_packed_sequence(
     sequence: PackedSequence,
     batch_first: bool = False,
@@ -380,6 +413,7 @@ def pad_packed_sequence(
         the batch was passed to ``pack_padded_sequence`` or ``pack_sequence``.
     """
     max_seq_length = sequence.batch_sizes.size(0)
+    unsorted_indices = sequence.unsorted_indices
     if total_length is not None:
         if total_length < max_seq_length:
             raise ValueError(
@@ -388,10 +422,29 @@ def pad_packed_sequence(
                 f"total_length={total_length} and max sequence length being {max_seq_length}"
             )
         max_seq_length = total_length
-    padded_output, lengths = _VF._pad_packed_sequence(
-        sequence.data, sequence.batch_sizes, batch_first, padding_value, max_seq_length
-    )
-    unsorted_indices = sequence.unsorted_indices
+    if not torch.jit.is_scripting() and isinstance(max_seq_length, torch.SymInt):
+        max_batch_size = cast(
+            int | torch.SymInt,
+            unsorted_indices.size(0)
+            if unsorted_indices is not None
+            else sequence.batch_sizes[0].item(),
+        )
+        padded_output, lengths = _decomposed_pad_packed_sequence(
+            sequence.data,
+            sequence.batch_sizes,
+            batch_first,
+            padding_value,
+            max_seq_length,
+            max_batch_size,
+        )
+    else:
+        padded_output, lengths = _VF._pad_packed_sequence(
+            sequence.data,
+            sequence.batch_sizes,
+            batch_first,
+            padding_value,
+            max_seq_length,
+        )
     if unsorted_indices is not None:
         batch_dim = 0 if batch_first else 1
         return (
