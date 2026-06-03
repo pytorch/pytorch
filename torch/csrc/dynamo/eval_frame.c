@@ -512,6 +512,10 @@ static PyObject* dynamo__custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
+  if (unlikely(dynamo_is_guard_eval())) {
+    return dynamo_eval_frame_default(tstate, frame, throw_flag);
+  }
+
   // Shims logic into one of three states. Can probably be refactored into a
   // single func, later:
   //  - None: disables TorchDynamo
