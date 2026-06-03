@@ -138,6 +138,29 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_res, compiled_res)
         self.assertEqual(cnt.frame_count, 0)
 
+    def test_flop_counter_skip_does_not_disable_future_compile(self):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        def fn(x, y):
+            return x @ y
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        with FlopCounterMode(display=False) as mode:
+            self.assertEqual(compiled_fn(x, y), fn(x, y))
+
+        self.assertGreater(mode.get_total_flops(), 0)
+        self.assertEqual(cnt.frame_count, 0)
+
+        self.assertEqual(compiled_fn(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+
+        self.assertEqual(compiled_fn(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+
 
 class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
