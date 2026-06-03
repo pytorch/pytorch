@@ -2,6 +2,7 @@
 
 #include <ATen/record_function.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -136,6 +137,24 @@ namespace torch::profiler {
  */
 
 namespace {
+uint64_t cuptiApproximateTimeCallback() {
+  return static_cast<uint64_t>(c10::getApproximateTime());
+}
+
+class ApproximateClockPyConverter {
+ public:
+  ApproximateClockPyConverter() : converter_(clock_.makeConverter()) {}
+
+  uint64_t to_unix_ns(uint64_t t) const {
+    return static_cast<uint64_t>(
+        converter_(static_cast<c10::approx_time_t>(t)));
+  }
+
+ private:
+  c10::ApproximateClockToUnixTimeConverter clock_;
+  std::function<c10::time_t(c10::approx_time_t)> converter_;
+};
+
 struct RecordFunctionFast {
   PyObject_HEAD
   PyObject* name;
@@ -487,6 +506,8 @@ void initPythonBindings(PyObject* module) {
                 t.size() > 12 ? t[12].cast<bool>() : false,
                 t.size() > 13 ? t[13].cast<bool>() : false);
           }))
+      .def_readwrite(
+          "custom_profiler_config", &ExperimentalConfig::custom_profiler_config)
       .def_readwrite("trace_only", &ExperimentalConfig::trace_only);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
@@ -686,6 +707,16 @@ void initPythonBindings(PyObject* module) {
   m.def(
       "_set_cuda_sync_enabled_val",
       &torch::profiler::impl::set_cuda_sync_enabled_val);
+  py::class_<ApproximateClockPyConverter>(
+      m, "_ApproximateClockToUnixTimeConverter")
+      .def(py::init<>())
+      .def("to_unix_ns", &ApproximateClockPyConverter::to_unix_ns);
+  m.def("_get_approximate_time", []() {
+    return static_cast<uint64_t>(c10::getApproximateTime());
+  });
+  m.def("_cupti_approximate_time_callback_address", []() {
+    return reinterpret_cast<uintptr_t>(&cuptiApproximateTimeCallback);
+  });
 
   if (PyModule_AddType(m.ptr(), &THPCapturedTracebackType) < 0) {
     throw python_error();

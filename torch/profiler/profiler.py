@@ -199,6 +199,7 @@ class _KinetoProfile:
         acc_events: bool = False,
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
+        cupti_mux: bool = False,
     ) -> None:
         if activities is not None:
             self.activities, self.activity_filters = _parse_activities(activities)
@@ -256,6 +257,11 @@ class _KinetoProfile:
         self.preset_metadata: dict[str, str] = {}
         self._trace_metadata: dict[str, str] = {}
 
+        # Optional GPU-activity collection via the in-process CUPTI mux
+        # (torch.profiler.cupti) in place of kineto's device path.
+        self._cupti_mux = cupti_mux
+        self._cupti_prof: Any = None
+
     def start(self) -> None:
         self.prepare_trace()
         self.start_trace()
@@ -264,6 +270,12 @@ class _KinetoProfile:
         self.stop_trace()
 
     def prepare_trace(self) -> None:
+        if self._cupti_mux:
+            if self._cupti_prof is None:
+                from torch.profiler.cupti import CuptiProfiler
+
+                self._cupti_prof = CuptiProfiler()
+            return
         if hasattr(torch, "_inductor"):
             import torch._inductor.config as inductor_config
 
@@ -295,6 +307,11 @@ class _KinetoProfile:
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
+        if self._cupti_mux:
+            if self._cupti_prof is None:
+                raise AssertionError("Profiler must be initialized before starting trace")
+            self._cupti_prof.start()
+            return
         if self.execution_trace_observer:
             self.execution_trace_observer.start()
         if self.profiler is None:
@@ -342,6 +359,10 @@ class _KinetoProfile:
                 self.add_metadata_json(k, v)
 
     def stop_trace(self) -> None:
+        if self._cupti_mux:
+            if self._cupti_prof is not None:
+                self._cupti_prof.stop()
+            return
         if self.execution_trace_observer:
             self.execution_trace_observer.stop()
         if self.profiler is None:
@@ -353,6 +374,13 @@ class _KinetoProfile:
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
+        if self._cupti_mux:
+            if self._cupti_prof is None:
+                raise AssertionError(
+                    "Profiler must be initialized before exporting chrome trace"
+                )
+            self._cupti_prof.export_chrome_trace(path)
+            return
         if self.profiler is None:
             raise AssertionError(
                 "Profiler must be initialized before exporting chrome trace"
@@ -860,6 +888,7 @@ class profile(_KinetoProfile):
         use_cuda: bool | None = None,
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
+        cupti_mux: bool = False,
     ) -> None:
         # Extract activities for the use_cuda deprecation check.
         if activities is not None:
@@ -897,6 +926,7 @@ class profile(_KinetoProfile):
             acc_events=acc_events,
             custom_trace_id_callback=custom_trace_id_callback,
             post_processing_timeout_s=post_processing_timeout_s,
+            cupti_mux=cupti_mux,
         )
 
         if schedule:
