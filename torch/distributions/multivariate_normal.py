@@ -32,7 +32,7 @@ def _batch_mahalanobis(bL, bx):
     for a factored :math:`\mathbf{M} = \mathbf{L}\mathbf{L}^\top`.
 
     Accepts batches for both bL and bx. They are not necessarily assumed to have the same batch
-    shape, but `bL` one should be able to broadcasted to `bx` one.
+    shape, but `bL` one should be able to be broadcasted to `bx` one.
     """
     n = bx.size(-1)
     bx_batch_shape = bx.shape[:-1]
