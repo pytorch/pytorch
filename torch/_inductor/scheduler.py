@@ -2273,6 +2273,9 @@ class SchedulerNode(BaseSchedulerNode):
             # entry by using a customized cache implementation rather than
             # lru_cache.
             SIMDScheduling.candidate_tilings.cache_clear()
+            backend = self.scheduler.get_backend(self.get_device())
+            if isinstance(backend, SIMDScheduling):
+                backend.clear_tiling_caches()
 
     def snapshot_loop_state(self) -> tuple[Any, ...]:
         """Snapshot mutable state modified by loop transformations
