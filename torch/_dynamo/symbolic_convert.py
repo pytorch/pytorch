@@ -2710,11 +2710,6 @@ class InstructionTranslatorBase(
         self.call_function(fn, args, {})
 
     def exception_handler(self, raised_exception: ObservedException) -> None:
-        observed_exn_gb_explanation = (
-            "Dynamo found no exception handler at the top-level compiled function "
-            "when encountering an exception. Exception will propagate outside the compiled region."
-        )
-
         def bubble_exception_to_interpreter() -> None:
             # Bubble the exception to the interpreter
             curr_exc = self.exn_vt_stack.get_current_exception()
@@ -2723,10 +2718,17 @@ class InstructionTranslatorBase(
                 raise AssertionError(
                     "expected isinstance(raised_exception, dynamo_exc) to be true"
                 )  # sanity check
+            exception_repr = curr_exc.debug_repr()
+            exception_context = f"raised exception {exception_repr}"
             unimplemented(
                 gb_type="Observed exception",
-                context=f"raised exception {curr_exc.debug_repr()}",
-                explanation=observed_exn_gb_explanation,
+                context=exception_context,
+                explanation=(
+                    "Dynamo observed an exception while tracing your code: "
+                    f"{exception_repr}. Exception will propagate outside "
+                    "the compiled region because Dynamo found no exception handler "
+                    "at the top-level compiled function."
+                ),
                 hints=[
                     *graph_break_hints.USER_ERROR,
                     *graph_break_hints.SUPPORTABLE,
@@ -2783,11 +2785,16 @@ class InstructionTranslatorBase(
                         # instruction translator.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
+                            exception_context = str(raised_exception)
                             unimplemented(
                                 gb_type="Observed exception (EXCEPT_HANDLER)",
-                                context=str(raised_exception),
-                                explanation=observed_exn_gb_explanation
-                                + " This graph break is unexpected.",
+                                context=exception_context,
+                                explanation=(
+                                    "Dynamo observed an exception while tracing your code: "
+                                    f"{exception_context}. Exception will propagate outside "
+                                    "the compiled region because Dynamo found no exception handler "
+                                    "at the top-level compiled function. This graph break is unexpected."
+                                ),
                                 hints=[*graph_break_hints.DYNAMO_BUG],
                                 from_exc=raised_exception,
                             )
