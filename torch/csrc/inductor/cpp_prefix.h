@@ -854,11 +854,6 @@ inline std::common_type_t<T, U> truncdiv_integral(T a, U b) {
     inductor_cpu_note_integer_div_by_zero();
     return C(0);
   }
-  if constexpr (std::is_signed_v<C>) {
-    if (a_c == std::numeric_limits<C>::min() && b_c == C(-1)) {
-      return a_c;
-    }
-  }
   return a_c / b_c;
 }
 
