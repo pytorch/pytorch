@@ -236,7 +236,6 @@ class <lambda>(torch.nn.Module):
 
     @requires_cuda
     def test_target_values_dict_round_trips_through_graph_break(self):
-
         # Regression test for a dict-vs-tuple issue interpreting
         # `target_values`. This was initially a tuple and got repurposed as a
         # dict, but some oft-unexecuted paths still assumed it was a tuple.
@@ -275,8 +274,7 @@ class <lambda>(torch.nn.Module):
             adds: list[torch.fx.Node] = [
                 n
                 for n in gm.graph.nodes
-                if n.op == "call_function"
-                and n.target is torch.ops.aten.add.Tensor
+                if n.op == "call_function" and n.target is torch.ops.aten.add.Tensor
             ]
             self.assertEqual(len(adds), 1)
             custom: dict[str, Any] = adds[0].meta.get("custom", {})

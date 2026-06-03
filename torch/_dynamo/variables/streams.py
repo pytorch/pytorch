@@ -404,9 +404,7 @@ class StreamContextVariable(ContextWrappingVariable):
             )
 
         thunk = functools.partial(torch.cuda.stream, stream_value)
-        name = codegen.tx.output.install_global_by_id(
-            "_stream_ctx_thunk", thunk
-        )
+        name = codegen.tx.output.install_global_by_id("_stream_ctx_thunk", thunk)
         codegen.append_output(codegen.create_load_global(name, add=True))
 
     def get_stream(self) -> "StreamVariable":
