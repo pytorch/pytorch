@@ -1971,8 +1971,40 @@ class SIMDScheduling(BaseScheduling):
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
 
+    def __init__(self, scheduler: Any) -> None:
+        super().__init__(scheduler)
+        self.clear_tiling_caches()
+
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
+
+    def _get_node_tiling(self, node, numel, rnumel):
+        """Cached select_tiling per node. Unfused nodes with the same
+        group share a single tiling computation.
+
+        Cleared together with candidate_tilings via
+        clear_tiling_caches().
+        """
+        tc = self._tiling_cache
+        key = id(node)
+        if key not in tc:
+            nodes_list = node.get_nodes()
+            if len(nodes_list) == 1:
+                gtc = self._group_tiling_cache
+                gk = (node.group, numel, rnumel)
+                if gk not in gtc:
+                    gtc[gk] = self.select_tiling(nodes_list, numel, rnumel)
+                tc[key] = gtc[gk]
+            else:
+                tc[key] = self.select_tiling(nodes_list, numel, rnumel)
+        return tc[key]
+
+    def clear_tiling_caches(self) -> None:
+        """Clear all tiling caches. Called from
+        SchedulerNode.clear_loop_body_dependent_caches when loop
+        order changes invalidate tiling decisions."""
+        self._tiling_cache = {}
+        self._group_tiling_cache = {}
 
     def can_fuse(self, node1, node2):
         """
@@ -2092,28 +2124,32 @@ class SIMDScheduling(BaseScheduling):
                     return True
 
             # check for a bad combined tiling
-            tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
-            tiling2 = self.select_tiling(node2.get_nodes(), numel1, rnumel1)
-            tiling3 = self.select_tiling(
-                node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
-            )
+            tiling1 = self._get_node_tiling(node1, numel1, rnumel1)
+            tiling2 = self._get_node_tiling(node2, numel1, rnumel1)
             if config.triton.tiling_prevents_pointwise_fusion:
-                cond = True
-                if len(tiling1) > 2:
-                    if len(tiling2) > 2:
-                        cond = tiling1 == tiling2 == tiling3
-                    else:
-                        cond = tiling1 == tiling3
-                elif len(tiling2) > 2:
-                    cond = tiling2 == tiling3
-                if not cond:
-                    why(
-                        "tiling mismatch (%s, %s, %s)",
-                        tiling1,
-                        tiling2,
-                        tiling3,
+                # tiling3 is only consulted when at least one tiling
+                # has >2 dims; for <=2D the check always passes.
+                if len(tiling1) > 2 or len(tiling2) > 2:
+                    tiling3 = self.select_tiling(
+                        node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
                     )
-                    return False
+                    cond = True
+                    if len(tiling1) > 2:
+                        cond = (
+                            tiling1 == tiling2 == tiling3
+                            if len(tiling2) > 2
+                            else tiling1 == tiling3
+                        )
+                    else:
+                        cond = tiling2 == tiling3
+                    if not cond:
+                        why(
+                            "tiling mismatch (%s, %s, %s)",
+                            tiling1,
+                            tiling2,
+                            tiling3,
+                        )
+                        return False
 
             return True
 
