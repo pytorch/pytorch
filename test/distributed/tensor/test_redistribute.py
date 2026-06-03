@@ -1543,7 +1543,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             (Partial("sum"),),
             tensor_meta=TensorMeta(
                 local_tensor.size(),
-                local_tensor.stride(),
+                local_tensor.stride,
                 local_tensor.dtype,
             ),
         )
@@ -1552,7 +1552,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             (Partial("avg"),),
             tensor_meta=TensorMeta(
                 local_tensor.size(),
-                local_tensor.stride(),
+                local_tensor.stride,
                 local_tensor.dtype,
             ),
         )
