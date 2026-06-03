@@ -56,7 +56,7 @@ at::Tensor pg_all_gather_bytes(
 
   c10d::AllgatherOptions ag_opts;
   ag_opts.asyncOp = false;
-  pg->all_gather_single(out_buf, in_buf, ag_opts);
+  pg->_allgather_base(out_buf, in_buf, ag_opts);
 
   return out_buf.cpu();
 }
