@@ -254,7 +254,7 @@ _cupti_monitor.enable_hes_early()
 
         with TemporaryDirectoryName() as out_dir:
             self.assertIsNone(_cupti_monitor.get_monitor())
-            monitor = _cupti_monitor.start_collection(out_dir, raw_buffer_dump=True)
+            monitor = _cupti_monitor.start_collection(out_dir)
             self.assertIs(monitor, _cupti_monitor.get_monitor())
 
             x = torch.randn(64, 64, device="cuda")
@@ -282,10 +282,10 @@ _cupti_monitor.enable_hes_early()
     def test_cupti_monitor_collection_repeated_lifecycle(self):
         from torch.profiler import _cupti_monitor
 
-        for raw_dump in (False, True):
+        for _ in range(2):
             with TemporaryDirectoryName() as out_dir:
                 self.assertIsNone(_cupti_monitor.get_monitor())
-                _cupti_monitor.start_collection(out_dir, raw_buffer_dump=raw_dump)
+                _cupti_monitor.start_collection(out_dir)
 
                 x = torch.randn(32, 32, device="cuda")
                 y = torch.sigmoid(x)
@@ -296,17 +296,19 @@ _cupti_monitor.enable_hes_early()
                 self.assertIsNotNone(stats)
                 self.assertIsNone(_cupti_monitor.get_monitor())
 
-                expected_file = (
-                    _cupti_monitor._RAW_BUFFER_FILE
-                    if raw_dump
-                    else _cupti_monitor._RECORD_FILE
-                )
                 self.assertTrue(
                     os.path.exists(os.path.join(out_dir, _cupti_monitor._META_FILE))
                 )
-                self.assertTrue(os.path.exists(os.path.join(out_dir, expected_file)))
+                self.assertTrue(
+                    os.path.exists(
+                        os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE)
+                    )
+                )
                 self.assertGreater(
-                    os.path.getsize(os.path.join(out_dir, expected_file)), 0
+                    os.path.getsize(
+                        os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE)
+                    ),
+                    0,
                 )
 
     def test_cupti_monitor_multithread_runtime_thread_assignment(self):
