@@ -1072,6 +1072,7 @@ static std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordi
   }
 
   std::vector<Tensor> result;
+  result.reserve(dim.size());
   for (const auto i : c10::irange(dim.size())) {
     TORCH_CHECK( coordinates[i].dim() == 1, "torch.gradient expected each element of spacing to have one dimension, but got an element with ", coordinates[i].dim(), " dimensions!");
     int64_t direction = maybe_wrap_dim(dim[i], self.dim());
@@ -1109,6 +1110,7 @@ static std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordi
 
 static std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> spacing, IntArrayRef dim, int64_t edge_order) {
   std::vector<Tensor> result;
+  result.reserve(dim.size());
   for (const auto i : c10::irange(dim.size())) {
       int64_t direction = maybe_wrap_dim(dim[i], self.dim());
       const auto& ax_dx = spacing[i];

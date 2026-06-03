@@ -1114,7 +1114,7 @@ _EXTRA_TYPE_PROMOTION_RULE_SET = {
 
 
 class ElementwiseTypePromotionRuleSetGenerator:
-    """Hackly distilling info from reference ops decorated with elementwise type promotion rule.
+    """Hackily distilling info from reference ops decorated with elementwise type promotion rule.
 
     The goal is to retrieve the decorator
 

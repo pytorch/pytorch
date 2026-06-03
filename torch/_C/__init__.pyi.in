@@ -1623,6 +1623,8 @@ class PyTorchFileReader:
     def __init__(self, buffer: IO[bytes]) -> None: ...
     def get_record(self, name: str) -> bytes: ...
     def get_all_records(self) -> list[str]: ...
+    def get_record_size(self, name: str) -> _int: ...
+    def get_storage_from_record(self, name: str, numel: _int, dtype: dtype) -> Tensor: ...
     def serialization_id(self) -> str: ...
 
 class PyTorchFileWriter:
@@ -2574,6 +2576,7 @@ class _XpuDeviceProperties:
     memory_bus_width: _int
     sub_group_sizes: list[_int]
     local_mem_size: _int
+    last_level_cache_size: _int
     has_fp16: _bool
     has_fp64: _bool
     has_atomic64: _bool
@@ -2581,6 +2584,7 @@ class _XpuDeviceProperties:
     has_subgroup_matrix_multiply_accumulate: _bool
     has_subgroup_matrix_multiply_accumulate_tensor_float32: _bool
     has_subgroup_2d_block_io: _bool
+    is_integrated_gpu: _bool
     total_memory: _int
     gpu_subslice_count: _int
     architecture: _int
