@@ -3478,6 +3478,13 @@ class PermuteView(BaseView):
         size = self.data.get_size()
         return [size[i] for i in self.dims]
 
+    def get_stride(self) -> Sequence[Expr]:
+        assert OrderedSet(self._map_neg_dims(self.dims)) == OrderedSet(
+            range(len(self.dims))
+        )
+        stride = self.data.get_stride()
+        return [stride[i] for i in self.dims]
+
     def make_reindexer(
         self,
     ) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
