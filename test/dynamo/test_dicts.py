@@ -2375,6 +2375,20 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, d.pop)
 
     @make_dynamo_test
+    def test_delitem(self):
+        d = self.thetype({"a": 1, "b": 2})
+        self.assertIsNone(d.__delitem__("a"))
+        self.assertEqual(d, {"b": 2})
+
+        d = self.thetype({"a": 1})
+        self.assertRaises(TypeError, d.__delitem__)
+        self.assertEqual(d, {"a": 1})
+        self.assertRaises(TypeError, d.__delitem__, "a", "extra")
+        self.assertEqual(d, {"a": 1})
+        self.assertRaises(KeyError, d.__delitem__, "missing")
+        self.assertEqual(d, {"a": 1})
+
+    @make_dynamo_test
     def test_popitem(self):
         d = self.thetype({"a": 1})
         key, value = d.popitem()

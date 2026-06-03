@@ -6,7 +6,8 @@ for making VariableTracker instances usable as dictionary keys and set elements
 during symbolic execution. Used by both ConstDictVariable and SetVariable.
 """
 
-from typing import TYPE_CHECKING
+import collections
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -72,6 +73,74 @@ def is_hashable(x: VariableTracker) -> bool:
     return x.is_hashable()
 
 
+def _contains_unrealized_source_backed_lazy_constant(value: Any) -> bool:
+    # Unlike PyCodegen's container-only scan, hash deferral starts from a single
+    # candidate key. Walk the full VT object here so supported composite keys can
+    # defer their hash guard when any item reloads from source.
+    cache: set[int] = set()
+
+    def visit(obj: Any) -> bool:
+        idx = id(obj)
+        if idx in cache:
+            return False
+        cache.add(idx)
+
+        if isinstance(obj, variables.LazyConstantVariable):
+            return not obj.is_realized() and obj.source is not None
+
+        if isinstance(obj, HashableTracker):
+            return visit(obj.vt)
+
+        if isinstance(obj, VariableTracker):
+            obj = obj.unwrap()
+            if visit(obj):
+                return True
+            return any(
+                visit(subvalue)
+                for key, subvalue in obj.__dict__.items()
+                if key not in obj._nonvar_fields
+            )
+
+        if isinstance(obj, (list, tuple, set, frozenset)):
+            return any(visit(subvalue) for subvalue in obj)
+
+        if isinstance(obj, (dict, collections.OrderedDict)):
+            return any(visit(key) or visit(subvalue) for key, subvalue in obj.items())
+
+        return False
+
+    return visit(value)
+
+
+def _can_defer_hash_guard(vt: VariableTracker) -> bool:
+    # Keep these local: list/set variable modules import HashableTracker.
+    from .lists import SliceVariable, TupleVariable
+    from .sets import FrozensetVariable
+
+    def can_hash_item(item: VariableTracker) -> bool:
+        if _contains_unrealized_source_backed_lazy_constant(item):
+            return _can_defer_hash_guard(item)
+        return is_hashable(item)
+
+    if (
+        isinstance(vt, variables.LazyConstantVariable)
+        and not vt.is_realized()
+        and vt.source is not None
+    ):
+        return True
+
+    if isinstance(vt, TupleVariable):
+        return all(can_hash_item(item) for item in vt.items)
+
+    if isinstance(vt, SliceVariable):
+        return vt.is_hashable() and all(can_hash_item(item) for item in vt.items)
+
+    if isinstance(vt, FrozensetVariable):
+        return all(can_hash_item(item.vt) for item in vt.set_items)
+
+    return False
+
+
 class RawHash:
     """Wraps a pre-computed hash value to bypass int.__hash__'s modular reduction.
 
@@ -101,9 +170,20 @@ class HashableTracker:
 
     _MISSING = object()
 
-    def __init__(self, vt: VariableTracker) -> None:
+    def __init__(self, vt: VariableTracker, *, defer_guard: bool = False) -> None:
         # We specialize SymNodes
         vt = specialize_symnode(vt)
+        self.vt: VariableTracker
+        self._defer_guard = False
+
+        if defer_guard and _can_defer_hash_guard(vt):
+            # Dict side-effect replay can reload this key from its
+            # source later. Use identity hashing until a dict operation actually
+            # observes key equality and needs the real constant value.
+            self._hash = id(self)
+            self.vt = vt
+            self._defer_guard = True
+            return
 
         # Fast path for unrealized LazyVariableTrackers: check and hash without
         # realizing, to avoid inserting guards.  If the fast-path check fails,
@@ -168,6 +248,11 @@ class HashableTracker:
     def __hash__(self) -> int:
         return self._hash
 
+    def materialize(self) -> "HashableTracker":
+        if not self._defer_guard:
+            return self
+        return HashableTracker(variables.LazyVariableTracker.realize_all(self.vt))
+
     def __eq__(self, other: object) -> bool:
         """
         Checks equality between two HashableTracker instances.
@@ -183,6 +268,8 @@ class HashableTracker:
         """
         if not isinstance(other, HashableTracker):
             return False
+        if self._defer_guard or other._defer_guard:
+            return self is other
         if self.vt is other.vt:
             return True
 

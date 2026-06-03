@@ -12,6 +12,7 @@ It includes functionality for:
 
 import collections
 import dataclasses
+import functools
 import re
 import sys
 import types
@@ -46,6 +47,8 @@ from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
+from .variables.hashable import HashableTracker
+from .variables.lazy import LazyConstantVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.script_object import TorchScriptObjectVariable
 from .variables.tensor import (
@@ -61,6 +64,34 @@ if TYPE_CHECKING:
     from torch._dynamo.variables.builder import GraphArg
 
     from .symbolic_convert import InstructionTranslatorBase
+
+
+@functools.cache
+def _lazy_constant_container_vt_types() -> tuple[type[VariableTracker], ...]:
+    # Keep these imports local: container VTs reference PyCodegen for
+    # reconstruction type annotations and several are imported through
+    # torch._dynamo.variables during startup.
+    from .variables.dicts import ConstDictVariable, MappingProxyVariable
+    from .variables.lists import BaseListVariable, SliceVariable
+    from .variables.sets import SetVariable
+    from .variables.user_defined import (
+        UserDefinedDictVariable,
+        UserDefinedListVariable,
+        UserDefinedSetVariable,
+        UserDefinedTupleVariable,
+    )
+
+    return (
+        BaseListVariable,
+        ConstDictVariable,
+        MappingProxyVariable,
+        SetVariable,
+        SliceVariable,
+        UserDefinedDictVariable,
+        UserDefinedListVariable,
+        UserDefinedSetVariable,
+        UserDefinedTupleVariable,
+    )
 
 
 @dataclasses.dataclass
@@ -130,6 +161,47 @@ class PyCodegen:
 
     def graph_output_vars(self) -> list[VariableTracker]:
         return [x.variable for x in self.graph_outputs.values()]
+
+    @staticmethod
+    def _contains_unrealized_source_backed_lazy_constant(value: Any) -> bool:
+        cache: set[int] = set()
+        container_vt_types = _lazy_constant_container_vt_types()
+
+        def visit(obj: Any) -> bool:
+            idx = id(obj)
+            if idx in cache:
+                return False
+            cache.add(idx)
+
+            if isinstance(obj, LazyConstantVariable):
+                return not obj.is_realized() and obj.source is not None
+
+            if isinstance(obj, HashableTracker):
+                return visit(obj.vt)
+
+            if isinstance(obj, VariableTracker):
+                obj = obj.unwrap()
+                if visit(obj):
+                    return True
+                if not isinstance(obj, container_vt_types):
+                    return False
+                return any(
+                    visit(subvalue)
+                    for key, subvalue in obj.__dict__.items()
+                    if key not in obj._nonvar_fields
+                )
+
+            if isinstance(obj, (list, tuple, set, frozenset)):
+                return any(visit(subvalue) for subvalue in obj)
+
+            if isinstance(obj, (dict, collections.OrderedDict)):
+                return any(
+                    visit(key) or visit(subvalue) for key, subvalue in obj.items()
+                )
+
+            return False
+
+        return visit(value)
 
     def call_reconstruct(
         self, value: Union[VariableTracker, Source, "GraphArg"]
@@ -304,7 +376,21 @@ class PyCodegen:
             ):
                 return self(value.source)
 
-        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
+        if (
+            isinstance(value, LazyConstantVariable)
+            and not value.is_realized()
+            and value.source is not None
+        ):
+            # The value only survived into residual bytecode. Reload it from
+            # its source instead of baking in the trace-time constant and
+            # installing a CONSTANT_MATCH guard.
+            return self(value.source)
+
+        if (
+            not self._contains_unrealized_source_backed_lazy_constant(value)
+            and value.is_python_constant()
+            and is_safe_constant(value.as_python_constant())
+        ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
