@@ -35,6 +35,19 @@ class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
             # Re-enter the mode to support nested control flow
             with self:
                 return while_loop_node(*args, **kwargs)
+        # This case is used when torch.cond() or torch.while_loop()
+        # are rewritten to accept input mutations
+        if (
+            func is torch.ops.higher_order.auto_functionalized_v2
+            and len(args) > 0
+            and _is_control_flow_op(args[0])
+        ):
+            from torch._higher_order_ops.auto_functionalize import (
+                auto_functionalized_v2_dense,
+            )
+
+            with self:
+                return auto_functionalized_v2_dense(*args, **kwargs)
         return func(*args, **kwargs)
 
 
@@ -113,8 +126,25 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
                     while_loop_node(*args, **kwargs)
 
                 return func(*args, **kwargs)
+        elif (
+            func is torch.ops.higher_order.auto_functionalized_v2
+            and len(args) > 0
+            and _is_control_flow_op(args[0])
+        ):
+            from torch._higher_order_ops.auto_functionalize import (
+                auto_functionalized_v2_dense,
+            )
+
+            with self:
+                return auto_functionalized_v2_dense(*args, **kwargs)
         else:
             return func(*args, **kwargs)
+
+
+def _is_control_flow_op(func: object) -> bool:
+    return (
+        func is torch.ops.higher_order.cond or func is torch.ops.higher_order.while_loop
+    )
 
 
 def _check_no_cond_kwargs(kwargs) -> None:
@@ -129,6 +159,10 @@ def _is_boolean_scalar_cuda_tensor(pred: object) -> bool:
         and pred.dtype == torch.bool
         and pred.is_cuda
     )
+
+
+def _parse_mutated_arg_indices(mutated_arg_indices: str) -> set[int]:
+    return {int(i) for i in mutated_arg_indices.split(",") if i}
 
 
 @contextmanager
@@ -185,12 +219,15 @@ def while_loop_node(
     body_fn,
     carried_inputs,
     additional_inputs,
+    *,
+    mutated_arg_indices: str = "",
 ):
     flat_carried_inputs, carried_spec = pytree.tree_flatten(carried_inputs)
     if not all(isinstance(inp, torch.Tensor) for inp in flat_carried_inputs):
         raise RuntimeError(
             "CUDA graph while_loop conditional nodes only support tensor carried_inputs"
         )
+    mutated_input_indices = _parse_mutated_arg_indices(mutated_arg_indices)
 
     loop_carried = pytree.tree_map_only(
         torch.Tensor, lambda inp: inp.clone(), carried_inputs
@@ -226,5 +263,11 @@ def while_loop_node(
                 f"cond_fn must return a boolean scalar CUDA tensor but got {pred}"
             )
         current_cuda_graph.set_conditional_handle_for_current_node(pred)
+
+    for idx, (input_arg, carried) in enumerate(
+        zip(flat_carried_inputs, flat_loop_carried)
+    ):
+        if idx in mutated_input_indices:
+            input_arg.copy_(carried)
 
     return loop_carried
