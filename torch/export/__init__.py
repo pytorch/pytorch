@@ -154,6 +154,8 @@ def export(
       ``OrderedDict`` containing all above types.
 
     """
+    from torch._dynamo.functional_export import _StrictExportGetItemDefaultStopHandler
+
     from ._trace import _export
 
     if not isinstance(mod, torch.nn.Module):
@@ -168,16 +170,17 @@ def export(
         )
 
     try:
-        return _export(
-            mod,
-            args,
-            kwargs,
-            dynamic_shapes,
-            strict=strict,
-            preserve_module_call_signature=preserve_module_call_signature,
-            pre_dispatch=True,
-            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-        )
+        with _StrictExportGetItemDefaultStopHandler():
+            return _export(
+                mod,
+                args,
+                kwargs,
+                dynamic_shapes,
+                strict=strict,
+                preserve_module_call_signature=preserve_module_call_signature,
+                pre_dispatch=True,
+                prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+            )
     except Exception as e:
         draft_export_msg = (
             "The error above occurred when calling torch.export.export. If you would "

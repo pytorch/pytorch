@@ -120,6 +120,8 @@ from .object_protocol import (
     generic_neg,
     generic_pos,
     generic_repr,
+    maybe_get_python_type,
+    pysequence_check,
     vt_add,
     vt_getitem,
     vt_identity_compare,
@@ -254,6 +256,11 @@ BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # In the builtin var, we check if there is a tensor in the first args position,
 # if not, we swap the args and use the r* version of the op.
 BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
+
+# Sentinel for `inspect.getattr_static` lookups that must distinguish
+# "attribute absent" from "attribute is None" (e.g. `__reversed__ = None`
+# opt-out).
+_MISSING_SENTINEL = object()
 
 
 def populate_builtin_to_tensor_fn_map() -> None:
@@ -1512,10 +1519,34 @@ class BuiltinVariable(BaseBuiltinVariable):
                 # provides call_function dispatch first.
                 method_name = "__eq__" if fn is operator.eq else "__ne__"
                 return args[0].call_method(tx, method_name, list(args[1:]), kwargs)
+
+            def has_slice_default_stop_with_non_unit_step(
+                key: VariableTracker,
+            ) -> bool:
+                items = key.items if isinstance(key, TupleVariable) else [key]
+                for item in items:
+                    if not isinstance(item, variables.SliceVariable):
+                        continue
+                    step = item.items[2]
+                    if step.is_constant_none():
+                        continue
+                    if not step.is_python_constant():
+                        continue
+                    step_value = step.as_python_constant()
+                    if (
+                        type(step_value) is int
+                        and step_value > 0
+                        and step_value != 1
+                        and item.items[1].is_constant_none()
+                    ):
+                        return True
+                return False
+
             if (
                 fn is operator.getitem
                 and type(args[0]) is TensorVariable
                 and tx.output.export
+                and has_slice_default_stop_with_non_unit_step(args[1])
             ):
                 return args[0].method___getitem__(tx, args[1])
             proxy = tx.output.create_proxy(
@@ -2474,11 +2505,33 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_reversed(
         self, tx: "InstructionTranslatorBase", obj: VariableTracker
-    ) -> VariableTracker | None:
-        if obj.has_unpack_var_sequence(tx):
-            items = list(reversed(obj.unpack_var_sequence(tx)))
-            return variables.TupleVariable(items)
-        return None
+    ) -> VariableTracker:
+        # Mirrors CPython's builtin_reversed_impl (Python/enumobject.c)
+        # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/enumobject.c#L353-L395
+        # 1. Look up __reversed__ via _PyObject_LookupSpecial. If found, call it.
+        # 2. Else require PySequence_Check (sq_item). If absent, TypeError.
+        # 3. Else build a reverse sequence iterator over __len__ + __getitem__.
+
+        obj_type = maybe_get_python_type(obj)
+
+        # Type-level __reversed__ lookup, mirrors _PyObject_LookupSpecial.
+        # getattr_static skips descriptors / metaclass. CPython treats
+        # `__reversed__ = None` on the type as an explicit opt-out, raising
+        # TypeError even if the sequence protocol would otherwise work.
+        reversed_attr = inspect.getattr_static(
+            obj_type, "__reversed__", _MISSING_SENTINEL
+        )
+        if reversed_attr is None:
+            raise_type_error(tx, f"'{obj_type.__name__}' object is not reversible")
+        if reversed_attr is not _MISSING_SENTINEL:
+            return obj.call_method(tx, "__reversed__", [], {})
+
+        if not pysequence_check(obj_type):
+            raise_type_error(tx, "argument to reversed() must be a sequence")
+
+        return variables.UserFunctionVariable(
+            polyfills.builtins.reversed_sequence_iterator
+        ).call_function(tx, [obj], {})
 
     def call_sorted(
         self,
@@ -3528,17 +3581,17 @@ class ListBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/listobject.c#L1265-L1287
+        if kwargs:
+            raise_type_error(
+                tx,
+                "list() takes no keyword arguments",
+            )
         if len(args) == 0:
             return ListVariable([], mutation_type=ValueMutationNew())
         elif len(args) > 1:
             raise_type_error(
                 tx,
                 f"list expected at most 1 argument, got {len(args)}",
-            )
-        elif kwargs:
-            raise_type_error(
-                tx,
-                "list() takes no keyword arguments",
             )
 
         obj = args[0]
@@ -3566,7 +3619,7 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
         lst = ListVariable([], mutation_type=ValueMutationNew())
-        lst.call_method(tx, "extend", [args[0]], kwargs)
+        lst.call_method(tx, "extend", [args[0]], {})
         return lst
 
     def call_method(

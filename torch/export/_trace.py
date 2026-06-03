@@ -899,6 +899,7 @@ def _export_to_torch_ir(
                 if torch._export.config.use_new_tracer_experimental:
                     from torch._dynamo.functional_export import (
                         _dynamo_graph_capture_for_export,
+                        _StrictExportGetItemDefaultStopHandler,
                         dynamo_graph_capture_for_export,
                     )
 
@@ -914,7 +915,8 @@ def _export_to_torch_ir(
                     # things like copy.deepcopy(ep.graph_module) not crash.
                     # see test_export.py::test_custom_tag_metadata_re_export
                     # Once we delete the old strict export, we can use
-                    gm_torch_level = dynamo_graph_capture(*args, **kwargs)
+                    with _StrictExportGetItemDefaultStopHandler():
+                        gm_torch_level = dynamo_graph_capture(*args, **kwargs)
                     # We can't serialize entire fake mode yet, so this is to make sure
                     # things like copy.deepcopy(ep.graph_module) not crash.
                     # see test_export.py::test_custom_tag_metadata_re_export

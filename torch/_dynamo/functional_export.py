@@ -237,6 +237,94 @@ class ModuleToTrace(torch.nn.Module):
 ExportTracerOutput = namedtuple("ExportTracerOutput", ["flat_args", "out_spec"])
 
 
+class _StrictExportGetItemDefaultStopHandler(torch.overrides.TorchFunctionMode):
+    def _override(
+        self, func: Callable[..., Any], args: Any
+    ) -> Callable[[], Any] | None:
+        if func is not torch.Tensor.__getitem__:
+            return None
+        if not args or not isinstance(args[0], torch.Tensor):
+            return None
+
+        tensor = args[0]
+        items = list(args[1]) if isinstance(args[1], tuple) else [args[1]]
+        has_default_stop_step_slice = any(
+            isinstance(item, slice)
+            and item.stop is None
+            and isinstance(item.step, int)
+            and item.step > 1
+            for item in items
+        )
+        if not has_default_stop_step_slice:
+            return None
+
+        index_ellipsis = None
+        dim_consuming_items = 0
+        for i, item in enumerate(items):
+            if item is Ellipsis:
+                if index_ellipsis is not None:
+                    return None
+                index_ellipsis = i
+            elif item is not None:
+                dim_consuming_items += 1
+
+        if index_ellipsis is not None:
+            n_none_slices = tensor.ndim - dim_consuming_items
+            if n_none_slices < 0:
+                return None
+            items[index_ellipsis : index_ellipsis + 1] = [slice(None)] * n_none_slices
+
+        def rewrite(dim: int, current_ndim: int, item: Any) -> Any | None:
+            if item is None:
+                return dim + 1, current_ndim + 1, (torch.unsqueeze, [dim])
+            if dim >= current_ndim:
+                return None
+            if isinstance(item, int):
+                return dim, current_ndim - 1, (torch.select, [dim, item])
+            if isinstance(item, slice):
+                step = 1 if item.step is None else item.step
+                if not isinstance(step, int) or step <= 0:
+                    return None
+                if item.start is None and item.stop is None and step == 1:
+                    return dim + 1, current_ndim, (lambda t: t, ())
+                return (
+                    dim + 1,
+                    current_ndim,
+                    (torch.ops.aten.slice.Tensor, [dim, item.start, item.stop, step]),
+                )
+            return None
+
+        dim = 0
+        current_ndim = tensor.ndim
+        sequence = []
+        for item in items:
+            if (result := rewrite(dim, current_ndim, item)) is None:
+                return None
+            dim, current_ndim, call_spec = result
+            sequence.append(call_spec)
+
+        def run() -> Any:
+            result = tensor
+            for method, method_args in sequence:
+                result = method(result, *method_args)
+            return result
+
+        return run
+
+    def __torch_function__(
+        self,
+        func: Callable[..., Any],
+        types: tuple[type, ...],
+        args: tuple[object, ...] = (),
+        kwargs: dict[str, object] | None = None,
+    ) -> Any:
+        if kwargs:
+            return func(*args, **kwargs)
+        if (override := self._override(func, args)) is not None:
+            return override()
+        return func(*args, **(kwargs or {}))
+
+
 # mypy: disable-error-code="no-untyped-def,var-annotated,assignment,index,operator"
 class DynamoGraphTransformer(torch.fx.Transformer):
     """Graph transformer for dynamo export that flattens inputs/outputs without complex matching."""
@@ -874,6 +962,7 @@ def op_overload_wrapper({", ".join(arg_list)}):
         if torch._dynamo.config.install_free_tensors:
             raise AssertionError("install_free_tensors must be False")
         with (
+            _StrictExportGetItemDefaultStopHandler(),
             _compiling_state_context(),
             torch._dynamo.config.patch(
                 replay_side_effects=False, side_effect_replay_policy="warn"
@@ -925,7 +1014,7 @@ def _dynamo_graph_capture_for_export(
 
     def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
         # This sets the is_exporting flag when building guards.
-        with _compiling_state_context():
+        with _StrictExportGetItemDefaultStopHandler(), _compiling_state_context():
             flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
             check_user_input_output(flat_inputs, UserErrorType.INVALID_INPUT)
             module_to_trace = ModuleToTrace(mod, in_spec)
@@ -958,6 +1047,7 @@ def _dynamo_graph_capture_for_export(
             )
 
             with (
+                _StrictExportGetItemDefaultStopHandler(),
                 get_metrics_context(),
                 dynamo_timed("fullgraph_capture"),
                 dynamo_config_ctx,

@@ -399,6 +399,27 @@ class TestDynamismExpression(TestCase):
         self.assertEqual(slice_nodes[0].args[2:], (None, None, 6))
         self.assertTrue(torchdynamo.utils.same(model(x, y), ep.module()(x, y)))
 
+    def test_export_slice_python_indexing_default_bounds_static(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x[::6, :]
+
+        model = Model()
+        x = torch.randn(30, 6)
+        ep = export(model, (x,))
+
+        graph_str = str(ep.graph_module.graph)
+        self.assertNotIn(str(sys.maxsize), graph_str)
+
+        slice_nodes = [
+            node
+            for node in ep.graph_module.graph.nodes
+            if node.op == "call_function" and node.target is torch.ops.aten.slice.Tensor
+        ]
+        self.assertEqual(len(slice_nodes), 1)
+        self.assertEqual(slice_nodes[0].args[2:], (None, None, 6))
+        self.assertTrue(torchdynamo.utils.same(model(x), ep.module()(x)))
+
     def test_export_slice_python_indexing_explicit_maxsize(self):
         class Model(torch.nn.Module):
             def forward(self, x):
