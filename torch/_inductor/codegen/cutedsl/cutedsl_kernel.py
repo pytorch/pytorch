@@ -33,6 +33,7 @@ from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
 
 from ...utils import sympy_index_symbol
+from .aux_scalars import CuteDSLAuxScalarBindings
 from .cutedsl_op_overrides import CuteDSLCSEVariable, CuteDSLOpOverrides
 from .lane_analysis import classify_lane_expr
 
@@ -43,7 +44,16 @@ MAIN_SUFFIX = "main"
 
 log = logging.getLogger(__name__)
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
-cutedsl_pexpr = PythonPrinter().doprint
+
+
+class CuteDSLPrinter(PythonPrinter):
+    def _print_ToFloat(self, expr: sympy.Expr) -> str:
+        if len(expr.args) != 1:
+            raise AssertionError("ToFloat expects exactly one argument")
+        return f"cutlass.Float64({self._print(expr.args[0])})"
+
+
+cutedsl_pexpr = CuteDSLPrinter().doprint
 
 
 class CuteDSLKernelWrapper:
@@ -174,6 +184,7 @@ class CuteDSLTemplateKernel(Kernel):
 
         # Track all tensor buffers added during modification processing
         self.collected_tensor_buffers: list[str] = []
+        self.aux_scalar_bindings = CuteDSLAuxScalarBindings()
 
         # Captured IR nodes keyed by buffer name. Used by call_kernel to emit
         # reinterpret_tensor for view captures in the python_argdefs loop.
@@ -204,6 +215,13 @@ class CuteDSLTemplateKernel(Kernel):
 
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
+        symbol_codes = self.aux_scalar_bindings.symbol_codes_with_renames(
+            self.rename_indexing
+        )
+        if symbol_codes:
+            expr = expr.xreplace(
+                {symbol: sympy.Symbol(code) for symbol, code in symbol_codes.items()}
+            )
         return cutedsl_pexpr(expr)
 
     def create_cse_var(self, *args, **kwargs):
@@ -238,6 +256,9 @@ class CuteDSLTemplateKernel(Kernel):
 
         """Render the kernel using the template, returning PartialRender object with hooks."""
         self._template_kwargs = dict(kwargs)
+        self.aux_scalar_bindings = CuteDSLAuxScalarBindings(
+            tuple(kwargs.get("AUX_SCALAR_SYMBOLS", ()))
+        )
 
         # Available {{}} hooks for jinja rendering
         template_env = {
@@ -246,6 +267,7 @@ class CuteDSLTemplateKernel(Kernel):
             "get_output": self.get_output,
             "get_tensor_buffers": self.get_tensor_buffers,
             "add_tensor_inputs": self.add_tensor_inputs,
+            "define_aux_scalars": self.define_aux_scalars,
             "unpack_buffers": self.unpack_buffers,
             "modification": self.modification,
             "set_cute_hash": self.set_cute_hash,
@@ -417,13 +439,17 @@ class CuteDSLTemplateKernel(Kernel):
         buffer_names = []
         for buffer in buffers:
             if isinstance(buffer, sympy.Expr):
-                # Symbolic size/index expressions are not kernel tensor inputs yet.
                 continue
             remapped_name = self.args.input(buffer.get_name())
             if remapped_name not in self.collected_tensor_buffers:
                 self.collected_tensor_buffers.append(remapped_name)
             buffer_names.append(remapped_name)
         return buffer_names
+
+    def define_aux_scalars(self, symbols):
+        """Return the runtime scalar tuple for captured symbolic scalars."""
+        assert tuple(symbols) == self.aux_scalar_bindings.symbols
+        return self.aux_scalar_bindings.tuple_expr(self.rename_indexing, cutedsl_pexpr)
 
     def unpack_buffers(self, buffer_list_name: str, *, indent_width: int = 4):
         """Generate buffer unpacking code via render hook."""

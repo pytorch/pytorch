@@ -15,6 +15,7 @@ from sympy import Expr, Integer
 import torch
 from torch.fx import GraphModule
 
+from ...codegen.cutedsl.aux_scalars import CuteDSLAuxScalarBindings
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
@@ -53,6 +54,16 @@ class FlexFlashConfig:
     mask_mod_packed_intervals: tuple[PackedMaskInterval, ...] | None = None
 
 
+def collect_aux_scalar_symbols(*buffer_groups: Sequence[Any]) -> tuple[sympy.Symbol, ...]:
+    symbols: dict[sympy.Symbol, None] = {}
+    for buffers in buffer_groups:
+        for buffer in buffers:
+            if isinstance(buffer, sympy.Expr):
+                for symbol in sorted(buffer.free_symbols, key=lambda s: s.name):
+                    symbols.setdefault(symbol, None)
+    return tuple(symbols)
+
+
 def get_flex_flash_fwd_configs(
     has_score_mod: bool,
     has_aux_tensors: bool,
@@ -63,6 +74,7 @@ def get_flex_flash_fwd_configs(
     has_mask_aux_tensors: bool = False,
     mask_mod_graph_module: GraphModule | None = None,
     mask_mod_other_buffers: Sequence[TensorBox] = (),
+    aux_scalar_symbols: Sequence[sympy.Symbol] = (),
 ) -> list[FlexFlashConfig]:
     cuda_major = None
     if torch.cuda.is_available() and (
@@ -86,14 +98,15 @@ def get_flex_flash_fwd_configs(
     )
     mask_mod_packed_intervals = None
     if has_mask_mod and cuda_major in (10, 11) and mask_mod_graph_module is not None:
-        mask_mod_packed_intervals = select_packed_mask_intervals(mask_mod_graph_module)
+        mask_mod_packed_intervals = select_packed_mask_intervals(
+            mask_mod_graph_module,
+            mask_mod_other_buffers,
+            CuteDSLAuxScalarBindings(tuple(aux_scalar_symbols)).symbol_codes(
+                cast_integer_to_int32=True
+            ),
+        )
     if mask_mod_packed_intervals is not None:
-        if any(isinstance(buf, sympy.Expr) for buf in mask_mod_other_buffers):
-            # Packed interval rendering addresses tensor captures through aux_tensors,
-            # but symbolic scalar captures are not aux tensor inputs.
-            mask_mod_packed_intervals = None
-        else:
-            mask_mod_vec_size = DEFAULT_MASK_MOD_VEC_SIZE
+        mask_mod_vec_size = DEFAULT_MASK_MOD_VEC_SIZE
 
     if (
         has_score_mod
@@ -281,33 +294,12 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
     return len(placeholders) == 4 and output_val.target is torch.ops.aten.full.default
 
 
-@functools.lru_cache(maxsize=1)
-def _is_symbol_from_tensor_shape(symbol: sympy.Symbol, shape_env: Any) -> bool:
-    from torch._dynamo.source import TensorPropertySource
-
-    sources = shape_env.var_to_sources.get(symbol, [])
-    return any(isinstance(s, TensorPropertySource) for s in sources)
-
-
-def has_unsupported_captured_scalars(
+def has_unsupported_cpu_scalar_tensor_captures(
     score_mod_other_buffers: Sequence[Any],
     mask_mod_other_buffers: Sequence[Any],
 ) -> bool:
-    """Return True when FLASH captures dynamic scalars it cannot inline.
-
-    With dynamic=True, captured Python scalars in score_mod or mask_mod may
-    become sympy symbols from LocalSource (captured ints) or 0-dim CPU tensors
-    (captured floats). Symbols from TensorPropertySource are allowed because
-    tensor size/stride values are resolved at runtime, but LocalSource symbols
-    cannot be inlined into the CuteDSL template.
-    """
-    shape_env = V.graph.sizevars.shape_env
-
+    """Return True for CPU 0-d tensor captures that need scalarization first."""
     for buf in list(score_mod_other_buffers) + list(mask_mod_other_buffers):
-        if isinstance(buf, sympy.Expr):
-            for symbol in buf.free_symbols:
-                if not _is_symbol_from_tensor_shape(symbol, shape_env):
-                    return True
         if isinstance(buf, TensorBox):
             device = buf.get_device()
             size = buf.get_size()
@@ -470,18 +462,27 @@ def create_flex_flash_attention_kernel(
         subgraphs.append(subgraph_buffer)
     subgraphs.append(mask_graph_buffer)
 
+    aux_scalar_symbols = collect_aux_scalar_symbols(
+        score_mod_other_buffers, mask_mod_other_buffers
+    )
+
     configs = get_flex_flash_fwd_configs(
         has_score_mod=has_score_mod,
-        has_aux_tensors=len(score_mod_other_buffers) > 0,
+        has_aux_tensors=any(
+            not isinstance(buffer, sympy.Expr) for buffer in score_mod_other_buffers
+        ),
         device=device,
         score_mod_graph_module=(
             subgraph.graph_module if has_score_mod and subgraph is not None else None
         ),
         score_mod_other_buffers=score_mod_other_buffers,
         has_mask_mod=needs_block_mask,
-        has_mask_aux_tensors=len(mask_mod_other_buffers) > 0,
+        has_mask_aux_tensors=any(
+            not isinstance(buffer, sympy.Expr) for buffer in mask_mod_other_buffers
+        ),
         mask_mod_graph_module=mask_graph.graph_module,
         mask_mod_other_buffers=mask_mod_other_buffers,
+        aux_scalar_symbols=aux_scalar_symbols,
     )
     error: NotImplementedError | None = None
     for conf in configs:
@@ -498,6 +499,7 @@ def create_flex_flash_attention_kernel(
                 MASK_MOD_VEC_SIZE=conf.mask_mod_vec_size,
                 MASK_MOD_PACKED_INTERVALS=conf.mask_mod_packed_intervals,
                 MASK_MOD_OTHER_BUFFERS=mask_mod_other_buffers,
+                AUX_SCALAR_SYMBOLS=aux_scalar_symbols,
                 NEEDS_BLOCK_MASK=needs_block_mask,
                 SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
@@ -618,6 +620,7 @@ def create_flex_flash_attention_backward_kernel(
     joint_subgraph_buffer: Any | None = None,
     score_mod_other_buffers: list[TensorBox] | None = None,
     mask_graph_buffer: SubgraphResults | None = None,
+    mask_mod_other_buffers: list[TensorBox] | None = None,
     q_num_blocks: TensorBox | None = None,
     q_indices: TensorBox | None = None,
     full_q_num_blocks: TensorBox | None = None,
@@ -789,6 +792,9 @@ def create_flex_flash_attention_backward_kernel(
     if has_block_mask:
         subgraphs.append(mask_graph_buffer)
 
+    aux_scalar_symbols = collect_aux_scalar_symbols(
+        score_mod_other_buffers or (), mask_mod_other_buffers or ()
+    )
     configs = _get_flex_flash_bwd_configs()
 
     error: NotImplementedError | None = None
@@ -808,6 +814,7 @@ def create_flex_flash_attention_backward_kernel(
                 HAS_DQ_WRITE_ORDER_FULL=dq_write_order_full is not None,
                 HAS_DQ_KV_ORDER=has_dq_kv_order,
                 DQ_KV_ORDER_SPT=dq_kv_order_spt_for_flash,
+                AUX_SCALAR_SYMBOLS=aux_scalar_symbols,
                 SUPPORTS_DQ_KV_ORDER=supports_dq_kv_order,
                 SUPPORTS_SPT=supports_spt,
                 DETERMINISTIC_BACKWARD_ENABLED=deterministic_backward_enabled,

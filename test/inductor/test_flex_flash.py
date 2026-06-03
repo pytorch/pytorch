@@ -96,6 +96,7 @@ def force_flex_flash_score_mod_vec_size(vec_size: int):
         has_mask_aux_tensors=False,
         mask_mod_graph_module=None,
         mask_mod_other_buffers=(),
+        aux_scalar_symbols=(),
     ):
         if has_score_mod and has_aux_tensors:
             return [
@@ -121,6 +122,7 @@ def use_explicit_flex_flash_mask_mod_vec_size(vec_size: int | None):
         has_mask_aux_tensors=False,
         mask_mod_graph_module=None,
         mask_mod_other_buffers=(),
+        aux_scalar_symbols=(),
     ):
         if has_mask_mod:
             return [
@@ -2553,8 +2555,8 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             self._flash_triton_dynamic(q, k, v)
 
     def test_captured_float_fails_with_dynamic(self):
-        """Test that captured Python float fails with dynamic=True."""
-        val = 2.0  # Captured float
+        """Test that captured Python float still fails as a CPU scalar tensor."""
+        val = 2.0
 
         def score_mod(score, _b, _h, _q, _k):
             return score * val
@@ -2562,29 +2564,21 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         compiled_fn = torch.compile(flex_attention, dynamic=True)
         q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"captures a dynamic scalar \(SymInt/SymFloat\)"
-        ):
+        with self.assertRaisesRegex(RuntimeError, r"captures a 0-dim CPU tensor"):
             compiled_fn(
                 q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
             )
 
-    def test_captured_int_fails_with_dynamic(self):
-        """Captured Python int should fail with dynamic=True."""
-        val = 2  # Captured int
+    def test_captured_int_works_with_dynamic(self):
+        """Captured Python int should work with dynamic=True."""
+        val = 2
 
         def score_mod(score, _b, _h, _q, _k):
             return score * val
 
-        compiled_fn = torch.compile(flex_attention, dynamic=True)
         q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"captures a dynamic scalar \(SymInt/SymFloat\)"
-        ):
-            compiled_fn(
-                q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
-            )
+        flash_vs_triton(q, k, v, score_mod=score_mod, dynamic=True)
 
     @xfailIfSM120OrLater
     def test_captured_float_works_with_static(self):
@@ -2774,6 +2768,46 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             model(x)
 
         self.assertEqual(len(backend.graphs), 1, "Expected a single dynamic graph")
+
+    def _compare_flash_triton_backward(self, score_mod_factory):
+        def run(q, k, v, backend):
+            batch = q.size(0)
+            return flex_attention(
+                q,
+                k,
+                v,
+                score_mod=score_mod_factory(batch),
+                kernel_options={"BACKEND": backend},
+            )
+
+        flash = torch.compile(lambda q, k, v: run(q, k, v, "FLASH"), dynamic=True)
+        triton = torch.compile(lambda q, k, v: run(q, k, v, "TRITON"), dynamic=True)
+
+        q, k, v = create_test_tensors(
+            seq_len=128, device="cuda", dtype=torch.float16, requires_grad=True
+        )
+        q_ref, k_ref, v_ref = [x.detach().clone().requires_grad_() for x in (q, k, v)]
+        out_flash = flash(q, k, v)
+        out_triton = triton(q_ref, k_ref, v_ref)
+        self.assertEqual(out_flash, out_triton, atol=3e-2, rtol=3e-2)
+
+        grad = torch.randn_like(out_flash)
+        grads_flash = torch.autograd.grad(out_flash, (q, k, v), grad)
+        grads_triton = torch.autograd.grad(out_triton, (q_ref, k_ref, v_ref), grad)
+        for actual, expected in zip(grads_flash, grads_triton):
+            self.assertEqual(actual, expected, atol=3e-2, rtol=3e-2)
+
+    def test_dynamic_symbol_closure_in_score_mod_backward(self):
+        """Captured SymInt in score_mod should propagate through FLASH backward."""
+        self._compare_flash_triton_backward(
+            lambda batch: lambda score, _b, _h, _q, _kv: score * (batch + 1)
+        )
+
+    def test_dynamic_symfloat_closure_in_score_mod_backward(self):
+        """SymFloat expressions in score_mod should lower inside FLASH backward."""
+        self._compare_flash_triton_backward(
+            lambda batch: lambda score, _b, _h, _q, _kv: score * ((batch + 1) / 2.0)
+        )
 
 
 class TestHierarchicalIndex(InductorTestCase):
