@@ -30,15 +30,37 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: arc,lf
 
+  # Resolve the stable CUDA version from generate_binary_build_matrix.py
+  # (CUDA_STABLE) so the build/test environment tracks it without hardcoding.
+  get-cuda-version:
+    name: get-cuda-version
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'pytorch'
+    outputs:
+      stable-cuda: ${{ steps.get.outputs.stable-cuda }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: 1
+      - name: Get stable CUDA version
+        id: get
+        run: |
+          set -eou pipefail
+          echo "stable-cuda=$(python3 .github/scripts/get_ci_variable.py --cuda-stable-version)" >> "${GITHUB_OUTPUT}"
+
   build:
     name: torchtitan-x-pytorch-build
     if: github.repository_owner == 'pytorch'
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - get-cuda-version
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.0-py3-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 8.9 9.0 10.0'
       runner: linux.24xlarge.memory
@@ -51,7 +73,7 @@ jobs:
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
     secrets: inherit
 
   test:
@@ -60,12 +82,13 @@ jobs:
     needs:
       - build
       - get-label-type
+      - get-cuda-version
     with:
-      build-environment: linux-jammy-cuda13.0-py3-gcc11
+      build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3-gcc11
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
     secrets: inherit
