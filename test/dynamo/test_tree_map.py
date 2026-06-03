@@ -7,6 +7,7 @@ from typing import NamedTuple
 import torch
 import torch._dynamo
 import torch.utils._pytree as python_pytree
+import torch.utils.pytree as generic_pytree
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -43,6 +44,7 @@ def _tuple_is_leaf(node):
 
 
 pytree_modules = {
+    "generic": generic_pytree,
     "python": python_pytree,
 }
 if python_pytree._cxx_pytree_dynamo_traceable:
