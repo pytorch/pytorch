@@ -884,7 +884,6 @@ inductor_one_sample["xpu"] = {
     "logspace": {f16, i32, i64},
     "logspace.tensor_overload": {f16, f32, f64, i32, i64},
     "masked_logsumexp": {i64},
-    "max_pool2d_with_indices_backward": {f16, f32, f64},
     "new_empty_strided": {f16},
     "nn.functional.adaptive_avg_pool3d": {f16},
     "nn.functional.adaptive_max_pool1d": {f16, f32},
