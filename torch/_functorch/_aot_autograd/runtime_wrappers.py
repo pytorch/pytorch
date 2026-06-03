@@ -24,6 +24,10 @@ import torch
 import torch.fx as fx
 from torch import Tensor
 from torch._dynamo import config as dynamo_config
+from torch._dynamo.graph_bytecode_inputs import (
+    index_to_external_object_weakref,
+    set_external_object_by_index,
+)
 from torch._dynamo.callback import callback_handler, CallbackTrigger
 from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
 from torch._guards import (
@@ -2706,6 +2710,13 @@ class _AutogradForwardEpilogue:
         ]
         ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
         ctx._materialize_non_diff_grads = False
+
+        ctx._external_objects = {
+            k: ref()
+            for k, ref in index_to_external_object_weakref.items()
+            if ref() is not None
+        }
+
         return tuple(raw_returns)
 
 
@@ -3429,6 +3440,13 @@ class _AOTDispatchAutogradFunctionFactory:
                         )
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
             ctx._materialize_non_diff_grads = False
+
+            ctx._external_objects = {
+                k: ref()
+                for k, ref in index_to_external_object_weakref.items()
+                if ref() is not None
+            }
+
             return tuple(raw_returns)
 
         forward_epilogue.finalize = _codegen_finalize  # type: ignore[method-assign]
@@ -3534,6 +3552,11 @@ class _AOTDispatchAutogradFunctionFactory:
                             "donated buffer."
                         ),
                     )
+
+                if hasattr(ctx, "_external_objects"):
+                    for idx, obj in ctx._external_objects.items():
+                        if obj is not None:
+                            set_external_object_by_index(idx, obj)
 
                 return call_func_at_runtime_with_args(
                     compiled_bw,
