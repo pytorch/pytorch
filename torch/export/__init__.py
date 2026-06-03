@@ -61,7 +61,7 @@ def export(
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any] | None = None,
     *,
-    # dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | AdditionalInputs | ShapesCollection | ShapesSpec | ParamsSpec | None
+    # dynamic_shapes: _DynamicShapesInput | AdditionalInputs | ShapesCollection
     dynamic_shapes: Any = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),

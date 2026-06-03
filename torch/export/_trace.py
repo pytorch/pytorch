@@ -122,6 +122,11 @@ log = logging.getLogger(__name__)
 # of these containers, so they are *not* part of this alias.
 _LegacyDynamicShapesSpec: TypeAlias = dict[str, Any] | tuple[Any, ...] | list[Any]
 
+# Full set of accepted ``dynamic_shapes`` inputs across export entry points.
+_DynamicShapesInput: TypeAlias = (
+    _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None
+)
+
 
 @dataclasses.dataclass
 class ExportDynamoConfig:
@@ -872,8 +877,8 @@ def _export_to_torch_ir(
     f: Callable,
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None = None,
-    dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None = None,
-    *,
+    dynamic_shapes: _DynamicShapesInput = None,
+    strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
     prefer_deferred_runtime_asserts_over_guards: bool = False,
@@ -901,12 +906,6 @@ def _export_to_torch_ir(
     # dynamic. We will unwrap ints in fakify later.
     args, kwargs = pytree.tree_map_only(int, _IntWrapper, (args, kwargs))
 
-    # `dynamic_shapes` is overloaded: it can be the legacy spec OR the new
-    # ShapesSpec/ParamsSpec. To use the new API, users must explicitly
-    # wrap their entries in a ShapesSpec(...) or ParamsSpec(...) — a bare
-    # dict is always interpreted as the legacy form (to avoid ambiguity).
-    # TODO(future): expose this via an explicit `shapes_spec=` kwarg on
-    # `torch.export.export` (matching `torch.compile`'s separate kwarg).
     is_shapes_spec = isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec))
 
     if not is_shapes_spec:
@@ -1462,7 +1461,7 @@ def _process_export_inputs(
     tuple[object, ...],
     dict[str, object],
     TreeSpec,
-    _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None,
+    _DynamicShapesInput,
     Callable[[ExportedProgram], None],
 ]:
     """
@@ -1504,7 +1503,7 @@ def _process_export_inputs(
     _, original_in_spec = pytree.tree_flatten((args, kwargs))
 
     verify_additional_inputs: Callable[[ExportedProgram], None]
-    out_dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None
+    out_dynamic_shapes: _DynamicShapesInput
     if isinstance(dynamic_shapes, torch.export.AdditionalInputs):
         verify_additional_inputs = dynamic_shapes.verify  # type: ignore[assignment]
         out_dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)  # type: ignore[assignment]
@@ -1653,7 +1652,7 @@ def _strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None,
+    dynamic_shapes: _DynamicShapesInput,
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     prefer_deferred_runtime_asserts_over_guards: bool,
@@ -2140,7 +2139,7 @@ def _non_strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None,
+    dynamic_shapes: _DynamicShapesInput,
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     prefer_deferred_runtime_asserts_over_guards: bool,
@@ -2338,7 +2337,7 @@ def _export_for_training(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None = None,
-    dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None = None,
+    dynamic_shapes: _DynamicShapesInput = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
@@ -2347,8 +2346,6 @@ def _export_for_training(
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
 
-    # ShapesSpec encodes constraints in shape_env, so legacy constraint passes
-    # should see None.
     is_shapes_spec = isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec))
 
     if is_shapes_spec and prefer_deferred_runtime_asserts_over_guards:
@@ -2523,7 +2520,7 @@ def _export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None = None,
-    dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None = None,
+    dynamic_shapes: _DynamicShapesInput = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
@@ -2576,8 +2573,6 @@ def _export(
 
     from torch._utils_internal import export_training_ir_rollout_check
 
-    # ShapesSpec encodes constraints in shape_env, so legacy constraint passes
-    # should see None.
     is_shapes_spec = isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec))
     range_constraints_dynamic_shapes = None if is_shapes_spec else dynamic_shapes
 
