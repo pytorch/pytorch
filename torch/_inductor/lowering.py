@@ -1034,7 +1034,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
-        return fallback_handler(aten.view.dtype)(x, dtype)
+        x_cont = ir.ExternKernel.require_contiguous_strides(x)
+        return fallback_handler(aten.view.dtype)(x_cont, dtype)
     else:
         return TensorBox(DtypeView.create(x, dtype))
 
@@ -3359,8 +3360,6 @@ add_layout_constraint(
     aten.native_dropout.default, constrain_to_fx_strides_if_fallback_random
 )
 
-add_layout_constraint(aten.view.dtype, constrain_to_fx_strides)
-
 
 def sdpa_constraint(fx_node, *args, **kwargs):
     """Apply stride constraints to SDPA inputs, ensuring dense last dimension."""
@@ -3783,7 +3782,7 @@ def copy(self, src, non_blocking=False):
 def clone(x, *, memory_format=None):
     # Don't materialize the layout here based on memory_format,
     # as we want to give the scheduler opportunity to perform layout optimization.
-    # Let the downstram op handle the input stride as needed.
+    # Let the downstream op handle the input stride as needed.
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
