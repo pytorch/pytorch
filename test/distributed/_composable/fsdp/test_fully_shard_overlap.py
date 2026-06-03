@@ -28,6 +28,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    IS_LINUX,
     MI200_ARCH,
     run_tests,
     TEST_HPU,
@@ -189,6 +190,7 @@ class TestFullyShardOverlap(FSDPTest):
         # )
         self.assertLessEqual(fwd_bwd_time, ref_fwd_bwd_time)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/131081")
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
     def test_fully_shard_post_optim_event_overlap(self):
@@ -332,7 +334,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
                 *args,
                 **kwargs,
             )
-            rs_input, rs_event, *rest = result
+            rs_input, rs_event, post_reduce_stream, *rest = result
             if reduce_scatter_group not in delay_streams:
                 delay_streams[reduce_scatter_group] = device_module.Stream()
             ds = delay_streams[reduce_scatter_group]
@@ -340,7 +342,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             with device_module.stream(ds):
                 device_module._sleep(int(sleep_ms * get_cycles_per_ms()))
                 delayed_event = ds.record_event()
-            return (rs_input, delayed_event, *rest)
+            return (rs_input, delayed_event, post_reduce_stream, *rest)
 
         dist.barrier()
         _pg_mod.foreach_reduce = wrapped

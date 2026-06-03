@@ -428,7 +428,7 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
 
     Args:
         error_message (str): When saved tensors default hooks are used when they
-                             have been are disabled, a RuntimeError with this
+                             have been disabled, a RuntimeError with this
                              error message gets raised.
 
     Example::
