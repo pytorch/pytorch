@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import contextvars
 import functools
 import inspect
 import itertools
@@ -427,6 +428,11 @@ def _get_total_cache_entry_count(
     return torch._C._dynamo.eval_frame._get_total_cache_entry_count(code)
 
 
+_use_wrapper_parameters_for_module_methods_ctx = contextvars.ContextVar(
+    "use_wrapper_parameters_for_module_methods", default=False
+)
+
+
 class OptimizedModule(torch.nn.Module):
     """
     Wraps the original nn.Module object and later patches its
@@ -462,7 +468,8 @@ class OptimizedModule(torch.nn.Module):
         self._super_module_initialized = True
 
         # Installs the params/buffer
-        self._orig_mod = mod  # `super().__setattr__` will register this module
+        with self._use_wrapper_parameters_for_module_methods():
+            self._orig_mod = mod  # `super().__setattr__` will register this module
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
@@ -581,6 +588,107 @@ class OptimizedModule(torch.nn.Module):
         self.__dict__ = state
         self._initialize()
 
+    def __getattribute__(self, name: str) -> Any:
+        if name == "_parameters":
+            try:
+                attrs = object.__getattribute__(self, "__dict__")
+                if _use_wrapper_parameters_for_module_methods_ctx.get():
+                    return attrs["_parameters"]
+
+                modules = attrs.get("_modules")
+                if modules is not None and "_orig_mod" in modules:
+                    return modules["_orig_mod"]._parameters
+
+                orig_mod = attrs.get("_orig_mod")
+                if orig_mod is not None:
+                    return orig_mod._parameters
+            except AttributeError:
+                pass
+
+        return super().__getattribute__(name)
+
+    @contextlib.contextmanager
+    def _use_wrapper_parameters_for_module_methods(self) -> Generator[None, None, None]:
+        token = _use_wrapper_parameters_for_module_methods_ctx.set(True)
+        try:
+            yield
+        finally:
+            _use_wrapper_parameters_for_module_methods_ctx.reset(token)
+
+    def named_parameters(
+        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+    ):
+        iterator = super().named_parameters(
+            prefix=prefix,
+            recurse=recurse,
+            remove_duplicate=remove_duplicate,
+        )
+        while True:
+            with self._use_wrapper_parameters_for_module_methods():
+                try:
+                    item = next(iterator)
+                except StopIteration:
+                    return
+            yield item
+
+    def _apply(self, fn, recurse=True):
+        def fn_with_proxied_parameters(*args, **kwargs):
+            token = _use_wrapper_parameters_for_module_methods_ctx.set(False)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                _use_wrapper_parameters_for_module_methods_ctx.reset(token)
+
+        with self._use_wrapper_parameters_for_module_methods():
+            return super()._apply(fn_with_proxied_parameters, recurse=recurse)
+
+    def _replicate_for_data_parallel(self):
+        with self._use_wrapper_parameters_for_module_methods():
+            return super()._replicate_for_data_parallel()
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars) -> None:
+        with self._use_wrapper_parameters_for_module_methods():
+            return super()._save_to_state_dict(destination, prefix, keep_vars)
+
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ) -> None:
+        for hook in self._load_state_dict_pre_hooks.values():
+            hook(
+                state_dict,
+                prefix,
+                local_metadata,
+                strict,
+                missing_keys,
+                unexpected_keys,
+                error_msgs,
+            )
+
+        attrs = object.__getattribute__(self, "__dict__")
+        load_state_dict_pre_hooks = attrs["_load_state_dict_pre_hooks"]
+        saved_load_state_dict_pre_hooks = load_state_dict_pre_hooks.copy()
+        load_state_dict_pre_hooks.clear()
+        with self._use_wrapper_parameters_for_module_methods():
+            try:
+                return super()._load_from_state_dict(
+                    state_dict,
+                    prefix,
+                    local_metadata,
+                    strict,
+                    missing_keys,
+                    unexpected_keys,
+                    error_msgs,
+                )
+            finally:
+                load_state_dict_pre_hooks.update(saved_load_state_dict_pre_hooks)
+
     @property
     # pyrefly: ignore [bad-override]
     def training(self) -> bool:
@@ -600,6 +708,14 @@ class OptimizedModule(torch.nn.Module):
         return getattr(self._orig_mod, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
+        if _use_wrapper_parameters_for_module_methods_ctx.get() and name in {
+            "_parameters",
+            "_buffers",
+            "_modules",
+            "_is_replica",
+        }:
+            return super().__setattr__(name, value)
+
         # Allow patching over class attributes
         if hasattr(type(self), name):
             return super().__setattr__(name, value)
@@ -609,6 +725,14 @@ class OptimizedModule(torch.nn.Module):
         return setattr(self._orig_mod, name, value)
 
     def __delattr__(self, name: str) -> None:
+        if _use_wrapper_parameters_for_module_methods_ctx.get() and name in {
+            "_parameters",
+            "_buffers",
+            "_modules",
+            "_is_replica",
+        }:
+            return super().__delattr__(name)
+
         # This mirrors `__setattr__`
         if hasattr(type(self), name):
             return super().__delattr__(name)
