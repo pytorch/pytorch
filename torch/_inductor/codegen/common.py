@@ -762,7 +762,6 @@ def check_shape(
         buffer.writeline(f"tl.static_assert({var}.shape == ({shape_str}))")
 
 
-
 class DataTypePropagation:
     def __init__(self, body: LoopBody) -> None:
         self.body = body

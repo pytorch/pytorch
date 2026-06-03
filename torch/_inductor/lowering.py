@@ -8597,6 +8597,46 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
 from torch._inductor.fx_passes.control_dependencies import control_deps
 
 
+def _add_passthrough_barriers(output, args, subgraph_ops):
+    """Create identity Pointwise barriers for pass-through outputs.
+
+    When a subgraph returns an input unchanged (pass-through), downstream
+    consumers see the original buffer and have no scheduling dependency on
+    the subgraph operations (e.g. wait_event).  Wrapping each pass-through
+    in an identity Pointwise that is realized creates a new buffer name.
+    Adding additional_buffer_deps from the barrier to the subgraph ops
+    forces the barrier (and therefore its consumers) after the subgraph.
+    """
+    input_ids = OrderedSet([id(a) for a in args])
+
+    subgraph_buf_names = [
+        op.get_name() for op in subgraph_ops if isinstance(op, ir.OperationBuffer)
+    ]
+    if not subgraph_buf_names:
+        return output
+
+    def maybe_barrier(val):
+        if id(val) not in input_ids or not hasattr(val, "make_loader"):
+            return val
+        barrier = Pointwise.create(
+            device=val.get_device(),
+            dtype=val.get_dtype(),
+            inner_fn=val.make_loader(),
+            ranges=list(val.get_size()),
+        )
+        op_count = len(V.graph.operations)
+        barrier.realize()
+        for barrier_op in V.graph.operations[op_count:]:
+            assert barrier_op.operation_name is not None
+            for buf_name in subgraph_buf_names:
+                V.graph.additional_buffer_deps[barrier_op.operation_name].add(buf_name)
+        return barrier
+
+    if isinstance(output, (list, tuple)):
+        return type(output)(maybe_barrier(v) for v in output)
+    return maybe_barrier(output)
+
+
 @register_lowering(control_deps, type_promotion_kind=None)
 def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     """
@@ -8613,7 +8653,7 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     original_dep_nodes = V.graph.current_node.args[0]
     assert isinstance(original_dep_nodes, tuple)
 
-    dep_names = []
+    dep_names: list[str] = []
     for dep, orig_node in zip(additional_deps, original_dep_nodes, strict=True):
         dep_ir_nodes = [
             dep_leaf
@@ -8671,11 +8711,18 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     # b = control_deps(a, mm, ...)
     # c = control_deps(b, wait, ...)
     # if c == a, then you have a cycle.
-    for op in new_ops:
+    subgraph_ops = V.graph.operations[operation_len:]
+    for op in subgraph_ops:
         for dep_name in dep_names:
             op_name = op.operation_name
             assert op_name is not None
             V.graph.additional_buffer_deps[op_name].add(dep_name)
+
+    # Pass-through outputs are the same IR nodes as inputs, so downstream
+    # consumers would have no scheduling dependency on the subgraph ops
+    # (e.g. wait_event).  Interpose identity barriers to fix ordering.
+    if subgraph_ops:
+        output = _add_passthrough_barriers(output, args, subgraph_ops)
 
     return output
 
