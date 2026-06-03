@@ -878,7 +878,7 @@ def _compile_fx_inner(
         # AOTAutogradCache entries refer to FXGraphCache keys for both the
         # forward and backward graphs. Preserve those keys only when an
         # AOTAutograd cache miss is actively preparing an entry.
-        and not graph_kwargs["aot_autograd_needs_fx_graph_cache_key"]
+        and not graph_kwargs.get("aot_autograd_needs_fx_graph_cache_key", False)
         and not torch._functorch.config.bundled_autograd_cache
     ):
         # trigger the real recompilation for _LazyGraphModule before returning
