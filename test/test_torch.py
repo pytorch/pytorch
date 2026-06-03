@@ -7851,6 +7851,31 @@ class TestTorch(TestCase):
         self.assertEqual(complexdouble_storage.type(), 'torch.ComplexDoubleStorage')
         self.assertIs(complexdouble_storage.dtype, torch.complex128)
 
+    def test_storage_cast_quantized_raises(self):
+        # Quantized storage is not self-contained: it has no scale or
+        # zero_point, so dtype conversion cannot produce meaningful results
+        # and previously could segfault. Verify it raises a clear error
+        # instead. See #169210.
+        quantized_storage_classes = [
+            torch.QInt32Storage,
+            torch.QInt8Storage,
+            torch.QUInt8Storage,
+            torch.QUInt4x2Storage,
+            torch.QUInt2x4Storage,
+        ]
+        target_methods = [
+            "bfloat16", "float", "double", "complex_double", "complex_float",
+            "half", "long", "int", "short", "char", "byte", "bool",
+        ]
+        for storage_class in quantized_storage_classes:
+            storage = storage_class(5)
+            for method in target_methods:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"Cannot cast quantized storage",
+                ):
+                    getattr(storage, method)()
+
     def test_storage_byteswap(self):
         input = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
         swapped_8bytes = [7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8]
