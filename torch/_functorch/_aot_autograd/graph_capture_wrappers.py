@@ -63,6 +63,7 @@ from .functional_utils import (
     _check_if_mutation_can_be_in_graph,
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
+    copy_mutated_input,
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
@@ -821,16 +822,16 @@ def apply_in_graph_mutations(
                 inpt_old  # type: ignore[assignment]
             )
         with torch.no_grad(), maybe_preserve_vc:
-            inpt_old.copy_(inpt_new)
+            copy_mutated_input(inpt_old, inpt_new)
     elif input_info.mutations_under_no_grad_or_inference_mode:
         # Under no_grad = run under no_grad (we still bump the VC though)
         # (inference_mode will also bump the VC, as long as the tensor in question
         # was created outside of inference_mode)
 
         with torch.no_grad():
-            inpt_old.copy_(inpt_new)
+            copy_mutated_input(inpt_old, inpt_new)
     else:
-        inpt_old.copy_(inpt_new)
+        copy_mutated_input(inpt_old, inpt_new)
 
 
 # This creates the final function that we want to trace using make_fx(),
@@ -974,7 +975,7 @@ def create_functionalized_fn(
                             # triggering check_inplace during tracing.  The
                             # requires_grad case is checked at runtime instead
                             with torch.no_grad():
-                                before.copy_(after)
+                                copy_mutated_input(before, after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
                         )
@@ -1024,7 +1025,7 @@ def create_functionalized_fn(
                                 raise AssertionError(
                                     f"expected both before and after to be Tensors, got {type(before)} and {type(after)}"
                                 )
-                            before.copy_(after)
+                            copy_mutated_input(before, after)
 
             if aot_config.keep_inference_input_mutations:
                 # Note: This is a bit annoying. There's a layering issue here, where:

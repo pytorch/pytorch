@@ -62,7 +62,13 @@ from torch._functorch.aot_autograd import (
     make_boxed_func,
     SerializableAOTDispatchCompiler,
 )
-from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
+from torch._guards import StorageMetadata, TracingContext
+from torch._inductor.codecache import (
+    _needs_storage_metadata_for_cache_key,
+    code_hash,
+    FxGraphCache,
+    output_code_log,
+)
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     cudagraphs_log,
@@ -102,7 +108,11 @@ from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
+from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    guarding_hint_or_throw,
+    SymExprPrinter,
+)
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
@@ -842,6 +852,59 @@ def compile_fx_inner(
         )
 
 
+def _source_from_aot_input_desc(desc: Any):
+    from torch._functorch._aot_autograd.descriptors import (
+        PlainAOTInput,
+        SyntheticBaseAOTInput,
+        ViewBaseAOTInput,
+    )
+
+    while isinstance(desc, (SyntheticBaseAOTInput, ViewBaseAOTInput)):
+        desc = desc.base_of
+
+    if isinstance(desc, PlainAOTInput):
+        tracing_context = TracingContext.try_get()
+        sources = (
+            None
+            if tracing_context is None
+            else tracing_context.aotautograd_arg_pos_to_source
+        )
+        if sources is not None and desc.idx < len(sources):
+            return sources[desc.idx]
+    return None
+
+
+def _guarding_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(guarding_hint_or_throw(value))
+
+
+def _add_storage_metadata_guards_for_cache_sensitive_ops(
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
+) -> None:
+    tracing_context = TracingContext.try_get()
+    if tracing_context is None or not _needs_storage_metadata_for_cache_key(gm):
+        return
+
+    placeholders = (node for node in gm.graph.nodes if node.op == "placeholder")
+    for node, arg in zip(placeholders, example_inputs):
+        if not isinstance(arg, torch.Tensor):
+            continue
+        source = _source_from_aot_input_desc(node.meta.get("desc"))
+        if source is None:
+            continue
+        tracing_context.guards_context.aotautograd_guards.append(
+            StorageMetadata(
+                source,
+                _guarding_int(arg.untyped_storage().size()),
+                _guarding_int(arg.storage_offset()),
+            )
+        )
+
+
 @time_and_log(attr="compilation time (in seconds)")
 def _compile_fx_inner(
     gm: GraphModule,
@@ -894,6 +957,7 @@ def _compile_fx_inner(
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
+    _add_storage_metadata_guards_for_cache_sensitive_ops(gm, example_inputs)
 
     assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
         f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"

@@ -16,6 +16,7 @@ from torch import Tensor
 from torch._C import _functionalization
 from torch._logging import getArtifactLogger
 from torch._opaque_base import OpaqueBase
+from torch._prims_common import compute_storage_length
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -83,6 +84,53 @@ def from_fun(t: object) -> object:
         return t
     sync_functional_tensor(t)
     return torch._from_functional_tensor(t.elem)
+
+
+# Some view mutations can update storage locations that are not part of the
+# input tensor's logical shape, for example as_strided() on a sliced input.
+def mutated_input_storage_copy_length(
+    original_inpt: torch.Tensor, updated_inpt: Any
+) -> int | None:
+    if not isinstance(updated_inpt, torch.Tensor):
+        return None
+    if is_traceable_wrapper_subclass(original_inpt) or is_traceable_wrapper_subclass(
+        updated_inpt
+    ):
+        return None
+    if (
+        original_inpt.layout != torch.strided
+        or updated_inpt.layout != torch.strided
+        or original_inpt.device != updated_inpt.device
+        or original_inpt.dtype != updated_inpt.dtype
+        or original_inpt.is_conj()
+        or updated_inpt.is_conj()
+        or original_inpt.is_neg()
+        or updated_inpt.is_neg()
+    ):
+        return None
+
+    try:
+        original_storage_len = compute_storage_length(original_inpt)
+        updated_storage_len = compute_storage_length(updated_inpt)
+    except RuntimeError:
+        return None
+
+    if updated_storage_len > updated_inpt.numel() and (
+        original_storage_len >= updated_storage_len
+    ):
+        return updated_storage_len
+    return None
+
+
+def copy_mutated_input(original_inpt: torch.Tensor, updated_inpt: Any) -> None:
+    storage_copy_length = mutated_input_storage_copy_length(original_inpt, updated_inpt)
+    if storage_copy_length is not None:
+        original_storage = original_inpt.as_strided((storage_copy_length,), (1,), 0)
+        updated_storage = updated_inpt.as_strided((storage_copy_length,), (1,), 0)
+        original_storage.copy_(updated_storage)
+        return
+
+    original_inpt.copy_(updated_inpt)
 
 
 def is_fun(t: object) -> TypeGuard[FunctionalTensor | Tensor]:

@@ -1790,13 +1790,14 @@ def _as_strided_scatter_meta(
     utils.validate_strides(stride)
 
     required_size = utils.compute_required_storage_length(size, stride, storage_offset)
+    storage_size = utils.clone_preserve_strides_storage_length(input)
     torch._check(
-        input.numel() >= required_size,
+        storage_size >= required_size,
         lambda: (
             f"as_strided_scatter: sizes {size}, strides {stride}, storage offset {storage_offset} "
             f" and itemsize {input.element_size()} requiring a storage size of "
             f"{required_size * input.element_size()} are out of bounds "
-            f"for storage of size {input.numel() * input.element_size()}"
+            f"for storage of size {storage_size * input.element_size()}"
         ),
     )
     torch._check(

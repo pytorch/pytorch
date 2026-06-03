@@ -1993,6 +1993,18 @@ def compute_required_storage_length(
     return 1 + storage_offset + max_offset
 
 
+def compute_storage_length(t: TensorLikeType):
+    return t.untyped_storage().nbytes() // t.element_size()
+
+
+def clone_preserve_strides_storage_length(t: TensorLikeType):
+    # Match native clone_preserve_strides: internally overlapping tensors use a
+    # logical clone instead of cloning and reinterpreting the physical storage.
+    if torch._debug_has_internal_overlap(t) == 1:
+        return t.numel()
+    return compute_storage_length(t)
+
+
 def check_in_bounds_for_storage(
     a: torch.TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
 ):
@@ -2162,9 +2174,9 @@ def layout_or_default(layout: torch.layout | None) -> torch.layout:
 
 
 def clone_preserve_strides(x):
-    needed_size = compute_required_storage_length(
-        x.size(), x.stride(), x.storage_offset()
-    )
+    if torch._debug_has_internal_overlap(x) == 1:
+        return x.clone()
+    needed_size = compute_storage_length(x)
     # Our eager implementations for *_scatter ops are all primitives w.r.t autograd,
     # so these as_strided() calls are not seen by autograd.
     # We need to mimic this behavior in our ref/prim implementations.

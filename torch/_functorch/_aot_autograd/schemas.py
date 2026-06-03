@@ -138,6 +138,7 @@ class InputAliasInfo:
     mutations_under_no_grad_or_inference_mode: bool
     mutation_inductor_storage_resize: bool
     mutates_storage_metadata: bool
+    mutation_requires_storage_copy: bool
     requires_grad: bool
     keep_input_mutations: bool
 
@@ -161,15 +162,18 @@ class InputAliasInfo:
         ):
             return MutationType.NOT_MUTATED
 
-        if _check_if_mutation_can_be_in_graph(
-            self.keep_input_mutations,
-            self.mutates_data,
-            self.mutates_metadata,
-            self.mutations_hidden_from_autograd,
-            self.mutations_under_no_grad_or_inference_mode,
-            self.mutates_storage_metadata,
-            self.mutation_inductor_storage_resize,
-            self.requires_grad,
+        if (
+            _check_if_mutation_can_be_in_graph(
+                self.keep_input_mutations,
+                self.mutates_data,
+                self.mutates_metadata,
+                self.mutations_hidden_from_autograd,
+                self.mutations_under_no_grad_or_inference_mode,
+                self.mutates_storage_metadata,
+                self.mutation_inductor_storage_resize,
+                self.requires_grad,
+            )
+            and not self.mutation_requires_storage_copy
         ):
             return MutationType.MUTATED_IN_GRAPH
 

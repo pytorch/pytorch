@@ -553,6 +553,57 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     return meta
 
 
+def _needs_storage_metadata_for_cache_key(gm: torch.fx.GraphModule) -> bool:
+    storage_metadata_targets = OrderedSet(
+        [
+            torch.as_strided,
+            torch.as_strided_scatter,
+            torch.diagonal_scatter,
+            torch.select_scatter,
+            torch.slice_scatter,
+            torch.ops.aten.as_strided.default,
+            torch.ops.aten.as_strided_scatter.default,
+            torch.ops.aten.diagonal_scatter.default,
+            torch.ops.aten.select_scatter.default,
+            torch.ops.aten.slice_scatter.default,
+        ]
+    )
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        for node in module.graph.nodes:
+            if (
+                node.op == "call_method"
+                and node.target
+                in (
+                    "as_strided",
+                    "as_strided_scatter",
+                    "diagonal_scatter",
+                    "select_scatter",
+                    "slice_scatter",
+                )
+            ) or (
+                node.op == "call_function" and node.target in storage_metadata_targets
+            ):
+                return True
+    return False
+
+
+def _extract_storage_metadata_for_cache_key(
+    example_inputs: Sequence[InputType],
+) -> tuple[tuple[object, object] | None, ...]:
+    metadata: list[tuple[object, object] | None] = []
+    for inp in example_inputs:
+        if isinstance(inp, torch.Tensor):
+            tensor_metadata = extract_tensor_metadata(inp)
+            metadata.append(
+                (tensor_metadata.storage_offset, tensor_metadata.storage_bytes)
+            )
+        else:
+            metadata.append(None)
+    return tuple(metadata)
+
+
 # Types that pickle handles natively via GLOBAL/INST opcodes even though their
 # __reduce_ex__ may raise TypeError. We must not treat these as unpicklable in
 # reducer_override to avoid infinite recursion.
@@ -1213,6 +1264,10 @@ class FxGraphHashDetails:
             else:
                 processed_inputs.append(inp)
         self.example_inputs = processed_inputs
+        if _needs_storage_metadata_for_cache_key(gm):
+            self.input_storage_metadata = _extract_storage_metadata_for_cache_key(
+                example_inputs
+            )
         self.cache_key_tag = cconfig.cache_key_tag
 
         # Order kwargs so hashing is stable to changes in kwarg order. Although

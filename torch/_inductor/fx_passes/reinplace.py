@@ -13,7 +13,7 @@ import torch.fx.node
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, StorageMetadata, TracingContext
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_functional,
@@ -24,8 +24,10 @@ from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
 from torch._inductor.virtualized import V
+from torch._prims_common import clone_preserve_strides_storage_length
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
+    guarding_hint_or_throw,
     GuardOnDataDependentSymNode,
     statically_known_true,
     sym_eq,
@@ -510,7 +512,7 @@ def _decompose_scatter_mutating(
     assert not node.kwargs
 
     if node.target is _generalized_scatter:
-        inp = graph_call_function(graph, aten.clone, inp)
+        inp = _clone_for_scatter_decomposition(graph, inp, view_ops)
 
     tmp = inp
     for view in _decode_view_ops(cast(EncodedViewOps, tuple(view_ops))):
@@ -527,12 +529,94 @@ def _decompose_scatter_mutating(
     return inp  # type: ignore[return-value]
 
 
-# View ops whose view_scatter op is lowered into mutations anyway,
-# so is never a pessimisation to decompose.
+def _clone_for_scatter_decomposition(
+    graph: torch.fx.Graph, inp: Any, view_ops: Sequence[Any]
+) -> torch.fx.Node:
+    if not isinstance(inp, torch.fx.Node):
+        return graph_call_function(graph, aten.clone, inp)
+
+    inp_val = inp.meta.get("val")
+    if not isinstance(inp_val, torch.Tensor):
+        return graph_call_function(graph, aten.clone, inp)
+
+    if torch._debug_has_internal_overlap(inp_val) == 1:
+        return graph_call_function(graph, aten.clone, inp)
+
+    storage_size = int(
+        guarding_hint_or_throw(clone_preserve_strides_storage_length(inp_val))
+    )
+    storage_nbytes = int(guarding_hint_or_throw(inp_val.untyped_storage().size()))
+    storage_offset = int(guarding_hint_or_throw(inp_val.storage_offset()))
+    _add_storage_metadata_guard_for_scatter_input(inp, storage_nbytes, storage_offset)
+    storage = graph_call_function(
+        graph,
+        aten.as_strided.default,
+        inp,
+        [storage_size],
+        [1],
+        0,
+    )
+    storage_clone = graph_call_function(graph, aten.clone, storage)
+    return graph_call_function(
+        graph,
+        aten.as_strided.default,
+        storage_clone,
+        list(inp_val.size()),
+        list(inp_val.stride()),
+        storage_offset,
+    )
+
+
+def _source_from_aot_input_desc(desc: Any):
+    tracing_context = TracingContext.try_get()
+    sources = (
+        None
+        if tracing_context is None
+        else tracing_context.aotautograd_arg_pos_to_source
+    )
+    if sources is None:
+        return None
+
+    from torch._functorch._aot_autograd.descriptors import (
+        PlainAOTInput,
+        SyntheticBaseAOTInput,
+        ViewBaseAOTInput,
+    )
+
+    while isinstance(desc, (SyntheticBaseAOTInput, ViewBaseAOTInput)):
+        desc = desc.base_of
+
+    if isinstance(desc, PlainAOTInput) and desc.idx < len(sources):
+        return sources[desc.idx]
+    return None
+
+
+def _add_storage_metadata_guard_for_scatter_input(
+    inp: torch.fx.Node, storage_size: int, storage_offset: int
+) -> None:
+    tracing_context = TracingContext.try_get()
+    if tracing_context is None:
+        return
+
+    source = _source_from_aot_input_desc(inp.meta.get("desc"))
+    if source is None:
+        return
+
+    tracing_context.guards_context.aotautograd_guards.append(
+        StorageMetadata(source, storage_size, storage_offset)
+    )
+
+
+# Native view_scatter ops clone_preserve_strides(input) before updating the
+# selected view. Use the mutating decomposition for all of them so compiled
+# outputs preserve backing storage/offset semantics when that storage is later
+# observed.
 _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
     [
         aten.as_strided.default,
         aten.diagonal.default,
+        aten.select.int,
+        aten.slice.Tensor,
     ]
 )
 

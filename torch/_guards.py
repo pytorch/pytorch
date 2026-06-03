@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import dis
-    from collections.abc import Callable, Generator, Iterator
+    from collections.abc import Callable, Generator, Iterator, Sequence
     from types import CodeType
 
     import sympy
@@ -486,6 +486,13 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 class StorageOverlap(GuardEnvExpr):
     overlapping_sources: list[Source]
     non_overlapping_sources: list[Source]
+
+
+@dataclasses.dataclass(frozen=True)
+class StorageMetadata(GuardEnvExpr):
+    input_source: Source
+    size: int
+    offset: int
 
 
 """
@@ -1112,6 +1119,8 @@ class TracingContext:
         self.loc_in_frame_positions: dis.Positions | None = None
         # this is only set after aot_autograd
         self.fw_metadata: ViewAndMutationMeta | None = None
+        # this is only set during aot_autograd
+        self.aotautograd_arg_pos_to_source: Sequence[Source | None] | None = None
         # this is only set when the DDPOptimizer is used
         self.ddp_optimizer_ctx: DDPOptimizerContext | None = None
         # this is only set after aot_autograd
