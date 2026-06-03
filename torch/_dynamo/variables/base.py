@@ -646,13 +646,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
         raise NotImplementedError
 
-    def has_unpack_var_sequence(self, tx: Any) -> bool:
-        try:
-            self.unpack_var_sequence(tx)
-            return True
-        except NotImplementedError:
-            return False
-
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
