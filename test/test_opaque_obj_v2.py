@@ -3263,6 +3263,150 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
             lambda: make_fx(fn, tracing_mode="fake")(torch.randn(4)),
         )
 
+    def test_reference_opaque_export_creation_errors(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                meta = Issue175968Meta()
+                return torch.ops._issue_175968_base.apply(x, meta)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked reference-type opaque object",
+            lambda: torch.export.export(M(), (torch.randn(4),), strict=False),
+        )
+
+        class MutatingModule(torch.nn.Module):
+            def forward(self, x):
+                self.meta = Issue175968Meta()
+                return torch.ops._issue_175968_base.apply(x, self.meta)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked reference-type opaque object",
+            lambda: torch.export.export(
+                MutatingModule(), (torch.randn(4),), strict=False
+            ),
+        )
+
+    def test_reference_opaque_dynamic_constant_allowances_error(self):
+        def dynamic_class_attr(x):
+            Issue175968Meta.SINGLETON = Issue175968Meta()
+            return torch.ops._issue_175968_base.apply(x, Issue175968Meta.SINGLETON)
+
+        try:
+            self.assertRaisesRegex(
+                RuntimeError,
+                "untracked reference-type opaque object",
+                lambda: make_fx(dynamic_class_attr, tracing_mode="fake")(
+                    torch.randn(4)
+                ),
+            )
+        finally:
+            if hasattr(Issue175968Meta, "SINGLETON"):
+                delattr(Issue175968Meta, "SINGLETON")
+
+        module_type = get_opaque_type_name(AddModule)
+        self.lib.define(
+            f"dynamic_module_mul({module_type} m, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::dynamic_module_mul",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def dynamic_module_mul_impl(m: AddModule, x: torch.Tensor) -> torch.Tensor:
+            return m(x, 2)
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::dynamic_module_mul", lib=self.lib
+        )
+        def dynamic_module_mul_fake(m: AddModule, x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        def dynamic_module(x):
+            return torch.ops._TestOpaqueObject.dynamic_module_mul(AddModule(), x)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked reference-type opaque object",
+            lambda: make_fx(dynamic_module, tracing_mode="fake")(torch.randn(4)),
+        )
+
+        class AllowAttrMeta(Issue175968Meta):
+            _allow_opaque_fx_constant = True
+
+        def dynamic_allow_attr(x):
+            return torch.ops._issue_175968_base.apply(x, AllowAttrMeta())
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked reference-type opaque object",
+            lambda: make_fx(dynamic_allow_attr, tracing_mode="fake")(torch.randn(4)),
+        )
+
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops._issue_175968_base.apply(x, self.meta)
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                self.child.meta = Issue175968Meta()
+                return self.child(x)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked reference-type opaque object",
+            lambda: make_fx(Parent(), tracing_mode="fake")(torch.randn(4)),
+        )
+
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    def test_reference_opaque_dynamic_device_mesh_errors(self):
+        from torch.distributed.device_mesh import (
+            _register_distributed_opaque_types,
+            DeviceMesh,
+        )
+
+        _register_distributed_opaque_types()
+        mesh_type = get_opaque_type_name(DeviceMesh)
+        self.lib.define(
+            f"dynamic_device_mesh_use({mesh_type} m, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::dynamic_device_mesh_use",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def dynamic_device_mesh_use_impl(
+            m: DeviceMesh, x: torch.Tensor
+        ) -> torch.Tensor:
+            return x + 1
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::dynamic_device_mesh_use", lib=self.lib
+        )
+        def dynamic_device_mesh_use_fake(
+            m: DeviceMesh, x: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        def dynamic_device_mesh(x):
+            mesh = DeviceMesh("cpu", [0], _init_backend=False, _rank=0)
+            return torch.ops._TestOpaqueObject.dynamic_device_mesh_use(mesh, x)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "untracked reference-type opaque object",
+            lambda: make_fx(dynamic_device_mesh, tracing_mode="fake")(torch.randn(4)),
+        )
+
     def test_hoisted_value_type_make_fx(self):
         def foo(x, hoisted_str):
             return op_with_string(x, hoisted_str)
