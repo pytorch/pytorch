@@ -4336,21 +4336,25 @@ class Scheduler:
             for stream_idx in self.node_to_stream.values()
         )
 
-        self._stream_op_stream_indices: set[int] = set()
-        self._stream_op_event_indices: set[int] = set()
+        self._stream_op_stream_indices: OrderedSet[int] = OrderedSet()
+        self._stream_op_event_indices: OrderedSet[int] = OrderedSet()
         if self._multi_stream_nodes:
             self._collect_stream_op_indices()
 
     def _collect_stream_op_indices(self) -> None:
-        _STREAM_OPS = {
-            "torch.ops.streams.fork.default",
-            "torch.ops.streams.join.default",
-            "torch.ops.streams.wait_stream.default",
-        }
-        _EVENT_OPS = {
-            "torch.ops.streams.record_event.default",
-            "torch.ops.streams.wait_event.default",
-        }
+        _STREAM_OPS = OrderedSet(
+            [
+                "torch.ops.streams.fork.default",
+                "torch.ops.streams.join.default",
+                "torch.ops.streams.wait_stream.default",
+            ]
+        )
+        _EVENT_OPS = OrderedSet(
+            [
+                "torch.ops.streams.record_event.default",
+                "torch.ops.streams.wait_event.default",
+            ]
+        )
 
         for sched_node in self.nodes:
             ir_node = sched_node.node

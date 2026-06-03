@@ -793,8 +793,12 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
 
     num_streams: int = 1
     stream_idx_to_user_obj_idx: dict[int, int] = dataclasses.field(default_factory=dict)
-    stream_op_stream_indices: set[int] = dataclasses.field(default_factory=set)
-    stream_op_event_indices: set[int] = dataclasses.field(default_factory=set)
+    stream_op_stream_indices: OrderedSet[int] = dataclasses.field(
+        default_factory=OrderedSet
+    )
+    stream_op_event_indices: OrderedSet[int] = dataclasses.field(
+        default_factory=OrderedSet
+    )
     setup_stream_cache: bool = True
 
     def codegen(self, code: IndentedBuffer) -> None:
@@ -808,9 +812,15 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
                 code.writeline(f"{DEFAULT_STREAM} = torch.cuda.current_stream()")
 
                 if self.num_streams > 1:
-                    non_default_user_obj_indices = set(self.stream_idx_to_user_obj_idx.values())
-                    default_indices = sorted(self.stream_op_stream_indices - non_default_user_obj_indices)
-                    new_indices = sorted(non_default_user_obj_indices & self.stream_op_stream_indices)
+                    non_default_user_obj_indices = OrderedSet(
+                        self.stream_idx_to_user_obj_idx.values()
+                    )
+                    default_indices = sorted(
+                        self.stream_op_stream_indices - non_default_user_obj_indices
+                    )
+                    new_indices = sorted(
+                        non_default_user_obj_indices & self.stream_op_stream_indices
+                    )
                     event_indices = sorted(self.stream_op_event_indices)
 
                     if default_indices or new_indices or event_indices:
@@ -1854,8 +1864,8 @@ class PythonWrapperCodegen(CodeGen):
         device_idx: int,
         num_streams: int = 1,
         stream_idx_to_user_obj_idx: dict[int, int] | None = None,
-        stream_op_stream_indices: set[int] | None = None,
-        stream_op_event_indices: set[int] | None = None,
+        stream_op_stream_indices: OrderedSet[int] | None = None,
+        stream_op_event_indices: OrderedSet[int] | None = None,
     ) -> None:
         if num_streams > 1:
             assert stream_idx_to_user_obj_idx is not None
@@ -1867,8 +1877,8 @@ class PythonWrapperCodegen(CodeGen):
                     self.last_seen_device_guard_index,
                     num_streams,
                     stream_idx_to_user_obj_idx,
-                    stream_op_stream_indices=stream_op_stream_indices or set(),
-                    stream_op_event_indices=stream_op_event_indices or set(),
+                    stream_op_stream_indices=stream_op_stream_indices or OrderedSet(),
+                    stream_op_event_indices=stream_op_event_indices or OrderedSet(),
                     setup_stream_cache=setup_stream_cache,
                 ),
             )

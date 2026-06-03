@@ -490,6 +490,153 @@ class TestControlDeps(InductorTestCase):
             "expected MutationOutput entries for pass-through values in control_deps",
         )
 
+    def test_stream_cache_setup_only_once(self):
+        """When codegen_device_guard_enter is called multiple times on the same
+        wrapper instance (e.g., forward + backward sharing a wrapper in
+        activation offloading), only the first call should set
+        setup_stream_cache=True."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        codegen = MagicMock(spec=PythonWrapperCodegen)
+        codegen._stream_cache_setup_done = False
+        codegen.last_seen_device_guard_index = None
+        codegen.writeline = MagicMock()
+
+        stream_map = {1: 10}
+
+        # Call the real method twice on the same instance
+        PythonWrapperCodegen.codegen_device_guard_enter(
+            codegen,
+            device_idx=0,
+            num_streams=2,
+            stream_idx_to_user_obj_idx=stream_map,
+        )
+        first_call_line = codegen.writeline.call_args_list[0][0][0]
+        self.assertTrue(first_call_line.setup_stream_cache)
+
+        PythonWrapperCodegen.codegen_device_guard_enter(
+            codegen,
+            device_idx=0,
+            num_streams=2,
+            stream_idx_to_user_obj_idx=stream_map,
+        )
+        second_call_line = codegen.writeline.call_args_list[1][0][0]
+        self.assertFalse(
+            second_call_line.setup_stream_cache,
+            "Second device guard entry should not re-execute stream cache setup",
+        )
+
+    @requires_gpu()
+    def test_stream_event_cache_functions(self):
+        """_setup_stream_event_cache populates thread-local caches that
+        _get_stream_by_index and _get_event_by_index read from."""
+        from torch._dynamo.variables.streams import (
+            _get_event_by_index,
+            _get_stream_by_index,
+            _setup_stream_event_cache,
+            _tls,
+        )
+
+        try:
+            _setup_stream_event_cache(
+                default_stream_indices=[0],
+                new_stream_indices=[1],
+                event_indices=[5],
+            )
+
+            s0 = _get_stream_by_index(0)
+            self.assertEqual(s0, torch.cuda.current_stream())
+
+            s1 = _get_stream_by_index(1)
+            self.assertIsInstance(s1, torch.cuda.Stream)
+            self.assertNotEqual(s1, torch.cuda.current_stream())
+
+            e5 = _get_event_by_index(5)
+            self.assertIsInstance(e5, torch.Event)
+
+            # Same index returns same cached object
+            self.assertIs(_get_stream_by_index(0), s0)
+            self.assertIs(_get_stream_by_index(1), s1)
+            self.assertIs(_get_event_by_index(5), e5)
+        finally:
+            if hasattr(_tls, "stream_cache"):
+                del _tls.stream_cache
+            if hasattr(_tls, "event_cache"):
+                del _tls.event_cache
+
+    @requires_gpu()
+    def test_generated_code_calls_setup_stream_event_cache(self):
+        """Generated inductor code should call _setup_stream_event_cache
+        when the graph has stream/event operations."""
+
+        def fn(x):
+            s = torch.Stream(device=GPU_TYPE)
+            e = torch.Event()
+            with s:
+                y = x + 1
+                e.record()
+            e.wait()
+            return y * 2
+
+        x = torch.ones(4, 4, device=GPU_TYPE)
+        result, code = run_and_get_code(torch.compile(fn), x)
+        FileCheck().check("_setup_stream_event_cache").run(code[0])
+
+        expected = fn(torch.ones(4, 4, device=GPU_TYPE))
+        torch.testing.assert_close(result, expected)
+
+    @requires_gpu()
+    def test_restore_external_objects_before_backward(self):
+        """The forward epilogue snapshots the external object registry into
+        ctx._external_objects, and backward restores it. This protects
+        against a second torch.compile frame's store_user_object_weakrefs
+        clobbering the registry between forward and backward.
+
+        This unit test simulates the clobber and verifies the snapshot/restore
+        mechanism works, without requiring a full multi-frame compilation."""
+        from torch._dynamo.graph_bytecode_inputs import (
+            get_external_object_by_index,
+            index_to_external_object_weakref,
+            set_external_object_by_index,
+            store_user_object_weakrefs,
+        )
+
+        s1 = torch.cuda.Stream()
+        s2 = torch.cuda.Stream()
+        e1 = torch.Event()
+
+        # Simulate fn1's forward: register 3 objects
+        store_user_object_weakrefs(s1, s2, e1)
+        self.assertIs(get_external_object_by_index(0), s1)
+        self.assertIs(get_external_object_by_index(1), s2)
+        self.assertIs(get_external_object_by_index(2), e1)
+
+        # Snapshot (what commit 7 does in forward epilogue)
+        snapshot = {
+            k: ref()
+            for k, ref in index_to_external_object_weakref.items()
+            if ref() is not None
+        }
+
+        # Simulate fn2's forward clobbering with fewer entries
+        s3 = torch.cuda.Stream()
+        store_user_object_weakrefs(s3)
+        self.assertIs(get_external_object_by_index(0), s3)
+        with self.assertRaises(AssertionError):
+            get_external_object_by_index(2)
+
+        # Restore (what commit 7 does before backward)
+        for idx, obj in snapshot.items():
+            if obj is not None:
+                set_external_object_by_index(idx, obj)
+
+        # fn1's backward can now find all its objects
+        self.assertIs(get_external_object_by_index(0), s1)
+        self.assertIs(get_external_object_by_index(1), s2)
+        self.assertIs(get_external_object_by_index(2), e1)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:
