@@ -221,6 +221,48 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(orig_out, opt_out))
         self.assertIn("moo", warning_messages)
 
+    def test_reorder_constant_warnings_by_default(self):
+        def f(x):
+            x1 = x + x
+            warnings.warn("moo", category=DeprecationWarning, stacklevel=1)
+            x2 = x1 * x1
+            return x2
+
+        x = torch.ones(3, 3)
+        opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            opt_out = opt_f(x)
+
+        self.assertTrue(same((x + x) * (x + x), opt_out))
+        self.assertEqual([str(i.message) for i in w], ["moo"])
+        self.assertIs(w[0].category, DeprecationWarning)
+
+    def test_tensor_warnings_still_require_explicit_reorder(self):
+        def f(x):
+            x1 = x + x
+            warnings.warn(f"{x1}")
+            x2 = x1 * x1
+            return x2
+
+        x = torch.ones(3, 3)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Attempted to call function marked as skipped",
+        ):
+            torch.compile(backend="eager", fullgraph=True)(f)(x)
+
+        torch._dynamo.reset()
+
+        with torch._dynamo.config.patch(reorderable_logging_functions={warnings.warn}):
+            opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                opt_out = opt_f(x)
+
+        self.assertTrue(same((x + x) * (x + x), opt_out))
+        self.assertEqual([str(i.message) for i in w], [f"{x + x}"])
+
     @torch._dynamo.config.patch(reorderable_logging_functions={print})
     def test_reorder_print_graph_break(self):
         def f(x):

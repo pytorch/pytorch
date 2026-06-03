@@ -1371,7 +1371,9 @@ class InstructionTranslatorBase(
     # Does this tx currently have a child tx tracing?
     # Used to correctly implement should_compile_partial_graph
     is_child_tracer_active: bool
-    debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
+    debug_locals: list[
+        tuple[VariableTracker, list[VariableTracker], dict[str, VariableTracker]]
+    ]
     package: CompilePackage | None
     latest_bytecode_queue: deque[str]
     # Store the latest bytecode before graph_break() call by user

@@ -394,12 +394,14 @@ from user code:
         )
 
     def test_warnings(self):
-        def fn():
-            warnings.warn("test")
+        def fn(x):
+            warnings.warn(f"{x}")
 
         self.assertExpectedInlineMunged(
             Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2)
+            ),
             """\
 Attempted to call function marked as skipped
   Explanation: Dynamo does not know how to trace the Python builtin `_warnings.warn`.
@@ -412,7 +414,7 @@ Attempted to call function marked as skipped
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    warnings.warn("test")""",
+    warnings.warn(f"{x}")""",
         )
 
     @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")

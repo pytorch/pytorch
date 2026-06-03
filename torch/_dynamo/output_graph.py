@@ -2432,11 +2432,20 @@ class OutputGraph(OutputGraphCommon):
 
         # TODO get debug_locals working for nested graph breaks
         # Return variables used for logging at the end
-        for debug_var, args in tx.debug_locals:
+        for debug_var, args, kwargs in tx.debug_locals:
             cg.add_push_null(lambda: cg(debug_var))
             for arg in args:
                 cg(arg)
-            cg.extend_output(create_call_function(len(args), False))
+            for arg in kwargs.values():
+                cg(arg)
+            if kwargs:
+                cg.extend_output(
+                    cg.create_call_function_kw(
+                        len(args) + len(kwargs), tuple(kwargs.keys()), False
+                    )
+                )
+            else:
+                cg.extend_output(create_call_function(len(args), False))
             cg.extend_output([create_instruction("POP_TOP")])
 
         # codegen cells before we apply side effects

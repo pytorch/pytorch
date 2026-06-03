@@ -27,6 +27,7 @@ import re
 import sys
 import traceback
 import types
+import warnings
 import weakref
 from collections.abc import Callable, Sequence
 from random import Random
@@ -2080,6 +2081,16 @@ class DebuggingVariable(VariableTracker):
             and obj in torch._dynamo.config.reorderable_logging_functions
         )
 
+    @staticmethod
+    def is_default_reorderable_logging_function(
+        obj: Any,
+    ) -> TypeGuard[types.FunctionType | types.BuiltinFunctionType]:
+        return (
+            callable(obj)
+            and isinstance(obj, (types.FunctionType, types.BuiltinFunctionType))
+            and obj is warnings.warn
+        )
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -2101,7 +2112,7 @@ class DebuggingVariable(VariableTracker):
                 ],
             )
 
-        tx.debug_locals.append((self, list(args)))
+        tx.debug_locals.append((self, list(args), dict(kwargs)))
         return ConstantVariable.create(None)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -2112,24 +2123,51 @@ class DebuggingVariable(VariableTracker):
         return self.source.reconstruct(codegen)
 
     @staticmethod
-    def can_reorder_logs(fn: Any, args: Sequence[Any], kwargs: dict[str, Any]) -> bool:
+    def _arg_involves_tensor_value(arg: VariableTracker) -> bool:
+        if isinstance(arg, variables.TensorVariable):
+            return True
+        if isinstance(arg, StringFormatVariable):
+            return any(
+                DebuggingVariable._arg_involves_tensor_value(value)
+                for value in itertools.chain(arg.sym_args, arg.sym_kwargs.values())
+            )
+        return False
+
+    @staticmethod
+    def _can_reorder_configured_log_arg(arg: VariableTracker) -> bool:
+        return arg.is_python_constant() or isinstance(
+            arg, (variables.TensorVariable, StringFormatVariable)
+        )
+
+    @staticmethod
+    def _can_reorder_default_log_arg(arg: VariableTracker) -> bool:
+        if DebuggingVariable._arg_involves_tensor_value(arg):
+            return False
+        return arg.is_python_constant() or isinstance(arg, StringFormatVariable)
+
+    @staticmethod
+    def can_reorder_logs(
+        fn: Any, args: Sequence[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> bool:
         """
         Run some additional checks for what sort of function calls can we
         actually reorder.
         """
 
-        allowed_input_types = (
-            variables.TensorVariable,
-            variables.ConstantVariable,
-            StringFormatVariable,
-        )
-
         flat_args = pytree.tree_leaves([args, kwargs])
-        for arg in flat_args:
-            if not isinstance(arg, allowed_input_types):
-                return False
 
-        return True
+        if fn in torch._dynamo.config.reorderable_logging_functions:
+            return all(
+                DebuggingVariable._can_reorder_configured_log_arg(arg)
+                for arg in flat_args
+            )
+
+        if DebuggingVariable.is_default_reorderable_logging_function(fn):
+            return all(
+                DebuggingVariable._can_reorder_default_log_arg(arg) for arg in flat_args
+            )
+
+        return False
 
 
 class IgnoredFunctionVariable(VariableTracker):
