@@ -280,7 +280,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         for _ in range(10):
             race_tensors.pop()
-            work = pg.alltoall_base(output, input, [], [], opts)
+            work = pg.all_to_all_single(output, input, [], [], opts)
             # this triggers cudaFree
             torch.cuda.empty_cache()
             work.wait()
@@ -476,7 +476,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         local_device_id = self.rank_to_GPU[self.rank][0]
 
         def allgather_base(output_t, input_t):
-            work = pg._allgather_base(output_t, input_t)
+            work = pg.all_gather_single(output_t, input_t)
             work.wait()
 
         # allgather_base is GPU number agnostic.
@@ -498,7 +498,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         local_device_id = self.rank_to_GPU[self.rank][0]
 
         def allgather_base(output_t, input_t):
-            work = pg._allgather_base(output_t, input_t)
+            work = pg.all_gather_single(output_t, input_t)
             work.wait()
 
         # anticipate an error
@@ -763,7 +763,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         local_device_id = self.rank_to_GPU[self.rank][0]
 
         def reduce_scatter_base(output_t, input_t):
-            work = pg._reduce_scatter_base(output_t, input_t)
+            work = pg.reduce_scatter_single(output_t, input_t)
             work.wait()
 
         # anticipate an error
@@ -933,7 +933,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         local_device_id = self.rank_to_GPU[self.rank][0]
 
         def reduce_scatter_base(output_t, input_t):
-            work = pg._reduce_scatter_base(output_t, input_t)
+            work = pg.reduce_scatter_single(output_t, input_t)
             work.wait()
 
         # reduce_scatter_base is GPU number agnostic.
@@ -1076,7 +1076,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         local_device_id = self.rank_to_GPU[self.rank][0]
 
         def allgather_base(output_t, input_t):
-            work = pg._allgather_base(output_t, input_t)
+            work = pg.all_gather_single(output_t, input_t)
             work.wait()
 
         # allgather_base is GPU number agnostic.

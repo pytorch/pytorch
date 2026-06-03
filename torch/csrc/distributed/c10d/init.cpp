@@ -2554,6 +2554,28 @@ communication mechanism.
               R"(Alltoalls the input tensors from all processes across the process group.
 
               See :func:`torch.distributed.all_to_all_single` for more details.)")
+          .def(
+              "all_to_all_single",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& output,
+                 at::Tensor& input,
+                 std::vector<int64_t>& outputSplitSizes,
+                 std::vector<int64_t>& inputSplitSizes,
+                 std::optional<std::chrono::milliseconds> timeout) {
+                ::c10d::AllToAllOptions opts;
+                opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
+                return self->all_to_all_single(
+                    output, input, outputSplitSizes, inputSplitSizes, opts);
+              },
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::arg("timeout") = std::nullopt,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Alltoalls the input tensors from all processes across the process group.
+
+              See :func:`torch.distributed.all_to_all_single` for more details.)")
           // Deprecated alias of all_to_all_single, kept for backward
           // compatibility. Bound to all_to_all_single to avoid referencing the
           // deprecated C++ method.
