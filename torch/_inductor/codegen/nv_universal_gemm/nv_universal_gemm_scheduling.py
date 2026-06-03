@@ -513,7 +513,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if only_gen_src_code:
             return src_code
 
-        precompile_metadata = self._build_precompile_metadata(kernel, ctb)
+        precompile_metadata = self._build_precompile_metadata(
+            kernel, ctb, epilogue_nodes, epilogue_reads
+        )
 
         with V.set_kernel_handler(kernel):
             node_schedule: list[BaseSchedulerNode] = [template_node]
@@ -530,7 +532,9 @@ class NVUniversalGemmScheduling(BaseScheduling):
         self.free_buffers_in_scheduler()
         return None
 
-    def _build_precompile_metadata(self, kernel, ctb):
+    def _build_precompile_metadata(
+        self, kernel, ctb, epilogue_nodes=None, epilogue_reads=None
+    ):
         """Extract shapes and dtypes from kernel inputs/output for subprocess precompilation.
 
         Returns None if shapes are symbolic (dynamic shapes), in which case the
@@ -553,11 +557,23 @@ class NVUniversalGemmScheduling(BaseScheduling):
                     input_node.get_dtype()
                 ).removeprefix("torch.")
 
-            output_size = ctb.layout.size
-            precompile_shapes["output"] = [int(s) for s in output_size]
-            output_stride = ctb.layout.stride
-            precompile_strides["output"] = [int(s) for s in output_stride]
-            precompile_dtypes["output"] = str(ctb.layout.dtype).removeprefix("torch.")
+            if epilogue_nodes:
+                final_node = cast(SchedulerNode, epilogue_nodes[-1])
+                out_layout = cast(Layout, final_node.node.get_layout())
+            else:
+                out_layout = cast(Layout, ctb.layout)
+            precompile_shapes["output"] = [int(s) for s in out_layout.size]
+            precompile_strides["output"] = [int(s) for s in out_layout.stride]
+            precompile_dtypes["output"] = str(out_layout.dtype).removeprefix("torch.")
+
+            if epilogue_reads:
+                for read_name in epilogue_reads:
+                    buf = V.graph.get_buffer(read_name)
+                    precompile_shapes[read_name] = [int(s) for s in buf.get_size()]
+                    precompile_strides[read_name] = [int(s) for s in buf.get_stride()]
+                    precompile_dtypes[read_name] = str(buf.get_dtype()).removeprefix(
+                        "torch."
+                    )
         except (TypeError, RuntimeError, ValueError):
             log.debug(
                 "Skipping NV Universal GEMM precompile metadata: symbolic sizes "
@@ -577,22 +593,15 @@ class NVUniversalGemmScheduling(BaseScheduling):
         max_active_clusters = None
         kernel_name = ctb.kernel_metadata.get("kernel_name")
         if kernel_name and torch.cuda.is_available():
-            try:
-                from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
-                    get_kernel_by_name,
-                )
+            from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+                get_kernel_by_name,
+            )
 
-                k = get_kernel_by_name(kernel_name)
-                if k is not None and hasattr(k, "impl"):
-                    from cutlass_api.providers.cutedsl.utils import (
-                        get_max_active_clusters,
-                    )
+            k = get_kernel_by_name(kernel_name)
+            if k is not None and hasattr(k, "impl"):
+                from cutlass_api.providers.cutedsl.utils import get_max_active_clusters
 
-                    max_active_clusters = get_max_active_clusters(
-                        k.impl.cluster_shape_mn
-                    )
-            except Exception:
-                log.debug("Could not extract max_active_clusters for precompile")
+                max_active_clusters = get_max_active_clusters(k.impl.cluster_shape_mn)
 
         return {
             "precompile_shapes": precompile_shapes,
@@ -601,6 +610,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
             "device_index": device_index,
             "device_capability": device_capability,
             "max_active_clusters": max_active_clusters,
+            "epilogue_reads": epilogue_reads or [],
         }
 
     def generate_kernel_code_from_nodes(
