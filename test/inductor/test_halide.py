@@ -275,6 +275,21 @@ class HalideTests(TestCase):
             )
             self.assertIn("@hl.generator", code)
 
+    def test_inplace_add_broadcast_input_alias(self):
+        @torch.compile(backend="inductor", options={"cpu_backend": "halide"})
+        def fn(x, y):
+            return x.add_(y)
+
+        x = torch.ones([2, 12, 13, 17]).transpose(1, 2)
+        y = torch.ones([2, 13, 1, 17])
+        expected = x.clone()
+        expected.add_(y)
+
+        result = fn(x, y)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(x, expected)
+
 
 if test_torchinductor.HAS_CPU and HAS_HALIDE:
     make_halide(test_torchinductor.SweepInputsCpuTest)
