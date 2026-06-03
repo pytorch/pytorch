@@ -1231,9 +1231,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L831
         return self
 
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return False
-
     # no nested graph breaks in generators
     def should_allow_nested_graph_breaks(self) -> Literal[False]:
         return False
