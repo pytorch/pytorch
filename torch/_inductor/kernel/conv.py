@@ -354,6 +354,10 @@ aten_convolution = ExternKernelChoice(
     op_overload=aten.convolution.default,
 )
 
+aten_convolution_fallback = fallback_handler(
+    aten.convolution.default, add_to_fallback_set=False
+)
+
 
 def conv1x1_via_mm(x, w, *, out):
     w = torch.squeeze(torch.squeeze(w, -1), -1)
@@ -715,6 +719,30 @@ def convolution(
             groups=groups,
             n_spatial_dimensions=ndim,
         )
+
+    # Fallback when no choices are available but the user explicitly requested
+    # a conv backend (e.g. "TRITON").  The Triton template guard rejects
+    # transposed convolutions, dilated convolutions, and non-zero
+    # output_padding, which leaves the choices list empty.  Rather than
+    # crashing with NoValidChoicesError, fall back to the ATen implementation.
+    # This mirrors the two-tier fallback in convolution_backward_lowering.
+    #
+    # Note: if the user set max_autotune_conv_backends="" (no backends), we
+    # intentionally let autotune_select_algorithm raise so they get a clear
+    # error message.
+    if not choices and torch._inductor.utils._use_conv_autotune_backend("TRITON"):
+        return aten_convolution_fallback(
+            x,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            transposed,
+            output_padding,
+            groups,
+        )
+
     node, _ = autotune_select_algorithm("convolution", choices, args, layout)
     return node
 

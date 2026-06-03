@@ -1576,6 +1576,60 @@ class TestMaxAutotune(TestCase):
 
         self.assertIn("NoValidChoicesError", str(context.exception))
 
+    @config.patch(
+        max_autotune=True,
+        max_autotune_conv_backends="TRITON",
+        layout_optimization=False,
+    )
+    def test_conv_triton_only_transposed_fallback(self):
+        """
+        Transposed convolutions are not supported by the Triton conv template.
+        When max_autotune_conv_backends="TRITON", the forward path should
+        automatically fall back to ATen instead of raising NoValidChoicesError.
+        """
+        m = torch.nn.ConvTranspose2d(16, 32, kernel_size=3).to(GPU_TYPE)
+        inp = torch.randn(2, 16, 8, 8, device=GPU_TYPE)
+
+        expected = m(inp)
+        actual = torch.compile(m)(inp)
+        torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
+
+    @config.patch(
+        max_autotune=True,
+        max_autotune_conv_backends="TRITON",
+        layout_optimization=False,
+    )
+    def test_conv_triton_only_dilated_fallback(self):
+        """
+        Dilated convolutions (dilation > 1) are not supported by the Triton
+        conv template.  The forward path should fall back to ATen.
+        """
+        m = torch.nn.Conv2d(16, 32, kernel_size=3, dilation=2).to(GPU_TYPE)
+        inp = torch.randn(2, 16, 16, 16, device=GPU_TYPE)
+
+        expected = m(inp)
+        actual = torch.compile(m)(inp)
+        torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
+
+    @config.patch(
+        max_autotune=True,
+        max_autotune_conv_backends="TRITON",
+        layout_optimization=False,
+    )
+    def test_conv_triton_only_output_padding_fallback(self):
+        """
+        ConvTranspose2d with output_padding is not supported by the Triton
+        conv template.  The forward path should fall back to ATen.
+        """
+        m = torch.nn.ConvTranspose2d(
+            16, 32, kernel_size=3, stride=2, output_padding=1
+        ).to(GPU_TYPE)
+        inp = torch.randn(2, 16, 8, 8, device=GPU_TYPE)
+
+        expected = m(inp)
+        actual = torch.compile(m)(inp)
+        torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
+
     def test_non_contiguous_input_mm(self):
         """
         Make sure the triton template can work with non-contiguous inputs without crash.
