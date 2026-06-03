@@ -60,7 +60,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
-from .control_dependencies import preserve_node_ordering
+from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
@@ -1320,6 +1320,29 @@ def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph
             pass_fn(child_mod.graph)
 
 
+def apply_pass_to_control_deps_subgraphs(
+    pass_fn: Callable[[fx.Graph], None], graph: fx.Graph
+):
+    """Recursively apply a pass function to subgraphs referenced by control_deps."""
+    gm = graph.owning_module
+    if gm is None:
+        return
+
+    for node in graph.find_nodes(op="call_function", target=control_deps):
+        if len(node.args) < 2:
+            continue
+        subgraph_attr = node.args[1]
+        if (
+            not isinstance(subgraph_attr, torch.fx.Node)
+            or subgraph_attr.op != "get_attr"
+            or not isinstance(subgraph_attr.target, str)
+        ):
+            continue
+        subgraph = getattr(gm, subgraph_attr.target, None)
+        if isinstance(subgraph, torch.fx.GraphModule):
+            pass_fn(subgraph.graph)
+
+
 def _get_single_replacement_node(
     replacement_nodes: Sequence[torch.fx.Node], target: torch.fx.node.Target
 ) -> torch.fx.Node:
@@ -1409,6 +1432,8 @@ def decompose_auto_functionalized(graph):
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
+    apply_pass_to_control_deps_subgraphs(decompose_auto_functionalized, graph)
+
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
@@ -1419,9 +1444,9 @@ def decompose_auto_functionalized(graph):
     def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
-        only_clone_these_tensors = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
-        )
+        only_clone_these_tensors = match.nodes[0].meta.get("only_clone_these_tensors")
+        if only_clone_these_tensors is not None:
+            only_clone_these_tensors = tuple(only_clone_these_tensors)
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
@@ -1447,9 +1472,9 @@ def decompose_auto_functionalized(graph):
             auto_functionalized_v2_dense,
         )
 
-        only_clone_these_bases = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
-        )
+        only_clone_these_bases = match.nodes[0].meta.get("only_clone_these_tensors")
+        if only_clone_these_bases is not None:
+            only_clone_these_bases = tuple(only_clone_these_bases)
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
