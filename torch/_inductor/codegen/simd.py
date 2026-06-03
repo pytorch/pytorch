@@ -2092,26 +2092,70 @@ class SIMDScheduling(BaseScheduling):
                     return True
 
             # check for a bad combined tiling
-            tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
-            tiling2 = self.select_tiling(node2.get_nodes(), numel1, rnumel1)
-            tiling3 = self.select_tiling(
-                node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
-            )
+            # Cache per-node tiling: select_tiling is called 3x per
+            # fusion pair (node1, node2, combined) but the per-node
+            # result is the same regardless of which partner node is
+            # being considered. Caching avoids redundant computation
+            # when the same node appears in many candidate pairs.
+            if not hasattr(self, "_node_tiling_cache"):
+                self._node_tiling_cache: dict[
+                    tuple[int, Any, Any], dict[str, Any]
+                ] = {}
+            _tc = self._node_tiling_cache
+            # Key by node id for correctness (different nodes with the
+            # same group can have different access patterns). Also try
+            # a group-level cache for the common case where single
+            # unfused nodes with the same group produce the same tiling.
+            if not hasattr(self, "_group_tiling_cache"):
+                self._group_tiling_cache: dict[
+                    tuple[Any, ...], dict[str, Any]
+                ] = {}
+            _gtc = self._group_tiling_cache
+
+            def _get_tiling(node: Any) -> dict[str, Any]:
+                nid = id(node)
+                if nid in _tc:
+                    return _tc[nid]
+                # For single (unfused) nodes, try the group-level cache
+                nodes_list = node.get_nodes()
+                if len(nodes_list) == 1:
+                    gk = (node.group, numel1, rnumel1)
+                    if gk in _gtc:
+                        _tc[nid] = _gtc[gk]
+                        return _gtc[gk]
+                    result = self.select_tiling(nodes_list, numel1, rnumel1)
+                    _gtc[gk] = result
+                    _tc[nid] = result
+                    return result
+                result = self.select_tiling(nodes_list, numel1, rnumel1)
+                _tc[nid] = result
+                return result
+
+            tiling1 = _get_tiling(node1)
+            tiling2 = _get_tiling(node2)
             if config.triton.tiling_prevents_pointwise_fusion:
                 cond = True
-                if len(tiling1) > 2:
-                    if len(tiling2) > 2:
-                        cond = tiling1 == tiling2 == tiling3
+                # The combined tiling is only needed when at least one
+                # individual tiling has >2 dimensions. When both are
+                # <=2D, cond stays True unconditionally. Skip the
+                # expensive combined select_tiling in that case.
+                if len(tiling1) > 2 or len(tiling2) > 2:
+                    tiling3 = self.select_tiling(
+                        node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
+                    )
+                    if len(tiling1) > 2:
+                        if len(tiling2) > 2:
+                            cond = tiling1 == tiling2 == tiling3
+                        else:
+                            cond = tiling1 == tiling3
                     else:
-                        cond = tiling1 == tiling3
-                elif len(tiling2) > 2:
-                    cond = tiling2 == tiling3
+                        cond = tiling2 == tiling3
                 if not cond:
                     why(
                         "tiling mismatch (%s, %s, %s)",
                         tiling1,
                         tiling2,
-                        tiling3,
+                        tiling3,  # always defined when cond is False
                     )
                     return False
 
