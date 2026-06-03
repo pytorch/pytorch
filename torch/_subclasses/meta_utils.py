@@ -519,7 +519,7 @@ class MetaTensorDescriber:
         return r
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class MetaStorageDesc:
     id: MetaStorageId
     size: int
@@ -535,7 +535,7 @@ class MetaStorageDesc:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ViewFunc(Generic[_TensorT]):
     @abstractmethod
     def apply(
@@ -554,7 +554,7 @@ class ViewFunc(Generic[_TensorT]):
             return _CustomViewFunc(t._view_func_unsafe)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _FakeTensorViewFunc(ViewFunc["FakeTensor"]):
     @override
     def apply(
@@ -573,7 +573,7 @@ class _FakeTensorViewFunc(ViewFunc["FakeTensor"]):
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
     func: Callable[
         [
@@ -624,7 +624,7 @@ class _MetaTensorCallbackOptDevice(Protocol, Generic[_TensorT_cov]):
     ) -> _TensorT_cov: ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class MetaTensorDesc(Generic[_TensorT]):
     id: MetaTensorId
     ndim: int
@@ -2005,11 +2005,16 @@ class MetaConverter(Generic[_TensorT]):
                     s = t.storage
                     if s is None:
                         raise AssertionError("t.storage must not be None")
+                    from torch.fx.experimental.symbolic_shapes import (
+                        guard_or_false,
+                        sym_eq,
+                    )
+
                     if s.id not in self.storage_memo and (
                         r.is_nested
                         or (
-                            r.stride() == strides
-                            and r.storage_offset() == storage_offset
+                            guard_or_false(sym_eq(r.stride(), strides))
+                            and guard_or_false(r.storage_offset() == storage_offset)
                         )
                     ):
                         # You're normal and happy, install the fresh storage into the memo

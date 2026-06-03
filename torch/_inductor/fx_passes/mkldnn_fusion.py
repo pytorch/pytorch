@@ -185,7 +185,7 @@ if torch._C._has_mkldnn:
         computation_op = mkldnn._linear_pointwise.default
         act = computation_nodes[0].args[0]
         wgt = computation_nodes[0].args[1]
-        wgt_size = wgt.meta.get("val").size()
+        wgt_size = wgt.meta.get("val").size()  # type: ignore[union-attr]
         return len(computation_nodes) >= 2 and all(
             (
                 node.target == computation_op
@@ -795,7 +795,7 @@ if torch._C._has_mkldnn:
                 for op in V.graph.operations:
                     if (
                         isinstance(op, mkldnn_ir.QLinearPointwiseBinaryPT2E)
-                        and unwrap_buffer(data) == op.inputs[6]
+                        and unwrap_buffer(data) == op.inputs[6]  # type: ignore[attr-defined]
                     ):
                         return True
             return False
@@ -1107,10 +1107,9 @@ if torch._C._has_mkldnn:
             )
             weight_meta = transpose_weight_node.args[0].meta.get("val")
             bias_node = add_node.args[1]
-            if isinstance(bias_node, int):
-                # we only folding bias if it is a constant
+            if not isinstance(bias_node, torch.fx.Node):
                 return False
-            bias_meta = add_node.args[1].meta.get("val")
+            bias_meta = bias_node.meta.get("val")
             if weight_meta is None or bias_meta is None:
                 return False
 

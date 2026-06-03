@@ -26,6 +26,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      check_experiments: arc
 
   linux-jammy-py3_14t-clang18-tsan-build:
     name: linux-jammy-py3.14t-clang18-tsan
@@ -35,6 +36,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.14t-clang18-tsan
       docker-image-name: ci-image:pytorch-linux-jammy-py3.14t-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
           { config: "tsan", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
@@ -54,7 +56,6 @@ jobs:
       build-environment: linux-jammy-py3.14t-clang18-tsan
       docker-image: ${{ needs.linux-jammy-py3_14t-clang18-tsan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang18-tsan-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.linux-jammy-py3_14t-clang18-tsan-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.14t"
       compiler: clang18
