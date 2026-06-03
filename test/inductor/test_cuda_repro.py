@@ -305,6 +305,64 @@ class CudaReproTests(TestCase):
             self.assertEqual(out, f(*inputs))
 
     @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "requires flash attention",
+    )
+    @skipIfRocm(msg="requires CUDA flash attention layout")
+    @skipIfXpu(msg="requires CUDA flash attention layout")
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 attention")
+    def test_view_as_complex_backward_with_conv_sdpa_layout(self):
+        B, H, W, D, heads = 1, 4, 4, 128, 2
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.w = nn.Parameter(torch.randn(D, D))
+                self.register_buffer(
+                    "freqs",
+                    torch.view_as_real(
+                        torch.randn(1, H, W, 1, D // heads // 2, dtype=torch.cfloat)
+                    ),
+                )
+                self.conv = nn.Conv2d(D, D, 1, bias=False)
+
+            def forward(self, x):
+                x = (x @ self.w).view(B, H, W, heads, D // heads)
+                freqs = torch.view_as_complex(self.freqs)
+                x_ = torch.view_as_complex(x.reshape(*x.shape[:-1], -1, 2))
+                x = torch.view_as_real(x_ * freqs).flatten(-2)
+                x = x.reshape(B, -1, heads, D // heads).permute(0, 2, 1, 3).bfloat16()
+                with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                    x = F.scaled_dot_product_attention(x, x, x)
+                x = x.permute(0, 2, 1, 3).reshape(B, H, W, D).float()
+                return self.conv(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+
+        torch.manual_seed(0)
+        eager_model = Model().to(device_type)
+        compiled_model = copy.deepcopy(eager_model)
+        x = torch.randn(B, H, W, D, device=device_type)
+        compiled_x = x.detach().clone()
+
+        eager_out = eager_model(x).sum()
+        eager_out.backward()
+
+        compiled_out = torch.compile(lambda m, x: m(x).sum(), fullgraph=True)(
+            compiled_model, compiled_x
+        )
+        compiled_out.backward()
+
+        torch.testing.assert_close(compiled_out, eager_out, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(
+            compiled_model.w.grad, eager_model.w.grad, atol=1e-2, rtol=1e-2
+        )
+        torch.testing.assert_close(
+            compiled_model.conv.weight.grad,
+            eager_model.conv.weight.grad,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+
+    @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support mem_eff_attention",
     )
