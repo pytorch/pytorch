@@ -84,10 +84,14 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
+from torch.utils._import_utils import _check_module_exists
 
 
 if TYPE_CHECKING:
     from torch.autograd.profiler_util import FunctionEvent
+
+
+TEST_CUPTI_PYTHON = _check_module_exists("cupti")
 
 
 def get_profiler_activities(device_type):
@@ -408,6 +412,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 y = torch.mm(x, x)
         self.assertGreater(len(p.events()), 0)
 
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_enable_hes_early_guard(self):
         import subprocess
 
@@ -449,6 +454,7 @@ _cupti_monitor.enable_hes_early()
             p.stderr,
         )
 
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_collection_raw_dump_smoke(self):
         from torch.profiler import _cupti_monitor
 
@@ -479,6 +485,7 @@ _cupti_monitor.enable_hes_early()
                 0,
             )
 
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_collection_repeated_lifecycle(self):
         from torch.profiler import _cupti_monitor
 
@@ -511,6 +518,7 @@ _cupti_monitor.enable_hes_early()
                     0,
                 )
 
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_multithread_runtime_thread_assignment(self):
         x1 = torch.randn(256, 256, device="cuda")
         x2 = torch.randn(256, 256, device="cuda")
@@ -583,6 +591,122 @@ _cupti_monitor.enable_hes_early()
         self.assertEqual(len(worker_tids), 2)
         self.assertGreater(len(launch_tids), 0)
         self.assertTrue(set(launch_tids).issubset(set(worker_tids)))
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_trace_has_expected_events(self):
+        cfg = _ExperimentalConfig(
+            custom_profiler_config='{"backend":"cupti_monitor"}',
+        )
+        with TemporaryFileName(mode="w+") as trace_path:
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                experimental_config=cfg,
+            ) as prof:
+                with record_function("monitor_region"):
+                    a = torch.randn(128, 128, device="cuda")
+                    b = torch.randn(128, 128, device="cuda")
+                    c = (a @ b).relu()
+                    _ = c.cpu()
+                    torch.cuda.synchronize()
+            prof.export_chrome_trace(trace_path)
+            with open(trace_path) as f:
+                events = json.load(f)["traceEvents"]
+
+        cats = {e.get("cat") for e in events if e.get("ph") == "X"}
+        for expected in (
+            "kernel",
+            "cuda_runtime",
+            "gpu_memcpy",
+            "cpu_op",
+            "user_annotation",
+        ):
+            self.assertIn(
+                expected,
+                cats,
+                f"missing {expected}; got {sorted(c for c in cats if c)}",
+            )
+
+        kernels = [e for e in events if e.get("cat") == "kernel" and e.get("ph") == "X"]
+        self.assertGreater(len(kernels), 0)
+        self.assertTrue(all(e["dur"] > 0 for e in kernels))
+
+        runtime_names = {
+            e.get("name") for e in events if e.get("cat") == "cuda_runtime"
+        }
+        self.assertIn("cudaLaunchKernel", runtime_names)
+
+        user_names = {
+            e["name"]
+            for e in events
+            if e.get("cat") == "user_annotation" and e.get("ph") == "X"
+        }
+        self.assertIn("monitor_region", user_names)
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_record_shapes(self):
+        cfg = _ExperimentalConfig(
+            custom_profiler_config='{"backend":"cupti_monitor"}',
+        )
+
+        def shaped_cpu_ops(record_shapes):
+            with TemporaryFileName(mode="w+") as trace_path:
+                with profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    record_shapes=record_shapes,
+                    experimental_config=cfg,
+                ) as prof:
+                    a = torch.randn(64, 64, device="cuda")
+                    (a @ a).relu()
+                    torch.cuda.synchronize()
+                prof.export_chrome_trace(trace_path)
+                with open(trace_path) as f:
+                    events = json.load(f)["traceEvents"]
+            return [
+                e
+                for e in events
+                if e.get("cat") == "cpu_op" and "Input Dims" in e.get("args", {})
+            ]
+
+        # record_shapes is a CPU-side setting, so it must flow through the monitor
+        # backend just like the stock profiler.
+        self.assertEqual(shaped_cpu_ops(record_shapes=False), [])
+        self.assertGreater(len(shaped_cpu_ops(record_shapes=True)), 0)
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_matches_stock_op_and_kernel_names(self):
+        def trace_summary(use_monitor):
+            cfg = _ExperimentalConfig(
+                custom_profiler_config='{"backend":"cupti_monitor"}'
+                if use_monitor
+                else ""
+            )
+            with TemporaryFileName(mode="w+") as trace_path:
+                with profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    experimental_config=cfg,
+                ) as prof:
+                    a = torch.randn(128, 128, device="cuda")
+                    b = torch.randn(128, 128, device="cuda")
+                    (a @ b).relu().sum()
+                    torch.cuda.synchronize()
+                prof.export_chrome_trace(trace_path)
+                with open(trace_path) as f:
+                    events = json.load(f)["traceEvents"]
+            aten_ops = {
+                e["name"]
+                for e in events
+                if e.get("cat") == "cpu_op" and e.get("name", "").startswith("aten::")
+            }
+            n_kernels = sum(
+                1 for e in events if e.get("cat") == "kernel" and e.get("ph") == "X"
+            )
+            return aten_ops, n_kernels
+
+        stock_ops, stock_kernels = trace_summary(use_monitor=False)
+        monitor_ops, monitor_kernels = trace_summary(use_monitor=True)
+        self.assertGreater(stock_kernels, 0)
+        self.assertGreater(monitor_kernels, 0)
+        self.assertEqual(monitor_ops, stock_ops)
 
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
