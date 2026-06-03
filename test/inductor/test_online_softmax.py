@@ -91,6 +91,24 @@ class TestOnlineSoftmax(TestCase):
 
         self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("use_log_softmax", [False, True])
+    def test_codegen_online_softmax_unbacked_non_reduction_dim(self, use_log_softmax):
+        def f(x, n):
+            x = x[: n.item(), :]
+            if use_log_softmax:
+                return torch.log_softmax(x, dim=-1)
+            else:
+                return torch.softmax(x, dim=-1)
+
+        x = torch.randn(1024, 2048, dtype=torch.bfloat16, device=GPU_TYPE)
+        n = torch.tensor(1024)
+        _, source_codes = run_and_get_code(torch.compile(f, fullgraph=True), x, n)
+        wrapper_code = "\n".join(source_codes)
+
+        self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
+        self.assertTrue("online_softmax_reduce" in wrapper_code)
+
     def test_no_online_softmax_for_cpu(self):
         code = self.get_softmax_wrapper(V=2048, device="cpu")
 
