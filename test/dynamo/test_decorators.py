@@ -9,7 +9,9 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
+from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
 from torch._dynamo.exc import Unsupported
+from torch._dynamo.trace_rules import is_callable_allowed
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -45,6 +47,27 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # check for graph break on sub
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 4)
+
+    def test_invoke_subgraph_wrapper_is_allow_in_graph(self):
+        # `invoke_subgraph_inner_compiler` returns a boxed wrapper that, when
+        # called, invokes an inner closure decorated with `@disable` and
+        # `@torch._dynamo.allow_in_graph`. The id of that inner closure must
+        # be in the allow_in_graph registry — otherwise dynamo's
+        # `lookup_callable` will fall through to the disable check and graph
+        # break, defeating the point of `allow_in_graph`.
+        def f(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(f)
+        boxed = invoke_subgraph_inner_compiler(gm, [torch.randn(4)])
+
+        # The boxed wrapper closes over `invoke_subgraph_wrapper_unboxed`.
+        self.assertEqual(
+            boxed.__code__.co_freevars, ("invoke_subgraph_wrapper_unboxed",)
+        )
+        unboxed = boxed.__closure__[0].cell_contents
+
+        self.assertTrue(is_callable_allowed(unboxed))
 
     def test_disable_for_custom_op(self):
         import torch.library
