@@ -297,7 +297,10 @@ class SetVariable(VariableTracker):
                 "symmetric_difference",
             )
             and check_constant_args(args, kwargs)
-            and self.python_type() is set
+            # Exact builtin types only: a subclass may override these methods,
+            # and OrderedSet is excluded because as_python_constant() loses
+            # insertion order (it routes through the unordered set_items).
+            and self.python_type() in (set, frozenset)
         ):
             py_type = self.python_type()
             return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
