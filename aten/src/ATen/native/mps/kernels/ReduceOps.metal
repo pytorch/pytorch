@@ -95,6 +95,12 @@ kernel void norm(
     } else if (p == 0) {
       output_val += (input_abs == 0) ? 0 : 1;
 
+    } else if (p == 1) {
+      output_val += input_abs;
+
+    } else if (p == 2) {
+      output_val += input_abs * input_abs;
+
     } else {
       output_val += static_cast<TA>(::precise::pow(input_abs, p));
     }
@@ -149,7 +155,9 @@ kernel void norm(
       }
     }
 
-    if (p != 0 && p != 1 && p != INFINITY && p != -INFINITY) {
+    if (p == 2) {
+      output_val = static_cast<TA>(::precise::sqrt(output_val));
+    } else if (p != 0 && p != 1 && p != INFINITY && p != -INFINITY) {
       output_val = static_cast<TA>(::precise::pow(output_val, 1 / p));
     }
     output[output_offset] = static_cast<TO>(output_val);
@@ -178,12 +186,18 @@ REGISTER_NORM(half2, half);
 #include <c10/metal/reduction_utils.h>
 
 // Load modes for sum_reduction: identity (sum), nan-to-zero (nansum),
-// or nonzero-as-one (count_nonzero).
+// nonzero-as-one (count_nonzero), abs (L1 norm), or square (L2 norm).
 enum LoadMode : uint {
   LOAD_IDENTITY = 0,
   LOAD_NAN_TO_ZERO = 1,
-  LOAD_NONZERO = 2
+  LOAD_NONZERO = 2,
+  LOAD_ABS = 3,
+  LOAD_SQUARE = 4
 };
+
+// Finalize op applied to the accumulator (in opmath_t) before the output cast.
+// FINAL_SQRT turns a sum-of-squares reduction into an L2 norm.
+enum FinalizeOp : uint { FINAL_NONE = 0, FINAL_SQRT = 1 };
 
 template <typename T, ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
 inline bool load_is_nonzero(T v) {
@@ -228,6 +242,29 @@ template <
     ::metal::enable_if_t<MODE == LOAD_NONZERO, bool> = true>
 inline uint load_val(TI v) {
   return load_is_nonzero(v) ? 1u : 0u;
+}
+
+template <
+    LoadMode MODE,
+    typename TI,
+    ::metal::enable_if_t<MODE == LOAD_ABS, bool> = true>
+inline opmath_t<TI> load_val(TI v) {
+  return static_cast<opmath_t<TI>>(
+      ::precise::abs(static_cast<opmath_t<TI>>(v)));
+}
+
+template <
+    LoadMode MODE,
+    typename TI,
+    ::metal::enable_if_t<MODE == LOAD_SQUARE, bool> = true>
+inline opmath_t<TI> load_val(TI v) {
+  auto r = static_cast<opmath_t<TI>>(v);
+  return r * r;
+}
+
+template <FinalizeOp FINAL, typename T>
+inline T finalize_val(T v) {
+  return FINAL == FINAL_SQRT ? static_cast<T>(::precise::sqrt(v)) : v;
 }
 
 // Sum reduction kernel with multiple independent accumulation chains (ILP).
@@ -512,7 +549,8 @@ template <
     typename TI,
     typename TO,
     uint NCHAINS = SUM_NCHAINS,
-    LoadMode MODE = LOAD_IDENTITY>
+    LoadMode MODE = LOAD_IDENTITY,
+    FinalizeOp FINAL = FINAL_NONE>
 kernel void sum_reduction_inner(
     constant TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
@@ -563,28 +601,31 @@ kernel void sum_reduction_inner(
     if (divisor > 0) {
       sum /= static_cast<TA>(divisor);
     }
-    output[row] = static_cast<TO>(sum);
+    output[row] = static_cast<TO>(finalize_val<FINAL>(sum));
   }
 }
 
-#define REGISTER_SUM_INNER_IMPL(TI, TO, PREFIX, MODE)           \
-  template [[host_name(PREFIX "reduction_inner_" #TI "_" #TO)]] \
-  kernel void sum_reduction_inner<TI, TO, SUM_NCHAINS, MODE>(   \
-      constant TI * input [[buffer(0)]],                        \
-      device TO * output [[buffer(1)]],                         \
-      constant uint2 & sizes [[buffer(2)]],                     \
-      constant float& divisor [[buffer(3)]],                    \
-      uint tptg [[threads_per_threadgroup]],                    \
-      uint tgid [[threadgroup_position_in_grid]],               \
-      uint simd_lane_id [[thread_index_in_simdgroup]],          \
+#define REGISTER_SUM_INNER_IMPL(TI, TO, PREFIX, MODE, FINAL)         \
+  template [[host_name(PREFIX "reduction_inner_" #TI "_" #TO)]]      \
+  kernel void sum_reduction_inner<TI, TO, SUM_NCHAINS, MODE, FINAL>( \
+      constant TI * input [[buffer(0)]],                             \
+      device TO * output [[buffer(1)]],                              \
+      constant uint2 & sizes [[buffer(2)]],                          \
+      constant float& divisor [[buffer(3)]],                         \
+      uint tptg [[threads_per_threadgroup]],                         \
+      uint tgid [[threadgroup_position_in_grid]],                    \
+      uint simd_lane_id [[thread_index_in_simdgroup]],               \
       uint simdgroup_id [[simdgroup_index_in_threadgroup]]);
 
 #define REGISTER_SUM_INNER(TI, TO) \
-  REGISTER_SUM_INNER_IMPL(TI, TO, "sum_", LOAD_IDENTITY)
+  REGISTER_SUM_INNER_IMPL(TI, TO, "sum_", LOAD_IDENTITY, FINAL_NONE)
 #define REGISTER_NANSUM_INNER(TI, TO) \
-  REGISTER_SUM_INNER_IMPL(TI, TO, "nansum_", LOAD_NAN_TO_ZERO)
+  REGISTER_SUM_INNER_IMPL(TI, TO, "nansum_", LOAD_NAN_TO_ZERO, FINAL_NONE)
 #define REGISTER_COUNT_NONZERO_INNER(TI) \
-  REGISTER_SUM_INNER_IMPL(TI, long, "count_nonzero_", LOAD_NONZERO)
+  REGISTER_SUM_INNER_IMPL(TI, long, "count_nonzero_", LOAD_NONZERO, FINAL_NONE)
+#define REGISTER_NORM_INNER(TI, TO)                                 \
+  REGISTER_SUM_INNER_IMPL(TI, TO, "norm_l1_", LOAD_ABS, FINAL_NONE) \
+  REGISTER_SUM_INNER_IMPL(TI, TO, "norm_l2_", LOAD_SQUARE, FINAL_SQRT)
 
 REGISTER_SUM_INNER(float, float);
 REGISTER_SUM_INNER(half, half);
@@ -604,6 +645,10 @@ REGISTER_SUM_INNER(bool, long);
 REGISTER_SUM_INNER(bool, int);
 REGISTER_SUM_INNER(float2, float2);
 REGISTER_SUM_INNER(half2, half2);
+
+REGISTER_NORM_INNER(float, float);
+REGISTER_NORM_INNER(half, half);
+REGISTER_NORM_INNER(bfloat, bfloat);
 
 #define REGISTER_SUM_IMPL(TI, TO, PREFIX, MODE)             \
   template [[host_name(PREFIX "reduction_" #TI "_" #TO)]]   \

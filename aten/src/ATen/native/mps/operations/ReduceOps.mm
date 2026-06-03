@@ -277,6 +277,46 @@ static void norm_kernel_mps(TensorIterator& iter, const Scalar& p_scalar) {
 
   TORCH_INTERNAL_ASSERT(output.dim() == input.dim());
 
+  // Fast path: L1/L2 norm over the innermost contiguous dim reuses the sum
+  // inner kernel (abs/square load + sqrt)
+  if ((p == 1.0 || p == 2.0) && output.numel() > 1 && input.is_contiguous() && output.is_contiguous() &&
+      input.scalar_type() == output.scalar_type() &&
+      (input.scalar_type() == kFloat || input.scalar_type() == kHalf || input.scalar_type() == kBFloat16)) {
+    int num_reduced = 0;
+    int reduced_dim = -1;
+    for (const auto d : c10::irange(input.dim())) {
+      if (input.size(d) != output.size(d)) {
+        num_reduced++;
+        reduced_dim = d;
+      }
+    }
+    if (num_reduced == 1 && reduced_dim == input.dim() - 1) {
+      uint32_t N = input.size(input.dim() - 1);
+      uint32_t M = input.numel() / N;
+      auto kernel_name = fmt::format("norm_{}_reduction_inner_{}_{}",
+                                     p == 2.0 ? "l2" : "l1",
+                                     scalarToMetalTypeString(input),
+                                     scalarToMetalTypeString(output));
+      constexpr uint32_t TG_SIZE = 256;
+      constexpr uint32_t rows_per_tg = TG_SIZE / 32;
+      const auto num_tgs = c10::metal::ceil_div(M, rows_per_tg);
+      MPSStream* stream = getCurrentMPSStream();
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          id<MTLComputeCommandEncoder> ce = stream->commandEncoder();
+          auto ps = lib.getPipelineStateForFunc(kernel_name);
+          getMPSProfiler().beginProfileKernel(ps, "norm_reduction_inner", {input});
+          const float divisor = 0.0f;
+          [ce setComputePipelineState:ps];
+          mtl_setArgs(ce, input, output, std::array<uint32_t, 2>{M, N}, divisor);
+          [ce dispatchThreads:MTLSizeMake(num_tgs * TG_SIZE, 1, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)];
+          getMPSProfiler().endProfileKernel(ps);
+        }
+      });
+      return;
+    }
+  }
+
   NormParams params;
 
   params.ndim = input.dim();
