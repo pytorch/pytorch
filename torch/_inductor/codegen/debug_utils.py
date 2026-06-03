@@ -30,17 +30,20 @@ def _print_debugging_tensor_value_info(msg, arg):
     if not isinstance(arg, torch.Tensor):
         print("Value: ", arg)
         return
-    numel = arg.float().numel()
+    numel = arg.numel()
     # print the debug printing stats
     if numel <= max_numel_to_print:
         print(arg)
     print("Number of elements: ", numel)
-    print("Size: ", arg.float().size())
-    print("Dtype: ", arg.float().mean().item())
-    print("Mean: ", arg.float().mean().item())
-    print("Min: ", arg.float().min().item())
-    print("Max: ", arg.float().max().item())
-    print("Std: ", arg.float().std().item())
+    print("Size: ", arg.size())
+    print("Dtype: ", arg.dtype)
+    arg_f = arg.float()
+    std, mean = torch.std_mean(arg_f)
+    amin, amax = torch.aminmax(arg_f)
+    print("Mean: ", mean.item())
+    print("Min: ", amin.item())
+    print("Max: ", amax.item())
+    print("Std: ", std.item())
 
 
 # AOTI debug printing related configs
