@@ -3569,6 +3569,16 @@ class PrecompileFunction:
         return self.fn()
 
 
+def _benchmark_request_for_choice(choice: ChoiceCaller) -> Any | None:
+    bmreq = getattr(choice, "_bmreq", None)
+    if bmreq is not None:
+        return bmreq
+    try:
+        return vars(choice).get("bmreq")
+    except TypeError:
+        return None
+
+
 # Args to FeedbackFunctions
 # timings: mapping from choices to the benchmark time
 # name: name of the op
@@ -4105,7 +4115,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 [
                     path
                     for choice in choices
-                    for bmreq in (getattr(choice, "bmreq", None),)
+                    for bmreq in (_benchmark_request_for_choice(choice),)
                     for path in (getattr(bmreq, "module_path", None),)
                     if path is not None
                 ]
@@ -4800,7 +4810,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 autotune_args.verify(**VERIFY)
             return result
         finally:
-            bmreq = getattr(choice, "bmreq", None)
+            bmreq = _benchmark_request_for_choice(choice)
             cleanup_run_fn = getattr(bmreq, "cleanup_run_fn", None)
             if cleanup_run_fn is not None:
                 # In-process autotuning owns the loaded benchmark module, so clean it
