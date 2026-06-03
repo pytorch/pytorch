@@ -680,9 +680,15 @@ def meta_select(
         # index is data-dependent, we do not know which index we are accessing it could be index or index+size!
         # we assign a new data-dependent symbol for the storage offset.
         new_storage_offset = fake_mode.shape_env.create_unbacked_symint()
-        # The index's unbacked symbol is consumed into the opaque storage offset
-        # above and does not appear in the output, so it is not a pending binding
-        # site. Mark it ignorable so compute_unbacked_bindings does not flag it.
+        # The data-dependent index is consumed into the opaque offset above and
+        # never appears in the output, so its unbacked symbol has no binding site.
+        # This is the same situation the tensor_split decomposition and dynamo's
+        # ops_consuming_unbacked_scalars handle by wrapping the producing .item()
+        # in ignore_fresh_unbacked_symbols(). Here the index is created upstream
+        # (item() is fused into tensor indexing), so rather than suppressing at the
+        # creation site we discharge the already-pending symbol, as device_mesh's
+        # _select_split_tensor does. We can't torch._check its sign: select accepts
+        # negative indices.
         if isinstance(index, torch.SymInt):
             from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
@@ -727,8 +733,15 @@ def meta_select_copy(
         )
 
     # Unlike select, select_copy returns a contiguous copy, so it has no
-    # data-dependent storage offset to reason about and can index by a
-    # data-dependent (unbacked) index without specializing it.
+    # data-dependent storage offset to reason about. The index is still consumed
+    # without appearing in the output, so discharge its unbacked symbol the same
+    # way meta_select does.
+    if isinstance(index, torch.SymInt) and fake_mode.shape_env is not None:
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+        for s in free_unbacked_symbols(index):
+            fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(s)
+
     new_size = list(self.size())
     del new_size[dim]
     # pyrefly: ignore[bad-return]
