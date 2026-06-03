@@ -2556,14 +2556,18 @@ Tensor index_select_sparse_cpu(
             auto [sorted_dim_indices, sorted_dim_indices_idx] =
                 dim_indices.sort();
             return std::make_tuple(
-                sorted_dim_indices, sorted_dim_indices_idx, nneg_index);
+                std::move(sorted_dim_indices),
+                std::move(sorted_dim_indices_idx),
+                nneg_index);
           }
         }
         // sort nneg_index to binary search into it
         else {
           auto [sorted_nneg_index, sorted_nneg_index_idx] = nneg_index.sort();
           return std::make_tuple(
-              sorted_nneg_index, sorted_nneg_index_idx, dim_indices);
+              std::move(sorted_nneg_index),
+              std::move(sorted_nneg_index_idx),
+              dim_indices);
         }
       }();
 
@@ -2945,10 +2949,10 @@ Tensor index_select_sparse_cpu(
               }
             });
 
-        const auto src_idx_offsets =
+        auto src_idx_offsets =
             src_intersection_offsets.sub_(src_intersection_counts);
 
-        return std::make_tuple(src_idx, src_idx_offsets);
+        return std::make_tuple(std::move(src_idx), std::move(src_idx_offsets));
       }();
 
       auto [idx_selected, src_selected] =

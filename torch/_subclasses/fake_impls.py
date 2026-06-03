@@ -801,6 +801,12 @@ def _compute_stride(
             while view_d >= 0 and (
                 maybe_guard_or_true(view_numel < tensor_numel)
                 or maybe_guard_or_false(new_shape[view_d] == 1)
+                or (
+                    size_oblivious
+                    and statically_known_true(
+                        view_numel * new_shape[view_d] == tensor_numel
+                    )
+                )
             ):
                 new_stride[view_d] = view_numel * chunk_base_stride
                 view_numel *= new_shape[view_d]
@@ -997,8 +1003,10 @@ def _view_unbacked_meta(
     from torch._prims import view_of
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
-    # Creates a valid shape
-    shape = utils.extract_shape_from_varargs(shape, validate=False)
+    # Creates a valid shape. Keep the pre-inference shape around so retries
+    # after symbol unification can re-run -1 inference with the new equalities.
+    original_shape = utils.extract_shape_from_varargs(shape, validate=False)
+    shape = original_shape
 
     # Reshape may be given a shape with a -1 length
     # This indicates that the dimension's length should be inferred
@@ -1070,7 +1078,7 @@ def _view_unbacked_meta(
         ):
             return _view_unbacked_meta(
                 a,
-                shape,
+                original_shape,
                 size_oblivious_enabled=True,
                 allow_copy=allow_copy,
                 tried_duck_specialize=True,

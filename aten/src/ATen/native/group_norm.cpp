@@ -172,7 +172,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
       dX,
       dgamma,
       dbeta);
-  return std::make_tuple(dX, dgamma, dbeta);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 Tensor group_norm(
@@ -197,9 +197,31 @@ Tensor group_norm(
       c10::multiply_integers(input_shape.slice(2));
 
   const Tensor kEmpty;
-  auto memory_format = input.suggest_memory_format();
+  const bool has_symbolic_sizes_strides =
+      input.unsafeGetTensorImpl()->has_symbolic_sizes_strides();
+  auto memory_format = has_symbolic_sizes_strides
+      ? at::MemoryFormat::Contiguous
+      : input.suggest_memory_format();
+  if (has_symbolic_sizes_strides &&
+      input.sym_is_contiguous(at::MemoryFormat::ChannelsLast)
+          .statically_known_true(__FILE__, __LINE__)) {
+    memory_format = at::MemoryFormat::ChannelsLast;
+  } else if (
+      has_symbolic_sizes_strides &&
+      input.sym_is_contiguous(at::MemoryFormat::ChannelsLast3d)
+          .statically_known_true(__FILE__, __LINE__)) {
+    memory_format = at::MemoryFormat::ChannelsLast3d;
+  }
+  const bool needs_symbolic_copy = has_symbolic_sizes_strides &&
+      !input.sym_is_contiguous(memory_format).statically_known_true(
+          __FILE__, __LINE__);
+  if (needs_symbolic_copy) {
+    memory_format = at::MemoryFormat::Contiguous;
+  }
   const auto& X = input.device().is_cpu() || input.is_privateuseone() ?
-                  input.contiguous(memory_format) : input.contiguous();
+                  (needs_symbolic_copy ? input.clone(memory_format)
+                                       : input.contiguous(memory_format))
+                  : input.contiguous();
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
   TORCH_CHECK(!gamma.defined() || gamma.sym_numel() == C);

@@ -1485,7 +1485,7 @@ def _collapse_view_helper(
     stride = strides[end]
     for idx in range(end - 1, start - 1, -1):
         if must_be_valid:
-            if shape[idx] != 1:
+            if statically_known_true(shape[idx] != 1):
                 # TODO with unbacked we should really exclude when shape[idx] == 1
                 # something like
                 # min(stride[end], torch.ite(shape[x]!=1,stride[idx], inf), ...)

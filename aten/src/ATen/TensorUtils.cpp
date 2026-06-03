@@ -388,7 +388,10 @@ inline static std::optional<ResultVec> computeStride_impl(
      // and u0==u1, then want to stop unless newshape[view_d]==1. taking one more iteration will keep [view_numel = u0
      // and tensor_numel = u1].
       while (view_d >= 0 &&
-            (TORCH_STATICALLY_KNOWN_TRUE(sym_lt(view_numel, tensor_numel)) || TORCH_STATICALLY_KNOWN_TRUE(sym_eq(newshape[view_d], 1)))) {
+            (TORCH_STATICALLY_KNOWN_TRUE(sym_lt(view_numel, tensor_numel)) ||
+             TORCH_STATICALLY_KNOWN_TRUE(sym_eq(newshape[view_d], 1)) ||
+             TORCH_STATICALLY_KNOWN_TRUE(
+                 sym_eq(view_numel * newshape[view_d], tensor_numel)))) {
         newstride[view_d] = view_numel * chunk_base_stride;
         view_numel *= newshape[view_d];
         view_d--;
