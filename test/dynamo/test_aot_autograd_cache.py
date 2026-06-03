@@ -14,6 +14,8 @@ from collections.abc import Sequence
 from typing import Literal
 from unittest.mock import patch
 
+import numpy as np
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
@@ -29,9 +31,10 @@ from torch._functorch._aot_autograd.autograd_cache import (
     AOTAutogradCachePickler,
     autograd_cache_key,
     BypassAOTAutogradCache,
+    check_cacheable,
     sanitize_gm_for_cache,
 )
-from torch._functorch._aot_autograd.schemas import AOTConfig
+from torch._functorch._aot_autograd.schemas import AOTConfig, CacheableAOTConfig
 from torch._guards import TracingContext
 from torch._inductor import config as inductor_config
 from torch._inductor.custom_graph_pass import (
@@ -54,9 +57,12 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     skipIfWindows,
     subtest,
+    TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
@@ -311,6 +317,39 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         torch._dynamo.reset()
         torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
 
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "compile_threads": 1,
+        }
+    )
+    def test_local_cache_stats(self):
+        from torch._inductor.remote_cache import cache_stats
+
+        cache_stats._stats.clear()
+
+        def fn(x, y):
+            return x * 2 + y
+
+        compiled_fn = torch.compile(fn)
+        a = torch.rand(25)
+        b = torch.rand(25)
+        compiled_fn(a, b)
+
+        stats = cache_stats._stats.get("LocalAOTAutogradCache")
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats.miss, 1)
+        self.assertEqual(stats.put, 1)
+        self.assertEqual(stats.hit, 0)
+
+        self._clear_dynamo_and_codecache()
+        compiled_fn(a, b)
+
+        self.assertEqual(stats.hit, 1)
+        cache_stats._stats.clear()
+
     @requires_triton()
     @functorch_config.patch({"enable_autograd_cache": True})
     @inductor_config.patch(
@@ -346,8 +385,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             compiled_result.sum().backward()
-            if hasattr(a, "_dynamo_weak_dynamic_indices"):
-                del a._dynamo_weak_dynamic_indices
+            if hasattr(a, "_dynamo_propagated_dynamic_indices"):
+                del a._dynamo_propagated_dynamic_indices
             self.assertEqual(eager_result, compiled_result)
             if functorch_config.bundled_autograd_cache:
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
@@ -388,8 +427,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             compiled_result = compiled_fn(a, b)
             self.assertEqual(eager_result, compiled_result)
             compiled_result.sum().backward()
-            if hasattr(a, "_dynamo_weak_dynamic_indices"):
-                del a._dynamo_weak_dynamic_indices
+            if hasattr(a, "_dynamo_propagated_dynamic_indices"):
+                del a._dynamo_propagated_dynamic_indices
             if functorch_config.bundled_autograd_cache:
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -421,8 +460,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             compiled_result.sum().backward()
-            if hasattr(a, "_dynamo_weak_dynamic_indices"):
-                del a._dynamo_weak_dynamic_indices
+            if hasattr(a, "_dynamo_propagated_dynamic_indices"):
+                del a._dynamo_propagated_dynamic_indices
             self.assertEqual(eager_result, compiled_result)
             if functorch_config.bundled_autograd_cache:
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
@@ -461,6 +500,30 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         # don't prevent compilation).
         self._clear_dynamo_and_codecache()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_numpy_round_cache_hit(self):
+        def fn(x):
+            return np.round(x)
+
+        inp = np.array([[1.2, 2.7], [-3.5, 4.5]], dtype=np.float32)
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        np.testing.assert_array_equal(compiled_fn(inp), fn(inp))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        self._clear_dynamo_and_codecache()
+        np.testing.assert_array_equal(compiled_fn(inp), fn(inp))
 
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
@@ -2220,8 +2283,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 torch.compile(dynamic=dynamic)
             ):
                 actual_grads = torch.autograd.grad(compiled_result.sum(), inputs=(a, b))
-            if hasattr(a, "_dynamo_weak_dynamic_indices"):
-                del a._dynamo_weak_dynamic_indices
+            if hasattr(a, "_dynamo_propagated_dynamic_indices"):
+                del a._dynamo_propagated_dynamic_indices
             self.assertEqual(eager_result, compiled_result)
             self.assertEqual(expected_grads[0], actual_grads[0])
             self.assertEqual(expected_grads[1], actual_grads[1])
@@ -2282,8 +2345,8 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                     actual_grads = torch.autograd.grad(
                         compiled_result.sum(), inputs=(a, b)
                     )
-                if hasattr(a, "_dynamo_weak_dynamic_indices"):
-                    del a._dynamo_weak_dynamic_indices
+                if hasattr(a, "_dynamo_propagated_dynamic_indices"):
+                    del a._dynamo_propagated_dynamic_indices
                 self.assertEqual(eager_result, compiled_result)
                 self.assertEqual(expected_grads[0], actual_grads[0])
                 self.assertEqual(expected_grads[1], actual_grads[1])
@@ -2917,7 +2980,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self._clear_all_caches()
             compiled_fn = torch.compile(fn)
             with self.assertRaisesRegex(
-                RuntimeError, "pre_grad_custom_pass must implement uuid"
+                RuntimeError, "pre_grad_custom_pass.*NoUuidPass must implement uuid"
             ):
                 compiled_fn(x, y)
 
@@ -2957,7 +3020,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             ) as log_cm:
                 compiled_fn(x, y)
             uuid_warnings = [
-                m for m in log_cm.output if "does not implement uuid()" in m
+                m for m in log_cm.output if "NoUuidPass does not implement uuid()" in m
             ]
             self.assertEqual(len(uuid_warnings), 1)
 
@@ -3080,6 +3143,10 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 self.assertEqual(c3.get("autograd_cache_miss", 0), 0)
                 self.assertEqual(c3.get("autograd_cache_hit", 0), 1)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/179689",
+    )
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -3165,6 +3232,68 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             )
         compile_fx.compile_fx(gm, [[fake_x, fake_y]])
 
+    @unittest.skipIf(not HAS_GPU, "requires accelerator")
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    def test_autocast_cache_distinguishes_dtype(self):
+        """
+        Ensure AOTAutograd cache key includes autocast dtype so that
+        graphs compiled under different autocast dtypes are not reused.
+        """
+
+        class TwoLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(64, 64)
+                self.fc2 = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                return self.fc2(torch.nn.functional.gelu(self.fc1(x)))
+
+        with fresh_cache():
+            model = TwoLinear().to(GPU_TYPE).eval()
+            x = torch.randn(2, 64, device=GPU_TYPE)
+
+            # Run 1: compile under bfloat16 autocast
+            torch._dynamo.reset()
+            compiled1 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), torch.amp.autocast(GPU_TYPE, dtype=torch.bfloat16):
+                out_bf16 = compiled1(x)
+            self.assertEqual(out_bf16.dtype, torch.bfloat16)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            # Run 2: compile under float16 autocast
+            counters.clear()
+            torch._dynamo.reset()
+            compiled2 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), torch.amp.autocast(GPU_TYPE, dtype=torch.float16):
+                out_fp16 = compiled2(x)
+            self.assertEqual(out_fp16.dtype, torch.float16)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            # Run 3: compile under bfloat16 again
+            counters.clear()
+            torch._dynamo.reset()
+            compiled3 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), torch.amp.autocast(GPU_TYPE, dtype=torch.bfloat16):
+                out_bf16_2 = compiled3(x)
+            self.assertEqual(out_bf16_2.dtype, torch.bfloat16)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+            # Run 4: compile under float16 again
+            counters.clear()
+            torch._dynamo.reset()
+            compiled4 = torch.compile(model, backend="inductor")
+            with torch.no_grad(), torch.amp.autocast(GPU_TYPE, dtype=torch.float16):
+                out_fp16_2 = compiled4(x)
+            self.assertEqual(out_fp16_2.dtype, torch.float16)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
 
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
@@ -3245,23 +3374,60 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c2 = self.gen_cache_key(fn, config)
         self.assertEqual(c1, c2)
 
-    def test_identical_graphs_and_configs(self):
+    def test_runtime_only_configs_do_not_change_key(self):
         def fn(x):
             return x.sin().cos()
 
-        def fn2(x):
-            y = x.sin()
-            z = y.cos()
-            return z
-
-        # Make the id different, but otherwise identical
         config = self.default_config()
         config2 = self.default_config()
-        config2.aot_id = 1
+        config2 = dataclasses.replace(config2, aot_id=1)
+        config3 = self.default_config()
+        config3 = dataclasses.replace(config3, fw_compiler=lambda gm, inputs: gm)
 
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config2)
+        c3 = self.gen_cache_key(fn, config3)
         self.assertEqual(c1, c2)
+        self.assertEqual(c1, c3)
+
+    def test_to_cacheable_strips_runtime_only_fields(self):
+        config = self.default_config()
+        config = dataclasses.replace(
+            config,
+            fw_compiler=lambda gm, inputs: gm,
+            bw_compiler=lambda gm, inputs: gm,
+            partition_fn=lambda *args: args,
+            decompositions=None,
+            inference_compiler=lambda gm, inputs: gm,
+            static_input_indices=[0],
+            precompile_backend_id="backend",
+        )
+
+        cacheable = config.to_cacheable()
+
+        self.assertIsInstance(cacheable, CacheableAOTConfig)
+        self.assertEqual(cacheable.static_input_indices, [0])
+        self.assertEqual(cacheable.precompile_backend_id, "backend")
+        self.assertFalse(hasattr(cacheable, "fw_compiler"))
+
+    def test_different_cacheable_configs(self):
+        def fn(x):
+            return x.sin().cos()
+
+        base_config = self.default_config()
+        base = self.gen_cache_key(fn, base_config)
+
+        config_with_static_inputs = self.default_config()
+        config_with_static_inputs = dataclasses.replace(
+            config_with_static_inputs, static_input_indices=[0]
+        )
+        self.assertNotEqual(base, self.gen_cache_key(fn, config_with_static_inputs))
+
+        config_with_backend = self.default_config()
+        config_with_backend = dataclasses.replace(
+            config_with_backend, precompile_backend_id="backend"
+        )
+        self.assertNotEqual(base, self.gen_cache_key(fn, config_with_backend))
 
     def test_different_graphs(self):
         def fn(x):
@@ -3281,7 +3447,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         config = self.default_config()
         config2 = self.default_config()
-        config2.dynamic_shapes = False
+        config2 = dataclasses.replace(config2, dynamic_shapes=False)
         c1 = self.gen_cache_key(fn, config)
         c2 = self.gen_cache_key(fn, config2)
         self.assertNotEqual(c1, c2)
@@ -3426,6 +3592,133 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         config = self.default_config()
         self.gen_cache_key(fn, config, inputs=[torch.ones((3, 3))])
 
+    def test_numpy_wrapper_requires_torch_numpy_target(self):
+        def not_torch_numpy(x):
+            return x.sin()
+
+        wrapper = torch._dynamo.utils.numpy_to_tensor_wrapper(not_torch_numpy)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(wrapper, (x,))
+        graph.output(y)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "Unsupported call_function target"
+        ):
+            check_cacheable(gm)
+
+    def test_numpy_wrapper_cache_key_does_not_cache_unknown_callable_ids(self):
+        torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_clear()
+
+        def not_torch_numpy(x):
+            return x
+
+        self.assertIsNone(
+            torch._dynamo.utils._torch_numpy_callable_cache_key(not_torch_numpy)
+        )
+        cache_info = (
+            torch._dynamo.utils._torch_numpy_callable_cache_key_by_id.cache_info()
+        )
+        self.assertEqual(
+            cache_info.currsize,
+            0,
+        )
+
+    def test_numpy_wrapper_accepts_torch_numpy_alias_target(self):
+        import torch._numpy as tnp
+
+        for target in (tnp.abs, tnp.absolute):
+            wrapper = torch._dynamo.utils.numpy_to_tensor_wrapper(target)
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            y = graph.call_function(wrapper, (x,))
+            graph.output(y)
+            gm = torch.fx.GraphModule({}, graph)
+
+            check_cacheable(gm)
+            self.assertIsNotNone(torch._dynamo.utils.numpy_wrapper_cache_key(wrapper))
+
+    def test_numpy_wrapper_rejects_spoofed_torch_numpy_target(self):
+        def spoofed_round(x):
+            return x.sin()
+
+        spoofed_round.__module__ = "torch._numpy._funcs_impl"
+        spoofed_round.__qualname__ = "round"
+        spoofed_round.__name__ = "round"
+
+        wrapper = torch._dynamo.utils.numpy_to_tensor_wrapper(spoofed_round)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(wrapper, (x,))
+        graph.output(y)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "Unsupported call_function target"
+        ):
+            check_cacheable(gm)
+
+    def test_numpy_wrapper_rejects_subclass(self):
+        import torch._numpy as tnp
+
+        class CustomWrapper(torch._dynamo.utils.numpy_to_tensor_wrapper):
+            def __call__(self, x):
+                return x
+
+        wrapper = CustomWrapper(tnp.round)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(wrapper, (x,))
+        graph.output(y)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaisesRegex(
+            BypassAOTAutogradCache, "Unsupported call_function target"
+        ):
+            check_cacheable(gm)
+
+    def test_numpy_wrapper_hash_distinguishes_safe_wrappers(self):
+        import torch._numpy as tnp
+
+        def make_gm(target):
+            wrapper = torch._dynamo.utils.numpy_to_tensor_wrapper(target)
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            y = graph.call_function(wrapper, (x,))
+            graph.output(y)
+            return torch.fx.GraphModule({}, graph)
+
+        round_gm = make_gm(tnp.round)
+        sin_gm = make_gm(tnp.sin)
+
+        check_cacheable(round_gm)
+        check_cacheable(sin_gm)
+
+        self.assertNotEqual(
+            AOTAutogradCachePickler(round_gm).get_hash(round_gm),
+            AOTAutogradCachePickler(sin_gm).get_hash(sin_gm),
+        )
+
+    def test_graph_module_hash_preserves_kernel_idx_strings(self):
+        def make_gm(message):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            graph.call_function(torch._assert, (True, message))
+            graph.output(x)
+            return torch.fx.GraphModule({}, graph)
+
+        gm1 = make_gm("kernel_idx = 1")
+        gm2 = make_gm("kernel_idx = 2")
+
+        check_cacheable(gm1)
+        check_cacheable(gm2)
+
+        self.assertNotEqual(
+            AOTAutogradCachePickler(gm1).get_hash(gm1),
+            AOTAutogradCachePickler(gm2).get_hash(gm2),
+        )
+
     def test_sanitize_gm_for_cache(self):
         def fn(x):
             y = torch.sin(x)
@@ -3557,6 +3850,74 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         ):
             AOTAutogradCache._pickle_entry(entry, remote=False)
 
+    @requires_cuda_and_triton
+    def test_prepare_for_pickle_clears_benchmark_failure_reasons(self):
+        """prepare_for_pickle clears benchmark_failure_reasons which can hold
+        exec'd launcher keys that aren't picklable.
+        """
+        from torch._inductor.runtime.hints import (
+            AttrsDescriptorWrapper,
+            DeviceProperties,
+            HeuristicType,
+        )
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+        from torch._inductor.utils import triton_version_uses_attrs_dict
+
+        meta = {
+            "signature": {
+                "in_ptr0": "*fp32",
+                "out_ptr0": "*fp32",
+                "xnumel": "i32",
+            },
+            "device": DeviceProperties.create(torch.device(GPU_TYPE)),
+            "configs": [AttrsDescriptorWrapper(divisible_by_16=(0, 1), equal_to_1=())],
+            "constants": {},
+        }
+        if triton_version_uses_attrs_dict():
+            meta["signature"]["XBLOCK"] = "constexpr"
+
+        @triton.jit
+        def _add_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * XBLOCK + tl.arange(0, XBLOCK)
+            mask = offsets < xnumel
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            tl.store(out_ptr0 + offsets, x + 1.0, mask=mask)
+
+        autotuner = CachingAutotuner(
+            fn=_add_kernel,
+            triton_meta=meta,
+            configs=[triton.Config({"XBLOCK": 128})],
+            save_cache_hook=False,
+            mutated_arg_names=[],
+            optimize_mem=True,
+            heuristic_type=HeuristicType.POINTWISE,
+            inductor_meta={"grid_type": "Grid1D"},
+        )
+
+        xnumel = 256
+        inp = torch.randn(xnumel, device=GPU_TYPE)
+        out = torch.empty_like(inp)
+        autotuner.run(inp, out, xnumel, stream=torch.cuda.current_stream().cuda_stream)
+        self.assertEqual(out, inp + 1.0)
+
+        # Inject a launcher key into benchmark_failure_reasons — this is how
+        # the leak happens in production (launcher used as dict key).
+        self.assertTrue(len(autotuner.launchers) > 0)
+        launcher_fn = autotuner.launchers[0]
+        autotuner.benchmark_failure_reasons[launcher_fn] = "test"
+
+        # The autotuner is unpicklable: __getstate__ asserts launchers are
+        # empty, and benchmark_failure_reasons holds an exec'd launcher key.
+        with self.assertRaises((pickle.PicklingError, AttributeError, AssertionError)):
+            pickle.dumps(autotuner)
+
+        # prepare_for_pickle clears benchmark_failure_reasons (and other
+        # unpicklable fields), making pickle succeed.
+        autotuner.prepare_for_pickle()
+        self.assertEqual(autotuner.benchmark_failure_reasons, {})
+        pickle.dumps(autotuner)
+
     def test_nested_tensor_subclass_cache_key(self):
         ctx = multiprocessing.get_context("spawn")
         results = []
@@ -3614,6 +3975,51 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         )
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_dtensor_fake_script_object_mesh_cache_key(self):
+        from torch._library.fake_class_registry import FakeScriptObject
+        from torch.distributed.device_mesh import DeviceMesh
+        from torch.distributed.tensor import DTensor, Replicate
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+
+        with _fake_process_group():
+            mesh = DeviceMesh("cpu", torch.arange(2))
+            fake_mesh = FakeScriptObject(
+                mesh,
+                f"{DeviceMesh.__module__}.{DeviceMesh.__qualname__}",
+                mesh,
+            )
+            local_tensor = torch.zeros(4, 4)
+            tensor_meta = TensorMeta(
+                local_tensor.shape, local_tensor.stride(), local_tensor.dtype
+            )
+            fake_mesh_dtensor = DTensor(
+                local_tensor,
+                DTensorSpec(
+                    fake_mesh,
+                    (Replicate(),),
+                    tensor_meta=tensor_meta,
+                ),
+                requires_grad=False,
+            )
+            real_mesh_dtensor = DTensor(
+                local_tensor,
+                DTensorSpec(
+                    mesh,
+                    (Replicate(),),
+                    tensor_meta=tensor_meta,
+                ),
+                requires_grad=False,
+            )
+
+            pickler = AOTAutogradCachePickler(
+                torch.fx.GraphModule({}, torch.fx.Graph())
+            )
+            self.assertEqual(
+                pickler.get_hash(fake_mesh_dtensor),
+                pickler.get_hash(real_mesh_dtensor),
+            )
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_dtensor_different_placements_different_cache_key(self):
         from torch.distributed.device_mesh import init_device_mesh
         from torch.distributed.tensor import DTensor, Replicate, Shard
@@ -3650,6 +4056,39 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                 cache_key_shard,
                 "DTensor with Replicate() should have different cache key than Shard(0)",
             )
+
+    def test_reducer_override_fallthrough_for_unpicklable_types(self):
+        """
+        Test that AOTAutogradCachePickler falls through to the parent class
+        reducer_override for types that are not tensor subclasses but are
+        unpicklable (e.g. pybind11 enums).
+        """
+
+        class FakeReduceOp:
+            """Simulates a pybind11 enum that cannot be pickled."""
+
+            def __init__(self, name):
+                self.name = name
+
+            def __reduce_ex__(self, protocol):
+                raise TypeError("cannot pickle 'FakeReduceOp' object")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = AOTAutogradCachePickler(gm)
+
+        obj_a = FakeReduceOp("SUM")
+        obj_b = FakeReduceOp("SUM")
+        obj_c = FakeReduceOp("PRODUCT")
+
+        # Should not raise — parent's reducer_override handles it
+        data_a = pickler.dumps(obj_a)
+        data_b = pickler.dumps(obj_b)
+        data_c = pickler.dumps(obj_c)
+
+        # Same value -> same hash
+        self.assertEqual(data_a, data_b)
+        # Different value -> different hash
+        self.assertNotEqual(data_a, data_c)
 
 
 def _subprocess_gen_dtensor_cache_key(queue):
@@ -4225,6 +4664,9 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
             if dynamic_shapes == "from_tracing_context"
             else nullcontext()
         )
+        standalone_fake_mode = (
+            fake_mode if dynamic_shapes == "from_example_inputs" else None
+        )
 
         # Run standalone_compile and capture the real cache key.
         real_cache_key_fn = autograd_cache.autograd_cache_key
@@ -4246,6 +4688,7 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                     dynamic_shapes=dynamic_shapes,
                     options={},
                     aot=aot,
+                    fake_mode=standalone_fake_mode,
                 )
 
             self.assertIsNotNone(captured_key)
@@ -4255,6 +4698,7 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                 example_inputs,
                 dynamic_shapes=dynamic_shapes,
                 aot=aot,
+                fake_mode=standalone_fake_mode,
             )
             self.assertEqual(captured_key, sc_key)
 

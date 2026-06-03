@@ -14,7 +14,8 @@ from .common_utils import (
 )
 from .dsl_registry import dsl_registry, DSLModuleProtocol
 from .registry import (
-    _OpFn,
+    _OpCondFn,
+    _OpImplFn,
     deregister_op_overrides as _deregister_op_overrides_impl,
     register_op_override as _register_op_override_impl,
 )
@@ -43,6 +44,14 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
     if not _cuda.is_built():
         return (False, None)
 
+    # CuTeDSL kernels require genuine NVIDIA GPUs; on ROCm/HIP builds the
+    # CUDA compatibility layer reports is_built()=True but cuInit() will fail
+    # because no NVIDIA driver is present.
+    import torch
+
+    if torch.version.hip is not None:
+        return (False, None)
+
     deps = [
         ("nvidia_cutlass_dsl", "cutlass"),
         ("apache_tvm_ffi", "tvm_ffi"),
@@ -52,7 +61,11 @@ def _check_runtime_available() -> tuple[bool, Version | None]:
         available = True
         version = _available_version("nvidia_cutlass_dsl")
     else:
-        log.warning(
+        # info, not warning: missing optional deps is the common case on stock
+        # builds and we don't want to spam stderr on `import torch`. Surface
+        # it via TORCH_LOGS=+native_dsl when diagnosing why an override is
+        # silent.
+        log.info(
             "CuTeDSL operators require optional Python packages "
             "`nvidia-cutlass-dsl` and `apache-tvm-ffi`; "
             "%s",
@@ -79,7 +92,7 @@ def _version_is_ok() -> bool:
     if check_native_version_skip() or (version in _CUTEDSL_REQUIRED_VERSIONS):
         return True
 
-    log.warning(
+    log.info(
         "cutedsl version %s is not known-good (ok: %s); "
         "set TORCH_NATIVE_SKIP_VERSION_CHECK=1 to override",
         version,
@@ -99,7 +112,8 @@ def register_op_override(
     lib_symbol: str,
     op_symbol: str,
     dispatch_key: str,
-    impl: _OpFn,
+    cond: _OpCondFn | None,
+    impl: _OpImplFn,
     *,
     allow_multiple_override: bool = False,
     unconditional_override: bool = False,
@@ -121,6 +135,7 @@ def register_op_override(
         lib_symbol,
         op_symbol,
         dispatch_key,
+        cond,
         impl,
         allow_multiple_override=allow_multiple_override,
         unconditional_override=unconditional_override,

@@ -4,6 +4,7 @@
 #include <c10/metal/common.h>
 #include <functional>
 #include <stdexcept>
+#include <string_view>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
@@ -329,6 +330,15 @@ MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format) {
     const NSUInteger W = sizes[3];
     return @[ @(N), @(H), @(W), @(C) ];
   }
+  if (memory_format == MemoryFormat::ChannelsLast3d) {
+    TORCH_INTERNAL_ASSERT(sizes.size() == 5, "ChannelsLast3d memory format must have 5 dimensions!");
+    const NSUInteger N = sizes[0];
+    const NSUInteger C = sizes[1];
+    const NSUInteger D = sizes[2];
+    const NSUInteger H = sizes[3];
+    const NSUInteger W = sizes[4];
+    return @[ @(N), @(D), @(H), @(W), @(C) ];
+  }
   const int sz = sizes.size();
   const int sz_ = (sz > 0) ? sz : 1;
 
@@ -397,7 +407,8 @@ static MPSNDArray* permuteNDArray(MPSNDArray* inArray, const std::vector<int64_t
 static void check_mps_shape(MPSShape* shape) {
   for (NSNumber* elem in shape) {
     const auto val = [elem longValue];
-    TORCH_CHECK(val <= std::numeric_limits<int32_t>::max(), "MPSGaph does not support tensor dims larger than INT_MAX");
+    TORCH_CHECK(val <= std::numeric_limits<int32_t>::max(),
+                "MPSGraph does not support tensor dims larger than INT_MAX");
   }
 }
 
@@ -558,7 +569,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
 
     auto storage_numel = src.storage().nbytes() / src.element_size() - src.storage_offset();
     TORCH_CHECK(storage_numel <= std::numeric_limits<int32_t>::max(),
-                "MPSGaph does not support tensor dims larger than INT_MAX");
+                "MPSGraph does not support tensor dims larger than INT_MAX");
     MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType
                                                                                  shape:@[ @(storage_numel) ]];
     srcTensorDesc.preferPackedRows = YES;
@@ -895,6 +906,18 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
   return cplMap[key];
 }
 
+bool MetalShaderLibrary::hasFunction(const std::string& fname) {
+  // Lazily build a set of all kernel names exposed by the library. The library is immutable post-load, so the set is
+  // computed once per library instance. Used by exec_unary_kernel to decide whether to take the direct per-(in,out)
+  // kernel or fall back to the `_dense_cast_` cast variant.
+  if (C10_UNLIKELY(!functionNamesPopulated)) {
+    auto names = getFunctionNames();
+    functionNames.insert(names.begin(), names.end());
+    functionNamesPopulated = true;
+  }
+  return functionNames.contains(fname);
+}
+
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
   if (C10_UNLIKELY(!library && nparams > 0)) {
     throw std::runtime_error("Library must be initialized first");
@@ -982,11 +1005,11 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<c10::Scalar> alpha,
                                            std::optional<c10::ScalarType> scalar_arg_type,
-                                           bool supports_vec4) {
+                                           std::optional<uint32_t> ilp_threshold) {
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_unary_kernel(sub_iter, name, alpha, scalar_arg_type, supports_vec4);
+      exec_unary_kernel(sub_iter, name, alpha, scalar_arg_type, ilp_threshold);
     }
     return;
   }
@@ -998,15 +1021,71 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     return;
   }
   using namespace mps;
-  bool use_vec4 =
-      supports_vec4 && iter.is_contiguous() && !alpha.has_value() && at::isFloatingType(iter.common_dtype());
+  // For contiguous non-alpha unary ops we have two kernel flavors: an
+  // ILP_PER_THREAD-wide one that wins on large tensors, and a one-thread-per-
+  // element scalar fallback for small tensors where the ILP per-thread
+  // overhead isn't amortized. Crossover measured empirically on M-series.
+  // Crossover empirically measured on M-series across {sin, cos, tanh, exp} x
+  // {f32, f16, bf16}: cos/sin cross over near 128K, exp/tanh near 256K. Picking
+  // 256K here avoids regressions on every measured op at the cost of leaving
+  // some 128-256K wins on the table. Revisit per-Apple-GPU if wider data exists.
+  constexpr uint32_t ILP_DISPATCH_THRESHOLD = 1u << 18; // 262144 elements
+  const bool is_contiguous = iter.is_contiguous();
+  // ILP is gated on floating-point output dtype. Integer outputs come only from
+  // cheap ops (neg/abs/sqr/bitwise_not) where the smaller threadgroup count
+  // from the wider per-thread tile regresses real-world sizes, and complex
+  // outputs lose because the wide per-thread state spills out of registers.
+  const bool ilp_eligible_dtype = c10::isFloatingType(outputTensor.scalar_type());
+  bool dense_ilp = is_contiguous && !alpha.has_value() && ilp_eligible_dtype && length >= ILP_DISPATCH_THRESHOLD;
+  // Bench-only override: force ILP or scalar dispatch.
+  if (is_contiguous && !alpha.has_value()) {
+    if (auto force = c10::utils::get_env("PYTORCH_UNARY_FORCE_FLAVOR")) {
+      if (force.value() == "ilp")
+        dense_ilp = true;
+      else if (force.value() == "scalar")
+        dense_ilp = false;
+    }
+  }
   const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
+  // alpha kernels are registered under "_dense_" (unary_alpha_dense); only the
+  // plain unary path has the new "_dense_scalar_" / "_dense_" (ILP) split.
+  std::string_view dense_suffix;
+  if (!is_contiguous) {
+    dense_suffix = "strided";
+  } else if (dense_ilp || alpha.has_value()) {
+    dense_suffix = "dense";
+  } else {
+    dense_suffix = "dense_scalar";
+  }
   auto kernel_name = fmt::format("{}_{}_{}_{}{}",
                                  name,
-                                 use_vec4 ? "dense_vec4" : (iter.is_contiguous() ? "dense" : "strided"),
+                                 dense_suffix,
                                  scalarToMetalTypeString(outputTensor),
                                  scalarToMetalTypeString(inputTensor),
                                  alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "");
+  // Castout-fallback path: if the direct per-(out,in) kernel isn't registered, swap to the `_dense_castout_<in>` /
+  // `_strided_castout_<in>` variant. The castout kernel computes the functor in the input dtype and casts the result to
+  // the user's output dtype on store (via store_at_offs), matching CPU's "compute in input precision, cast on store"
+  // semantics. Castout variants don't exist for alpha kernels, so skip the fallback when alpha is set (existing
+  // TORCH_CHECK still fires for missing direct kernel).
+  bool cast_needed = false;
+  bool cast_ilp = false;
+  if (!alpha.has_value() && !hasFunction(kernel_name)) {
+    cast_needed = true;
+    // ILP castout is opt-in via caller-supplied ilp_threshold (mirrors exec_binary_kernel).
+    // Default is off because for general unary ops the runtime ScalarType switch in
+    // store_at_offs has variable cost. Copy-style call sites that know they're bandwidth-bound
+    // can pass ilp_threshold=0u (or a custom crossover) to force ILP whenever the launch shape
+    // and dtypes are compatible.
+    cast_ilp = is_contiguous && ilp_threshold.has_value() && length >= ilp_threshold.value();
+    if (cast_ilp) {
+      dense_suffix = "dense_castout_ilp";
+    } else {
+      dense_suffix = is_contiguous ? "dense_castout" : "strided_castout";
+    }
+    dense_ilp = false;
+    kernel_name = fmt::format("{}_{}_{}", name, dense_suffix, scalarToMetalTypeString(inputTensor));
+  }
   @autoreleasepool {
     auto cplState = getPipelineStateForFunc(kernel_name);
 
@@ -1018,23 +1097,94 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
 
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
-      if (use_vec4) {
+      // Strided kernels use a 2D dispatch (grid.x = innermost dim, grid.y = product of outer dims) so the kernel can
+      // read pos[0] directly from thread_position_in_grid.x and skip one div/mod per element. shape()[0] is the
+      // innermost dim after TensorIterator's reorder+coalesce.
+      const auto dispatch_strided_2d = [&]() {
+        const auto inner = static_cast<NSUInteger>(iter.shape()[0]);
+        const auto outer = static_cast<NSUInteger>(length) / inner;
+        mtl_dispatch2DJob(computeEncoder, cplState, inner, outer);
+      };
+      if (cast_needed) {
+        // {dense,strided}_castout take the output dtype at runtime via the ScalarType in the trailing constant buffer;
+        // input is read at compile-time Tin.
+        const auto out_type = static_cast<uint32_t>(outputTensor.scalar_type());
+        if (cast_ilp) {
+          std::array<uint32_t, 3> size_outtype_numel = {
+              static_cast<uint32_t>(c10::elementSize(outputTensor.scalar_type())), out_type, length};
+          mtl_setBytes(computeEncoder, size_outtype_numel, 2);
+          mtl_dispatch1DJob(
+              computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
+        } else if (is_contiguous) {
+          std::array<uint32_t, 2> size_outtype = {static_cast<uint32_t>(c10::elementSize(outputTensor.scalar_type())),
+                                                  out_type};
+          mtl_setBytes(computeEncoder, size_outtype, 2);
+          mtl_dispatch1DJob(computeEncoder, cplState, length);
+        } else {
+          std::array<uint32_t, 2> ndim_outtype = {static_cast<uint32_t>(iter.ndim()), out_type};
+          mtl_setArgs<2>(computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), ndim_outtype);
+          dispatch_strided_2d();
+        }
+      } else if (dense_ilp) {
         mtl_setBytes(computeEncoder, length, 2);
-        mtl_dispatch1DJob(computeEncoder, cplState, (length + 3) / 4);
+        mtl_dispatch1DJob(
+            computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
       } else {
-        if (!iter.is_contiguous()) {
-          mtl_setArgs<2>(computeEncoder,
-                         outputTensor.sizes(),
-                         inputTensor.strides(),
-                         outputTensor.strides(),
-                         inputTensor.ndimension());
+        if (!is_contiguous) {
+          mtl_setArgs<2>(
+              computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), static_cast<uint32_t>(iter.ndim()));
         }
         if (alpha) {
-          mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), iter.is_contiguous() ? 2 : 6);
+          mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), is_contiguous ? 2 : 6);
         }
-        mtl_dispatch1DJob(computeEncoder, cplState, length);
+        if (!is_contiguous) {
+          dispatch_strided_2d();
+        } else {
+          mtl_dispatch1DJob(computeEncoder, cplState, length);
+        }
       }
 
+      getMPSProfiler().endProfileKernel(cplState);
+    });
+  }
+}
+
+void MetalShaderLibrary::exec_unary_kernel_raw(const std::string& name,
+                                               MTLBuffer_t src_buf,
+                                               uint32_t src_offs_bytes,
+                                               c10::ScalarType src_dtype,
+                                               MTLBuffer_t dst_buf,
+                                               uint32_t dst_offs_bytes,
+                                               c10::ScalarType dst_dtype,
+                                               uint32_t numel,
+                                               std::optional<uint32_t> ilp_threshold) {
+  if (numel == 0) {
+    return;
+  }
+  const bool use_ilp = ilp_threshold.has_value() && numel >= ilp_threshold.value();
+  const std::string_view suffix = use_ilp ? "dense_castout_ilp" : "dense_castout";
+  const auto kernel_name = fmt::format("{}_{}_{}", name, suffix, scalarToMetalTypeString(src_dtype));
+  @autoreleasepool {
+    auto cplState = getPipelineStateForFunc(kernel_name);
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      auto computeEncoder = mpsStream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(cplState, name, /*isGraph=*/false);
+      [computeEncoder setComputePipelineState:cplState];
+      [computeEncoder setBuffer:dst_buf offset:dst_offs_bytes atIndex:0];
+      [computeEncoder setBuffer:src_buf offset:src_offs_bytes atIndex:1];
+      const auto out_type = static_cast<uint32_t>(dst_dtype);
+      const auto elem_size = static_cast<uint32_t>(c10::elementSize(dst_dtype));
+      if (use_ilp) {
+        std::array<uint32_t, 3> size_outtype_numel = {elem_size, out_type, numel};
+        mtl_setBytes(computeEncoder, size_outtype_numel, 2);
+        mtl_dispatch1DJob(
+            computeEncoder, cplState, (numel + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
+      } else {
+        std::array<uint32_t, 2> size_outtype = {elem_size, out_type};
+        mtl_setBytes(computeEncoder, size_outtype, 2);
+        mtl_dispatch1DJob(computeEncoder, cplState, numel);
+      }
       getMPSProfiler().endProfileKernel(cplState);
     });
   }
@@ -1043,7 +1193,9 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
 void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
                                             const std::string& name,
                                             std::optional<c10::Scalar> alpha,
-                                            std::optional<c10::ScalarType> scalar_arg_type) {
+                                            std::optional<c10::ScalarType> scalar_arg_type,
+                                            std::optional<c10::ScalarType> natural_output_dtype,
+                                            std::optional<uint32_t> ilp_threshold) {
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
@@ -1057,10 +1209,21 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   // Decompose 64-bit tensor into 32-bit ones
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_binary_kernel(sub_iter, name, alpha, scalar_arg_type);
+      exec_binary_kernel(sub_iter, name, alpha, scalar_arg_type, natural_output_dtype, ilp_threshold);
     }
     return;
   }
+
+  // Output-cast routing: when the user-facing output dtype diverges from the
+  // kernel's natural output, force the strided `_castout_` kernel variant.
+  // The default `natural` is `iter.dtype(0)` -- arithmetic kernels are
+  // template-instantiated for whatever dtype the user requested, so there's
+  // no divergence to handle. Comparison stubs declare `kBool` and
+  // `polar`/`make_complex` declare `toComplexType(common)`, which lets the
+  // dispatcher route through the new castout path when the user's `out=`
+  // dtype diverges from that fixed natural output.
+  const auto natural = natural_output_dtype.value_or(iter.output().scalar_type());
+  const bool output_cast_needed = iter.output().scalar_type() != natural;
 
   auto convert_double_scalar = [](Tensor& t) {
     if (t.dim() != 0) {
@@ -1081,8 +1244,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   convert_double_scalar(other);
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  const auto cast_needed = input.scalar_type() != other.scalar_type();
-  const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  bool cast_needed = input.scalar_type() != other.scalar_type();
   bool use_broadcast_kernel = false;
   bool use_scalar_kernel = false;
   bool broadcast_on_lhs = false;
@@ -1094,23 +1256,55 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   const bool input_is_bc = is_dense_broadcastable(input, out) && !input_is_full;
   const bool other_is_bc = is_dense_broadcastable(other, out) && !other_is_full;
 
-  if (input_is_bc && other_is_full && other.is_contiguous() && out.is_contiguous()) {
-    broadcast_numel = input.numel();
-    if (broadcast_numel == 1) {
-      use_scalar_kernel = true;
-      scalar_on_lhs = true;
-    } else {
-      use_broadcast_kernel = true;
-      broadcast_on_lhs = true;
+  // Scalar/broadcast specializations are skipped when the user-facing output
+  // dtype differs from the kernel's natural output: only the strided castout
+  // variant is registered for that combination.
+  if (!output_cast_needed) {
+    if (input_is_bc && other_is_full && other.is_contiguous() && out.is_contiguous()) {
+      broadcast_numel = input.numel();
+      if (broadcast_numel == 1) {
+        use_scalar_kernel = true;
+        scalar_on_lhs = true;
+      } else {
+        use_broadcast_kernel = true;
+        broadcast_on_lhs = true;
+      }
+    } else if (other_is_bc && input_is_full && input.is_contiguous() && out.is_contiguous()) {
+      broadcast_numel = other.numel();
+      if (broadcast_numel == 1) {
+        use_scalar_kernel = true;
+        scalar_on_lhs = false;
+      } else {
+        use_broadcast_kernel = true;
+        broadcast_on_lhs = false;
+      }
     }
-  } else if (other_is_bc && input_is_full && input.is_contiguous() && out.is_contiguous()) {
-    broadcast_numel = other.numel();
-    if (broadcast_numel == 1) {
-      use_scalar_kernel = true;
-      scalar_on_lhs = false;
-    } else {
-      use_broadcast_kernel = true;
-      broadcast_on_lhs = false;
+  }
+
+  // Scalar fast-path: host-promote the scalar to the common dtype so we can
+  // use the no-cast scalar kernel and skip the per-element runtime switch.
+  // Only safe when (a) the tensor already matches the common dtype (else the
+  // matching no-cast kernel doesn't exist) and (b) `.to(common)` is bit-exact.
+  // Conservatively limited to int scalar with a float32-backed common (kFloat
+  // or kComplexFloat) -- both are lossless on the host, and the GPU cast path
+  // also widens via op_math_t=float, so the two paths produce identical
+  // results. Half/bfloat (and complex-half) are skipped because narrowing an
+  // int directly to half on host differs from the GPU widen-to-float-then-
+  // narrow-on-store sequence for values that overflow half range.
+  if (use_scalar_kernel && cast_needed) {
+    const auto common = iter.common_dtype();
+    const auto& tensor_dtype = scalar_on_lhs ? other.scalar_type() : input.scalar_type();
+    const auto& scalar_dtype = scalar_on_lhs ? input.scalar_type() : other.scalar_type();
+    const auto common_real = c10::isComplexType(common) ? c10::toRealValueType(common) : common;
+    const bool safe_host_promote =
+        tensor_dtype == common && c10::isIntegralType(scalar_dtype, /*includeBool=*/true) && common_real == kFloat;
+    if (safe_host_promote) {
+      if (scalar_on_lhs) {
+        input = input.to(common);
+      } else {
+        other = other.to(common);
+      }
+      cast_needed = false;
     }
   }
 
@@ -1118,13 +1312,57 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       scalar_arg_type.has_value() ? scalar_arg_type.value() : (cast_needed ? out.scalar_type() : iter.common_dtype());
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
 
+  // ILP variant mirrors the unary path: each thread processes ILP_PER_THREAD
+  // elements. The kernel is applicable whenever the launch shape matches
+  // binary_dense (contiguous, no cast / broadcast / scalar / alpha); it is
+  // registered for every dtype REGISTER_BINARY_OP touches. The crossover
+  // (`ilp_threshold`) is owned by the caller: floating-point output defaults
+  // to 256K (see exec_unary_kernel for the rationale), non-floating to
+  // UINT32_MAX (i.e. off by default), and ops with a different
+  // memory-bandwidth profile can override. PYTORCH_BINARY_FORCE_FLAVOR
+  // overrides whenever the kernel is applicable, regardless of dtype.
+  const bool ilp_applicable = !use_scalar_kernel && !use_broadcast_kernel && iter.is_contiguous() && !cast_needed &&
+      !alpha.has_value() && !output_cast_needed;
+  const uint32_t threshold = ilp_threshold.value_or(
+      c10::isFloatingType(out.scalar_type()) ? (1u << 18) : std::numeric_limits<uint32_t>::max());
+  bool dense_ilp = ilp_applicable && static_cast<uint32_t>(iter.numel()) >= threshold;
+  if (ilp_applicable) {
+    if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
+      if (force.value() == "ilp")
+        dense_ilp = true;
+      else if (force.value() == "scalar")
+        dense_ilp = false;
+    }
+  }
+
+  // Both cast and non-cast variants use a `_{DTYPEO}_{DTYPEI}` suffix.
+  // Conceptually the second suffix is the kernel's compute precision (= the
+  // iterator's common dtype). For arithmetic ops out and common coincide in
+  // every registered combo (DTYPEI=DTYPEO and inputs are promoted to common
+  // before the kernel reads them, OPMATH variants widen further internally),
+  // so we substitute out for the lookup. For comparison ops DTYPEO=bool but
+  // DTYPEI varies with the read precision, so we use the actual common dtype.
+  const auto cast_suffix_type =
+      fmt::format("{}_{}",
+                  scalarToMetalTypeString(out),
+                  scalarToMetalTypeString(out.scalar_type() == kBool ? iter.common_dtype() : out.scalar_type()));
   std::string kernel_name;
-  if (use_scalar_kernel) {
+  if (output_cast_needed) {
+    // Force the strided castout path regardless of contiguity / scalar /
+    // broadcast hints. The strided binding code below also kicks in (see the
+    // matching `output_cast_needed` short-circuit). Defensive: lookup fails
+    // loudly via getPipelineStateForFunc if the op didn't register a
+    // `_strided_castout_` variant (e.g. alpha or unusual functor combos).
+    kernel_name = fmt::format("{}_strided_castout_{}_{}{}",
+                              name,
+                              scalarToMetalTypeString(natural),
+                              scalarToMetalTypeString(iter.common_dtype()),
+                              alpha_suffix);
+  } else if (use_scalar_kernel) {
     const auto& tensor_operand = scalar_on_lhs ? other : input;
     const auto lhs_suffix = scalar_on_lhs ? "_lhs" : "";
     if (cast_needed) {
-      kernel_name =
-          fmt::format("{}_dense_scalar{}_cast_{}{}", name, lhs_suffix, scalarToMetalTypeString(out), alpha_suffix);
+      kernel_name = fmt::format("{}_dense_scalar{}_cast_{}{}", name, lhs_suffix, cast_suffix_type, alpha_suffix);
     } else {
       kernel_name = fmt::format("{}_dense_scalar{}_{}_{}{}",
                                 name,
@@ -1136,11 +1374,8 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   } else if (use_broadcast_kernel) {
     const auto& tensor_operand = broadcast_on_lhs ? other : input;
     if (cast_needed) {
-      kernel_name = fmt::format("{}_dense_broadcast{}_cast_{}{}",
-                                name,
-                                broadcast_on_lhs ? "_rhs" : "",
-                                scalarToMetalTypeString(out),
-                                alpha_suffix);
+      kernel_name = fmt::format(
+          "{}_dense_broadcast{}_cast_{}{}", name, broadcast_on_lhs ? "_rhs" : "", cast_suffix_type, alpha_suffix);
     } else {
       kernel_name = fmt::format("{}_dense_broadcast{}_{}_{}{}",
                                 name,
@@ -1151,7 +1386,11 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     }
   } else {
     // TODO: Implicitly pass both input and output types to non-cast kernels
-    kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(out), alpha_suffix)
+    // The ILP suffix carries the unroll width (e.g. dense_ilp4) so future
+    // variants (ilp8, ...) can coexist; see C10_METAL_ILP_PER_THREAD_STR.
+    const auto suffix =
+        iter.is_contiguous() ? (dense_ilp ? "dense_ilp" C10_METAL_ILP_PER_THREAD_STR : "dense") : "strided";
+    kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, cast_suffix_type, alpha_suffix)
                               : fmt::format("{}_{}_{}_{}{}",
                                             name,
                                             suffix,
@@ -1167,7 +1406,20 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
       [computeEncoder setComputePipelineState:binaryPSO];
       bind_iter_tensors(computeEncoder, iter);
-      if (use_scalar_kernel) {
+      if (output_cast_needed) {
+        // Strided castout path: shape/strides + (ndim, in_a_type, in_b_type,
+        // out_type). The kernel reads inputs at runtime types and stores at
+        // ndim_and_types.w (out dtype). This binding matches the
+        // `binary_strided_castout` template at any contiguity/broadcast.
+        std::array<int, 4> ndim_and_types = {iter.ndim(),
+                                             static_cast<int>(input.scalar_type()),
+                                             static_cast<int>(other.scalar_type()),
+                                             static_cast<int>(out.scalar_type())};
+        mtl_setArgs<3>(computeEncoder, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+      } else if (use_scalar_kernel) {
+        // Rebind the scalar in case we promoted it above; harmless when we
+        // didn't, since this matches what bind_iter_tensors already did.
+        mtl_setBuffer(computeEncoder, scalar_on_lhs ? input : other, scalar_on_lhs ? 1 : 2);
         if (cast_needed) {
           std::array<uint32_t, 4> sizes_types = {static_cast<uint32_t>(c10::elementSize(input.scalar_type())),
                                                  static_cast<uint32_t>(c10::elementSize(other.scalar_type())),
@@ -1198,7 +1450,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
         }
       } else {
         if (iter.is_contiguous()) {
-          if (alpha) {
+          if (dense_ilp) {
+            mtl_setBytes(computeEncoder, static_cast<uint32_t>(iter.numel()), 3);
+          } else if (alpha) {
             mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), 3);
           }
           if (cast_needed) {
@@ -1230,7 +1484,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
           }
         }
       }
-      mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
+      const auto dispatch_n =
+          dense_ilp ? (iter.numel() + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD : iter.numel();
+      mtl_dispatch1DJob(computeEncoder, binaryPSO, dispatch_n);
       getMPSProfiler().endProfileKernel(binaryPSO);
     }
   });
@@ -1443,6 +1699,6 @@ void* get_tensor_gpu_address(const at::TensorBase& t) {
 } // namespace at::native::mps
 
 // Check that c10::metal::ScalarType is strict subset (with matching values) of c10::ScalarType
-#define DTYPE_CHECKER(_n, _v) \
+#define DTYPE_CHECKER(_n, _v, _t) \
   static_assert(static_cast<int>(::c10::ScalarType::_n) == static_cast<int>(::c10::metal::ScalarType::_n));
 C10_METAL_ALL_TYPES_FUNCTOR(DTYPE_CHECKER)

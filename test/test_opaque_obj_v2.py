@@ -51,6 +51,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -446,7 +447,7 @@ class TestOpaqueObject(TestCase):
         # raises. Any registrations before this would leak into the next test.
         super().setUp()
 
-        self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")  # noqa: TOR901
+        self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")  # noqa: SCOPED_LIBRARY
         self._opaque_types_before_test = set(_OPAQUE_TYPES_BY_NAME.keys())
 
         torch.library.define(
@@ -1194,7 +1195,7 @@ def forward(self, x_1, cfg_1):
             return out
 
         torch.library.register_fake(
-            "_TestOpaqueObject::bad_fake", bad_fake1, lib=self.lib, allow_override=True
+            "_TestOpaqueObject::bad_fake", bad_fake1, lib=self.lib
         )
 
         with self.assertRaisesRegex(
@@ -1208,7 +1209,7 @@ def forward(self, x_1, cfg_1):
             return torch.empty_like(x)
 
         torch.library.register_fake(
-            "_TestOpaqueObject::bad_fake", bad_fake2, lib=self.lib, allow_override=True
+            "_TestOpaqueObject::bad_fake", bad_fake2, lib=self.lib
         )
 
         with self.assertRaisesRegex(
@@ -1370,6 +1371,7 @@ def forward(self, arg0_1, arg1_1):
         res = torch.compile(foo, fullgraph=True, backend="inductor")(rng, x)
         self.assertFalse(torch.allclose(res, x * x + x))
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184597")
     def test_reference_type_recompile(self):
         cnt = CompileCounter()
 
