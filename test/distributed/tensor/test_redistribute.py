@@ -539,7 +539,7 @@ class RedistributeTest(DTensorContinuousTestBase):
                 torch.ones(local_shape, dtype=dtype) * self.world_size,
             )
             self.assertEqual(
-                comm_mode.get_comm_counts()[funcol.reduce_scatter_single], 1
+                comm_mode.get_comm_counts()[funcol.reduce_scatter_tensor], 1
             )
 
     def _test_all_gather_optimization(
@@ -2716,14 +2716,14 @@ class MultiDimRedistributeOptimizationTest(DTensorContinuousTestBase):
                 mesh_2d,
                 (Partial("sum"), Partial("sum")),
                 (Shard(0), Shard(0)),
-                {funcol.reduce_scatter_single: 1},
+                {funcol.reduce_scatter_tensor: 1},
                 "nested reduce_scatter",
             ),
             (
                 mesh_2d,
                 (Partial("sum"), Partial("sum")),
                 (Shard(0), Shard(1)),
-                {funcol.reduce_scatter_single: 2},
+                {funcol.reduce_scatter_tensor: 2},
                 "reduce_scatter to different dims",
             ),
             (
@@ -2746,7 +2746,7 @@ class MultiDimRedistributeOptimizationTest(DTensorContinuousTestBase):
                 (Partial("sum"), Partial("sum"), Shard(0)),
                 (Shard(0), Shard(0), Shard(0)),
                 {
-                    funcol.reduce_scatter_single: 1,
+                    funcol.reduce_scatter_tensor: 1,
                     funcol.all_reduce: 1,
                     funcol.all_gather_into_tensor: 1,
                 },
@@ -2777,14 +2777,14 @@ class MultiDimRedistributeOptimizationTest(DTensorContinuousTestBase):
                 mesh_3d,
                 (Partial("sum"), Partial("sum"), Replicate()),
                 (Shard(0), Shard(1), Replicate()),
-                {funcol.reduce_scatter_single: 2},
+                {funcol.reduce_scatter_tensor: 2},
                 "reduce_scatter with Replicate unchanged",
             ),
             (
                 mesh_3d,
                 (Partial("sum"), Partial("sum"), Partial("sum")),
                 (Shard(0), Shard(0), Shard(1)),
-                {funcol.reduce_scatter_single: 2},
+                {funcol.reduce_scatter_tensor: 2},
                 "3 partials: 2 merged reduce_scatter + 1 separate",
             ),
         ]
@@ -2910,7 +2910,7 @@ class MultiDimRedistributeOptimizationTest(DTensorContinuousTestBase):
 
         # Should be 1 merged reduce_scatter
         self.assertEqual(
-            comm_mode.get_comm_counts().get(funcol.reduce_scatter_single, 0),
+            comm_mode.get_comm_counts().get(funcol.reduce_scatter_tensor, 0),
             1,
             "mixed sum/avg reduce_scatter should merge to 1 collective",
         )
