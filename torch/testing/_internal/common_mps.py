@@ -353,6 +353,7 @@ if torch.backends.mps.is_available():
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
+            "lcm": None,
             "linalg.cond": None,
             "linalg.eigh": None,
             "linalg.eigvalsh": None,
