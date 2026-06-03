@@ -1161,6 +1161,35 @@ def _has_script_object_arg(schema: torch.FunctionSchema) -> bool:
 # You can obtain an OpOverload object through attribute query.
 class OpOverloadPacket(Generic[_P, _T]):
     __file__: ClassVar[str] = "torch.ops"
+    __name__: str
+    _qualified_op_name: str
+    _op: Callable[_P, _T]
+    _overload_names: list[str]
+    _dir: list[str]
+    _has_torchbind_op_overload: bool
+
+    def __new__(
+        cls,
+        qualified_op_name: str | None = None,
+        op_name: str | None = None,
+        op: Callable[_P, _T] | None = None,
+        overload_names: list[str] | None = None,
+    ) -> "OpOverloadPacket[_P, _T]":
+        self: OpOverloadPacket[_P, _T] = super().__new__(cls)
+        if (
+            qualified_op_name is not None
+            and op_name is not None
+            and op is not None
+            and overload_names is not None
+        ):
+            # Tracing/profiling hooks can inspect self at the entry of __init__.
+            # Initialize fields used by __repr__, __str__, and __getattr__ first.
+            self._qualified_op_name = qualified_op_name
+            self.__name__ = op_name
+            self._op = op
+            self._overload_names = overload_names
+            self._dir = []
+        return self
 
     def __init__(
         self,
@@ -1171,16 +1200,14 @@ class OpOverloadPacket(Generic[_P, _T]):
     ) -> None:
         # These attributes are accessible on the object through the properties
         # defined below but are immutable
-        self._qualified_op_name = qualified_op_name
-        self.__name__ = op_name
-        self._op = op
-        self._overload_names = overload_names
-        self._dir: list[str] = []
         self._has_torchbind_op_overload = any(
             _has_script_object_arg(schema) for schema in self._schemas.values()
         )
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
+    def __copy__(self):
+        return self
+
     def __deepcopy__(self, memo=None):
         return self
 
@@ -1207,12 +1234,25 @@ class OpOverloadPacket(Generic[_P, _T]):
         }
 
     def __getattr__(self, key: str) -> OpOverload[_P, _T]:
-        # Overload names cannot be dunder names. This also keeps tracing hooks
-        # that probe __qualname__ from recursively entering __getattr__ before
-        # __init__ has finished setting up the packet.
-        if key.startswith("__"):
-            cls_name = object.__getattribute__(self, "__class__").__name__
-            raise AttributeError(f"'{cls_name}' object has no attribute '{key}'")
+        # ensure that query for dunder attributes that does not exist on
+        # opoverloadpacket but instead exists on the self._op object does not unnecessarily call
+        # `_get_operation_overload` (which is an expensive operation).
+        # This is done to prevent any potential slowdown. This list can be extended
+        # if there exists other attributes like `__name__` that only exist on self._op and not on the
+        # opoverloadpacket.
+        # This is ok since we are guaranteed that an overload name for an aten op can't start with '__'
+        try:
+            if key.startswith("__"):
+                return getattr(self._op, key)
+        except AttributeError:
+            # for consistency because it seems weird to
+            # throw an attribute error with a message containing
+            # an object name different from the one the attribute
+            # query was performed on.
+            raise AttributeError(
+                f"'{str(self)}' can't have an overload name beginning with '__' and the "
+                f"underlying op {str(self._op)} has no attribute {key} either."
+            ) from None
 
         try:
             # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
