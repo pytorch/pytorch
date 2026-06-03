@@ -1796,6 +1796,10 @@ class TritonOverrides(OpOverrides):
     def index_expr(cls, expr, dtype):
         raise NotImplementedError("ops.index_expr not implemented outside a kernel")
 
+    @classmethod
+    def value_expr(cls, expr, dtype):
+        raise NotImplementedError("ops.value_expr not implemented outside a kernel")
+
     @staticmethod
     def masked(mask, body, other):
         raise NotImplementedError("ops.masked not implemented outside a kernel")
@@ -2401,6 +2405,29 @@ class TritonKernelOverrides(TritonOverrides):
                 )
 
         var.mask_vars = indexing.mask_vars
+        return var
+
+    @classmethod
+    def value_expr(cls, expr, dtype):
+        """
+        Like :meth:`index_expr`, but honors ``dtype`` by setting the kernel
+        index dtype before emitting, and casting the result if needed.
+        """
+        real_index_dtype = V.kernel._index_dtype
+        V.kernel._index_dtype = (
+            dtype if dtype in (torch.int32, torch.int64) else torch.int64
+        )
+        try:
+            var = cls.index_expr(expr, dtype)
+        finally:
+            V.kernel._index_dtype = real_index_dtype
+        if real_index_dtype != dtype or var.dtype != dtype:
+            var = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"({var}).to({triton_type(dtype)})",
+                dtype=dtype,
+                shape=var.shape,
+            )
         return var
 
     @staticmethod
@@ -3051,11 +3078,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         fixed_config: FixedTritonConfig | None = None,
         hint_override: int | None = None,
         is_combo_kernel: bool = False,
+        per_subkernel_blocks: bool = False,
         **kwargs,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
         self.is_combo_kernel: bool = is_combo_kernel
+        self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
@@ -6704,7 +6733,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def needs_yz_grid_overflow(self, entry: IterationRangesRoot) -> bool:
         # Combo kernels use flattened dispatch where y_pid_offset is computed
         # from the flattened pid, so YZ overflow is not needed
-        if self.is_combo_kernel and config.combo_kernel_per_subkernel_blocks:
+        if self.is_combo_kernel and self.per_subkernel_blocks:
             return False
         return (
             entry.grid_dim == 1
@@ -7430,12 +7459,14 @@ class TritonScheduling(SIMDScheduling):
         V.graph.inplaced_to_remove = OrderedSet(inplaced_to_remove_orig)
         enable_autotune = config.combo_kernels_autotune > 0
         mixed_sizes = config.combo_kernel_allow_mixed_sizes > 0
+        per_subkernel_blocks = config.combo_kernel_per_subkernel_blocks
         kernel_code_list = self.generate_combo_kernel_code(
             subkernel_nodes=node_list,
             custom_part_algorithm=True,
             enable_autotune=enable_autotune,
             mixed_sizes=mixed_sizes,
             only_gen_src_code=True,
+            per_subkernel_blocks=per_subkernel_blocks,
         )
 
         # pyrefly: ignore [bad-assignment]
