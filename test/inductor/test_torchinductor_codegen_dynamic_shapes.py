@@ -119,6 +119,9 @@ test_failures = {
     "test_as_strided_on_split_view_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_cat_empty_1d_negative_dim_zero_output_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     #
     # Failed to find dynamic for loop variable:
     #
@@ -135,6 +138,7 @@ test_failures = {
     "test_arange4_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange6_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange7_dynamic_shapes": TestFailure(("cpu",)),
+    "test_arange9_dynamic_shapes": TestFailure(("cpu",)),
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_dynamic_shapes": TestFailure(("cpu",)),
@@ -180,6 +184,9 @@ test_failures = {
     "test_bincount_with_int_weights_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu")
     ),
+    "test_bincount_empty_with_weights_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
     "test_unique_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_unique_dim_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_unique_consecutive_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -193,6 +200,10 @@ test_failures = {
         ("cpu", "cuda", "xpu")
     ),
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    # XPU falls back max_pool2d_with_indices_backward to ATen eager (see
+    # torch/_decomp/decompositions.py), so no Triton kernel is generated.
+    "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(("xpu",)),
+    "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(("xpu",)),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d_backward4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),

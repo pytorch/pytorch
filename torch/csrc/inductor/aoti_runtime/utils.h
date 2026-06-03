@@ -1,10 +1,12 @@
 #pragma once
 
+#include <array>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 // WARNING: Be careful when adding new includes here. This header will be used
@@ -67,7 +69,7 @@ inline void delete_c10_value_object(void* ptr) {
 
 class RAIIAtenRecordFunctionHandle {
  public:
-  RAIIAtenRecordFunctionHandle() : handle_(nullptr, noop_deleter) {}
+  RAIIAtenRecordFunctionHandle() = default;
   RAIIAtenRecordFunctionHandle(const RAIIAtenRecordFunctionHandle& other) =
       delete;
   RAIIAtenRecordFunctionHandle& operator=(
@@ -103,9 +105,7 @@ class RAIIAtenRecordFunctionHandle {
   RAIIAtenRecordFunctionHandle(AtenRecordFunctionHandle handle)
       : handle_(handle, delete_record_function_object) {}
 
-  ~RAIIAtenRecordFunctionHandle() {
-    handle_.reset();
-  }
+  ~RAIIAtenRecordFunctionHandle() = default;
 
   // Return a raw AtenRecordFunctionHandle to be used by aoti_torch functions
   // Note: this function does NOT transfer the ownership of the handle
@@ -126,13 +126,15 @@ class RAIIAtenRecordFunctionHandle {
   }
 
  private:
-  std::unique_ptr<AtenRecordFunctionOpaque, DeleterFnPtr> handle_;
+  std::unique_ptr<AtenRecordFunctionOpaque, DeleterFnPtr> handle_{
+      nullptr,
+      noop_deleter};
 };
 
 // RAIIAtenTensorHandle steals the tensor objects created by the libtorch C ABI
 class RAIIAtenTensorHandle {
  public:
-  RAIIAtenTensorHandle() : handle_(nullptr, noop_deleter) {}
+  RAIIAtenTensorHandle() = default;
   RAIIAtenTensorHandle(const RAIIAtenTensorHandle& other) = delete;
   RAIIAtenTensorHandle& operator=(const RAIIAtenTensorHandle& other) = delete;
 
@@ -144,9 +146,7 @@ class RAIIAtenTensorHandle {
   RAIIAtenTensorHandle(AtenTensorHandle handle)
       : handle_(handle, delete_tensor_object) {}
 
-  ~RAIIAtenTensorHandle() {
-    handle_.reset();
-  }
+  ~RAIIAtenTensorHandle() = default;
 
   // Return a raw AtenTensorHandle to be used by aoti_torch functions
   // Note: this function does NOT transfer the ownership of the handle
@@ -206,13 +206,15 @@ class RAIIAtenTensorHandle {
   }
 
  private:
-  std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
+  std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_{
+      nullptr,
+      noop_deleter};
 };
 
 // RAIIC10IValueHandle steals the IValue objects created by the libtorch C ABI
 class RAIIC10IValueHandle {
  public:
-  RAIIC10IValueHandle() : handle_(nullptr, noop_deleter) {}
+  RAIIC10IValueHandle() = default;
   RAIIC10IValueHandle(const RAIIC10IValueHandle& other) = delete;
   RAIIC10IValueHandle& operator=(const RAIIC10IValueHandle& other) = delete;
 
@@ -224,9 +226,7 @@ class RAIIC10IValueHandle {
   RAIIC10IValueHandle(C10IValueHandle handle)
       : handle_(handle, delete_c10_value_object) {}
 
-  ~RAIIC10IValueHandle() {
-    handle_.reset();
-  }
+  ~RAIIC10IValueHandle() = default;
 
   // Return a raw C10IValueHandle to be used by aoti_torch functions
   // Note: this function does NOT transfer the ownership of the handle
@@ -247,7 +247,7 @@ class RAIIC10IValueHandle {
   }
 
  private:
-  std::unique_ptr<C10IValueOpaque, DeleterFnPtr> handle_;
+  std::unique_ptr<C10IValueOpaque, DeleterFnPtr> handle_{nullptr, noop_deleter};
 };
 
 class MaybeOwningAtenTensorHandle {
@@ -266,23 +266,25 @@ class MaybeOwningAtenTensorHandle {
       default;
 
   // Steal the ownership from another RAIIAtenTensorHandle using std::move
-  MaybeOwningAtenTensorHandle(RAIIAtenTensorHandle&& other)
-      : raii_handle_(std::move(other)) {
+  MaybeOwningAtenTensorHandle(RAIIAtenTensorHandle other)
+      : handle_(nullptr), raii_handle_(std::move(other)) {
     handle_ = raii_handle_.get();
   }
-  MaybeOwningAtenTensorHandle& operator=(RAIIAtenTensorHandle&& other) {
+  MaybeOwningAtenTensorHandle& operator=(RAIIAtenTensorHandle other) {
     raii_handle_ = std::move(other);
     handle_ = raii_handle_.get();
     return *this;
   }
 
   // By default, steal the ownership from raw AtenTensorHandle
-  MaybeOwningAtenTensorHandle(AtenTensorHandle handle) : raii_handle_(handle) {
+  MaybeOwningAtenTensorHandle(AtenTensorHandle handle)
+      : handle_(nullptr), raii_handle_(handle) {
     handle_ = raii_handle_.get();
   }
 
   // If user_managed is true, we do not steal the ownership.
-  MaybeOwningAtenTensorHandle(AtenTensorHandle handle, bool user_managed) {
+  MaybeOwningAtenTensorHandle(AtenTensorHandle handle, bool user_managed)
+      : handle_(nullptr) {
     if (user_managed) {
       aoti_torch_new_tensor_handle(handle, &handle_);
     } else {
@@ -291,11 +293,7 @@ class MaybeOwningAtenTensorHandle {
     }
   }
 
-  ~MaybeOwningAtenTensorHandle() {
-    // This is no-op if we don't hold raii_handle with the
-    // MaybeOwningAtenTensorHandle.
-    raii_handle_.reset();
-  }
+  ~MaybeOwningAtenTensorHandle() = default;
 
   // Return a raw AtenTensorHandle to be used by aoti_torch functions
   // Note: this function does NOT transfer the ownership of the handle
@@ -416,13 +414,13 @@ inline DevicePtr allocate_scratch_tensor(
     RAIIAtenTensorHandle& scratch_tensor) {
   DevicePtr scratch_ptr = 0;
   if (numel > 0) {
-    int64_t scratch_size[] = {numel};
-    int64_t scratch_stride[] = {1};
-    AtenTensorHandle scratch_handle;
+    std::array<int64_t, 1> scratch_size{numel};
+    std::array<int64_t, 1> scratch_stride{1};
+    AtenTensorHandle scratch_handle = nullptr;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
         1,
-        scratch_size,
-        scratch_stride,
+        scratch_size.data(),
+        scratch_stride.data(),
         dtype,
         device_type,
         device_index,
@@ -483,7 +481,7 @@ inline void assert_size_stride(
     const char* expected_dtype_name = nullptr) {
   std::string op_msg = op_name ? std::string("\nError in op: ") + op_name : "";
   if (expected_dtype >= 0) {
-    int32_t dtype;
+    int32_t dtype = 0;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &dtype));
     if (dtype != expected_dtype) {
       std::string dtype_name = expected_dtype_name
@@ -500,7 +498,7 @@ inline void assert_size_stride(
     }
   }
 
-  int64_t ndim;
+  int64_t ndim = 0;
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dim(tensor, &ndim));
   int64_t expected_ndim = static_cast<int64_t>(expected_sizes.size());
   AOTI_RUNTIME_CHECK(
@@ -508,14 +506,14 @@ inline void assert_size_stride(
       "expected ndim " + std::to_string(expected_ndim) + " but got " +
           std::to_string(ndim) + op_msg);
 
-  int64_t numel;
+  int64_t numel = 0;
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_numel(tensor, &numel));
   if (numel == 0) {
     return;
   }
 
-  int64_t* sizes;
-  int64_t* strides;
+  int64_t* sizes = nullptr;
+  int64_t* strides = nullptr;
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(tensor, &sizes));
   AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(tensor, &strides));
 
@@ -565,6 +563,7 @@ inline AtenTensorHandle wrap_with_raii_handle_if_needed(
 // This should only be called in cases where the C-shim API expects an optional
 // input argument (passed by pointer), and a temporary needs to be passed to it.
 template <class T>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 T& temporary_reference(T&& t) {
   return t;
 }
