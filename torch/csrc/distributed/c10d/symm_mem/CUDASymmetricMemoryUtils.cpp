@@ -46,9 +46,10 @@ at::Tensor pg_all_gather_bytes(
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   auto device = c10::Device(c10::DeviceType::CUDA, device_idx);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  void* mutable_data = const_cast<void*>(data);
   at::Tensor in_buf = at::from_blob(
-                          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-                          const_cast<void*>(data),
+                          mutable_data,
                           {static_cast<int64_t>(nbytes)},
                           at::TensorOptions().dtype(at::kByte))
                           .to(device);
