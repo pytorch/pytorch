@@ -904,7 +904,9 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = func1(x.clone())
             self.assertEqual(out_eager, out_compiled)
 
-    @torch._inductor.config.patch(force_layout_optimization=True)
+    @torch._inductor.config.patch(
+        layout_optimization=True, force_layout_optimization=True
+    )
     def test_as_strided_input_layout_with_symbolic_strides(self):
         from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 
