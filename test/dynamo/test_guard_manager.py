@@ -739,6 +739,37 @@ user_stack=None)
             guard_str,
         )
 
+    def test_framelocals_verbose_uses_framelocals_mapping(self):
+        from torch._C._dynamo.eval_frame import code_framelocals_names
+
+        guard_mod = torch._dynamo.guards
+        orig_get_framelocals_idx = guard_mod.get_framelocals_idx
+
+        def fn(t, x, y):
+            return t + x
+
+        y_idx = tuple(code_framelocals_names(fn.__code__)).index("y")
+
+        def wrong_idx(code, var_name):
+            if code is fn.__code__ and var_name == "x":
+                return y_idx
+            return orig_get_framelocals_idx(code, var_name)
+
+        guard_mod.get_framelocals_idx = wrong_idx
+        try:
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                opt_fn = torch.compile(fn, backend="eager")
+                opt_fn(torch.ones(2), 1, 2)
+                with self.assertRaises(torch._dynamo.exc.RecompileError) as cm:
+                    opt_fn(torch.ones(2), 1, 2)
+
+            msg = str(cm.exception)
+            self.assertIn("x == 1", msg)
+            self.assertNotIn("Unexpected recompilation", msg)
+        finally:
+            guard_mod.get_framelocals_idx = orig_get_framelocals_idx
+            torch._dynamo.reset()
+
     def test_dict_getitem_accessor(self):
         foo = {
             "a": 1,
