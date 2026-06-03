@@ -163,12 +163,12 @@ struct AttentionKernel {
 
     uint8_t custom_mask_type = NoCustomMask;
 
-    int32_t q_strideM = 0;
-    int32_t k_strideM = 0;
-    int32_t v_strideM = 0;
-    int32_t bias_strideM = 0;
+    int64_t q_strideM = 0;
+    int64_t k_strideM = 0;
+    int64_t v_strideM = 0;
+    int64_t bias_strideM = 0;
 
-    int32_t o_strideM = 0;
+    int64_t o_strideM = 0;
 
     // Everything below is only used in `advance_to_block`
     // and shouldn't use registers
