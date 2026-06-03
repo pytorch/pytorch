@@ -1945,6 +1945,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
         self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Any:
         arg = next(self.old_args_gen)
+        _preserve_node_meta(self.current_node, arg.node)
         if "val" in self.current_node.meta:
             arg.node.meta["val"] = self.current_node.meta["val"]
         if "tensor_dict" in self.current_node.meta:
@@ -1982,6 +1983,8 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
     def run_node(self, n: Node) -> Any:
         self.current_node = n
         result_proxy = super().run_node(n)
+        if isinstance(result_proxy, torch.fx.Proxy):
+            _preserve_node_meta(self.current_node, result_proxy.node)
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
         if "example_value" in self.current_node.meta:
@@ -2001,12 +2004,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
 
     def transform(self) -> torch.fx.GraphModule:
         result_gm = super().transform()
-        if "dynamo_flat_name_to_original_fqn" in self.module.meta:  # type: ignore[operator]
-            result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[  # type: ignore[index]
-                "dynamo_flat_name_to_original_fqn"  # type: ignore[index]
-            ]
-        if "dynamo_compile_id" in self.module.meta:  # type: ignore[operator]
-            result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]  # type: ignore[index]
+        _preserve_graph_module_meta(self.module, result_gm)
         return result_gm
 
 
@@ -2099,6 +2097,56 @@ def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -
                 "using `torch.utils._pytree.register_pytree_node` or "
                 "`torch.export.register_dataclass`.",
             )
+
+
+_RETRACE_VALUE_META_FIELDS = frozenset(
+    {"val", "example_value", "tensor_meta", "unbacked_bindings", "grapharg"}
+)
+
+
+def _preserve_node_meta(
+    src: Node, dst: Node, skip_fields: frozenset[str] = frozenset()
+) -> None:
+    for k, v in src.meta.items():
+        if k not in skip_fields:
+            dst.meta.setdefault(k, v)
+
+
+def _preserve_graph_module_meta(src: Any, dst: torch.fx.GraphModule) -> None:
+    dst.meta.update(src.meta)
+
+
+def _iter_node_source_keys(node: Node) -> Generator[tuple[int, str], None, None]:
+    sources = list(node.meta.get("from_node", ()))
+    while sources:
+        source = sources.pop(0)
+        node_info = getattr(source, "node_info", None)
+        if node_info is not None:
+            yield node_info.graph_id, node_info.name
+        sources.extend(getattr(source, "from_node", ()))
+
+
+def _preserve_make_fx_meta(
+    src: torch.fx.GraphModule, dst: torch.fx.GraphModule
+) -> None:
+    _preserve_graph_module_meta(src, dst)
+
+    src_nodes = {(id(node.graph), node.name): node for node in src.graph.nodes}
+    for node in dst.graph.nodes:
+        for source_key in _iter_node_source_keys(node):
+            if source := src_nodes.get(source_key):
+                _preserve_node_meta(source, node, _RETRACE_VALUE_META_FIELDS)
+                break
+
+    src_placeholders = list(src.graph.find_nodes(op="placeholder"))
+    dst_placeholders = list(dst.graph.find_nodes(op="placeholder"))
+    for src_node, dst_node in zip(src_placeholders, dst_placeholders):
+        _preserve_node_meta(src_node, dst_node, _RETRACE_VALUE_META_FIELDS)
+
+    src_outputs = list(src.graph.find_nodes(op="output"))
+    dst_outputs = list(dst.graph.find_nodes(op="output"))
+    for src_node, dst_node in zip(src_outputs, dst_outputs):
+        _preserve_node_meta(src_node, dst_node, _RETRACE_VALUE_META_FIELDS)
 
 
 def rewrite_signature(
@@ -2574,10 +2622,12 @@ def export(
         ]
 
         if aten_graph:
+            torch_level_graph = graph
+
             # Running graph with interpreter is needed for propagating the stack_trace
             def graph_with_interpreter(*args: Any) -> Any:
                 with torch.fx.traceback.preserve_node_meta():
-                    return torch.fx.Interpreter(graph).run(*args)  # type: ignore[arg-type]
+                    return torch.fx.Interpreter(torch_level_graph).run(*args)
 
             with unset_fake_temporarily(), enable_python_dispatcher(), fake_mode:
                 try:
@@ -2599,6 +2649,7 @@ def export(
 
             if graph is None:
                 raise AssertionError("graph must not be None after tracing")
+            _preserve_make_fx_meta(torch_level_graph, graph)
             for node in graph.graph.find_nodes(op="get_attr"):
                 if isinstance(getattr(graph, node.target), torch.Tensor):  # type: ignore[arg-type]
                     node.meta["val"] = fake_mode.from_tensor(

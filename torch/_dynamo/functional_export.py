@@ -15,7 +15,12 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.decorators import disable as dynamo_disable
-from torch._dynamo.eval_frame import argument_names, check_user_input_output
+from torch._dynamo.eval_frame import (
+    _preserve_graph_module_meta,
+    _preserve_node_meta,
+    argument_names,
+    check_user_input_output,
+)
 from torch._dynamo.exc import UserErrorType
 from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
@@ -289,10 +294,9 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                 graph_placeholder_idx = self.graph_input_order[i]
                 if graph_placeholder_idx < len(self.placeholders):
                     orig_placeholder = self.placeholders[graph_placeholder_idx]
-                    # Copy other metadata but not "val" yet
-                    for key, value in orig_placeholder.meta.items():
-                        if key != "val":
-                            placeholder.node.meta[key] = value
+                    _preserve_node_meta(
+                        orig_placeholder, placeholder.node, frozenset({"val"})
+                    )
 
             # Always ensure we have proper "val" metadata from fake tensor
             if self.fake_mode is not None and isinstance(
@@ -338,10 +342,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         if self.current_node in self.old_to_new_mapping:
             new_arg = self.old_to_new_mapping[self.current_node]
 
-            # Copy over additional metadata from current node, but don't overwrite "val"
-            for key in ["tensor_dict", "example_value", "unbacked_bindings"]:
-                if key in self.current_node.meta:
-                    new_arg.node.meta[key] = self.current_node.meta[key]
+            _preserve_node_meta(self.current_node, new_arg.node, frozenset({"val"}))
 
             # Only copy "val" if we don't already have a good one
             if "val" in self.current_node.meta and "val" not in new_arg.node.meta:
@@ -398,9 +399,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
         # Copy important metadata
         if hasattr(result, "node") and result.node is not n:
-            for key in ["val", "example_value", "unbacked_bindings"]:
-                if key in n.meta:
-                    result.node.meta[key] = n.meta[key]
+            _preserve_node_meta(n, result.node)
 
             # Preserve node names (except output)
             if n.op != "output" and hasattr(n, "name"):
@@ -412,22 +411,8 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         """Perform the graph transformation and copy module metadata."""
         result_gm = super().transform()
 
-        # Copy module metadata like the original implementation
         if hasattr(self.module, "meta"):
-            # pyrefly: ignore [unsupported-operation]
-            if "dynamo_flat_name_to_original_fqn" in self.module.meta:
-                # pyrefly: ignore [bad-index]
-                result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                    # pyrefly: ignore [bad-index]
-                    "dynamo_flat_name_to_original_fqn"
-                ]
-            # pyrefly: ignore [unsupported-operation]
-            if "dynamo_compile_id" in self.module.meta:
-                # pyrefly: ignore [bad-index]
-                result_gm.meta["dynamo_compile_id"] = self.module.meta[
-                    # pyrefly: ignore [bad-index]
-                    "dynamo_compile_id"
-                ]
+            _preserve_graph_module_meta(self.module, result_gm)
 
         return result_gm
 
