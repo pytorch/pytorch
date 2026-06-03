@@ -126,6 +126,60 @@ class _RecvInfo:
         return f"_RecvInfo(input={self.input_name}, source={self.source}, shape={buffer_shape}, meta={meta_type})"
 
 
+# Cache of per-direction P2P communicators, keyed by the PP process group they
+# are derived from. Looped/V schedules construct several stage chunks per rank
+# that share one PP group; they must share the same forward/backward comms (and
+# issue the split_group collective only once) so creation stays consistent and
+# cheap across all ranks.
+_PP_DIRECTION_GROUP_CACHE: dict[Any, tuple[dist.ProcessGroup, dist.ProcessGroup]] = {}
+
+
+def _build_p2p_direction_groups(
+    group: dist.ProcessGroup | None,
+) -> tuple[dist.ProcessGroup, dist.ProcessGroup]:
+    """Create two communicators over the same ranks as ``group`` for the forward
+    (downstream, ``r -> r+1``) and backward (upstream, ``r -> r-1``) directions.
+
+    Pipeline P2P normally shares a single communicator for both directions, which
+    serializes every send/recv in one FIFO. Coalescing makes a single mixed
+    send+recv batch deadlock-free, but across *separate* batches (pipeline skew,
+    looped / V schedules, skip connections) the shared FIFO can still form a
+    dependency cycle and deadlock. Routing forward and backward P2P onto separate
+    communicators / streams removes that cross-batch coupling and restores
+    full-duplex bandwidth.
+
+    Uses ``split_group``, which is collective over ``group``'s own ranks (not the
+    whole world), so it composes with PP as a sub-axis of a larger device mesh.
+    Requires the default process group to be device-bound (e.g.
+    ``init_process_group(..., device_id=...)``), which ``split_group`` needs for
+    NCCL; torchcomms binds the device automatically.
+    """
+    key = group if group is not None else "__default__"
+    cached = _PP_DIRECTION_GROUP_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    parent = group if group is not None else dist.distributed_c10d._get_default_group()
+    split_ranks = [list(range(dist.get_world_size(parent)))]
+    try:
+        fwd = dist.split_group(
+            parent_pg=group, split_ranks=split_ranks, group_desc="pp_p2p_fwd"
+        )
+        bwd = dist.split_group(
+            parent_pg=group, split_ranks=split_ranks, group_desc="pp_p2p_bwd"
+        )
+    except RuntimeError as err:
+        raise RuntimeError(
+            "Per-direction pipeline P2P needs the default process group to be "
+            "device-bound so split_group can duplicate the PP communicator. Pass "
+            f"device_id to init_process_group. Original error: {err}"
+        ) from err
+    # All parent ranks are members of the single split, so neither is None.
+    assert fwd is not None and bwd is not None
+    _PP_DIRECTION_GROUP_CACHE[key] = (fwd, bwd)
+    return fwd, bwd
+
+
 class _PipelineStageBase(ABC):
     """Base class for pipeline stages.
 
@@ -141,6 +195,7 @@ class _PipelineStageBase(ABC):
         device: torch.device,
         group: dist.ProcessGroup | None = None,
         dw_builder: Callable[[], Callable[..., None]] | None = None,
+        p2p_per_direction: bool = False,
     ):
         """
         Args:
@@ -154,6 +209,12 @@ class _PipelineStageBase(ABC):
                 for deferred weight updates in F/I/W zero-bubble
                 schedules. If ``None``, a runner is generated
                 automatically via autograd graph traversal.
+            p2p_per_direction: If ``True``, carry forward (downstream) and
+                backward (upstream) P2P on two separate communicators derived
+                from ``group`` instead of sharing one. This removes cross-batch
+                FIFO ordering deadlocks on a single PP communicator and restores
+                full-duplex bandwidth. Requires a device-bound default process
+                group (see :func:`_build_p2p_direction_groups`).
         """
         super().__init__()
         if stage_index >= num_stages:
@@ -166,6 +227,16 @@ class _PipelineStageBase(ABC):
         self.num_stages = num_stages
         self.device = device
         self.group = group
+
+        # Forward (downstream) and backward (upstream) P2P communicators. When
+        # per-direction P2P is disabled both alias ``self.group`` so behavior is
+        # byte-for-byte unchanged.
+        self.p2p_per_direction = p2p_per_direction
+        if p2p_per_direction:
+            self._fwd_group, self._bwd_group = _build_p2p_direction_groups(group)
+        else:
+            self._fwd_group = group
+            self._bwd_group = group
 
         self.dw_builder = dw_builder
 
@@ -349,10 +420,13 @@ class _PipelineStageBase(ABC):
     def _get_recv_ops(
         self,
         recv_infos: tuple[_RecvInfo, ...],
+        group: dist.ProcessGroup | None,
     ) -> list[dist.P2POp]:
         """
         Helper function shared by `get_fwd_recv_ops` and `get_bwd_recv_ops`.
-        Returns a list of ops that correspond to the recv infos.
+        Returns a list of ops that correspond to the recv infos. ``group`` is the
+        direction-specific communicator (forward vs backward); it equals
+        ``self.group`` unless per-direction P2P is enabled.
         """
         ops: list[dist.P2POp] = []
         for info in recv_infos:
@@ -366,9 +440,7 @@ class _PipelineStageBase(ABC):
             # At this point, source and buffer are guaranteed non-None
             assert info.source is not None  # noqa: S101
             peer_global_rank = self._resolve_peer_global_rank(info.source)
-            ops.append(
-                dist.P2POp(dist.irecv, info.buffer, peer_global_rank, self.group)
-            )
+            ops.append(dist.P2POp(dist.irecv, info.buffer, peer_global_rank, group))
 
         return ops
 
@@ -465,7 +537,7 @@ class _PipelineStageBase(ABC):
         """
         recv_infos: tuple[_RecvInfo, ...] = self.args_recv_info[fwd_chunk_id]
 
-        return self._get_recv_ops(recv_infos)
+        return self._get_recv_ops(recv_infos, self._fwd_group)
 
     def get_bwd_recv_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
         """
@@ -476,7 +548,7 @@ class _PipelineStageBase(ABC):
             return []
 
         recv_infos = self.grad_recv_info[bwd_chunk_id]
-        return self._get_recv_ops(recv_infos)
+        return self._get_recv_ops(recv_infos, self._bwd_group)
 
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
@@ -502,7 +574,9 @@ class _PipelineStageBase(ABC):
                 )
                 peer_global_rank = self._resolve_peer_global_rank(dst)
                 ops.append(
-                    dist.P2POp(dist.isend, send_tensor, peer_global_rank, self.group)
+                    dist.P2POp(
+                        dist.isend, send_tensor, peer_global_rank, self._fwd_group
+                    )
                 )
 
         return ops
@@ -539,7 +613,9 @@ class _PipelineStageBase(ABC):
                 )
                 peer_global_rank = self._resolve_peer_global_rank(grad_recv_stage)
                 ops.append(
-                    dist.P2POp(dist.isend, send_tensor, peer_global_rank, self.group)
+                    dist.P2POp(
+                        dist.isend, send_tensor, peer_global_rank, self._bwd_group
+                    )
                 )
             else:
                 if grad is not None or grad_recv_stage is not None:
@@ -1067,14 +1143,14 @@ class _PipelineStageBase(ABC):
         send_tensor = torch.tensor(
             self.stage_index, device=self.device, dtype=torch.float32
         )
-        # forward
+        # forward (downstream) traffic -> forward communicator
         if not self.is_first:
             ops.append(
                 dist.P2POp(
                     dist.irecv,
                     recv_tensor,
                     group_peer=prev_stage_peer_rank,
-                    group=self.group,
+                    group=self._fwd_group,
                 )
             )
         if not self.is_last:
@@ -1083,18 +1159,18 @@ class _PipelineStageBase(ABC):
                     dist.isend,
                     send_tensor,
                     group_peer=next_stage_peer_rank,
-                    group=self.group,
+                    group=self._fwd_group,
                 )
             )
 
-        # backward
+        # backward (upstream) traffic -> backward communicator
         if not self.is_first:
             ops.append(
                 dist.P2POp(
                     dist.isend,
                     send_tensor,
                     group_peer=prev_stage_peer_rank,
-                    group=self.group,
+                    group=self._bwd_group,
                 )
             )
         if not self.is_last:
@@ -1103,7 +1179,7 @@ class _PipelineStageBase(ABC):
                     dist.irecv,
                     recv_tensor,
                     group_peer=next_stage_peer_rank,
-                    group=self.group,
+                    group=self._bwd_group,
                 )
             )
 
@@ -1624,8 +1700,17 @@ class PipelineStage(_PipelineStageBase):
         group: dist.ProcessGroup | None = None,
         dw_builder: Callable[[], Callable[..., None]] | None = None,
         get_mesh: GetMeshCallback | None = None,
+        p2p_per_direction: bool = False,
     ):
-        super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
+        super().__init__(
+            submodule,
+            stage_index,
+            num_stages,
+            device,
+            group,
+            dw_builder,
+            p2p_per_direction=p2p_per_direction,
+        )
 
         self._mesh_cache = _MeshCache(get_mesh_cb=get_mesh)
         self._inference_mode: InferenceMode | None = None
