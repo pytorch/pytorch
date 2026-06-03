@@ -13,7 +13,7 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
-from .kernel_inputs import KernelInputs  # noqa: TC001
+from .kernel_inputs import KernelInputs, MMKernelInputs
 from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
@@ -47,6 +47,21 @@ if TYPE_CHECKING:
     from .kernel_template_choice import KernelTemplateChoice
 
     from torch.utils._ordered_set import OrderedSet  # isort: skip
+
+
+if TYPE_CHECKING or not config.is_fbcode():
+
+    def _maybe_log_inductor_mm_shape(
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        context_fn: Any = None,
+    ) -> None:
+        return
+
+else:
+    from torch._inductor.fb.shape_logging import (
+        log_inductor_mm_shape as _maybe_log_inductor_mm_shape,
+    )
 
 
 class Sortable(typing.Protocol):
@@ -161,6 +176,10 @@ class InductorChoices:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
 
+    def _logging_context(self) -> dict[str, Any]:
+        """Extra fields for the per-shape log row. Subclasses may override."""
+        return {}
+
     def _finalize_template_configs(
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
@@ -188,6 +207,10 @@ class InductorChoices:
         Returns:
             Flattened list of KernelTemplateChoice objects across all templates
         """
+        if isinstance(kernel_inputs, MMKernelInputs):
+            _maybe_log_inductor_mm_shape(
+                kernel_inputs, op_name, context_fn=self._logging_context
+            )
         choices: list[KernelTemplateChoice] = []
         for choice_gen in template_choices.values():
             choices.extend(choice_gen)
