@@ -16,7 +16,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     e4m3_type,
     instantiate_device_type_tests,
-    onlyCPU,
     onlyCUDA,
     skipIf,
     skipIfExceptPRIVATEUSE1,
@@ -448,6 +447,9 @@ class TestFlopCounter(TestCase):
         self.assertEqual(layer1_conv_flops_standard, layer1_conv_flops_inference)
 
 
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
+)
 class TestFlopCounterDeviceType(TestCase):
     @skipIfExceptPRIVATEUSE1(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -506,28 +508,28 @@ class TestFlopCounterDeviceType(TestCase):
             )
 
             if backend == "math":
-                backend = torch.backends.cuda.sdp_kernel(
+                backend = torch.nn.attention.sdpa_kernel(
                     enable_flash=False,
                     enable_math=True,
                     enable_mem_efficient=False,
                     enable_cudnn=False,
                 )
             elif backend == "flash":
-                backend = torch.backends.cuda.sdp_kernel(
+                backend = torch.nn.attention.sdpa_kernel(
                     enable_flash=True,
                     enable_math=False,
                     enable_mem_efficient=False,
                     enable_cudnn=False,
                 )
             elif backend == "mem_efficient":
-                backend = torch.backends.cuda.sdp_kernel(
+                backend = torch.nn.attention.sdpa_kernel(
                     enable_flash=False,
                     enable_math=False,
                     enable_mem_efficient=True,
                     enable_cudnn=False,
                 )
             elif backend == "cudnn":
-                backend = torch.backends.cuda.sdp_kernel(
+                backend = torch.nn.attention.sdpa_kernel(
                     enable_flash=False,
                     enable_math=False,
                     enable_mem_efficient=False,
@@ -1287,7 +1289,6 @@ class TestFlopCounterDeviceType(TestCase):
 
 
 class TestFlexAttentionEstimation(TestCase):
-    @onlyCPU
     def test_flex_attention_flop_registration(self):
         """flex_attention HOPs are registered in flop_registry and recognized as compute nodes."""
         from torch._inductor.fx_passes.overlap_scheduling import is_compute_node
@@ -1335,41 +1336,7 @@ class TestFlexAttentionEstimation(TestCase):
         expected_flops = sdpa_flop_count(q_shape, k_shape, v_shape)
         self.assertEqual(fwd_flops, expected_flops)
 
-    @onlyCUDA
-    def test_flex_attention_roofline_estimate(self, device):
-        """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""
-        from torch._inductor.fx_passes.overlap_scheduling import (
-            estimate_roofline_runtime_ms,
-        )
-
-        q_shape = (2, 16, 1024, 64)
-        k_shape = (2, 4, 1024, 64)
-        v_shape = (2, 4, 1024, 64)
-
-        graph = torch.fx.Graph()
-        q = graph.placeholder("q")
-        k = graph.placeholder("k")
-        v = graph.placeholder("v")
-        q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
-        k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
-        v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
-
-        fwd = graph.call_function(torch.ops.higher_order.flex_attention, args=(q, k, v))
-        fwd.meta["val"] = (
-            torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
-            torch.randn(
-                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
-            ),
-            torch.randn(
-                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
-            ),
-        )
-
-        est_ms = estimate_roofline_runtime_ms(fwd)
-        self.assertGreater(est_ms, 0.0)
-
-    @onlyCPU
-    def test_sparsity_hint_annotate_propagates(self, device):
+    def test_sparsity_hint_annotate_propagates(self):
         """fx_traceback.annotate propagates sparsity_hint to flex_attention node."""
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.traceback import annotate, preserve_node_meta
@@ -1381,7 +1348,7 @@ class TestFlexAttentionEstimation(TestCase):
                     return flex_attention(q, k, v)
 
         with FakeTensorMode():
-            q = torch.randn(1, 8, 64, 64, device=device, dtype=torch.bfloat16)
+            q = torch.randn(1, 8, 64, 64, device="cpu", dtype=torch.bfloat16)
             with preserve_node_meta():
                 ep = torch.export.export(M(), (q, q, q), strict=False)
 
@@ -1398,8 +1365,7 @@ class TestFlexAttentionEstimation(TestCase):
         self.assertIn("sparsity_hint", custom)
         self.assertAlmostEqual(custom["sparsity_hint"], 0.9)
 
-    @onlyCPU
-    def test_sparsity_hint_affects_flex_attention_flops(self, device):
+    def test_sparsity_hint_affects_flex_attention_flops(self):
         """sparsity_hint via annotate reduces flex_attention flop count."""
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.traceback import annotate, preserve_node_meta
@@ -1416,7 +1382,7 @@ class TestFlexAttentionEstimation(TestCase):
                     return flex_attention(q, k, v)
 
         with FakeTensorMode():
-            q = torch.randn(1, 8, 64, 64, device=device, dtype=torch.bfloat16)
+            q = torch.randn(1, 8, 64, 64, device="cpu", dtype=torch.bfloat16)
             with preserve_node_meta():
                 dense_ep = torch.export.export(Dense(), (q, q, q), strict=False)
                 sparse_ep = torch.export.export(Sparse(), (q, q, q), strict=False)
@@ -1458,8 +1424,43 @@ class TestFlexAttentionEstimation(TestCase):
         self.assertEqual(sparse_flops, dense_flops // 2)
 
 
+class TestFlexAttentionEstimationDeviceType(TestCase):
+    @onlyCUDA
+    def test_flex_attention_roofline_estimate(self):
+        """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            estimate_roofline_runtime_ms,
+        )
+
+        q_shape = (2, 16, 1024, 64)
+        k_shape = (2, 4, 1024, 64)
+        v_shape = (2, 4, 1024, 64)
+
+        graph = torch.fx.Graph()
+        q = graph.placeholder("q")
+        k = graph.placeholder("k")
+        v = graph.placeholder("v")
+        q.meta["val"] = torch.randn(*q_shape, device="meta", dtype=torch.bfloat16)
+        k.meta["val"] = torch.randn(*k_shape, device="meta", dtype=torch.bfloat16)
+        v.meta["val"] = torch.randn(*v_shape, device="meta", dtype=torch.bfloat16)
+
+        fwd = graph.call_function(torch.ops.higher_order.flex_attention, args=(q, k, v))
+        fwd.meta["val"] = (
+            torch.randn(*q_shape, device="meta", dtype=torch.bfloat16),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+            torch.randn(
+                q_shape[0], q_shape[1], q_shape[2], device="meta", dtype=torch.float32
+            ),
+        )
+
+        est_ms = estimate_roofline_runtime_ms(fwd)
+        self.assertGreater(est_ms, 0.0)
+
+
 instantiate_device_type_tests(TestFlopCounterDeviceType, globals(), except_for=("cpu",))
-instantiate_device_type_tests(TestFlexAttentionEstimation, globals())
+instantiate_device_type_tests(TestFlexAttentionEstimationDeviceType, globals())
 
 
 if __name__ == "__main__":
