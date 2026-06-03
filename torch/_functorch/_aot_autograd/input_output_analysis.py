@@ -423,12 +423,45 @@ def add_input_mutation_storage_overlap_guards(
     if not aot_config.aot_autograd_arg_pos_to_source:
         return
 
+    def is_user_input_source(source: Any) -> bool:
+        from torch._dynamo.source import (
+            is_from_local_source,
+            is_from_optimizer_source,
+            is_from_unspecialized_param_buffer_source,
+        )
+
+        if source is None:
+            return False
+
+        try:
+            guard_source = source.guard_source
+        except NotImplementedError:
+            return False
+
+        # AOTAutograd's fwd_inputs can include lifted parameters, buffers, and
+        # constants. Their storage relationships are not call-site user input
+        # relationships, and guarding each of them against every mutated input
+        # creates quadratic guard sets for large training graphs.
+        if (
+            guard_source.is_specialized_nn_module()
+            or guard_source.is_unspecialized_nn_module()
+            or guard_source.is_fsdp_module()
+        ):
+            return False
+
+        is_optimizer_source = is_from_optimizer_source(source)
+        is_param_buffer_source = is_from_unspecialized_param_buffer_source(source)
+        if is_optimizer_source or is_param_buffer_source:
+            return False
+
+        return is_from_local_source(source, only_allow_input=True)
+
     tensor_indices = [
         i
         for i, inpt in enumerate(fwd_inputs)
         if isinstance(inpt, Tensor)
         and i < len(aot_config.aot_autograd_arg_pos_to_source)
-        and aot_config.aot_autograd_arg_pos_to_source[i] is not None
+        and is_user_input_source(aot_config.aot_autograd_arg_pos_to_source[i])
     ]
     if len(tensor_indices) <= 1:
         return

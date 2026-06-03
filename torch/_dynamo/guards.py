@@ -758,7 +758,10 @@ def check_storage_overlap_pair(
     a: torch.Tensor, b: torch.Tensor, expected_overlap: bool
 ) -> bool:
     if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
-        return False
+        # Some AOT inputs are lifted scalar constants whose Dynamo source still
+        # resolves to the original Python value. Non-tensors have no storage, so
+        # they cannot overlap a tensor.
+        return expected_overlap is False
 
     same_storage = StorageWeakRef(a.untyped_storage()) == StorageWeakRef(
         b.untyped_storage()

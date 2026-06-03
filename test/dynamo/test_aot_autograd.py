@@ -18,7 +18,12 @@ from torch._dynamo.testing import (
     rand_strided,
 )
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
-from torch._guards import CompileContext, StorageOverlap, TracingContext
+from torch._guards import (
+    CompileContext,
+    StorageOverlap,
+    StorageOverlapPair,
+    TracingContext,
+)
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile
@@ -1675,6 +1680,45 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                     self.assertEqual(opt_out, ref_out)
                     self.assertEqual(base, base_ref)
                     self.assertEqual(compiler.frame_count, 2)
+
+    def test_input_mutation_storage_overlap_ignores_lifted_params(self):
+        class ManyParams(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    torch.nn.Linear(4, 4) for _ in range(10)
+                )
+
+            def forward(self, x, y):
+                x.add_(1)
+                out = x + y
+                for layer in self.layers:
+                    out = out + layer.weight.sum() * 0 + layer.bias.sum() * 0
+                return out
+
+        class Compiler:
+            def __init__(self):
+                self.counter = CompileCounterWithBackend("aot_eager")
+                self.guards = []
+
+            def __call__(self, *args, **kwargs):
+                self.guards = TracingContext.get().guards_context.aotautograd_guards
+                return self.counter(*args, **kwargs)
+
+        mod = ManyParams()
+        compiler = Compiler()
+        opt_mod = torch.compile(mod, backend=compiler)
+
+        opt_out = opt_mod(torch.ones(4), torch.ones(4))
+
+        ref_mod = copy.deepcopy(mod)
+        ref_out = ref_mod(torch.ones(4), torch.ones(4))
+        self.assertEqual(opt_out, ref_out)
+
+        pair_guards = [
+            guard for guard in compiler.guards if isinstance(guard, StorageOverlapPair)
+        ]
+        self.assertEqual(len(pair_guards), 1)
 
     def test_inputs_overlapping_with_mutation_stress(self):
         # Stress test for StorageOverlap guard.
