@@ -15770,13 +15770,7 @@ op_db: list[OpInfo] = [
                     ref=np.gcd,
                     dtypes=integral_types_and(),
                     supports_autograd=False,
-                    supports_rhs_python_scalar=False,
-                    skips=(
-                        DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncsDevice',
-                                     'test_reference_numerics_small_values',
-                                     dtypes=(torch.int8,)),
-                    )),
+                    supports_rhs_python_scalar=False),
     BinaryUfuncInfo('isclose',
                     ref=np.isclose,
                     dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -26124,12 +26118,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.gcd",
         torch_opinfo_name="gcd",
-        skips=(
-            DecorateInfo(unittest.expectedFailure,
-                         'TestBinaryUfuncsDevice',
-                         'test_reference_numerics_small_values',
-                         dtypes=(torch.int8,)),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
