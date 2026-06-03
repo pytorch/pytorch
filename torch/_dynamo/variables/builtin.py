@@ -1502,13 +1502,22 @@ class BuiltinVariable(BaseBuiltinVariable):
             if check_numpy_ndarray_args(args, kwargs) and not any(
                 type(arg) is TensorVariable for arg in args
             ):
+                numpy_scalar = all(
+                    variables.NumpyNdarrayVariable.is_scalar_like_arg(arg)
+                    for arg in itertools.chain(args, kwargs.values())
+                )
                 proxy = tx.output.create_proxy(
                     "call_function",
                     numpy_operator_wrapper(fn),
                     *proxy_args_kwargs(args, kwargs),
                 )
 
-                return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
+                return wrap_fx_proxy_cls(
+                    variables.NumpyNdarrayVariable,
+                    tx,
+                    proxy,
+                    numpy_scalar=numpy_scalar,
+                )
 
             if (
                 fn in (operator.eq, operator.ne)

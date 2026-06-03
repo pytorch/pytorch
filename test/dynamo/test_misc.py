@@ -3807,6 +3807,72 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_scalar_round(self):
+        def literal_fn(x):
+            n = int(round(np.floor(3.1)))
+            return x + n
+
+        def arg_fn(n, x):
+            p = int(round(np.floor(n)))
+            return x + p
+
+        def constructor_fn(x):
+            return x + int(round(np.float64(3.1)))
+
+        def constructor_arg_fn(n, x):
+            return x + int(round(np.float64(n)))
+
+        x = torch.ones(1)
+        for fn, args in [
+            (literal_fn, (x,)),
+            (arg_fn, (3.1, x)),
+            (constructor_fn, (x,)),
+            (constructor_arg_fn, (3.1, x)),
+        ]:
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(*args), fn(*args))
+            torch._dynamo.reset()
+
+        opt_arg_fn = torch.compile(arg_fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_arg_fn(3.1, x), arg_fn(3.1, x))
+        self.assertEqual(opt_arg_fn(4.1, x), arg_fn(4.1, x))
+
+        opt_constructor_arg_fn = torch.compile(
+            constructor_arg_fn, backend="eager", fullgraph=True
+        )
+        self.assertEqual(opt_constructor_arg_fn(3.1, x), constructor_arg_fn(3.1, x))
+        self.assertEqual(opt_constructor_arg_fn(4.1, x), constructor_arg_fn(4.1, x))
+
+    def test_numpy_scalar_dtype_semantics(self):
+        def fn(x):
+            y = np.float32(3e38)
+            z = y * y
+            return x + (0 if np.isinf(z) else 1)
+
+        x = torch.ones(1)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", "overflow encountered")
+            ref = fn(x)
+            opt_fn = torch.compile(fn, backend="eager")
+            self.assertEqual(opt_fn(x), ref)
+
+    def test_numpy_array_dunder_round_still_errors(self):
+        def fn(x):
+            round(np.floor([3.1]))
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_fn(torch.ones(1))
+
+        def zero_dim_array_fn(x):
+            round(np.array(3.1))
+            return x
+
+        opt_zero_dim_array_fn = torch.compile(zero_dim_array_fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_zero_dim_array_fn(torch.ones(1))
+
     def test_numpy_array_of_arrays(self):
         def fn(x, y):
             return np.array([x, y])

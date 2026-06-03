@@ -2763,9 +2763,28 @@ class NumpyNdarrayVariable(TensorVariable):
     Use this for Tensor.numpy() call.
     """
 
+    _nonvar_fields = {
+        "numpy_scalar",
+        *TensorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        proxy: torch.fx.Proxy,
+        *,
+        numpy_scalar: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(proxy, **kwargs)
+        self.numpy_scalar = numpy_scalar
+
     @staticmethod
     def create(
-        tx: "InstructionTranslatorBase", proxy: torch.fx.Proxy, **options: Any
+        tx: "InstructionTranslatorBase",
+        proxy: torch.fx.Proxy,
+        *,
+        numpy_scalar: bool = False,
+        **options: Any,
     ) -> "NumpyNdarrayVariable":
         from .builder import wrap_fx_proxy_cls
 
@@ -2773,7 +2792,45 @@ class NumpyNdarrayVariable(TensorVariable):
             target_cls=NumpyNdarrayVariable,
             tx=tx,
             proxy=proxy,
+            numpy_scalar=numpy_scalar,
             **options,
+        )
+
+    @staticmethod
+    def is_scalar_like_arg(arg: VariableTracker) -> bool:
+        from .lazy import LazyVariableTracker
+
+        if isinstance(arg, LazyVariableTracker):
+            arg = arg.realize()
+        if isinstance(arg, NumpyNdarrayVariable):
+            return arg.numpy_scalar or arg.ndim == 0
+        if isinstance(arg, (SymNodeVariable, UnspecializedPythonVariable)):
+            return True
+        if isinstance(arg, ConstantVariable):
+            value = arg.as_python_constant()
+            if np is not None and isinstance(value, np.ndarray):
+                return value.ndim == 0
+            return not isinstance(value, (dict, list, tuple))
+        return False
+
+    @staticmethod
+    def numpy_call_returns_scalar(
+        fn: Any,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> bool:
+        if np is None:
+            return False
+        out = kwargs.get("out")
+        if out is not None and not out.is_constant_none():
+            return False
+        call_args = [*args, *(v for k, v in kwargs.items() if k != "out")]
+        if not call_args or not all(
+            NumpyNdarrayVariable.is_scalar_like_arg(arg) for arg in call_args
+        ):
+            return False
+        return isinstance(fn, np.ufunc) or (
+            isinstance(fn, type) and issubclass(fn, np.generic)
         )
 
     def is_hashable(self) -> bool:
@@ -2802,7 +2859,12 @@ class NumpyNdarrayVariable(TensorVariable):
             (self.as_proxy(), other.as_proxy()),
             {},
         )
-        return NumpyNdarrayVariable.create(tx, proxy)
+        return NumpyNdarrayVariable.create(
+            tx,
+            proxy,
+            numpy_scalar=self.is_scalar_like_arg(self)
+            and self.is_scalar_like_arg(other),
+        )
 
     def var_getattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -2924,7 +2986,15 @@ class NumpyNdarrayVariable(TensorVariable):
         if name in ["__len__", "size", "tolist", "__iter__"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
-        if name in ("tostring", "tobytes", "__delattr__"):
+        if name == "__round__" and self.numpy_scalar:
+            item_proxy = tx.output.create_proxy(
+                "call_method",
+                "item",
+                *proxy_args_kwargs([self], {}),
+            )
+            item = SymNodeVariable.create(tx, item_proxy, sym_num=None)
+            return item.call_method(tx, name, args, kwargs)
+        if name in ("tostring", "tobytes", "__delattr__", "__round__"):
             unimplemented(
                 gb_type="Unsupported ndarray method call",
                 context=f"call_method {self} {name} {args} {kwargs}",

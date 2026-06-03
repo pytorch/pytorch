@@ -1849,10 +1849,8 @@ class NumpyVariable(VariableTracker):
                     ],
                 )
         else:
-            if (
-                func.__module__ == "torch._numpy.random"
-                and config.use_numpy_random_stream
-            ):
+            is_numpy_random = func.__module__ == "torch._numpy.random"
+            if is_numpy_random and config.use_numpy_random_stream:
                 unimplemented(
                     gb_type="attempted to trace torch._numpy.random function with config.use_numpy_random_stream=True",
                     context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
@@ -1884,7 +1882,13 @@ class NumpyVariable(VariableTracker):
                 numpy_to_tensor_wrapper(func),
                 *proxy_args_kwargs(args, kwargs),
             )
-            return NumpyNdarrayVariable.create(tx, proxy)
+            return NumpyNdarrayVariable.create(
+                tx,
+                proxy,
+                numpy_scalar=NumpyNdarrayVariable.numpy_call_returns_scalar(
+                    self.value, args, kwargs
+                ),
+            )
 
     def call_method(
         self,
