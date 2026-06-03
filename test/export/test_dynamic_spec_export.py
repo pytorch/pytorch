@@ -114,7 +114,7 @@ ExportedProgram:
             _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
             sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
             return (sum_1,)
-Graph signature: 
+Graph signature:
     x: USER_INPUT
     sum_1: USER_OUTPUT
 Range constraints: {u0: VR[0, int_oo]}""",
@@ -159,9 +159,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             _ModX(),
             (torch.randn(8, 3),),
-            dynamic_shapes=ParamsSpec(
-                {"x": TensorSpec([ShapeVar("batch"), None])}
-            ),
+            dynamic_shapes=ParamsSpec({"x": TensorSpec([ShapeVar("batch"), None])}),
             strict=True,
         )
         shape = _first_tensor_placeholder_shape(ep.graph_module)
@@ -205,9 +203,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
         ep = export(
             _ModX(),
             (torch.randn(8, 3),),
-            dynamic_shapes=ShapesSpec(
-                params=ParamsSpec({"x": TensorSpec([b, None])})
-            ),
+            dynamic_shapes=ShapesSpec(params=ParamsSpec({"x": TensorSpec([b, None])})),
             strict=True,
         )
         shape = _first_tensor_placeholder_shape(ep.graph_module)
@@ -289,9 +285,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
             args=(torch.randn(8, 3),),
             kwargs={"z": torch.randn(7, 3), "y": torch.randn(5, 3)},
             dynamic_shapes=ShapesSpec(
-                params=ParamsSpec(
-                    {"y": TensorSpec([ShapeVar("Y"), None])}
-                )
+                params=ParamsSpec({"y": TensorSpec([ShapeVar("Y"), None])})
             ),
             strict=True,
         )
@@ -311,7 +305,7 @@ ExportedProgram:
             sum_3: "f32[3]" = torch.ops.aten.sum.dim_IntList(z, [0]);  z = None
             add_1: "f32[3]" = torch.ops.aten.add.Tensor(add, sum_3);  add = sum_3 = None
             return (add_1,)
-Graph signature: 
+Graph signature:
     x: USER_INPUT
     z: USER_INPUT
     y: USER_INPUT
@@ -338,9 +332,7 @@ Range constraints: {u0: VR[0, int_oo]}""",
                 M(),
                 args=([torch.randn(8, 3), torch.randn(8, 3)],),
                 dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec(
-                        {"xs": TensorSpec([ShapeVar("B"), None])}
-                    )
+                    params=ParamsSpec({"xs": TensorSpec([ShapeVar("B"), None])})
                 ),
                 strict=True,
             )
@@ -442,7 +434,7 @@ ExportedProgram:
         def forward(self, x: "f32[s6, 3]"):
             sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
             return (sum_1,)
-Graph signature: 
+Graph signature:
     x: USER_INPUT
     sum_1: USER_OUTPUT
 Range constraints: {s6: VR[0, int_oo]}""",
@@ -461,7 +453,7 @@ ExportedProgram:
             _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
             sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
             return (sum_1,)
-Graph signature: 
+Graph signature:
     x: USER_INPUT
     sum_1: USER_OUTPUT
 Range constraints: {u0: VR[0, int_oo]}""",
@@ -519,7 +511,7 @@ ExportedProgram:
             mul: "f32[3]" = torch.ops.aten.mul.Tensor(sum_2, 1);  sum_2 = None
             add: "f32[3]" = torch.ops.aten.add.Tensor(sum_1, mul);  sum_1 = mul = None
             return (add,)
-Graph signature: 
+Graph signature:
     x: USER_INPUT
     y: USER_INPUT
     add: USER_OUTPUT
@@ -546,7 +538,7 @@ ExportedProgram:
             mul: "f32[3]" = torch.ops.aten.mul.Tensor(sum_2, 1);  sum_2 = None
             add: "f32[3]" = torch.ops.aten.add.Tensor(sum_1, mul);  sum_1 = mul = None
             return (add,)
-Graph signature: 
+Graph signature:
     x: USER_INPUT
     y: USER_INPUT
     add: USER_OUTPUT
@@ -593,7 +585,7 @@ ExportedProgram:
         def forward(self, x: "f32[s6, 3]"):
             sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
             return (sum_1,)
-Graph signature: 
+Graph signature:
     x: USER_INPUT
     sum_1: USER_OUTPUT
 Range constraints: {s6: VR[0, int_oo]}""",
@@ -612,14 +604,13 @@ ExportedProgram:
             _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
             sum_1: "f32[3]" = torch.ops.aten.sum.dim_IntList(x, [0]);  x = None
             return (sum_1,)
-Graph signature: 
+Graph signature:
     x: USER_INPUT
     sum_1: USER_OUTPUT
 Range constraints: {u0: VR[0, int_oo]}""",
             ignore_comments=True,
             ignore_empty_lines=True,
         )
-
 
     def test_user_varargs_in_forward_marked_dynamic_via_varargs_spec(self):
         """User's `def forward(*args)` with ``ParamsSpec({"*args": [...]})`` —
@@ -912,7 +903,7 @@ class TestExportDynamicSpecInternalAPIs(TestCase):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, x):
-        arg_0: "f32[u0, 3]"; 
+        arg_0: "f32[u0, 3]";
 
         arg_0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
         l_flat_args_0_ = arg_0

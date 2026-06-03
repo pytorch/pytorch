@@ -61,7 +61,7 @@ def export(
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any] | None = None,
     *,
-    # dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | ShapesSpec | ParamsSpec | None
+    # dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | AdditionalInputs | ShapesCollection | ShapesSpec | ParamsSpec | None
     dynamic_shapes: Any = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
@@ -131,8 +131,8 @@ def export(
          **ShapesSpec API.** ``dynamic_shapes`` may also be a
          :class:`torch.fx.experimental.dynamic_spec.ShapesSpec` (or its
          shorthand :class:`torch.fx.experimental.dynamic_spec.ParamsSpec`).
-         This is a newer unbacked unified API across compile, pre-compile, 
-         export, etc., and is the recommended way to specify dynamic 
+         This is a newer unbacked unified API across compile, pre-compile,
+         export, etc., and is the recommended way to specify dynamic
          shapes for export going forward.
 
          Key properties (see :mod:`torch.fx.experimental.dynamic_spec` for
@@ -151,15 +151,21 @@ def export(
          Example::
 
             from torch.fx.experimental.dynamic_spec import (
-                ParamsSpec, ShapesSpec, ShapeVar, TensorSpec,
+                ParamsSpec,
+                ShapesSpec,
+                ShapeVar,
+                TensorSpec,
             )
 
             ep = torch.export.export(
-                mod, (torch.randn(8, 3),),
+                mod,
+                (torch.randn(8, 3),),
                 dynamic_shapes=ShapesSpec(
-                    params=ParamsSpec({
-                        "x": TensorSpec([ShapeVar("batch", min=1, max=128), None]),
-                    })
+                    params=ParamsSpec(
+                        {
+                            "x": TensorSpec([ShapeVar("batch", min=1, max=128), None]),
+                        }
+                    )
                 ),
                 strict=True,
             )
@@ -486,7 +492,15 @@ def draft_export(
     an ExportedProgram, even if there are potential soundness issues, and to
     generate a report listing the issues found.
     """
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+
     from ._draft_export import draft_export
+
+    if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
+        raise NotImplementedError(
+            f"draft_export does not support the new dynamic shapes API "
+            f"({type(dynamic_shapes).__name__}); use torch.export.export instead."
+        )
 
     return draft_export(
         mod=mod,

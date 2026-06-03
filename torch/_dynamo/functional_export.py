@@ -50,6 +50,7 @@ from torch.fx.experimental.dynamic_spec import (
     TensorSpec,
 )
 
+
 T = TypeVar("T")
 log = logging.getLogger(__name__)
 
@@ -938,13 +939,12 @@ def _check_leaf_spec_matches_value(
                 )
         case _:
             raise AssertionError(
-                f"{where}: unexpected leaf spec type "
-                f"{type(user_spec).__name__}"
+                f"{where}: unexpected leaf spec type {type(user_spec).__name__}"
             )
 
 
 def _flatten_shapes_spec(
-    f: Callable,
+    f: Callable[..., Any],
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None,
     shapes_spec: ShapesSpec,
@@ -982,7 +982,7 @@ def _flatten_shapes_spec(
     params_spec_named_args = params_spec._named_args
     params_spec_varargs = params_spec._varargs  # may be None
 
-    assert isinstance(f, torch.nn.Module), (
+    assert isinstance(f, torch.nn.Module), (  # noqa: S101
         "_flatten_shapes_spec only supports nn.Module (the only thing "
         "torch.export.export accepts)."
     )
@@ -1057,7 +1057,8 @@ def _flatten_shapes_spec(
         if user_spec is not None:
             matched_named_keys.add(arg_name)
             _check_leaf_spec_matches_value(
-                user_spec, arg_value,
+                user_spec,
+                arg_value,
                 where=f"ParamsSpec entry for forward param {arg_name!r}",
             )
             # Validation guarantees arg_value is a single leaf (n=1).
@@ -1083,7 +1084,8 @@ def _flatten_shapes_spec(
         user_spec = params_spec_varargs[user_idx]
         if user_spec is not None:
             _check_leaf_spec_matches_value(
-                user_spec, arg_value,
+                user_spec,
+                arg_value,
                 where=f"ParamsSpec varargs[{user_idx}]",
             )
             out_leaf_specs[flat_idx] = user_spec
@@ -1111,7 +1113,8 @@ def _flatten_shapes_spec(
             user_spec = None
         if user_spec is not None:
             _check_leaf_spec_matches_value(
-                user_spec, arg_value,
+                user_spec,
+                arg_value,
                 where=f"ParamsSpec entry for forward kwarg {arg_name!r}",
             )
             out_leaf_specs[flat_idx] = user_spec
@@ -1162,7 +1165,12 @@ def _dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
     *,
     constraints: list[Constraint] | None = None,
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None = None,
+    dynamic_shapes: dict[str, Any]
+    | tuple[Any]
+    | list[Any]
+    | ShapesSpec
+    | ParamsSpec
+    | None = None,
 ) -> Callable[..., torch.fx.GraphModule]:
     """
     Improved dynamo graph capture using transformer approach with proper fake tensor handling.
@@ -1197,9 +1205,9 @@ def _dynamo_graph_capture_for_export(
             orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
 
             constraints: list[Constraint] | None = _constraints
-            dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = (
-                _dynamic_shapes
-            )
+            dynamic_shapes: (
+                dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None
+            ) = _dynamic_shapes
 
             from . import reset  # type: ignore[attr-defined]
 

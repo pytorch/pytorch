@@ -87,10 +87,7 @@ from torch.export.dynamic_shapes import (
 )
 from torch.export.exported_program import OutputKind
 from torch.fx._symbolic_trace import _ConstantAttributeType
-from torch.fx.experimental.dynamic_spec import (
-    ParamsSpec,
-    ShapesSpec,
-)
+from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
 from torch.fx.experimental.proxy_tensor import (
     get_proxy_slot,
     make_fx,
@@ -119,8 +116,11 @@ from .graph_signature import _convert_to_export_graph_signature, ExportGraphSign
 
 log = logging.getLogger(__name__)
 
-# Type alias for dynamic shapes specification
-_DynamicShapesSpec: TypeAlias = dict[str, Any] | tuple[Any, ...] | list[Any]
+# Legacy dynamic shapes specification: the raw container spelling that
+# predates the structured ShapesSpec / ParamsSpec types. AdditionalInputs
+# and ShapesCollection are entry-point helpers that get unwrapped into one
+# of these containers, so they are *not* part of this alias.
+_LegacyDynamicShapesSpec: TypeAlias = dict[str, Any] | tuple[Any, ...] | list[Any]
 
 
 @dataclasses.dataclass
@@ -602,12 +602,12 @@ def _add_input_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
     if (shape_env := _get_shape_env_from_gm(gm)) is None:
         return
 
-    pending: set = set()
     for node in gm.graph.nodes:
         if node.op != "placeholder" or node.meta.get("unbacked_bindings"):
             continue
         if (val := node.meta.get("val")) is None:
             continue
+        pending: set = set()
         dims = list(val.shape) if isinstance(val, torch.Tensor) else [val]
         for dim in dims:
             if isinstance(dim, (torch.SymInt, torch.SymFloat)):
@@ -872,7 +872,7 @@ def _export_to_torch_ir(
     f: Callable,
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None = None,
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None = None,
+    dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None = None,
     *,
     preserve_module_call_signature: tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
@@ -1452,15 +1452,17 @@ def _process_export_inputs(
     mod: torch.nn.Module,
     args: tuple[object, ...],
     kwargs: dict[str, object] | None,
-    dynamic_shapes: _DynamicShapesSpec
+    dynamic_shapes: _LegacyDynamicShapesSpec
     | torch.export.AdditionalInputs
     | torch.export.ShapesCollection
+    | ShapesSpec
+    | ParamsSpec
     | None,
 ) -> tuple[
     tuple[object, ...],
     dict[str, object],
     TreeSpec,
-    _DynamicShapesSpec | None,
+    _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None,
     Callable[[ExportedProgram], None],
 ]:
     """
@@ -1502,7 +1504,7 @@ def _process_export_inputs(
     _, original_in_spec = pytree.tree_flatten((args, kwargs))
 
     verify_additional_inputs: Callable[[ExportedProgram], None]
-    out_dynamic_shapes: _DynamicShapesSpec | None
+    out_dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None
     if isinstance(dynamic_shapes, torch.export.AdditionalInputs):
         verify_additional_inputs = dynamic_shapes.verify  # type: ignore[assignment]
         out_dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)  # type: ignore[assignment]
@@ -1651,7 +1653,7 @@ def _strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None,
+    dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None,
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     prefer_deferred_runtime_asserts_over_guards: bool,
@@ -2138,7 +2140,7 @@ def _non_strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None,
+    dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None,
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     prefer_deferred_runtime_asserts_over_guards: bool,
@@ -2336,7 +2338,7 @@ def _export_for_training(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None = None,
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None = None,
+    dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
@@ -2521,7 +2523,7 @@ def _export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None = None,
-    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None = None,
+    dynamic_shapes: _LegacyDynamicShapesSpec | ShapesSpec | ParamsSpec | None = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),

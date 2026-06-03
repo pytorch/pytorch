@@ -2259,17 +2259,21 @@ def export(
          ``forward``)::
 
              class M(torch.nn.Module):
-                 def forward(self, x, y, z=None):
-                     ...
+                 def forward(self, x, y, z=None): ...
+
 
              ep = torch.export.export(
                  M(),
-                 args=(torch.randn(8, 3),),                 # x
-                 kwargs={"y": torch.randn(5, 3), "z": 7},   # y, z
-                 dynamic_shapes=ShapesSpec(params=ParamsSpec({
-                     "x": TensorSpec([ShapeVar("A"), None]),
-                     "y": TensorSpec([ShapeVar("B"), None]),
-                 })),
+                 args=(torch.randn(8, 3),),  # x
+                 kwargs={"y": torch.randn(5, 3), "z": 7},  # y, z
+                 dynamic_shapes=ShapesSpec(
+                     params=ParamsSpec(
+                         {
+                             "x": TensorSpec([ShapeVar("A"), None]),
+                             "y": TensorSpec([ShapeVar("B"), None]),
+                         }
+                     )
+                 ),
                  strict=True,
              )
 
