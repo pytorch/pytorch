@@ -1311,8 +1311,9 @@ Example:
           &::c10d::nccl_ep::nccl_ep_create_group,
           py::arg("pg"),
           py::arg("num_experts"),
-          py::arg("max_tokens_per_rank"),
-          py::arg("token_size_bytes"),
+          py::arg("max_dispatch_tokens_per_rank"),
+          py::arg("max_recv_tokens_per_rank"),
+          py::arg("max_token_bytes"),
           py::arg("num_qp_per_rank") = 0,
           py::arg("num_channels") = 0);
 
@@ -1334,7 +1335,6 @@ Example:
       py::arg("handle"),
       py::arg("tokens"),
       py::arg("topk_weights"),
-      py::arg("topk_idx"),
       py::arg("out_tokens"),
       py::arg("out_topk_weights"),
       py::arg("out_topk_idx"));
