@@ -10,7 +10,7 @@ addmm_long_configs = op_bench.cross_product_configs(
     M=[256, 1024, 3000],
     N=[512, 4096],
     K=[512, 4096],
-    device=["cuda"],
+    device=["cuda", "xpu"],
     tags=["long"],
     dtype=[torch.float16, torch.bfloat16, torch.float32],
 )
@@ -24,7 +24,7 @@ addmm_short_configs = op_bench.config_list(
         [64, 64, 128],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
         "dtype": [torch.float],
     },
     tags=["short"],
@@ -132,7 +132,7 @@ addbmm_long_configs = op_bench.cross_product_configs(
     M=[256, 1024],
     N=[256, 1024],
     K=[64, 128],
-    device=["cuda"],
+    device=["cuda", "xpu"],
     dtype=[torch.float16, torch.bfloat16, torch.float32],
     tags=["long"],
 )
@@ -141,7 +141,7 @@ addbmm_short_configs = op_bench.cross_product_configs(
     M=[8, 128],
     N=[32, 64],
     K=[256, 512],
-    device=["cpu", "cuda"],
+    device=["cpu", "cuda", "xpu"],
     dtype=[torch.float16, torch.bfloat16, torch.float32],
     tags=["short"],
 )
