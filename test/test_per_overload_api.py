@@ -1,5 +1,8 @@
 # Owner(s): ["module: unknown"]
 import copy
+import subprocess
+import sys
+import textwrap
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -65,6 +68,56 @@ class TestPerOverloadAPI(TestCase):
         self.assertEqual(b, torch.tensor(4))
 
         self.assertRaises(RuntimeError, lambda: add_tensoroverload(a, a, out=b))
+
+    def test_opoverloadpacket_init_under_sys_settrace(self):
+        script = textwrap.dedent(
+            """
+            import sys
+            import torch._ops
+
+            saw_packet_init = False
+
+            def trace_func(frame, event, arg):
+                global saw_packet_init
+                if (
+                    event == "call"
+                    and frame.f_code is torch._ops.OpOverloadPacket.__init__.__code__
+                ):
+                    saw_packet_init = True
+                    packet = frame.f_locals["self"]
+                    repr(packet)
+                    str(packet)
+                    getattr(packet, "__qualname__", None)
+                    getattr(packet, "missing_overload", None)
+                return trace_func
+
+            def dummy():
+                pass
+
+            sys.settrace(trace_func)
+            try:
+                packet = torch._ops.OpOverloadPacket("aten::dummy", "dummy", dummy, [])
+            finally:
+                sys.settrace(None)
+
+            assert saw_packet_init
+            assert str(packet) == "aten.dummy"
+            """
+        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("OpOverloadPacket initialization hung under sys.settrace")
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
 
     def test_decompose(self):
         x = torch.randn(2, 3)
