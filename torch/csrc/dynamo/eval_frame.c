@@ -208,6 +208,7 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(
     return NULL;
   self->frame = frame;
   self->locals = NULL;
+  self->locals_mapping = NULL;
   return self;
 }
 
@@ -562,6 +563,13 @@ static PyTypeObject THPPyInterpreterFrameType = {
 };
 
 #endif // !(IS_PYTHON_3_15_PLUS)
+
+FrameLocalsMapping* THPPyInterpreterFrame_GetFrameLocalsMapping(PyObject* obj) {
+  if (!PyObject_TypeCheck(obj, &THPPyInterpreterFrameType)) {
+    return NULL;
+  }
+  return ((THPPyInterpreterFrame*)obj)->locals_mapping;
+}
 
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,

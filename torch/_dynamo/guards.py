@@ -5199,7 +5199,7 @@ def describe_backend(backend: Callable[..., object] | None) -> str:
 
 def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
-    f_locals: dict[str, object],
+    frame_or_f_locals: DynamoFrameType | dict[str, object],
     compile_id: CompileId | None,
     # pyrefly: ignore [implicit-any]
     backend: Callable | None,
@@ -5214,6 +5214,14 @@ def get_guard_fail_reason_helper(
         raise AssertionError("guard_manager.global_scope must not be None")
     if guard_manager.closure_vars is None:
         raise AssertionError("guard_manager.closure_vars must not be None")
+
+    if isinstance(frame_or_f_locals, dict):
+        f_locals = frame_or_f_locals
+        check_verbose_arg: DynamoFrameType | dict[str, object] = f_locals
+    else:
+        f_locals = frame_or_f_locals.f_locals
+        check_verbose_arg = frame_or_f_locals
+
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
     reasons: list[str] = []
@@ -5225,7 +5233,7 @@ def get_guard_fail_reason_helper(
     no_tensor_aliasing_check_failed = False
 
     verbose_code_parts: list[str] = []
-    guard_debug_info = guard_manager.check_verbose(f_locals)
+    guard_debug_info = guard_manager.check_verbose(check_verbose_arg)
     user_stack_str = ""
 
     # For test_export_with_map_cond, the check_verbose fail even without the
@@ -5313,7 +5321,7 @@ def get_guard_fail_reason_helper(
 def get_guard_fail_reason(
     guard_manager: GuardManagerWrapper,
     code: types.CodeType,
-    f_locals: dict[str, object],
+    frame_or_f_locals: DynamoFrameType | dict[str, object],
     compile_id: CompileId,
     # pyrefly: ignore [implicit-any]
     backend: Callable,
@@ -5322,7 +5330,7 @@ def get_guard_fail_reason(
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
         return f"{compile_id}: {guard_manager.invalidation_reason}"
     reason_str = get_guard_fail_reason_helper(
-        guard_manager, f_locals, compile_id, backend
+        guard_manager, frame_or_f_locals, compile_id, backend
     )
     if skip_logging:
         return reason_str
@@ -5359,7 +5367,7 @@ def get_and_maybe_log_recompilation_reasons(
         reason = get_guard_fail_reason(
             cache_entry.guard_manager,
             cache_entry.code,
-            frame.f_locals,
+            frame,
             cache_entry.compile_id,
             backend,
             skip_logging,
