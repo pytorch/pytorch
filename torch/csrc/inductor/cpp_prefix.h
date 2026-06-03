@@ -841,6 +841,37 @@ inline std::common_type_t<T, U> mod(T a, U b) {
   }
   return a_c % b_c;
 }
+
+template <typename T, typename U>
+inline std::common_type_t<T, U> truncdiv_integral(T a, U b) {
+  using C = std::common_type_t<T, U>;
+  static_assert(
+      std::is_integral_v<C>,
+      "truncdiv_integral(T a, U b) is only for integral types.");
+  const C a_c = static_cast<C>(a);
+  const C b_c = static_cast<C>(b);
+  if (C10_UNLIKELY_OR_CONST(b_c == 0)) {
+    inductor_cpu_note_integer_div_by_zero();
+    return C(0);
+  }
+  return a_c / b_c;
+}
+
+template <typename T, typename U>
+inline std::common_type_t<T, U> floordiv_integral(T a, U b) {
+  using C = std::common_type_t<T, U>;
+  static_assert(
+      std::is_integral_v<C>,
+      "floordiv_integral(T a, U b) is only for integral types.");
+  const C a_c = static_cast<C>(a);
+  const C b_c = static_cast<C>(b);
+  if (C10_UNLIKELY_OR_CONST(b_c == 0)) {
+    inductor_cpu_note_integer_div_by_zero();
+    return C(0);
+  }
+  return c10::div_floor_integer(a_c, b_c);
+}
+
 template <>
 inline float mod(float a, float b) {
   return std::fmod(a, b);
@@ -869,6 +900,72 @@ inline T remainder_integral(T a, T b) {
 }
 
 #if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+inline at::vec::Vectorized<T> truncdiv_integral(
+    const at::vec::Vectorized<T>& a,
+    const at::vec::Vectorized<T>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "truncdiv_integral expects integral underlying type");
+  using Vec = at::vec::Vectorized<T>;
+  constexpr int kLen = Vec::size();
+  alignas(alignof(Vec)) T out_buf[kLen];
+  alignas(alignof(Vec)) T b_buf[kLen];
+  a.store(out_buf);
+  b.store(b_buf);
+  for (int i = 0; i < kLen; ++i) {
+    out_buf[i] = truncdiv_integral(out_buf[i], b_buf[i]);
+  }
+  return Vec::loadu(out_buf);
+}
+
+template <typename T, int N>
+inline at::vec::VectorizedN<T, N> truncdiv_integral(
+    const at::vec::VectorizedN<T, N>& a,
+    const at::vec::VectorizedN<T, N>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "truncdiv_integral expects integral underlying type");
+  at::vec::VectorizedN<T, N> out;
+  for (int i = 0; i < N; ++i) {
+    out[i] = truncdiv_integral(a[i], b[i]);
+  }
+  return out;
+}
+
+template <typename T>
+inline at::vec::Vectorized<T> floordiv_integral(
+    const at::vec::Vectorized<T>& a,
+    const at::vec::Vectorized<T>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "floordiv_integral expects integral underlying type");
+  using Vec = at::vec::Vectorized<T>;
+  constexpr int kLen = Vec::size();
+  alignas(alignof(Vec)) T out_buf[kLen];
+  alignas(alignof(Vec)) T b_buf[kLen];
+  a.store(out_buf);
+  b.store(b_buf);
+  for (int i = 0; i < kLen; ++i) {
+    out_buf[i] = floordiv_integral(out_buf[i], b_buf[i]);
+  }
+  return Vec::loadu(out_buf);
+}
+
+template <typename T, int N>
+inline at::vec::VectorizedN<T, N> floordiv_integral(
+    const at::vec::VectorizedN<T, N>& a,
+    const at::vec::VectorizedN<T, N>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "floordiv_integral expects integral underlying type");
+  at::vec::VectorizedN<T, N> out;
+  for (int i = 0; i < N; ++i) {
+    out[i] = floordiv_integral(a[i], b[i]);
+  }
+  return out;
+}
+
 template <typename T>
 inline at::vec::Vectorized<T> remainder_integral(
     const at::vec::Vectorized<T>& a,

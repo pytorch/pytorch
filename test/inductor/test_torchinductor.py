@@ -8739,6 +8739,48 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @skip_if_halide  # cpp-only RuntimeError contract
     @skip_if_pallas  # cpp-only RuntimeError contract
     @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    def test_floor_divide_zero_divisor_cpu_inductor_raises_error(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest(
+                "CPU-only: integer floor_divide divide-by-zero RuntimeError check"
+            )
+
+        def fn(a, b):
+            return torch.floor_divide(a, b)
+
+        for dtype in [torch.int32, torch.int64]:
+            inp = torch.arange(1, 17, dtype=dtype, device=self.device).reshape(2, 8)
+            divisor = torch.ones((8,), dtype=dtype, device=self.device)
+            divisor[2] = 0
+            torch._dynamo.reset()
+            opt = torch.compile(fn, fullgraph=True, backend="inductor", mode=None)
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                opt(inp, divisor)
+
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
+    def test_trunc_divide_zero_divisor_cpu_inductor_raises_error(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest(
+                "CPU-only: integer trunc divide-by-zero RuntimeError check"
+            )
+
+        def fn(a, b):
+            return torch.divide(a, b, rounding_mode="trunc")
+
+        for dtype in [torch.int32, torch.int64]:
+            inp = torch.arange(1, 17, dtype=dtype, device=self.device).reshape(2, 8)
+            divisor = torch.ones((8,), dtype=dtype, device=self.device)
+            divisor[2] = 0
+            torch._dynamo.reset()
+            opt = torch.compile(fn, fullgraph=True, backend="inductor", mode=None)
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                opt(inp, divisor)
+
+    @skip_if_halide  # cpp-only RuntimeError contract
+    @skip_if_pallas  # cpp-only RuntimeError contract
+    @skip_if_triton_cpu  # cpp-only RuntimeError contract
     def test_fmod_uint8_zero_divisor_cpu_inductor_raises_error(self):
         if self.device != "cpu":
             raise unittest.SkipTest(
