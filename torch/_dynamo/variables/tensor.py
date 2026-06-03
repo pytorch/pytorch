@@ -1458,6 +1458,17 @@ class TensorVariable(VariableTracker):
                 # are no leaves requiring grad.
                 return ConstantVariable.create(None)
         else:
+            # Unwrap dict-like wrappers (e.g. `OrderedDictVariable`,
+            # `DefaultDictVariable`, `MappingProxyVariable`) to expose the
+            # underlying `ConstDictVariable` storage.
+            if isinstance(inputs, variables.UserDefinedDictVariable):
+                if inputs._base_vt is None:
+                    raise AssertionError(
+                        "UserDefinedDictVariable._base_vt must not be None"
+                    )
+                inputs = inputs._base_vt
+            elif isinstance(inputs, variables.MappingProxyVariable):
+                inputs = inputs.dv_dict
             if isinstance(inputs, variables.BaseListVariable):
                 provided_vars = inputs.items
             elif isinstance(inputs, variables.ConstDictVariable):
