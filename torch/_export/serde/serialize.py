@@ -27,6 +27,7 @@ import sympy
 import torch
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
+from torch._export.serde import _is_unsafe_callable_registered
 from torch._export.verifier import load_verifier
 from torch._library.opaque_object import get_opaque_type_name, is_opaque_value
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -1037,8 +1038,13 @@ class GraphModuleSerializer(metaclass=Final):
                 metadata=self.serialize_metadata(node),
             )
         elif callable(node.target):
-            # Handle predispatch wrapper functions (vmap, JVP, etc.) that appear
-            # as plain Python function call_function nodes in pre_dispatch graphs.
+            if not _is_unsafe_callable_registered(node.target):
+                raise SerializeError(
+                    f"Serializing callable {node.target} is not supported by default. "
+                    "Use torch._export.serde.unsafe_allow_callable_serialization() to "
+                    "register specific callables for serialization (no backwards "
+                    "compatibility guarantee)."
+                )
             ex_node = Node(
                 name=node.name,
                 target=self.serialize_operator(node.target),
@@ -2733,7 +2739,12 @@ class GraphModuleDeserializer(metaclass=Final):
             )
             self.deserialize_outputs(serialized_node, fx_node)
         elif callable(target):
-            # Handle predispatch wrapper functions (vmap, JVP, etc.)
+            if not _is_unsafe_callable_registered(target):
+                raise SerializeError(
+                    f"Deserializing callable {target} is not supported by default. "
+                    "Use torch._export.serde.unsafe_allow_callable_serialization() to "
+                    "register specific callables for deserialization."
+                )
             args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
             name = serialized_node.name if serialized_node.name else None
             fx_node = self.graph.create_node(

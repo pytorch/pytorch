@@ -35,6 +35,7 @@ from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export import config
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
+from torch._export.serde import unsafe_allow_callable_serialization
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -43,6 +44,13 @@ from torch._export.utils import (
     register_dataclass_as_pytree_node,
 )
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
+from torch._functorch.predispatch import (
+    _add_batch_dim,
+    _remove_batch_dim,
+    _vmap_decrement_nesting,
+    _vmap_increment_nesting,
+    lazy_load_decompositions,
+)
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.scan import scan
@@ -862,7 +870,17 @@ class TestExport(TestCase):
                 vmapped = torch.vmap(f)(x, y)
                 return vmapped.sum(dim=0)
 
-        ep = export(VmapToAssert(), (torch.zeros(4, 4, 4, 4), torch.zeros(4, 4, 4, 4)))
+        # See comment in test_vmap for why registration is needed.
+        with unsafe_allow_callable_serialization(
+            _vmap_increment_nesting,
+            _vmap_decrement_nesting,
+            _add_batch_dim,
+            _remove_batch_dim,
+            lazy_load_decompositions,
+        ):
+            ep = export(
+                VmapToAssert(), (torch.zeros(4, 4, 4, 4), torch.zeros(4, 4, 4, 4))
+            )
         exported = ep.module()(torch.ones(4, 4, 4, 4), torch.ones(4, 4, 4, 4))
         eager = VmapToAssert()(torch.ones(4, 4, 4, 4), torch.ones(4, 4, 4, 4))
         self.assertEqual(exported, eager)
@@ -3845,10 +3863,20 @@ graph():
         DYN = torch.export.Dim.DYNAMIC
         inputs = (torch.tensor([1.0, 2.0, 3.0]), torch.tensor([0.1, 0.2, 0.3]))
         dynamic = {"x": {0: DYN}, "y": {0: DYN}}
-        ep = torch.export.export(Vmap(), inputs, {}, dynamic_shapes=dynamic)
-        self.assertExpectedInline(
-            str(ep.graph).strip(),
-            """\
+        # vmap produces predispatch callable nodes that need to be registered
+        # for serialization. Registration is needed here so that when test_serdes
+        # replaces export() with a mock that calls save/load, the callables are allowed.
+        with unsafe_allow_callable_serialization(
+            _vmap_increment_nesting,
+            _vmap_decrement_nesting,
+            _add_batch_dim,
+            _remove_batch_dim,
+            lazy_load_decompositions,
+        ):
+            ep = torch.export.export(Vmap(), inputs, {}, dynamic_shapes=dynamic)
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
 graph():
     %x : [num_users=1] = placeholder[target=x]
     %y : [num_users=2] = placeholder[target=y]
@@ -3864,13 +3892,13 @@ graph():
     %_vmap_decrement_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_decrement_nesting](args = (), kwargs = {})
     %sum_2 : [num_users=1] = call_function[target=torch.ops.aten.sum.dim_IntList](args = (%_remove_batch_dim, [0]), kwargs = {})
     return (sum_2,)""",
-        )
-        ep = torch.export.export(
-            Vmap(), inputs, {}, dynamic_shapes=dynamic, strict=True
-        )
-        self.assertExpectedInline(
-            str(ep.graph).strip(),
-            """\
+            )
+            ep = torch.export.export(
+                Vmap(), inputs, {}, dynamic_shapes=dynamic, strict=True
+            )
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
 graph():
     %x : [num_users=1] = placeholder[target=x]
     %y : [num_users=2] = placeholder[target=y]
@@ -3886,10 +3914,12 @@ graph():
     %_vmap_decrement_nesting : [num_users=0] = call_function[target=torch._functorch.predispatch._vmap_decrement_nesting](args = (), kwargs = {})
     %sum_2 : [num_users=1] = call_function[target=torch.ops.aten.sum.dim_IntList](args = (%_remove_batch_dim, [0]), kwargs = {})
     return (sum_2,)""",
-        )
-        self.assertTrue(torch.allclose(ep.module()(*inputs), Vmap()(*inputs)))
-        ep = export(Vmap(), inputs, {}, dynamic_shapes=dynamic).run_decompositions({})
-        self.assertTrue(torch.allclose(ep.module()(*inputs), Vmap()(*inputs)))
+            )
+            self.assertTrue(torch.allclose(ep.module()(*inputs), Vmap()(*inputs)))
+            ep = export(Vmap(), inputs, {}, dynamic_shapes=dynamic).run_decompositions(
+                {}
+            )
+            self.assertTrue(torch.allclose(ep.module()(*inputs), Vmap()(*inputs)))
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses

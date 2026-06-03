@@ -38,6 +38,7 @@ import torch.export._trace
 import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
+from torch._export.serde import unsafe_allow_callable_serialization
 from torch._export.serde.schema import ArgumentKind
 from torch._export.serde.serialize import (
     _dict_to_dataclass,
@@ -2746,8 +2747,14 @@ class TestPredispatchSerialization(TestCase):
     def test_predispatch_jvp_serialize_roundtrip(self):
         """Test that JVP predispatch wrapper functions survive serialization round-trip."""
         from torch._functorch.predispatch import (
+            _enter_dual_level,
+            _exit_dual_level,
             _jvp_decrement_nesting,
             _jvp_increment_nesting,
+            _make_dual,
+            _unpack_dual,
+            _unwrap_for_grad,
+            lazy_load_decompositions,
         )
 
         class JVP(torch.nn.Module):
@@ -2776,10 +2783,20 @@ class TestPredispatchSerialization(TestCase):
         self.assertIn("_jvp_increment_nesting", graph_str)
         self.assertIn("_jvp_decrement_nesting", graph_str)
 
-        buffer = io.BytesIO()
-        torch.export.save(ep, buffer)
-        buffer.seek(0)
-        loaded_ep = torch.export.load(buffer)
+        with unsafe_allow_callable_serialization(
+            _jvp_increment_nesting,
+            _jvp_decrement_nesting,
+            _make_dual,
+            _unpack_dual,
+            _unwrap_for_grad,
+            _enter_dual_level,
+            _exit_dual_level,
+            lazy_load_decompositions,
+        ):
+            buffer = io.BytesIO()
+            torch.export.save(ep, buffer)
+            buffer.seek(0)
+            loaded_ep = torch.export.load(buffer)
 
         loaded_graph_str = str(loaded_ep.graph)
         self.assertIn("_jvp_increment_nesting", loaded_graph_str)
@@ -2800,6 +2817,13 @@ class TestPredispatchSerialization(TestCase):
 
     def test_predispatch_vmap_serialize_roundtrip(self):
         """Test that vmap predispatch wrapper functions survive serialization round-trip."""
+        from torch._functorch.predispatch import (
+            _add_batch_dim,
+            _remove_batch_dim,
+            _vmap_decrement_nesting,
+            _vmap_increment_nesting,
+            lazy_load_decompositions,
+        )
         from torch.export._trace import _export
 
         class Vmap(torch.nn.Module):
@@ -2816,10 +2840,17 @@ class TestPredispatchSerialization(TestCase):
         self.assertIn("_vmap_increment_nesting", graph_str)
         self.assertIn("_vmap_decrement_nesting", graph_str)
 
-        buffer = io.BytesIO()
-        torch.export.save(ep, buffer)
-        buffer.seek(0)
-        loaded_ep = torch.export.load(buffer)
+        with unsafe_allow_callable_serialization(
+            _vmap_increment_nesting,
+            _vmap_decrement_nesting,
+            _add_batch_dim,
+            _remove_batch_dim,
+            lazy_load_decompositions,
+        ):
+            buffer = io.BytesIO()
+            torch.export.save(ep, buffer)
+            buffer.seek(0)
+            loaded_ep = torch.export.load(buffer)
 
         # Verify predispatch nodes survive round-trip
         loaded_graph_str = str(loaded_ep.graph)
@@ -2829,6 +2860,35 @@ class TestPredispatchSerialization(TestCase):
         exp_out = ep.module()(*inp)
         actual_out = loaded_ep.module()(*inp)
         self.assertTrue(torch.allclose(exp_out, actual_out))
+
+    def test_callable_serialization_blocked_by_default(self):
+        """Serializing callable targets should fail without unsafe_allow_callable_serialization()."""
+
+        class JVP(torch.nn.Module):
+            def foo(self, x, r, t) -> torch.Tensor:
+                return x - 0.1 * r + 0.1 * t
+
+            def forward(self, x, y, r, t, z, o) -> tuple[torch.Tensor, torch.Tensor]:
+                return torch.func.jvp(
+                    self.foo,
+                    (x, r, t),
+                    (y, z, o),
+                )
+
+        inp = (
+            torch.rand(2, 4),
+            torch.rand(2, 4),
+            torch.rand(2, 1),
+            torch.rand(2, 1),
+            torch.zeros(2, 1),
+            torch.ones(2, 1),
+        )
+
+        ep = export(JVP(), inp, strict=False)
+
+        buffer = io.BytesIO()
+        with self.assertRaisesRegex(SerializeError, "not supported by default"):
+            torch.export.save(ep, buffer)
 
 
 if __name__ == "__main__":
