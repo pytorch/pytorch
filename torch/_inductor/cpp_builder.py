@@ -915,7 +915,7 @@ def _get_ffast_math_flags() -> list[str]:
     if _IS_WINDOWS:
         flags = []
     else:
-        # ffast-math is equivalent to these flags as in
+        # This starts from the flags implied by -ffast-math, as in
         # https://github.com/gcc-mirror/gcc/blob/4700ad1c78ccd7767f846802fca148b2ea9a1852/gcc/opts.cc#L3458-L3468
         # however gcc<13 sets the FTZ/DAZ flags for runtime on x86 even if we have
         # -ffast-math -fno-unsafe-math-optimizations because the flags for runtime
@@ -926,12 +926,15 @@ def _get_ffast_math_flags() -> list[str]:
             "funsafe-math-optimizations",
             "ffinite-math-only",
             "fno-signed-zeros",
-            "fno-math-errno",
         ]
 
         flags.append("fno-finite-math-only")
         if not config.cpp.enable_unsafe_math_opt_flag:
             flags.append("fno-unsafe-math-optimizations")
+        # Keep errno-preserving libm semantics.  With -fno-math-errno, GCC can
+        # inline/transform libm call pairs like sin(atan(x)) in ways that do not
+        # preserve NaN values (see https://github.com/pytorch/pytorch/issues/143978).
+        flags.append("fmath-errno")
         flags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
         if is_gcc():
