@@ -330,6 +330,15 @@ MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format) {
     const NSUInteger W = sizes[3];
     return @[ @(N), @(H), @(W), @(C) ];
   }
+  if (memory_format == MemoryFormat::ChannelsLast3d) {
+    TORCH_INTERNAL_ASSERT(sizes.size() == 5, "ChannelsLast3d memory format must have 5 dimensions!");
+    const NSUInteger N = sizes[0];
+    const NSUInteger C = sizes[1];
+    const NSUInteger D = sizes[2];
+    const NSUInteger H = sizes[3];
+    const NSUInteger W = sizes[4];
+    return @[ @(N), @(D), @(H), @(W), @(C) ];
+  }
   const int sz = sizes.size();
   const int sz_ = (sz > 0) ? sz : 1;
 
@@ -897,6 +906,18 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
   return cplMap[key];
 }
 
+bool MetalShaderLibrary::hasFunction(const std::string& fname) {
+  // Lazily build a set of all kernel names exposed by the library. The library is immutable post-load, so the set is
+  // computed once per library instance. Used by exec_unary_kernel to decide whether to take the direct per-(in,out)
+  // kernel or fall back to the `_dense_cast_` cast variant.
+  if (C10_UNLIKELY(!functionNamesPopulated)) {
+    auto names = getFunctionNames();
+    functionNames.insert(names.begin(), names.end());
+    functionNamesPopulated = true;
+  }
+  return functionNames.contains(fname);
+}
+
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
   if (C10_UNLIKELY(!library && nparams > 0)) {
     throw std::runtime_error("Library must be initialized first");
@@ -1041,6 +1062,18 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                  scalarToMetalTypeString(outputTensor),
                                  scalarToMetalTypeString(inputTensor),
                                  alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "");
+  // Castout-fallback path: if the direct per-(out,in) kernel isn't registered, swap to the `_dense_castout_<in>` /
+  // `_strided_castout_<in>` variant. The castout kernel computes the functor in the input dtype and casts the result to
+  // the user's output dtype on store (via store_at_offs), matching CPU's "compute in input precision, cast on store"
+  // semantics. Castout variants don't exist for alpha kernels, so skip the fallback when alpha is set (existing
+  // TORCH_CHECK still fires for missing direct kernel).
+  bool cast_needed = false;
+  if (!alpha.has_value() && !hasFunction(kernel_name)) {
+    cast_needed = true;
+    dense_suffix = is_contiguous ? "dense_castout" : "strided_castout";
+    dense_ilp = false;
+    kernel_name = fmt::format("{}_{}_{}", name, dense_suffix, scalarToMetalTypeString(inputTensor));
+  }
   @autoreleasepool {
     auto cplState = getPipelineStateForFunc(kernel_name);
 
@@ -1052,7 +1085,29 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
 
       [computeEncoder setComputePipelineState:cplState];
       bind_iter_tensors(computeEncoder, iter);
-      if (dense_ilp) {
+      // Strided kernels use a 2D dispatch (grid.x = innermost dim, grid.y = product of outer dims) so the kernel can
+      // read pos[0] directly from thread_position_in_grid.x and skip one div/mod per element. shape()[0] is the
+      // innermost dim after TensorIterator's reorder+coalesce.
+      const auto dispatch_strided_2d = [&]() {
+        const auto inner = static_cast<NSUInteger>(iter.shape()[0]);
+        const auto outer = static_cast<NSUInteger>(length) / inner;
+        mtl_dispatch2DJob(computeEncoder, cplState, inner, outer);
+      };
+      if (cast_needed) {
+        // {dense,strided}_castout take the output dtype at runtime via the ScalarType in the trailing constant buffer;
+        // input is read at compile-time Tin.
+        const auto out_type = static_cast<uint32_t>(outputTensor.scalar_type());
+        if (is_contiguous) {
+          std::array<uint32_t, 2> size_outtype = {static_cast<uint32_t>(c10::elementSize(outputTensor.scalar_type())),
+                                                  out_type};
+          mtl_setBytes(computeEncoder, size_outtype, 2);
+          mtl_dispatch1DJob(computeEncoder, cplState, length);
+        } else {
+          std::array<uint32_t, 2> ndim_outtype = {static_cast<uint32_t>(iter.ndim()), out_type};
+          mtl_setArgs<2>(computeEncoder, iter.shape(), iter.strides(1), iter.strides(0), ndim_outtype);
+          dispatch_strided_2d();
+        }
+      } else if (dense_ilp) {
         mtl_setBytes(computeEncoder, length, 2);
         mtl_dispatch1DJob(
             computeEncoder, cplState, (length + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD);
@@ -1064,7 +1119,11 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
         if (alpha) {
           mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), is_contiguous ? 2 : 6);
         }
-        mtl_dispatch1DJob(computeEncoder, cplState, length);
+        if (!is_contiguous) {
+          dispatch_strided_2d();
+        } else {
+          mtl_dispatch1DJob(computeEncoder, cplState, length);
+        }
       }
 
       getMPSProfiler().endProfileKernel(cplState);
