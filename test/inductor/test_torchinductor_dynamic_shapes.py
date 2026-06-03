@@ -59,15 +59,20 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
+    # torch.func.jvp with nn.Module doesn't retrace with symbolic sizes
+    "test_jvp_compile_backward_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu", "mps"), is_skip=True
+    ),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     # Bool argmax/argmin fix is Triton-only (see #174069), skip on CPU
     "test_max_min_bool_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
-    # calling div on only symint args
+    # With tensorify enabled, SymInt div no longer graph-breaks; the full
+    # model compiles but Inductor hangs on the complex dynamic-shape graph.
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu", "mps")
+        ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),

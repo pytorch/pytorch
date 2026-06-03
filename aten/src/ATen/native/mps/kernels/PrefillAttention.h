@@ -825,13 +825,14 @@ prefill_attention(
               row_pos_in_seq,
               col_pos_in_seq);
 
+          constexpr selem_t kLog2E = selem_t(1.44269504089f);
           PREFILL_PRAGMA_UNROLL
           for (short jj = 0; jj < stile_t::MMAFrag_t::kElemsPerFrag; jj++) {
             if IF_CONSTEXPR (is_bool) {
               Stile.frag_at(i, j)[jj] =
                   mfrag[jj] ? Stile.frag_at(i, j)[jj] : neg_inf;
             } else {
-              Stile.frag_at(i, j)[jj] += selem_t(mfrag[jj]);
+              Stile.frag_at(i, j)[jj] += selem_t(mfrag[jj]) * kLog2E;
             }
           }
         }
