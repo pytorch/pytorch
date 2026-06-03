@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from tabulate import tabulate
@@ -27,6 +28,9 @@ from torch.distributed.flight_recorder.components.types import (
 
 if TYPE_CHECKING:
     from torch.distributed.debug._frontend import FrontendServer, HTTPRequestHandler
+
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -635,10 +639,14 @@ class TorchCommsHealthCheckHandler(DebugHandler):
             if resp.status_code == 200:
                 try:
                     data = resp.json()
-                    if not data.get("healthy", True):
-                        return True
                 except Exception:
-                    pass
+                    logger.exception(
+                        "failed to parse health check response as JSON; "
+                        "treating rank as healthy"
+                    )
+                    continue
+                if not data.get("healthy", True):
+                    return True
         return False
 
     def _handle(self, req: HTTPRequestHandler) -> bytes:
