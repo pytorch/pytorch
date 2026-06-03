@@ -6909,14 +6909,16 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch._dynamo.eval_frame.clear_dynamo_tls()
 
         opt_f = torch.compile(f, backend="eager", dynamic=False)
-        opt_f(torch.randn(3))
-        opt_f(torch.randn(3))
+        x = torch.randn(3)
+        self.assertEqual(opt_f(x), f(x))
+        x2 = torch.randn(3)
+        self.assertEqual(opt_f(x2), f(x2))
 
         frame_names = [
             info.split()[0]
             for info in torch._dynamo.eval_frame.dynamo_tls.traced_frame_infos
         ]
-        self.assertEqual(frame_names, ["f", "f"])
+        self.assertEqual(frame_names, ["f"])
 
     def test_torchname(self):
         def fn(obj):
@@ -9292,6 +9294,32 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
 
         with mock.patch("torch.cuda.is_initialized", lambda: False):
             self.assertEqual(f(inp), inp + 2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_graph_metadata_does_not_retain_cuda_fake_constants(self):
+        def f():
+            x = torch.tensor(5, dtype=torch.float32, device="cuda")
+            copy.deepcopy(x)
+
+        def clear_cuda_memory(*, reset_dynamo):
+            if reset_dynamo:
+                torch._dynamo.reset()
+            gc.collect()
+            torch._C._cuda_clearCublasWorkspaces()
+            torch.cuda.empty_cache()
+
+        clear_cuda_memory(reset_dynamo=True)
+        memory_before = torch.cuda.memory_allocated()
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f()
+        clear_cuda_memory(reset_dynamo=False)
+
+        self.assertEqual(torch.cuda.memory_allocated(), memory_before)
+        # Keep the compiled callable alive through the assertion. Before the
+        # fix, it retained the compiled FX graph, whose FakeTensor metadata
+        # retained the real CUDA scalar through FakeTensor.constant.
+        self.assertIsNotNone(opt_f)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")

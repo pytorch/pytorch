@@ -1773,7 +1773,6 @@ def _compile(
                         frame_exec_strategy=FrameExecStrategy(
                             FrameAction.SKIP, FrameAction.SKIP
                         ),
-                        apply_to_code=False,
                         skip_reason=skip_reason,
                     ),
                     e._torch_dynamo_tracer_output,
