@@ -744,13 +744,14 @@ void initTorchFunctions(PyObject* module) {
         // - non-differentiable aliasing: aliasing of subclass_x and subclass_y
         //   is defined recursively based on the aliasing of their inner
         //   tensors.
-        at::native::checkSetStorage(
-            dst,
-            src.storage(),
-            dst.sym_storage_offset(),
-            dst.sym_sizes(),
-            dst.sym_strides(),
-            /*check_offset_in_bounds=*/false);
+        // Use shallow_copy_from for cross-device support.
+        // checkSetStorage rejects cross-device, but _functionalize_unsafe_set
+        // is explicitly meant to bypass safety checks.
+        if (dst.device() != src.device()) {
+          dst.unsafeGetTensorImpl()->_change_backend_component_keys(
+              src.device());
+        }
+        dst.unsafeGetTensorImpl()->set_storage_keep_dtype(src.storage());
       });
   py_module.def("_is_functional_tensor", [](const at::Tensor& t) {
     return at::functionalization::impl::isFunctionalTensor(t);
