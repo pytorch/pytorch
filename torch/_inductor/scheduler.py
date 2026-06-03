@@ -384,19 +384,31 @@ class MixOrderReduction:
             # Call evaluate_expr rather than statically_known_geq since nrow can
             # have dynamic shape in real models.
             # Don't use hint directly since hint can be non-representative.
-            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow * ncol, size_thres)):
+            if not V.graph.sizevars.evaluate_expr(
+                sympy.Ge(nrow * ncol, size_thres),
+                size_oblivious=True,
+                fallback_value=False,
+            ):
                 return False
 
             # We require more more row than columns since
             # 1, we prefer doing persistent reduction for each row
             # 2, we will split the reduction across the rows
-            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow, ncol * 2)):
+            if not V.graph.sizevars.evaluate_expr(
+                sympy.Ge(nrow, ncol * 2),
+                size_oblivious=True,
+                fallback_value=False,
+            ):
                 return False
 
             # When nrow is small, ncol should also be small (due to the check
             # above). Thus the entire tensor should be well cached in L2.
             # Mix order reduction is less beneficial.
-            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow, 4096)):
+            if not V.graph.sizevars.evaluate_expr(
+                sympy.Ge(nrow, 4096),
+                size_oblivious=True,
+                fallback_value=False,
+            ):
                 return False
 
         # Make sure a persistent reduction will be generated
@@ -3258,6 +3270,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         prev_node_1: BaseSchedulerNode | None = None,
         prev_node_2: BaseSchedulerNode | None = None,
         enable_autotune: bool = False,
+        per_subkernel_blocks: bool = False,
     ) -> None:
         self.read_to_node = {}
         self.name_to_node = {}
@@ -3327,6 +3340,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.group = (device, ((sympy.Expr("combo_kernel"),),))
         self.origins = OrderedSet[torch.fx.Node]()
         self.enable_autotune = enable_autotune
+        self.per_subkernel_blocks = per_subkernel_blocks
 
     @classmethod
     def combinable_nodes(
@@ -3826,6 +3840,41 @@ def _is_epilogue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     if tb is not None and tb.allow_epilogue_fusion is not None:
         return tb.allow_epilogue_fusion
     return config.epilogue_fusion
+
+
+def _is_atomic_add_mutation_epilogue(
+    node: BaseSchedulerNode, *, check_config: bool = True
+) -> bool:
+    if check_config and not config.epilogue_fusion_with_atomic_add:
+        return False
+    if not isinstance(node, SchedulerNode):
+        return False
+    if not isinstance(node.node, ir.ComputedBuffer):
+        return False
+    if not isinstance(node.node.data, ir.Scatter):
+        return False
+    if node.node.data.scatter_mode != "atomic_add":
+        return False
+
+    outputs = node.get_outputs()
+    if len(outputs) != 1:
+        return False
+    if outputs[0].get_aliases() or len(outputs[0].get_mutations()) != 1:
+        return False
+
+    writes = node.read_writes.writes
+    return bool(writes) and all(
+        isinstance(write, MemoryDep) and write.mode == "atomic_add" for write in writes
+    )
+
+
+def _can_fuse_atomic_add_template_epilogue(
+    template_node: BaseSchedulerNode, epilogue_node: BaseSchedulerNode
+) -> bool:
+    template_buf = template_node.get_template_node()
+    return isinstance(
+        template_buf, ir.TritonTemplateBuffer
+    ) and _is_atomic_add_mutation_epilogue(epilogue_node)
 
 
 def _is_prologue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
@@ -5223,6 +5272,12 @@ class Scheduler:
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
             for n in (node1, node2)
         )
+        atomic_add_template_epilogue = isinstance(
+            node1.get_template_node(), ir.TritonTemplateBuffer
+        ) and _is_atomic_add_mutation_epilogue(node2, check_config=False)
+        if atomic_add_template_epilogue and not config.epilogue_fusion_with_atomic_add:
+            return FusionResult.fuse(False)
+
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
 
@@ -5245,11 +5300,14 @@ class Scheduler:
 
         node_list_2 = node2.get_nodes()
         node_list_fused = list(itertools.chain(node_list_1, node_list_2))
+        has_atomic_add = self._any_atomic_add(node_list_fused)
 
         # We can not accurately benchmark kernel using atomic_add
         # due to how we generate random integer inputs.
-        # Skip benchmarking them by allowing fusion.
-        if self._any_atomic_add(node_list_fused):
+        # Skip benchmarking them by allowing fusion. The
+        # epilogue_fusion_with_atomic_add gate only applies to Triton template
+        # epilogues, so keep the existing non-template behavior here.
+        if has_atomic_add and not is_multi_template:
             return FusionResult.fuse(True)
 
         from triton.compiler.errors import CompilationError
@@ -5293,50 +5351,53 @@ class Scheduler:
             hint_override_best_fusion_choice: dict[
                 int | None, TritonTemplateCallerBase
             ] = {}
-            future_choices: list[tuple[Any, LambdaFuture | None, ModuleType]] = []
-            for hint_override in config.multi_kernel_hints:
-                choice_timings = multi_node.choice_timings(hint_override)
-                for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
-                    if not isinstance(
-                        choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                    ):
-                        continue
-                    with multi_node.swap_as_triton_caller(choice):
-                        future_choices.append(
-                            (
-                                choice,
-                                *self.compile_kernel(
-                                    node_list_fused, hint_override=choice.hint_override
-                                ),
+            if not has_atomic_add:
+                future_choices: list[tuple[Any, LambdaFuture | None, ModuleType]] = []
+                for hint_override in config.multi_kernel_hints:
+                    choice_timings = multi_node.choice_timings(hint_override)
+                    for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
+                        if not isinstance(
+                            choice,
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                        ):
+                            continue
+                        with multi_node.swap_as_triton_caller(choice):
+                            future_choices.append(
+                                (
+                                    choice,
+                                    *self.compile_kernel(
+                                        node_list_fused,
+                                        hint_override=choice.hint_override,
+                                    ),
+                                )
                             )
-                        )
 
-                min_ms_fused = float("inf")
-                ms_fused_choice: TritonTemplateCallerBase | None = None
-                new_timings = {}
-                for choice, future, mod_fused in future_choices:
-                    try:
-                        if future is not None:
-                            future.result()
-                    except Exception as e:
-                        if fusion_log.isEnabledFor(logging.DEBUG):
-                            fusion_log.debug(
-                                "Exception in compiling %s: %s",
-                                "prologue" if not epilogue_fusion else "epilogue",
-                                e,
+                    min_ms_fused = float("inf")
+                    ms_fused_choice: TritonTemplateCallerBase | None = None
+                    new_timings = {}
+                    for choice, future, mod_fused in future_choices:
+                        try:
+                            if future is not None:
+                                future.result()
+                        except Exception as e:
+                            if fusion_log.isEnabledFor(logging.DEBUG):
+                                fusion_log.debug(
+                                    "Exception in compiling %s: %s",
+                                    "prologue" if not epilogue_fusion else "epilogue",
+                                    e,
+                                )
+                            continue
+                        with multi_node.swap_as_triton_caller(choice):
+                            ms_fused, path = self.benchmark_codegened_module(
+                                mod_fused, device
                             )
-                        continue
-                    with multi_node.swap_as_triton_caller(choice):
-                        ms_fused, path = self.benchmark_codegened_module(
-                            mod_fused, device
-                        )
-                        new_timings[choice] = ms_fused
-                        if ms_fused < min_ms_fused:
-                            min_ms_fused = ms_fused
-                            ms_fused_choice = choice
-                multi_node._choice_timings[hint_override] = new_timings
-                assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
-                hint_override_best_fusion_choice[hint_override] = ms_fused_choice
+                            new_timings[choice] = ms_fused
+                            if ms_fused < min_ms_fused:
+                                min_ms_fused = ms_fused
+                                ms_fused_choice = choice
+                    multi_node._choice_timings[hint_override] = new_timings
+                    assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
+                    hint_override_best_fusion_choice[hint_override] = ms_fused_choice
 
             bench_epilogue = config.benchmark_epilogue_fusion
             num_triton_callers = sum(
@@ -5363,6 +5424,81 @@ class Scheduler:
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
 
+            from torch._inductor.codegen.simd import CantSplit
+
+            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
+                if not isinstance(
+                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
+                ):
+                    return False
+                # For prologue fusion we check if the underlying template of the choice
+                # supports all allowed prologue inputs. If not, we skip this choice in
+                # the fusion benchmark.
+                # TODO: Remove this check after all Triton templates support prologue fusion.
+                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
+                return not (
+                    not epilogue_fusion
+                    and hasattr(choice, "allowed_prologue_inps")
+                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
+                )
+
+            def compile_without_benchmarking(
+                choice: torch._inductor.select_algorithm.TritonTemplateCaller,
+            ) -> bool:
+                with multi_node.swap_as_triton_caller(choice):
+                    try:
+                        future, mod_fused = self.compile_kernel(
+                            node_list_fused, hint_override=choice.hint_override
+                        )
+                        if future is not None:
+                            future.result()
+                        else:
+                            mod_fused.triton_.precompile()
+                    except CantSplit:
+                        return False
+                    except Exception as e:
+                        if fusion_log.isEnabledFor(logging.DEBUG):
+                            fusion_log.debug(
+                                "Exception in compiling %s: %s",
+                                "prologue" if not epilogue_fusion else "epilogue",
+                                e,
+                            )
+                        return False
+                return True
+
+            if has_atomic_add:
+                if not epilogue_fusion:
+                    return FusionResult.fuse(False)
+
+                for hint_override in [*config.multi_kernel_hints, None]:
+                    choice_timings = multi_node.choice_timings(hint_override)
+                    ms_fused_choice: TritonTemplateCallerBase | None = None
+                    for choice, _ in sorted(
+                        choice_timings.items(), key=operator.itemgetter(1)
+                    ):
+                        if not choice_supports_fusion(choice):
+                            continue
+                        triton_choice = typing.cast(
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                            choice,
+                        )
+                        if compile_without_benchmarking(triton_choice):
+                            ms_fused_choice = triton_choice
+                            break
+                    if ms_fused_choice is None:
+                        return FusionResult.fuse(False)
+                    hint_override_best_fusion_choice[hint_override] = ms_fused_choice
+
+                if config.multi_kernel_hints:
+                    multi_node.finalize_as_triton_callers(
+                        hint_override_best_fusion_choice
+                    )
+                else:
+                    multi_node.finalize_as_triton_caller(
+                        hint_override_best_fusion_choice[None]
+                    )
+                return FusionResult.fuse(True)
+
             if bench_epilogue:
                 ms2, path2 = (
                     self.benchmark_fused_nodes(node_list_2)
@@ -5378,25 +5514,12 @@ class Scheduler:
                 ms2_fused = _estimate_fused_epilogue_runtime(node1, node2, ms2)
 
             # Start compiling choices in parallel
-            from torch._inductor.codegen.simd import CantSplit
-
             future_choices: list[tuple[Any, LambdaFuture | None, ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in choice_timings_iter:
-                if not isinstance(choice, TritonTemplateCallerBase):
+                if not choice_supports_fusion(choice):
                     continue
-
-                # For prologue fusion we check if the underlying template of the choice
-                # supports all allowed prologue inputs. If not, we skip this choice in
-                # the fusion benchmark.
-                # TODO: Remove this check after all Triton templates support prologue fusion.
-                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
-                if (
-                    not epilogue_fusion
-                    and hasattr(choice, "allowed_prologue_inps")
-                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
-                ):
-                    continue
+                choice = typing.cast(TritonTemplateCallerBase, choice)
 
                 if bench_epilogue and unfused_time >= ms1 + ms2:
                     break
@@ -6034,6 +6157,7 @@ class Scheduler:
                         window,
                         use_custom_partition_algo=True,
                         enable_autotune=enable_autotune,
+                        per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
                     )
                     _register_accept(combo_node, window, num)
 
@@ -6123,6 +6247,7 @@ class Scheduler:
             group_nodes,
             use_custom_partition_algo=True,
             enable_autotune=enable_autotune,
+            per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
         )
         # Wire the combo's pred_buffers from its members so the gate
         # simulator can read `node.mpi_node.pred_buffers` uniformly.
@@ -7416,8 +7541,11 @@ class Scheduler:
                 return False
 
         if node1.is_template():
+            atomic_add_mutation_epilogue = _can_fuse_atomic_add_template_epilogue(
+                node1, node2
+            )
             if (
-                node2.has_aliasing_or_mutation()
+                (node2.has_aliasing_or_mutation() and not atomic_add_mutation_epilogue)
                 or node2.is_reduction()
                 or not _is_epilogue_fusion_enabled(node1)
             ):
