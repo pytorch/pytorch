@@ -1985,17 +1985,14 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
     return true;
   }
 
-  // t1->view(-1, t1->size(-1)) does not copy only when the first n-1 dimensions are contiguous
-  // in the sense that t1_stride[i] = t1_stride[i+1]*t1_shape[i+1]
   const auto t1_shape = t1->sym_sizes();
-  const auto t1_strides = t1->sym_strides();
-  for (auto i = int64_t{0}; i < dim_t1 - int64_t{2}; ++i) {
-    if (TORCH_GUARD_OR_TRUE(
-            t1_strides[i].sym_ne(t1_strides[i + 1] * t1_shape[i + 1]))) {
-      return false;
-    }
-  }
-  return true;
+  const auto leading_shape =
+      c10::SymDimVector(t1_shape.begin(), t1_shape.end() - 1);
+  const auto folded_dim1 = c10::multiply_integers(leading_shape);
+  const c10::SymDimVector t1_folded_shape{folded_dim1, t1_shape.back()};
+  return at::detail::computeStride(
+             t1_shape, t1->sym_strides(), t1_folded_shape)
+      .has_value();
 }
 
 /*
