@@ -14,7 +14,7 @@ import sympy
 import torch
 from torch._inductor.template_heuristics.triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import Mod
+from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config
@@ -37,6 +37,7 @@ from ..utils import (
     get_num_sms,
     get_tma_workspace_arg,
     TMA_DESCRIPTOR_SIZE,
+    triton_type,
     using_b200,
 )
 from ..virtualized import V
@@ -274,7 +275,7 @@ class ROCmFlexDecodeConfig(FlexDecodeConfig):
 
 class BaseHeuristicSingleton(type):
     """
-    Thread-safe implementation of single to be used in the config heuristic subclasses
+    Thread-safe implementation of singleton to be used in the config heuristic subclasses
     to ensure heavy __init__ calls are not repeatedly run
     """
 
@@ -327,6 +328,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 64, 3, 4),
             GemmConfig(128, 128, 64, 5, 8),
             GemmConfig(128, 128, 128, 4, 8),
+            # 128x256x64 NS=4: larger N-tile that wins on Hopper-class matmul
+            GemmConfig(128, 256, 64, 4, 8),
         ]
 
         # Exhaustive search for mm configs
@@ -1018,17 +1021,22 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
 
         try:
-            device = torch.cuda.current_device()
-            props = torch.cuda.get_device_properties(device)
-            if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
-                sm_available = int(props.shared_memory_per_block_optin)
-            elif hasattr(props, "shared_memory_per_block"):  # for ROCm
-                sm_available = int(props.shared_memory_per_block)
+            if torch.cuda.is_available():
+                device = torch.cuda.current_device()
+                props = torch.cuda.get_device_properties(device)
+                if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                    sm_available = int(props.shared_memory_per_block_optin)
+                elif hasattr(props, "shared_memory_per_block"):  # for ROCm
+                    sm_available = int(props.shared_memory_per_block)
+                else:
+                    return None
+            elif torch.xpu.is_available():
+                props = torch.xpu.get_device_properties()
+                sm_available = int(props.local_mem_size)
             else:
                 return None
-
         except Exception:
-            # If CUDA is not available or properties cannot be queried, return None
+            # If device properties cannot be queried, return None
             return None
 
         # TODO make a BaseDeviceConfigHeuristics to handle different device configuration in its own implementation.
@@ -2076,7 +2084,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # allow_tf32 alignment heuristics based on reverse engineering
         # H100 CUDA 12.8 behavior
         size_threshold = V.graph.sizevars.statically_known_true(
-            sympy.And(sympy.Ge(m, 16), sympy.Ge(sympy.Min(n, k), 512))
+            sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
         )
         allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
             size_threshold
@@ -2393,14 +2401,19 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     @staticmethod
     def _dtype_to_triton(dtype: torch.dtype) -> str:
         """Convert a torch dtype to a triton type string."""
-        return f"tl.{dtype}".replace("torch.", "")
+        return triton_type(dtype)
 
     def _get_acc_type(self, dtype: torch.dtype) -> str:
         """
         Get accumulator type for the given dtype.
         Moved from mm_common.acc_type.
         """
-        if dtype in (torch.float16, torch.bfloat16):
+        if dtype in (
+            torch.float16,
+            torch.bfloat16,
+            torch.float8_e4m3fnuz,
+            torch.float8_e4m3fn,
+        ):
             return "tl.float32"
         return self._dtype_to_triton(dtype)
 
@@ -2427,6 +2440,37 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
     def __init__(self) -> None:
         super().__init__()
         self.should_scale_configs = False
+
+    def preprocess_mm_configs(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        configs: list[BaseConfig],
+        has_int8_tensor: bool = False,
+        scale: float = 1.0,
+        exclude: Callable[
+            [sympy.Integer, sympy.Integer, sympy.Integer], bool
+        ] = lambda m, n, k: False,
+        dtype_size: int = 0,
+        op_name: str = "mm",
+        **kwargs,
+    ) -> Generator[TritonConfig, None, None]:
+        configs = [
+            c for c in configs if V.graph.sizevars.statically_known_lt(c.block_k, k)
+        ]
+        return super().preprocess_mm_configs(
+            m,
+            n,
+            k,
+            configs=configs,
+            has_int8_tensor=has_int8_tensor,
+            scale=scale,
+            exclude=exclude,
+            dtype_size=dtype_size,
+            op_name=op_name,
+            **kwargs,
+        )
 
     def _get_template_configs_impl(
         self,
@@ -2634,6 +2678,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
             nodes,
             mat1_idx=kernel_inputs._mat1_idx,
             mat2_idx=kernel_inputs._mat2_idx,
+            out_dtype=kernel_inputs._out_dtype,
         )
 
     def _get_template_configs_impl(
@@ -2694,7 +2739,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
 
 
 class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
-    """Mixing for scaled mm with the regular mm template"""
+    """Mixin for scaled mm with the regular mm template"""
 
     def get_extra_kwargs(
         self,
@@ -2882,7 +2927,7 @@ class CUDAPersistentTMATemplateConfigHeuristic(
 )
 class PersistentMMTemplateConfigHeuristic(
     MMTemplateConfigMixin,
-    ROCmConfigHeuristic,
+    ROCmConfigHeuristic,  # type: ignore[misc]
 ):
     """Persistent MM template heuristic (no TMA, standard pointer loads)"""
 

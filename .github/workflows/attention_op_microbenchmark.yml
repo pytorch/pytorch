@@ -39,6 +39,7 @@ jobs:
       runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
         { include: [
@@ -62,7 +63,6 @@ jobs:
       build-environment: ${{ needs.attn-microbenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.attn-microbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.attn-microbenchmark-build.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.attn-microbenchmark-build.outputs.test-matrix-osdc }}
       use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
       python-version: "3.10"
       compiler: gcc11
@@ -80,6 +80,7 @@ jobs:
       runner: linux.r7i.4xlarge
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
@@ -102,7 +103,6 @@ jobs:
       build-environment: ${{ needs.opmicrobenchmark-build-b200.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build-b200.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix }}
-      test-matrix-osdc: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix-osdc }}
       use-arc: true
       python-version: "3.10"
       compiler: gcc11

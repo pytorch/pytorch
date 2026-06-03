@@ -21,12 +21,14 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM100OrLater
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     MI200_ARCH,
     NAVI_ARCH,
     parametrize,
+    skipIfRocm,
     skipIfRocmArch,
     subtest,
 )
@@ -317,6 +319,7 @@ class CommonTemplate:
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/161095")
     def test_broadcast_with_singleton_dims(self):
         # This tests the case when the input / output contains both zero strides
         # and singleton dimensions. In this case the broadcasting dimensions
@@ -1027,6 +1030,7 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/158328")
     @parametrize("reduction_op", [torch.sum, torch.argmax])
     def test_2d_reductions_mixed_indexing(
         self,
@@ -1658,6 +1662,38 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         loss.backward()
         self.assertIsNotNone(x.grad)
         self.assertIsNotNone(w.grad)
+
+    @largeTensorTest("1GB", inductor=True)
+    def test_large_tensor_pointwise(self):
+        def fn(a):
+            return a + 4
+
+        t = torch.zeros(2**30 + 1, dtype=torch.int8, device=GPU_TYPE)
+        compiled_fn = torch.compile(fn)
+        actual = compiled_fn(t)
+        self.assertTrue((actual == 4).all())
+
+    def test_slice_constant_offset_disables_tma(self):
+        """TMA requires 16-byte aligned base; x[1:] with float32 yields 4-byte offset."""
+
+        def fn(x):
+            return x[1:] + 1
+
+        x = torch.randn(1025, device=GPU_TYPE)
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x))
+        self.assertIn("tl.load", code)
+
+    def test_slice_view_dtype_unaligned_buffer(self):
+        offset = 1
+
+        def f(x):
+            return x[2:].view(dtype=torch.float32) + 1
+
+        x = torch.randn((128 + offset) * 2, dtype=torch.bfloat16, device=GPU_TYPE)
+        expected = f(x)
+        actual = torch.compile(f)(x)
+        self.assertEqual(actual, expected)
 
 
 test_torchinductor.copy_tests(
