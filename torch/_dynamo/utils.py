@@ -112,10 +112,7 @@ if typing.TYPE_CHECKING:
 
     from torch._dynamo.bytecode_transformation import Instruction
     from torch._dynamo.replay_record import ExecutionRecord
-    from torch._dynamo.symbolic_convert import (
-        InstructionTranslator,
-        InstructionTranslatorBase,
-    )
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
     from torch._subclasses import FakeTensorMode
@@ -1363,6 +1360,21 @@ def is_lru_cache_wrapped_function(
     )
 
 
+_lru_cache_wrappers_allowed_to_trace_without_warning: weakref.WeakSet[
+    functools._lru_cache_wrapper[Any]
+] = weakref.WeakSet()
+
+
+def allow_lru_cache_wrapper_trace_without_warning(
+    value: functools._lru_cache_wrapper[Any],
+) -> None:
+    _lru_cache_wrappers_allowed_to_trace_without_warning.add(value)
+
+
+def is_lru_cache_wrapper_trace_without_warning_allowed(value: Any) -> bool:
+    return value in _lru_cache_wrappers_allowed_to_trace_without_warning
+
+
 _FuncTypes: TypeAlias = (
     types.FunctionType
     | types.BuiltinFunctionType
@@ -1437,6 +1449,18 @@ def is_wrapper_or_member_descriptor(
             types.MethodWrapperType,
         ),
     )
+
+
+def tracked_repr(tx: InstructionTranslatorBase, vt: VariableTracker) -> str:
+    from .variables.object_protocol import generic_repr
+
+    return generic_repr(tx, vt).as_python_constant()
+
+
+def _item_debug_repr(vt: VariableTracker) -> str:
+    if vt.is_python_constant():
+        return repr(vt.as_python_constant())
+    return vt.debug_repr()
 
 
 def unwrap_if_wrapper(fn: Any) -> Any:
@@ -2194,21 +2218,32 @@ class ChromiumEventLogger:
             if metadata:
                 CompileEventLogger.add_record_function_data(event_name, **metadata)
 
-    def reset(self) -> None:
-        # We this on every compile in case a compile crashes or restarts and we haven't
-        # cleared the stack.
+    def _reset_to_state(
+        self,
+        stack_depth: int,
+        pt2_compile_substack_depth: int,
+        event_data_keys: set[str],
+        record_function_keys: set[str],
+    ) -> None:
         stack = self.get_stack()
+        del stack[stack_depth:]
         substack = self.get_pt2_compile_substack()
-        stack.clear()
-        substack.clear()
+        del substack[pt2_compile_substack_depth:]
         event_data = self.get_event_data()
-        event_data.clear()
+        for event_name in list(event_data):
+            if event_name not in event_data_keys:
+                del event_data[event_name]
         # Clean up any lingering record functions (shouldn't happen in normal operation)
         record_functions = self.get_record_functions()
-        if record_functions:
-            for rf in record_functions.values():
+        for event_name, rf in list(record_functions.items()):
+            if event_name not in record_function_keys:
                 rf.__exit__(None, None, None)
-            record_functions.clear()
+                del record_functions[event_name]
+
+    def reset(self) -> None:
+        # We do this on every compile in case a compile crashes or restarts and
+        # we haven't cleared the stack.
+        self._reset_to_state(0, 0, set(), set())
 
     def log_event_end(
         self,
@@ -2389,6 +2424,14 @@ def chromium_event_timed(
     instead. Use this context manager only if you want to avoid dynamo_timed.
     """
     chromium_event_log = get_chromium_event_logger()
+    reset_state: tuple[int, int, set[str], set[str]] | None = None
+    if reset_event_log_on_exit:
+        reset_state = (
+            len(chromium_event_log.get_stack()),
+            len(chromium_event_log.get_pt2_compile_substack()),
+            set(chromium_event_log.get_event_data()),
+            set(chromium_event_log.get_record_functions()),
+        )
     chromium_start_time = time.time_ns()
     chromium_event_log.log_event_start(
         event_name,
@@ -2406,8 +2449,8 @@ def chromium_event_timed(
             chromium_start_time,
             log_pt2_compile_event,
         )
-        if reset_event_log_on_exit:
-            chromium_event_log.reset()
+        if reset_state is not None:
+            chromium_event_log._reset_to_state(*reset_state)
 
 
 @dataclasses.dataclass
@@ -2769,8 +2812,8 @@ def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
 def timed(
     model: Any, example_inputs: Iterable[Any], times: int = 1
 ) -> tuple[Any, float]:
-    if torch.cuda.is_available():
-        synchronize = torch.cuda.synchronize
+    if torch.accelerator.is_available():
+        synchronize = torch.accelerator.synchronize
     else:
         synchronize = nothing
 
@@ -3218,7 +3261,7 @@ def raise_args_mismatch(
 def iter_contains(
     items: Iterable[Any],
     search: Any,
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     check_tensor_identity: bool = False,
 ) -> Any:
     from .variables import ConstantVariable
@@ -4075,6 +4118,19 @@ def _get_fake_value_impl(
                 str(cause),
                 case_name="constrain_as_size_example",
             ) from cause
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.FakeTensorDeviceMismatchError
+        ):
+            _wrap_graph_break_with_torch_runtime_err(
+                lambda: unimplemented(
+                    gb_type="Tensor device mismatch",
+                    context=f"{op} {node.target}",
+                    explanation=str(cause),
+                    hints=["Move inputs, parameters, and buffers to the same device."],
+                    from_exc=cause,
+                )
+            )
+            raise AssertionError("should not be reachable") from None
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
@@ -4210,6 +4266,12 @@ def run_node(
                 from_exc=e,
             )
         except Unsupported:
+            raise
+        except IndexError:
+            # Re-raise IndexError from tensor dim validation (e.g. canonicalize_dim,
+            # maybe_wrap_dim) so it reaches the user as IndexError, not RuntimeError.
+            # This is intentionally broad: an internal Dynamo indexing bug would also
+            # propagate this way, but such bugs are rare and the traceback is preserved.
             raise
         except Exception as e:
             raise RuntimeError(make_error_message(e)).with_traceback(
@@ -5689,7 +5751,7 @@ def is_pybind11_enum_member(value: Any) -> bool:
 
 
 def _make_inlined(
-    tx: InstructionTranslator, f: Callable[..., Any]
+    tx: InstructionTranslatorBase, f: Callable[..., Any]
 ) -> Callable[..., VariableTracker]:
     if not callable(f):
         raise AssertionError("Expect f to be a python callable.")
