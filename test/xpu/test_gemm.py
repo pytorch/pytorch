@@ -1019,6 +1019,33 @@ class TestBasicGEMM(TestCase):
         ):
             _test(row_major, incx, incy, lda_tail)
 
+    @dtypes(torch.double, torch.float32, torch.bfloat16, torch.half)
+    @tf32_on_and_off()
+    def test_addmv_out_noncontiguous_preserves_strides(self, device, dtype):
+        M, K = 5, 3
+        mat = torch.randn(M, K, device=device, dtype=dtype)
+        vec = torch.randn(K, device=device, dtype=dtype)
+        bias = torch.randn(M, device=device, dtype=dtype)
+
+        expected = torch.addmv(bias, mat, vec)
+
+        # Create a noncontiguous output tensor (stride != 1)
+        out = make_tensor((M,), device=device, dtype=dtype, noncontiguous=True)
+        original_stride = out.stride()
+        original_ptr = out.data_ptr()
+
+        torch.addmv(bias, mat, vec, out=out)
+
+        self.assertEqual(out, expected)
+        self.assertEqual(
+            out.stride(),
+            original_stride,
+            "addmv out= must preserve noncontiguous strides",
+        )
+        self.assertEqual(
+            out.data_ptr(), original_ptr, "addmv out= must not reallocate storage"
+        )
+
     @precisionOverride(
         {
             torch.float: 1e-4,
