@@ -1787,9 +1787,6 @@ class PythonWrapperCodegen(CodeGen):
             "AOTI div-by-zero check is only emitted by C++ wrappers"
         )
 
-    def write_assert_alignment(self, name: str, alignment: int, op_name: str) -> None:
-        self.writeline(f"assert_alignment({name}, {alignment}, {op_name!r})")
-
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
         Called from the scheduler after mutated_input_idxs is computed."""
