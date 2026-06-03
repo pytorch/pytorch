@@ -528,6 +528,65 @@ class TestControlDeps(InductorTestCase):
             "Second device guard entry should not re-execute stream cache setup",
         )
 
+    @requires_gpu()
+    def test_stream_event_cache_functions(self):
+        """_setup_stream_event_cache populates thread-local caches that
+        _get_stream_by_index and _get_event_by_index read from."""
+        from torch._dynamo.variables.streams import (
+            _get_event_by_index,
+            _get_stream_by_index,
+            _setup_stream_event_cache,
+            _tls,
+        )
+
+        try:
+            _setup_stream_event_cache(
+                default_stream_indices=[0],
+                new_stream_indices=[1],
+                event_indices=[5],
+            )
+
+            s0 = _get_stream_by_index(0)
+            self.assertEqual(s0, torch.cuda.current_stream())
+
+            s1 = _get_stream_by_index(1)
+            self.assertIsInstance(s1, torch.cuda.Stream)
+            self.assertNotEqual(s1, torch.cuda.current_stream())
+
+            e5 = _get_event_by_index(5)
+            self.assertIsInstance(e5, torch.Event)
+
+            # Same index returns same cached object
+            self.assertIs(_get_stream_by_index(0), s0)
+            self.assertIs(_get_stream_by_index(1), s1)
+            self.assertIs(_get_event_by_index(5), e5)
+        finally:
+            if hasattr(_tls, "stream_cache"):
+                del _tls.stream_cache
+            if hasattr(_tls, "event_cache"):
+                del _tls.event_cache
+
+    @requires_gpu()
+    def test_generated_code_calls_setup_stream_event_cache(self):
+        """Generated inductor code should call _setup_stream_event_cache
+        when the graph has stream/event operations."""
+
+        def fn(x):
+            s = torch.Stream(device=GPU_TYPE)
+            e = torch.Event()
+            with s:
+                y = x + 1
+                e.record()
+            e.wait()
+            return y * 2
+
+        x = torch.ones(4, 4, device=GPU_TYPE)
+        result, code = run_and_get_code(torch.compile(fn), x)
+        FileCheck().check("_setup_stream_event_cache").run(code[0])
+
+        expected = fn(torch.ones(4, 4, device=GPU_TYPE))
+        torch.testing.assert_close(result, expected)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:
