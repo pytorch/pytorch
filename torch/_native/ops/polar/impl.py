@@ -19,8 +19,7 @@ batched inputs therefore fall through to aten.
 
 import torch
 
-from ... import registry
-from ...common_utils import _unavailable_reason
+from ... import nvmath_utils, registry
 
 
 # Dtypes for which the cuSOLVER Xpolar (QDWH) fast path is attempted. Xpolar
@@ -28,30 +27,16 @@ from ...common_utils import _unavailable_reason
 # kernel. This is the single source of truth for the override's dtype gating.
 _XPOLAR_DTYPES = (torch.float32, torch.float64)
 
-_NVMATH_DEPS = [
-    ("nvmath-python", "nvmath.bindings"),
-]
-
 # Minimum cuSOLVER runtime version exposing cusolverDnXpolar (CUDA 13.2 ships
-# cuSOLVER 12.2). cusolverGetVersion encodes major*1000 + minor*100 + patch and
-# does not expose the build number, so this only gates out runtimes that lack
-# the symbol entirely -- it cannot distinguish patch builds.
+# cuSOLVER 12.2). The cuSOLVER nvmath loads is whatever the loader resolves
+# (system CUDA, or the nvidia-cu* wheels a torch build pulls in), which is not
+# guaranteed to be >= 12.2 just because nvmath is installed -- so we gate on the
+# reported version and fall through to the SVD kernel when it is too old.
 _MIN_CUSOLVER_VERSION = 12200
 
 # cuSOLVER Xpolar availability. Checked lazily on first use; flipped to False
 # permanently if a call ever hits a hard failure (e.g. runtime lacks the symbol).
 _nvmath_available: "bool | None" = None
-
-
-def _cusolver_version() -> int | None:
-    # Query cusolverGetVersion via nvmath against the same cuSOLVER library it
-    # dlopens. Returns None if nvmath/cuSOLVER can't be loaded.
-    try:
-        from nvmath.bindings import cusolver  # pyrefly: ignore[missing-import]
-
-        return cusolver.get_version()
-    except Exception:
-        return None
 
 
 def _check_nvmath() -> bool:
@@ -60,10 +45,12 @@ def _check_nvmath() -> bool:
         # The cuSOLVER Xpolar path is NVIDIA-only; never attempt it on ROCm
         # (torch.version.hip is set for HIP builds, where tensors still report
         # device.type == "cuda"). ROCm falls through to the aten SVD kernel.
-        version = None if torch.version.hip is not None else _cusolver_version()
+        version = (
+            None if torch.version.hip is not None else nvmath_utils.cusolver_version()
+        )
         _nvmath_available = (
             torch.version.hip is None
-            and _unavailable_reason(_NVMATH_DEPS) is None
+            and nvmath_utils.nvmath_unavailable_reason() is None
             and version is not None
             and version >= _MIN_CUSOLVER_VERSION
         )
@@ -148,6 +135,13 @@ def _polar_out_impl_cuda(
 
 
 def register_to_dispatch() -> None:
+    # This is a CUDA-only accelerator. Registering a CUDA override captures the
+    # existing aten CUDA kernel as the fallback, which only exists in a CUDA
+    # build -- on CPU/XPU/ROCm-only builds there is no aten::linalg_polar.out
+    # CUDA kernel and registration would raise at import time. Gate on the
+    # fork-safe build-time check (NOT is_available(), which would init CUDA).
+    if not torch.backends.cuda.is_built():
+        return
     registry.register_op_override(
         "native",
         "aten",

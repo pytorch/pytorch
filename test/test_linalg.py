@@ -3064,6 +3064,7 @@ class TestLinalg(TestCase):
         drivers = {
             "cpu": (None,),
             "cuda": (None, "gesvd", "gesvdj", "gesvda"),
+            "xpu": (None,),
         }
 
         ns = (12, 4, 2, 0)

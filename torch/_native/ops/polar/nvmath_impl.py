@@ -4,28 +4,13 @@ import ctypes
 
 import torch
 
+from ... import nvmath_utils
+
 
 # cuBLAS fill mode passed to Xpolar. The general polar decomposition reads the
 # entire input A (it is not assumed symmetric), so FULL is required -- LOWER is
 # rejected and UPPER silently reads only a triangle, yielding wrong factors.
 _CUBLAS_FILL_MODE_FULL = 2
-
-# One cuSOLVER handle per device, reused for the process lifetime. Handles are
-# bound to the CUDA device that is current when cusolverDnCreate runs, so the
-# handle must be created -- and later used -- with its device active.
-_handles: dict[torch.device, int] = {}
-
-
-def _get_handle(device: torch.device) -> int:
-    from nvmath.bindings import cusolverDn as cs  # pyrefly: ignore[missing-import]
-
-    handle = _handles.get(device)
-    if handle is None:
-        # Create under the target device so the handle is bound to it.
-        with torch.cuda.device(device):
-            handle = cs.create()
-        _handles[device] = handle
-    return handle
 
 
 def _cuda_dtype(dtype: torch.dtype):
@@ -59,7 +44,7 @@ def _polar_2d(
     # allocation, and the xpolar call) with A's device current so a non-default
     # device (e.g. cuda:1) doesn't trigger an illegal memory access.
     with torch.cuda.device(device):
-        handle = _get_handle(device)
+        handle = nvmath_utils.get_cusolver_handle(device)
         params = cs.create_params()
         return _polar_2d_impl(A, m, n, dtype, device, handle, params, return_residual)
 
@@ -96,9 +81,12 @@ def _polar_2d_impl(A, m, n, dtype, device, handle, params, return_residual):
             compute_type,
         )
 
-        buf_dev = torch.empty(max(ws_dev, 1), dtype=torch.uint8, device=device)
-        buf_host = bytearray(max(ws_host, 1))
-        host_ptr = (ctypes.c_char * len(buf_host)).from_buffer(buf_host)
+        # Allocate exactly the queried sizes. When a size is 0, cuSOLVER does
+        # not dereference the corresponding pointer (an empty CUDA tensor's
+        # data_ptr is null, which is the expected "no workspace" convention).
+        buf_dev = torch.empty(ws_dev, dtype=torch.uint8, device=device)
+        buf_host = bytearray(ws_host)
+        host_ptr = (ctypes.c_char * ws_host).from_buffer(buf_host)
 
         # Xpolar reports convergence diagnostics into device scalars: three
         # double* (res_nrm, A_nrmF, rcond) and one int* (info). Pack all four
