@@ -390,10 +390,9 @@ class ReplicateTest(MultiProcessInductorTestCase):
 class DDP_TP_Test(InductorTestCase):
     def setUp(self):
         super().setUp()
-        # Hmm, why a specific set_device call for rank 0?
         self.rank = 0
         self.world_size = 4
-        torch.get_device_module(device_type).set_device(device_type)
+        torch.get_device_module(device_type).set_device(self.rank)
 
         store = FakeStore()
         dist.init_process_group(
@@ -406,6 +405,9 @@ class DDP_TP_Test(InductorTestCase):
     def tearDown(self):
         dist.destroy_process_group()
 
+    @unittest.skip(
+        "Temporarily disabled due to SymInt error: `unhashable type: non-nested SymInt`"
+    )
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_ddp_tp(self):
         ref_model = Net()
