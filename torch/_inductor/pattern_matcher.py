@@ -280,7 +280,9 @@ class Match:
         Args:
             run_functional_passes (bool). If we should run passes that
                 assume functional IR (like DCE, remove_noop_ops), on the
-                replacement graph.
+                replacement graph. When True, the traced graph is required to
+                be functional. Callers should pass False when preserving
+                mutation, effects, or aliasing relationships is required.
 
         """
         from torch._inductor.virtualized import NullHandler, V
@@ -2587,6 +2589,7 @@ def fwd_only(
     from .fx_passes.post_grad import remove_noop_ops
 
     if run_functional_passes:
+        _check_fwd_only_graph_is_functional(gm)
         remove_noop_ops(gm.graph)
 
         # NOTE: applying early_patterns to user patterns cause
@@ -2600,6 +2603,36 @@ def fwd_only(
 
     gm.recompile()
     return gm
+
+
+def _check_fwd_only_graph_is_functional(gm: torch.fx.GraphModule) -> None:
+    submodules = dict(gm.named_modules())
+
+    def check_graph(graph: torch.fx.Graph) -> None:
+        for node in graph.nodes:
+            if node.op in ("placeholder", "output"):
+                continue
+            if (
+                (
+                    node.op == "call_function"
+                    and node.target is torch.ops.higher_order.with_effects
+                )
+                or is_mutation_op(node)
+                or node.is_impure(impure_random=False)
+            ):
+                raise RuntimeError(
+                    "fwd_only(..., run_functional_passes=True) requires a "
+                    "functional graph, but tracing produced a mutating or "
+                    f"effectful node: {node.format_node()}. Pass "
+                    "run_functional_passes=False when the replacement graph "
+                    "must preserve mutation, effects, or aliasing."
+                )
+            if node.op == "get_attr" and isinstance(node.target, str):
+                sub_gm = submodules.get(node.target)
+                if isinstance(sub_gm, torch.fx.GraphModule):
+                    check_graph(sub_gm.graph)
+
+    check_graph(gm.graph)
 
 
 @torch.enable_grad()

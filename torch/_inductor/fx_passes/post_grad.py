@@ -1225,13 +1225,13 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
     output_node = next(iter(reversed(graph.nodes)))
     assert output_node.op == "output"
-    outputs = output_node.args[0]
-    if not isinstance(outputs, (list, tuple)):
-        # nested subgraphs can have singleton outputs
-        outputs = (outputs,)
+    outputs = OrderedSet(
+        out
+        for out in pytree.tree_leaves(output_node.args[0])
+        if isinstance(out, torch.fx.Node)
+    )
     for out in outputs:
-        if isinstance(out, torch.fx.Node):
-            output_storages.add(get_node_storage(out))
+        output_storages.add(get_node_storage(out))
 
     for node in graph.nodes:
         if node.target in noop_registry:
@@ -1257,11 +1257,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
             # Even if input and outputs are expected to alias,
             # don't make "node is src" True
-            if (
-                node_is_view
-                and node in output_node.args
-                and (src in inputs or src in output_node.args)
-            ):
+            if node_is_view and node in outputs and (src in inputs or src in outputs):
                 continue
 
             is_valid, args, kwargs = get_fake_args_kwargs(node)
