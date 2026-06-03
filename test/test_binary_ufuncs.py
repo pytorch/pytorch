@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
+    onlyNativeDeviceTypes,
     OpDTypes,
     ops,
     precisionOverride,
@@ -74,10 +75,6 @@ from torch.testing._internal.common_utils import (
 if TEST_SCIPY:
     import scipy.integrate
     import scipy.special
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
 
 _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
 
@@ -986,11 +983,8 @@ class TestBinaryUfuncs(TestCase):
 
         d_trunc = torch.divide(a, b, rounding_mode="trunc")
         rounding_unsupported = (
-            dtype == torch.half
-            and torch.device(device).type == "cpu"
-            or dtype == torch.bfloat16
-            and device != "cpu"
-        )
+            dtype == torch.half and torch.device(device).type == "cpu"
+        ) or (dtype == torch.bfloat16 and torch.device(device).type != "cpu")
         d_ref = d_true.float() if rounding_unsupported else d_true
         self.assertEqual(d_trunc, d_ref.trunc().to(dtype))
 
@@ -2761,6 +2755,7 @@ class TestBinaryUfuncs(TestCase):
             self.assertTrue(torch.all(fn(x, 0.0).isnan()))
             self.assertTrue(torch.all(fn(x, zero).isnan()))
 
+    @onlyNativeDeviceTypes
     @dtypes(*integral_types())
     @dtypesIfXPU(*set(integral_types()) - {torch.int64})
     def test_fmod_remainder_by_zero_integral(self, device, dtype):
@@ -2934,7 +2929,7 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(actual, expected, exact_dtype=False)
 
         if torch.device(device).type != "cpu":
-            # test using cpu scalar with cuda.
+            # test using cpu scalar with accelerator device.
             x = torch.randn(10, device=device).to(dtype)
             y = torch.tensor(2.0).to(dtype)
             actual1 = torch.hypot(x, y)
