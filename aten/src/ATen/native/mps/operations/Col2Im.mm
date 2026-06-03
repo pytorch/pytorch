@@ -75,8 +75,8 @@ static void col2im_out_mps_template(const Tensor& input,
   const bool use_u32 = offsetsFitIn<uint32_t>(col_tensor, output);
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      auto col2imPSO =
-          lib.getPipelineStateForFunc("col2im_kernel_" + mps::scalarToMetalTypeString(input) + mtlIdxSuffix(use_u32));
+      auto col2imPSO = lib.getPipelineStateForFunc(
+          fmt::format("col2im_kernel_{}{}", scalarToMetalTypeString(input), mtlIdxSuffix(use_u32)));
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:col2imPSO];
       const uint32_t gridWidth = static_cast<uint32_t>(output_width);

@@ -78,7 +78,8 @@ static void im2col_out_mps_template(Tensor& output,
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
   const bool use_u32 = offsetsFitIn<int32_t>(input, output);
-  auto im2colPSO = lib.getPipelineStateForFunc("im2col_" + mps::scalarToMetalTypeString(input) + mtlIdxSuffix(use_u32));
+  auto im2colPSO =
+      lib.getPipelineStateForFunc(fmt::format("im2col_{}{}", scalarToMetalTypeString(input), mtlIdxSuffix(use_u32)));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       std::array<int32_t, 4> kernel_dilation = {static_cast<int32_t>(kernel_width),

@@ -100,6 +100,7 @@ inline void mtlDispatchByIndexWidth(bool use32, Fn&& fn) {
     fn(std::type_identity<Offset64>{});
   }
 }
+
 NSArray<NSNumber*>* getTensorAxes(const TensorBase& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
