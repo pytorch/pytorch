@@ -563,6 +563,202 @@ class NestedReduction:
         parent_full_domain: tuple[sympy.Expr, ...]
         parent_half_domain: tuple[sympy.Expr, ...] | None = None
 
+    @dataclasses.dataclass(frozen=True)
+    class HalfResolutionEpiloguePlan:
+        half_nodes: tuple[SchedulerNode, ...]
+        reduction_nodes: tuple[BaseSchedulerNode, ...]
+        parent_half_source_names: OrderedSet[str]
+
+    @classmethod
+    def half_resolution_epilogue_plan(
+        cls,
+        nodes: Sequence[BaseSchedulerNode],
+        numel: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> HalfResolutionEpiloguePlan | None:
+        from .codegen.simd import SIMDKernel
+
+        if V.graph.sizevars.statically_known_equals(rnumel, 1):
+            return None
+        rnumel_hint = V.graph.sizevars.simplify(rnumel)
+        if not isinstance(rnumel_hint, (int, sympy.Integer)) or int(rnumel_hint) != 16:
+            return None
+        if any(node.has_aliasing_or_mutation() for node in nodes):
+            return None
+
+        reduction_names = OrderedSet[str]()
+        reduction_reads: dict[str, list[MemoryDep]] = collections.defaultdict(list)
+        for node in nodes:
+            if node.is_reduction():
+                reduction_names |= node.get_operation_names()
+                for dep in node.read_writes.reads:
+                    if isinstance(dep, MemoryDep):
+                        reduction_reads[dep.name].append(dep)
+        if not reduction_names:
+            return None
+
+        fused_buffer_names = OrderedSet[str]()
+        for node in nodes:
+            fused_buffer_names |= node.get_buffer_names()
+
+        half_nodes: list[SchedulerNode] = []
+        full_numel = V.graph.sizevars.simplify(numel * rnumel)
+        for node in nodes:
+            if node.is_reduction():
+                continue
+            if not isinstance(node, SchedulerNode):
+                return None
+            _, (node_numel, node_rnumel) = node.group
+            if not V.graph.sizevars.statically_known_equals(node_rnumel, 1):
+                continue
+            if not V.graph.sizevars.statically_known_equals(2 * node_numel, full_numel):
+                continue
+            if not SIMDKernel.is_compatible(
+                (numel, FloorDiv(rnumel, 2)), node.get_ranges()
+            ):
+                continue
+            if reduction_names & node.ancestors:
+                half_nodes.append(node)
+
+        if not half_nodes:
+            return None
+        parent_half_source_deps = cls._half_resolution_epilogue_source_deps(
+            half_nodes,
+            fused_buffer_names,
+            full_numel,
+            reduction_reads,
+        )
+        if parent_half_source_deps is None:
+            return None
+
+        half_node_set = OrderedSet(half_nodes)
+        if not cls._half_resolution_epilogue_source_loads_are_unambiguous(
+            nodes,
+            half_node_set,
+            parent_half_source_deps,
+        ):
+            return None
+        return cls.HalfResolutionEpiloguePlan(
+            tuple(half_nodes),
+            tuple(node for node in nodes if node not in half_node_set),
+            OrderedSet(dep.name for dep in parent_half_source_deps),
+        )
+
+    @classmethod
+    def _half_resolution_epilogue_source_deps(
+        cls,
+        nodes: Sequence[BaseSchedulerNode],
+        fused_buffer_names: OrderedSet[str],
+        full_numel: sympy.Expr,
+        reduction_reads: dict[str, list[MemoryDep]],
+        renames: dict[str, str] | None = None,
+    ) -> tuple[MemoryDep, ...] | None:
+        source_deps: OrderedSet[MemoryDep] = OrderedSet()
+        for node in nodes:
+            for raw_dep in node.read_writes.reads:
+                dep_name = (
+                    renames.get(raw_dep.name, raw_dep.name)
+                    if renames is not None
+                    else raw_dep.name
+                )
+                if not isinstance(raw_dep, MemoryDep):
+                    if dep_name in fused_buffer_names:
+                        continue
+                    return None
+                dep = raw_dep.rename(renames) if renames is not None else raw_dep
+                if not V.graph.sizevars.statically_known_equals(
+                    2 * sympy_product(dep.ranges.values()), full_numel
+                ):
+                    if (
+                        dep.name in reduction_reads
+                        and dep.name not in fused_buffer_names
+                    ):
+                        return None
+                    continue
+                if dep.name in fused_buffer_names and dep.name not in reduction_reads:
+                    continue
+                lane = V.graph.sizevars.simplify(sympy.Mod(dep.index, 2))
+                if not any(
+                    V.graph.sizevars.statically_known_equals(lane, value)
+                    for value in (0, 1)
+                ):
+                    return None
+                reduction_deps = reduction_reads.get(dep.name, [])
+                if len(reduction_deps) != 1:
+                    return None
+                reduction_dep = reduction_deps[0]
+                if not cls._half_resolution_epilogue_read_matches_reduction_read(
+                    dep, reduction_dep, lane
+                ):
+                    return None
+                source_deps.add(reduction_dep)
+        return tuple(source_deps)
+
+    @staticmethod
+    def _half_resolution_epilogue_source_loads_are_unambiguous(
+        nodes: Sequence[BaseSchedulerNode],
+        half_node_set: OrderedSet[SchedulerNode],
+        source_deps: tuple[MemoryDep, ...],
+        renames: dict[str, str] | None = None,
+    ) -> bool:
+        source_deps_by_name: dict[str, OrderedSet[MemoryDep]] = {}
+        for dep in source_deps:
+            source_deps_by_name.setdefault(dep.name, OrderedSet()).add(dep)
+
+        for node in nodes:
+            if node in half_node_set:
+                continue
+            for raw_dep in node.read_writes.reads:
+                dep_name = (
+                    renames.get(raw_dep.name, raw_dep.name)
+                    if renames is not None
+                    else raw_dep.name
+                )
+                planned_deps = source_deps_by_name.get(dep_name)
+                if planned_deps is None:
+                    continue
+                if not isinstance(raw_dep, MemoryDep):
+                    return False
+                dep = raw_dep.rename(renames) if renames is not None else raw_dep
+                if dep not in planned_deps:
+                    return False
+        return True
+
+    @staticmethod
+    def _half_resolution_epilogue_read_matches_reduction_read(
+        dep: MemoryDep,
+        reduction_dep: MemoryDep,
+        lane: sympy.Expr,
+    ) -> bool:
+        if len(dep.var_names) != len(reduction_dep.var_names):
+            return False
+
+        reduction_half_dims = [
+            i
+            for i, size in enumerate(reduction_dep.size)
+            if V.graph.sizevars.statically_known_equals(size, dep.size[i] * 2)
+        ]
+        if len(reduction_half_dims) != 1:
+            return False
+        half_dim = reduction_half_dims[0]
+        if half_dim != len(dep.var_names) - 1:
+            return False
+
+        substitutions: dict[sympy.Symbol, sympy.Expr] = {}
+        for i, reduction_var in enumerate(reduction_dep.var_names):
+            dep_var = dep.var_names[i]
+            if i == half_dim:
+                substitutions[reduction_var] = 2 * dep_var + lane
+            elif V.graph.sizevars.statically_known_equals(
+                reduction_dep.size[i], dep.size[i]
+            ):
+                substitutions[reduction_var] = dep_var
+            else:
+                return False
+
+        expected = reduction_dep.index.subs(substitutions)
+        return V.graph.sizevars.statically_known_equals(dep.index, expected)
+
     @classmethod
     def _get_grouped_reduction_and_size(
         cls, grouped_node: BaseSchedulerNode, grouped_rnumel: sympy.Expr
@@ -3059,11 +3255,26 @@ class FusedNestedReductions(FusedSchedulerNode):
             for sn, domain in pointwise_domains
             if domain is NestedReduction.PointwiseDomain.PARENT_HALF
         ]
-        if half_resolution_nodes and not self._half_resolution_reads_use_constant_lane(
-            half_resolution_nodes
-        ):
-            return False
         if half_resolution_nodes:
+            candidate_domains = NestedReduction._classify_grouped_pointwise_nodes(
+                self.domain_context,
+                [*self.node2.get_nodes(), *other.get_nodes()],
+            )
+            if candidate_domains is None:
+                return False
+            candidate_half_resolution_nodes = [
+                sn
+                for sn, domain in candidate_domains
+                if domain is NestedReduction.PointwiseDomain.PARENT_HALF
+            ]
+            if (
+                self._parent_half_source_names(
+                    candidate_half_resolution_nodes,
+                    [*self.node2.get_nodes(), *other.get_nodes()],
+                )
+                is None
+            ):
+                return False
             return self.scheduler._can_fuse_nested_reduction_append(
                 self.node2,
                 other,
@@ -3079,34 +3290,41 @@ class FusedNestedReductions(FusedSchedulerNode):
             can_reorder=can_reorder,
         )
 
-    def _half_resolution_reads_use_constant_lane(
-        self, nodes: Sequence[BaseSchedulerNode]
-    ) -> bool:
+    def _parent_half_source_names(
+        self,
+        half_nodes: Sequence[SchedulerNode],
+        all_grouped_nodes: Sequence[BaseSchedulerNode],
+    ) -> OrderedSet[str] | None:
+        renames = self.scheduler.mutation_renames
         fused_buffer_names = OrderedSet(
-            self.scheduler.mutation_renames.get(name, name)
-            for name in self.get_buffer_names()
+            renames.get(name, name) for name in self.get_buffer_names()
         )
         fullres_numel = V.graph.sizevars.simplify(
             self.domain_context.grouped_numel * self.domain_context.grouped_rnumel
         )
-        for sn in nodes:
-            for dep in sn.read_writes.reads:
-                name = self.scheduler.mutation_renames.get(dep.name, dep.name)
-                if name in fused_buffer_names:
-                    continue
-                if not isinstance(dep, MemoryDep):
-                    return False
-                if not V.graph.sizevars.statically_known_equals(
-                    2 * sympy_product(dep.ranges.values()), fullres_numel
-                ):
-                    continue
-                lane = V.graph.sizevars.simplify(sympy.Mod(dep.index, 2))
-                if not any(
-                    V.graph.sizevars.statically_known_equals(lane, value)
-                    for value in (0, 1)
-                ):
-                    return False
-        return True
+        reduction_reads: dict[str, list[MemoryDep]] = collections.defaultdict(list)
+        for raw_dep in self.grouped_reduction.read_writes.reads:
+            if isinstance(raw_dep, MemoryDep):
+                dep = raw_dep.rename(renames)
+                reduction_reads[dep.name].append(dep)
+
+        source_deps = NestedReduction._half_resolution_epilogue_source_deps(
+            half_nodes,
+            fused_buffer_names,
+            fullres_numel,
+            reduction_reads,
+            renames,
+        )
+        if source_deps is None:
+            return None
+        if not NestedReduction._half_resolution_epilogue_source_loads_are_unambiguous(
+            all_grouped_nodes,
+            OrderedSet(half_nodes),
+            source_deps,
+            renames,
+        ):
+            return None
+        return OrderedSet(dep.name for dep in source_deps)
 
     def fuse_with(self, other: BaseSchedulerNode) -> FusedNestedReductions:
         device = self.node2.get_device()
