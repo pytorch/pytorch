@@ -930,7 +930,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
 
   auto safe_get_attr_string = [](PyObject* o,
                                  const char* attr_name) -> PyObject* {
-    // Clear error indicator if attribute does not exists.
+    // Clear error indicator if attribute does not exist.
     // Otherwise subsequent Python C API calls might return bogus values.
     // See https://github.com/pytorch/pytorch/issues/58520 for more details
     auto rc = PyObject_GetAttrString(o, attr_name);

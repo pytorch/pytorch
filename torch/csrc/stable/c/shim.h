@@ -159,7 +159,7 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad);
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 
-// Shims for the a few dtypes not already in
+// Shims for a few dtypes not already in
 // torch/csrc/inductor/aoti_torch/c/shim.h
 AOTI_TORCH_EXPORT int32_t torch_dtype_float8_e8m0fnu();
 AOTI_TORCH_EXPORT int32_t torch_dtype_float4_e2m1fn_x2();
@@ -220,8 +220,46 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
     const char* schema,
     const int32_t* tags,
     int32_t num_tags);
-
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+/**
+ * The beginning of all shims added in 2.13.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+
+// Stable corollary to torch::Library method m.set_python_module(...).
+AOTI_TORCH_EXPORT AOTITorchError torch_library_set_python_module(
+    TorchLibraryHandle self,
+    const char* pymodule,
+    const char* context);
+
+/// Retrieve a pointer to the string that holds the most recent exception's
+/// message and backtrace that occurred in the calling thread. This pointer is a
+/// borrowed pointer and is invalidated when the next exception occurs or the
+/// calling thread is shutdown. This may be the same as the less detailed
+/// torch_exception_get_what_without_backtrace() in case more information is not
+/// available.
+AOTI_TORCH_EXPORT const char* torch_exception_get_what();
+
+/// Retrieve a pointer to the string that holds the most recent exception's
+/// message that occurred in the calling thread. This pointer is a borrowed
+/// pointer and is invalidated when the next exception occurs or the calling
+/// thread is shutdown.
+AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace();
+
+// Allocates an StableIValue on the heap, returns an owning pointer.
+// This allocation must be deleted with torch_delete_stable_ivalue or
+// by passing it to a dispatch call which frees it internally.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_stable_ivalue(StableIValue** ret_value);
+
+// Frees an StableIValue that was created by torch_new_stable_ivalue.
+// Deleting a nullptr is invalid and returns failure, allocations must
+// only be deleted once.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_stable_ivalue(StableIValue* value);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 #ifdef __cplusplus
 } // extern "C"

@@ -192,7 +192,7 @@ class _MinimizerBase:
     ) -> None:
         """
         Store the outputs of self.run_a() and self.run_b() into self.a_outputs and
-        self.b_outputs, so that we can use them when execute preceding nodes that
+        self.b_outputs, so that we can use them when executing preceding nodes that
         use those outputs as inputs.
 
         Args:

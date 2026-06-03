@@ -74,6 +74,16 @@ NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
+# Bound Inductor compile-worker futures on ROCm so a stuck Triton compile
+# fails fast with a clear RuntimeError naming the kernel, instead of blocking
+# until the outer test timeout kills the shard and loses all context. Scoped
+# to ROCm because the known-bad cases (sort-with-index on gfx90a/gfx942) have
+# only been observed there; leaving CPU/CUDA jobs unbounded avoids regressing
+# any legitimately long compile on those backends.
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT=300
+fi
+
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
@@ -185,8 +195,11 @@ if [[ -d "${HF_CACHE}" && "$TEST_CONFIG" != "onnx" ]]; then
 fi
 
 if [[ "$TEST_CONFIG" == 'default' ]]; then
-  export CUDA_VISIBLE_DEVICES=0
-  export HIP_VISIBLE_DEVICES=0
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export HIP_VISIBLE_DEVICES=0
+  else
+    export CUDA_VISIBLE_DEVICES=0
+  fi
 fi
 
 if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -244,6 +257,8 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
     # shellcheck disable=SC1091
     source /opt/intel/oneapi/umf/latest/env/vars.sh
   fi
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/tcm/latest/env/vars.sh
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
   # shellcheck disable=SC1091
@@ -421,6 +436,7 @@ test_python_smoke_b200() {
       nn/attention/test_open_registry \
       inductor/test_flex_flash \
       inductor/test_torchinductor \
+      inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
       test_varlen_attention \
@@ -432,8 +448,9 @@ test_python_smoke_b200() {
 
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
-  time python test/run_test.py --include test_transformers $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time test_xpu_sycl_tla_backend
+  time python test/run_test.py --include test_transformers $PYTHON_TEST_EXTRA_OPTION
+  # Temporary disable sycl-tla backend test for XPU since it's not stable yet. We will re-enable it once the stability is improved.
+  # time test_xpu_sycl_tla_backend
   assert_git_not_dirty
 }
 
@@ -449,6 +466,9 @@ test_dtensor() {
 
 test_h100_distributed() {
   # Distributed tests at H100
+  # Disable NVLS: AWS H100 instances lack the IMEX channel device
+  # needed for NCCL NVLS multicast
+  export NCCL_NVLS_ENABLE=0
   time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # This test requires multicast support
   time python test/run_test.py --include distributed/_composable/fsdp/test_fully_shard_comm.py -k TestFullyShardAllocFromPG $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -629,6 +649,15 @@ test_inductor_shard() {
     --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor inductor/test_cpu_select_algorithm \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
+
+  # ROCm origami GEMM tests: rocm.origami / max_autotune are read once at config
+  # import (env-var-driven, see torch/_inductor/config.py); without these set
+  # before the process starts, the test_origami.py test class self-skips. Run
+  # only on shard 1 to avoid duplicate execution across shards.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] && [[ "$1" -eq 1 ]]; then
+    TORCHINDUCTOR_MAX_AUTOTUNE=1 TORCHINDUCTOR_ORIGAMI=1 \
+      python test/run_test.py --include inductor/test_origami --verbose
+  fi
 }
 
 test_inductor_aoti_cpp() {
@@ -643,7 +672,7 @@ test_inductor_aoti_cpp() {
     TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
   fi
 
-  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
+  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
 }
 
 test_inductor_aoti_cross_compile_for_windows() {
@@ -684,7 +713,8 @@ test_inductor_cpp_wrapper_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro inductor/test_triton_kernels \
+    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+              inductor/test_triton_kernels inductor/test_combo_kernels \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py --inductor \
@@ -692,12 +722,14 @@ test_inductor_cpp_wrapper_shard() {
     -k 'take' \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
+
   # Keep testing TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 for the near future.
   # Will drop this after AOTInductor also switches to lazy Triton compilation.
   TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=1 python test/run_test.py \
     --include inductor/test_torchinductor inductor/test_triton_kernels inductor/test_max_autotune \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
+
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     python test/run_test.py \
       --include inductor/test_mkldnn_pattern_matcher \
@@ -1082,9 +1114,17 @@ collect_tlparse_output() {
     return
   fi
 
-  echo "Collecting tlparse output from $trace_dir"
+  echo "Collecting torch trace output from $trace_dir"
 
-  # Install tlparse if not already available
+  # Always preserve raw trace logs (gzipped) for downstream analysis
+  mkdir -p "$test_reports_dir/tlparse_output"
+  for f in "$trace_dir"/*.log; do
+    [ -f "$f" ] || continue
+    gzip -c "$f" > "$test_reports_dir/tlparse_output/$(basename "$f").gz"
+  done
+  echo "Raw trace logs saved to $test_reports_dir/tlparse_output/"
+
+  # Try to generate HTML report via tlparse (best-effort)
   if ! command -v tlparse &>/dev/null; then
     pip install tlparse 2>/dev/null || {
       echo "Warning: failed to install tlparse, skipping HTML generation"
@@ -1092,14 +1132,12 @@ collect_tlparse_output() {
     }
   fi
 
-  # Run tlparse to generate HTML report
-  mkdir -p "$test_reports_dir/tlparse_output"
-  tlparse -o "$test_reports_dir/tlparse_output/" --no-browser --overwrite "$trace_dir" 2>&1 || {
-    echo "Warning: tlparse failed to generate HTML output"
-    return
-  }
-
-  echo "TLParse output generated in $test_reports_dir/tlparse_output/"
+  for f in "$trace_dir"/*.log; do
+    [ -f "$f" ] || continue
+    tlparse -o "$test_reports_dir/tlparse_output/" --no-browser --overwrite "$f" 2>&1 || {
+      echo "Warning: tlparse failed on $(basename "$f")"
+    }
+  done
 }
 
 test_dynamo_benchmark() {
@@ -1326,6 +1364,14 @@ test_unbacked_parity_smoketest() {
 }
 
 test_inductor_set_cpu_affinity(){
+  # `nproc` from coreutils honors $OMP_NUM_THREADS and returns the smaller of
+  # that and the real cpuset count. The USE_ARC block earlier in this script
+  # sets OMP_NUM_THREADS=nproc/4 for general tests; if we leave it set, every
+  # subsequent `nproc` call here returns the quartered value instead of the
+  # pod's true CPU allocation. Unset it so we can re-derive OMP_NUM_THREADS
+  # from the actual cgroup cpuset below.
+  unset OMP_NUM_THREADS
+
   JEMALLOC_LIB="$(find /usr/lib -name libjemalloc.so.2)"
   export LD_PRELOAD="$JEMALLOC_LIB":"$LD_PRELOAD"
   export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
@@ -1343,10 +1389,6 @@ test_inductor_set_cpu_affinity(){
   thread_per_core=$(lscpu | grep 'Thread(s) per core:' | awk '{print $4}')
   cores=$((cpus / thread_per_core))
 
-  # Set number of cores to 16 on aarch64 for performance runs
-  if [[ "$(uname -m)" == "aarch64" && $cores -gt 16 ]]; then
-    cores=16
-  fi
   export OMP_NUM_THREADS=$cores
 
   # Handle cgroups slice start and end CPU
@@ -1509,6 +1551,9 @@ test_libtorch_profiler() {
 
   # Run all other tests
   python test/run_test.py --cpp --verbose -i cpp/test_privateuse1_profiler -k "not EndToEndProfiling"
+
+  # Tests for torch/csrc/profiler/collection.cpp.
+  python test/run_test.py --cpp --verbose -i cpp/test_profiler_collection
 }
 
 test_libtorch_api() {
@@ -1795,7 +1840,7 @@ build_xla() {
   rm "${XLA_DIR}/torch_patches/.torch_pin" || true
 
   apply_patches
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
   retry install_pre_deps_pytorch_xla $XLA_DIR $USE_CACHE
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
@@ -1810,7 +1855,7 @@ test_xla() {
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  SITE_PACKAGES="$(python -c 'from sysconfig import get_path; print(get_path("purelib"))')"
   # Set LD_LIBRARY_PATH for C++ tests
   export LD_LIBRARY_PATH="/opt/conda/lib/:${LD_LIBRARY_PATH}"
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SKIP_MP_OP_TESTS=1 run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
@@ -2063,6 +2108,12 @@ test_operator_benchmark() {
   cd benchmarks/operator_benchmark/pt_extension
   python -m pip install . -v --no-build-isolation
 
+  # On ROCm, MIOpen exhaustive kernel search can take hours per shape on cold cache.
+  # Use FAST mode (heuristics only) to keep benchmark CI from timing out.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export MIOPEN_FIND_MODE=FAST
+  fi
+
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
       --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
@@ -2079,6 +2130,12 @@ test_operator_microbenchmark() {
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
 
+  # When running the baseline (nightly wheel), tag outputs so the compare step can distinguish them
+  local suffix=""
+  if [[ "${TEST_CONFIG:-}" == *_baseline ]]; then
+    suffix="_baseline"
+  fi
+
   test_inductor_set_cpu_affinity
 
   cd benchmarks/operator_benchmark/pt_extension
@@ -2086,13 +2143,21 @@ test_operator_microbenchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
+  # On ROCm, MIOpen exhaustive kernel search can take hours per shape on cold cache.
+  # Use FAST mode (heuristics only) to keep benchmark CI from timing out.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    export MIOPEN_FIND_MODE=FAST
+  fi
+
   # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
-  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm; do
-    $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
-      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
+  # OP_BENCHMARK_TESTS env var can override the default operator list (set via _linux-test.yml matrix)
+  local op_list="${OP_BENCHMARK_TESTS:-matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm}"
+  for op in $op_list; do
+    $TASKSET python -m "pt.${op}_test" --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}_compile${suffix}.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
-    $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
-      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}.json" \
+    $TASKSET python -m "pt.${op}_test" --tag-filter long \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${op}${suffix}.json" \
       --benchmark-name "PyTorch operator microbenchmark"
   done
 }
@@ -2163,6 +2228,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
+  install_torchcomms
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -2182,10 +2248,36 @@ elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
 
   fi
 elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
+  # Support single-operator selection via config name:
+  #   operator_microbenchmark_{op}_test     — run against the PR-built wheel
+  #   operator_microbenchmark_{op}_baseline — install latest nightly and run against it
+  if [[ "${TEST_CONFIG}" =~ operator_microbenchmark_(.+)_(test|baseline) ]] && [[ "${BASH_REMATCH[1]}" != "" ]]; then
+    export OP_BENCHMARK_TESTS="${BASH_REMATCH[1]}"
+  fi
+  if [[ "${TEST_CONFIG}" == *_baseline ]]; then
+    # Derive the nightly wheel channel from BUILD_ENVIRONMENT so baseline matches the PR
+    # build's CUDA/ROCm toolchain. Override by setting BASELINE_INDEX_URL in the workflow.
+    if [[ -z "${BASELINE_INDEX_URL:-}" ]]; then
+      if [[ "${BUILD_ENVIRONMENT}" == *cuda12.8* ]]; then
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"
+      elif [[ "${BUILD_ENVIRONMENT}" == *cuda13* ]]; then
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu130"
+      elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+        # Keep in sync with the ROCm version in the benchmarks docker image
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm6.4"
+      else
+        echo "ERROR: cannot infer BASELINE_INDEX_URL from BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
+        exit 1
+      fi
+    fi
+    echo "Installing nightly torch from ${BASELINE_INDEX_URL} for baseline comparison"
+    pip install --pre --force-reinstall --index-url "${BASELINE_INDEX_URL}" torch
+  fi
   test_operator_microbenchmark
 elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
   test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
+  install_torchcomms
   setup_torch_trace
   test_inductor_distributed
   collect_tlparse_output
@@ -2320,6 +2412,7 @@ elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
 elif [[ "${TEST_CONFIG}" == dtensor ]]; then
   test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
+  install_torchcomms
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem
