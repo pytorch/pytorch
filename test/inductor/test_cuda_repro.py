@@ -135,6 +135,37 @@ class CudaReproTests(TestCase):
         self.assertEqual(actual_mantissa, expected_mantissa, equal_nan=True)
         self.assertEqual(actual_exponent, expected_exponent)
 
+    @parametrize("dtype", [torch.float64, torch.float32, torch.float16, torch.bfloat16])
+    @parametrize(
+        "op,x_value,y_value",
+        [
+            ("minimum", -0.0, 0.0),
+            ("minimum", 0.0, -0.0),
+            ("maximum", -0.0, 0.0),
+            ("maximum", 0.0, -0.0),
+        ],
+    )
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_minimum_maximum_signed_zero(self, dtype, op, x_value, y_value):
+        if dtype is torch.bfloat16 and not SM80OrLater:
+            raise unittest.SkipTest("uses bfloat16 which requires SM >= 80")
+
+        def fn(x, y):
+            return getattr(torch, op)(x, y)
+
+        x = torch.tensor([x_value], dtype=dtype, device=device_type)
+        y = torch.tensor([y_value], dtype=dtype, device=device_type)
+        expected = fn(x, y)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+
+        if dtype is torch.float64:
+            view_dtype = torch.int64
+        elif dtype is torch.float32:
+            view_dtype = torch.int32
+        else:
+            view_dtype = torch.int16
+        self.assertEqual(actual.view(view_dtype), expected.view(view_dtype))
+
     def test_index_put_issue(self):
         def forward(
             self,

@@ -128,6 +128,15 @@ def is_floating(x):
 
 
 @triton.jit
+def signbit(x):
+    idtype: tl.constexpr = tl.core.get_int_dtype(
+        x.dtype.primitive_bitwidth, signed=False
+    )
+    sign_mask: tl.constexpr = 1 << (x.dtype.primitive_bitwidth - 1)
+    return (x.to(idtype, bitcast=True) & sign_mask) != 0
+
+
+@triton.jit
 def _prod_accumulate(a, b):
     return a * b
 
@@ -138,34 +147,12 @@ def prod(input, axis):
 
 
 @triton.jit
-def _is_neg_zero(x):
-    if hasattr(x, "dtype") and x.dtype == tl.float32:
-        return (x == 0.0) & (x.to(tl.int32, bitcast=True) < 0)
-    elif hasattr(x, "dtype") and (x.dtype == tl.float16 or x.dtype == tl.bfloat16):
-        return (x == 0.0) & (x.to(tl.int16, bitcast=True) < 0)
-    elif hasattr(x, "dtype") and x.dtype == tl.float64:
-        return (x == 0.0) & (x.to(tl.int64, bitcast=True) < 0)
-    elif hasattr(x, "dtype") and (
-        x.dtype == getattr(tl, "float8e4nv", None)
-        or x.dtype == getattr(tl, "float8e5", None)
-        or x.dtype == getattr(tl, "float8e4b8", None)
-        or x.dtype == getattr(tl, "float8e4b15", None)
-        or x.dtype == getattr(tl, "float8e5b16", None)
-    ):
-        return (x == 0.0) & (x.to(tl.int8, bitcast=True) < 0)
-    else:
-        return (x == x) & False
-
-
-@triton.jit
 def minimum(a, b):
     mask = a < b
     if is_floating(a):
+        both_zero = (a == 0.0) & (b == 0.0)
+        mask |= both_zero & signbit(a)
         mask |= a != a
-        # Handle signed zeros: -0.0 < +0.0
-        a_is_neg = _is_neg_zero(a)
-        b_is_neg = _is_neg_zero(b)
-        mask |= a_is_neg & (b == 0.0) & (~b_is_neg)
     return tl.where(mask, a, b)
 
 
@@ -173,38 +160,20 @@ def minimum(a, b):
 def maximum(a, b):
     mask = a > b
     if is_floating(a):
-        mask |= a != a
-        # Handle signed zeros: +0.0 > -0.0
-        a_is_neg = _is_neg_zero(a)
-        b_is_neg = _is_neg_zero(b)
-        mask |= (a == 0.0) & (~a_is_neg) & b_is_neg
-    return tl.where(mask, a, b)
-
-
-@triton.jit
-def _reduction_minimum(a, b):
-    mask = a < b
-    if is_floating(a):
-        mask |= a != a
-    return tl.where(mask, a, b)
-
-
-@triton.jit
-def _reduction_maximum(a, b):
-    mask = a > b
-    if is_floating(a):
+        both_zero = (a == 0.0) & (b == 0.0)
+        mask |= both_zero & ~signbit(a)
         mask |= a != a
     return tl.where(mask, a, b)
 
 
 @triton.jit
 def min2(a, dim):
-    return tl.reduce(a, dim, _reduction_minimum)
+    return tl.reduce(a, dim, minimum)
 
 
 @triton.jit
 def max2(a, dim):
-    return tl.reduce(a, dim, _reduction_maximum)
+    return tl.reduce(a, dim, maximum)
 
 
 @triton.jit
@@ -217,14 +186,6 @@ def minimum_with_index(a_value, a_index, b_value, b_index):
         mask |= a_isnan & (not b_isnan)
         # Consider NaNs as equal
         equal |= a_isnan & b_isnan
-
-        # Handle signed zeros: -0.0 < +0.0
-        a_is_neg = _is_neg_zero(a_value)
-        b_is_neg = _is_neg_zero(b_value)
-
-        mask |= a_is_neg & (b_value == 0.0) & (~b_is_neg)
-        # Break equality for the index if they are both zero but have different signs
-        equal &= ~((a_value == 0.0) & (a_is_neg != b_is_neg))
 
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
@@ -242,46 +203,6 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
         # Consider NaNs as equal
         equal |= a_isnan & b_isnan
 
-        # Handle signed zeros: +0.0 > -0.0
-        a_is_neg = _is_neg_zero(a_value)
-        b_is_neg = _is_neg_zero(b_value)
-
-        mask |= (a_value == 0.0) & (~a_is_neg) & b_is_neg
-        # Break equality for the index if they are both zero but have different signs
-        equal &= ~((a_value == 0.0) & (a_is_neg != b_is_neg))
-
-    # Prefer lowest index if values are equal
-    mask |= equal & (a_index < b_index)
-    return tl.where(mask, a_value, b_value), tl.where(mask, a_index, b_index)
-
-
-@triton.jit
-def _reduction_minimum_with_index(a_value, a_index, b_value, b_index):
-    mask = a_value < b_value
-    equal = a_value == b_value
-    if is_floating(a_value):
-        a_isnan = a_value != a_value
-        b_isnan = b_value != b_value
-        mask |= a_isnan & (not b_isnan)
-        # Consider NaNs as equal
-        equal |= a_isnan & b_isnan
-
-    # Prefer lowest index if values are equal
-    mask |= equal & (a_index < b_index)
-    return tl.where(mask, a_value, b_value), tl.where(mask, a_index, b_index)
-
-
-@triton.jit
-def _reduction_maximum_with_index(a_value, a_index, b_value, b_index):
-    mask = a_value > b_value
-    equal = a_value == b_value
-    if is_floating(a_value):
-        a_isnan = a_value != a_value
-        b_isnan = b_value != b_value
-        mask |= a_isnan & (not b_isnan)
-        # Consider NaNs as equal
-        equal |= a_isnan & b_isnan
-
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
     return tl.where(mask, a_value, b_value), tl.where(mask, a_index, b_index)
@@ -289,12 +210,12 @@ def _reduction_maximum_with_index(a_value, a_index, b_value, b_index):
 
 @triton.jit
 def min_with_index(value, index, dim):
-    return tl.reduce((value, index), dim, _reduction_minimum_with_index)
+    return tl.reduce((value, index), dim, minimum_with_index)
 
 
 @triton.jit
 def max_with_index(value, index, dim):
-    return tl.reduce((value, index), dim, _reduction_maximum_with_index)
+    return tl.reduce((value, index), dim, maximum_with_index)
 
 
 @triton.jit
