@@ -187,6 +187,8 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         cutlass_template_node_name: str,
         epilogue_nodes: list[BaseSchedulerNode],
         removed_buffers: OrderedSet[str],
+        fn_name: str = "fn",
+        as_standalone_function: bool = False,
     ) -> tuple[list[str], list[str], dict[str, Any], str]:
         codegen = CutlassEVTCodegen(cutlass_template_node_name, removed_buffers)
         handler = _AssignmentFormatter(codegen)
@@ -205,15 +207,25 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             codegen.get_reads(),
             codegen.get_writes(),
             codegen.get_renames(),
-            codegen.get_value(),
+            codegen.get_value(
+                fn_name=fn_name,
+                as_standalone_function=as_standalone_function,
+            ),
         )
 
-    def get_value(self) -> str:
+    def get_value(
+        self,
+        fn_name: str = "fn",
+        as_standalone_function: bool = False,
+    ) -> str:
+        ret = self._render_return_statement()
+        if as_standalone_function:
+            ret = "    " + ret
         return linesep.join(
             [
-                self._render_input_signature(),
+                self._render_input_signature(fn_name),
                 self.body.getvalue(),
-                self._render_return_statement(),
+                ret,
             ]
         )
 
@@ -309,12 +321,12 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             for l, r in (zip(left, right))
         )
 
-    def _render_input_signature(self) -> str:
+    def _render_input_signature(self, fn_name: str = "fn") -> str:
         arguments = ", ".join(
             [_ACCUMULATOR_ARG_NAME]
             + [name for name in self.reads if name != self.accumulator_node_name]
         )
-        return f"def fn({arguments}):"
+        return f"def {fn_name}({arguments}):"
 
     def _render_return_statement(self) -> str:
         return_vars = OrderedSet(
