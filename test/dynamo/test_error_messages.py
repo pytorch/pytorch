@@ -473,7 +473,7 @@ Attempted to call function marked as skipped
             ),
             """\
 Observed exception
-  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Explanation: Dynamo observed an exception while tracing your code: ValueError('not enough values to unpack (expected 2, got 1)'). Exception will propagate outside the compiled region because Dynamo found no exception handler at the top-level compiled function.
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
@@ -500,7 +500,7 @@ from user code:
             ),
             """\
 Observed exception
-  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Explanation: Dynamo observed an exception while tracing your code: TypeError("'int' object is not iterable"). Exception will propagate outside the compiled region because Dynamo found no exception handler at the top-level compiled function.
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
@@ -523,7 +523,7 @@ from user code:
             lambda: fn(torch.randn(2)),
             """\
 Observed exception
-  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Explanation: Dynamo observed an exception while tracing your code: ValueError('not enough values to unpack (expected at least 1, got 0)'). Exception will propagate outside the compiled region because Dynamo found no exception handler at the top-level compiled function.
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
@@ -545,7 +545,7 @@ from user code:
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
             """\
 Observed exception
-  Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
+  Explanation: Dynamo observed an exception while tracing your code: RuntimeError('test'). Exception will propagate outside the compiled region because Dynamo found no exception handler at the top-level compiled function.
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
@@ -556,6 +556,45 @@ Observed exception
 from user code:
    File "test_error_messages.py", line N, in fn
     raise RuntimeError("test")""",
+        )
+
+    def test_export_malformed_positional_args_observed_exception(self):
+        class Decoder(torch.nn.Module):
+            def forward(self, decoder_input_ids=None, decoder_inputs_embeds=None):
+                if decoder_input_ids is None and decoder_inputs_embeds is None:
+                    raise ValueError(
+                        "You have to specify either decoder_input_ids "
+                        "or decoder_inputs_embeds"
+                    )
+                return decoder_input_ids
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.decoder = Decoder()
+
+            def forward(self, input_ids=None, attention_mask=None, labels=None):
+                return self.decoder(decoder_input_ids=labels)
+
+        with self.assertRaises(Unsupported) as ctx:
+            torch.export.export(
+                Model(),
+                (torch.ones(2), torch.ones(2)),
+                strict=True,
+            )
+
+        exc_str = str(ctx.exception)
+        self.assertIn(
+            "Dynamo observed an exception while tracing your code: "
+            "ValueError('You have to specify either decoder_input_ids "
+            "or decoder_inputs_embeds')",
+            exc_str,
+        )
+        self.assertIn(
+            "Developer debug context: raised exception "
+            "ValueError('You have to specify either decoder_input_ids "
+            "or decoder_inputs_embeds')",
+            exc_str,
         )
 
     def test_uninitialized_module(self):
