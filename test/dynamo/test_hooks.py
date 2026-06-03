@@ -1105,6 +1105,197 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_disabled_child_forward_pre_hooks_trace_parent_forward(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed = torch.nn.Embedding(10, 4)
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(4, 4) for _ in range(2)]
+                )
+                self.output = torch.nn.Linear(4, 10)
+
+            def forward(self, x):
+                x = self.embed(x)
+                for layer in self.layers:
+                    x = layer(x)
+                return self.output(x)
+
+        def fn(mod, x):
+            return mod(x)
+
+        @torch.compiler.disable()
+        def hook(mod, inputs):
+            pass
+
+        for compile_mode in ("module.compile", "torch.compile function"):
+            with self.subTest(compile_mode=compile_mode):
+                torch._dynamo.reset()
+                mod = ToyModel()
+                ref_mod = ToyModel()
+                ref_mod.load_state_dict(mod.state_dict())
+                for layer in mod.layers:
+                    layer.register_forward_pre_hook(hook)
+                x = torch.randint(10, (2, 3))
+                ref = ref_mod(x), ref_mod(x)
+                backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+                if compile_mode == "module.compile":
+                    mod.compile(backend=backend)
+                    res = mod(x), mod(x)
+                else:
+                    opt_fn = torch.compile(fn, backend=backend)
+                    res = opt_fn(mod, x), opt_fn(mod, x)
+
+                self.assertEqual(ref, res)
+                self.assertEqual(len(backend.graphs), 1)
+                graph_code = "\n".join(
+                    graph.print_readable(print_output=False) for graph in backend.graphs
+                )
+                self.assertIn("torch.nn.functional.embedding", graph_code)
+                self.assertEqual(graph_code.count("torch._C._nn.linear"), 3)
+
+    def test_disabled_noop_named_forward_pre_hooks_still_graph_breaks(self):
+        @torch.compiler.disable()
+        def disabled():
+            pass
+
+        def fn(_forward_pre_hooks, x):
+            _forward_pre_hooks[0]()
+            return x + 1
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"Skip calling `torch.compiler.disable\(\)`d function",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                [disabled], torch.ones(2, 3)
+            )
+
+    def test_disabled_child_forward_pre_hook_state_mutation_graph_breaks(self):
+        class Scale(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = 1.0
+
+            def forward(self, x):
+                return x * self.scale
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = Scale()
+
+            def forward(self, x):
+                return self.scale(x)
+
+        def fn(mod, x):
+            return mod(x)
+
+        for compile_mode in ("module.compile", "torch.compile function"):
+            with self.subTest(compile_mode=compile_mode):
+                torch._dynamo.reset()
+                calls = {"count": 0}
+
+                @torch.compiler.disable()
+                def hook(mod, inputs):
+                    calls["count"] += 1
+                    mod.scale = 2.0
+                    return None
+
+                mod = Mod()
+                mod.scale.register_forward_pre_hook(hook)
+                x = torch.ones(2, 3)
+
+                if compile_mode == "module.compile":
+                    mod.compile(backend="eager")
+                    res = mod(x)
+                else:
+                    res = torch.compile(fn, backend="eager")(mod, x)
+
+                self.assertEqual(res, torch.full_like(x, 2.0))
+                self.assertEqual(calls["count"], 1)
+
+    def test_disabled_child_forward_pre_hook_input_mutation_graph_breaks(self):
+        class Scale(torch.nn.Module):
+            def forward(self, x):
+                return x * 2.0
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = Scale()
+
+            def forward(self, x):
+                return self.scale(x)
+
+        def fn(mod, x):
+            return mod(x)
+
+        for compile_mode in ("module.compile", "torch.compile function"):
+            with self.subTest(compile_mode=compile_mode):
+                torch._dynamo.reset()
+                calls = {"count": 0}
+
+                @torch.compiler.disable()
+                def hook(mod, inputs):
+                    calls["count"] += 1
+                    inputs[0].add_(1.0)
+                    return None
+
+                mod = Mod()
+                mod.scale.register_forward_pre_hook(hook)
+                x = torch.ones(2, 3)
+
+                if compile_mode == "module.compile":
+                    mod.compile(backend="eager")
+                    res = mod(x)
+                else:
+                    res = torch.compile(fn, backend="eager")(mod, x)
+
+                self.assertEqual(res, torch.full_like(x, 4.0))
+                self.assertEqual(x, torch.full_like(x, 2.0))
+                self.assertEqual(calls["count"], 1)
+
+    def test_disabled_child_forward_pre_hook_returning_input_grad(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2, bias=False)
+                with torch.no_grad():
+                    self.linear.weight.copy_(torch.eye(2))
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def fn(mod, x):
+            return mod(x)
+
+        for compile_mode in ("module.compile", "torch.compile function"):
+            with self.subTest(compile_mode=compile_mode):
+                torch._dynamo.reset()
+                calls = {"count": 0}
+
+                @torch.compiler.disable()
+                def hook(mod, inputs):
+                    calls["count"] += 1
+                    return (inputs[0] * 2,)
+
+                mod = Mod()
+                mod.linear.register_forward_pre_hook(hook)
+                backend = torch._dynamo.testing.EagerAndRecordGraphs()
+                x = torch.ones(1, 2, requires_grad=True)
+
+                if compile_mode == "module.compile":
+                    mod.compile(backend=backend)
+                    y = mod(x)
+                else:
+                    y = torch.compile(fn, backend=backend)(mod, x)
+
+                y.sum().backward()
+                self.assertEqual(x.grad, torch.full_like(x, 2.0))
+                self.assertEqual(calls["count"], 1)
+
     def test_global_module_forward_pre_hook(self):
         class Mod(torch.nn.Module):
             def forward(self, x):

@@ -24,6 +24,7 @@ accurate graph capture while handling Python's various function-related behavior
 import _collections  # type: ignore[import-not-found]
 import builtins
 import collections
+import dis
 import functools
 import importlib.metadata
 import importlib.util
@@ -69,8 +70,10 @@ from ..source import (
     ClosureSource,
     ConstantSource,
     DefaultsSource,
+    DictGetItemSource,
     GetItemSource,
     ImportSource,
+    NNModuleSource,
     SkipGuardSource,
     TypeMROSource,
     TypeSource,
@@ -2190,6 +2193,51 @@ RE_CONSTANT_FOLD_FNS = {
 }
 
 
+_STATIC_NOOP_HOOK_IGNORED_OPS = frozenset(
+    {
+        "CACHE",
+        "COPY_FREE_VARS",
+        "EXTENDED_ARG",
+        "NOP",
+        "RESUME",
+    }
+)
+
+
+def _is_nn_module_forward_pre_hook_source(source: Source | None) -> bool:
+    while source is not None:
+        if (
+            isinstance(source, DictGetItemSource)
+            and isinstance(source.base, AttrSource)
+            and source.base.member == "_forward_pre_hooks"
+            and isinstance(source.base.base, NNModuleSource)
+        ):
+            return True
+        source = getattr(source, "base", None)
+    return False
+
+
+def _is_static_noop_disabled_hook(hook: Callable[..., Any]) -> bool:
+    if not isinstance(hook, types.FunctionType):
+        return False
+
+    instructions = [
+        inst
+        for inst in dis.get_instructions(hook)
+        if inst.opname not in _STATIC_NOOP_HOOK_IGNORED_OPS
+    ]
+    if len(instructions) == 1:
+        return (
+            instructions[0].opname == "RETURN_CONST" and instructions[0].argval is None
+        )
+    return (
+        len(instructions) == 2
+        and instructions[0].opname == "LOAD_CONST"
+        and instructions[0].argval is None
+        and instructions[1].opname == "RETURN_VALUE"
+    )
+
+
 class SkipFunctionVariable(VariableTracker):
     _nonvar_fields = {
         "value",
@@ -2275,6 +2323,19 @@ class SkipFunctionVariable(VariableTracker):
             return VariableTracker.build(tx, result)
 
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+            hook = self.value
+            hook_source = self.source
+            while inspect.getattr_static(hook, "_torchdynamo_orig_callable", False):
+                hook = hook._torchdynamo_orig_callable  # type: ignore[attr-defined]
+                if hook_source is not None:
+                    hook_source = AttrSource(hook_source, "_torchdynamo_orig_callable")
+            if _is_nn_module_forward_pre_hook_source(
+                self.source
+            ) and _is_static_noop_disabled_hook(hook):
+                if hook_source is not None:
+                    install_guard(hook_source.make_guard(GuardBuilder.CLOSURE_MATCH))
+                return variables.ConstantVariable.create(None)
+
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
             unimplemented(
                 gb_type="Skip calling `torch.compiler.disable()`d function",
