@@ -40,7 +40,7 @@ from ..source import (
     GlobalWeakRefSource,
     GradSource,
 )
-from ..utils import GLOBAL_KEY_PREFIX
+from ..utils import GLOBAL_KEY_PREFIX, unpack_iterable
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
@@ -316,8 +316,10 @@ class OptimizerVariable(UserDefinedObjectVariable):
             params_vt = group_vt.getitem_const(tx, ConstantVariable.create("params"))
             all_static = True
             non_static_grads = []
-            for p, p_vt in zip(group["params"], params_vt.unpack_var_sequence(tx)):
+            for p, p_vt in zip(group["params"], unpack_iterable(tx, params_vt)):
                 param_source = p_vt.source
+                if param_source is None:
+                    raise AssertionError(f"param {p} does not have a source")
                 self.tensor_to_source[p] = param_source
                 grad_source = GradSource(
                     param_source,
