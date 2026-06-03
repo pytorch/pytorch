@@ -4,6 +4,7 @@ from __future__ import annotations
 import atexit
 import ctypes
 import json
+import logging
 import os
 import queue
 import struct
@@ -18,6 +19,13 @@ import torch
 
 _PY_PROFILER = torch._C._profiler
 
+logger = logging.getLogger(__name__)
+
+# Buffers are a recycling pool bounded by peak concurrent demand, so the count
+# only keeps climbing if the worker can't drain completed buffers as fast as
+# CUPTI fills them. Warn once past this many outstanding buffers (1GB at the
+# default 4MB size) as a sign of that backpressure.
+_OUTSTANDING_WARN_THRESHOLD = 256
 
 _LIBCUPTI_PATH_ENV = "TORCH_CUPTI_MONITOR_LIBCUPTI_PATH"
 
@@ -316,6 +324,7 @@ class CuptiMonitor:
         self._buffers_completed = 0
         self._valid_bytes = 0
         self._max_outstanding = 0
+        self._outstanding_warned = False
         self._dropped_records = 0
         self._raw_chunk_count = 0
 
@@ -346,10 +355,24 @@ class CuptiMonitor:
                 self._buffers_requested += 1
                 outstanding = self._buffers_requested - self._buffers_completed
                 self._max_outstanding = max(self._max_outstanding, outstanding)
+                warn_backpressure = (
+                    outstanding >= _OUTSTANDING_WARN_THRESHOLD
+                    and not self._outstanding_warned
+                )
+                if warn_backpressure:
+                    self._outstanding_warned = True
 
             buffer_ptr[0] = ptr
             size_ptr[0] = self.buffer_size
             max_records_ptr[0] = 0
+
+            if warn_backpressure:
+                logger.warning(
+                    "CUPTI monitor has %d outstanding activity buffers; the "
+                    "processing worker is not keeping up with CUPTI, so memory "
+                    "use will grow. Reduce traced activity or buffer size.",
+                    outstanding,
+                )
 
         @comp_type
         def complete_cb(ctx, stream_id, buffer, size, valid_size):
@@ -524,10 +547,14 @@ class CuptiMonitor:
         self._flush_stop.set()
         if self._flush_thread is not None:
             self._flush_thread.join(timeout=5.0)
+            if self._flush_thread.is_alive():
+                logger.warning("CUPTI monitor flush thread did not stop within 5s")
             self._flush_thread = None
         self._worker_stop.set()
         if self._worker_thread is not None:
             self._worker_thread.join(timeout=5.0)
+            if self._worker_thread.is_alive():
+                logger.warning("CUPTI monitor worker thread did not stop within 5s")
             self._worker_thread = None
         if self._worker_error is not None:
             raise RuntimeError("CUPTI monitor worker failed") from self._worker_error
