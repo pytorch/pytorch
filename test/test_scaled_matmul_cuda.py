@@ -2155,6 +2155,7 @@ class TestFP8Matmul(TestCase):
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     def test_functional_scaled_mm_single_value_expansion(self, device) -> None:
         M, N, K = 128, 128, 128
@@ -2190,6 +2191,7 @@ class TestFP8Matmul(TestCase):
         )
         self.assertEqual(actual, expected)
 
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     def test_functional_scaled_mm_rejects_mismatched_scale_lists(self, device) -> None:
         M, N, K = 128, 128, 128
