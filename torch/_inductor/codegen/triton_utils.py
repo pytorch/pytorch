@@ -200,8 +200,7 @@ def _get_buffer_layout(buf_name: str) -> "torch._inductor.ir.Layout":
     return layout
 
 
-def is_unaligned_buffer(arg: TensorArg):
-    buf_name = arg.buffer
+def is_unaligned_buffer_name(buf_name: str) -> bool:
     if buf_name in V.graph.unaligned_buffers:
         return True
 
@@ -220,6 +219,10 @@ def is_unaligned_buffer(arg: TensorArg):
         return not layout.maybe_guard_aligned()
     else:
         return False
+
+
+def is_unaligned_buffer(arg: TensorArg):
+    return is_unaligned_buffer_name(arg.buffer)
 
 
 def _arg_equals_1(arg: KernelArgType) -> bool:

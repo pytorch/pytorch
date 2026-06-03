@@ -6258,6 +6258,16 @@ class TestMPS(TestCaseMPS):
         x = x_cpu.detach().clone().to('mps')
         self.assertEqual(helper(x_cpu), helper(x))
 
+    @serialTest()
+    def test_im2col_uint32_overflow(self):
+        C, H, W = 65537, 256, 256
+        x = torch.zeros(1, C, H, W, dtype=torch.bool)
+        x[0, C - 1, 0, 0] = True
+        args = ([1, 1], [1, 1], [0, 0], [H, W])
+        out_cpu = torch.ops.aten.im2col(x, *args)
+        out_mps = torch.ops.aten.im2col(x.to("mps"), *args).cpu()
+        self.assertEqual(out_cpu, out_mps)
+
     def test_col2im(self):
         def helper(shapes, output_size, kernel_size, padding, stride, contiguous, dtype=torch.float32, test_bool=False):
             atol = 1e-5 if dtype == torch.float else 1e-2
@@ -6302,6 +6312,26 @@ class TestMPS(TestCaseMPS):
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, torch.bfloat16)
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, torch.float16)
         helper((20, 15), (2, 10), (3, 5), (1, 2), (1, 1), False, test_bool=True)
+
+    def test_col2im_uint32_overflow(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/185663
+        K = L = 65537
+        cols = torch.zeros(1, K, L, dtype=torch.bool)
+        cols[0, K - 1, :] = True
+        args = ([1, 131073], [1, K], [1, 1], [0, 0], [1, 1])
+        out_cpu = torch.ops.aten.col2im(cols, *args)
+        out_mps = torch.ops.aten.col2im(cols.to("mps"), *args).cpu()
+        self.assertEqual(out_cpu, out_mps)
+
+    def test_col2im_uint32_overflow_spatial(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/185663
+        H = W = 65537
+        cols = torch.zeros(1, 1, H * W, dtype=torch.bool)
+        cols[0, 0, 1 << 32:] = True
+        args = ([H, W], [1, 1], [1, 1], [0, 0], [1, 1])
+        out_cpu = torch.ops.aten.col2im(cols, *args)
+        out_mps = torch.ops.aten.col2im(cols.to("mps"), *args).cpu()
+        self.assertEqual(out_cpu, out_mps)
 
     def test_fold_invalid_input_raises(self):
         # F.fold/col2im on MPS must raise the same shape errors as CPU. See #170639.
@@ -9608,6 +9638,22 @@ class TestLargeTensors(TestCaseMPS):
         # Reclaim memory after running the tests
         del y
         del x
+        gc.collect()
+        torch.mps.empty_cache()
+
+    @serialTest()
+    def test_64bit_index_copy(self):
+        if torch.mps.recommended_max_memory() < 16_000_000_000:
+            raise unittest.SkipTest("Needs at least 16Gb of RAM")
+        m = (1 << 31) + 16
+        x = torch.zeros(2, m, dtype=torch.int8, device='mps')
+        src = torch.full((1, m), 7, dtype=torch.int8, device='mps')
+        x.index_copy_(0, torch.tensor([1], device='mps'), src)
+        self.assertEqual(x[1, 0].item(), 7)
+        self.assertEqual(x[1, m - 1].item(), 7)
+        self.assertEqual(x[0, 0].item(), 0)
+        self.assertEqual(x[0, m - 1].item(), 0)
+        del x, src
         gc.collect()
         torch.mps.empty_cache()
 
@@ -14965,6 +15011,7 @@ class TestConsistency(TestCaseMPS):
     # is a little larger than 8 GB. MPS allocations are capped at 16 GB, so it
     # cannot be run on float32.
     @unittest.skipIf(torch._C._mps_maxBufferLength() < int(8.1 * 1024**3), "Need >8 GB buffer")
+    @serialTest()
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("trigger_32bit_overflow", [False, True])
     def test_group_norm_large_input(self, device, dtype, trigger_32bit_overflow):
