@@ -3845,7 +3845,6 @@ def linear_cross_entropy(
         or label_smoothing != 0.0
         or target.dtype != torch.int64
         or torch.jit.is_tracing()
-        or linear_bias is not None
     ):
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
@@ -3866,7 +3865,6 @@ def linear_cross_entropy(
         and target.dtype == torch.int64
         and not out_features
         and not torch.jit.is_tracing()
-        and linear_bias is None
     ):
         if input.dim() == 2:
             num_batches = input.shape[0]
