@@ -15735,7 +15735,11 @@ op_db: list[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
+<<<<<<< HEAD
            dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.int8, torch.complex32, torch.bfloat16),
+=======
+           dtypesIfXPU=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.int8),
+>>>>>>> 24f41f7bf99 (Add the dtypesIfXPU argument to the conv_transpose1d.)
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
