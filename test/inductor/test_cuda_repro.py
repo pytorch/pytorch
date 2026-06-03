@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     MI350_ARCH,
     parametrize,
+    skipIfCachingAllocatorDisabled,
     skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
@@ -117,6 +118,22 @@ class CudaReproTests(TestCase):
         expected = fn(a, b)
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_frexp_non_finite(self):
+        def fn(x):
+            return torch.frexp(x)
+
+        x = torch.tensor(
+            [float("inf"), float("-inf"), float("nan")], device=device_type
+        )
+        expected_mantissa, expected_exponent = fn(x)
+        actual_mantissa, actual_exponent = torch.compile(
+            fn, backend="inductor", fullgraph=True
+        )(x)
+
+        self.assertEqual(actual_mantissa, expected_mantissa, equal_nan=True)
+        self.assertEqual(actual_exponent, expected_exponent)
 
     def test_index_put_issue(self):
         def forward(
@@ -333,9 +350,14 @@ class CudaReproTests(TestCase):
         )[0]
         compiled_out.sum().backward()
 
-        self.assertEqual(compiled_out, eager_out)
-        self.assertEqual(compiled_q.grad, eager_q.grad)
-        self.assertEqual(compiled_kv.grad, eager_kv.grad)
+        tol_kwargs = {}
+        if device_type == "xpu":
+            # XPU fp16 SDPA compile-vs-eager can drift ~1% relative.
+            tol_kwargs = {"atol": 1e-4, "rtol": 1e-2}
+
+        self.assertEqual(compiled_out, eager_out, **tol_kwargs)
+        self.assertEqual(compiled_q.grad, eager_q.grad, **tol_kwargs)
+        self.assertEqual(compiled_kv.grad, eager_kv.grad, **tol_kwargs)
 
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
@@ -1178,6 +1200,15 @@ class CudaReproTests(TestCase):
         self.assertEqual(foo(inp), out)
 
         def foo(x):
+            return x.log()
+
+        inp = torch.ones(64, device=device_type, dtype=torch.float32)
+        with config.patch({"eager_numerics.use_pytorch_libdevice": True}):
+            out, code = run_and_get_code(torch.compile(foo), inp)
+        FileCheck().check_not("tl_math.log").check("libdevice.log").run(code[0])
+        self.assertEqual(foo(inp), out)
+
+        def foo(x):
             return x.sigmoid()
 
         inp = torch.ones(64, device=device_type).to(torch.float64)
@@ -1610,6 +1641,50 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(ref, res)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/180948")
+    @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @config.patch(
+        emulate_precision_casts=False,
+        emulate_precision_casts_on_saved_tensors=True,
+    )
+    def test_saved_lowp_checkpoint_truncates_subsequent_uses(self, lowp_dtype):
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        torch.manual_seed(0)
+        lowp_name = str(lowp_dtype).removeprefix("torch.")
+
+        def policy(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.sigmoid.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy)
+
+        def g(x):
+            y = torch.sigmoid(x)
+            return y * y
+
+        def fn(x):
+            return checkpoint(g, x, use_reentrant=False, context_fn=context_fn)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = (torch.randn(64, device=device_type, dtype=lowp_dtype) * 3).requires_grad_(
+            True
+        )
+
+        expected = fn(x)
+        actual, (code,) = run_and_get_code(
+            opt_fn, x.detach().clone().requires_grad_(True)
+        )
+
+        torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        self.assertIn(f".to(tl.{lowp_name})", code)
+
     @parametrize("lowp_dtype", [torch.bfloat16, torch.float16])
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_preserves_explicit_precision_cast(
@@ -1725,6 +1800,7 @@ class CudaReproTests(TestCase):
                     atol=1e-3,
                 )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163765")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_mean_ratio_chain(self):
         torch.manual_seed(12345)
@@ -2109,6 +2185,43 @@ class CudaReproTests(TestCase):
         out2 = compiled_scan(a, b)
         self.assertEqual(out1, out2)
 
+    def test_associative_scan_dynamic_ndim(self):
+        if device_type != "cuda":
+            raise unittest.SkipTest("associative_scan pointwise lowering requires CUDA")
+
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        def add_combine(a, b):
+            return a + b
+
+        def scan_dim0(x):
+            return associative_scan(add_combine, x, dim=0)
+
+        x1 = torch.randn(7, device=device_type)
+        torch.compiler.reset()
+        compiled_1d = torch.compile(scan_dim0, dynamic=True)
+        self.assertEqual(torch.cumsum(x1, 0), compiled_1d(x1))
+
+        x2 = torch.randn(4, 8, device=device_type)
+        torch.compiler.reset()
+        compiled_static = torch.compile(scan_dim0)
+        self.assertEqual(torch.cumsum(x2, 0), compiled_static(x2))
+
+        torch.compiler.reset()
+        compiled_dynamic = torch.compile(scan_dim0, dynamic=True)
+        self.assertEqual(torch.cumsum(x2, 0), compiled_dynamic(x2))
+
+        def mul_combine(a, b):
+            return a * b
+
+        def scan_dim1(x):
+            return associative_scan(mul_combine, x, dim=1)
+
+        x3 = torch.randn(2, 9, 5, device=device_type).clamp(-2, 2)
+        torch.compiler.reset()
+        compiled_3d = torch.compile(scan_dim1, dynamic=True)
+        self.assertEqual(scan_dim1(x3), compiled_3d(x3))
+
     def test_dynamic_persistent_reductions(self):
         @torch.compile(dynamic=True)
         def inner_reduce(x):
@@ -2195,6 +2308,46 @@ class CudaReproTests(TestCase):
         loss = attn_output.mean()
         loss.backward()
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_mem_eff_attention_backward_non_16_aligned_head_dim(self):
+        for is_causal in (False, True):
+            torch._dynamo.reset()
+            torch.manual_seed(0)
+
+            def fn(q, k, v):
+                return F.scaled_dot_product_attention(
+                    q, k, v, is_causal=is_causal
+                ).sum()
+
+            inputs = [
+                torch.randn(
+                    2,
+                    4,
+                    8,
+                    20,
+                    device=device_type,
+                    dtype=torch.float32,
+                    requires_grad=True,
+                )
+                for _ in range(3)
+            ]
+            eager_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+                expected = fn(*eager_inputs)
+                expected.backward()
+                actual = compiled_fn(*compiled_inputs)
+                actual.backward()
+
+            self.assertEqual(actual, expected)
+            for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
+                self.assertEqual(actual_input.grad, expected_input.grad)
+
     def test_non_contiguous_unaligned_input_indices(self):
         from torch._inductor.compile_fx import remove_unaligned_input_idxs
 
@@ -2214,6 +2367,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(idxs, [0])
 
     @skipIfXpu(msg="cudagraph is not supported on xpu")
+    @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
     def test_unused_cpu_input_cudagraphs(self):
         def fn(x, y):
@@ -2252,6 +2406,7 @@ class CudaReproTests(TestCase):
             self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
 
     @skipIfXpu(msg="cudagraph is not supported on xpu")
+    @skipIfCachingAllocatorDisabled
     @config.patch("triton.cudagraphs", True)
     def test_cpu_index(self):
         @torch.compile(fullgraph=True)
@@ -2554,6 +2709,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163701")
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         counters.clear()
@@ -2775,6 +2931,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(eager_out, compile_out)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163689")
     @skipIfXpu(
         msg="Explicit attn_mask should not be set when is_causal=True - torch-xpu-ops: 2802"
     )
@@ -2986,6 +3143,51 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         x = torch.randn(1000, device=device_type, dtype=torch.float32) + 0.1
         self.common(fn, [x])
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skipIfRocm(msg="PTX atan codegen is CUDA-specific")
+    @skipIfXpu(msg="PTX atan codegen is CUDA-specific")
+    def test_atan_special_psi_eager_parity(self):
+        def atan_fn(x):
+            return torch.ops.aten.atan(x)
+
+        def fn(x):
+            out = atan_fn(x)
+            return torch.ops.aten.special_psi(out, out=out)
+
+        atan_x = torch.tensor(
+            [
+                -float("inf"),
+                -10.0,
+                -1.5516796112060547,
+                -1.0,
+                -0.0,
+                0.0,
+                1.0,
+                1.5516796112060547,
+                10.0,
+                float("inf"),
+                float("nan"),
+            ],
+            device=device_type,
+        )
+        actual_atan = torch.compile(atan_fn, backend="inductor", fullgraph=True)(atan_x)
+        expected_atan = atan_fn(atan_x)
+        self.assertEqual(
+            actual_atan.view(torch.uint32),
+            expected_atan.view(torch.uint32),
+        )
+
+        # Selected from the original seed-0 repro where a 1 ULP atan difference
+        # was amplified by special_psi into an assert_close failure.
+        x = torch.tensor([-1.5516796112060547], device=device_type)
+        actual, code = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x
+        )
+        expected = fn(x)
+
+        torch.testing.assert_close(actual, expected)
+        self.assertTrue(any("rcp.approx.ftz.f32" in src for src in code))
 
     def test_vector_norm_negative_dim_size_one(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/182181

@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 
 __TestCase = CPythonTestCase
 
@@ -426,6 +426,10 @@ class _TestErrorHandling:
 
     # Issue #17278: the heap may change size while it's being walked.
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_heappush_mutating_heap(self):
         heap = []
         heap.extend(SideEffectLT(i, heap) for i in range(200))
@@ -433,6 +437,10 @@ class _TestErrorHandling:
         with self.assertRaises((IndexError, RuntimeError)):
             self.module.heappush(heap, SideEffectLT(5, heap))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_heappop_mutating_heap(self):
         heap = []
         heap.extend(SideEffectLT(i, heap) for i in range(200))
@@ -440,6 +448,10 @@ class _TestErrorHandling:
         with self.assertRaises((IndexError, RuntimeError)):
             self.module.heappop(heap)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_comparison_operator_modifiying_heap(self):
         # See bpo-39421: Strong references need to be taken
         # when comparing objects as they can alter the heap
@@ -452,6 +464,10 @@ class _TestErrorHandling:
         self.module.heappush(heap, EvilClass(0))
         self.assertRaises(IndexError, self.module.heappushpop, heap, 1)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "__build_class__ with closed over objects not supported",
+    )
     def test_comparison_operator_modifiying_heap_two_heaps(self):
 
         class h(int):

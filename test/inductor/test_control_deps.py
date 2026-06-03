@@ -326,6 +326,84 @@ class TestControlDeps(InductorTestCase):
             f"void_names={void_names}, referenced={referenced}",
         )
 
+    def test_reinplace_not_blocked_by_control_deps_ordering_dep(self):
+        """Views in control_deps' ordering-only deps should not block reinplacing.
+
+        When a tensor appears only in control_deps' additional_deps (args[0])
+        and NOT in the pass-through args (args[2:]), it is an ordering-only
+        dependency.  The reinplace pass must not treat this as a real data use.
+        """
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch._inductor.fx_passes.reinplace import (
+            _is_control_deps_ordering_only_use,
+        )
+
+        g = torch.fx.Graph()
+        view = g.placeholder("view")
+        other = g.placeholder("other")
+        subgraph = g.placeholder("subgraph")
+
+        # view only in ordering deps (args[0]) -> ordering only, not a real use
+        ctrl = g.call_function(control_deps, args=((view,), subgraph, other))
+        self.assertTrue(_is_control_deps_ordering_only_use(ctrl, view))
+
+        # view in both ordering deps AND pass-through -> real data use
+        ctrl2 = g.call_function(control_deps, args=((view,), subgraph, view))
+        self.assertFalse(_is_control_deps_ordering_only_use(ctrl2, view))
+
+        # view only in pass-through, not in ordering deps -> real data use
+        ctrl3 = g.call_function(control_deps, args=((other,), subgraph, view))
+        self.assertFalse(_is_control_deps_ordering_only_use(ctrl3, view))
+
+        # non-control_deps node -> not ordering only
+        add = g.call_function(torch.ops.aten.add.Tensor, args=(view, other))
+        self.assertFalse(_is_control_deps_ordering_only_use(add, view))
+
+    @requires_gpu()
+    def test_control_deps_passthrough_creates_mutation_output(self):
+        """Pass-through values in control_deps must create MutationOutput.
+
+        When an input passes through control_deps unchanged, the subgraph
+        operations add MutationOutput entries so the scheduler's mutation
+        rename chain forces consumers after the subgraph boundary.
+        """
+        from torch._inductor.virtualized import V
+
+        captured: list[dict] = []
+
+        def capture(nodes):
+            mutation_count = 0
+            for op in V.graph.operations:
+                if hasattr(op, "mutation_outputs"):
+                    mutation_count += len(op.mutation_outputs)
+            captured.append({"mutation_count": mutation_count})
+            return nodes
+
+        def fn(x):
+            s = torch.Stream(device=GPU_TYPE)
+            e = torch.Event()
+            with s:
+                y = x + 1
+                e.record()
+            e.wait()
+            return y * 2
+
+        torch._dynamo.reset()
+        with config.patch(_pre_fusion_custom_pass=capture):
+            x = torch.ones(4, device=GPU_TYPE)
+            result = torch.compile(fn)(x)
+
+        expected = fn(torch.ones(4, device=GPU_TYPE))
+        torch.testing.assert_close(result, expected)
+
+        self.assertTrue(captured, "expected at least one Inductor compile")
+        total_mutations = sum(c["mutation_count"] for c in captured)
+        self.assertGreater(
+            total_mutations,
+            0,
+            "expected MutationOutput entries for pass-through values in control_deps",
+        )
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:

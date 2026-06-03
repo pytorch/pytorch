@@ -16,7 +16,7 @@ from torch.utils._runtime_estimation import (
 
 
 if TYPE_CHECKING:
-    from .schemas import ViewAndMutationMeta  # noqa: TC004
+    from .schemas import ViewAndMutationMeta
 
 from .indexed_dict import IndexedDict
 
@@ -177,7 +177,7 @@ def handle_synced_deallocation(
         raise AssertionError(
             "allocating and side stream should be different for synced deallocations"
         )
-    if not torch.cuda.is_available():
+    if not torch.accelerator.is_available():
         # fallback to record_stream in this case
         with graph.inserting_after(node):
             graph.call_function(
@@ -383,8 +383,7 @@ def _expand_dict_returning_deps(
     for dep in deps:
         if not (
             dep.op == "call_function"
-            and dep.target
-            is torch.ops.higher_order.triton_kernel_wrapper_functional
+            and dep.target is torch.ops.higher_order.triton_kernel_wrapper_functional
         ):
             expanded.append(dep)
             continue
@@ -403,9 +402,7 @@ def _expand_dict_returning_deps(
         with graph.inserting_before(sync_node):
             for old_gi in after_sync_getitems:
                 key = old_gi.args[1]
-                new_gi = graph.call_function(
-                    operator.getitem, args=(dep, key)
-                )
+                new_gi = graph.call_function(operator.getitem, args=(dep, key))
                 new_gi.meta.update(old_gi.meta)
                 visited.add(new_gi)
                 expanded.append(new_gi)
