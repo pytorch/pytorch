@@ -7779,6 +7779,15 @@ class Scheduler:
             ]
             if not relevant_reads:
                 continue
+            device = node2.get_device()
+            if device is not None and (
+                (device.type == "cpu" and config.cpu_backend == "halide")
+                or (device.type == "cuda" and config.cuda_backend == "halide")
+            ):
+                # Halide autoschedules may overcompute output tiles via
+                # TailStrategy::ShiftInwards.  That is only semantics-preserving
+                # if the output is not also an input read by the fused producer.
+                return False
             num_concurrent_reads += 1
             if not all(
                 isinstance(read, MemoryDep)
