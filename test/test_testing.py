@@ -405,6 +405,7 @@ if __name__ == '__main__':
             self.assertIn('errors=1', stderr)
 
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/106308")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
@@ -580,6 +581,7 @@ class TestEnvironmentDefFlag(TestCase):
     """Verify env-var-vs-implication precedence in TestEnvironment.def_flag."""
 
     def setUp(self):
+        super().setUp()
         import torch.testing._internal.common_utils as _cu
         self._cu = _cu
         self._defined: list[str] = []
@@ -2465,6 +2467,8 @@ class TestImports(TestCase):
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
+                           "torch._native.ops.scatter_add",  # depends on cutlass
+                           "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
@@ -2475,6 +2479,7 @@ class TestImports(TestCase):
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
+                           "torch._vendor.quack",  # depends on cutlass / cuda-python
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac

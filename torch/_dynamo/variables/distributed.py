@@ -20,7 +20,7 @@ checks and proper tracking of distributed state and operations across processes.
 
 import functools
 import inspect
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState
@@ -35,7 +35,7 @@ from .base import VariableTracker
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 class DistributedVariable(VariableTracker):
@@ -70,11 +70,13 @@ class DistributedVariable(VariableTracker):
         # check if the distributed package is available or not
         return torch.distributed.is_available()
 
-    def is_python_hashable(self) -> Literal[True]:
-        return True
+    def hash_impl(self, tx: Any) -> tuple[int, bool]:
+        return hash(self.value), False
 
-    def get_python_hash(self) -> int:
-        return hash(self.value)
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
 
     def is_python_equal(self, other: object) -> bool:
         return (
@@ -132,14 +134,22 @@ class WorldMetaClassVariable(DistributedVariable):
     def python_type(self) -> type:
         return type(self.value)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if name == "WORLD":
-            assert self.source
+            if not self.source:
+                raise AssertionError(
+                    "WorldMetaClassVariable requires a source for WORLD attribute"
+                )
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return VariableTracker.build(tx, self.value.WORLD, source)
         elif name == "NON_GROUP_MEMBER":
-            assert self.source
+            if not self.source:
+                raise AssertionError(
+                    "WorldMetaClassVariable requires a source for NON_GROUP_MEMBER attribute"
+                )
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER, source)
@@ -154,7 +164,7 @@ class BackwardHookVariable(VariableTracker):
 
     @staticmethod
     def create(
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         module: VariableTracker,
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
@@ -231,7 +241,7 @@ class BackwardHookVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -241,7 +251,10 @@ class BackwardHookVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
     def _setup_hook(
-        self, tx: "InstructionTranslator", hook_method_name: str, args: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        hook_method_name: str,
+        args: VariableTracker,
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 

@@ -29,12 +29,13 @@ Error Formatting:
 import json
 import logging
 import re
+import sys
 import textwrap
 import typing
 from enum import auto, Enum
 from functools import lru_cache
 from pathlib import Path
-from traceback import extract_stack, format_exc, format_list, FrameSummary, StackSummary
+from traceback import format_exc, format_list, FrameSummary, StackSummary
 from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch._guards
@@ -183,7 +184,8 @@ class ShortenTraceback(TorchDynamoException):
             return self
         while tb.tb_frame is not self.first_useful_frame:
             tb = tb.tb_next
-            assert tb is not None, "internal error, please report a bug"
+            if tb is None:
+                raise AssertionError("internal error, please report a bug")
         return self.with_traceback(tb)
 
 
@@ -228,7 +230,8 @@ class Unsupported(TorchDynamoException):
         self.logged = False
 
     def remove_from_stats(self) -> None:
-        assert self.category is not None
+        if self.category is None:
+            raise AssertionError("category must be set before removing from stats")
         counters[self.category][self.msg] -= 1
         if counters[self.category][self.msg] <= 0:
             del counters[self.category][self.msg]
@@ -281,7 +284,8 @@ class UserError(TorchDynamoException):
         case_name: (Optional) Unique name (snake case) for the usage example in exportdb.
         """
         if case_name is not None:
-            assert isinstance(case_name, str)
+            if not isinstance(case_name, str):
+                raise AssertionError(f"case_name must be a str, got {type(case_name)}")
             if msg.endswith("."):
                 msg += " "
             else:
@@ -446,7 +450,8 @@ def raise_observed_exception(
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
         tx, args_, kwargs or {}
     )
-    assert isinstance(exception_vt, ExceptionVals)
+    if not isinstance(exception_vt, ExceptionVals):
+        raise AssertionError(f"expected ExceptionVals, got {type(exception_vt)}")
     tx._attach_traceback_to_exception(exception_vt)
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raised_exc = get_dynamo_observed_exception(exc_type)
@@ -748,8 +753,39 @@ def get_exc_message(
     return filename, lineno
 
 
+def _extract_stack_with_positions() -> StackSummary:
+    # traceback.extract_stack() does not populate colno/end_colno on
+    # FrameSummary, even though the data is available on live frames via
+    # f_lasti + co_positions(). This means traceback.format_list() never
+    # renders caret annotations for stacks captured this way. We do it
+    # manually here so that "stack above dynamo" frames get carets.
+    stack = StackSummary()
+    frame = sys._getframe(1)
+    while frame is not None:
+        code = frame.f_code
+        # colno/end_colno kwargs were added to FrameSummary in 3.11
+        kwargs: dict[str, Any] = {}
+        if sys.version_info >= (3, 11) and frame.f_lasti >= 0:
+            positions = list(code.co_positions())
+            idx = frame.f_lasti // 2
+            if idx < len(positions):
+                _, _, kwargs["colno"], kwargs["end_colno"] = positions[idx]
+        stack.append(
+            FrameSummary(
+                code.co_filename,
+                frame.f_lineno,
+                code.co_name,
+                lookup_line=False,
+                **kwargs,
+            )
+        )
+        frame = frame.f_back
+    stack.reverse()
+    return stack
+
+
 def get_stack_above_dynamo() -> StackSummary:
-    return filter_stack(extract_stack())
+    return filter_stack(_extract_stack_with_positions())
 
 
 def get_real_stack(

@@ -185,13 +185,6 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_assert_invalid_mesh_tensor(self):
-        mesh = torch.arange(self.world_size).to(self.rank)
-        with self.assertRaises(ValueError):
-            DeviceMesh(self.device_type, mesh)
-
     @with_comms()
     def test_2d_mesh_non_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)

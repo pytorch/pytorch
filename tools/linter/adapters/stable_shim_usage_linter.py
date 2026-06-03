@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import re
 import sys
 from pathlib import Path
 
@@ -21,8 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
+    IdentifierMatcher,
     LintMessage,
     LintSeverity,
+    MULTILINE_MATCHERS,
     PreprocessorTracker,
 )
 
@@ -32,7 +33,7 @@ LINTER_CODE = "STABLE_SHIM_USAGE"
 
 def get_shim_functions(
     shim_files: list[Path | str] | None = None,
-) -> dict[str, tuple[int, int]]:
+) -> dict[str, tuple[int, int, int]]:
     """
     Extract function names from shim header files and their required version.
     Returns a dict mapping function name to (major, minor) version tuple.
@@ -41,15 +42,20 @@ def get_shim_functions(
     Functions without version guards are ignored.
 
     Args:
-        shim_files: List of paths to shim header files. If None, will use the default
-                    paths to torch/csrc/stable/c/shim.h and
-                    torch/csrc/inductor/aoti_torch/c/shim.h based on the repository root.
+        shim_files: List of paths to shim header files. If None, will use the
+                    default set of shim headers under torch/csrc/stable and
+                    torch/csrc/inductor/aoti_torch (including generated shims)
     """
     if shim_files is None:
         repo_root = Path(__file__).resolve().parents[3]
         shim_files_to_check = [
             repo_root / "torch/csrc/stable/c/shim.h",
             repo_root / "torch/csrc/inductor/aoti_torch/c/shim.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_mps.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/generated/c_shim_xpu.h",
         ]
     else:
         shim_files_to_check = [Path(f) for f in shim_files]
@@ -62,66 +68,33 @@ def get_shim_functions(
             "Ensure all shim header files exist in the repository."
         )
 
-    functions: dict[str, tuple[int, int]] = {}
-
-    # Match function declarations like: AOTI_TORCH_EXPORT ... function_name(
-    function_pattern = re.compile(r"AOTI_TORCH_EXPORT.+?(\w+)\s*\(")
-    # Also match typedef function pointers
-    typedef_pattern = re.compile(r"typedef\s+.*\(\*(\w+)\)")
-    # Match using declarations like: using TypeName = ...
-    using_pattern = re.compile(r"using\s+(\w+)\s*=")
-    # Match struct/class declarations like: struct StructName or class ClassName
-    struct_class_pattern = re.compile(r"(?:struct|class)\s+(\w+)")
+    identifiers: dict[str, tuple[int, int, int]] = {}
 
     for shim_file in shim_files_to_check:
         with open(shim_file) as f:
             lines = f.readlines()
 
-        tracker = PreprocessorTracker()
+        tracker = PreprocessorTracker(MULTILINE_MATCHERS)
 
         for line in lines:
-            is_directive_or_comment = tracker.process_line(line)
+            tracker.process_line(line)
+            for identifier_version in tracker.identifiers_used():
+                # Only look for function declarations if not a comment/directive and inside a version block
+                if identifier_version.version is None:
+                    continue
+                identifiers[identifier_version.identifier] = identifier_version.version
 
-            # Only look for function declarations if not a comment/directive and inside a version block
-            if not is_directive_or_comment:
-                version_of_block = tracker.get_version_of_block()
-                if version_of_block:
-                    stripped = line.strip()
-                    func_match = function_pattern.search(stripped)
-                    if func_match:
-                        func_name = func_match.group(1)
-                        functions[func_name] = version_of_block
-                        continue
-
-                    typedef_match = typedef_pattern.search(stripped)
-                    if typedef_match:
-                        func_name = typedef_match.group(1)
-                        functions[func_name] = version_of_block
-                        continue
-
-                    using_match = using_pattern.search(stripped)
-                    if using_match:
-                        type_name = using_match.group(1)
-                        functions[type_name] = version_of_block
-                        continue
-
-                    struct_class_match = struct_class_pattern.search(stripped)
-                    if struct_class_match:
-                        type_name = struct_class_match.group(1)
-                        functions[type_name] = version_of_block
-                        continue
-
-    if not functions:
+    if not identifiers:
         raise RuntimeError(
             "Could not find any versioned shim functions. "
             "Ensure at least one of the shim files exists and contains versioned functions."
         )
 
-    return functions
+    return identifiers
 
 
 def write_shim_function_versions(
-    functions: dict[str, tuple[int, int]],
+    functions: dict[str, tuple[int, int, int]],
     output_file: Path | str | None = None,
 ) -> None:
     """
@@ -155,12 +128,12 @@ def write_shim_function_versions(
         )
         f.write("# DO NOT EDIT MANUALLY.\n\n")
 
-        for func_name, (major, minor) in sorted_functions:
-            f.write(f"{func_name}: TORCH_VERSION_{major}_{minor}_0\n")
+        for func_name, (major, minor, patch) in sorted_functions:
+            f.write(f"{func_name}: TORCH_VERSION_{major}_{minor}_{patch}\n")
 
 
 def check_file(
-    filename: str, shim_functions: dict[str, tuple[int, int]]
+    filename: str, shim_functions: dict[str, tuple[int, int, int]]
 ) -> list[LintMessage]:
     """
     Check the input file for proper usage of versioned shim functions.
@@ -174,71 +147,70 @@ def check_file(
     with open(filename) as f:
         lines = f.readlines()
 
-    tracker = PreprocessorTracker()
+    # Generate the matchers from the provided function names.
+    matchers = [
+        IdentifierMatcher.word(function_name) for function_name in shim_functions
+    ]
+
+    tracker = PreprocessorTracker(matchers)
 
     for line_num, line in enumerate(lines, 1):
-        is_directive_or_comment = tracker.process_line(line)
+        tracker.process_line(line)
+        for identifier_version in tracker.identifiers_used():
+            version_of_block = identifier_version.version
+            func_name = identifier_version.identifier
+            required_version = shim_functions[func_name]
 
-        if is_directive_or_comment:
-            continue
+            major, minor, patch = required_version
+            required_macro = f"TORCH_VERSION_{major}_{minor}_{patch}"
 
-        version_of_block = tracker.get_version_of_block()
-
-        for func_name, required_version in shim_functions.items():
-            # Look for:
-            # 1. Function calls like: func_name(
-            # 2. Type usage like: func_name variable_name
-            # Use word boundaries to avoid matching partial names
-
-            if re.search(rf"\b{re.escape(func_name)}\b", line):
-                major, minor = required_version
-                required_macro = f"TORCH_VERSION_{major}_{minor}_0"
-
-                if version_of_block is None:
-                    # Not inside any version block
-                    lint_messages.append(
-                        LintMessage(
-                            path=filename,
-                            line=line_num,
-                            char=None,
-                            code=LINTER_CODE,
-                            severity=LintSeverity.ERROR,
-                            name="unversioned-shim-call",
-                            original=None,
-                            replacement=None,
-                            description=(
-                                f"Usage '{func_name}' from shim.h is not wrapped "
-                                f"in a TORCH_FEATURE_VERSION block. This function requires at least:\n"
-                                f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
-                                f"  // ... your code calling {func_name} ...\n"
-                                f"#endif // TORCH_FEATURE_VERSION >= {required_macro}"
-                            ),
-                        )
+            if version_of_block is None:
+                # Not inside any version block
+                lint_messages.append(
+                    LintMessage(
+                        path=filename,
+                        line=line_num,
+                        char=None,
+                        code=LINTER_CODE,
+                        severity=LintSeverity.ERROR,
+                        name="unversioned-shim-call",
+                        original=None,
+                        replacement=None,
+                        description=(
+                            f"Usage '{func_name}' from shim.h is not wrapped "
+                            f"in a TORCH_FEATURE_VERSION block. This function requires at least:\n"
+                            f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
+                            f"  // ... your code calling {func_name} ...\n"
+                            f"#endif // TORCH_FEATURE_VERSION >= {required_macro}"
+                        ),
                     )
-                elif version_of_block < required_version:
-                    # Inside a version block, but version is too old
-                    current_major, current_minor = version_of_block
-                    current_macro = f"TORCH_VERSION_{current_major}_{current_minor}_0"
-                    lint_messages.append(
-                        LintMessage(
-                            path=filename,
-                            line=line_num,
-                            char=None,
-                            code=LINTER_CODE,
-                            severity=LintSeverity.ERROR,
-                            name="insufficient-version-for-shim-call",
-                            original=None,
-                            replacement=None,
-                            description=(
-                                f"Use of '{func_name}' is wrapped in {current_macro}, "
-                                f"but this function requires at least {required_macro}. "
-                                f"The version guard must be at least the required version:\n"
-                                f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
-                                f"  // ... your code calling {func_name} ...\n"
-                                f"#endif // TORCH_FEATURE_VERSION >= {required_macro}"
-                            ),
-                        )
+                )
+            elif version_of_block < required_version:
+                # Inside a version block, but version is too old
+                current_major, current_minor, current_patch = version_of_block
+                current_macro = (
+                    f"TORCH_VERSION_{current_major}_{current_minor}_{current_patch}"
+                )
+                lint_messages.append(
+                    LintMessage(
+                        path=filename,
+                        line=line_num,
+                        char=None,
+                        code=LINTER_CODE,
+                        severity=LintSeverity.ERROR,
+                        name="insufficient-version-for-shim-call",
+                        original=None,
+                        replacement=None,
+                        description=(
+                            f"Use of '{func_name}' is wrapped in {current_macro}, "
+                            f"but this function requires at least {required_macro}. "
+                            f"The version guard must be at least the required version:\n"
+                            f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
+                            f"  // ... your code calling {func_name} ...\n"
+                            f"#endif // TORCH_FEATURE_VERSION >= {required_macro}"
+                        ),
                     )
+                )
 
     return lint_messages
 

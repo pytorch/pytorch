@@ -371,8 +371,9 @@ static PyObject* THPEngine_run_backward(
     for (const auto i : c10::irange(num_inputs)) {
       TORCH_CHECK(
           allow_unreachable || outputs[i].defined(),
-          "One of the "
-          "differentiated Tensors appears to not have been used "
+          "The differentiated Tensor at index ",
+          i,
+          " appears to not have been used "
           "in the graph. Set allow_unused=True if this is the "
           "desired behavior.");
       PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));

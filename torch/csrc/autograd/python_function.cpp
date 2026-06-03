@@ -32,6 +32,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -117,8 +118,7 @@ static PyObject* unpack_saved_variables(
     auto unpacked_var = saved_variables[i].unpack(saved_for);
     THPObjectPtr value;
     if (!unpacked_var.defined()) {
-      Py_INCREF(Py_None);
-      value = Py_None;
+      value = Py_NewRef(Py_None);
     } else {
       value = unpack_fn(unpacked_var);
     }
@@ -262,27 +262,30 @@ auto PyNode::apply_with_saved_impl(
   for (const auto i : c10::irange(is_variable_input.size())) {
     if (!is_variable_input[i]) {
       // input at i is not a variable, skip index
-      PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, Py_None);
+      PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, Py_NewRef(Py_None));
       offset++;
       continue;
     }
 
     const auto& input_info = input_infos[i - offset];
 
-    PyObject* device(THPDevice_New(input_info.device));
+    THPObjectPtr device(THPDevice_New(input_info.device));
     if (!device)
       throw_python_error();
     // Metadata is a tuple of 4 elements: (layout, device, dtype, size)
-    PyObject* fwdInputMetadata = PyTuple_Pack(
-        4,
-        autograd::utils::wrap(input_info.layout),
-        device,
-        autograd::utils::wrap(input_info.scalar_type),
-        to_py_size(input_info.size));
+    THPObjectPtr fwdInputMetadata(PyTuple_New(4));
     if (!fwdInputMetadata)
       throw python_error();
+    PyTuple_SET_ITEM(
+        fwdInputMetadata.get(), 0, autograd::utils::wrap(input_info.layout));
+    PyTuple_SET_ITEM(fwdInputMetadata.get(), 1, device.release());
+    PyTuple_SET_ITEM(
+        fwdInputMetadata.get(),
+        2,
+        autograd::utils::wrap(input_info.scalar_type));
+    PyTuple_SET_ITEM(fwdInputMetadata.get(), 3, to_py_size(input_info.size));
 
-    PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, fwdInputMetadata);
+    PyTuple_SET_ITEM(fwdInputMetadatas.get(), i, fwdInputMetadata.release());
   }
   THPObjectPtr saved_tensors(unpack_saved_variables(
       py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
@@ -290,11 +293,13 @@ auto PyNode::apply_with_saved_impl(
   auto [bwd_idx, maybe_bwd_state_idx, opaque_obj_indices] =
       saved.retrieve_pynode_objs(this);
 
-  PyObject* backward_state_idx = Py_None;
+  THPObjectPtr backward_state_idx;
   if (maybe_bwd_state_idx.has_value()) {
     backward_state_idx = THPUtils_packUInt64(maybe_bwd_state_idx.value());
     // this might be simplifiable now that we no longer inline
     Py_CLEAR(py_fn->compiled_autograd_backward_state);
+  } else {
+    backward_state_idx = Py_NewRef(Py_None);
   }
 
   THPObjectPtr opaque_indices_list(
@@ -318,7 +323,7 @@ auto PyNode::apply_with_saved_impl(
       saved_tensors.get(),
       bwd_idx,
       pyobj(),
-      backward_state_idx,
+      backward_state_idx.get(),
       opaque_indices_list.get()));
 
   if (!r)
@@ -477,7 +482,7 @@ PyObject* PyNode::to_py_args(
   };
 
   auto num_inputs = inputs.size();
-  PyObject* pyInputs = PyTuple_New(static_cast<Py_ssize_t>(num_inputs));
+  THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
   if (!pyInputs)
     throw_python_error();
   auto& output_info = py_fn->output_info;
@@ -493,10 +498,10 @@ PyObject* PyNode::to_py_args(
     }
     if (!input)
       throw_python_error();
-    PyTuple_SET_ITEM(pyInputs, i, input);
+    PyTuple_SET_ITEM(pyInputs.get(), i, input);
   }
 
-  return pyInputs;
+  return pyInputs.release();
 }
 
 variable_list PyNode::to_variable_list(
@@ -706,8 +711,7 @@ static void _wrap_outputs(
         }
         variable_idx++;
       } else {
-        Py_INCREF(Py_None);
-        input = Py_None;
+        input = Py_NewRef(Py_None);
       }
       PyTuple_SET_ITEM(pyInputs.get(), i, input);
     }
@@ -940,7 +944,6 @@ struct InputFlags {
 };
 
 namespace {
-template <bool enforce_variables>
 std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
   UnpackedInput unpacked;
   InputFlags flags;
@@ -957,15 +960,8 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
     bool is_variable = THPVariable_Check(arg);
     flags.is_variable_input.push_back(is_variable);
     if (!is_variable) {
-      // TODO: remove this code path once Variable and Tensor are merged in
-      // Python
-      if (enforce_variables) {
-        THPUtils_setError(
-            "expected a Tensor argument, but got ", THPUtils_typename(arg));
-        throw python_error();
-      }
-      Py_INCREF(Py_False);
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
+      // Non-tensor argument: it can't require grad.
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_NewRef(Py_False));
 
       if (profiler_need_input) {
         // The following conversion from PyObject to IValue is expensive
@@ -1217,8 +1213,7 @@ PyObject* process_outputs(
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {
     PyObject* output = PyTuple_GET_ITEM(outputs.get(), 0);
-    Py_INCREF(output);
-    return output;
+    return Py_NewRef(output);
   }
 
   return outputs.release();
@@ -1349,12 +1344,170 @@ static PyObject* get_base_setup_context() {
   return setup_context;
 }
 
-PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
+// Given cls (a Function subclass), args, and kwargs, resolve kwargs into
+// positional arguments by inspecting the forward method's signature.
+// Returns a new reference to a tuple of positional args.
+//
+// Uses co_varnames/co_argcount directly instead of inspect.signature to
+// stay in C on this hot path. This means we don't handle *args, **kwargs,
+// defaults, or decorated/wrapped forwards correctly.
+static PyObject* resolve_kwargs_to_positional(
+    PyObject* cls,
+    PyObject* args,
+    PyObject* kwargs) {
+  if (!kwargs || PyDict_Size(kwargs) == 0) {
+    return Py_NewRef(args);
+  }
+
+  THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
+  if (!forward_fn)
+    return nullptr;
+
+  PyObject* func = forward_fn.get();
+  THPObjectPtr code_py(PyObject_GetAttrString(func, "__code__"));
+  if (!code_py)
+    return nullptr;
+  if (!PyCode_Check(code_py.get())) {
+    PyErr_SetString(PyExc_TypeError, "forward().__code__ is not a code object");
+    return nullptr;
+  }
+  PyCodeObject* code = (PyCodeObject*)code_py.get();
+
+  Py_ssize_t co_argcount = code->co_argcount;
+  THPObjectPtr varnames_obj(PyCode_GetVarnames(code));
+  if (!varnames_obj)
+    return nullptr;
+
+  // Determine if forward takes ctx as first arg.
+  // If setup_context is overridden, forward does NOT take ctx.
+  auto cls_setup_context =
+      THPObjectPtr(PyObject_GetAttrString(cls, "setup_context"));
+  if (!cls_setup_context)
+    return nullptr;
+  auto orig_setup_context = get_base_setup_context();
+  if (!orig_setup_context)
+    return nullptr;
+  bool has_ctx = (cls_setup_context.get() == orig_setup_context);
+
+  // param_offset: number of leading params to skip (ctx for old-style)
+  Py_ssize_t param_offset = has_ctx ? 1 : 0;
+
+  // Number of user-visible parameters (excluding ctx)
+  Py_ssize_t num_params = co_argcount - param_offset;
+  Py_ssize_t num_positional = PyTuple_GET_SIZE(args);
+
+  // Validate kwargs and find the max positional index they map to.
+  // We do this before the count check so that "multiple values for argument"
+  // takes priority over "takes N positional arguments but M were given".
+  Py_ssize_t max_kwarg_idx = num_positional - 1;
+  {
+    PyObject* key = nullptr;
+    PyObject* value = nullptr;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(kwargs, &pos, &key, &value)) {
+      if (!PyUnicode_Check(key)) {
+        PyErr_SetString(PyExc_TypeError, "keywords must be strings");
+        return nullptr;
+      }
+
+      Py_ssize_t param_idx = -1;
+      for (Py_ssize_t i = param_offset; i < co_argcount; i++) {
+        PyObject* varname = PyTuple_GET_ITEM(varnames_obj.get(), i);
+        if (PyUnicode_Compare(key, varname) == 0) {
+          param_idx = i - param_offset;
+          break;
+        }
+      }
+
+      if (param_idx < 0) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "forward() got an unexpected keyword argument '%U'",
+            key);
+        return nullptr;
+      }
+
+      if (param_idx < num_positional) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "forward() got multiple values for argument '%U'",
+            key);
+        return nullptr;
+      }
+
+      if (param_idx > max_kwarg_idx) {
+        max_kwarg_idx = param_idx;
+      }
+    }
+  }
+
+  Py_ssize_t total_args = max_kwarg_idx + 1;
+  if (total_args > num_params) {
+    PyErr_Format(
+        PyExc_TypeError,
+        "forward() takes %zd positional arguments but %zd were given",
+        num_params,
+        total_args);
+    return nullptr;
+  }
+
+  // Build result tuple
+  THPObjectPtr result(PyTuple_New(total_args));
+  if (!result)
+    return nullptr;
+
+  // Copy existing positional args
+  for (Py_ssize_t i = 0; i < num_positional; i++) {
+    PyObject* item = PyTuple_GET_ITEM(args, i);
+    Py_INCREF(item);
+    PyTuple_SET_ITEM(result.get(), i, item);
+  }
+
+  // Place kwargs into their positional slots
+  {
+    PyObject* key = nullptr;
+    PyObject* value = nullptr;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(kwargs, &pos, &key, &value)) {
+      for (Py_ssize_t i = param_offset; i < co_argcount; i++) {
+        PyObject* varname = PyTuple_GET_ITEM(varnames_obj.get(), i);
+        if (PyUnicode_Compare(key, varname) == 0) {
+          Py_INCREF(value);
+          PyTuple_SET_ITEM(result.get(), i - param_offset, value);
+          break;
+        }
+      }
+    }
+  }
+
+  // Check for gaps (kwargs that skip over unfilled positions)
+  for (Py_ssize_t i = 0; i < total_args; i++) {
+    if (PyTuple_GET_ITEM(result.get(), i) == nullptr) {
+      PyObject* varname =
+          PyTuple_GET_ITEM(varnames_obj.get(), i + param_offset);
+      PyErr_Format(
+          PyExc_TypeError,
+          "forward() missing required argument: '%U' (position %zd)",
+          varname,
+          i);
+      return nullptr;
+    }
+  }
+
+  return result.release();
+}
+
+PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
+
+  THPObjectPtr resolved_args(resolve_kwargs_to_positional(cls, args, kwargs));
+  if (!resolved_args)
+    return nullptr;
+  PyObject* inputs = resolved_args.get();
 
   // save a local copy of seq_id before it gets incremented
   auto seq_id = at::sequence_number::peek();
-  auto info_pair = unpack_input<false>(inputs);
+  auto info_pair = unpack_input(inputs);
   UnpackedInput& unpacked_input = info_pair.first;
   InputFlags& input_info = info_pair.second;
 
@@ -1586,8 +1739,7 @@ PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
       "Either access saved_tensors only once, or set "
       "clear_saved_tensors_on_access=False.");
   if (self->saved_for_forward) {
-    Py_INCREF(self->saved_for_forward);
-    return self->saved_for_forward;
+    return Py_NewRef(self->saved_for_forward);
   } else {
     PyObject* result = unpack_saved_variables(
         self, [](const Variable& var) { return THPVariable_Wrap(var); });
@@ -1640,17 +1792,17 @@ PyObject* THPFunction_get_compiled_autograd_symints(
   HANDLE_TH_ERRORS
   auto self = (THPFunction*)_self;
   auto size = self->compiled_autograd_symints.size();
-  PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(size));
+  THPObjectPtr result(PyTuple_New(static_cast<Py_ssize_t>(size)));
   if (!result) {
     throw python_error();
   }
   for (const auto i : c10::irange(size)) {
     PyTuple_SET_ITEM(
-        result,
+        result.get(),
         i,
         py::cast(self->compiled_autograd_symints[i]).release().ptr());
   }
-  return result;
+  return result.release();
   END_HANDLE_TH_ERRORS
 }
 
@@ -1663,8 +1815,7 @@ PyObject* THPFunction_get_compiled_autograd_backward_state(
   if (bw_state == nullptr) {
     bw_state = Py_None;
   }
-  Py_INCREF(bw_state);
-  return bw_state;
+  return Py_NewRef(bw_state);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1745,8 +1896,7 @@ PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
       "please file an issue reporting that you are affected by this.");
   auto metadata = static_cast<PyAnomalyMetadata*>(cdata->metadata())->dict();
 
-  Py_INCREF(metadata);
-  return metadata;
+  return Py_NewRef(metadata);
   END_HANDLE_TH_ERRORS
 }
 } // namespace
@@ -1763,8 +1913,7 @@ PyObject* getObject(PyObject* obj, void* _unused) {
   if (!value) {
     Py_RETURN_NONE;
   }
-  Py_INCREF(value);
-  return value;
+  return Py_NewRef(value);
 }
 
 template <PyObject* THPFunction::* ptr>
@@ -1882,7 +2031,10 @@ static struct PyMethodDef THPFunction_methods[] = {
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,
      nullptr},
-    {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
+    {(char*)"apply",
+     castPyCFunctionWithKeywords(THPFunction_apply),
+     METH_CLASS | METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {(char*)"_register_hook_dict",
      THPFunction__register_hook_dict,
      METH_O,
