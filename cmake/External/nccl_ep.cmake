@@ -6,4 +6,8 @@ if(NOT __NCCL_EP_INCLUDED)
   add_dependencies(__caffe2_nccl_ep nccl_external)
   target_link_libraries(__caffe2_nccl_ep INTERFACE ${NCCL_EP_LIBRARIES})
   target_include_directories(__caffe2_nccl_ep INTERFACE ${NCCL_EP_INCLUDE_DIRS})
+  # libnccl_ep.a's JIT calls CUDA Driver APIs; pull in libcuda.so.
+  if(TARGET CUDA::cuda_driver)
+    target_link_libraries(__caffe2_nccl_ep INTERFACE CUDA::cuda_driver)
+  endif()
 endif()

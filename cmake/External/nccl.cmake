@@ -12,10 +12,9 @@ if(NOT __NCCL_INCLUDED)
   else()
     set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
     if(USE_NCCL_EP)
+      # nccl_ep links the `nccl` CMake target, so NCCL must be CMake-built (not Makefile).
       message(STATUS "Building NCCL with NCCL EP (contrib/nccl_ep) via CMake")
-      # nccl_ep/CMakeLists.txt links against the `nccl` CMake target, so we must
-      # build NCCL via CMake (not Makefile) to get that target in the same tree.
-      # nccl_ep also requires sm_90+, so filter archs accordingly.
+      # nccl_ep requires sm_90+; keep only matching archs, fall back to "90".
       set(__nccl_ep_cuda_archs)
       foreach(_arch IN LISTS CMAKE_CUDA_ARCHITECTURES)
         string(REGEX MATCH "^[0-9]+" _arch_num "${_arch}")
@@ -26,8 +25,10 @@ if(NOT __NCCL_INCLUDED)
       if(NOT __nccl_ep_cuda_archs)
         set(__nccl_ep_cuda_archs "90")
       endif()
+      # Escape ';' so the list reaches ExternalProject_Add as one arg.
       string(REPLACE ";" "\\;" __nccl_ep_cuda_archs "${__nccl_ep_cuda_archs}")
 
+      # BUILD_NCCL_EP=ON also builds contrib/nccl_ep alongside libnccl_static.a.
       ExternalProject_Add(nccl_external
         SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl
         BINARY_DIR ${__NCCL_BUILD_DIR}
@@ -42,6 +43,7 @@ if(NOT __NCCL_INCLUDED)
           "${__NCCL_BUILD_DIR}/lib/libnccl_ep.a"
         INSTALL_COMMAND ""
       )
+      # Consumed by nccl_ep.cmake to wire up __caffe2_nccl_ep.
       set(NCCL_EP_LIBRARIES "${__NCCL_BUILD_DIR}/lib/libnccl_ep.a")
       set(NCCL_EP_INCLUDE_DIRS "${__NCCL_BUILD_DIR}/include")
       message(STATUS "NCCL EP library: ${NCCL_EP_LIBRARIES}")
