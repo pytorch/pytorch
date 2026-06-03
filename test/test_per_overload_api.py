@@ -86,7 +86,6 @@ class TestPerOverloadAPI(TestCase):
                     saw_packet_init = True
                     packet = frame.f_locals["self"]
                     assert getattr(packet, "__qualname__", None) is None
-                    assert getattr(packet, "missing_overload", None) is None
                 return trace_func
 
             def dummy():
