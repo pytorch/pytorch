@@ -381,6 +381,9 @@ class FSDPParam:
         for name in dp_dim_names.shard_names + dp_dim_names.replicate_names:
             axis = spmd.MeshAxis.of(spmd_mesh.get_group(name))
             axis_type = local_type.get(axis)
+            mesh_dim = spmd_mesh.mesh_dim_names.index(name)
+            if axis_type is None and spmd_mesh.size(mesh_dim) == 1:
+                continue
             if axis_type is not spmd.R:
                 raise ValueError(
                     f"Expected spmd.R on DP mesh dim '{name}' for parameter "
