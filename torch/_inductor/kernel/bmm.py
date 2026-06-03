@@ -29,6 +29,7 @@ from ..utils import (
 from ..virtualized import ops, V
 from .mm_common import (
     _is_static_problem,
+    emulate_lowp_native_matmul_output_precision,
     is_batch_stride_largest_or_zero,
     mm_args,
     use_native_matmul,
@@ -184,7 +185,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         mul_pointwise = make_pointwise(ops.dot)(*args)
         dot_reduction = make_reduction("dot")(mul_pointwise, 2)
 
-        return dot_reduction
+        return emulate_lowp_native_matmul_output_precision(
+            dot_reduction, out_dtype or mat1.get_dtype()
+        )
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2 = mm_args(
