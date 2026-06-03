@@ -1,7 +1,7 @@
 {
   "description": "Labels suitable for issue triage. Excludes CI triggers, test configs, release notes, deprecated, PR-only labels, and labels requiring human decision.",
   "repo": "pytorch/pytorch",
-  "count": 285,
+  "count": 284,
   "labels": [
     {
       "name": "better-on-discuss-forum",
@@ -30,10 +30,6 @@
     {
       "name": "fx",
       "description": ""
-    },
-    {
-      "name": "good first issue",
-      "description": "Good for new open source contributors"
     },
     {
       "name": "has workaround",
