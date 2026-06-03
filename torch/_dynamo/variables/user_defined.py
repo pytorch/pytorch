@@ -4434,6 +4434,7 @@ class OrderedDictVariable(UserDefinedDictVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None for OrderedDict repr")
         base_vt = cast(ConstDictVariable, self._base_vt)
+        base_vt.materialize_deferred_keys()
         items = [
             (key.vt.debug_repr(), value.debug_repr())
             for key, value in base_vt.items.items()
@@ -4446,6 +4447,7 @@ class OrderedDictVariable(UserDefinedDictVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None for OrderedDict repr")
         base_vt = cast(ConstDictVariable, self._base_vt)
+        base_vt.materialize_deferred_keys()
         items = [
             (tracked_repr(tx, key.vt), tracked_repr(tx, value))
             for key, value in base_vt.items.items()
@@ -4528,6 +4530,7 @@ class OrderedDictVariable(UserDefinedDictVariable):
         elif name == "popitem":
             if self._base_vt is None:
                 raise AssertionError("_base_vt must not be None in popitem")
+            self._base_vt.materialize_deferred_keys()  # type: ignore[union-attr]
             if not self._base_vt.items:  # type: ignore[union-attr]
                 raise_observed_exception(
                     KeyError, tx, args=["popitem(): dictionary is empty"]

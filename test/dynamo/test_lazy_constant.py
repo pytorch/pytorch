@@ -1,11 +1,25 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import keyword
 
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
+
+
+_lazy_constant_summary = {}
+_lazy_constant_tuple_key_summary = {}
+_lazy_constant_update_summary = {}
+_lazy_constant_value_summary = {}
+_lazy_constant_iter_summary = {}
+_lazy_constant_popitem_summary = {}
+_lazy_constant_delitem_summary = {}
+_lazy_constant_view_summary = {}
+_lazy_constant_repr_summary = {}
+_lazy_constant_ordered_dict_summary = collections.OrderedDict()
+_lazy_constant_ordered_dict_repr_summary = collections.OrderedDict()
 
 
 class LazyConstantVariableTests(TestCase):
@@ -538,6 +552,321 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(eager6[1], compiled6[1])
         self.assertEqual(eager6[2], compiled6[2])
         self.assertEqual(counter_multi.frame_count, 1)
+
+    def test_source_backed_lazy_constant_dict_key_side_effect_replay(self):
+        global _lazy_constant_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                out = torch.sin(x)
+                self.add_summary()
+                return out
+
+            def add_summary(self):
+                global _lazy_constant_summary
+                _lazy_constant_summary[self.name] = 0
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod_a = SubMod("mod_a")
+                self.mod_b = SubMod("mod_b")
+
+            def forward(self, x):
+                global _lazy_constant_summary
+                _lazy_constant_summary = {}
+                x = self.mod_a(x)
+                x = self.mod_b(x)
+                return x
+
+        mod = Mod()
+        mod(torch.randn(4))
+        self.assertEqual(_lazy_constant_summary, {"mod_a": 0, "mod_b": 0})
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+        mod(torch.randn(4))
+        self.assertEqual(_lazy_constant_summary, {"mod_a": 0, "mod_b": 0})
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    def test_source_backed_lazy_constant_tuple_dict_key_side_effect_replay(self):
+        global _lazy_constant_tuple_key_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                out = torch.sin(x)
+                _lazy_constant_tuple_key_summary[(self.name,)] = 0
+                return out
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod_a = SubMod("mod_a")
+                self.mod_b = SubMod("mod_b")
+
+            def forward(self, x):
+                global _lazy_constant_tuple_key_summary
+                _lazy_constant_tuple_key_summary = {}
+                x = self.mod_a(x)
+                x = self.mod_b(x)
+                return x
+
+        mod = Mod()
+        mod(torch.randn(4))
+        self.assertEqual(
+            _lazy_constant_tuple_key_summary, {("mod_a",): 0, ("mod_b",): 0}
+        )
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+        mod(torch.randn(4))
+        self.assertEqual(
+            _lazy_constant_tuple_key_summary, {("mod_a",): 0, ("mod_b",): 0}
+        )
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    def test_source_backed_lazy_constant_dict_update_side_effect_replay(self):
+        global _lazy_constant_update_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                out = torch.sin(x)
+                _lazy_constant_update_summary.update({self.name: 0})
+                return out
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod_a = SubMod("mod_a")
+                self.mod_b = SubMod("mod_b")
+
+            def forward(self, x):
+                global _lazy_constant_update_summary
+                _lazy_constant_update_summary = {}
+                x = self.mod_a(x)
+                x = self.mod_b(x)
+                return x
+
+        mod = Mod()
+        mod(torch.randn(4))
+        self.assertEqual(_lazy_constant_update_summary, {"mod_a": 0, "mod_b": 0})
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+        mod(torch.randn(4))
+        self.assertEqual(_lazy_constant_update_summary, {"mod_a": 0, "mod_b": 0})
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    def test_source_backed_lazy_constant_dict_value_side_effect_replay(self):
+        global _lazy_constant_value_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                out = torch.sin(x)
+                _lazy_constant_value_summary["name"] = self.name
+                return out
+
+        mod_a = SubMod("mod_a")
+        mod_b = SubMod("mod_b")
+
+        _lazy_constant_value_summary = {}
+        mod_a(torch.randn(4))
+        self.assertEqual(_lazy_constant_value_summary, {"name": "mod_a"})
+        self.assertEqual(counter.frame_count, 1)
+
+        _lazy_constant_value_summary = {}
+        mod_b(torch.randn(4))
+        self.assertEqual(_lazy_constant_value_summary, {"name": "mod_b"})
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_source_backed_lazy_constant_dict_key_overwrite_then_iterate(self):
+        global _lazy_constant_iter_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                _lazy_constant_iter_summary[self.name] = 1
+                n = 0
+                for _ in _lazy_constant_iter_summary:
+                    n += 1
+                return x + n
+
+        mod = SubMod("mod_a")
+        _lazy_constant_iter_summary = {"mod_a": 0}
+        x = torch.randn(4)
+        self.assertEqual(mod(x), x + 1)
+        self.assertEqual(_lazy_constant_iter_summary, {"mod_a": 1})
+
+    def test_source_backed_lazy_constant_dict_key_overwrite_then_popitem(self):
+        global _lazy_constant_popitem_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                _lazy_constant_popitem_summary[self.name] = 1
+                _key, value = _lazy_constant_popitem_summary.popitem()
+                return x + value + len(_lazy_constant_popitem_summary)
+
+        mod = SubMod("mod_a")
+        _lazy_constant_popitem_summary = {"mod_a": 0}
+        x = torch.randn(4)
+        self.assertEqual(mod(x), x + 1)
+        self.assertEqual(_lazy_constant_popitem_summary, {})
+
+    def test_source_backed_lazy_constant_dict_key_overwrite_then_delitem(self):
+        global _lazy_constant_delitem_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                _lazy_constant_delitem_summary[self.name] = 1
+                del _lazy_constant_delitem_summary[self.name]
+                return x + len(_lazy_constant_delitem_summary)
+
+        mod = SubMod("mod_a")
+        _lazy_constant_delitem_summary = {"mod_a": 0}
+        x = torch.randn(4)
+        self.assertEqual(mod(x), x)
+        self.assertEqual(_lazy_constant_delitem_summary, {})
+
+    def test_source_backed_lazy_constant_ordered_dict_key_overwrite_then_popitem(self):
+        global _lazy_constant_ordered_dict_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                _lazy_constant_ordered_dict_summary[self.name] = 1
+                _key, value = _lazy_constant_ordered_dict_summary.popitem()
+                return x + value + len(_lazy_constant_ordered_dict_summary)
+
+        mod = SubMod("mod_a")
+        _lazy_constant_ordered_dict_summary = collections.OrderedDict([("mod_a", 0)])
+        x = torch.randn(4)
+        self.assertEqual(mod(x), x + 1)
+        self.assertEqual(_lazy_constant_ordered_dict_summary, collections.OrderedDict())
+
+    def test_source_backed_lazy_constant_dict_key_overwrite_then_view_len(self):
+        global _lazy_constant_view_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                keys = _lazy_constant_view_summary.keys()
+                _lazy_constant_view_summary[self.name] = 1
+                return x + len(keys)
+
+        mod = SubMod("mod_a")
+        _lazy_constant_view_summary = {"mod_a": 0}
+        x = torch.randn(4)
+        self.assertEqual(mod(x), x + 1)
+        self.assertEqual(_lazy_constant_view_summary, {"mod_a": 1})
+
+    def test_source_backed_lazy_constant_dict_key_overwrite_then_repr(self):
+        global _lazy_constant_repr_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                _lazy_constant_repr_summary[self.name] = 1
+                return x + len(repr(_lazy_constant_repr_summary))
+
+        mod = SubMod("mod_a")
+        _lazy_constant_repr_summary = {"mod_a": 0}
+        x = torch.randn(4)
+        expected_summary = {"mod_a": 1}
+        self.assertEqual(mod(x), x + len(repr(expected_summary)))
+        self.assertEqual(_lazy_constant_repr_summary, expected_summary)
+
+    def test_source_backed_lazy_constant_ordered_dict_key_overwrite_then_repr(self):
+        global _lazy_constant_ordered_dict_repr_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                _lazy_constant_ordered_dict_repr_summary[self.name] = 1
+                return x + len(repr(_lazy_constant_ordered_dict_repr_summary))
+
+        mod = SubMod("mod_a")
+        _lazy_constant_ordered_dict_repr_summary = collections.OrderedDict(
+            [("mod_a", 0)]
+        )
+        x = torch.randn(4)
+        expected_summary = collections.OrderedDict([("mod_a", 1)])
+        self.assertEqual(mod(x), x + len(repr(expected_summary)))
+        self.assertEqual(_lazy_constant_ordered_dict_repr_summary, expected_summary)
 
 
 if __name__ == "__main__":

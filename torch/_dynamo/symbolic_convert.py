@@ -3874,7 +3874,11 @@ class InstructionTranslatorBase(
 
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
-        self.push(VariableTracker.build(self, d))
+        self.push(
+            ConstDictVariable(
+                d, mutation_type=ValueMutationNew(), defer_key_guards=True
+            )
+        )
 
     def BUILD_MAP_UNPACK(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
