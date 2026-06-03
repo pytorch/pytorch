@@ -3,6 +3,7 @@
 set -ex
 
 install_ubuntu() {
+  ulimit -n 65535 # to solve error "too many open files" in "rustup self uninstall -y" below
   echo "Installing pkg-config and libssl-dev"
   apt-get update && apt-get install -y pkg-config libssl-dev curl
   echo "Installing rust"
@@ -20,7 +21,7 @@ install_ubuntu() {
   cd ..
   rm -rf sccache
   rustup self uninstall -y
-  apt-get remove -y pkg-config libssl-dev
+  apt-get remove -y libssl-dev
   apt-get autoclean && apt-get clean
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"

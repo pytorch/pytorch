@@ -58,6 +58,12 @@ COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_magma.sh ${ROCM_VERSION}; fi
 RUN rm install_rocm_magma.sh
 COPY ./common/install_rocSHMEM.sh install_rocSHMEM.sh
+RUN if [ -f "/opt/rocm/core-${ROCM_VERSION}/.info/version" ]; then \
+      ln -sfn "core-${ROCM_VERSION}/.info" /opt/rocm/.info \
+        || echo "WARNING: ln for /opt/rocm/.info failed" >&2; \
+    else \
+      echo "WARNING: /opt/rocm/core-${ROCM_VERSION}/.info not found; skipping symlink" >&2; \
+    fi
 RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION}
 RUN rm install_rocSHMEM.sh
 ADD ./common/install_miopen.sh install_miopen.sh

@@ -159,87 +159,18 @@ Pin: release o=repo.radeon.com
 Pin-Priority: 600
 EOF
 
-    # we want the patch version of 6.4 instead
-    if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
-        ROCM_VERSION="${ROCM_VERSION}.2"
-    fi
-
-    # we want the patch version of 7.2 instead
-    if [[ $(ver $ROCM_VERSION) -eq $(ver 7.2) ]]; then
-        ROCM_VERSION="${ROCM_VERSION}.1"
-    fi
-
-    # Default url values
-    rocm_baseurl="http://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
-    UBUNTU_VERSION_NAME=`cat /etc/os-release | grep UBUNTU_CODENAME | awk -F= '{print $2}'`
-
     # Add rocm repository
-    wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
-    echo "deb [arch=amd64] ${rocm_baseurl} ${UBUNTU_VERSION_NAME} main" > /etc/apt/sources.list.d/rocm.list
     apt-get update --allow-insecure-repositories
 
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
-                   rocm-dev \
-                   rocm-utils \
-                   rocm-libs \
-                   rccl \
-                   rocprofiler-dev \
-                   roctracer-dev \
-                   amd-smi-lib
+    # following https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-on-debian-based-systems-ubuntu-debian-etc-1
+    export RELEASE_ID=20260512-25711157883
+    export GFX_ARCH=gfx950
 
-    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.1) ]]; then
-        DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated rocm-llvm-dev
-    fi
-
-    if [[ $(ver $ROCM_VERSION) -lt $(ver 7.1) ]]; then
-      # precompiled miopen kernels added in ROCm 3.5, renamed in ROCm 5.5, removed in ROCm 7.1
-      # search for all unversioned packages
-      # if search fails it will abort this script; use true to avoid case where search fails
-      MIOPENHIPGFX=$(apt-cache search --names-only miopen-hip-gfx | awk '{print $1}' | grep -F -v . || true)
-      if [[ "x${MIOPENHIPGFX}" = x ]]; then
-        echo "miopen-hip-gfx package not available" && exit 1
-      else
-        DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENHIPGFX}
-      fi
-    fi
-
-    # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
-    for kdb in /opt/rocm/share/miopen/db/*.kdb
-    do
-        sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
-    done
-
-    # ROCm 6.3 had a regression where initializing static code objects had significant overhead
-    # CI no longer builds for ROCm 6.3, but
-    # ROCm 6.4 did not yet fix the regression, also HIP branch names are different
-    if [[ $(ver $ROCM_VERSION) -ge $(ver 6.4) ]] && [[ $(ver $ROCM_VERSION) -lt $(ver 7.0) ]]; then
-        if [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.2) ]]; then
-            HIP_TAG=rocm-6.4.2
-            CLR_HASH=74d78ba3ac4bac235d02bcb48511c30b5cfdd457  # branch release/rocm-rel-6.4.2-statco-hotfix
-        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4.1) ]]; then
-            HIP_TAG=rocm-6.4.1
-            CLR_HASH=efe6c35790b9206923bfeed1209902feff37f386  # branch release/rocm-rel-6.4.1-statco-hotfix
-        elif [[ $(ver $ROCM_VERSION) -eq $(ver 6.4) ]]; then
-            HIP_TAG=rocm-6.4.0
-            CLR_HASH=600f5b0d2baed94d5121e2174a9de0851b040b0c  # branch release/rocm-rel-6.4-statco-hotfix
-        fi
-        # clr build needs CppHeaderParser but can only find it using conda's python
-        python -m pip install CppHeaderParser
-        git clone https://github.com/ROCm/HIP -b $HIP_TAG
-        HIP_COMMON_DIR=$(readlink -f HIP)
-        git clone https://github.com/jeffdaily/clr
-        pushd clr
-        git checkout $CLR_HASH
-        popd
-        mkdir -p clr/build
-        pushd clr/build
-        # Need to point CMake to the correct python installation to find CppHeaderParser
-        cmake .. -DPython3_EXECUTABLE=/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/bin/python3 -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
-        make -j
-        cp hipamd/lib/libamdhip64.so.6.4.* /opt/rocm/lib/libamdhip64.so.6.4.*
-        popd
-        rm -rf HIP clr
-    fi
+    apt-get install -y ca-certificates
+    echo "deb [trusted=yes] https://rocm.nightlies.amd.com/deb/${RELEASE_ID} stable main" \
+      | tee /etc/apt/sources.list.d/rocm-nightly.list
+    apt-get update
+    apt-get install -y amdrocm-core-sdk-${GFX_ARCH}
 
     # Note: rocm-composable-kernel (ck4inductor) is now built as a wheel
     # alongside PyTorch in .ci/pytorch/build.sh and installed at test time
