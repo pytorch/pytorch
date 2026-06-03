@@ -219,6 +219,13 @@ def scan(
     if reverse:
         out = pytree.tree_map(lambda elem: elem.flip([0]), out)
 
+    # Move the scan dimension from 0 back to the user-specified `dim`.
+    if dim != 0:
+        out = pytree.tree_map(
+            lambda elem: torch.movedim(elem, 0, dim) if dim < elem.ndim else elem,
+            out,
+        )
+
     return carry, out
 
 
@@ -1019,6 +1026,9 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
         torch.stack([e[leave_ind] for e in op(result_flat)])
         for leave_ind in range(num_leaves)
     ]
+    # Match scan semantics: move the scan dim from 0 to the user-specified dim
+    # when the output has enough dimensions.
+    results = [torch.movedim(r, 0, dim) if dim < r.ndim else r for r in results]
     return (
         pytree.tree_unflatten(carry, carry_spec),
         pytree.tree_unflatten(results, dummy_out_spec),
