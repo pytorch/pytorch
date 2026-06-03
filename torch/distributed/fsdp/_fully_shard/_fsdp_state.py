@@ -408,8 +408,11 @@ class FSDPState(_State):
                         fsdp_param_group.finalize_backward()
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
-                # Catch the last module's RS states that no subsequent
-                # module's group N-1 wait will clear.
+                # Wait on and release any retained reduce-scatter input buffers:
+                # the last module's (which no later module's rs_wait clears) and,
+                # when set_reduce_scatter_max_input_buffers retains more than
+                # one in flight, the rest. The compute stream (which reuses the
+                # memory) is ordered past each reduce-scatter first.
                 for rs_state in self._comm_ctx.reduce_scatter_states:
                     if rs_state.event is not None:
                         self._device_handle.current_stream().wait_event(rs_state.event)

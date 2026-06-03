@@ -549,6 +549,76 @@ class TestFullyShardCommunication(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
+    def test_set_reduce_scatter_max_input_buffers(self):
+        """
+        Tests that ``set_reduce_scatter_max_input_buffers`` is a pure
+        scheduling change: changing the in-flight reduce-scatter copy-in buffer
+        cap (``2``, or an explicit ``1`` that matches the default) produces
+        identical parameters and gradients to the default single-buffer
+        behavior, across FSDP/HSDP and reshard-after-forward (under bf16 mixed
+        precision, where the retained buffer is in the reduce dtype).
+        """
+        self.run_subtests(
+            {
+                "mesh_shape": [(self.world_size,), (self.world_size // 2, 2)],
+                "reshard_after_forward": [True, False],
+                "max_input_buffers": [1, 2],
+            },
+            self._test_set_reduce_scatter_max_input_buffers,
+        )
+
+    def _test_set_reduce_scatter_max_input_buffers(
+        self,
+        mesh_shape: tuple[int] | tuple[int, int],
+        reshard_after_forward: bool,
+        max_input_buffers: int,
+    ):
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0, weight_tying=False)
+        ref_model = Transformer(model_args)
+        model = copy.deepcopy(ref_model)
+        mesh_dim_names = ("outer",) if len(mesh_shape) == 1 else ("outer", "inner")
+        mesh = init_device_mesh(
+            device_type.type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        fsdp_kwargs = {
+            "reshard_after_forward": reshard_after_forward,
+            "mesh": mesh,
+            "mp_policy": mp_policy,
+        }
+        # Reference model keeps the default (copy-in on the compute stream)
+        for module in ref_model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, **fsdp_kwargs)
+        ref_model = fully_shard(ref_model, **fsdp_kwargs)
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        # Test model retains multiple reduce-scatter copy-in buffers in flight
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, **fsdp_kwargs)
+        model = fully_shard(model, **fsdp_kwargs)
+        model.set_reduce_scatter_max_input_buffers(max_input_buffers)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        for _ in range(3):
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            ref_optim.step()
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            self.assertEqual(ref_loss, loss)
+            # Check parity before zero_grad so gradients are compared too
+            check_sharded_parity(self, ref_model, model)
+            ref_optim.zero_grad()
+            optim.zero_grad()
+
+    @skip_if_lt_x_gpu(2)
     def test_set_reshard_after_forward(self):
         """
         Tests that FSDP issues the expected number of all-gathers and

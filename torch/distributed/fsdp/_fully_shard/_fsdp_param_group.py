@@ -216,6 +216,14 @@ class FSDPParamGroup:
         # Whether to reshard parameters after backward (only useful for
         # gradient accumulation)
         self.reshard_after_backward: bool = True
+        # cap-K: max reduce-scatter copy-in (chunk_cat) input buffers kept in
+        # flight. FSDP keeps 1 by default, so the compute stream waits on the
+        # previous reduce-scatter before the next copy-in reuses the buffer;
+        # raising it (via FSDPModule.set_reduce_scatter_max_input_buffers)
+        # lets the next copy-in use a fresh buffer instead of stalling on an
+        # exposed reduce-scatter, at the cost of retaining that many buffers.
+        # The copy-in always stays on the compute stream.
+        self.reduce_scatter_max_input_buffers: int = 1
         # Optional custom factor for the gradient reduction op (e.g. to divide
         # by a factor other than the world size)
         self.gradient_divide_factor: float | None = None
@@ -624,17 +632,29 @@ class FSDPParamGroup:
                     unsharded_grads.append(fsdp_param.unsharded_zero_grad_data)
             if self.reshard_after_backward:
                 self.reshard()
-        # Wait on prior module's RS states (assumes backward fires groups
-        # N-1 first; if not, overlap degrades but correctness is preserved).
+        # Recycle prior modules' reduce-scatter input buffers so the compute
+        # stream can reuse the memory for the next copy-in, keeping at most
+        # `max_input_buffers` in flight: reclaim the oldest (wait on its
+        # reduce-scatter, then drop the keepalive ref) until fewer than that
+        # remain, before this module's reduce appends one more. With the default
+        # of 1 this waits on the previous reduce-scatter every layer (the
+        # exposed-RS stall); raising it lets the next copy-in use a fresh buffer
+        # -- a no-op reclaim once max_input_buffers >= the reduce-scatter pipeline
+        # depth.
+        # (Assumes backward fires groups N-1 first; if not, overlap degrades but
+        # correctness is preserved.)
+        max_input_buffers = self.reduce_scatter_max_input_buffers
         if (
             self._param_group_index == self._num_param_groups - 1
             and self.comm_ctx.reduce_scatter_states
         ):
             with record_function(f"FSDP::post_backward_rs_wait ({self._module_fqn})"):
-                for rs_state in self.comm_ctx.reduce_scatter_states:
-                    if rs_state.event is not None:
-                        self.device_handle.current_stream().wait_event(rs_state.event)
-                self.comm_ctx.reduce_scatter_states.clear()
+                states = self.comm_ctx.reduce_scatter_states
+                while len(states) >= max_input_buffers:
+                    oldest = states.pop(0)
+                    if oldest.event is not None:
+                        self.device_handle.current_stream().wait_event(oldest.event)
+                    del oldest
         if len(fsdp_params_with_grad) == 0:
             return
         with record_function(self._with_fqn("FSDP::post_backward_reduce")):
