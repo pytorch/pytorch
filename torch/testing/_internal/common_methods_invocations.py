@@ -17740,6 +17740,7 @@ op_db: list[OpInfo] = [
         supports_out=False,
         has_nondeterministic_output=True,
         supports_autograd=True,
+        supports_gradgrad=False,
         supports_fwgrad_bwgrad=False,
         supports_forward_ad=False,
         check_batched_forward_grad=False,

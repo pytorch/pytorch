@@ -404,6 +404,7 @@ aliasing_ops_list_return = {
 skip_noncontig = {
     "_batch_norm_with_update",
     "as_strided_copy",
+    "torch.ops.aten._scaled_dot_product_flash_attention_for_cpu",
 }
 
 bool_unsupported_ordered_ops = {
@@ -598,6 +599,7 @@ class TestOperators(TestCase):
                 xfail("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
+                xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
                 xfail(
                     "nn.functional.rrelu"
                 ),  # in-place test errors out with no formula implemented
@@ -993,6 +995,9 @@ class TestOperators(TestCase):
                 skip("nn.functional.fractional_max_pool3d"),  # calls random op
                 xfail("nn.functional.scaled_dot_product_attention"),  # randomness
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
+                xfail(
+                    "torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"
+                ),  # higher-order AD not implemented
                 xfail("nn.functional.multi_head_attention_forward"),  # randomness
                 # It looks like you're either (1) calling .item() on a Tensor or
                 # (2) attempting to use a Tensor in some data-dependent control flow or
@@ -1066,6 +1071,7 @@ class TestOperators(TestCase):
         {
             xfail("as_strided", "partial_views"),
             xfail("as_strided_copy"),
+            xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
         },
     )
     def test_vmapvjpvjp(self, device, dtype, op):
@@ -1759,6 +1765,9 @@ class TestOperators(TestCase):
                 xfail("nn.functional.pdist", ""),  # NYI: forward-AD with _pdist_forward
                 skip("nn.functional.scaled_dot_product_attention"),
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
+                xfail(
+                    "torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"
+                ),  # forward-AD not implemented
                 xfail(
                     "nn.functional.multi_margin_loss", ""
                 ),  # NYI: forward AD with multi_margin_loss
