@@ -1140,6 +1140,79 @@ class BlockMask:
         *batch_dims, _, _ = self.kv_indices.shape
         return tuple(batch_dims) + self.seq_lengths
 
+    @staticmethod
+    def _slices_partial_block(index: slice, block_idx: int, num_blocks: int) -> bool:
+        return block_idx in range(*index.indices(num_blocks))
+
+    @staticmethod
+    def _is_int_tensor(index: Tensor) -> bool:
+        return index.dtype in (torch.int32, torch.int64)
+
+    @staticmethod
+    def _normalize_int_tensor_index(index: Tensor) -> int | Tensor:
+        if index.dim() == 0 and BlockMask._is_int_tensor(index):
+            return int(index.item())
+        return index
+
+    @staticmethod
+    def _validate_q_index_tensor(index: Tensor, num_blocks: int) -> None:
+        if index.dim() != 1 or not BlockMask._is_int_tensor(index):
+            raise NotImplementedError(
+                "Tensor query indexing on BlockMask only supports 1D integer "
+                "tensors that select a contiguous range of query blocks."
+            )
+        if index.numel() == 0:
+            return
+        if bool(((index < -num_blocks) | (index >= num_blocks)).any().item()):
+            raise IndexError("Tensor query index is out of bounds for BlockMask")
+        normalized_index = index.remainder(num_blocks)
+        if normalized_index.numel() == 1:
+            return
+        if not bool((normalized_index[1:] == normalized_index[:-1] + 1).all().item()):
+            raise NotImplementedError(
+                "Tensor query indexing on BlockMask must select a contiguous "
+                "range of query blocks in ascending order."
+            )
+
+    @staticmethod
+    def _tensor_index_selects_block(
+        index: Tensor, block_idx: int, num_blocks: int
+    ) -> bool:
+        return bool((index.remainder(num_blocks) == block_idx).any().item())
+
+    def _sliced_seq_lengths(
+        self,
+        index: tuple[int | slice | Tensor, ...],
+        new_kv_indices: Tensor,
+    ) -> tuple[int, int]:
+        q_len, kv_len = self.seq_lengths
+        q_block_size = self.BLOCK_SIZE[0]
+        new_q_blocks = new_kv_indices.shape[-2]
+        if new_q_blocks == 0:
+            return (0, kv_len)
+
+        partial_q_block = q_len % q_block_size
+        if partial_q_block == 0:
+            return (new_q_blocks * q_block_size, kv_len)
+
+        q_blocks = self.kv_indices.shape[-2]
+        last_q_block = q_blocks - 1
+        q_index = index[2]
+        if isinstance(q_index, slice):
+            includes_partial_q_block = self._slices_partial_block(
+                q_index, last_q_block, q_blocks
+            )
+        elif isinstance(q_index, Tensor):
+            includes_partial_q_block = self._tensor_index_selects_block(
+                q_index, last_q_block, q_blocks
+            )
+        else:
+            includes_partial_q_block = q_index % q_blocks == last_q_block
+
+        if includes_partial_q_block:
+            return ((new_q_blocks - 1) * q_block_size + partial_q_block, kv_len)
+        return (new_q_blocks * q_block_size, kv_len)
+
     def __str__(self) -> str:
         s = f"BlockMask(shape={self.shape}, sparsity={self.sparsity():.2f}%, \n"
         mask_str = self.to_string().strip()
@@ -1200,12 +1273,22 @@ class BlockMask:
         index = (index,) if not isinstance(index, tuple) else index
         padded = (*index, slice(None), slice(None), slice(None))[:3]
         sizes = self.kv_num_blocks.shape[:3]
-        index = tuple(
-            (slice(i + n, i + n + 1) if -n <= i < 0 else slice(i, i + 1))
-            if isinstance(i, int)
-            else i
-            for i, n in zip(padded, sizes, strict=True)
-        )
+        normalized_index: list[int | slice | Tensor] = []
+        for i, n in zip(padded, sizes, strict=True):
+            if isinstance(i, Tensor):
+                i = self._normalize_int_tensor_index(i)
+            if isinstance(i, int):
+                i = slice(i + n, i + n + 1) if -n <= i < 0 else slice(i, i + 1)
+            normalized_index.append(i)
+        index = tuple(normalized_index)
+        q_index = index[2]
+        if isinstance(q_index, Tensor):
+            self._validate_q_index_tensor(q_index, sizes[2])
+            if isinstance(index[0], Tensor) or isinstance(index[1], Tensor):
+                raise NotImplementedError(
+                    "Tensor query indexing on BlockMask cannot be combined with "
+                    "tensor batch or head indexing."
+                )
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
         if self.full_kv_num_blocks is not None:
@@ -1216,6 +1299,7 @@ class BlockMask:
         else:
             new_full_kv_num_blocks = None
             new_full_kv_indices = None
+        new_seq_lengths = self._sliced_seq_lengths(index, new_kv_indices)
         new_block_mask = BlockMask.from_kv_blocks(
             new_kv_num_blocks,
             new_kv_indices,
@@ -1223,7 +1307,7 @@ class BlockMask:
             new_full_kv_indices,
             BLOCK_SIZE=self.BLOCK_SIZE,
             mask_mod=_sliced_mask_mod_error,
-            seq_lengths=self.seq_lengths,
+            seq_lengths=new_seq_lengths,
             compute_q_blocks=self.q_indices is not None,
         )
         new_block_mask.dq_kv_order = self._slice_dq_kv_order(self.dq_kv_order, index)
