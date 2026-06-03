@@ -177,10 +177,11 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(len(_debug_get_cache_entry_list(fn.__code__)), 2)
 
-        self.assertTrue(
-            {name for name in fn.__globals__ if name.startswith("__builtins_dict___")}
-            - preexisting_builtins_keys
-        )
+        new_builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict___")
+        } - preexisting_builtins_keys
+        self.assertTrue(new_builtins_keys)
+        del entries
         torch._dynamo.reset()
         self.assertEqual(
             {name for name in fn.__globals__ if name.startswith("__builtins_dict___")},
@@ -223,6 +224,49 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x, False), x)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(len(_debug_get_cache_entry_list(fn.__code__)), 2)
+
+    def test_condition_dependent_skip_with_global_tensor_factory(self):
+        def fn(n):
+            if n == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return torch.ones(3) - 1
+            if torch.compiler.is_compiling():
+                return torch.ones(3) + 1
+            return torch.ones(3) - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+
+        self.assertEqual(opt_fn(0), torch.zeros(3))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn(1), torch.ones(3) + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_condition_dependent_skip_with_sequence_length_guard(self):
+        def fn(xs):
+            if len(xs) == 0:
+                try:
+                    torch._dynamo.graph_break()
+                finally:
+                    pass
+                return torch.zeros(3)
+            if torch.compiler.is_compiling():
+                return xs[0] + 1
+            return xs[0] - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=False)
+        x = torch.ones(3)
+
+        self.assertEqual(opt_fn([]), torch.zeros(3))
+        self.assertEqual(counter.frame_count, 0)
+
+        self.assertEqual(opt_fn([x]), x + 1)
+        self.assertEqual(counter.frame_count, 1)
 
     def test_backend_skip_frame_preserves_fullgraph_failure(self):
         def backend(gm, args):

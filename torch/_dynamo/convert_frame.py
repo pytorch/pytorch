@@ -344,7 +344,11 @@ def _guarded_eager_fallback(
     if output is None or output.guards is None:
         _cleanup_skipped_tracer_output(tracer_output)
         return ConvertFrameReturn(apply_to_code=False, skip_reason=skip_reason)
+    if not _has_condition_dependent_skip_guards(code, output):
+        _cleanup_skipped_tracer_output(tracer_output)
+        return ConvertFrameReturn(skip_reason=skip_reason)
 
+    guarded_fallback_created = False
     try:
         build_guards_ctx = contextlib.ExitStack()
         if torch_function_mode_stack_state_mgr.stack:
@@ -372,6 +376,7 @@ def _guarded_eager_fallback(
 
         orig_code_map[fallback_code] = code
         output_codes.add(fallback_code)
+        guarded_fallback_created = True
         return ConvertFrameReturn(
             frame_exec_strategy=FrameExecStrategy(
                 FrameAction.DEFAULT, FrameAction.DEFAULT
@@ -382,9 +387,92 @@ def _guarded_eager_fallback(
                 compile_id,
                 "Torch-Compiled Eager Fallback: " + str(compile_id),
             ),
+            skip_reason=skip_reason,
         )
     finally:
+        if not guarded_fallback_created:
+            for cleanup in output.cleanups:
+                cleanup()
+            output.cleanups.clear()
         tracer_output._cleanup_output_graph()
+
+
+def _has_condition_dependent_skip_guards(
+    code: CodeType, output: OutputGraphCommon
+) -> bool:
+    if not _has_tensor_related_state(code, output):
+        return False
+
+    for guard in output.guards:
+        if guard.create_fn_name() not in {
+            "CONSTANT_MATCH",
+            "EQUALS_MATCH",
+            "SEQUENCE_LENGTH",
+        }:
+            continue
+        if not guard.source.is_local():
+            continue
+        name = guard.name
+        if name.startswith(("L['___", "L['__nested_")):
+            continue
+        return True
+    return False
+
+
+def _has_tensor_related_state(code: CodeType, output: OutputGraphCommon) -> bool:
+    torch_skip_only_names = {
+        "torch",
+        "_dynamo",
+        "decorators",
+        "graph_break",
+        "skip_frame",
+        "step_unsupported",
+    }
+    for co_name in code.co_names:
+        if co_name in output.global_scope:
+            obj = output.global_scope[co_name]
+            if _contains_tensor_related_value(obj):
+                return True
+            if isinstance(obj, ModuleType) and (
+                obj.__name__.startswith("torch.") or obj is torch
+            ):
+                return any(name not in torch_skip_only_names for name in code.co_names)
+            if np and config.trace_numpy and (obj is np or is_numpy(obj)):
+                return True
+
+    return any(
+        _contains_tensor_related_value(value) for value in output.local_scope.values()
+    )
+
+
+def _contains_tensor_related_value(value: object, seen: set[int] | None = None) -> bool:
+    if seen is None:
+        seen = set()
+    value_id = id(value)
+    if value_id in seen:
+        return False
+    seen.add(value_id)
+    if isinstance(value, (torch.Tensor, torch.nn.Module)) or (
+        istype(value, type) and issubclass(value, torch.nn.Module)
+    ):
+        return True
+    if (
+        config.trace_numpy
+        and np
+        and (istype(value, np.ndarray) or isinstance(value, np.generic))
+    ):
+        return True
+    if istype(value, (list, tuple)):
+        return any(_contains_tensor_related_value(item, seen) for item in value)
+    if istype(value, dict):
+        values = list(value.values())
+        return any(_contains_tensor_related_value(item, seen) for item in values)
+    if is_namedtuple(value) and hasattr(value, "_fields"):
+        return any(
+            _contains_tensor_related_value(getattr(value, name), seen)
+            for name in value._fields
+        )
+    return False
 
 
 def _cleanup_skipped_tracer_output(tracer_output: DynamoTracerOutput) -> None:
@@ -2627,7 +2715,7 @@ class CatchErrorsWrapper:
     def _handle_skip(
         self, result: ConvertFrameReturn, frame: DynamoFrameType
     ) -> ConvertFrameReturn:
-        if result.skip_reason is not None and result.guarded_code is None:
+        if result.skip_reason is not None:
             log.debug(
                 "skipping: %s (reason: %s, file: %s)",
                 frame.f_code.co_name,
