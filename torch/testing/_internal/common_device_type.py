@@ -458,7 +458,12 @@ class DeviceTypeTestBase(TestCase):
     #   mechanism of acquiring all available devices.
     @classmethod
     def get_all_devices(cls):
-        return [cls.get_primary_device()]
+        devices = [cls.get_primary_device()]
+        for i in range(torch.accelerator.device_count()):
+            device_str = f"{cls.device_type}:{i}"
+            if device_str not in devices:
+                devices.append(device_str)
+        return devices
 
     # Returns the dtypes the test has requested.
     # Prefers device-specific dtype specifications over generic ones.
