@@ -14,6 +14,7 @@ import tempfile
 import textwrap
 import types
 import unittest
+import warnings
 from contextlib import contextmanager
 from typing import Any, cast
 from typing_extensions import override
@@ -26,7 +27,7 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
-from torch._inductor import config, metrics
+from torch._inductor import config, config_comms, metrics
 from torch._inductor.cache_key import (
     AUTOTUNE_CACHE_KEY_STRATEGY,
     CacheKeyStrategy,
@@ -3261,6 +3262,31 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(details3),
         )
 
+    def test_hash_config_comms_changes(self):
+        """
+        Test that changes to config_comms settings affect hashes.
+        """
+        with config_comms.patch(
+            {"runtime_estimations_use_nccl_lib_estimations": False}
+        ):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with config_comms.patch({"runtime_estimations_use_nccl_lib_estimations": True}):
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+
     def test_hash_private_config_changes(self):
         """
         Test that private config settings affect hashes.
@@ -4457,6 +4483,82 @@ class TestUtils(TestCase):
             return layer(inp @ weight)
 
         torch.compile(fn)()
+
+
+class TestVecISACheckBuild(TestCase):
+    # Regression tests for the VecISA.check_build dlopen probe behavior:
+    # the parent must (1) bound the child with a timeout and return
+    # False if it expires, and (2) make libtorch findable in the
+    # child's loader path so the child can dlopen the probe .so
+    # without importing torch.
+    #
+    # These target the small helpers (_probe_load, _build_probe_env)
+    # directly so they don't depend on CppBuilder / CppTorchOptions
+    # succeeding on the host, which would otherwise make the tests
+    # platform-specific (the production path is fine; only the
+    # CppTorchOptions construction is brittle to host compiler probes
+    # when handed an off-arch VecISA like VecAVX2 on aarch64/macOS-arm64).
+
+    def test_probe_load_returns_false_on_timeout(self):
+        from torch._inductor import cpu_vec_isa
+
+        calls: list[Any] = []
+
+        def fake_run(*args, **kwargs):
+            calls.append(kwargs.get("timeout"))
+            raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+
+        fake_subprocess = types.SimpleNamespace(
+            run=fake_run,
+            TimeoutExpired=subprocess.TimeoutExpired,
+            CalledProcessError=subprocess.CalledProcessError,
+            DEVNULL=subprocess.DEVNULL,
+        )
+
+        instance = cpu_vec_isa.VecAVX2()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
+                result = instance._probe_load("/nonexistent/probe.so")
+
+        self.assertFalse(result)
+        self.assertEqual(calls, [60])
+        self.assertTrue(
+            any("hung after 60s" in str(w.message) for w in caught),
+            msg=f"expected timeout warning, got: {[str(w.message) for w in caught]}",
+        )
+
+    def test_probe_load_returns_false_on_called_process_error(self):
+        from torch._inductor import cpu_vec_isa
+
+        def fake_run(*args, **kwargs):
+            raise subprocess.CalledProcessError(returncode=1, cmd=args[0])
+
+        fake_subprocess = types.SimpleNamespace(
+            run=fake_run,
+            TimeoutExpired=subprocess.TimeoutExpired,
+            CalledProcessError=subprocess.CalledProcessError,
+            DEVNULL=subprocess.DEVNULL,
+        )
+
+        instance = cpu_vec_isa.VecAVX2()
+        with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
+            result = instance._probe_load("/nonexistent/probe.so")
+
+        self.assertFalse(result)
+
+    def test_build_probe_env_prepends_torch_lib_dir_to_loader_path(self):
+        from torch._inductor import cpu_vec_isa
+
+        env = cpu_vec_isa.VecISA._build_probe_env()
+
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+        value = env.get("LD_LIBRARY_PATH", "")
+        self.assertEqual(
+            value.split(os.pathsep)[0],
+            torch_lib,
+            msg=f"LD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+        )
 
 
 class TestCompilationEventLogging(TestCase):

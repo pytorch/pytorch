@@ -1626,7 +1626,7 @@ class TestMaxAutotune(TestCase):
 
         ref = x1 @ y1 + x2 @ y2
         act = f(x1, y1, x2, y2)
-        torch.testing.assert_close(act, ref, atol=1e-1, rtol=1e-2)
+        torch.testing.assert_close(act, ref, atol=1e-2, rtol=1e-2)
 
     @config.patch(
         max_autotune=True,
@@ -5568,6 +5568,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
 
     def setUp(self):
         super().setUp()
+        AutotuneProcessPool._shutdown_for_inactivity = False
         test_name = self._testMethodName
         for skip_test_name in self.SKIP_TESTS:
             if skip_test_name in test_name or TEST_XPU or config.cpp_wrapper:
@@ -5576,6 +5577,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
     def tearDown(self):
         super().tearDown()
         AutotuneProcessPool.shutdown_instance()
+        AutotuneProcessPool._shutdown_for_inactivity = False
         # Clear the AsyncAutotuner cache to prevent test pollution
         AsyncAutotuner.choice_hash_to_future.clear()
 
@@ -5703,7 +5705,6 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         cache_entries_after_second = len(AsyncAutotuner.choice_hash_to_future)
         self.assertEqual(cache_entries_after_second, 0)
 
-    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/179696")
     @config.patch(max_autotune_gemm=True)
     def test_triton_error_precompilation_and_autotuning(self):
         """
