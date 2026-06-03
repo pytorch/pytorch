@@ -573,12 +573,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ):
         self.prefix.writeline(f"""{info_kind}[{idx}].name = "{name}";""")
 
-    def codegen_input_symbol_assignment(
+    def codegen_input_symbol_assignment(  # type: ignore[override]
         self,
         name: str,
         value: ir.TensorBox,
         bound_vars: OrderedSet[sympy.Symbol],
     ):
+        """Assign symbolic shapes to C++ locals, with replacement aliases."""
         code = self.prefix
 
         @functools.cache
@@ -591,6 +592,26 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.codegen_input_stride_var_decl(code, name)
             return f"{name}_stride"
 
+        def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
+            # Deferred runtime asserts reference pre-replacement backed
+            # symbols (e.g. s77) that were replaced to this canonical
+            # symbol (s31) during constraint solving. Emit aliases so
+            # the asserts compile. Skip unbacked symbols — they are
+            # defined separately by the unbacked symbol codegen path.
+            from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+            for src, tgt in V.graph.sizevars.shape_env.replacements.items():
+                if (
+                    tgt == sym
+                    and isinstance(src, sympy.Symbol)
+                    and src not in bound_vars
+                    and not symbol_is_type(
+                        src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+                    )
+                ):
+                    code.writeline(f"int64_t {src} = {sym};")
+                    bound_vars.add(src)
+
         def codegen_symbol(
             sym_or_exp: sympy.Symbol | sympy.Expr,
             base_name: str,
@@ -602,6 +623,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     return
                 code.writeline(f"int64_t {sym_or_exp} = {name_fn(base_name)}[{dim}];")
                 bound_vars.add(sym_or_exp)
+                maybe_emit_replacement_aliases(sym_or_exp)
             elif isinstance(sym_or_exp, sympy.Expr):
                 undefined_symbols = [
                     sym for sym in sym_or_exp.free_symbols if sym not in bound_vars
@@ -639,6 +661,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise AssertionError("Unexpected symbol type")
             code.writeline(f"{decl} {value} = {name};")
             bound_vars.add(value)
+            maybe_emit_replacement_aliases(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
                 codegen_symbol(size, name, sizeof, dim)
@@ -1926,15 +1949,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def codegen_cpp_sizevar(self, x: sympy.Expr, *, simplify: bool = True) -> str:
         maybe_simplified_x = V.graph.sizevars.simplify(x) if simplify else x
         # In AOT mode, emit runtime checks for potential division/modulo by zero
-        # to prevent SIGFPE crashes when symbolic tensor shapes can be 0
+        # to prevent SIGFPE crashes when symbolic tensor shapes can be 0.
         if V.graph.aot_mode:
-            divisors = self._extract_divisors_from_expr(maybe_simplified_x)
-            for divisor, op_name in divisors:
-                divisor_str = cexpr(divisor)
-                self.writeline(
-                    f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
-                )
+            for divisor, op_name in self._extract_divisors_from_expr(
+                maybe_simplified_x
+            ):
+                self.write_assert_div_by_zero(cexpr(divisor), op_name)
         return cexpr(maybe_simplified_x)
+
+    def _codegen_assert_div_by_zero(
+        self, code: IndentedBuffer, divisor_str: str, op_name: str
+    ) -> None:
+        """Emit one div-by-zero AOTI check to `code` (replay-phase target)."""
+        code.writeline(
+            f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
+        )
 
     def codegen_sizevar(self, x: sympy.Expr) -> str:
         return self.codegen_cpp_sizevar(x)
@@ -2436,6 +2465,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
         )
 
+    def sync_d2h_copy(self, buffer_name: str) -> None:
+        # TODO: add AOTI C API for event-based D2H copy synchronization
+        pass
+
     def codegen_multi_output(self, node: ir.MultiOutput):
         # in the abi_compatible mode, outputs are retrieved by passing
         # output pointers, so we skip its codegen here.
@@ -2475,6 +2508,43 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # before (e.g., in the while_loop codegen)
                 self.writeline(f"{outer_output}.reset();")
             self.writeline(f"{outer_output} = {src};")
+
+    @staticmethod
+    def _get_while_loop_carried_output_names(while_loop):
+        mutation_output_names = {
+            mutation_name: mutation_output.get_name()
+            for mutation_output in while_loop.mutation_outputs
+            for mutation_name in mutation_output.get_mutation_names()
+        }
+
+        def resolve_mutation_output_name(name):
+            seen = OrderedSet()
+            while name in mutation_output_names:
+                assert name not in seen, "while_loop mutation outputs contain a cycle"
+                seen.add(name)
+                name = mutation_output_names[name]
+            return name
+
+        output_names = []
+        output_idx = 0
+        for carried_input in while_loop.carried_inputs:
+            carried_input_name = carried_input.get_name()
+            mutation_output_name = resolve_mutation_output_name(carried_input_name)
+            if mutation_output_name != carried_input_name:
+                output_names.append(mutation_output_name)
+                continue
+
+            assert output_idx < len(while_loop.outputs), (
+                "while_loop has fewer non-mutated outputs than carried inputs"
+            )
+            output_names.append(while_loop.outputs[output_idx].get_name())
+            output_idx += 1
+
+        assert output_idx == len(while_loop.outputs), (
+            "while_loop has unused non-mutated outputs"
+        )
+
+        return output_names
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
         raise NotImplementedError(
@@ -2547,6 +2617,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         outer_additional_inputs = [
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
+        carried_output_names = self._get_while_loop_carried_output_names(while_loop)
         cond_result_name = f"{name}_cond_result"
         if is_bool_pred:
             self.writeline(f"bool {cond_result_name};")
@@ -2554,12 +2625,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
 
         cond_outer_inputs = []
-        for inp, out in zip(outer_carried_inputs, while_loop.outputs):
+        for inp, out_name in zip(outer_carried_inputs, carried_output_names):
             # in ABI-compatible mode, the carried inputs are codegened
             # as buffers outside the while loop and set to the initial
             # values. at the end of each while_loop iteration, they
             # will be assigned the carried values.
-            out_name = out.get_name()
             self.writeline(f"AtenTensorHandle {out_name}_handle;")
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({inp}, &{out_name}_handle));"
