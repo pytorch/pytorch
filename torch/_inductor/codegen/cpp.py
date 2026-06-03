@@ -807,9 +807,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # a and b are integer type
-        quot = f"{a} / {b}"
-        rem = f"{a} % {b}"
-        return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
+        return f"floordiv_integral({a}, {b})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -825,7 +823,7 @@ class CppOverrides(OpOverrides):
     # pyrefly: ignore [bad-override]
     def truncdiv(a, b):
         # a and b are integer type
-        return f"{a} / {b}"
+        return f"truncdiv_integral({a}, {b})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -1603,10 +1601,7 @@ class CppVecOverrides(CppOverrides):
             if V.kernel._get_raw_num_vectors(b.dtype) < 1:
                 # Doing blend to set the remaining bits of b to non-zero
                 b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
-            quot = f"{a} / {b}"
-            has_rem = f"({a} % {b} != {_t}(0))"
-            is_neg = f"(({a} < {_t}(0)) != ({b} < {_t}(0)))"
-            return f"{_t}::blendv({quot}, {quot} - {_t}(1), {has_rem} & {is_neg})"
+            return f"floordiv_integral({a}, {b})"
 
     @staticmethod
     def truncdiv(a, b):
@@ -1615,7 +1610,7 @@ class CppVecOverrides(CppOverrides):
             # Doing blend to set the remaining bits of b to non-zero
             _t = f"decltype({b})"
             b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
-        return f"{a} / {b}"
+        return f"truncdiv_integral({a}, {b})"
 
     @staticmethod
     def minimum(a, b):
