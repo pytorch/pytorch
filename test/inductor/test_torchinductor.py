@@ -1206,11 +1206,6 @@ def target_assert_size_stride_str(
     return f"{size_str}, {stride_str}"
 
 
-def target_assert_alignment_regex():
-    op_name_literal = r'"[^"]+"' if config.cpp_wrapper else r"'[^']+'"
-    return rf"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*{op_name_literal}\s*\)"
-
-
 @instantiate_parametrized_tests
 class CommonTemplate:
     def is_dtype_supported(self, dtype: torch.dtype) -> bool:
@@ -4358,7 +4353,18 @@ class CommonTemplate:
             a = torch.permute(a, [0, 2, 3, -3])
             return (a,)
 
-        self.common(fn, (torch.randn(4, 4),))
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_permute_unbacked_slice(self):
+        def eager(a, end_t):
+            b = a + 1
+            c = torch.permute(b, [0, 2, 1])
+            end = end_t.item()
+            return c[:, :end, :]
+
+        compiled = torch.compile(eager, backend="inductor")
+        a = torch.randn(4, 16, 8, device=self.device)
+        end_t = torch.tensor([5])
+        self.assertEqual(compiled(a, end_t), eager(a, end_t))
 
     def test_expand(self):
         def fn(a):
@@ -10154,6 +10160,44 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
         )
 
+    def test_index_copy_error_checks(self):
+        cases = (
+            (
+                torch.randn(4, device=self.device),
+                0,
+                torch.tensor([0, 1], device=self.device),
+                torch.tensor(1.0, device=self.device),
+                "When source is scalar",
+            ),
+            (
+                torch.randn(4, 5, device=self.device),
+                0,
+                torch.tensor([0, 1], device=self.device),
+                torch.randn(2, device=self.device),
+                "their dimensionality must match",
+            ),
+            (
+                torch.randn(4, 5, 6, device=self.device),
+                0,
+                torch.tensor([0, 2], device=self.device),
+                torch.randn(1, 1, 6, device=self.device),
+                "Source/destination tensor must have same slice shapes",
+            ),
+            (
+                torch.randn(4, 5, device=self.device),
+                0,
+                torch.tensor([0, 1], device=self.device),
+                torch.randn(3, 5, device=self.device),
+                "Number of indices",
+            ),
+        )
+
+        for x, dim, index, y, msg in cases:
+            with self.subTest(msg=msg):
+                fn = torch.compile(torch.index_copy)
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    fn(x, dim, index, y)
+
     def test_index_put2(self):
         def fn(a, b, c):
             return torch.index_put(a, [b], c, True)
@@ -14984,9 +15028,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if not is_dynamic_shape_enabled():
             if code and len(code) > 0 and "assert_alignment(" in code[0]:
                 try:
-                    FileCheck().check_regex(target_assert_alignment_regex()).run(
-                        code[0]
-                    )
+                    FileCheck().check_regex(
+                        r"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*'[^']+'\s*\)"
+                    ).run(code[0])
                 except Exception as e:
                     print(f"Failed regex match for assert_alignment: {e}")
                     print(code[0])
