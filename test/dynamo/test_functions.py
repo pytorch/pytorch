@@ -4099,6 +4099,15 @@ class GraphModule(torch.nn.Module):
         compiled_result = compiled_fn(t, scale, zero_point)
         self.assertEqual(compiled_result, result)
 
+    def test_sample_dirichlet(self):
+        def fn(concentration):
+            return torch._sample_dirichlet(concentration)
+
+        concentration = torch.tensor([0.5, 1.0, 2.0])
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        result = compiled_fn(concentration)
+        self.assertEqual(result.shape, concentration.shape)
+
     def test_map_return(self):
         def fn(a, b):
             return map(lambda x: x + 1, [a, b])
