@@ -45,7 +45,7 @@ _MEMORY_KIND_NAMES = {
 
 _FLOW_CATEGORY = "ac2g"
 _OVERHEAD_PID = -1
-_USER_EXTERNAL_CORRELATION_KIND = int(_mon._cc.ExternalCorrelationKind.CUSTOM1)
+_USER_EXTERNAL_CORRELATION_KIND: int | None = None
 _RUNTIME_CBID_NAMES: dict[int, str] | None = None
 _DRIVER_CBID_NAMES: dict[int, str] | None = None
 _RUNTIME_BLOCKLIST = {
@@ -81,6 +81,13 @@ _DRIVER_FLOW_NAMES = {
     "cuLaunchKernel",
     "cuLaunchKernelEx",
 }
+
+
+def _ensure_cupti_python_bindings() -> None:
+    global _USER_EXTERNAL_CORRELATION_KIND
+    cc = _mon._require_cupti_python()
+    if _USER_EXTERNAL_CORRELATION_KIND is None:
+        _USER_EXTERNAL_CORRELATION_KIND = int(cc.ExternalCorrelationKind.CUSTOM1)
 
 
 def _trimester_base_ns() -> int:
@@ -180,15 +187,17 @@ def _load_cbid_names(enum_cls) -> dict[int, str]:
 
 def _runtime_cbid_name(cbid: int) -> str:
     global _RUNTIME_CBID_NAMES
+    cc = _mon._require_cupti_python()
     if _RUNTIME_CBID_NAMES is None:
-        _RUNTIME_CBID_NAMES = _load_cbid_names(_mon._cc.Runtime_api_trace_cbid)
+        _RUNTIME_CBID_NAMES = _load_cbid_names(cc.Runtime_api_trace_cbid)
     return _RUNTIME_CBID_NAMES.get(cbid, f"cbid_{cbid}")
 
 
 def _driver_cbid_name(cbid: int) -> str:
     global _DRIVER_CBID_NAMES
+    cc = _mon._require_cupti_python()
     if _DRIVER_CBID_NAMES is None:
-        _DRIVER_CBID_NAMES = _load_cbid_names(_mon._cc.Driver_api_trace_cbid)
+        _DRIVER_CBID_NAMES = _load_cbid_names(cc.Driver_api_trace_cbid)
     return _DRIVER_CBID_NAMES.get(cbid, f"cbid_{cbid}")
 
 
@@ -515,6 +524,7 @@ def _gpu_user_annotation_events(
     *,
     base_ns: int,
 ) -> list[dict[str, object]]:
+    _ensure_cupti_python_bindings()
     user_annotations = trace_window.get("user_annotations", {})
     if not isinstance(user_annotations, dict) or not user_annotations:
         return []
