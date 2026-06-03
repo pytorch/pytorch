@@ -263,10 +263,23 @@ def convolution_handler(
     if not isinstance(output_spec, dtensor.DTensorSpec):
         raise AssertionError
 
+    local_args = list(op_info.local_args)
+    groups = local_args[8]
+
+    # Scale ``groups`` for channel-sharded grouped/depthwise conv. The sharding
+    # strategy (see _conv_ops.convolution_single_dim_strategy) propagates the
+    # channel sharding; here we adjust the local ``groups`` to match the local
+    # weight shard, since the strategy only decides placements, not local args.
+    if isinstance(groups, int) and groups > 1 and isinstance(args[1], dtensor.DTensor):
+        global_out_channels = cast(dtensor.DTensor, args[1]).shape[0]
+        local_out_channels = cast(torch.Tensor, local_args[1]).shape[0]
+        if local_out_channels != global_out_channels:
+            local_args[8] = groups * local_out_channels // global_out_channels
+
     # local propagation
     local_results = tp_convolution(
         op_call,
-        tuple(op_info.local_args),
+        tuple(local_args),
         op_info.local_kwargs,
         output_spec.dim_map,
     )
