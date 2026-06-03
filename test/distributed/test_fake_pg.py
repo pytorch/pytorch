@@ -66,7 +66,7 @@ class TestFakePG(TestCase):
 
         input_tensor = torch.randn(4, requires_grad=True)
         output_tensor = torch.empty(4 * world_size)
-        dist.all_gather_into_tensor(output_tensor, input_tensor)
+        dist.all_gather_single(output_tensor, input_tensor)
         self.assertEqual(output_tensor.shape, (4 * world_size,))
 
     def test_reduce_scatter(self):

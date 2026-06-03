@@ -133,13 +133,13 @@ class TestCommMode(TestCase):
 
         # tests c10d all_gather_into_tensor tracing
         with comm_mode:
-            dist.all_gather_into_tensor(all_gather_out, inp)
+            dist.all_gather_single(all_gather_out, inp)
 
         self.checksAssert(comm_mode, c10d_ops._allgather_base_, 1, 1)
 
         # tests c10d reduce_scatter tracing
         with comm_mode:
-            dist.reduce_scatter_tensor(inp, all_gather_out)
+            dist.reduce_scatter_single(inp, all_gather_out)
 
         self.checksAssert(comm_mode, c10d_ops._reduce_scatter_base_, 1, 1)
 
@@ -185,7 +185,7 @@ class TestCommMode(TestCase):
 
         # tests c10d allgather_into_tensor_coalesced_ tracing
         with comm_mode, dist._coalescing_manager():
-            dist.all_gather_into_tensor(all_gather_out, inp)
+            dist.all_gather_single(all_gather_out, inp)
 
         self.checksAssert(comm_mode, c10d_ops.allgather_into_tensor_coalesced_, 1, 1)
 
@@ -203,7 +203,7 @@ class TestCommMode(TestCase):
 
         # tests c10d reduce_scatter_tensor_coalesced
         with comm_mode, dist._coalescing_manager():
-            dist.reduce_scatter_tensor(all_gather_out, inp)
+            dist.reduce_scatter_single(all_gather_out, inp)
 
         self.checksAssert(comm_mode, c10d_ops.reduce_scatter_tensor_coalesced_, 1, 1)
 
