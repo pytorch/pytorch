@@ -1,5 +1,6 @@
 """Functional interface."""
 
+import dataclasses
 import importlib
 import math
 import warnings
@@ -36,6 +37,7 @@ ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
 
 if TYPE_CHECKING:
+    from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
     from torch.types import _dtype as DType
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
@@ -3653,6 +3655,272 @@ def binary_cross_entropy_with_logits(
     )
 
 
+def linear_cross_entropy(
+    input: Tensor,
+    linear_weight: Tensor,
+    target: Tensor,
+    *,
+    weight: Tensor | None = None,
+    reduction: str = "mean",
+    ignore_index: int | None = None,
+    label_smoothing: float = 0.0,
+    options: "LinearCrossEntropyOptions | None" = None,
+) -> Tensor:
+    r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
+
+    The statement::
+
+      loss = linear_cross_entropy(input, linear_weight, target, **kwargs)
+
+    is equivalent to the following reference implementation of linear_cross_entropy::
+
+      logits = linear(input, linear_weight)
+      loss = cross_entropy(logits, target, **kwargs)
+
+    provided that :attr:`ignore_index` is not explicitly set to `None`
+    in `kwargs` (since :func:`cross_entropy` does not accept `None`
+    for :attr:`ignore_index`).
+
+    See :class:`~torch.nn.Linear` and :class:`~torch.nn.CrossEntropyLoss` for details.
+
+    Args:
+        input (Tensor) : input samples.
+        linear_weight (Tensor) : linear weight.
+        target (Tensor) : Ground truth class indices or class probabilities;
+        weight (Tensor, optional): a manual rescaling weight given to each class.
+        reduction (str, optional): Specifies the reduction to apply to
+            the output: ``'none'`` | ``'mean'`` |
+            ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the
+            number of elements in the output, ``'sum'``: the output
+            will be summed.
+            Default: ``'mean'``.
+        ignore_index (int, optional): Specifies a target value that is
+            ignored and does not contribute to the input
+            gradient. Note that :attr:`ignore_index` is only
+            applicable when the target contains class indices.
+            Default: `None`. When target contains class indices, the
+            default value is mapped to `-100`. Note: the default
+            :attr:`ignore_index` in
+            :class:`~torch.nn.functional.cross_entropy` is `-100` for both
+            target types.
+        label_smoothing (float, optional): A float in [0.0, 1.0].
+            Specifies the amount of smoothing when computing the
+            loss, where 0.0 means no smoothing. The targets become a
+            mixture of the original ground truth and a uniform
+            distribution as described in `Rethinking the Inception
+            Architecture for Computer Vision
+            <https://arxiv.org/abs/1512.00567>`__.
+            Default: :math:`0.0`.
+        options (LinearCrossEntropyOptions, optional): Specify
+            chunking strategy options, see
+            :class:`~torch.nn.LinearCrossEntropyOptions`
+            for more details. Enabling chunking will decrease the
+            memory usage.  To enable reference implementation of
+            ``linear_cross_entropy``, use `options=None`. Default:
+            ``None``. See the autograd / compile note below for
+            which higher-level APIs (``torch.compile``,
+            ``torch.func.grad``, ``torch.func.vmap(grad(...))``,
+            higher-order or forward-mode AD) only work on the
+            ``options=None`` reference path.
+
+    .. note::
+        **Limitations of the chunked path** (``options`` not ``None``).
+        The chunked op precomputes gradients inside forward and consumes
+        them via in-place backward mutation, which puts it outside the
+        standard autograd contract:
+
+        - Higher-order AD (``create_graph=True``, ``hessian``) is
+          unsupported.
+        - Forward-mode AD (``jvp``, ``jacfwd``) is unsupported.
+        - ``torch.func.grad`` / ``vmap(grad(...))`` does not work, but
+          plain ``output.backward()`` does.
+        - ``torch.compile`` falls back to eager at the chunked op;
+          ``allow_retain_graph=True`` is forced internally to keep
+          double-backward correct (with a warning).
+        - ``torch.jit.trace`` falls back to the reference path with a
+          warning.
+        - :class:`LinearCrossEntropyOptions` is not TorchScript-scriptable.
+
+        The reference path (``options=None``) supports all of the above.
+
+    Shape:
+        - Input: :math:`(in_features)` or :math:`(N, in\_features)`.
+        - Linear weight: :math:`(C, in\_features)` or :math:`(C, d_1,
+          ..., d_K, in\_features)` with :math:`K \geq 1` in the case of
+          K-dimensional loss.  Note: multi-dimensional weights (K > 0)
+          require batched input :math:`(N, in\_features)`.
+        - Target: If containing class indices, :math:`()`,
+          :math:`(N)`, or :math:`(N, d_1, d_2, ..., d_K)` when
+          :math:`K\geq 1`, where each value should be between
+          :math:`[0, C)`. The target data type is required to be long
+          when using class indices.
+          If containing class probabilities, the target must have
+          shape :math:`(C)`, :math:`(N, C)`, or :math:`(N, C, d_1,
+          d_2, ..., d_K)` when :math:`K\geq 1`, and each value should
+          be between :math:`[0, 1]`. This means the target data type
+          is required to be float when using class probabilities. Note
+          that PyTorch does not strictly enforce probability
+          constraints on the class probabilities and that it is the
+          user's responsibility to ensure ``target`` contains valid
+          probability distributions.
+        - Weight: :math:`(C)`.
+        - Output: If reduction is 'none', shape :math:`()`,
+          :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K\geq 1`
+          in the case of K-dimensional loss, depending on the
+          shape of the input. Otherwise, scalar.
+
+        where :math:`N` is batch size and :math:`C` is number of classes.
+
+    """
+    if has_torch_function_variadic(input, linear_weight, target, weight):
+        return handle_torch_function(
+            linear_cross_entropy,
+            (input, linear_weight, target, weight),
+            input,
+            linear_weight,
+            target,
+            weight=weight,
+            reduction=reduction,
+            ignore_index=ignore_index,
+            label_smoothing=label_smoothing,
+            options=options,
+        )
+    if input.dim() < 1 or input.dim() > 2:
+        raise RuntimeError(
+            f"expected input with dimensionality 1 or 2, got {input.dim()}"
+        )
+    if linear_weight.dim() < 2:
+        raise RuntimeError(
+            f"expected linear_weight with dimensionality at least 2, got {linear_weight.dim()}"
+        )
+    num_batches = input.shape[:-1]
+    in_features = input.shape[-1]
+    if in_features != linear_weight.shape[-1]:
+        raise RuntimeError(
+            "expected equal input and linear_weight last dimensions (in_features), "
+            f"got {input.shape[-1]} and {linear_weight.shape[-1]}, respectively"
+        )
+    num_classes = linear_weight.shape[0]
+    out_features = linear_weight.shape[1:-1]
+    if len(out_features) > 0 and len(num_batches) == 0:
+        raise RuntimeError(
+            f"K-dimensional loss defined by linear_weight shape {tuple(linear_weight.shape)} requires"
+            f" batched input, (N, {in_features}), got unbatched"
+            f" input with shape {tuple(input.shape)}"
+        )
+    logits_shape = (*num_batches, num_classes, *out_features)
+    # Ensure compatibility with cross_entropy_loss_symint that uses
+    # target and logits shape equality to detect if target contains
+    # probabilities:
+    target_contains_probabilities = target.shape == logits_shape
+    if target_contains_probabilities and ignore_index is not None:
+        raise RuntimeError(
+            "ignore_index cannot be specified when target contains probabilities"
+        )
+    ignore_index = ignore_index if ignore_index is not None else -100
+
+    # K-dim loss falls back: the chunked op softmaxes over the full
+    # linear_weight.shape[0], not per-position over num_classes.
+    if options is not None and (
+        out_features
+        or reduction not in {"mean", "sum"}
+        or label_smoothing != 0.0
+        or target.dtype != torch.int64
+        or torch.jit.is_tracing()
+    ):
+        warnings.warn(
+            "linear_cross_entropy: ``options`` ignored; chunked path needs "
+            "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
+            " == int64, out_features == (), and not under torch.jit.trace."
+            f" Got reduction={reduction!r}, label_smoothing={label_smoothing}, "
+            f"target.dtype={target.dtype}, out_features={tuple(out_features)}, "
+            f"tracing={torch.jit.is_tracing()}.",
+            stacklevel=2,
+        )
+
+    if (
+        options is not None
+        and reduction in {"mean", "sum"}
+        and label_smoothing == 0.0
+        and target.dtype == torch.int64
+        and not out_features
+        and not torch.jit.is_tracing()
+    ):
+        if input.dim() == 2:
+            num_batches = input.shape[0]
+            has_batches = True
+        else:
+            num_batches = 1
+            has_batches = False
+            input = input.unsqueeze(0)
+            target = target.unsqueeze(0)
+
+        options = options._adjust(
+            num_batches=num_batches,
+            in_features=in_features,
+            num_classes=num_classes,
+            dtype=input.dtype,
+            device=input.device,
+        )
+
+        # Force allow_retain_graph=True under torch.compile: the default
+        # second-backward guard uses a Python ``ctx._gi = None`` mutation
+        # that Dynamo doesn't preserve, breaking double-backward.
+        if not options.allow_retain_graph and torch.compiler.is_compiling():
+            warnings.warn(
+                "linear_cross_entropy: forcing allow_retain_graph=True under "
+                "torch.compile (adds one gradient-sized allocation/call). "
+                "Construct options with allow_retain_graph=True to silence.",
+                stacklevel=2,
+            )
+            options = dataclasses.replace(options, allow_retain_graph=True)
+
+        # Local import avoids a circular init via torch.library.custom_op.
+        from torch.nn.modules.linear_cross_entropy import (
+            _linear_cross_entropy_batch_chunked,
+        )
+
+        result = _linear_cross_entropy_batch_chunked(
+            input,
+            linear_weight,
+            target,
+            weight,
+            reduction,
+            ignore_index,
+            label_smoothing,
+            options.batch_chunk_size,
+            options.acc_policy,
+            options.acc_dtype,
+            options.allow_retain_graph,
+            input.requires_grad and torch.is_grad_enabled(),
+            linear_weight.requires_grad and torch.is_grad_enabled(),
+        )[0]
+
+        if not has_batches:
+            result = result.squeeze(0)
+        return result
+
+    if out_features:
+        linear_weight = linear_weight.reshape(
+            (math.prod(out_features, start=num_classes), in_features)
+        )
+
+    logits = linear(input, linear_weight)
+    # recover logits shape that corresponds to the shape of specified
+    # linear_weight:
+    logits = logits.reshape(logits_shape)
+
+    return cross_entropy(
+        logits,
+        target,
+        weight=weight,
+        reduction=reduction,
+        ignore_index=ignore_index,
+        label_smoothing=label_smoothing,
+    )
+
+
 def smooth_l1_loss(
     input: Tensor,
     target: Tensor,
@@ -4663,8 +4931,9 @@ def interpolate(  # noqa: F811
             for out-of-boundary values, making this operation *independent* of input size
             when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
-            Default: ``None``. When ``None`` and :attr:`mode` is one of the linear modes,
-            it is treated as ``False``.
+            Default: ``None``. ``None`` leaves :attr:`align_corners` unset for modes
+            that do not use it. For modes that use :attr:`align_corners`, ``None``
+            is treated as ``False``.
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
             interpolation calculation. If `recompute_scale_factor` is ``True``, then
             `scale_factor` must be passed in and `scale_factor` is used to compute the
@@ -4705,11 +4974,11 @@ def interpolate(  # noqa: F811
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
-            interpolate,
+            interpolate,  # pyrefly: ignore [bad-argument-type]
             (input,),
             input,
             size=size,
-            scale_factor=scale_factor,
+            scale_factor=scale_factor,  # pyrefly: ignore [bad-argument-type]
             mode=mode,
             align_corners=align_corners,
             recompute_scale_factor=recompute_scale_factor,
@@ -6323,7 +6592,7 @@ def multi_head_attention_forward(
         out_proj_weight, out_proj_bias: the output projection weight and bias.
         training: apply dropout if is ``True``.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention. This is an binary mask. When the value is True,
+            be ignored by the attention. This is a binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
             Default: `True`
@@ -6688,9 +6957,7 @@ def multi_head_attention_forward(
         if not torch.jit.is_scripting():
             del v
 
-        attn_output = (
-            attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
-        )
+        attn_output = attn_output.transpose(0, 1).reshape(tgt_len * bsz, embed_dim)
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
         attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
 
@@ -6725,14 +6992,12 @@ def multi_head_attention_forward(
             q, k, v, attn_mask, dropout_p, is_causal
         )
         # Free q, k, v and their backing projection storage before the
-        # .contiguous() call below allocates.  In self-attention the three
-        # tensors are views of a single packed projection, so releasing all
-        # references here lets the allocator reclaim that memory immediately.
+        # reshape() below allocates.  In self-attention the three tensors are
+        # views of a single packed projection, so releasing all references
+        # here lets the allocator reclaim that memory immediately.
         if not torch.jit.is_scripting():
             del q, k, v
-        attn_output = (
-            attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
-        )
+        attn_output = attn_output.permute(2, 0, 1, 3).reshape(bsz * tgt_len, embed_dim)
 
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
         attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
@@ -6788,6 +7053,30 @@ def grouped_mm(
     return torch._grouped_mm(mat_a, mat_b, offs=offs, bias=bias, out_dtype=out_dtype)
 
 
+def _expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
+    if v is None:
+        return []
+    elif not isinstance(v, list):
+        return [v]
+    else:
+        return v
+
+
+def _list_or_empty(l: list[_Any] | None) -> list[_Any]:
+    """Convert None to a list for native_functions list arguments.
+
+    native_functions cannot pass std::optional<ArrayRef<T>>, but can pass an
+    empty vector, so None arguments for lists must be converted explicitly.
+    """
+    return l if l else []
+
+
+def _enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
+    if not isinstance(l, list):
+        l = [l]
+    return [li.value for li in l]
+
+
 def scaled_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -6822,47 +7111,22 @@ def scaled_mm(
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
-    def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
-        if v is None:
-            return []
-        elif not isinstance(v, (list)):
-            return [
-                v,
-            ]
-        else:
-            return v
-
-    scale_a = expand_single_value(scale_a)
-    scale_recipe_a = expand_single_value(scale_recipe_a)
-    scale_b = expand_single_value(scale_b)
-    scale_recipe_b = expand_single_value(scale_recipe_b)
-    swizzle_a = expand_single_value(swizzle_a)
-    swizzle_b = expand_single_value(swizzle_b)
-
-    # native_functions has restrictions on what can be defined
-    # & passed through - std::optional<ArrayRef<Tensor>> for instance
-    # *cannot* be passed, but an empty vector (list) can.
-    # So, we need to convert None arguments for lists in python
-    # explicitly into empty lists.
-    def list_or_empty(l: list[_Any] | None) -> list[_Any]:
-        return l if l else []
-
-    def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
-        if not isinstance(l, list):
-            l = [
-                l,
-            ]
-        return [li.value for li in l]
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
 
     out = torch._scaled_mm_v2(
         mat_a,
         mat_b,
         scale_a,
-        enum_list_as_int_list(scale_recipe_a),
-        enum_list_as_int_list(list_or_empty(swizzle_a)),
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
         scale_b,
-        enum_list_as_int_list(scale_recipe_b),
-        enum_list_as_int_list(list_or_empty(swizzle_b)),
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
         bias,
         output_dtype,
         contraction_dim,
@@ -6908,47 +7172,22 @@ def scaled_grouped_mm(
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
-    def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
-        if v is None:
-            return []
-        elif not isinstance(v, (list)):
-            return [
-                v,
-            ]
-        else:
-            return v
-
-    scale_a = expand_single_value(scale_a)
-    scale_recipe_a = expand_single_value(scale_recipe_a)
-    scale_b = expand_single_value(scale_b)
-    scale_recipe_b = expand_single_value(scale_recipe_b)
-    swizzle_a = expand_single_value(swizzle_a)
-    swizzle_b = expand_single_value(swizzle_b)
-
-    # native_functions has restrictions on what can be defined
-    # & passed through - std::optional<ArrayRef<Tensor>> for instance
-    # *cannot* be passed, but an empty vector (list) can.
-    # So, we need to convert None arguments for lists in python
-    # explicitly into empty lists.
-    def list_or_empty(l: list[_Any] | None) -> list[_Any]:
-        return l if l else []
-
-    def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
-        if not isinstance(l, list):
-            l = [
-                l,
-            ]
-        return [li.value for li in l]
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
 
     out = torch._scaled_grouped_mm_v2(
         mat_a,
         mat_b,
         scale_a,
-        enum_list_as_int_list(scale_recipe_a),
-        enum_list_as_int_list(list_or_empty(swizzle_a)),
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
         scale_b,
-        enum_list_as_int_list(scale_recipe_b),
-        enum_list_as_int_list(list_or_empty(swizzle_b)),
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
         offs,
         bias,
         output_dtype,

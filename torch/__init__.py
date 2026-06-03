@@ -62,6 +62,7 @@ from torch.torch_version import __version__ as __version__
 
 
 if TYPE_CHECKING:
+    from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
     from torch.types import Device, IntLikeType
 
 
@@ -1494,7 +1495,7 @@ def use_deterministic_algorithms(
         will use some heuristics to pick the most promising configs rather
         than do autotuning.
       - Skip autotuning for reduction in coordinate descent tuning.
-      - Don't benchmarking for the computation/communication reordering pass
+      - Don't benchmark for the computation/communication reordering pass
       - Disable the feature that dynamically scale down RBLOCK triton config for higher
         occupancy.
 
@@ -2580,6 +2581,7 @@ def compile(
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
+    shapes_spec: _Any = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2594,6 +2596,7 @@ def compile(
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     name: str | None = None,
     disable: builtins.bool = False,
+    shapes_spec: _Any = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2608,6 +2611,8 @@ def compile(
     name: str | None = None,
     disable: builtins.bool = False,
     recompile_limit: builtins.int | None = None,
+    isolate_recompiles: builtins.bool = False,
+    shapes_spec: _Any = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -2700,6 +2705,25 @@ def compile(
        name (str or None): Optional identifier for the compiled region. When supported by downstream
         tooling, this is surfaced on wrapped compiled-region higher-order operators and other debug metadata.
        disable (bool): Turn torch.compile() into a no-op for testing
+       recompile_limit (int or None): Maximum number of recompilations allowed for this
+        ``torch.compile()`` call before falling back to eager. If None (default), uses
+        the global ``torch._dynamo.config.recompile_limit`` (default 8). With
+        ``fullgraph=True``, exceeding the limit raises ``FailOnRecompileLimitHit``.
+       isolate_recompiles (bool): If True, this ``torch.compile()`` call tracks
+        recompilations independently. By default, all ``torch.compile()`` calls on the
+        same function share a single set of compiled entries, so one call's
+        recompilations count against every other call's limit. With
+        ``isolate_recompiles=True``, each call gets its own isolated set of entries.
+        Lookups for an isolated compile call will still fall back to entries from
+        non-isolated compile calls (BC-friendly reuse), but new compilations are
+        stored separately. ``recompile_limit`` is checked per-region;
+        ``accumulated_recompile_limit`` is a global cap across all regions.
+        Default-strategy behavior is asymmetric: SKIP decisions (from
+        ``skip_code``, ``@torch._dynamo.skip``, FX-generated code, etc.) are
+        inherited by isolated regions — those remain skipped. RUN_ONLY persisted
+        by a non-isolated region hitting its recompile limit does NOT bleed
+        into isolated regions — each region manages its own RUN_ONLY state.
+        Default False.
 
     Example::
 
@@ -2728,6 +2752,13 @@ def compile(
 
         backend = get_default_backend()
 
+    # Auto-wrap ParamsSpec → ShapesSpec for convenience
+    if shapes_spec is not None:
+        from torch.fx.experimental.dynamic_spec import ParamsSpec, ShapesSpec
+
+        if isinstance(shapes_spec, ParamsSpec):
+            shapes_spec = ShapesSpec(shapes_spec)
+
     # Decorator mode
     if model is None:
 
@@ -2743,6 +2774,9 @@ def compile(
                 options=options,
                 name=name,
                 disable=disable,
+                recompile_limit=recompile_limit,
+                isolate_recompiles=isolate_recompiles,
+                shapes_spec=shapes_spec,
             )
 
         return fn
@@ -2800,6 +2834,8 @@ def compile(
         disable=disable,
         guard_filter_fn=guard_filter_fn,
         recompile_limit=recompile_limit,
+        isolate_recompiles=isolate_recompiles,
+        shapes_spec=shapes_spec,
     )(model)  # type: ignore[return-value]
 
 
@@ -2850,13 +2886,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
-from torch import fx as fx
-
-
-# Register MPS specific decomps
-torch.backends.mps._init()
-
-from torch import compiler as compiler
+from torch import compiler as compiler, fx as fx
 
 
 class _TritonLibrary:
@@ -2980,12 +3010,6 @@ def _constrain_as_size(
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
 
 
-from torch import _logging
-
-
-_logging._init_logs()
-
-
 def _import_device_backends():
     """
     Leverage the Python plugin mechanism to load out-of-the-tree device extensions.
@@ -3042,11 +3066,18 @@ def _as_tensor_fullprec(t):
         return torch.as_tensor(t)
 
 
-# `_import_device_backends` should be kept at the end to ensure
-# all the other functions in this module that may be accessed by
-# an autoloaded backend are defined
+# `_import_device_backends` should run after the definitions above to ensure
+# all the other functions in this module that may be accessed by an autoloaded
+# backend are defined.
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+from torch import _logging
+
+
+# Keep `TORCH_LOGS` initialization after backend autoload so backends can
+# register their log names before `TORCH_LOGS` is parsed and validated.
+_logging._init_logs()
 
 # Register all registered custom / override ops in torch/_native
 import torch._native

@@ -97,7 +97,10 @@ def _collect_all_subgraph_usages(
                 and subgraph_attr.op == "get_attr"
             ):
                 subgraph_name = subgraph_attr.target
-                assert isinstance(subgraph_name, str)
+                if not isinstance(subgraph_name, str):
+                    raise AssertionError(
+                        f"Expected subgraph_name to be str, got {type(subgraph_name)}"
+                    )
                 subgraph = getattr(gm, subgraph_name, None)
                 if isinstance(subgraph, torch.fx.GraphModule):
                     subgraph_id = id(subgraph)
@@ -176,10 +179,16 @@ def _dce_subgraph(
         for user in list(hop_node.users):
             if user.op == "call_function" and user.target == operator.getitem:
                 old_idx = user.args[1]
-                assert isinstance(old_idx, int)
+                if not isinstance(old_idx, int):
+                    raise AssertionError(
+                        f"Expected getitem index to be int, got {type(old_idx)}"
+                    )
 
                 if old_idx not in old_to_new:
-                    assert len(list(user.users)) == 0
+                    if len(list(user.users)) != 0:
+                        raise AssertionError(
+                            f"Expected unused getitem node at index {old_idx} to have no users"
+                        )
                     parent_gm.graph.erase_node(user)
                     continue
 
@@ -197,7 +206,10 @@ def _dce_subgraph(
         # Update example_value metadata on hop_node
         if "example_value" in hop_node.meta:
             old_example = hop_node.meta["example_value"]
-            assert isinstance(old_example, (tuple, list))
+            if not isinstance(old_example, (tuple, list)):
+                raise AssertionError(
+                    f"Expected example_value to be tuple or list, got {type(old_example)}"
+                )
             new_example = tuple(
                 old_example[old_idx]
                 for old_idx in range(len(old_outputs))

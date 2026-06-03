@@ -9,10 +9,12 @@ This package is lazily initialized, so you can always import it, and use
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import threading
 import traceback
 import warnings
+from ctypes import byref, c_double, c_uint32, c_void_p, cast, pointer
 from functools import lru_cache
 from typing import Any, NewType, TYPE_CHECKING
 
@@ -49,6 +51,23 @@ default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 _cached_device_count: int | None = None
 
 
+@dataclasses.dataclass
+class _ZesDeviceInfo:
+    device_handle: c_void_p
+    subdevice_id: int | None = None
+    is_integrated: bool = False
+    temperature_handle: c_void_p | None = None
+    frequency_handle: c_void_p | None = None
+    power_handle: c_void_p | None = None
+    engine_handle: c_void_p | None = None
+    memory_handle: c_void_p | None = None
+
+
+_cached_zes_device_infos: list[_ZesDeviceInfo] = []
+# Interval between two HW counter reads; must be >=100ms for fresh data.
+_zes_sample_interval_ms = 150
+
+
 def _is_compiled() -> bool:
     r"""Return true if compile with XPU support."""
     return torch._C._has_xpu
@@ -69,13 +88,18 @@ else:
         raise NotImplementedError("PyTorch was compiled without XPU support")
 
 
-def _parse_visible_devices() -> list[int]:
+def _parse_visible_devices(strict=False) -> list[int]:
     r"""Parse ``ZE_AFFINITY_MASK`` and return visible device ordinals.
 
     Returns a list of non-negative device ordinals specified by the mask.
     When the mask is unset, returns ``[0, 1, ..., 127]`` (the maximum range
     for ``int8_t`` device indices).  Returns an empty list for unsupported
     COMPOSITE-style masks (e.g. ``"0.0,0.1"``).
+
+    Args:
+        strict (bool): If ``True``, raises ``ValueError`` on unsupported mask
+            formats (e.g. COMPOSITE-style ``"0.0,0.1"``).  If ``False``
+            (default), returns an empty list instead.
     """
     var = os.getenv("ZE_AFFINITY_MASK")
     if var is None:
@@ -91,18 +115,24 @@ def _parse_visible_devices() -> list[int]:
             # A non-integer token (e.g. "0.0" in COMPOSITE-mode format)
             # means the mask is unsupported here; signal that by returning
             # an empty list.
+            if strict:
+                raise ValueError(
+                    f"Unsupported ZE_AFFINITY_MASK format: '{var}'. Expected a comma-separated list of integers, e.g. '0,1,2'."
+                ) from None
             return []
         if x >= 0 and x not in visible_devices:
             visible_devices.append(x)
     return visible_devices
 
 
-def _raw_device_count_zes(visible_mask: list[int]) -> int:
-    r"""Return the number of visible XPU devices via Level Zero Sysman.
+def _enum_zes_device_infos(visible_mask: list[int]) -> int:
+    r"""Enumerate visible XPU devices via Level Zero Sysman and cache their info.
 
     Enumerates devices from the first Level Zero Sysman driver and counts those
     whose logical index appears in *visible_mask*.  Only devices listed in
     the visible mask participate in counting.
+    The populated ``_cached_zes_device_infos`` list is indexed by PyTorch
+    device ordinal.
 
     Discrete GPUs (dGPUs) take priority: if any visible dGPU is found, only
     dGPUs are counted; integrated GPUs (iGPUs) are counted only when no
@@ -116,26 +146,26 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
     - **COMPOSITE**: sub-devices are hidden; the whole physical device
       counts as one.
 
-    Returns a negative value on initialization or enumeration failure.
+    Returns the visible device count, or a negative value on failure.
     """
-    from ctypes import byref, c_uint32
-
     try:
         import pyzes  # type: ignore[import]
     except ImportError:
         return -1
 
-    def _zes_check(rc: int, msg: str) -> bool:
-        """Return True if the call failed (rc != 0) after issuing a warning."""
-        if rc != 0:
-            warnings.warn(msg, stacklevel=3)
-        return rc != 0
+    global _cached_zes_device_infos
 
-    if _zes_check(pyzes.zesInit(0), "Can't initialize Level Zero Sysman"):
+    def _zes_check_warn(rc: int, msg: str) -> bool:
+        """Return True if the call failed (rc != ZE_RESULT_SUCCESS) after issuing a warning."""
+        if rc != pyzes.ZE_RESULT_SUCCESS:
+            warnings.warn(msg, stacklevel=3)
+        return rc != pyzes.ZE_RESULT_SUCCESS
+
+    if _zes_check_warn(pyzes.zesInit(0), "Can't initialize Level Zero Sysman"):
         return -1
 
     driver_count = c_uint32(0)
-    if _zes_check(
+    if _zes_check_warn(
         pyzes.zesDriverGet(byref(driver_count), None),
         "Can't get Level Zero Sysman driver count",
     ):
@@ -144,31 +174,31 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
         return 0
 
     drivers = (pyzes.zes_driver_handle_t * driver_count.value)()
-    if _zes_check(
+    if _zes_check_warn(
         pyzes.zesDriverGet(byref(driver_count), drivers),
         "Can't get Level Zero Sysman driver handles",
     ):
         return -1
 
     device_count = c_uint32(0)
-    if _zes_check(
+    if _zes_check_warn(
         pyzes.zesDeviceGet(drivers[0], byref(device_count), None),
         "Can't get Level Zero Sysman device count",
     ):
         return -1
 
     devices = (pyzes.zes_device_handle_t * device_count.value)()
-    if _zes_check(
+    if _zes_check_warn(
         pyzes.zesDeviceGet(drivers[0], byref(device_count), devices),
         "Can't get Level Zero Sysman device handles",
     ):
         return -1
 
     # --- Count visible dGPUs and iGPUs ---
-    ZE_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
-    hierarchy = os.getenv("ZE_FLAT_DEVICE_HIERARCHY")
-    expose_sub_devices = hierarchy != "COMPOSITE"
+    ZES_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
+    expose_subdevices = os.getenv("ZE_FLAT_DEVICE_HIERARCHY") != "COMPOSITE"
 
+    _cached_zes_device_infos.clear()
     visible = set(visible_mask)
     logical_index = 0
     num_igpu = 0
@@ -177,33 +207,48 @@ def _raw_device_count_zes(visible_mask: list[int]) -> int:
     for device in devices:
         props = pyzes.zes_device_properties_t()
         props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_PROPERTIES
-        if _zes_check(
+        ext_props = pyzes.zes_device_ext_properties_t()
+        ext_props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_EXT_PROPERTIES
+        props.pNext = cast(pointer(ext_props), c_void_p)
+        if _zes_check_warn(
             pyzes.zesDeviceGetProperties(device, byref(props)),
             "Can't get Level Zero Sysman device properties",
         ):
             return -1
 
-        is_integrated = bool(props.core.flags & ZE_DEVICE_PROPERTY_FLAG_INTEGRATED)
+        is_integrated = bool(ext_props.flags & ZES_DEVICE_PROPERTY_FLAG_INTEGRATED)
 
-        # Determine how many logical indices this physical device occupies.
-        # Tiled dGPUs in FLAT/COMBINED mode expose each sub-device separately;
-        # everything else (iGPU, non-tiled dGPU, COMPOSITE mode) counts as one.
-        num_slots = (
-            props.numSubdevices
-            if not is_integrated and props.numSubdevices > 0 and expose_sub_devices
-            else 1
-        )
+        # Tiled dGPUs in FLAT/COMBINED mode expose each sub-device as a
+        # separate logical device; everything else counts as one slot.
+        tiled = not is_integrated and props.numSubdevices > 0 and expose_subdevices
+        num_slots = props.numSubdevices if tiled else 1
 
-        for _ in range(num_slots):
+        for slot in range(num_slots):
             if logical_index in visible:
+                _cached_zes_device_infos.append(
+                    _ZesDeviceInfo(
+                        device_handle=device,
+                        subdevice_id=slot if tiled else None,
+                        is_integrated=is_integrated,
+                    )
+                )
                 if is_integrated:
                     num_igpu += 1
                 else:
                     num_dgpu += 1
             logical_index += 1
 
-    # Prefer dGPU count; fall back to iGPU count only when no dGPU is visible.
+    # dGPUs take priority; strip iGPUs when at least one dGPU is visible.
+    if num_dgpu and num_igpu:
+        _cached_zes_device_infos = [
+            info for info in _cached_zes_device_infos if not info.is_integrated
+        ]
     return num_dgpu or num_igpu
+
+
+def _raw_device_count_zes(visible_mask: list[int]) -> int:
+    r"""Return the visible XPU device count via Level Zero Sysman, or negative on failure."""
+    return _enum_zes_device_infos(visible_mask)
 
 
 def _device_count_zes() -> int:
@@ -454,6 +499,7 @@ def get_device_properties(
     - ``memory_bus_width`` (int) maximum bus width between device and memory in bits.
     - ``sub_group_sizes``: (list[int]): a list of supported sub-group sizes.
     - ``local_mem_size`` (int): device local memory capacity that can be allocated per work-group in bytes.
+    - ``last_level_cache_size`` (int): size in bytes of the device's last-level memory cache, shared across all Xe Cores (analogous to CUDA ``L2_cache_size``).
     - ``has_fp16`` (bool): whether float16 dtype is supported.
     - ``has_fp64`` (bool): whether float64 dtype is supported.
     - ``has_atomic64`` (bool): whether 64-bit atomic operations are supported.
@@ -461,6 +507,7 @@ def get_device_properties(
     - ``has_subgroup_matrix_multiply_accumulate`` (bool): whether DPAS (Dot Product Accumulate Systolic) is supported.
     - ``has_subgroup_matrix_multiply_accumulate_tensor_float32`` (bool): whether DPAS with tf32 inputs is supported.
     - ``has_subgroup_2d_block_io`` (bool): whether 2D block I/O for efficient matrix multiplication is supported.
+    - ``is_integrated_gpu`` (bool): whether the device is an integrated GPU (iGPU).
     - ``total_memory`` (int): device global memory in bytes.
     - ``gpu_subslice_count`` (int): number of subslice.
     - ``architecture`` (int): device architecture identifier (experimental).
@@ -720,6 +767,563 @@ def _get_rng_state_offset(device: int | str | torch.device = "xpu") -> int:
     return default_generator.get_offset()
 
 
+def _zes_check(rc: int, msg: str) -> None:
+    """Raise RuntimeError if the Level Zero Sysman call failed (rc != ZE_RESULT_SUCCESS)."""
+    import pyzes  # type: ignore[import]
+
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(f"{msg} (rc={rc})")
+
+
+def _zes_ensure_device_infos(device: int):
+    """Ensure the ZES device info cache is populated and validate the device index."""
+    if not _cached_zes_device_infos:
+        if _enum_zes_device_infos(_parse_visible_devices(strict=True)) < 0:
+            raise RuntimeError("Failed to enumerate devices via Level Zero Sysman.")
+
+    total_devices = len(_cached_zes_device_infos)
+    if device >= total_devices:
+        raise RuntimeError(
+            f"The device {device} is out of range for Level Zero Sysman. It must be in the range [0, {total_devices})."
+        )
+
+
+def _get_zes_temperature_handle(device: Device = None) -> c_void_p:
+    r"""Return the Level Zero Sysman GPU temperature sensor handle for the specified device.
+
+    The result is cached in ``_ZesDeviceInfo.temperature_handle`` so that
+    repeated calls skip sensor enumeration.  ``_cached_zes_device_infos``
+    is lazily populated on the first call.
+
+    Args:
+        device (torch.device, str or int, optional): target device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'"
+        ) from None
+
+    device = _get_device_index(device, optional=True)
+    _zes_ensure_device_infos(device)
+
+    info = _cached_zes_device_infos[device]
+    if info.temperature_handle is not None:
+        return info.temperature_handle
+
+    device_handle = info.device_handle
+    subdevice_id = info.subdevice_id
+
+    # Note [telemetry handle selection]:
+    # For tiled dGPUs, pick the handle whose subdeviceId matches.
+    # For non-tiled devices, pick the root-level (non-subdevice) handle.
+    temp_count = c_uint32(0)
+    _zes_check(
+        pyzes.zesDeviceEnumTemperatureSensors(device_handle, byref(temp_count), None),
+        "Can't get Level Zero Sysman temperature sensor count.",
+    )
+    if temp_count.value == 0:
+        raise RuntimeError("No Level Zero Sysman temperature sensors found.")
+    temp_handles = (pyzes.zes_temp_handle_t * temp_count.value)()
+    _zes_check(
+        pyzes.zesDeviceEnumTemperatureSensors(
+            device_handle, byref(temp_count), temp_handles
+        ),
+        "Can't get Level Zero Sysman temperature sensor handles.",
+    )
+
+    temperature_handle = None
+    for temp_handle in temp_handles:
+        temp_props = pyzes.zes_temp_properties_t()
+        temp_props.stype = pyzes.ZES_STRUCTURE_TYPE_TEMP_PROPERTIES
+        _zes_check(
+            pyzes.zesTemperatureGetProperties(temp_handle, byref(temp_props)),
+            "Can't get Level Zero Sysman temperature properties.",
+        )
+        if temp_props.type != pyzes.ZES_TEMP_SENSORS_GPU:
+            continue
+        if subdevice_id is not None:
+            if temp_props.onSubdevice and temp_props.subdeviceId == subdevice_id:
+                temperature_handle = temp_handle
+                break
+        else:
+            if not temp_props.onSubdevice:
+                temperature_handle = temp_handle
+                break
+
+    if temperature_handle is None:
+        raise RuntimeError("No Level Zero Sysman GPU temperature handle found.")
+    info.temperature_handle = temperature_handle
+    return temperature_handle
+
+
+def temperature(device: Device = None) -> float:
+    r"""Return the GPU temperature in degrees Celsius.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU temperature information.
+    """
+    temperature_handle = _get_zes_temperature_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    temp = c_double(0.0)
+    rc = pyzes.zesTemperatureGetState(temperature_handle, byref(temp))
+    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+        raise RuntimeError(
+            "GPU temperature querying is not available. Try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(f"Can't get Level Zero Sysman GPU temperature (rc={rc}).")
+    return temp.value
+
+
+def _get_zes_frequency_handle(device: Device = None) -> c_void_p:
+    r"""Return the Level Zero Sysman GPU frequency domain handle for the specified device.
+
+    The result is cached in ``_ZesDeviceInfo.frequency_handle`` so that
+    repeated calls skip domain enumeration.  ``_cached_zes_device_infos``
+    is lazily populated on the first call.
+
+    Args:
+        device (torch.device, str or int, optional): target device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'"
+        ) from None
+
+    device = _get_device_index(device, optional=True)
+    _zes_ensure_device_infos(device)
+
+    info = _cached_zes_device_infos[device]
+    if info.frequency_handle is not None:
+        return info.frequency_handle
+
+    device_handle = info.device_handle
+
+    # Enumerate all frequency domains under this device handle.
+    freq_count = c_uint32(0)
+    _zes_check(
+        pyzes.zesDeviceEnumFrequencyDomains(device_handle, byref(freq_count), None),
+        "Can't get Level Zero Sysman frequency domains count.",
+    )
+    if freq_count.value == 0:
+        raise RuntimeError("No Level Zero Sysman frequency domains found.")
+    freq_handles = (pyzes.zes_freq_handle_t * freq_count.value)()
+    _zes_check(
+        pyzes.zesDeviceEnumFrequencyDomains(
+            device_handle, byref(freq_count), freq_handles
+        ),
+        "Can't get Level Zero Sysman frequency domain handles.",
+    )
+
+    # TODO: pyzes lacks zesFrequencyGetProperties, so we cannot filter by
+    # subdevice or domain type. We assume index 0 (ZES_FREQ_DOMAIN_GPU)
+    # is the GPU frequency domain.
+    frequency_handle = freq_handles[0]
+    info.frequency_handle = frequency_handle
+    return frequency_handle
+
+
+def clock_rate(device: Device = None) -> float:
+    r"""Return the GPU clock rate in MHz.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    frequency_handle = _get_zes_frequency_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    freq_state = pyzes.zes_freq_state_t()
+    rc = pyzes.zesFrequencyGetState(frequency_handle, byref(freq_state))
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(f"Can't get Level Zero Sysman GPU clock rate (rc={rc}).")
+    return freq_state.actual
+
+
+def _get_zes_power_handle(device: Device = None) -> c_void_p:
+    r"""Return the Level Zero Sysman GPU power domain handle for the specified device.
+
+    The result is cached in ``_ZesDeviceInfo.power_handle`` so that
+    repeated calls skip domain enumeration.  ``_cached_zes_device_infos``
+    is lazily populated on the first call.
+
+    Args:
+        device (torch.device, str or int, optional): target device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'"
+        ) from None
+
+    device = _get_device_index(device, optional=True)
+    _zes_ensure_device_infos(device)
+
+    info = _cached_zes_device_infos[device]
+    if info.power_handle is not None:
+        return info.power_handle
+
+    device_handle = info.device_handle
+
+    # Enumerate all power domains under this device handle.
+    power_count = c_uint32(0)
+    _zes_check(
+        pyzes.zesDeviceEnumPowerDomains(device_handle, byref(power_count), None),
+        "Can't get Level Zero Sysman power domains count.",
+    )
+    if power_count.value == 0:
+        raise RuntimeError("No Level Zero Sysman power domains found.")
+    power_handles = (pyzes.zes_pwr_handle_t * power_count.value)()
+    _zes_check(
+        pyzes.zesDeviceEnumPowerDomains(
+            device_handle, byref(power_count), power_handles
+        ),
+        "Can't get Level Zero Sysman power domain handles.",
+    )
+
+    # TODO: pyzes lacks zesPowerGetProperties, so we cannot filter by
+    # subdevice or domain type. We assume index 0 (ZES_POWER_DOMAIN_CARD)
+    # is the GPU card power domain.
+    power_handle = power_handles[0]
+    info.power_handle = power_handle
+    return power_handle
+
+
+def power_draw(device: Device = None) -> float:
+    r"""Return the GPU card power draw in watts.
+
+    The value is computed by dividing the energy delta by the time delta between
+    two energy-counter reads separated by a 100ms sampling interval.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    .. note:: This function blocks for approximately 100ms per call due to the
+        sampling interval required to compute an accurate power reading.
+
+    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU power information.
+    """
+    power_handle = _get_zes_power_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    counter_start = pyzes.zes_power_energy_counter_t()
+    rc = pyzes.zesPowerGetEnergyCounter(power_handle, byref(counter_start))
+    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+        raise RuntimeError(
+            "GPU power draw querying is not available. Try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(f"Can't get Level Zero Sysman GPU power draw (rc={rc}).")
+
+    import time
+
+    time.sleep(_zes_sample_interval_ms / 1000.0)
+
+    counter_end = pyzes.zes_power_energy_counter_t()
+    _zes_check(
+        pyzes.zesPowerGetEnergyCounter(power_handle, byref(counter_end)),
+        "Can't get Level Zero Sysman GPU power energy counter.",
+    )
+    # energy is in microjoules, timestamp is in microseconds (per L0 Sysman spec).
+    # microjoules / microseconds = watts, so the micro factors cancel.
+    dt = counter_end.timestamp - counter_start.timestamp
+    return (counter_end.energy - counter_start.energy) / dt
+
+
+def _get_zes_engine_handle(device: Device = None) -> c_void_p:
+    r"""Return the Level Zero Sysman GPU engine group handle for the specified device.
+
+    The result is cached in ``_ZesDeviceInfo.engine_handle`` so that
+    repeated calls skip group enumeration.  ``_cached_zes_device_infos``
+    is lazily populated on the first call.
+
+    Args:
+        device (torch.device, str or int, optional): target device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'"
+        ) from None
+
+    device = _get_device_index(device, optional=True)
+    _zes_ensure_device_infos(device)
+
+    info = _cached_zes_device_infos[device]
+    if info.engine_handle is not None:
+        return info.engine_handle
+
+    device_handle = info.device_handle
+    subdevice_id = info.subdevice_id
+
+    # See Note [telemetry handle selection]
+    engine_count = c_uint32(0)
+    _zes_check(
+        pyzes.zesDeviceEnumEngineGroups(device_handle, byref(engine_count), None),
+        "Can't get Level Zero Sysman engine group count.",
+    )
+    # TODO: zesDeviceEnumEngineGroups does not return ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS on privilege errors;
+    # instead it succeeds with count=0. Treat that as an error with a helpful hint about elevated privileges.
+    if engine_count.value == 0:
+        raise RuntimeError(
+            "No Level Zero Sysman engine groups found. The GPU may not support engine monitoring, or try running with elevated privileges (e.g. sudo)."
+        )
+    engine_handles = (pyzes.zes_engine_handle_t * engine_count.value)()
+    _zes_check(
+        pyzes.zesDeviceEnumEngineGroups(
+            device_handle, byref(engine_count), engine_handles
+        ),
+        "Can't get Level Zero Sysman engine group handles.",
+    )
+
+    engine_handle = None
+    for eng_handle in engine_handles:
+        eng_props = pyzes.zes_engine_properties_t()
+        eng_props.stype = pyzes.ZES_STRUCTURE_TYPE_ENGINE_PROPERTIES
+        _zes_check(
+            pyzes.zesEngineGetProperties(eng_handle, byref(eng_props)),
+            "Can't get Level Zero Sysman engine properties.",
+        )
+        if eng_props.type != pyzes.ZES_ENGINE_GROUP_ALL:
+            continue
+        if subdevice_id is not None:
+            if eng_props.onSubdevice and eng_props.subdeviceId == subdevice_id:
+                engine_handle = eng_handle
+                break
+        else:
+            if not eng_props.onSubdevice:
+                engine_handle = eng_handle
+                break
+
+    if engine_handle is None:
+        raise RuntimeError("No Level Zero Sysman GPU engine handle found.")
+    info.engine_handle = engine_handle
+    return engine_handle
+
+
+def utilization(device: Device = None) -> float:
+    r"""Return the GPU engine utilization as a percentage.
+
+    The value is computed by dividing the active-time delta by the time delta
+    between two engine-activity reads separated by a 100ms sampling interval.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    .. note:: This function blocks for approximately 100ms per call due to the
+        sampling interval required to compute an accurate utilization reading.
+
+    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU utilization information.
+    """
+    engine_handle = _get_zes_engine_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    stats_start = pyzes.zes_engine_stats_t()
+    rc = pyzes.zesEngineGetActivity(engine_handle, byref(stats_start))
+    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+        raise RuntimeError(
+            "GPU utilization querying is not available. Try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(
+            f"Can't get Level Zero Sysman GPU engine activity (rc={rc})."
+        )
+
+    import time
+
+    time.sleep(_zes_sample_interval_ms / 1000.0)
+
+    stats_end = pyzes.zes_engine_stats_t()
+    _zes_check(
+        pyzes.zesEngineGetActivity(engine_handle, byref(stats_end)),
+        "Can't get Level Zero Sysman GPU engine activity.",
+    )
+    # activeTime and timestamp are monotonic counters in microseconds.
+    dt = stats_end.timestamp - stats_start.timestamp
+    return (stats_end.activeTime - stats_start.activeTime) / dt * 100
+
+
+def _zes_get_memory_handle(device: Device = None) -> c_void_p:
+    r"""Return the Level Zero Sysman GPU memory module handle for the specified device.
+
+    The result is cached in ``_ZesDeviceInfo.memory_handle`` so that
+    repeated calls skip module enumeration.  ``_cached_zes_device_infos``
+    is lazily populated on the first call.
+
+    Args:
+        device (torch.device, str or int, optional): target device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+    """
+    try:
+        import pyzes  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "pyzes is required; install it with 'pip install pyzes'"
+        ) from None
+
+    device = _get_device_index(device, optional=True)
+    _zes_ensure_device_infos(device)
+
+    info = _cached_zes_device_infos[device]
+    if info.memory_handle is not None:
+        return info.memory_handle
+
+    device_handle = info.device_handle
+    subdevice_id = info.subdevice_id
+
+    # See Note [telemetry handle selection]
+    mem_count = c_uint32(0)
+    _zes_check(
+        pyzes.zesDeviceEnumMemoryModules(device_handle, byref(mem_count), None),
+        "Can't get Level Zero Sysman memory module count.",
+    )
+    if mem_count.value == 0:
+        raise RuntimeError("No Level Zero Sysman memory modules found.")
+    memory_handles = (pyzes.zes_mem_handle_t * mem_count.value)()
+    _zes_check(
+        pyzes.zesDeviceEnumMemoryModules(
+            device_handle, byref(mem_count), memory_handles
+        ),
+        "Can't get Level Zero Sysman memory module handles.",
+    )
+
+    memory_handle = None
+    for mem_handle in memory_handles:
+        mem_props = pyzes.zes_mem_properties_t()
+        mem_props.stype = pyzes.ZES_STRUCTURE_TYPE_MEM_PROPERTIES
+        _zes_check(
+            pyzes.zesMemoryGetProperties(mem_handle, byref(mem_props)),
+            "Can't get Level Zero Sysman memory properties.",
+        )
+        if mem_props.location != pyzes.ZES_MEM_LOC_DEVICE:
+            continue
+        if subdevice_id is not None:
+            if mem_props.onSubdevice and mem_props.subdeviceId == subdevice_id:
+                memory_handle = mem_handle
+                break
+        else:
+            if not mem_props.onSubdevice:
+                memory_handle = mem_handle
+                break
+
+    if memory_handle is None:
+        raise RuntimeError("No Level Zero Sysman GPU memory handle found.")
+    info.memory_handle = memory_handle
+    return memory_handle
+
+
+def memory_usage(device: Device = None) -> float:
+    r"""Return the GPU memory bandwidth usage as a percentage.
+
+    The value is computed by dividing the byte-transfer delta by the time delta
+    between two bandwidth-counter reads separated by a 100ms sampling interval,
+    then normalizing by the peak bandwidth reported by the hardware.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    .. note:: This function blocks for approximately 100ms per call due to the
+        sampling interval required to compute an accurate bandwidth reading.
+
+    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU memory bandwidth usage information.
+    """
+    memory_handle = _zes_get_memory_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    bandwidth_start = pyzes.zes_mem_bandwidth_t()
+    rc = pyzes.zesMemoryGetBandwidth(memory_handle, byref(bandwidth_start))
+    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+        raise RuntimeError(
+            "GPU memory bandwidth usage querying is not available. Try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(
+            f"Can't get Level Zero Sysman GPU memory bandwidth (rc={rc})."
+        )
+
+    import time
+
+    time.sleep(_zes_sample_interval_ms / 1000.0)
+
+    bandwidth_end = pyzes.zes_mem_bandwidth_t()
+    _zes_check(
+        pyzes.zesMemoryGetBandwidth(memory_handle, byref(bandwidth_end)),
+        "Can't get Level Zero Sysman GPU memory bandwidth.",
+    )
+    dt = bandwidth_end.timestamp - bandwidth_start.timestamp
+    # readCounter and writeCounter are cumulative byte counts (per L0 Sysman spec).
+    read_delta = bandwidth_end.readCounter - bandwidth_start.readCounter
+    write_delta = bandwidth_end.writeCounter - bandwidth_start.writeCounter
+    # maxBandwidth is in bytes/sec; dt is in microseconds; the 1e6 factor converts dt to seconds.
+    return 1e6 * (read_delta + write_delta) / (bandwidth_end.maxBandwidth * dt) * 100
+
+
+def device_memory_used(device: Device = None) -> int:
+    r"""Return the current GPU used global (device) memory in bytes.
+
+    Args:
+        device (torch.device, str or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.xpu.current_device`,
+            if ``None`` (default).
+
+    .. note:: This API may require elevated privileges (e.g. ``sudo``) to access GPU memory usage information.
+    """
+    memory_handle = _zes_get_memory_handle(device)
+
+    import pyzes  # type: ignore[import]
+
+    mem_state = pyzes.zes_mem_state_t()
+    rc = pyzes.zesMemoryGetState(memory_handle, byref(mem_state))
+    if rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE:
+        raise RuntimeError(
+            "GPU memory usage querying is not available. Try running with elevated privileges (e.g. sudo)."
+        )
+    if rc != pyzes.ZE_RESULT_SUCCESS:
+        raise RuntimeError(f"Can't get Level Zero Sysman GPU memory state (rc={rc}).")
+    mem_props = pyzes.zes_mem_properties_t()
+    mem_props.stype = pyzes.ZES_STRUCTURE_TYPE_MEM_PROPERTIES
+    _zes_check(
+        pyzes.zesMemoryGetProperties(memory_handle, byref(mem_props)),
+        "Can't get Level Zero Sysman memory properties.",
+    )
+    # TODO: Some drivers report physicalSize as 0 on client GPUs; fall back to
+    # the allocatable size as an approximation in that case.
+    total = mem_props.physicalSize if mem_props.physicalSize != 0 else mem_state.size
+    return total - mem_state.free
+
+
 # import here to avoid circular import
 from .memory import (
     change_current_allocator,
@@ -762,12 +1366,14 @@ __all__ = [
     "XPUGraph",
     "can_device_access_peer",
     "change_current_allocator",
+    "clock_rate",
     "current_device",
     "current_stream",
     "default_generators",
     "device",
     "device_of",
     "device_count",
+    "device_memory_used",
     "empty_cache",
     "get_arch_list",
     "get_device_capability",
@@ -798,7 +1404,9 @@ __all__ = [
     "memory_snapshot",
     "memory_stats",
     "memory_stats_as_nested_dict",
+    "memory_usage",
     "MemPool",
+    "power_draw",
     "use_mem_pool",
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
@@ -812,4 +1420,6 @@ __all__ = [
     "stream",
     "streams",
     "synchronize",
+    "temperature",
+    "utilization",
 ]

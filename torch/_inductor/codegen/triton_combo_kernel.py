@@ -20,6 +20,7 @@ from ..runtime.triton_heuristics import (
     SequentialFlattenComboKernelGrid,
 )
 from ..scheduler import BaseSchedulerNode
+from ..stream_utils import get_raw_stream_name
 from ..utils import Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
@@ -439,6 +440,7 @@ class ComboKernel(Kernel):
         triton_kernel_cls: type[TritonKernel],
         enable_autotune: bool = False,
         mixed_sizes: bool = False,
+        per_subkernel_blocks: bool = False,
     ) -> None:
         super().__init__()
         self.triton_kernel_cls = triton_kernel_cls
@@ -450,6 +452,7 @@ class ComboKernel(Kernel):
         self.y_tree_list: list = []
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
+        self.per_subkernel_blocks = per_subkernel_blocks
         self.dispatch_class: (
             type[
                 ComboKernel.SequentialDispatch
@@ -482,13 +485,15 @@ class ComboKernel(Kernel):
         features: SIMDKernelFeatures,
         optimize_mask: bool,
         triton_kernel_cls: type[TritonKernel],
+        tiling_scores: dict[str, sympy.Expr] | None = None,
+        per_subkernel_blocks: bool = False,
     ) -> TritonKernel:
         """
         Only allow optimize_mask=True when 1) sequential dispatch is used,
         2) numels except x dimension are the same for each sub kernel.
         """
         # Flattened dispatch: all dimensions derived from single pid
-        if config.combo_kernel_per_subkernel_blocks:
+        if per_subkernel_blocks:
             pid_cache = {
                 "tl.program_id(0)": "x_pid_offset",
                 "tl.program_id(1)": "y_pid_offset",
@@ -496,15 +501,18 @@ class ComboKernel(Kernel):
         else:
             pid_cache = {"tl.program_id(0)": "pid_offset"}
 
-        return triton_kernel_cls(
-            tiling,
-            features=features,
+        kwargs: dict[str, Any] = dict(
             pid_cache=pid_cache,
             optimize_mask=optimize_mask,
             is_combo_kernel=True,
+            per_subkernel_blocks=per_subkernel_blocks,
             # foreach kernels don't work with cooperative reductions
             override_cooperative_reduction=False,
+            tiling_scores=tiling_scores,
         )
+        triton_kernel_cls.apply_feature_required_overrides(features, kwargs)
+
+        return triton_kernel_cls(tiling, features=features, **kwargs)
 
     def codegen_static_numels_sub_kernel(
         self, code: IndentedBuffer, sub_kernel: TritonKernel, num: int
@@ -557,13 +565,10 @@ class ComboKernel(Kernel):
             if tree.prefix == "x" and sub_kernel.no_x_dim:
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
                 uniquify_block_sizes.append("XBLOCK")
-            elif tree.prefix in ("x", "y") and config.combo_kernel_per_subkernel_blocks:
+            elif tree.prefix in ("x", "y") and self.per_subkernel_blocks:
                 uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
             elif tree.is_reduction:
-                if (
-                    config.combo_kernel_per_subkernel_blocks
-                    or sub_kernel.persistent_reduction
-                ):
+                if self.per_subkernel_blocks or sub_kernel.persistent_reduction:
                     uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
         self.grids.append(grid)
         return uniquify_block_sizes
@@ -683,7 +688,7 @@ class ComboKernel(Kernel):
     def select_dispatch_strategy(self) -> None:
         if self.dispatch_class is not None:
             return
-        if config.combo_kernel_per_subkernel_blocks:
+        if self.per_subkernel_blocks:
             self.dispatch_class = ComboKernel.SequentialFlattenGridDispatch
             return
         # mixed_sizes is used for optimize_mask, so it only allows sequential dispatch
@@ -747,7 +752,7 @@ class ComboKernel(Kernel):
         # The max_persistent_rblock mirrors how R0_BLOCK is computed in
         # codegen_static_numels_sub_kernel() for persistent reductions.
         max_persistent_rblock = 0
-        if not config.combo_kernel_per_subkernel_blocks:
+        if not self.per_subkernel_blocks:
             max_persistent_rblock = max(
                 (
                     next_power_of_2(int(simplified))
@@ -774,6 +779,16 @@ class ComboKernel(Kernel):
         }
         if max_persistent_rblock > 0:
             inductor_meta["max_persistent_rblock"] = max_persistent_rblock
+
+        # Sum per-sub-kernel bandwidth / FLOP estimates for the combo launch.
+        sub_metas = [sub.inductor_meta_per_kernel() for sub in self.sub_kernels]
+        self._kernel_num_gb = sum(m.get("kernel_num_gb") or 0 for m in sub_metas)
+        if config.benchmark_kernel or config.profile_bandwidth:
+            inductor_meta["kernel_num_gb"] = self._kernel_num_gb
+        if config.benchmark_kernel:
+            inductor_meta["kernel_flop"] = sum(
+                m.get("kernel_flop") or 0 for m in sub_metas
+            )
 
         sub_kernel = selected_kernel
         if heuristics == "foreach":
@@ -850,7 +865,7 @@ class ComboKernel(Kernel):
                     continue
                 if tree.prefix == "y":
                     y_tree = tree
-                if config.combo_kernel_per_subkernel_blocks:
+                if self.per_subkernel_blocks:
                     block_names[f"{tree.prefix.upper()}BLOCK_{i}"] = tree.prefix
                 else:
                     block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
@@ -987,7 +1002,7 @@ class ComboKernel(Kernel):
                 code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_combo_kernel:
-            code.splice(self.codegen_kernel_benchmark(num_gb=0))
+            code.splice(self.codegen_kernel_benchmark(num_gb=self._kernel_num_gb))
 
         return code.getvalue()
 
@@ -1059,7 +1074,7 @@ class ComboKernel(Kernel):
                 result.writeline(
                     V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
-                stream_name = f"stream{index}"
+                stream_name = get_raw_stream_name(index)
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
@@ -1151,6 +1166,9 @@ class ComboKernel(Kernel):
         )
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:
+        """
+        Build metadata used by combo-kernel grid/dispatch/autotune helpers.
+        """
         dynamic_shape = bool(self.dynamic_shape_args)
         num_kernels = len(self.sub_kernels)
         min_blocks = (
@@ -1160,11 +1178,14 @@ class ComboKernel(Kernel):
         meta: dict[str, Any] = {
             "num_kernels": num_kernels,
             "min_blocks": min_blocks,
+            # Captured at codegen time so runtime sees the same value the
+            # source was generated with, regardless of later config changes.
+            "autotune_grouping": config.combo_kernel_autotune_grouping,
         }
 
         if not self.enable_autotune:
             default_config: dict[str, int] = {}
-            if config.combo_kernel_per_subkernel_blocks:
+            if self.per_subkernel_blocks:
                 # Per-subkernel block sizes: XBLOCK_0, XBLOCK_1, etc.
                 for num, sub_kernel in enumerate(self.sub_kernels):
                     if sub_kernel.no_x_dim:
@@ -1194,7 +1215,7 @@ class ComboKernel(Kernel):
         for num, sub_kernel in enumerate(self.sub_kernels):
             meta[f"no_x_dim_{num}"] = sub_kernel.no_x_dim
 
-            if config.combo_kernel_per_subkernel_blocks:
+            if self.per_subkernel_blocks:
                 meta[f"heuristic_{num}"] = (
                     "persistent_reduction"
                     if sub_kernel.persistent_reduction
@@ -1204,19 +1225,17 @@ class ComboKernel(Kernel):
                 )
 
                 meta[f"size_hints_{num}"] = size_hints_list[num]
+                meta[f"inductor_meta_{num}"] = sub_kernel.inductor_meta_per_kernel()
                 if meta[f"heuristic_{num}"] == "pointwise":
                     if len(size_hints_list[num]) == 2:
                         meta[f"tile_hint_{num}"] = "TileHint.SQUARE"
                     else:
                         meta[f"tile_hint_{num}"] = "TileHint.DEFAULT"
-                    if sub_kernel.tiling_scores:
-                        meta[f"tiling_scores_{num}"] = {
-                            dim: V.graph.sizevars.optimization_hint(score, fallback=1)
-                            for dim, score in sub_kernel.tiling_scores.items()
-                        }
                 else:
                     meta[f"reduction_hint_{num}"] = (
-                        sub_kernel.features.get_reduction_hint().name
+                        sub_kernel.features.get_reduction_hint(
+                            sub_kernel.tiling_scores
+                        ).name
                     )
 
             for tree in sub_kernel.range_trees:
