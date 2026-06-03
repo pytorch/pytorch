@@ -26076,14 +26076,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.logical_not",
         torch_opinfo_name="logical_not",
-        skips=(
-            # _refs.logical_not precision divergence on MPS for non-contiguous
-            # complex inputs; pre-existing edge case in the decomposition.
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_or",
