@@ -172,8 +172,6 @@ xfails = [
     NestedGraphBreaksTupleTests.test___iter___nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksTupleTests.test_list_mul_constant_tuple_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksFunctionTests.test_itertools_islice_basic_ops_nested_graph_breaks,  # noqa: F821
-    # debug_force_nested_calls changes kwargs handling
-    NestedGraphBreaksDefaultsTests.test_map_strict_nested_graph_breaks,  # noqa: F821
     # bytecode codegen issues with nested graph breaks
     NestedGraphBreaksDefaultsTests.test_frozenset_reconstruction2_nested_graph_breaks,  # noqa: F821
     # correctness issues due to debug_force_nested_calls wrapping
