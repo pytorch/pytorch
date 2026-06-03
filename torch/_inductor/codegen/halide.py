@@ -463,16 +463,8 @@ class HalideOverrides(OpOverrides):
         return f"halide_helpers.rand({seed}, {offset})"
 
     @staticmethod
-    def rand4x(seed, offset):
-        return HalideOverrides.rand(seed, offset)
-
-    @staticmethod
     def randn(seed, offset):
         return f"halide_helpers.randn({seed}, {offset})"
-
-    @staticmethod
-    def randn4x(seed, offset):
-        return HalideOverrides.randn(seed, offset)
 
     @staticmethod
     def rand_eager(seed, base_offset, threads_per_round, tid, vec):
@@ -605,6 +597,16 @@ class HalideOverrides(OpOverrides):
         if dtype not in (torch.int32, torch.int64):
             return ops.to_dtype(var, dtype)
         return var
+
+    @classmethod
+    def value_expr(cls, expr, dtype):
+        index = V.kernel.prepare_indexing(expr)
+        var = V.kernel.genfunc(
+            V.kernel.index_to_str(index),
+            V.kernel.used_dims_from_index(index),
+            bounds=get_bounds_index_expr(expr),
+        )
+        return ops.to_dtype(var, dtype)
 
     @classmethod
     def indirect_indexing(cls, index_var, size, check=True, wrap_neg=True):

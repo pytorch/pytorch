@@ -1291,6 +1291,12 @@
   "GB0094": [
     {
       "Gb_type": "SEND with bad type",
+      "Context": "TOS type: {typestr(receiver)}",
+      "Explanation": "Attempted to SEND with unsupported type {typestr(receiver)}.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "SEND with bad type",
       "Context": "TOS type: {typestr(tos)}",
       "Explanation": "Attempted to SEND with unsupported type {typestr(tos)}.",
       "Hints": []
@@ -1304,6 +1310,16 @@
       "Hints": [
         "Avoid setting '__traceback__' on exception objects ",
         "within traced code, or set it to None."
+      ]
+    }
+  ],
+  "GB5173": [
+    {
+      "Gb_type": "Tensor device mismatch",
+      "Context": "{op} {node.target}",
+      "Explanation": "str(cause)",
+      "Hints": [
+        "Move inputs, parameters, and buffers to the same device."
       ]
     }
   ],
@@ -1549,6 +1565,16 @@
       "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo cannot reconstruct the function.",
       "Hints": [
         "Define the function at module scope instead of inside another function"
+      ]
+    }
+  ],
+  "GB1752": [
+    {
+      "Gb_type": "Missing tp_iteritem",
+      "Context": "_tp_iteritem on {self.python_type_name()}",
+      "Explanation": "Dynamo does not support virtual iteration on {self.python_type_name()}. Add tp_iteritem_impl to this VariableTracker subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -2305,6 +2331,16 @@
       "Hints": [
         "Avoid accessing {name} of tensor subclass in torch.compile region",
         "Renaming attribute `{name}` of type {self.class_type}",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0569": [
+    {
+      "Gb_type": "repr() on tensor",
+      "Context": "repr() on {self.python_type_name()}",
+      "Explanation": "Tensor repr requires actual runtime values which are not available during tracing.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -5208,6 +5244,86 @@
       "Context": "api: {api}, ret: {ret}",
       "Explanation": "{api} over function that returns something other than one Tensor.",
       "Hints": []
+    }
+  ],
+  "GB7968": [
+    {
+      "Gb_type": "repr() on non-constant list-like",
+      "Context": "repr() on {type(self).__name__} with non-constant elements",
+      "Explanation": "Dynamo could not safely evaluate repr() for this list-like object because one or more elements are not Python constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1584": [
+    {
+      "Gb_type": "repr() on nested function with non-constructible closure",
+      "Context": "repr() on nested function {self.fn_name.as_python_constant()}: {e}",
+      "Explanation": "Dynamo could not safely evaluate repr() for this nested function because it could not reconstruct its closure as Python constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5380": [
+    {
+      "Gb_type": "repr() on non-constant set",
+      "Context": "repr() on {type(self).__name__} with non-constant elements",
+      "Explanation": "Dynamo could not safely evaluate repr() for this set because one or more elements are not Python constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6053": [
+    {
+      "Gb_type": "repr_impl not implemented",
+      "Context": "{type(self).__name__} has tp_repr slot but no repr_impl override",
+      "Explanation": "The type {self.python_type_name()} has a tp_repr C slot but the corresponding VariableTracker doesn't implement repr_impl.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8315": [
+    {
+      "Gb_type": "repr() on non-constant dict",
+      "Context": "repr() on {type(self).__name__} with non-constant keys or values",
+      "Explanation": "Dynamo could not safely evaluate repr() for this dict-like object because one or more keys or values are not Python constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1275": [
+    {
+      "Gb_type": "repr() on non-constant dict view",
+      "Context": "repr() on {type(self).__name__} with non-constant backing dict",
+      "Explanation": "Dynamo could not safely evaluate repr() for this dict view because its backing dict could not be materialized as a Python constant.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2852": [
+    {
+      "Gb_type": "untraceable user-defined __repr__",
+      "Context": "Could not trace __repr__ override for {type(self.value).__name__}",
+      "Explanation": "Dynamo could not safely trace this user-defined __repr__ override.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0459": [
+    {
+      "Gb_type": "repr() on non-constant defaultdict",
+      "Context": "repr() on defaultdict with non-constant default_factory or values",
+      "Explanation": "Dynamo could not safely evaluate repr() for this defaultdict because its default_factory or contents are not Python constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0356": [

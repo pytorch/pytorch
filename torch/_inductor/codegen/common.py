@@ -328,6 +328,12 @@ class DeviceOpOverrides:
     def device_guard(self, device_idx: int) -> str:
         raise NotImplementedError
 
+    def current_stream(self) -> str:
+        raise NotImplementedError
+
+    def stream_handle(self, stream_name: str) -> str:
+        return f"{stream_name}.native_handle"
+
     def cpp_device_guard(self) -> str:
         raise NotImplementedError
 
@@ -689,13 +695,12 @@ def deduce_output_dtype_by_name(
     elif op_name in (
         "to_dtype",
         "index_expr",
+        "value_expr",
     ):
         return kwargs["dtype"] if "dtype" in kwargs else args[-1]
     elif op_name in (
         "rand",
-        "rand4x",
         "randn",
-        "randn4x",
     ):
         return torch.float
     elif op_name in (
@@ -2721,9 +2726,11 @@ class CSEProxy(DefaultHandler):
                 assert var_dtype is not None
                 check_dtype(V.kernel.compute, csevar, var_dtype)
 
-            if config.test_configs.runtime_triton_shape_assert:
-                assert output_shape is not None
-                check_shape(V.kernel.compute, csevar, output_shape)
+            if (
+                config.test_configs.runtime_triton_shape_assert
+                and var_shape is not None
+            ):
+                check_shape(V.kernel.compute, csevar, var_shape)
 
             if config.runtime_triton_nan_asserts:
                 check_nan(V.kernel.compute, csevar)

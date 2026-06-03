@@ -670,11 +670,6 @@ const Tensor& gradInput) {
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
 
-  const int64_t in_stride_n = input.ndimension() == 4 ? input.stride(-4) : 0;
-  const int64_t in_stride_c = input.stride(-3);
-  const int64_t in_stride_h = input.stride(-2);
-  const int64_t in_stride_w = input.stride(-1);
-
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
 
   const int64_t outputHeight = gradOutput.size(-2);
