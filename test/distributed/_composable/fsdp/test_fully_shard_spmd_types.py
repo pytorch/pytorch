@@ -7,7 +7,11 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import replicate
-from torch.distributed.fsdp import DataParallelMeshDims, fully_shard
+from torch.distributed.fsdp import (
+    DataParallelMeshDims,
+    fully_shard,
+    MixedPrecisionPolicy,
+)
 
 
 if dist._is_spmd_types_available():
@@ -45,6 +49,24 @@ class TestScale(nn.Module):
         self.weight = nn.Parameter(torch.randn(dim, device=device))
 
     def forward(self, x):
+        return x * self.weight
+
+
+class TestSpmdActivationMetadata(nn.Module):
+    def __init__(self, dim, axis, device=None):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(dim, device=device))
+        self.axis = axis
+
+    def forward(self, x):
+        from spmd_types.runtime import get_partition_spec
+
+        if x.dtype != torch.bfloat16:
+            raise AssertionError(f"Expected bf16 input, got {x.dtype}")
+        if spmd.get_local_type(x).get(self.axis) is not spmd.V:
+            raise AssertionError("Expected input to preserve V local SPMD type")
+        if get_partition_spec(x) is None:
+            raise AssertionError("Expected input to preserve PartitionSpec")
         return x * self.weight
 
 
@@ -214,6 +236,41 @@ class TestFullyShardSpmdTypes(FSDPTest):
         inp = torch.randn((2, mlp_dim), device=device_type)
         with spmd.set_current_mesh(mesh):
             self._run_fwd_bwd(model, ref_model, inp, fsdp_axis, input_type)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_mixed_precision_preserves_activation_spmd_metadata(self):
+        """MP input transforms preserve activation metadata.
+
+        FSDP casts fp32 inputs to bf16 and wraps grad inputs for post-backward;
+        both pass-through transforms should keep V plus PartitionSpec metadata.
+        """
+        mlp_dim = 16
+        mesh = init_device_mesh(
+            device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
+        )
+        fsdp_axis = spmd.MeshAxis.of(mesh.get_group("fsdp"))
+
+        torch.manual_seed(42)
+        model = TestSpmdActivationMetadata(mlp_dim, fsdp_axis, device=device_type)
+        spmd.assert_type(model.weight, {fsdp_axis: spmd.R})
+
+        fully_shard(
+            model,
+            mesh=mesh,
+            dp_mesh_dims=DataParallelMeshDims(shard="fsdp"),
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.float32,
+                cast_forward_inputs=True,
+            ),
+        )
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((2, mlp_dim), device=device_type, requires_grad=True)
+        with spmd.set_current_mesh(mesh), typecheck(strict_mode="strict", local=False):
+            spmd.assert_type(inp, {fsdp_axis: spmd.S(0)})
+            loss = model(inp).sum()
+        loss.backward()
 
     @skip_if_lt_x_gpu(4)
     def test_fsdp_tp_joint_mesh(self):
