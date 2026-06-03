@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
+#include <chrono>
 #include <iostream>
 #include <string>
 #include <unordered_set>
@@ -399,6 +400,7 @@ void fakeFallback(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatchKeySet,
     torch::jit::Stack* stack) {
+  auto t_start = std::chrono::steady_clock::now();
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   const auto arguments_begin = stack->size() - num_arguments;
@@ -643,7 +645,13 @@ void fakeFallback(
     if (interp) {
       bool found = false;
       try {
+        // std::cerr << "[TIMING] " << op.operator_name()
+        //           << " C++ before fake_try_decomp: "
+        //           << std::chrono::duration_cast<std::chrono::microseconds>(
+        //                  std::chrono::steady_clock::now() - t_start).count()
+        //           << "us" << std::endl;
         found = (*interp)->fake_try_decomp(op, stack);
+        t_start = std::chrono::steady_clock::now();
       } catch (...) {
         throw;
       }
@@ -720,10 +728,16 @@ void fakeFallback(
           });
     }
 
+    // std::cerr << "[TIMING] " << op.operator_name()
+    //           << " C++ before fake_try_prim_meta: "
+    //           << std::chrono::duration_cast<std::chrono::microseconds>(
+    //                  std::chrono::steady_clock::now() - t_start).count()
+    //           << "us" << std::endl;
     if ((*interp)->fake_try_prim_meta(op, stack)) {
       wrap_meta_outputs_with_default_device_logic();
       return;
     }
+    t_start = std::chrono::steady_clock::now();
   }
 
   // TODO: profiles
@@ -738,12 +752,18 @@ void fakeFallback(
   }
 
   if (mode && interp) {
+    // std::cerr << "[TIMING] " << op.operator_name()
+    //           << " C++ before fake_try_op_impl: "
+    //           << std::chrono::duration_cast<std::chrono::microseconds>(
+    //                  std::chrono::steady_clock::now() - t_start).count()
+    //           << "us" << std::endl;
     if ((*interp)->fake_try_op_impl(
             op,
             stack,
             common_device.value_or(c10::Device(c10::DeviceType::CPU)))) {
       return;
     }
+    t_start = std::chrono::steady_clock::now();
   }
 
   auto device_from_args = find_and_rewrite_device_args(
@@ -772,6 +792,11 @@ void fakeFallback(
         c10::DispatchKeySet(c10::DispatchKey::Python) |
         c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
     c10::impl::IncludeDispatchKeyGuard meta_guard(c10::DispatchKey::Meta);
+    // std::cerr << "[TIMING] " << op.operator_name()
+    //           << " C++ before Meta kernel: "
+    //           << std::chrono::duration_cast<std::chrono::microseconds>(
+    //                  std::chrono::steady_clock::now() - t_start).count()
+    //           << "us" << std::endl;
     op.callBoxed(stack);
     wrap_meta_outputs_with_default_device_logic();
   } catch (...) {

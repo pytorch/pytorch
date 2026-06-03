@@ -3148,11 +3148,24 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("source") = py::none(),
       py::arg("symbolic_context") = py::none());
 
+  struct PyCppFakeTensorMode {
+    std::shared_ptr<c10::FakeTensorMode> mode;
+    bool owns_tensor(const at::Tensor& t) const {
+      if (!t.is_fake())
+        return false;
+      auto tensor_mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
+      return tensor_mode.get() == mode.get();
+    }
+  };
+
+  py::class_<PyCppFakeTensorMode>(py_module, "_CppFakeTensorMode")
+      .def("owns_tensor", &PyCppFakeTensorMode::owns_tensor);
+
   py_module.def(
       "_create_cpp_fake_tensor_mode",
       [](py::object converter,
          py::object shape_env,
-         bool allow_fallback_kernels) {
+         bool allow_fallback_kernels) -> PyCppFakeTensorMode {
         Py_INCREF(shape_env.ptr());
         Py_INCREF(converter.ptr());
         auto mode = std::make_shared<c10::FakeTensorMode>(
@@ -3160,7 +3173,8 @@ Call this whenever a new thread is created in order to propagate values from
                 shape_env.ptr(), getPyInterpreter()),
             std::make_shared<c10::SafePyObject>(
                 converter.ptr(), getPyInterpreter()));
-        c10::impl::FakeTensorModeTLS::create_state(std::move(mode));
+        c10::impl::FakeTensorModeTLS::create_state(mode);
+        return PyCppFakeTensorMode{std::move(mode)};
       },
       py::arg("converter"),
       py::arg("shape_env") = py::none(),

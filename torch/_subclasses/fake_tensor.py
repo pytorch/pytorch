@@ -213,6 +213,10 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 
     if isinstance(x, FakeTensor):
         return True
+    # C++ FakeTensors are plain torch.Tensor with the Fake dispatch key, so they
+    # are not instances of the Python FakeTensor subclass.
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return True
     if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
         got_fake: bool | None = None
@@ -2484,6 +2488,9 @@ class FakeTensorMode(TorchDispatchMode):
         args: Sequence[object],
         kwargs: Mapping[str, object],
     ) -> FakeTensor | None:
+        import time as _time
+        _t_start = _time.monotonic()
+
         from torch._higher_order_ops.utils import registered_hop_fake_fns
 
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
@@ -2842,6 +2849,8 @@ class FakeTensorMode(TorchDispatchMode):
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table
 
+        # print(f"[PY TIMING] {func} before decomps: {(_time.monotonic() - _t_start)*1e6:.0f}us", flush=True)
+
         if (
             func not in meta_table
             and not self.cpp_meta_supports_symint(func)
@@ -2878,6 +2887,8 @@ class FakeTensorMode(TorchDispatchMode):
         # Fake Tensor Dispatch Keys
         # TODO - we should be use the prim aten impl
         # TODO - fix prims complex ops
+        # print(f"[PY TIMING] {func} before prims: {(_time.monotonic() - _t_start)*1e6:.0f}us", flush=True)
+        _t_start = _time.monotonic()
         if (
             "prims::" in func._schema.name
             and hasattr(func, "prim_meta_impl")
@@ -2947,6 +2958,8 @@ class FakeTensorMode(TorchDispatchMode):
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
         # and then afterwards wrapping them to a FakeTensor
+        # print(f"[PY TIMING] {func} before register_op_impl: {(_time.monotonic() - _t_start)*1e6:.0f}us", flush=True)
+        _t_start = _time.monotonic()
         for run_impl_check, op_impl in op_implementations_checks:
             if run_impl_check(func):
                 # pyrefly: ignore [bad-argument-count]
@@ -2982,6 +2995,7 @@ class FakeTensorMode(TorchDispatchMode):
         # run kernel registered to meta for func, which include
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         # It's possible that the kernel will return NotImplementedError
+        # print(f"[PY TIMING] {func} before Meta kernel: {(_time.monotonic() - _t_start)*1e6:.0f}us", flush=True)
         try:
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)

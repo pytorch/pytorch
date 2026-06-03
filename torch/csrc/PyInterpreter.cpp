@@ -984,15 +984,21 @@ bool ConcretePyInterpreterVTable::fake_try_decomp(
   static py::object meta_table =
       py::module::import("torch._decomp").attr("meta_table");
   if (meta_table.contains(py_op)) {
+    // std::cerr << "[PY CALLBACK] fake_try_decomp " << op.operator_name()
+    //           << " -> skipped (in meta_table)" << std::endl;
     return false;
   }
 
   static py::object decomp_table =
       py::module::import("torch._decomp").attr("decomposition_table");
   if (!decomp_table.contains(py_op)) {
+    // std::cerr << "[PY CALLBACK] fake_try_decomp " << op.operator_name()
+    //           << " -> no decomp" << std::endl;
     return false;
   }
 
+  // std::cerr << "[PY CALLBACK] fake_try_decomp " << op.operator_name()
+            // << " -> FOUND, calling decomp" << std::endl;
   py::object decomp_fn = decomp_table[py_op];
 
   const auto& schema = op.schema();
@@ -1041,6 +1047,8 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
       continue;
     }
 
+    // std::cerr << "[PY CALLBACK] fake_try_op_impl " << op.operator_name()
+    //           << " -> FOUND match" << std::endl;
     auto arguments = torch::jit::pop(*stack, schema.arguments().size());
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     py::object result;
@@ -1087,6 +1095,8 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
     return true;
   }
 
+  // std::cerr << "[PY CALLBACK] fake_try_op_impl " << op.operator_name()
+  //           << " -> no match" << std::endl;
   return false;
 }
 
@@ -1097,8 +1107,13 @@ bool ConcretePyInterpreterVTable::fake_try_prim_meta(
 
   py::handle py_op = getTorchApiFunction(op);
   if (!py::hasattr(py_op, "prim_meta_impl")) {
+    // std::cerr << "[PY CALLBACK] fake_try_prim_meta " << op.operator_name()
+    //           << " -> no prim_meta_impl" << std::endl;
     return false;
   }
+
+  // std::cerr << "[PY CALLBACK] fake_try_prim_meta " << op.operator_name()
+  //           << " -> FOUND, calling prim_meta_impl" << std::endl;
   py::object prim_meta_impl = py_op.attr("prim_meta_impl");
 
   const auto& schema = op.schema();

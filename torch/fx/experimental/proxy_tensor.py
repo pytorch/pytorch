@@ -55,20 +55,12 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
     get_plain_tensors,
-    is_fake as _is_fake_python,
+    is_fake,
     unset_fake_temporarily,
 )
 
 
 _has_cpp_fake_tensor = hasattr(torch._C, "_is_fake_tensor")
-
-
-def is_fake(x: object) -> bool:
-    if _is_fake_python(x):
-        return True
-    if _has_cpp_fake_tensor and isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        return True
-    return False
 
 
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -1577,11 +1569,7 @@ class PythonKeyTracer(Tracer):
             val = v.meta["val"]
             # other subclasses like FunctionalTensor error on `extract_val`
             # "Attempting to use FunctionalTensor on its own." just store FakeTensors for now
-            if (
-                isinstance(val, torch.Tensor)
-                and not isinstance(val, FakeTensor)
-                and not (_has_cpp_fake_tensor and torch._C._is_fake_tensor(val))
-            ):
+            if isinstance(val, torch.Tensor) and not is_fake(val):
                 return None
             return extract_val(v.meta["val"])
 

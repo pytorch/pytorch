@@ -4803,6 +4803,10 @@ class InstructionTranslatorBase(
     def fake_mode(self) -> FakeTensorMode | None:
         return self.output.tracing_context.fake_mode
 
+    @property
+    def cpp_fake_mode(self) -> object:
+        return self.output.cpp_fake_mode
+
     @contextlib.contextmanager
     def strict_translation_mode(
         self, check_fn: Callable[[VariableTracker], bool]
@@ -5913,6 +5917,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @property
     def fake_mode(self) -> FakeTensorMode | None:
         return self.parent.fake_mode
+
+    @property
+    def cpp_fake_mode(self) -> object:
+        return self.parent.cpp_fake_mode
 
     def run_ctx_mgr(self) -> Any:
         return TracingContext.current_frame(self.parent.frame_summary())

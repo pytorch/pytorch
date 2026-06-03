@@ -410,12 +410,7 @@ IntArrayRef TensorImpl::sizes_custom() const {
     // for Python FakeTensor, we use PyInterpreter to call .sizes() and guard the SymInts
     // with the concrete integer value. this is stored on the PyObject which is tied to
     // the lifetime of the tensor
-    if (!is_fake() &&
-        !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
-      if (auto* interp = c10::impl::getGlobalPyInterpreter()) {
-        return (*interp)->sizes(this);
-      }
-    } else {
+    if (is_fake()) {
       // for C++ FakeTensors that haven't crossed the Python boundary, we don't
       // have a PyInterpreter yet
       // so we call guard_int() directly here to materialize the vector
@@ -423,6 +418,10 @@ IntArrayRef TensorImpl::sizes_custom() const {
       // so the lifetime is also equivalently tied to the lifetime of the tensor
       // and is owned by SymbolicShapeMeta
       return symbolic_shape_meta().materialized_sizes();
+    } else {
+      if (auto* interp = c10::impl::getGlobalPyInterpreter()) {
+        return (*interp)->sizes(this);
+      }
     }
   }
   return sizes_default();

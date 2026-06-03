@@ -159,18 +159,13 @@ except ImportError:
     pass
 
 
-def is_fake_or_cpp_fake(x: object) -> bool:
-    """is_fake that also recognizes C++ fake tensors (DispatchKey::Fake)."""
-    if is_fake(x):
-        return True
-    if isinstance(x, torch.Tensor) and torch._C._is_fake_tensor(x):
-        return True
-    return False
-
-
-def cpp_fake_belongs_to_mode(t: torch.Tensor) -> bool:
-    """Check if a C++ fake tensor belongs to the currently active C++ FakeTensorMode."""
-    return torch._C._fake_tensor_belongs_to_active_mode(t)
+def cpp_fake_belongs_to_mode(
+    t: torch.Tensor, cpp_fake_mode: object | None
+) -> bool:
+    """Check if a C++ fake tensor belongs to the given C++ FakeTensorMode."""
+    if cpp_fake_mode is None:
+        return False
+    return cpp_fake_mode.owns_tensor(t)
 
 
 T = TypeVar("T")
@@ -3743,7 +3738,7 @@ def get_debug_dir() -> str:
 
 
 def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> Any:
-    if "example_value" in node.meta and is_fake_or_cpp_fake(node.meta["example_value"]):
+    if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
     elif required:
         from torch._dynamo.exc import unimplemented
@@ -3761,7 +3756,7 @@ def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> An
 
 
 def ensure_graph_fake(e: Any, tx: InstructionTranslatorBase) -> Any:
-    if maybe_get_fake_mode(e) is not tx.fake_mode and not cpp_fake_belongs_to_mode(e):
+    if maybe_get_fake_mode(e) is not tx.fake_mode and not cpp_fake_belongs_to_mode(e, tx.cpp_fake_mode):
         raise AssertionError(
             f"Expected fake mode of e to be tx.fake_mode, got {maybe_get_fake_mode(e)} vs {tx.fake_mode}"
         )
@@ -3875,7 +3870,7 @@ def _get_fake_value_impl(
     op = node.op
 
     # FX Node should always return the same fake value
-    if "example_value" in node.meta and is_fake_or_cpp_fake(node.meta["example_value"]):
+    if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
     args, kwargs = get_fake_values_from_nodes(
@@ -3892,7 +3887,7 @@ def _get_fake_value_impl(
         id_to_initial_version = {
             id(arg): arg._version
             for arg in flat_args_kwargs
-            if is_fake_or_cpp_fake(arg)
+            if is_fake(arg)
         }
     else:
         # pyrefly: ignore [implicit-any]

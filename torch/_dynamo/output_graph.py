@@ -707,9 +707,11 @@ class OutputGraph(OutputGraphCommon):
         self.dynamo_compile_id: CompileId | None = CompileContext.current_compile_id()
 
         if config.use_cpp_fake_tensor:
-            torch._C._create_cpp_fake_tensor_mode(
+            self.cpp_fake_mode = torch._C._create_cpp_fake_tensor_mode(
                 fake_mode.fake_tensor_converter, shape_env
             )
+        else:
+            self.cpp_fake_mode = None
 
         self.init_ambient_guards()
 
