@@ -1974,6 +1974,30 @@ class SIMDScheduling(BaseScheduling):
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
+    _tiling_cache: dict[int, dict[str, Any]] | None = None
+    _group_tiling_cache: dict[tuple[Any, ...], dict[str, Any]] | None = None
+
+    def _get_node_tiling(self, node, numel, rnumel):
+        """Cached select_tiling per node. Unfused nodes with the same
+        group share a single tiling computation."""
+        if self._tiling_cache is None:
+            self._tiling_cache = {}
+        key = id(node)
+        if key not in self._tiling_cache:
+            nodes_list = node.get_nodes()
+            if len(nodes_list) == 1:
+                if self._group_tiling_cache is None:
+                    self._group_tiling_cache = {}
+                gk = (node.group, numel, rnumel)
+                if gk not in self._group_tiling_cache:
+                    self._group_tiling_cache[gk] = self.select_tiling(
+                        nodes_list, numel, rnumel
+                    )
+                self._tiling_cache[key] = self._group_tiling_cache[gk]
+            else:
+                self._tiling_cache[key] = self.select_tiling(nodes_list, numel, rnumel)
+        return self._tiling_cache[key]
+
     def can_fuse(self, node1, node2):
         """
         Hook called by Scheduler to determine if the Triton backend
@@ -2092,8 +2116,8 @@ class SIMDScheduling(BaseScheduling):
                     return True
 
             # check for a bad combined tiling
-            tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
-            tiling2 = self.select_tiling(node2.get_nodes(), numel1, rnumel1)
+            tiling1 = self._get_node_tiling(node1, numel1, rnumel1)
+            tiling2 = self._get_node_tiling(node2, numel1, rnumel1)
             tiling3 = self.select_tiling(
                 node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
             )
