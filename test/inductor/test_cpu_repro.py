@@ -6769,6 +6769,13 @@ class CPUReproTests(TestCase):
         fn(math.inf)
         fn(math.nan)
 
+    def test_sin_atan_nan(self):
+        def fn(x):
+            return torch.sin(torch.atan(x))
+
+        x = torch.tensor([float("nan")])
+        self.common(fn, (x,))
+
     def test_pdist_fallback_continuous(self):
         # https://github.com/pytorch/pytorch/issues/170939
         def fn(x):
