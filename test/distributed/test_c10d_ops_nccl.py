@@ -356,7 +356,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         for _ in range(3):
             output = inp.new_empty((self.world_size, b, t, d))
-            c10d.all_gather_into_tensor(output, inp, group=self.pg)
+            c10d.all_gather_single(output, inp, group=self.pg)
 
         expected_sum = inp.numel() * sum(range(1, self.world_size + 1))
         self.assertEqual(output.sum().item(), expected_sum)
@@ -366,7 +366,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
-            c10d.all_gather_into_tensor(static_output, static_inp, group=self.pg)
+            c10d.all_gather_single(static_output, static_inp, group=self.pg)
 
         graph.replay()
         torch.cuda.synchronize()
@@ -963,7 +963,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         input_tensor = torch.ones(
             self.world_size * numel, dtype=torch.float32, device=device
         ).to(torch.float8_e5m2)
-        dist.reduce_scatter_tensor(output_tensor, input_tensor)
+        dist.reduce_scatter_single(output_tensor, input_tensor)
 
         expected = (
             torch.empty_like(output_tensor).fill_(self.world_size).to(torch.float8_e5m2)
@@ -982,7 +982,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             self.world_size * numel, dtype=torch.float32, device=device
         ).to(torch.bfloat16)
         # currently only reduce_scatter_tensor supports bfloat16
-        dist.reduce_scatter_tensor(output_tensor, input_tensor)
+        dist.reduce_scatter_single(output_tensor, input_tensor)
 
         expected = (
             torch.empty_like(output_tensor).fill_(self.world_size).to(torch.bfloat16)

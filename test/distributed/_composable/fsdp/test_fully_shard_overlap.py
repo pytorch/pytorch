@@ -129,7 +129,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
                         self.rank
                     ]
-                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                    dist.all_gather_single(dummy_ag_output, dummy_ag_input)
                 return ref_model(inp)
 
         def fwd():
@@ -151,7 +151,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
                         self.rank
                     ]
-                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                    dist.all_gather_single(dummy_ag_output, dummy_ag_input)
                 loss = ref_model(inp).sum()
                 # Run dummy all-gathers per weight again since we are
                 # resharding after forward
@@ -160,7 +160,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
                         self.rank
                     ]
-                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                    dist.all_gather_single(dummy_ag_output, dummy_ag_input)
                 loss.backward()
                 # Run dummy reduce-scatters per weight
                 for lin in ref_model:
@@ -168,7 +168,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_rs_output = torch.chunk(dummy_rs_input, self.world_size)[
                         self.rank
                     ]
-                    dist.reduce_scatter_tensor(dummy_rs_output, dummy_rs_input)
+                    dist.reduce_scatter_single(dummy_rs_output, dummy_rs_input)
 
         def fwd_bwd():
             with (
