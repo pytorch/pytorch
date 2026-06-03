@@ -317,19 +317,31 @@ def dictview_richcompare(
     return all(item in self for item in other)
 
 
+def _set_from_iterable(it: Iterable[T]) -> set[T]:
+    # Build a hash set from an arbitrary iterable, mirroring CPython's
+    # check-at-insert behavior (set_add_key): each element is hashed as it is
+    # added, so an unhashable element raises TypeError at that point (after
+    # consuming the preceding elements), with the element's type in the
+    # message. Also consumes one-shot iterables (generators) exactly once and
+    # gives O(1) membership for the set algebra below.
+    result: set[T] = set()
+    for x in it:
+        if not isinstance(x, Hashable):
+            raise TypeError(f"unhashable type: '{type(x).__name__}'")
+        result.add(x)
+    return result
+
+
 def set_symmetric_difference(
     set1: Iterable[T],
     set2: Iterable[T],
     cls: type[Any] = set,
 ) -> Any:
-    symmetric_difference_set: set[T] = set()
-    for x in set1:
-        if x not in set2:
-            symmetric_difference_set.add(x)
-    for x in set2:
-        if x not in set1:
-            symmetric_difference_set.add(x)
-    return cls(symmetric_difference_set)
+    # CPython: result = set(other); toggle each element of so against it.
+    s2 = _set_from_iterable(set2)
+    result = {x for x in set1 if x not in s2}
+    result.update(x for x in s2 if x not in set1)
+    return cls(result)
 
 
 def set_symmetric_difference_update(set1: set[T], set2: set[T]) -> None:
@@ -342,12 +354,13 @@ def set_isdisjoint(set1: set[T], set2: set[T]) -> bool:
     if not isinstance(set2, Iterable):
         raise TypeError(f"'{type(set2)}' object is not iterable")
 
-    for x in set1:
-        for y in set2:
-            if not isinstance(y, Hashable):
-                raise TypeError(f"unhashable type: '{type(y)}'")
-            if x == y:
-                return False
+    # CPython iterates the other operand exactly once and short-circuits on
+    # the first common element, which is observable with one-shot iterables.
+    for y in set2:
+        if not isinstance(y, Hashable):
+            raise TypeError(f"unhashable type: '{type(y).__name__}'")
+        if y in set1:
+            return False
     return True
 
 
@@ -361,21 +374,15 @@ def set_intersection(
         return set1.copy()
 
     if not all(isinstance(s, Iterable) for s in others):
-        raise TypeError(f"set.difference expected an iterable, got {type(others)}")
+        raise TypeError(f"set.intersection expected an iterable, got {type(others)}")
 
-    for s in others:
-        if any(not isinstance(x, Hashable) for x in s):
-            raise TypeError("unhashable type")
-
-    # return a new set with elements common in all sets
-    intersection_set = set()
-    for x in set1:
-        for set2 in others:
-            if not any(x == y for y in set2):
-                break
-        else:
-            intersection_set.add(x)
-    return cls(intersection_set)
+    # CPython keeps the elements of so present in every other; membership is
+    # hash-based (set_contains_entry), not a linear scan.
+    result = set(set1)
+    for other in others:
+        other_set = _set_from_iterable(other)
+        result = {x for x in result if x in other_set}
+    return cls(result)
 
 
 def set_intersection_update(set1: set[T], *others: Iterable[T]) -> None:
@@ -398,28 +405,22 @@ def set_union(
     if not all(isinstance(s, Iterable) for s in others):
         raise TypeError(f"set.union expected an iterable, got {type(others)}")
 
-    for s in others:
-        if any(not isinstance(x, Hashable) for x in s):
-            raise TypeError("unhashable type")
-
-    union_set = set(set1.copy())
-    for set2 in others:
-        set_update(union_set, set2)
+    # CPython: copy so, then update with each other (hash+add each element).
+    union_set = set(set1)
+    set_update(union_set, *others)
 
     # frozenset also uses this function
     # pyrefly: ignore [bad-argument-count, not-callable]
     return cls(union_set)
 
 
-# pyrefly: ignore [bad-return]
-def set_update(set1: set[T], *others: Iterable[T]) -> set[T]:
-    if len(others) == 0:
-        return set1
-
-    for set2 in others:
-        for x in set2:
-            if x not in set1:
-                set1.add(x)
+def set_update(set1: set[T], *others: Iterable[T]) -> None:
+    # CPython set_update_internal: hash and add each element as encountered.
+    for other in others:
+        for x in other:
+            if not isinstance(x, Hashable):
+                raise TypeError(f"unhashable type: '{type(x).__name__}'")
+            set1.add(x)
 
 
 def set_difference(
@@ -433,18 +434,15 @@ def set_difference(
     if not all(isinstance(s, Iterable) for s in others):
         raise TypeError(f"set.difference expected an iterable, got {type(others)}")
 
-    for s in others:
-        if any(not isinstance(x, Hashable) for x in s):
-            raise TypeError("unhashable type")
-
-    difference_set = set()
-    for x in set1:
-        for set2 in others:
-            if x in set2:
-                break
-        else:
-            difference_set.add(x)
-    return cls(difference_set)
+    # CPython set_copy_and_difference: copy so, then discard every element
+    # found in any other; membership is hash-based.
+    result = set(set1)
+    for other in others:
+        for x in other:
+            if not isinstance(x, Hashable):
+                raise TypeError(f"unhashable type: '{type(x).__name__}'")
+            result.discard(x)
+    return cls(result)
 
 
 def set_difference_update(set1: set[T], *others: Iterable[T]) -> None:
