@@ -4212,6 +4212,27 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_select_index(self):
+        # Index a fixed-size dim with a data-dependent (unbacked) 0-dim tensor,
+        # e.g. table[:, t]. The index sign is unknown, so this exercises the
+        # symbolic select produced by 0-dim tensor indexing and select's
+        # data-dependent meta: the index is not specialized (single compile) and
+        # negative indices work.
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(table, idx):
+            t = idx[0]
+            return table[:, t]
+
+        compiled_func = torch.compile(func, fullgraph=True, backend=cnt, dynamic=True)
+        table = torch.randn(3, 5)
+        for v in (0, 2, 4, -1, -5):
+            idx = torch.tensor([v])
+            self.assertEqual(compiled_func(table, idx), func(table, idx))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_reshape2(self):
         cnt = CompileCounterWithBackend("inductor")
 
