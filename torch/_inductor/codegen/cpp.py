@@ -88,6 +88,13 @@ from .cpp_utils import (
 _IS_WINDOWS = sys.platform == "win32"
 
 
+def _format_cpp_pybinding_source(source_code: str) -> str:
+    source_code = f"\n{source_code.strip()}\n"
+    if "'''" in source_code:
+        return repr(source_code)
+    return f"r'''{source_code}'''"
+
+
 @functools.cache
 def get_export_declaration():
     return "__declspec(dllexport)" if _IS_WINDOWS else ""
@@ -5663,11 +5670,11 @@ class CppScheduling(BaseScheduling):
             _, _, arg_types = args.cpp_argdefs()
             if not V.graph.cpp_wrapper:
                 compile_wrapper.writeline(
-                    f"async_compile.cpp_pybinding({arg_types!r}, r'''"
+                    f"async_compile.cpp_pybinding({arg_types!r}, "
+                    f"{_format_cpp_pybinding_source(src_code)})"
                 )
-            compile_wrapper.splice(src_code, strip=True)
-            if not V.graph.cpp_wrapper:
-                compile_wrapper.writeline("''')")
+            else:
+                compile_wrapper.splice(src_code, strip=True)
             wrapper.define_kernel(
                 kernel_name,
                 compile_wrapper.getvalue(),
