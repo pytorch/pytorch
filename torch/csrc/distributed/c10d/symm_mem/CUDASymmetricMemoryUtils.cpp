@@ -41,10 +41,13 @@ at::Tensor pg_all_gather_bytes(
   TORCH_CHECK(world_size > 0);
   const size_t total_bytes = static_cast<size_t>(world_size) * nbytes;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   c10::cuda::CUDAGuard guard(device_idx);
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   auto device = c10::Device(c10::DeviceType::CUDA, device_idx);
 
   at::Tensor in_buf = at::from_blob(
+                          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
                           const_cast<void*>(data),
                           {static_cast<int64_t>(nbytes)},
                           at::TensorOptions().dtype(at::kByte))
@@ -56,7 +59,7 @@ at::Tensor pg_all_gather_bytes(
 
   c10d::AllgatherOptions ag_opts;
   ag_opts.asyncOp = false;
-  pg->_allgather_base(out_buf, in_buf, ag_opts);
+  pg->all_gather_single(out_buf, in_buf, ag_opts);
 
   return out_buf.cpu();
 }
@@ -91,6 +94,7 @@ IpcChannel::IpcChannel()
       socket_ != -1, "Failed to create socket: ", c10::utils::str_error(errno));
 
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
+  // NOLINTNEXTLINE(modernize-use-ranges)
   std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
   TORCH_CHECK(
@@ -111,6 +115,7 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   // Define destination socket address
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
   auto socket_name = get_socket_name(dst_pid);
+  // NOLINTNEXTLINE(modernize-use-ranges)
   std::copy(socket_name.begin(), socket_name.end(), addr.sun_path);
 
   // Prepare data to send
@@ -176,6 +181,7 @@ int IpcChannel::recv_fd() {
   // Define socket address to receive on: family AF_UNIX means unix domain
   // socket
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
+  // NOLINTNEXTLINE(modernize-use-ranges)
   std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
 
   // Prepare message header
