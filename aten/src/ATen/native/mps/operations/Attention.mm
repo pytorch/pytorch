@@ -14,6 +14,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
+#include <ATen/ops/_scaled_dot_product_efficient_attention_native.h>
 #include <ATen/ops/empty_native.h>
 #endif
 
@@ -679,6 +680,138 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
 
   auto final_out = unsqueezed ? out.view_as(orig_query) : out;
   return {std::move(final_out), std::move(final_out)};
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_mps(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& attn_bias,
+    bool compute_log_sumexp,
+    double dropout_p,
+    bool is_causal,
+    std::optional<double> scale) {
+  using namespace mps;
+  TORCH_CHECK(query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
+              "_scaled_dot_product_efficient_attention_mps expects 4D query, key, and value");
+  TORCH_CHECK(query.scalar_type() == key.scalar_type() && query.scalar_type() == value.scalar_type(),
+              "_scaled_dot_product_efficient_attention_mps expects query, key, and value to have the same dtype");
+  TORCH_CHECK(query.size(0) == key.size(0) && query.size(0) == value.size(0),
+              "_scaled_dot_product_efficient_attention_mps expects query, key, and value to have the same batch size");
+  TORCH_CHECK(query.size(1) == key.size(1) && query.size(1) == value.size(1),
+              "_scaled_dot_product_efficient_attention_mps expects matching head counts");
+  TORCH_CHECK(query.size(3) == key.size(3) && query.size(3) == value.size(3),
+              "_scaled_dot_product_efficient_attention_mps expects matching head dimensions");
+  TORCH_CHECK(dropout_p == 0.0, "_scaled_dot_product_efficient_attention_mps does not support dropout");
+  TORCH_CHECK(!(is_causal && attn_bias.has_value()),
+              "_scaled_dot_product_efficient_attention_mps does not support attn_bias with is_causal=True");
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* qTensor = nil;
+    MPSGraphTensor* kTensor = nil;
+    MPSGraphTensor* vTensor = nil;
+    MPSGraphTensor* biasTensor = nil;
+    MPSGraphTensor* outputTensor = nil;
+    MPSGraphTensor* logsumexpTensor = nil;
+  };
+
+  const int64_t batchSize = query.size(0);
+  const int64_t numHeads = query.size(1);
+  const int64_t qSize = query.size(2);
+  const int64_t kSize = key.size(2);
+  const int64_t headSize = query.size(3);
+  auto out = at::empty({batchSize, numHeads, qSize, headSize}, query.options());
+  auto logsumexp = compute_log_sumexp ? at::empty({batchSize, numHeads, qSize}, query.options().dtype(kFloat))
+                                      : at::empty({0}, query.options().dtype(kFloat));
+  auto philox_seed = at::empty({}, query.options().dtype(kLong));
+  auto philox_offset = at::empty({}, query.options().dtype(kLong));
+  const auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
+
+  @autoreleasepool {
+    auto tensor_key = attn_bias.has_value() ? getTensorsStringKey({query, key, value, *attn_bias})
+                                            : getTensorsStringKey({query, key, value});
+    auto key_name = fmt::format(
+        "{}{}:causal={}:bias={}:lse={}",
+        __func__,
+        tensor_key,
+        static_cast<int>(is_causal),
+        static_cast<int>(attn_bias.has_value()),
+        static_cast<int>(compute_log_sumexp));
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(
+        key_name, [&, q_ = query, k_ = key, v_ = value](auto mpsGraph, auto graph) {
+          auto qTensor = mpsGraphRankedPlaceHolder(mpsGraph, q_);
+          auto kTensor = mpsGraphRankedPlaceHolder(mpsGraph, k_);
+          auto vTensor = mpsGraphRankedPlaceHolder(mpsGraph, v_);
+          auto kT = [mpsGraph transposeTensor:kTensor dimension:2 withDimension:3 name:nil];
+          auto scaleTensor = [mpsGraph constantWithScalar:scale_factor
+                                                    shape:getMPSShape({1})
+                                                 dataType:MPSDataTypeFloat32];
+
+          auto scores = [mpsGraph matrixMultiplicationWithPrimaryTensor:qTensor secondaryTensor:kT name:nil];
+          scores = castMPSTensor(mpsGraph, scores, MPSDataTypeFloat32);
+          scores = [mpsGraph multiplicationWithPrimaryTensor:scores secondaryTensor:scaleTensor name:nil];
+
+          if (is_causal) {
+            auto causalMask = [mpsGraph constantWithScalar:1.0f
+                                                     shape:getMPSShape({qSize, kSize})
+                                                  dataType:MPSDataTypeBool];
+            causalMask = [mpsGraph bandPartWithTensor:causalMask numLower:-1 numUpper:0 name:nil];
+            auto minusInf = [mpsGraph constantWithScalar:-INFINITY shape:scores.shape dataType:scores.dataType];
+            scores = [mpsGraph selectWithPredicateTensor:causalMask
+                                     truePredicateTensor:scores
+                                    falsePredicateTensor:minusInf
+                                                    name:nil];
+          } else if (attn_bias.has_value()) {
+            graph->biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_bias);
+            scores = [mpsGraph additionWithPrimaryTensor:scores
+                                         secondaryTensor:castMPSTensor(mpsGraph, graph->biasTensor, scores.dataType)
+                                                    name:nil];
+          }
+
+          auto sm = [mpsGraph softMaxWithTensor:scores axis:3 name:nil];
+          auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:sm secondaryTensor:vTensor name:nil];
+
+          graph->qTensor = qTensor;
+          graph->kTensor = kTensor;
+          graph->vTensor = vTensor;
+          graph->outputTensor = castMPSTensor(mpsGraph, output, qTensor.dataType);
+
+          if (compute_log_sumexp) {
+            auto maxs = [mpsGraph reductionMaximumWithTensor:scores axis:3 name:nil];
+            auto shiftedScores = [mpsGraph subtractionWithPrimaryTensor:scores secondaryTensor:maxs name:nil];
+            auto expScores = [mpsGraph exponentWithTensor:shiftedScores name:nil];
+            auto sums = [mpsGraph reductionSumWithTensor:expScores axis:3 name:nil];
+            auto logs = [mpsGraph logarithmWithTensor:sums name:nil];
+            auto logsumexp = [mpsGraph additionWithPrimaryTensor:maxs secondaryTensor:logs name:nil];
+            graph->logsumexpTensor = [mpsGraph reshapeTensor:logsumexp
+                                                   withShape:getMPSShape({batchSize, numHeads, qSize})
+                                                        name:nil];
+          }
+        });
+
+    auto qPlaceholder = Placeholder(cachedGraph->qTensor, query);
+    auto kPlaceholder = Placeholder(cachedGraph->kTensor, key);
+    auto vPlaceholder = Placeholder(cachedGraph->vTensor, value);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, out);
+    NSDictionary* feeds = nil;
+    if (attn_bias.has_value()) {
+      auto biasPlaceholder = Placeholder(cachedGraph->biasTensor, *attn_bias);
+      feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder, biasPlaceholder);
+    } else {
+      feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder);
+    }
+
+    if (compute_log_sumexp) {
+      auto logsumexpPlaceholder = Placeholder(cachedGraph->logsumexpTensor, logsumexp);
+      auto outs = dictionaryFromPlaceholders(outputPlaceholder, logsumexpPlaceholder);
+      runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outs);
+    } else {
+      runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+    }
+  }
+
+  return std::make_tuple(std::move(out), std::move(logsumexp), std::move(philox_seed), std::move(philox_offset));
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,

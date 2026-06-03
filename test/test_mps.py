@@ -11169,6 +11169,117 @@ class TestSDPA(TestCaseMPS):
         with torch.no_grad():
             self._test_sdpa_no_mask(False, torch.float32, requires_grad=True)
 
+    def test_sdpa_efficient_backward_dispatch_choice(self):
+        # Default routing on MPS is unchanged: math is the default backend.
+        # The efficient path only runs when the user explicitly opts in via
+        # sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION]).
+        q = torch.randn(1, 2, 8, 64, dtype=torch.float32, device="mps", requires_grad=True)
+        k = torch.randn(1, 2, 8, 64, dtype=torch.float32, device="mps", requires_grad=True)
+        v = torch.randn(1, 2, 8, 64, dtype=torch.float32, device="mps", requires_grad=True)
+        self.assertEqual(
+            torch._fused_sdp_choice(q, k, v),
+            torch.nn.attention.SDPBackend.MATH.value,
+        )
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION]):
+            self.assertEqual(
+                torch._fused_sdp_choice(q, k, v),
+                torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION.value,
+            )
+
+    @parametrize(
+        "case",
+        [
+            (torch.float32, False, 1, 1, 1, 64),
+            (torch.float16, True, 1, 1, 7, 64),
+            (torch.float32, True, 1, 2, 8, 128),
+            (torch.float16, False, 2, 4, 64, 64),
+            (torch.float32, True, 1, 16, 64, 64),
+            (torch.float32, False, 1, 4, 128, 128),
+            (torch.float16, True, 1, 4, 512, 64),
+            (torch.float32, False, 1, 1, 1024, 64),
+        ],
+    )
+    def test_sdpa_efficient_backward(self, case):
+        dtype, is_causal, B, NH, S, head_dim = case
+        torch.manual_seed(1729)
+        q = torch.randn(B, NH, S, head_dim, dtype=dtype, device="mps", requires_grad=True)
+        k = torch.randn(B, NH, S, head_dim, dtype=dtype, device="mps", requires_grad=True)
+        v = torch.randn(B, NH, S, head_dim, dtype=dtype, device="mps", requires_grad=True)
+
+        q_ref = q.detach().cpu().float().requires_grad_()
+        k_ref = k.detach().cpu().float().requires_grad_()
+        v_ref = v.detach().cpu().float().requires_grad_()
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION]):
+            out = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=is_causal)
+        out_ref = F.scaled_dot_product_attention(q_ref, k_ref, v_ref, dropout_p=0.0, is_causal=is_causal)
+
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        out_ref.backward(grad.detach().cpu().float())
+
+        if dtype == torch.float16:
+            atol, rtol = 2e-2, 2e-2
+        else:
+            atol, rtol = 2e-4, 2e-4
+        torch.testing.assert_close(out.detach().cpu().float(), out_ref, atol=atol, rtol=rtol)
+        torch.testing.assert_close(q.grad.cpu().float(), q_ref.grad, atol=atol, rtol=rtol)
+        torch.testing.assert_close(k.grad.cpu().float(), k_ref.grad, atol=atol, rtol=rtol)
+        torch.testing.assert_close(v.grad.cpu().float(), v_ref.grad, atol=atol, rtol=rtol)
+
+    def test_sdpa_efficient_backward_supports_arbitrary_head_dim(self):
+        # The tiled path slices along S, so any contiguous head_dim works
+        # when the user opts in via sdpa_kernel([EFFICIENT_ATTENTION]).
+        torch.manual_seed(1729)
+        q = torch.randn(1, 2, 8, 96, dtype=torch.float32, device="mps", requires_grad=True)
+        k = torch.randn(1, 2, 8, 96, dtype=torch.float32, device="mps", requires_grad=True)
+        v = torch.randn(1, 2, 8, 96, dtype=torch.float32, device="mps", requires_grad=True)
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION]):
+            self.assertEqual(
+                torch._fused_sdp_choice(q, k, v),
+                torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION.value,
+            )
+
+        q_ref = q.detach().cpu().requires_grad_()
+        k_ref = k.detach().cpu().requires_grad_()
+        v_ref = v.detach().cpu().requires_grad_()
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION]):
+            out = F.scaled_dot_product_attention(q, k, v)
+        out_ref = F.scaled_dot_product_attention(q_ref, k_ref, v_ref)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        out_ref.backward(grad.cpu())
+        torch.testing.assert_close(out.cpu(), out_ref, atol=2e-4, rtol=2e-4)
+        torch.testing.assert_close(q.grad.cpu(), q_ref.grad, atol=2e-4, rtol=2e-4)
+        torch.testing.assert_close(k.grad.cpu(), k_ref.grad, atol=2e-4, rtol=2e-4)
+        torch.testing.assert_close(v.grad.cpu(), v_ref.grad, atol=2e-4, rtol=2e-4)
+
+    def test_sdpa_efficient_dispatch_falls_back_for_dropout(self):
+        # Dropout is not supported by the efficient path; even with explicit
+        # opt-in the dispatcher must fall back to math.
+        q = torch.randn(1, 2, 8, 64, dtype=torch.float32, device="mps")
+        k = torch.randn(1, 2, 8, 64, dtype=torch.float32, device="mps")
+        v = torch.randn(1, 2, 8, 64, dtype=torch.float32, device="mps")
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION]):
+            self.assertEqual(
+                torch._fused_sdp_choice(q, k, v, dropout_p=0.1),
+                torch.nn.attention.SDPBackend.MATH.value,
+            )
+
+    def test_sdpa_efficient_forward_without_logsumexp(self):
+        torch.manual_seed(1729)
+        q = torch.randn(1, 2, 8, 64, dtype=torch.float32, device="mps")
+        k = torch.randn(1, 2, 8, 64, dtype=torch.float32, device="mps")
+        v = torch.randn(1, 2, 8, 64, dtype=torch.float32, device="mps")
+        out, logsumexp, _, _ = torch.ops.aten._scaled_dot_product_efficient_attention(
+            q, k, v, None, False, 0.0, False
+        )
+        out_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu())
+        self.assertEqual(logsumexp.numel(), 0)
+        torch.testing.assert_close(out.cpu(), out_ref, atol=2e-4, rtol=2e-4)
+
+    def test_sdpa_efficient_forward_logsumexp(self):
+        torch.manual_seed(1729)
     def _test_sdpa_mask(self, dtype: torch.dtype, L: int = 1, S: int = 72, NH: int = 32, HS: int = 128):
         torch.manual_seed(1729)
         causal_mask = torch.tril(torch.ones(S, S, dtype=torch.bool, device='mps'))

@@ -15224,6 +15224,7 @@
     Meta: _fused_sdp_choice_meta
     CPU, NestedTensorCPU: _fused_sdp_choice_cpp
     CUDA, NestedTensorCUDA: _fused_sdp_choice_cuda
+    MPS: _fused_sdp_choice_mps
     XPU: _fused_sdp_choice_xpu
   tags: nondeterministic_seeded
 
@@ -15282,6 +15283,7 @@
 - func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_cuda
+    MPS: _scaled_dot_product_efficient_attention_mps
     NestedTensorCUDA: _scaled_dot_product_efficient_attention_nestedtensor_cuda
   tags: nondeterministic_seeded
 
@@ -15289,6 +15291,7 @@
   device_check: NoCheck
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
+    MPS: _scaled_dot_product_efficient_attention_backward_mps
   tags: nondeterministic_seeded
 
 - func: _scaled_dot_product_cudnn_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
