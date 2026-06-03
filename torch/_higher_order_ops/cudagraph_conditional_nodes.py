@@ -25,11 +25,16 @@ class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
         args=(),
         kwargs=None,
     ):
+        kwargs = {} if kwargs is None else kwargs
         if func is torch.ops.higher_order.cond:
             # Re-enter the mode to support nested conditionals
+            _check_no_cond_kwargs(kwargs)
             with self:
                 return if_else_node(*args)
-        kwargs = {} if kwargs is None else kwargs
+        if func is torch.ops.higher_order.while_loop:
+            # Re-enter the mode to support nested control flow
+            with self:
+                return while_loop_node(*args, **kwargs)
         return func(*args, **kwargs)
 
 
@@ -70,11 +75,13 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
         if func is torch.ops.higher_order.cond:
             if torch.cuda.is_current_stream_capturing():
                 # This is a call to torch.cond() nested within another
-                # torch.cond() function.
+                # control-flow function.
+                _check_no_cond_kwargs(kwargs)
                 with self:
                     # We re-enter the mode in case of nested calls to torch.cond()
                     return if_else_node(*args)
             else:
+                _check_no_cond_kwargs(kwargs)
                 with (
                     torch.cuda.graph(
                         torch.cuda.CUDAGraph(),
@@ -87,8 +94,41 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
                     if_else_node(*args)
 
                 return func(*args, **kwargs)
+        elif func is torch.ops.higher_order.while_loop:
+            if torch.cuda.is_current_stream_capturing():
+                # This is a call to torch.while_loop() nested within another
+                # control-flow function.
+                with self:
+                    return while_loop_node(*args, **kwargs)
+            else:
+                with (
+                    torch.cuda.graph(
+                        torch.cuda.CUDAGraph(),
+                        pool=None,
+                        stream=self.capture_stream,
+                        capture_error_mode="relaxed",
+                    ),
+                    self,
+                ):
+                    while_loop_node(*args, **kwargs)
+
+                return func(*args, **kwargs)
         else:
             return func(*args, **kwargs)
+
+
+def _check_no_cond_kwargs(kwargs) -> None:
+    if kwargs:
+        raise RuntimeError("CUDA graph conditional torch.cond does not support kwargs")
+
+
+def _is_boolean_scalar_cuda_tensor(pred: object) -> bool:
+    return (
+        isinstance(pred, torch.Tensor)
+        and pred.size() == torch.Size([])
+        and pred.dtype == torch.bool
+        and pred.is_cuda
+    )
 
 
 @contextmanager
@@ -128,3 +168,63 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
                 ):
                     if_out.copy_(else_out)
     return outs[0]
+
+
+@contextmanager
+def _while_body(pred: torch.Tensor):
+    current_cuda_graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+    current_cuda_graph.begin_capture_to_while_node(pred)
+    try:
+        yield current_cuda_graph
+    finally:
+        current_cuda_graph.end_capture_to_conditional_node()
+
+
+def while_loop_node(
+    cond_fn,
+    body_fn,
+    carried_inputs,
+    additional_inputs,
+):
+    flat_carried_inputs, carried_spec = pytree.tree_flatten(carried_inputs)
+    if not all(isinstance(inp, torch.Tensor) for inp in flat_carried_inputs):
+        raise RuntimeError(
+            "CUDA graph while_loop conditional nodes only support tensor carried_inputs"
+        )
+
+    loop_carried = pytree.tree_map_only(
+        torch.Tensor, lambda inp: inp.clone(), carried_inputs
+    )
+    flat_loop_carried = pytree.tree_leaves(loop_carried)
+
+    pred = cond_fn(*loop_carried, *additional_inputs)
+    if not _is_boolean_scalar_cuda_tensor(pred):
+        raise RuntimeError(
+            f"cond_fn must return a boolean scalar CUDA tensor but got {pred}"
+        )
+
+    with _while_body(pred) as current_cuda_graph:
+        body_out = body_fn(*loop_carried, *additional_inputs)
+        flat_body_out, body_out_spec = pytree.tree_flatten(body_out)
+        if body_out_spec != carried_spec:
+            raise AssertionError(
+                "body_fn should return the same pytree structure as carried_inputs"
+            )
+        if not all(isinstance(out, torch.Tensor) for out in flat_body_out):
+            raise RuntimeError(
+                "CUDA graph while_loop conditional nodes only support tensor "
+                "body_fn outputs"
+            )
+
+        for carried, out in zip(flat_loop_carried, flat_body_out):
+            if carried.data_ptr() != out.data_ptr():
+                carried.copy_(out)
+
+        pred = cond_fn(*loop_carried, *additional_inputs)
+        if not _is_boolean_scalar_cuda_tensor(pred):
+            raise RuntimeError(
+                f"cond_fn must return a boolean scalar CUDA tensor but got {pred}"
+            )
+        current_cuda_graph.set_conditional_handle_for_current_node(pred)
+
+    return loop_carried
