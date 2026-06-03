@@ -1278,6 +1278,11 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         "-vv",
         "-rfEX",
     ]
+    if not _has_custom_pytest_show_capture_arg(options.additional_args):
+        # Pytest prints captured stdout/stderr between the traceback and short
+        # summary. In CI this can be very large, especially after reruns, and it
+        # makes the actionable failure hard to find in the terminal log.
+        pytest_args.append("--show-capture=no")
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         # We have a custom pytest shard that conflicts with the normal plugin
@@ -1298,6 +1303,13 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
 
     pytest_args.extend(rerun_options)
     return pytest_args
+
+
+def _has_custom_pytest_show_capture_arg(additional_args: Sequence[str]) -> bool:
+    return any(
+        arg == "--show-capture" or arg.startswith("--show-capture=")
+        for arg in additional_args
+    )
 
 
 def run_ci_sanity_check(test: ShardedTest, test_directory, options):
