@@ -1472,11 +1472,15 @@ class BaseSchedulerNode:
             return
 
         # NOTE remove V.graph.removed_operations once deps issue is fixed
-        inconsequential_nodes = (
-            self.ancestors
-            | V.graph.removed_operations
-            | self.scheduler.completed_operations
-        )
+        # Check membership against each set separately instead of
+        # creating a union -- the union is O(n) per call and this
+        # function is called for every node during codegen.
+        _ancestors = self.ancestors
+        _removed_ops = V.graph.removed_operations
+        _completed_ops = self.scheduler.completed_operations
+
+        def _is_inconsequential(name: str) -> bool:
+            return name in _ancestors or name in _removed_ops or name in _completed_ops
 
         def single_index_in_fused_node(buf_to_be_inplaced: SchedulerBuffer) -> bool:
             # Inside of NodeUser, we track that the read and write are equivalent
@@ -1542,7 +1546,7 @@ class BaseSchedulerNode:
                     remaining_uses = [
                         x
                         for x in input_buf.users
-                        if x.node.get_name() not in inconsequential_nodes
+                        if not _is_inconsequential(x.node.get_name())
                     ]
                     has_cross_stream_hazard = self.scheduler.has_cross_stream_hazard(
                         read.name, self
