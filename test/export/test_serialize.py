@@ -196,6 +196,28 @@ class TestSerialize(TestCase):
         self.assertEqual(exp_out, actual_out)
         self.assertEqual(exp_out.requires_grad, actual_out.requires_grad)
 
+    def test_export_weights_only(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(4, 4))
+                self.register_buffer("bias", torch.zeros(4))
+
+            def forward(self, x):
+                return x @ self.weight + self.bias
+
+        inp = (torch.ones(4),)
+        ep = export(Foo(), inp, strict=True)
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        
+        loaded_ep = torch.export.load(buffer, weights_only=True)
+        
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertEqual(exp_out, actual_out)
+
     def test_export_example_inputs_preserved(self):
         class MyModule(torch.nn.Module):
             """A test module with that has multiple args and uses kwargs"""
