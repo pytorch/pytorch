@@ -1322,12 +1322,20 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             zip(tensor_input_positions, tensor_input_sources)
         )
         overlapping_input_pairs = set(storage_overlapping_input_pairs)
+        input_info_matches_args = len(input_info) == len(args)
         for left_pos, left_input_position in enumerate(tensor_input_positions):
             for right_input_position in tensor_input_positions[left_pos + 1 :]:
-                if not (
-                    input_info[left_input_position].mutates_data
-                    or input_info[right_input_position].mutates_data
-                ):
+                if input_info_matches_args:
+                    has_data_mutation = (
+                        input_info[left_input_position].mutates_data
+                        or input_info[right_input_position].mutates_data
+                    )
+                else:
+                    # Cache entries store metadata after synthetic-base rewriting,
+                    # while args are still in the original user calling convention.
+                    # If those arities differ, replay conservatively.
+                    has_data_mutation = True
+                if not has_data_mutation:
                     continue
                 input_pair = (left_input_position, right_input_position)
                 input_sources = [

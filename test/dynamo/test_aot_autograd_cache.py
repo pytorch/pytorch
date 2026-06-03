@@ -61,9 +61,12 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     skipIfWindows,
     subtest,
+    TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
@@ -383,6 +386,88 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 for guard in overlap_guards
             },
             {("a", "b"), ("a", "c")},
+        )
+
+    def test_cache_hit_storage_overlap_guards_with_synthetic_base_metadata(self):
+        from torch._dynamo.source import LocalSource
+
+        def input_alias_info(mutates_data: bool) -> InputAliasInfo:
+            return InputAliasInfo(
+                is_leaf=False,
+                mutates_data=mutates_data,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                requires_grad=False,
+                keep_input_mutations=False,
+            )
+
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            inference_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[
+                LocalSource("a", is_input=True),
+                LocalSource("b", is_input=True),
+                LocalSource("c", is_input=True),
+                LocalSource("d", is_input=True),
+            ],
+            is_export=False,
+            no_tangents=False,
+            enable_log=False,
+            precompile_backend_id=None,
+        )
+
+        base = torch.ones(4)
+        args = [base[:2], base[1:3], torch.ones(2), torch.ones(2)]
+
+        tracing_context = TracingContext(None)
+        with torch._guards.tracing(tracing_context):
+            AOTAutogradCache._install_cache_hit_guards(
+                args,
+                aot_config,
+                [
+                    input_alias_info(mutates_data=True),
+                    input_alias_info(mutates_data=False),
+                    input_alias_info(mutates_data=False),
+                ],
+            )
+
+        overlap_guards = [
+            guard
+            for guard in tracing_context.guards_context.aotautograd_guards
+            if isinstance(guard, StorageOverlap)
+        ]
+        self.assertEqual(len(overlap_guards), 6)
+        self.assertEqual(
+            {
+                tuple(
+                    getattr(source, "local_name", source.name)
+                    for source in guard.overlapping_sources
+                )
+                for guard in overlap_guards
+                if guard.overlapping_sources
+            },
+            {("a", "b")},
+        )
+        self.assertEqual(
+            {
+                tuple(
+                    getattr(source, "local_name", source.name)
+                    for source in guard.non_overlapping_sources
+                )
+                for guard in overlap_guards
+                if guard.non_overlapping_sources
+            },
+            {("a", "c"), ("a", "d"), ("b", "c"), ("b", "d"), ("c", "d")},
         )
 
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -3211,6 +3296,10 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 self.assertEqual(c3.get("autograd_cache_miss", 0), 0)
                 self.assertEqual(c3.get("autograd_cache_hit", 0), 1)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/179689",
+    )
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -4728,6 +4817,9 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
             if dynamic_shapes == "from_tracing_context"
             else nullcontext()
         )
+        standalone_fake_mode = (
+            fake_mode if dynamic_shapes == "from_example_inputs" else None
+        )
 
         # Run standalone_compile and capture the real cache key.
         real_cache_key_fn = autograd_cache.autograd_cache_key
@@ -4749,6 +4841,7 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                     dynamic_shapes=dynamic_shapes,
                     options={},
                     aot=aot,
+                    fake_mode=standalone_fake_mode,
                 )
 
             self.assertIsNotNone(captured_key)
@@ -4758,6 +4851,7 @@ class CacheKeyAPITests(torch._dynamo.test_case.TestCase):
                 example_inputs,
                 dynamic_shapes=dynamic_shapes,
                 aot=aot,
+                fake_mode=standalone_fake_mode,
             )
             self.assertEqual(captured_key, sc_key)
 

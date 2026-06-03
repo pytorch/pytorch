@@ -4287,13 +4287,15 @@ class RootGuardManager : public GuardManager {
   }
 
   // See note on [Ownership with cloning]
-  RootGuardManager* clone_manager(const py::function& clone_filter_fn) {
+  std::unique_ptr<RootGuardManager> clone_manager(
+      const py::function& clone_filter_fn) {
     // Use clone_filter_fn
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
     }
-    RootGuardManager* cloned_root = new RootGuardManager();
-    clone_common(cloned_root, cloned_root, clone_filter_fn);
+    std::unique_ptr<RootGuardManager> cloned_root =
+        std::make_unique<RootGuardManager>();
+    clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
     }
@@ -8479,10 +8481,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("check", &RootGuardManager::check)
       .def("check_verbose", &RootGuardManager::check_verbose)
       .def("attach_compile_id", &RootGuardManager::attach_compile_id)
-      .def(
-          "clone_manager",
-          &RootGuardManager::clone_manager,
-          py::return_value_policy::reference)
+      .def("clone_manager", &RootGuardManager::clone_manager)
       // return by reference because GuardManager has the ownership of leaf
       // guards
       .def(
