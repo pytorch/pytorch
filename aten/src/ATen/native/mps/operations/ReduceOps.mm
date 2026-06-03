@@ -242,9 +242,70 @@ static void reduction_out_mps(const Tensor& input_t,
         castOutputTensor = [mpsGraph meanOfTensor:castInputTensor axes:wrappedAxes name:nil];
       }
 
+      // Apply wrapping (modular) arithmetic for small integer output types to
+      // match CPU behavior. MPSGraph's castTensor uses saturated casting (clamps
+      // to type range), but CPU preserves only the least significant bits
+      // (C-standard wrapping for unsigned types, two's complement for signed).
+      // We compute: wrapped = value - floor(value / range) * range
+      // which is equivalent to Python's floor-modulo (value % range).
       MPSGraphTensor* outputTensor = castOutputTensor;
-      if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
-        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
+      ScalarType outScalarType = output_t.scalar_type();
+      if (getMPSDataType(output_t) != [castOutputTensor dataType] &&
+          isIntegralType(outScalarType, /*includeBool=*/false)) {
+        double typeRange = 0;
+        double typeMin = 0;
+        if (outScalarType == kByte) {        // uint8
+          typeRange = 256.0;
+          typeMin = 0.0;
+        } else if (outScalarType == kChar) { // int8
+          typeRange = 256.0;
+          typeMin = -128.0;
+        } else if (outScalarType == kShort) { // int16
+          typeRange = 65536.0;
+          typeMin = -32768.0;
+        }
+
+        if (typeRange > 0) {
+          MPSDataType floatType = [castOutputTensor dataType];
+          MPSGraphTensor* rangeTensor = [mpsGraph constantWithScalar:typeRange dataType:floatType];
+
+          if (typeMin == 0) {
+            // Unsigned: floor(value / range) * range gives the multiple to subtract
+            MPSGraphTensor* divTensor = [mpsGraph divisionWithPrimaryTensor:castOutputTensor
+                                                           secondaryTensor:rangeTensor
+                                                                      name:nil];
+            MPSGraphTensor* floorTensor = [mpsGraph floorWithTensor:divTensor name:nil];
+            MPSGraphTensor* multTensor = [mpsGraph multiplicationWithPrimaryTensor:floorTensor
+                                                                  secondaryTensor:rangeTensor
+                                                                             name:nil];
+            castOutputTensor = [mpsGraph subtractionWithPrimaryTensor:castOutputTensor
+                                                     secondaryTensor:multTensor
+                                                                name:nil];
+          } else {
+            // Signed: shift to unsigned range [0, range), modulo, shift back
+            MPSGraphTensor* shiftTensor = [mpsGraph constantWithScalar:-typeMin dataType:floatType];
+            MPSGraphTensor* shifted = [mpsGraph additionWithPrimaryTensor:castOutputTensor
+                                                         secondaryTensor:shiftTensor
+                                                                    name:nil];
+            MPSGraphTensor* divTensor = [mpsGraph divisionWithPrimaryTensor:shifted
+                                                           secondaryTensor:rangeTensor
+                                                                      name:nil];
+            MPSGraphTensor* floorTensor = [mpsGraph floorWithTensor:divTensor name:nil];
+            MPSGraphTensor* multTensor = [mpsGraph multiplicationWithPrimaryTensor:floorTensor
+                                                                  secondaryTensor:rangeTensor
+                                                                             name:nil];
+            MPSGraphTensor* wrapped = [mpsGraph subtractionWithPrimaryTensor:shifted
+                                                            secondaryTensor:multTensor
+                                                                       name:nil];
+            castOutputTensor = [mpsGraph subtractionWithPrimaryTensor:wrapped
+                                                     secondaryTensor:shiftTensor
+                                                                name:nil];
+          }
+        }
+
+        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, outScalarType);
+      } else if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, castOutputTensor, outScalarType);
       }
 
       newCachedGraph->inputTensor_ = inputTensor;

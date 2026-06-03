@@ -6,9 +6,12 @@ on:
       - ciflow/inductor-periodic/*
   workflow_dispatch:
   schedule:
-    # Run every 4 hours during the week and every 12 hours on the weekend
-    - cron: 45 0,4,8,12,16,20 * * 1-5
-    - cron: 45 4,12 * * 0,6
+    # Reduced from every-4-hours weekday + every-12-hour weekend to twice-
+    # daily (2026-05). The previous cadence ran more often than was
+    # justified by the rate of regressions caught uniquely here. If a
+    # regression slips, raise via `ciflow/inductor-periodic` trigger or
+    # add a targeted cron line for the affected suite.
+    - cron: 45 0,12 * * *
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}

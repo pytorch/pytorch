@@ -41,15 +41,13 @@ jobs:
     with:
       jobs-to-include: ${{ github.event.inputs.jobs-to-include || '' }}
 
-  llm-td:
-    if: github.repository_owner == 'pytorch'
-    name: before-test
-    uses: ./.github/workflows/llm_td_retrieval.yml
-
+  # llm-td removed for trunk (2026-05): the LLM retrieval job downloads
+  # CodeLlama-7B and runs torchrun on linux.4xlarge per invocation. On trunk
+  # we run all tests anyway, so TD-augmented results provide no test-skip
+  # signal; pull.yml continues to refresh the S3 cache for PR-time consumers.
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
-    needs: llm-td
 
   get-label-type:
     name: get-label-type

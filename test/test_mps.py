@@ -5727,6 +5727,20 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(x.numel(), 8)
         self.assertEqual(x.max().item(), 30.0)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/179415
+    # MPS sum should use wrapping (not saturated) cast for integer overflow
+    def test_sum_integer_overflow_wrapping(self):
+        # uint8: [-1, 2, 1, 5, 3, 6] as uint8 = [255, 2, 1, 5, 3, 6], sum = 272, wrapped = 16
+        example = [[-1, 2, 1], [5, 3, 6]]
+        cpu_x = torch.tensor(example, dtype=torch.uint8, device="cpu")
+        mps_x = torch.tensor(example, dtype=torch.uint8, device="mps")
+        self.assertEqual(mps_x.sum(dtype=torch.uint8), cpu_x.sum(dtype=torch.uint8))
+
+        # int8: [127, 1] should wrap to -128, not saturate at 127
+        cpu_y = torch.tensor([127, 1], dtype=torch.int8, device="cpu")
+        mps_y = torch.tensor([127, 1], dtype=torch.int8, device="mps")
+        self.assertEqual(mps_y.sum(dtype=torch.int8), cpu_y.sum(dtype=torch.int8))
+
     # Test forward prod
     def test_prod(self):
         def helper(shape, dtype=torch.float32):
