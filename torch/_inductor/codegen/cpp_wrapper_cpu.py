@@ -2133,15 +2133,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             code.writeline(stmt)
 
-    def write_assert_alignment(self, name: str, alignment: int, op_name: str) -> None:
-        stmt = f'assert_alignment({name}, {alignment}, "{op_name}");'
-        if V.graph.aot_mode:
-            if V.graph.is_const_graph:
-                return
-            self.writeline(f"if (_check_aoti_runtime_check_inputs_env()) {{ {stmt} }}")
-        else:
-            self.writeline(stmt)
-
     def codegen_device(self, device):
         assert device.type in DEVICE_TO_ATEN, (
             device.type + " not found in DEVICE_TO_ATEN"
