@@ -273,6 +273,10 @@ benchmark_harness = True
 # fuse pointwise into templates epilogues
 epilogue_fusion = True
 
+# fuse atomic-add scatter mutations into Triton template epilogues
+# Disabled by default because performance depends on index contention.
+epilogue_fusion_with_atomic_add = False
+
 # fuse pointwise into template prologues
 prologue_fusion = prologue_fusion_enabled()
 
@@ -2971,6 +2975,14 @@ class eager_numerics:
 # emulate the eager numerics.
 emulate_precision_casts: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
+
+# Targeted variant of emulate_precision_casts for saved low-precision outputs.
+# When a low-precision pointwise result is saved for backward and also used by
+# later forward math, this inserts a downcast-upcast at the saved value so
+# forward and backward consume the same precision.
+emulate_precision_casts_on_saved_tensors: bool = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS_ON_SAVED_TENSORS", "1") == "1"
 )
 
 # adds patch, save_config, etc
