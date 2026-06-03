@@ -4734,7 +4734,7 @@ class DefaultDictVariable(UserDefinedDictVariable):
 
     def nb_inplace_or_impl(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
         self.call_method(tx, "update", [other], {})
