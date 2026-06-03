@@ -507,6 +507,76 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("compile_threads", 1)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_cache_hit_for_lazy_backward_no_ops(self):
+        def fn(a, b):
+            for i in range(2):
+                a = a + b * i
+            return a
+
+        a = torch.randn(8, requires_grad=True)
+        b = torch.randn(8)
+        a2 = a.detach().clone().requires_grad_(True)
+        b2 = b.detach().clone()
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        result1 = compiled_fn(a, b)
+        result1.sum().backward()
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        if not functorch_config.bundled_autograd_cache:
+            # Both the forward and the call-free lazy backward should be
+            # represented in FXGraphCache so AOTAutograd can save a full entry.
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+
+        self._clear_dynamo_and_codecache()
+
+        result2 = compiled_fn(a2, b2)
+        result2.sum().backward()
+
+        self.assertEqual(result1, result2)
+        self.assertEqual(a.grad, a2.grad)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", False)
+    @inductor_config.patch("compile_threads", 1)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "enable_remote_autograd_cache": False}
+    )
+    def test_lazy_backward_no_ops_fast_path_when_autograd_cache_bypasses(self):
+        if functorch_config.bundled_autograd_cache:
+            raise unittest.SkipTest("non-bundled FXGraphCache bypass behavior")
+
+        def fn(a, b):
+            for i in range(2):
+                a = a + b * i
+            return a
+
+        a = torch.randn(8, requires_grad=True)
+        b = torch.randn(8)
+
+        real_codegen = compile_fx.fx_codegen_and_compile
+        with patch(
+            "torch._inductor.compile_fx.fx_codegen_and_compile",
+            wraps=real_codegen,
+        ) as wrapped_codegen:
+            compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+            result = compiled_fn(a, b)
+            result.sum().backward()
+
+        self.assertEqual(wrapped_codegen.call_count, 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )

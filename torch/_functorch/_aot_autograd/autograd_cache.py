@@ -1089,6 +1089,12 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                         forward_symints=symints,
                     ),
                 )
+        if compiler_config_extra is not None:
+            # On a miss with a valid AOTAutograd cache key, downstream Inductor
+            # compiles need FXGraphCache keys so the eventual entry can save.
+            compiler_config_extra.aot_autograd_needs_fx_graph_cache_key.value = (
+                aot_config.cache_info is not None
+            )
 
         cache_info.update(
             {
