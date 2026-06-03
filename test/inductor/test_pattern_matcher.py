@@ -109,6 +109,177 @@ class TestPatternMatcher(TestCase):
         additional_check(codes)
         counters.clear()
 
+    def test_fwd_only_skip_passes_preserves_clone_before_mutation(self):
+        def fn(x):
+            y = x.clone()
+            y.add_(1)
+            return x
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(RuntimeError, "run_functional_passes=False"):
+            fwd_only(fn, [x])
+
+        gm = fwd_only(fn, [x], run_functional_passes=False)
+
+        clones = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function" and node.target == aten.clone.default
+        ]
+        self.assertEqual(len(clones), 1)
+
+        add = next(
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function" and node.target == aten.add_.Tensor
+        )
+        self.assertIs(add.args[0], clones[0])
+
+        inp = x.clone()
+        expected = inp.clone()
+        self.assertEqual(gm(inp), expected)
+        self.assertEqual(inp, expected)
+
+    def test_fwd_only_skip_passes_preserves_auto_functionalized_clone(self):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
+
+        def fn(x):
+            return auto_functionalized_dense(
+                aten.add_.Tensor, ("self",), self=x, other=1
+            )
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(RuntimeError, "run_functional_passes=False"):
+            fwd_only(fn, [x])
+
+        gm = fwd_only(fn, [x], run_functional_passes=False)
+
+        self.assertEqual(
+            sum(
+                node.op == "call_function" and node.target == aten.clone.default
+                for node in gm.graph.nodes
+            ),
+            1,
+        )
+
+        inp = x.clone()
+        expected = inp.clone()
+        gm(inp)
+        self.assertEqual(inp, expected)
+
+    def test_fwd_only_preserves_nested_output_clone_aliasing(self):
+        def fn(x):
+            return ((x.clone(),),)
+
+        x = torch.randn(3)
+        gm = fwd_only(fn, [x])
+
+        clones = [
+            node
+            for node in gm.graph.nodes
+            if node.op == "call_function" and node.target == aten.clone.default
+        ]
+        self.assertEqual(len(clones), 1)
+
+        result = gm(x)
+        self.assertEqual(result, ((x,),))
+        self.assertIsNot(result[0][0], x)
+
+    def test_fwd_only_skip_passes_preserves_clone_before_effectful_op(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        with torch.library._scoped_library("_test_pm_effect_alias", "DEF") as lib:
+            lib.define("observe(Tensor x, Tensor y) -> ()")
+            lib.impl("observe", lambda x, y: None, "CPU")
+            lib.impl("observe", lambda x, y: None, "Meta")
+            handle = _register_effectful_op(
+                torch.ops._test_pm_effect_alias.observe.default,
+                EffectType.ORDERED,
+            )
+            try:
+
+                def fn(x):
+                    y = x.clone()
+                    torch.ops._test_pm_effect_alias.observe(x, y)
+                    return x
+
+                with self.assertRaisesRegex(
+                    RuntimeError, "run_functional_passes=False"
+                ):
+                    fwd_only(fn, [torch.randn(3)])
+
+                gm = fwd_only(fn, [torch.randn(3)], run_functional_passes=False)
+                observe = next(
+                    node
+                    for node in gm.graph.nodes
+                    if node.op == "call_function"
+                    and node.target == torch.ops._test_pm_effect_alias.observe.default
+                )
+
+                self.assertIsNot(observe.args[0], observe.args[1])
+                self.assertEqual(observe.args[1].target, aten.clone.default)
+            finally:
+                handle.destroy()
+
+    def test_fwd_only_skip_passes_preserves_clone_before_with_effects(self):
+        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
+        from torch._library.effects import EffectType
+
+        with torch.library._scoped_library("_test_pm_with_effects_alias", "DEF") as lib:
+            lib.define("observe(Tensor x, Tensor y) -> Tensor")
+            lib.impl("observe", lambda x, y: x + y, "CPU")
+            lib.impl("observe", lambda x, y: torch.empty_like(x), "Meta")
+            handle = _register_effectful_op(
+                torch.ops._test_pm_with_effects_alias.observe.default,
+                EffectType.ORDERED,
+            )
+            try:
+
+                def fn(x):
+                    y = x.clone()
+                    token = torch.ops.aten._make_dep_token()
+                    _new_token, out = with_effects(
+                        token,
+                        torch.ops._test_pm_with_effects_alias.observe.default,
+                        x,
+                        y,
+                    )
+                    return out
+
+                with self.assertRaisesRegex(
+                    RuntimeError, "run_functional_passes=False"
+                ):
+                    fwd_only(fn, [torch.randn(3)])
+
+                gm = fwd_only(fn, [torch.randn(3)], run_functional_passes=False)
+                node = next(
+                    node
+                    for node in gm.graph.nodes
+                    if node.op == "call_function"
+                    and node.target is torch.ops.higher_order.with_effects
+                )
+
+                self.assertIsNot(node.args[2], node.args[3])
+                self.assertEqual(node.args[3].target, aten.clone.default)
+            finally:
+                handle.destroy()
+
+    def test_fwd_only_removes_noop_clone_without_mutation(self):
+        def fn(x):
+            y = x.clone()
+            return y + 1
+
+        gm = fwd_only(fn, [torch.randn(3)])
+
+        self.assertEqual(
+            sum(
+                node.op == "call_function" and node.target == aten.clone.default
+                for node in gm.graph.nodes
+            ),
+            0,
+        )
+
     @inductor_config.patch(max_autotune_gemm=True)
     def test_mm_plus_mm(self):
         def fn(a, b, c, d):
