@@ -47,8 +47,7 @@ def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
 @dataclasses.dataclass
 class _ChunkViews:
     """Per-iteration tensor views; each property picks the right operand
-    variant or scratch destination from ctx dispatch flags so the
-    chunked-loop call sites read like raw tensor operations.
+    or scratch from ctx dispatch flags so call sites read raw.
     """
 
     ctx: "_ChunkContext"
@@ -141,14 +140,11 @@ class _ChunkViews:
 
 @dataclasses.dataclass
 class _ChunkContext:
-    """Per-call state for the chunked loop. Built once via
-    ``_ChunkContext.build`` before the loop. Methods hide
-    dtype/device/acc_policy dispatch behind single math operations;
-    per-iteration math without dispatch is inlined into the loop body.
-
-    Buffers that dispatch decided are not needed are present as
-    rank-matching empty tensors (``_make_empty``/``_make_zeros`` with
-    ``when=False``) so the dataclass surface stays uniform.
+    """Per-call state for the chunked loop, built once via ``build``.
+    Methods hide dtype/device/acc_policy dispatch behind single math ops;
+    dispatch-free per-iter math is inlined into the loop body. Buffers
+    dispatch decided are not needed are rank-matching empty tensors
+    (``when=False`` in ``_make_*``) so the dataclass surface stays uniform.
     """
 
     dtype: torch.dtype
@@ -393,10 +389,8 @@ class _ChunkContext:
             )
         use_acc_dtype = dtype != acc_dtype
 
-        # ===== Internal dtype layout =====
-        # "compact" follows the same dtype layout as "balanced"; the
-        # extra savings come from skipping the weight_grad_chunk
-        # scratch later, not from a different dtype layout.
+        # Internal dtype layout. ``compact`` reuses ``balanced``'s layout;
+        # its savings come from skipping the weight_grad_chunk scratch, not dtype.
         is_memory_like = acc_policy in {"balanced", "compact"}
         if use_acc_dtype:
             output_dtype = acc_dtype if dtype == torch.float16 else dtype
@@ -788,9 +782,8 @@ def _linear_cross_entropy_batch_chunked(
                 out=logits,
             )
         # output -= <weight_chunk, log(softmax_denom)>
-        # softmax_denom is always in acc_dtype (see ``sumexp_``); the
-        # dot needs matching dtypes, so promote weight_chunk up
-        # rather than rounding the wider denominator down.
+        # softmax_denom is in acc_dtype (see ``sumexp_``); promote weight_chunk
+        # for the dot rather than rounding the wider denominator down.
         output.sub_(weight_chunk.to(softmax_denom.dtype).dot(softmax_denom.log_()))
 
         if compute_grads:
@@ -942,9 +935,8 @@ def _(
 
 @_linear_cross_entropy_batch_chunked.register_vmap
 def _vmap(info, in_dims, *args):
-    """vmap rule (slow path: per-sample Python loop). A fold-into-
-    num_batches fast path would need ``reduction="none"`` support in
-    the chunked op.
+    """vmap rule (slow path: per-sample Python loop). A fold-into-num_batches
+    fast path would need ``reduction="none"`` in the chunked op.
     """
     batch_size = info.batch_size
 
