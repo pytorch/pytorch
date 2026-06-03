@@ -1250,6 +1250,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     D_output_buffer.get_dtype()
                 )
 
+                # When the D output buffer has a compatible reshape of the template
+                # output (e.g., [16, 512, 3072] vs [8192, 3072]), use the template's
+                # layout for EVT since CUTLASS operates on the 2D GEMM output shape.
+                if (
+                    template_buffer_node is not None
+                    and D_output_buffer.get_size() != template_buffer_node.get_size()
+                ):
+                    name_to_buffer[D_output_name] = template_buffer_node
+
                 assert output_names, "There should be at least one write"
 
                 epilogue_inputs = [name_to_buffer[name] for name in input_names]
@@ -1295,15 +1304,24 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 W,
                 Bias,
                 *epilogue_inputs,  # type: ignore[list-item]
-                Y,
                 *extra_inputs,
             ]
+            # Extend input_reorder to cover epilogue inputs and extra_inputs
+            # at their natural positions (identity mapping for new entries)
+            if input_reorder is not None:
+                base_len = len(input_reorder)
+                num_new = len(inputs) - base_len
+                if num_new > 0:
+                    input_reorder = input_reorder + list(
+                        range(base_len, base_len + num_new)
+                    )
+            # Y is the D output; include it in outputs (not inputs) so the
+            # wrapper allocates it as a writable buffer.
+            outputs = [Y]
             input_names = [evt_arg_renames.get(name) for name in input_names]
             output_names = [evt_arg_renames.get(name) for name in output_names]
 
-            names_str = ",".join(
-                ["X", "W", "Bias", *input_names, "Y", *output_names, *extra_names]
-            )
+            names_str = ",".join(["X", "W", "Bias", *input_names, *extra_names, "Y"])
         else:
             evt_name = None
             outputs = [Y]

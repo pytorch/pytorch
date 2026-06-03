@@ -2280,6 +2280,32 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
+    def test_evt_gelu(self):
+        # gelu is decomposed by Inductor into x * 0.5 * (1 + erf(x / sqrt(2)));
+        # the EVT codegen re-folds this back into the native CUTLASS GELU
+        # functor (see _fuse_activations in python_evt.py).
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.nn.functional.gelu(a @ b)
+
+        M = 1024
+        N = 512
+        a = torch.ones(M, N).to(GPU_TYPE).half()
+        b = torch.ones(N, N).to(GPU_TYPE).half().t()
+        model = TestModel().to(GPU_TYPE)
+
+        result = torch.compile(model)(a, b)
+        ref_result = model(a, b)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
     @evt_all_ops
     def test_evt_mixed_dtypes(self, op):
         M = 1024
@@ -2403,6 +2429,37 @@ class TestCutlassBackend(TestCase):
 
         self.assertEqual(
             torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_un_ops
+    def test_evt_reshape(self, op):
+        # mm [M, N] -> view [batch, seq, N] -> pointwise op
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                # a is 3D [batch, seq, K], b is 2D [K, N]
+                batch, seq = a.shape[0], a.shape[1]
+                acc = a.view(-1, a.shape[-1]) @ b
+                acc = acc.view(batch, seq, -1)
+                return op(acc, *extra_args)
+
+        N = 512
+        # Use batch=2, seq=512 so that M=batch*seq=1024.
+        # Use ones (like run_evt_test) to avoid fp16 numerical noise.
+        a = torch.ones(2, 512, N).to(GPU_TYPE).half()
+        b = torch.ones(N, N).to(GPU_TYPE).half().t()
+        extra_args = gen_args(op, (2, 512, N))
+        model = TestModel().to(GPU_TYPE)
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            counters["inductor"]["cutlass_epilogue_fusion_counter"],
             1,
         )
         torch.testing.assert_close(result, ref_result)

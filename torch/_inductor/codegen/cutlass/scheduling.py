@@ -4,6 +4,8 @@ import logging
 from collections.abc import Sequence
 from typing import cast, TypeGuard
 
+import sympy
+
 from torch._inductor.codegen.cutlass.python_evt import (
     CutlassEVTCodegen,
     MockCutlassHandler,
@@ -194,6 +196,32 @@ class CUTLASSScheduling(BaseScheduling):
             list[BaseSchedulerNode], [n for n in nodes if n.node is not template_node]
         )
 
+    @staticmethod
+    def _is_compatible_reshape(
+        template_size: Sequence[sympy.Expr], node_size: Sequence[sympy.Expr]
+    ) -> bool:
+        """
+        Check if node_size is a compatible reshape of template_size.
+        This allows cases like template [8192, 3072] with node [16, 512, 3072]
+        where [16*512, 3072] == [8192, 3072] (prefix dims multiply to match).
+        """
+        if len(node_size) <= len(template_size):
+            return False
+        # Try to merge consecutive node dims to reconstruct template dims
+        t_idx = 0
+        n_idx = 0
+        while t_idx < len(template_size) and n_idx < len(node_size):
+            product = node_size[n_idx]
+            n_idx += 1
+            # Try multiplying consecutive node dims until we match template dim
+            while sympy.simplify(product - template_size[t_idx]) != 0:
+                if n_idx >= len(node_size):
+                    return False
+                product = product * node_size[n_idx]
+                n_idx += 1
+            t_idx += 1
+        return t_idx == len(template_size) and n_idx == len(node_size)
+
     def _can_fuse_epilogue_impl(
         self,
         cutlass_template_buffer: CUTLASSTemplateBuffer,
@@ -236,12 +264,17 @@ class CUTLASSScheduling(BaseScheduling):
 
             name = node.get_computed_buffer_name()  # type: ignore[attr-defined]
             # dtype can differ, and strides can differ as long as they are broadcastable
+            # Allow compatible reshapes (e.g., [8192, 3072] vs [16, 512, 3072])
+            # where the node's shape is a split of the template's shape
             if node.get_size() != cutlass_template_buffer.get_size():
-                why(
-                    f"{name}'s size: {node.get_size()} differs from {cutlass_template_buffer.get_name()}'s \
+                if not self._is_compatible_reshape(
+                    cutlass_template_buffer.get_size(), node.get_size()
+                ):
+                    why(
+                        f"{name}'s size: {node.get_size()} differs from {cutlass_template_buffer.get_name()}'s \
 size: {cutlass_template_buffer.get_size()}"
-                )
-                return False
+                    )
+                    return False
 
         assert len(
             existing_epilogue_nodes
