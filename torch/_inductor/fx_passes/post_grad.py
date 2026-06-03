@@ -880,6 +880,7 @@ def register_lowering_pattern(
     pass_number=1,
     *,
     output_metadata_ignores_input_storage: bool = False,
+    output_metadata_is_input: int | str | None = None,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Register an aten to inductor IR replacement pattern
@@ -890,6 +891,7 @@ def register_lowering_pattern(
         # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[pass_number],
         output_metadata_ignores_input_storage=output_metadata_ignores_input_storage,
+        output_metadata_is_input=output_metadata_is_input,
     )
 
 
@@ -1555,6 +1557,7 @@ def decompose_auto_functionalized(graph):
     ),
     pass_number=2,
     extra_check=is_valid_splitwithsizes_cat,
+    output_metadata_is_input="input_",
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
@@ -1609,6 +1612,7 @@ def is_valid_cat_splitwithsizes(match):
     ),
     pass_number=2,
     extra_check=is_valid_cat_splitwithsizes,
+    output_metadata_is_input="input_",
 )
 def cat_splitwithsizes_replace(match, input_):
     return input_
@@ -1659,10 +1663,11 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         torch.bfloat16,
         torch.float16,
     ):
-        # Allow unfuse when inp is a narrowing dtype cast (e.g. AMP casting
-        # fp32 bias to bf16/fp16). Unfusing lets the Triton pointwise kernel
-        # load the original higher-precision tensor directly, preserving
-        # precision instead of truncating bias before the fused addmm.
+        # Narrowing-cast unfuse (PR #183680) is XPU-only: it preserves
+        # precision on XPU pointwise but regresses accuracy on ROCm
+        # (basic_gnn_edgecnn training+amp fails on gfx950 otherwise).
+        if inp.meta["val"].device.type != "xpu":
+            return
         if not (
             inp.op == "call_function"
             and inp.target is torch.ops.prims.convert_element_type.default

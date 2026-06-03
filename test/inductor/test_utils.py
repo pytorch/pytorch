@@ -435,6 +435,7 @@ class TestFakeTensorUpdater(TestCase):
     def _make_inductor_lowering_function(
         *,
         output_metadata_ignores_input_storage: bool = False,
+        output_metadata_is_input: int | str | None = None,
     ) -> Callable[[torch.Tensor], torch.Tensor]:
         def lowering_fn(x: torch.Tensor) -> torch.Tensor:
             raise AssertionError("lowering_fn should not run under FakeTensorUpdater")
@@ -442,6 +443,9 @@ class TestFakeTensorUpdater(TestCase):
         lowering_fn._inductor_lowering_function = True  # type: ignore[attr-defined]
         lowering_fn._inductor_lowering_output_metadata_ignores_input_storage = (  # type: ignore[attr-defined]
             output_metadata_ignores_input_storage
+        )
+        lowering_fn._inductor_lowering_output_metadata_is_input = (  # type: ignore[attr-defined]
+            output_metadata_is_input
         )
         return lowering_fn
 
@@ -717,6 +721,64 @@ class TestFakeTensorUpdater(TestCase):
 
         self.assertEqual(num_updated, 1)
         self.assertEqual(tuple(neg.meta["val"].shape), (2, 3))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
+
+    def test_pass_through_inductor_lowering_node_updates_from_input_metadata(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(output_metadata_is_input="input_"),
+            (),
+            {"input_": neg},
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            y.meta["val"] = mode.from_tensor(torch.randn(4, 5))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            neg.args = (y,)
+
+            with V.set_fake_mode(mode):
+                num_updated = updater.incremental_update()
+
+        self.assertEqual(num_updated, 2)
+        self.assertEqual(tuple(neg.meta["val"].shape), (4, 5))
+        self.assertEqual(tuple(lowered.meta["val"].shape), (4, 5))
+
+    def test_pass_through_inductor_lowering_node_rejects_missing_input_metadata(
+        self,
+    ):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        neg = graph.call_function(aten.neg.default, (x,))
+        lowered = graph.call_function(
+            self._make_inductor_lowering_function(output_metadata_is_input="input_"),
+            (),
+            {"input_": neg},
+        )
+        graph.output(lowered)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with torch._subclasses.FakeTensorMode() as mode, torch.no_grad():
+            x.meta["val"] = mode.from_tensor(torch.randn(2, 3))
+            neg.meta["val"] = aten.neg.default(x.meta["val"])
+            lowered.meta["val"] = neg.meta["val"]
+
+            updater = FakeTensorUpdater(gm)
+            del x.meta["val"]
+            lowered.kwargs = {"input_": x}
+
+            with self.assertRaisesRegex(RuntimeError, "metadata is unavailable"):
+                with V.set_fake_mode(mode):
+                    updater.incremental_update()
+
         self.assertEqual(tuple(lowered.meta["val"].shape), (2, 3))
 
     def test_unmarked_inductor_lowering_node_rejects_storage_only_dependency_change(
