@@ -3478,6 +3478,13 @@ class PermuteView(BaseView):
         size = self.data.get_size()
         return [size[i] for i in self.dims]
 
+    def get_stride(self) -> Sequence[Expr]:
+        assert OrderedSet(self._map_neg_dims(self.dims)) == OrderedSet(
+            range(len(self.dims))
+        )
+        stride = self.data.get_stride()
+        return [stride[i] for i in self.dims]
+
     def make_reindexer(
         self,
     ) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
@@ -7466,10 +7473,6 @@ class ExternKernel(InputsKernel):
         size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
         stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
         op_name = self.get_op_name()
-        name = self.get_assert_name()
-        wrapper.write_assert_size_stride(name, size, stride, op_name)
-
-    def get_assert_name(self) -> str:
         name = self.get_name()
         if V.graph.cpp_wrapper:
             # inplace_view ops (e.g. set_.source_Tensor) don't declare an
@@ -7478,18 +7481,20 @@ class ExternKernel(InputsKernel):
                 if torch.Tag.inplace_view in self.op_overload.tags:
                     assert isinstance(self.inputs[0], IRNode)
                     name = self.inputs[0].get_name()
-        return name
+        wrapper.write_assert_size_stride(name, size, stride, op_name)
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if config.alignment_asserts:
-            name = self.get_assert_name()
+        if config.alignment_asserts and not V.graph.cpp_wrapper:
+            name = self.get_name()
             aligned = name not in V.graph.unaligned_buffers
             op_name = self.get_op_name()
             if aligned:
-                wrapper.write_assert_alignment(name, GPU_ALIGN_BYTES, op_name)
+                wrapper.writeline(
+                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
+                )
             else:
                 wrapper.writeline(
-                    f"{wrapper.comment} buffer {name} (op: {op_name}) is assumed to be not aligned"
+                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
                 )
 
     def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
