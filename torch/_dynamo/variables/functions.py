@@ -4146,6 +4146,18 @@ class BoundBuiltinMethodVariable(VariableTracker):
     def python_type(self) -> type:
         return types.BuiltinMethodType
 
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
+        try:
+            return hash(self.as_python_constant()), False
+        except AsPythonConstantNotImplementedError:
+            return id(self), True
+
+    def richcompare_impl(self, tx, other, op):
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
     def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()
         if isinstance(self.descriptor, types.ClassMethodDescriptorType):

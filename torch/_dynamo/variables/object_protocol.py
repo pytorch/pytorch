@@ -1668,54 +1668,74 @@ def object_generic_getattr(
     obj: VariableTracker,
     name: str,
 ) -> VariableTracker:
-    """Dynamo's PyObject_GenericGetAttr for the base VariableTracker.
+    """Dynamo's PyObject_GenericGetAttr.
 
     https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L1611-L1683
 
-    Implements the standard attribute lookup algorithm using only the
-    VT's python_type() -- no self.value needed.  Works for any VT that
-    knows its Python type.
+    Implements the standard attribute lookup algorithm using the VT's
+    python_type() for MRO walking, and hooks on the VT for instance dict
+    and __getattr__ fallback.
 
     Steps:
       1. MRO walk on python_type() for type_attr
       2. Data descriptor -> invoke tp_descr_get
-      3. (Instance dict -- skipped, base VTs have no instance dict)
+      3. Instance dict -> obj.lookup_instance_dict(tx, name)
       4. Non-data descriptor -> invoke tp_descr_get
       5. Plain class variable -> wrap in VT
-      6. AttributeError
+      6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
+      7. AttributeError
     """
     from ..source import AttrSource
     from .user_defined import is_data_descriptor
 
     py_type = obj.python_type()
+    source = obj.source and AttrSource(obj.source, name)
+
+    # Step 1: MRO walk.
     type_attr = mro_lookup(py_type, name)
 
-    if type_attr is NO_SUCH_SUBOBJ:
-        raise_observed_exception(
-            AttributeError,
-            tx,
-            args=[f"'{py_type.__name__}' object has no attribute '{name}'"],
-        )
-
-    source = obj.source and AttrSource(obj.source, name)
-    class_vt = VariableTracker.build(tx, py_type)
-
-    is_data_desc = is_data_descriptor(type_attr)
-    has_get = hasattr(type(type_attr), "__get__")
-
-    # Step 2: Data descriptor takes priority.
-    # Step 4: Non-data descriptor with __get__.
-    if is_data_desc or has_get:
+    # Step 2: Data descriptor takes priority over instance dict.
+    if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
+        class_vt = VariableTracker.build(tx, py_type)
         result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
         if result is not None:
             return result
-        # Unrecognized descriptor type -- fall back to caller.
         raise NotImplementedError(
-            f"object_generic_getattr: unhandled descriptor {type(type_attr)} for {name}"
+            f"object_generic_getattr: unhandled data descriptor "
+            f"{type(type_attr)} for {name}"
+        )
+
+    # Step 3: Instance dict (tp_dictoffset).
+    instance_result = obj.lookup_instance_dict(tx, name)
+    if instance_result is not None:
+        return instance_result
+
+    # Step 4: Non-data descriptor with __get__.
+    if type_attr is not NO_SUCH_SUBOBJ and hasattr(type(type_attr), "__get__"):
+        class_vt = VariableTracker.build(tx, py_type)
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        if result is not None:
+            return result
+        raise NotImplementedError(
+            f"object_generic_getattr: unhandled non-data descriptor "
+            f"{type(type_attr)} for {name}"
         )
 
     # Step 5: Plain class variable (no __get__).
-    return VariableTracker.build(tx, type_attr, source)
+    if type_attr is not NO_SUCH_SUBOBJ:
+        return VariableTracker.build(tx, type_attr, source)
+
+    # Step 6: __getattr__ fallback.
+    getattr_result = obj.call_getattr_fallback(tx, name)
+    if getattr_result is not None:
+        return getattr_result
+
+    # Step 7: AttributeError.
+    raise_observed_exception(
+        AttributeError,
+        tx,
+        args=[f"'{py_type.__name__}' object has no attribute '{name}'"],
+    )
 
 
 def generic_getattr(

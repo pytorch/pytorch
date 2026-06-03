@@ -11,7 +11,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
     def test_getattr_constant(self):
         def fn():
-            return getattr(42, "__class__")
+            return (42).__class__
 
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertIs(result, int)
@@ -84,7 +84,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
 
         def fn(x):
-            return getattr(x, "_grad")
+            return x._grad
 
         x = torch.randn(3, requires_grad=True)
         x.grad = torch.ones(3)
@@ -424,7 +424,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             x = 42
 
         def fn(obj):
-            return getattr(obj, "x") == obj.x
+            return obj.x == obj.x
 
         result = torch.compile(fn, backend="eager")(MyObj())
         self.assertTrue(result)
@@ -453,13 +453,54 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
             def forward(self, x):
                 self.extra_val = 1
-                params = list(self.parameters())
+                _params = list(self.parameters())
                 return self.linear(x)
 
         m = MyModule()
         cnt = torch._dynamo.testing.CompileCounter()
         result = torch.compile(m, backend=cnt)(torch.randn(3))
         self.assertEqual(result.shape, torch.Size([4]))
+
+    # --- object_generic_getattr on converted VTs ---
+
+    def test_constant_method_via_generic_getattr(self):
+        """ConstantVariable now resolves methods through the descriptor protocol
+        via object_generic_getattr, instead of falling back to GetAttrVariable.
+        """
+
+        def fn():
+            return "hello".upper()
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "HELLO")
+
+    def test_constant_class_attr_via_generic_getattr(self):
+        """(42).__class__ resolves through getset_descriptor on object."""
+
+        def fn():
+            x = 42
+            return x.__class__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(result, int)
+
+    def test_range_method_via_generic_getattr(self):
+        """RangeVariable now resolves methods through the descriptor protocol."""
+
+        def fn():
+            r = range(10)
+            return r.count(5)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 1)
+
+    def test_range_index_via_generic_getattr(self):
+        def fn():
+            r = range(10)
+            return r.index(7)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, 7)
 
 
 if __name__ == "__main__":

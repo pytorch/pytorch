@@ -588,6 +588,28 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
+    def lookup_instance_dict(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker | None:
+        """Look up *name* in the instance __dict__ (tp_dictoffset equivalent).
+
+        Returns a VT if the attribute exists in the instance dict, None
+        otherwise.  The base returns None (most VTs have no instance dict).
+        UDOV overrides to check self.value.__dict__ + side effects.
+        """
+        return None
+
+    def call_getattr_fallback(
+        self, tx: InstructionTranslatorBase, name: str
+    ) -> VariableTracker | None:
+        """Call __getattr__ fallback (step 6 of GenericGetAttr).
+
+        Returns a VT if the type defines __getattr__ and it succeeds,
+        None otherwise.  The base returns None (most types have no
+        __getattr__).  UDOV overrides to walk the MRO for __getattr__.
+        """
+        return None
+
     def getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker:
