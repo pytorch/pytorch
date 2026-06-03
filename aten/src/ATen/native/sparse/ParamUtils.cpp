@@ -3,6 +3,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <tuple>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -47,7 +48,8 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> softmax_backward_sparse_input_prepro
   TORCH_CHECK(
       grad.sparse_dim() == output.sparse_dim(),
       ": grad and output sparse dimensions must be equal");
-  return std::make_tuple(grad_input, grad, output, dim);
+  return std::make_tuple(
+      std::move(grad_input), std::move(grad), std::move(output), dim);
 }
 
 } // namespace at::native
