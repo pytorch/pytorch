@@ -3,13 +3,17 @@
 
 set -eux
 
-ACL_VERSION=${ACL_VERSION:-"v52.6.0"}
+ACL_VERSION=${ACL_VERSION:-"v53.1.0"}
 ACL_INSTALL_DIR="/acl"
-
-# Clone ACL
-git clone https://github.com/ARM-software/ComputeLibrary.git -b "${ACL_VERSION}" --depth 1 --shallow-submodules
-
+ACL_REPO="https://github.com/ARM-software/ComputeLibrary.git"
 ACL_CHECKOUT_DIR="ComputeLibrary"
+
+# Clone ACL. ACL_VERSION may be a tag, branch, or commit SHA.
+git init --quiet "${ACL_CHECKOUT_DIR}"
+git -C "${ACL_CHECKOUT_DIR}" remote add origin "${ACL_REPO}"
+git -C "${ACL_CHECKOUT_DIR}" fetch --depth 1 origin "${ACL_VERSION}"
+git -C "${ACL_CHECKOUT_DIR}" checkout --detach FETCH_HEAD
+
 # Build with scons
 pushd $ACL_CHECKOUT_DIR
 scons -j8  Werror=0 debug=0 neon=1 opencl=0 embed_kernels=0 \
