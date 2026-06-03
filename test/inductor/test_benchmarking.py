@@ -5,11 +5,17 @@ from unittest.mock import patch
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor import config as inductor_config
 from torch._inductor.config import (
     inductor_default_autotune_rep,
     inductor_default_autotune_warmup,
 )
-from torch._inductor.runtime.benchmarking import Benchmarker, TritonBenchmarker
+from torch._inductor.runtime import benchmarking as _bench
+from torch._inductor.runtime.benchmarking import (
+    Benchmarker,
+    InductorBenchmarker,
+    TritonBenchmarker,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -149,6 +155,65 @@ class TestBenchmarker(TestCase):
 
         self.assertEqual(captured_kwargs["warmup"], custom_warmup)
         self.assertEqual(captured_kwargs["rep"], custom_rep)
+
+    def test_experimental_benchmarker_config_kwargs_forwarded(self):
+        captured_kwargs = {}
+
+        def capture_benchmark_gpu(self, _callable, **kwargs):
+            captured_kwargs.update(kwargs)
+            return 1.0
+
+        benchmarker = InductorBenchmarker()
+
+        with (
+            patch.object(_bench, "use_experimental_benchmarker", True),
+            inductor_config.patch(
+                experimental_benchmarker_estimation_iters=2,
+                experimental_benchmarker_memory_warmup_iters=3,
+                experimental_benchmarker_benchmark_iters=4,
+                experimental_benchmarker_max_duration=5,
+            ),
+            patch.object(InductorBenchmarker, "benchmark_gpu", capture_benchmark_gpu),
+        ):
+            benchmarker.benchmark(lambda: None, device="cuda")
+
+        self.assertEqual(captured_kwargs["estimation_iters"], 2)
+        self.assertEqual(captured_kwargs["memory_warmup_iters"], 3)
+        self.assertEqual(captured_kwargs["benchmark_iters"], 4)
+        self.assertEqual(captured_kwargs["max_benchmark_duration"], 5)
+
+    def test_experimental_benchmarker_explicit_kwargs_not_overridden(self):
+        captured_kwargs = {}
+
+        def capture_benchmark_gpu(self, _callable, **kwargs):
+            captured_kwargs.update(kwargs)
+            return 1.0
+
+        benchmarker = InductorBenchmarker()
+
+        with (
+            patch.object(_bench, "use_experimental_benchmarker", True),
+            inductor_config.patch(
+                experimental_benchmarker_estimation_iters=2,
+                experimental_benchmarker_memory_warmup_iters=3,
+                experimental_benchmarker_benchmark_iters=4,
+                experimental_benchmarker_max_duration=5,
+            ),
+            patch.object(InductorBenchmarker, "benchmark_gpu", capture_benchmark_gpu),
+        ):
+            benchmarker.benchmark(
+                lambda: None,
+                device="cuda",
+                estimation_iters=10,
+                memory_warmup_iters=20,
+                benchmark_iters=30,
+                max_benchmark_duration=40,
+            )
+
+        self.assertEqual(captured_kwargs["estimation_iters"], 10)
+        self.assertEqual(captured_kwargs["memory_warmup_iters"], 20)
+        self.assertEqual(captured_kwargs["benchmark_iters"], 30)
+        self.assertEqual(captured_kwargs["max_benchmark_duration"], 40)
 
     @unittest.skipIf(not HAS_CPU, "requires CPU")
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)

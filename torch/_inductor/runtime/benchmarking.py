@@ -236,6 +236,24 @@ class Benchmarker:
         warmup = kwargs.pop("warmup", inductor_config.inductor_default_autotune_warmup)
         rep = kwargs.pop("rep", inductor_config.inductor_default_autotune_rep)
 
+        if use_experimental_benchmarker and inferred_device.type == "cuda":
+            kwargs.setdefault(
+                "estimation_iters",
+                inductor_config.experimental_benchmarker_estimation_iters,
+            )
+            kwargs.setdefault(
+                "memory_warmup_iters",
+                inductor_config.experimental_benchmarker_memory_warmup_iters,
+            )
+            kwargs.setdefault(
+                "benchmark_iters",
+                inductor_config.experimental_benchmarker_benchmark_iters,
+            )
+            kwargs.setdefault(
+                "max_benchmark_duration",
+                inductor_config.experimental_benchmarker_max_duration,
+            )
+
         # Surfacing all kernels during autotuning is super noisy; filtering these out.
         with DebugMode._benchmarking_inductor():
             # First, try a registered device-specific benchmarker
@@ -250,24 +268,6 @@ class Benchmarker:
             # - else -> GPU benchmark path (legacy behavior retained for non-CPU)
             if inferred_device == torch.device("cpu"):
                 return self.benchmark_cpu(_callable, warmup=warmup, rep=rep, **kwargs)
-
-            if use_experimental_benchmarker:
-                kwargs.setdefault(
-                    "estimation_iters",
-                    inductor_config.experimental_benchmarker_estimation_iters,
-                )
-                kwargs.setdefault(
-                    "memory_warmup_iters",
-                    inductor_config.experimental_benchmarker_memory_warmup_iters,
-                )
-                kwargs.setdefault(
-                    "benchmark_iters",
-                    inductor_config.experimental_benchmarker_benchmark_iters,
-                )
-                kwargs.setdefault(
-                    "max_benchmark_duration",
-                    inductor_config.experimental_benchmarker_max_duration,
-                )
 
             return self.benchmark_gpu(_callable, warmup=warmup, rep=rep, **kwargs)
 
