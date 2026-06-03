@@ -335,7 +335,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
                 output_size[dim] *= mesh.size(0)
                 # each rank have its own tensor, all_gather gives a bigger tensor
                 local_tensor = torch.ones([3, 3, 3], device=device)
-                gathered_tensor = ft_c.all_gather_tensor(
+                gathered_tensor = ft_c.all_gather_single(
                     local_tensor, gather_dim=dim, group=(mesh, 0)
                 )
                 self.assertEqual(gathered_tensor, torch.ones(output_size))
@@ -376,7 +376,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
                 output_size[dim] *= group_size
                 input_tensor = torch.ones(output_size, device=device)
                 res_num = 1 * group_size
-                rs_tensor = ft_c.reduce_scatter_tensor(
+                rs_tensor = ft_c.reduce_scatter_single(
                     input_tensor, "sum", scatter_dim=dim, group=(mesh, 0)
                 )
                 self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
@@ -492,7 +492,7 @@ class TestAllGatherViewOptimization(TestCase):
         # numel_between = prod(shape[1:1]) = 1, so view optimization applies.
         # Result should be an AsyncCollectiveTensor (wait delayed).
         t = torch.randn(1, 8)
-        res = ft_c.all_gather_tensor(t, gather_dim=1, group=dist.group.WORLD)
+        res = ft_c.all_gather_single(t, gather_dim=1, group=dist.group.WORLD)
         self.assertIsInstance(res, ft_c.AsyncCollectiveTensor)
 
     def test_fallback_path_waits_early(self):
@@ -501,7 +501,7 @@ class TestAllGatherViewOptimization(TestCase):
         # so view optimization does NOT apply.
         # Result should be a plain tensor (wait called early).
         t = torch.randn(2, 8)
-        res = ft_c.all_gather_tensor(t, gather_dim=1, group=dist.group.WORLD)
+        res = ft_c.all_gather_single(t, gather_dim=1, group=dist.group.WORLD)
         self.assertNotIsInstance(res, ft_c.AsyncCollectiveTensor)
 
 
@@ -735,7 +735,7 @@ class TestFunctionalAutograd(TestCase):
             def my_func(t: torch.Tensor, dim: int) -> torch.Tensor:
                 if not t.requires_grad:
                     raise AssertionError("Expected t.requires_grad to be True")
-                out = ft_c.all_gather_tensor_autograd(
+                out = ft_c.all_gather_single_autograd(
                     t * 1.0,
                     gather_dim=dim,
                     group=group,
@@ -765,7 +765,7 @@ class TestFunctionalAutograd(TestCase):
                 if not t.requires_grad:
                     raise AssertionError("Expected t.requires_grad to be True")
                 rs_tensor = (
-                    ft_c.reduce_scatter_tensor_autograd(
+                    ft_c.reduce_scatter_single_autograd(
                         input_tensor * 1.0, "sum", scatter_dim=dim, group=group
                     )
                     * 1.0
