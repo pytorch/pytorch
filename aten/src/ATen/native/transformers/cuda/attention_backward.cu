@@ -217,8 +217,11 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
     }
 
     const bool is_nested = cum_seq_q.defined();
-    const int64_t max_seqlen_batch_q = query.size(2);
-    const int64_t max_seqlen_batch_k = key.size(2);
+    // For the nested/varlen path, query is the flat (total_tokens, h, d) tensor,
+    // so query.size(2) == d_qk, not the max sequence length. Use the max_q/max_k
+    // arguments the caller passed in instead.
+    const int64_t max_seqlen_batch_q = is_nested ? max_q : query.size(2);
+    const int64_t max_seqlen_batch_k = is_nested ? max_k : key.size(2);
 
     if (!is_nested) {
       const int64_t batch_size = query.size(0);
