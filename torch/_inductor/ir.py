@@ -6627,6 +6627,22 @@ class ExternKernel(InputsKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        read_writes = super().get_read_writes()
+
+        def add_ir_read(value: Any) -> None:
+            if isinstance(value, IRNode):
+                name = value.maybe_get_name()
+                if name is not None:
+                    read_writes.reads.add(dependencies.StarDep(name))
+
+        pytree.tree_map_(
+            add_ir_read,
+            (self.constant_args, self.kwargs),
+            is_leaf=lambda value: isinstance(value, IRNode),
+        )
+        return read_writes
+
     def collect_arg_kwarg_properties(self) -> None:
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
         # information for args and kwargs, e.g. type and default value, to help with the cpp wrapper codegen
@@ -7450,6 +7466,10 @@ class ExternKernel(InputsKernel):
         size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
         stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
         op_name = self.get_op_name()
+        name = self.get_assert_name()
+        wrapper.write_assert_size_stride(name, size, stride, op_name)
+
+    def get_assert_name(self) -> str:
         name = self.get_name()
         if V.graph.cpp_wrapper:
             # inplace_view ops (e.g. set_.source_Tensor) don't declare an
@@ -7458,20 +7478,18 @@ class ExternKernel(InputsKernel):
                 if torch.Tag.inplace_view in self.op_overload.tags:
                     assert isinstance(self.inputs[0], IRNode)
                     name = self.inputs[0].get_name()
-        wrapper.write_assert_size_stride(name, size, stride, op_name)
+        return name
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
-        if config.alignment_asserts and not V.graph.cpp_wrapper:
-            name = self.get_name()
+        if config.alignment_asserts:
+            name = self.get_assert_name()
             aligned = name not in V.graph.unaligned_buffers
             op_name = self.get_op_name()
             if aligned:
-                wrapper.writeline(
-                    f"assert_alignment({name}, {GPU_ALIGN_BYTES}, {op_name!r})"
-                )
+                wrapper.write_assert_alignment(name, GPU_ALIGN_BYTES, op_name)
             else:
                 wrapper.writeline(
-                    f"# buffer {name} (op: {op_name}) is assumed to be not aligned"
+                    f"{wrapper.comment} buffer {name} (op: {op_name}) is assumed to be not aligned"
                 )
 
     def codegen_memory_tracking(self, wrapper: PythonWrapperCodegen) -> None:
@@ -8328,6 +8346,7 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
 
 class SetSourceTensorKernel(ExternKernelAlloc):
     def __init__(self, self_tensor: IRNode, storage_tensor: IRNode) -> None:
+        storage_tensor = self.realize_input(storage_tensor)
         storage_tensor.freeze_layout()
         super().__init__(
             storage_tensor.get_layout(),
@@ -9417,6 +9436,12 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             packed.outputs = [outputs]
 
+        if kernel is torch.ops.aten._efficientzerotensor.default:
+            V.graph.never_reuse_buffers.add(packed.get_name())
+            for output in pytree.tree_leaves(outputs):
+                if isinstance(output, IRNode):
+                    V.graph.never_reuse_buffers.add(output.get_name())
+
         return outputs
 
 
@@ -9991,7 +10016,14 @@ class StorageBox(MutableBox):
             if is_cpu(self.data):
                 # Heuristic for realizing reused result of heavy ops on cpu
                 opcount = self.data.inner_fn_opcount()
-                heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
+                heavy_ops = [
+                    "exp",
+                    "log",
+                    "log10",
+                    "log1p",
+                    "log2",
+                    "sigmoid",
+                ]
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True
             return (
