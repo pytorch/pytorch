@@ -1812,6 +1812,145 @@ class GemmEpilogueFusionTests(TestCase):
         return a, b, scale_a, scale_b
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_scaled_mm_v2_local_reduce_feeds_main_fuses(self):
+        if not PLATFORM_SUPPORTS_MX_GEMM:
+            self.skipTest("MX GEMM is not supported")
+
+        swizzle = (
+            F.SwizzleType.NO_SWIZZLE
+            if torch.version.hip
+            else F.SwizzleType.SWIZZLE_32_4_4
+        )
+        m, k, n, group = 128, 32, 128, 32
+
+        def fn(a, b, scale_a, scale_b):
+            def epilogue(acc):
+                x = acc.float().view(m, -1, group)
+                denom = x.sum(dim=-1, keepdim=True) + 32.0
+                return (x * denom.reciprocal()).view(m, n)
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                epilogue,
+                gemm_kwargs={
+                    "scale_recipe_a": F.ScalingType.BlockWise1x32,
+                    "scale_recipe_b": F.ScalingType.BlockWise1x32,
+                    "swizzle_a": swizzle,
+                    "swizzle_b": swizzle,
+                    "output_dtype": torch.bfloat16,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        torch.manual_seed(13)
+        a = (0.5 * torch.randn(m, k, device="cuda", dtype=torch.bfloat16)).to(
+            torch.float8_e4m3fn
+        )
+        b = (0.5 * torch.randn(n, k, device="cuda", dtype=torch.bfloat16)).to(
+            torch.float8_e4m3fn
+        ).t()
+        scale_a = torch.full(
+            (self._block_scaled_numel(m, k, 32),),
+            1.0,
+            device="cuda",
+            dtype=torch.float8_e8m0fnu,
+        )
+        scale_b = torch.full(
+            (self._block_scaled_numel(n, k, 32),),
+            1.0,
+            device="cuda",
+            dtype=torch.float8_e8m0fnu,
+        )
+
+        checks, check_nots = self._quack_codegen_invariants(
+            "scale_a=",
+            "scale_b=",
+            "cute.ReductionOp.ADD",
+            "broadcast_to",
+        )
+        self._assert_compiled_matches(
+            fn,
+            a,
+            b,
+            scale_a,
+            scale_b,
+            atol=2e-1,
+            rtol=5e-2,
+            checks=checks,
+            check_nots=(*check_nots, "extern_kernels._scaled_mm"),
+            contains=self._tensorssa_grouped_n_invariants(group),
+            assert_fn=lambda actual, expected: torch.testing.assert_close(
+                actual.float(), expected.float(), atol=2e-1, rtol=5e-2
+            ),
+        )
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_scaled_mm_v2_tuple_local_reduce(self):
+        if not PLATFORM_SUPPORTS_MX_GEMM:
+            self.skipTest("MX GEMM is not supported")
+
+        swizzle = (
+            F.SwizzleType.NO_SWIZZLE
+            if torch.version.hip
+            else F.SwizzleType.SWIZZLE_32_4_4
+        )
+        m, n, group = 128, 128, 32
+
+        def fn(a, b, scale_a, scale_b):
+            def epilogue(acc):
+                x = acc.float().view(m, -1, group)
+                return acc.relu(), x.sum(dim=-1)
+
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                epilogue,
+                gemm_kwargs={
+                    "scale_recipe_a": F.ScalingType.BlockWise1x32,
+                    "scale_recipe_b": F.ScalingType.BlockWise1x32,
+                    "swizzle_a": swizzle,
+                    "swizzle_b": swizzle,
+                    "output_dtype": torch.bfloat16,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a, b, scale_a, scale_b = self._mxfp8_scaled_mm_v2_inputs(m=m, k=32, n=n)
+        with self.assertRaisesRegex(Exception, "local-reduce tuple epilogues"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale_a, scale_b)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_rejects_scaled_mm_v2_tuple_generic_aux(self):
+        if not PLATFORM_SUPPORTS_MX_GEMM:
+            self.skipTest("MX GEMM is not supported")
+
+        swizzle = (
+            F.SwizzleType.NO_SWIZZLE
+            if torch.version.hip
+            else F.SwizzleType.SWIZZLE_32_4_4
+        )
+
+        def fn(a, b, scale_a, scale_b):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: (acc.relu(), acc.float().abs()),
+                gemm_kwargs={
+                    "scale_recipe_a": F.ScalingType.BlockWise1x32,
+                    "scale_recipe_b": F.ScalingType.BlockWise1x32,
+                    "swizzle_a": swizzle,
+                    "swizzle_b": swizzle,
+                    "output_dtype": torch.bfloat16,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a, b, scale_a, scale_b = self._mxfp8_scaled_mm_v2_inputs()
+        with self.assertRaisesRegex(Exception, "generic aux tuple epilogues"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b, scale_a, scale_b)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_scaled_mm_v2_tensorwise(self):
         if not PLATFORM_SUPPORTS_FP8:
             self.skipTest("FP8 is not supported")
