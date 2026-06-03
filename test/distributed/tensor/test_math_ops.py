@@ -614,7 +614,7 @@ class DistMathOpsTest(DTensorTestBase):
 
                 # all requires_grad patterns should have the same forward comm counts
                 expected_fwd_comm = {
-                    funcol.reduce_scatter_single: 1,
+                    funcol.reduce_scatter_tensor: 1,
                     funcol.all_gather_into_tensor: 2,
                 }
                 self.assertDictEqual(
@@ -634,7 +634,7 @@ class DistMathOpsTest(DTensorTestBase):
                 if out_req_grad and not any((emb_req_grad, ln_req_grad)):
                     expected_bwd_comm = {}
                 elif ln_req_grad and not any((emb_req_grad, multidim_norm)):
-                    expected_bwd_comm = {funcol.reduce_scatter_single: 1}
+                    expected_bwd_comm = {funcol.reduce_scatter_tensor: 1}
                 elif multidim_norm:
                     expected_bwd_comm = {funcol.all_reduce: 1}
                     expected_bwd_comm[funcol.all_gather_into_tensor] = (
@@ -642,7 +642,7 @@ class DistMathOpsTest(DTensorTestBase):
                     )
                 else:
                     expected_bwd_comm = {
-                        funcol.reduce_scatter_single: 1,
+                        funcol.reduce_scatter_tensor: 1,
                         funcol.all_gather_into_tensor: 1,
                     }
 
