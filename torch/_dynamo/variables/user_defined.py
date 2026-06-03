@@ -4732,6 +4732,14 @@ class DefaultDictVariable(UserDefinedDictVariable):
         new.call_method(tx, "update", [right], {})
         return new
 
+    def nb_inplace_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        self.call_method(tx, "update", [other], {})
+        return self
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -4772,6 +4780,15 @@ class DefaultDictVariable(UserDefinedDictVariable):
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             return self._missing_impl(tx, args[0])
+        elif name == "__ior__":
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "1 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            return self.nb_inplace_or_impl(tx, args[0])
         elif name == "copy":
             # defaultdict.copy() creates a new defaultdict with same factory
             # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2282
