@@ -3374,21 +3374,28 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
+        source = self.get_source()
         wrapped_value = torch.tensor(value)
-        if not isinstance(self.get_source(), RandomValueSource):
-            install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
+        if not (
+            isinstance(source, RandomValueSource)
+            or (
+                isinstance(source, ChainedSource)
+                and isinstance(source.get_base(), RandomValueSource)
+            )
+        ):
+            install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
 
-        options = {"source": self.get_source()}
+        options = {"source": source}
         options.update({"raw_value": value})
 
         example_value = wrap_to_fake_tensor_and_record(
-            wrapped_value, tx=self.tx, is_tensor=False, source=self.get_source()
+            wrapped_value, tx=self.tx, is_tensor=False, source=source
         )
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(wrapped_value),
             example_value,
-            source=self.get_source(),
+            source=source,
         )
         cache_real_value_when_export(self.tx, proxy, wrapped_value)
 
@@ -3402,10 +3409,10 @@ class VariableBuilder:
         )
         # type: ignore[assignment]
         self.tx.output.unspec_variable_map[self.name] = unspec_var
-        if not is_constant_source(self.get_source()):
-            if self.tx.export and not isinstance(self.get_source(), LocalSource):
+        if not is_constant_source(source):
+            if self.tx.export and not isinstance(source, LocalSource):
                 raise AssertionError(
-                    f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
+                    f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={source}"
                 )
             fake_tensor_value = None
             if unspec_var.is_python_constant():
@@ -3428,7 +3435,7 @@ class VariableBuilder:
                 )
 
             proxy.node.meta["grapharg"] = GraphArg(
-                self.get_source(),
+                source,
                 wrapped_value,
                 pass_arg_as_tensor=True,
                 # type: ignore[arg-type]
