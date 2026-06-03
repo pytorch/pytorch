@@ -17,12 +17,12 @@ dictionaries with None values.
 
 import functools
 import operator
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import Any, TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
 
-from .. import polyfills, variables
+from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, raise_type_error
 from ..guards import GuardBuilder, install_guard
@@ -31,6 +31,7 @@ from ..utils import (
     _item_debug_repr,
     cmp_name_to_op_mapping,
     istype,
+    lazily_unpack_and_apply_fn,
     raise_args_mismatch,
     set_methods,
     tracked_repr,
@@ -258,6 +259,39 @@ class SetVariable(VariableTracker):
             raise_observed_exception(type(exc), tx, args=list(exc.args))
         return VariableTracker.build(tx, res)
 
+    def _iter_operand_keys(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> "Iterator[HashableTracker]":
+        # Lazily yield HashableTracker keys for a set-operation operand, one
+        # element at a time so callers that short-circuit (isdisjoint) observe
+        # the same generator side effects as CPython. A set operand's keys are
+        # reused directly (no re-hashing). HashableTracker raises
+        # ObservedTypeError for an unhashable element, matching CPython's
+        # hash-at-insert behavior.
+        if isinstance(other, SetVariable):
+            yield from other.items.keys()
+            return
+
+        yield from lazily_unpack_and_apply_fn(
+            tx, other, lambda item: HashableTracker(item)
+        )
+
+    def _operand_keys(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> list[HashableTracker]:
+        # Eager variant: unpack_iterable takes the fast unpack_var_sequence
+        # path for builtin iterables instead of the per-element iterator
+        # protocol.
+        if isinstance(other, SetVariable):
+            return list(other.items.keys())
+        return [HashableTracker(x) for x in unpack_iterable(tx, other)]
+
+    def _new_set(self, items: "Iterable[HashableTracker]") -> "SetVariable":
+        # Build a fresh set of the same concrete type (set / frozenset /
+        # OrderedSet). list() preserves insertion order, which matters for
+        # OrderedSet.
+        return type(self)(list(items), mutation_type=ValueMutationNew())
+
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
@@ -353,49 +387,57 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return SourcelessBuilder.create(tx, polyfills.set_isdisjoint).call_function(
-                tx, [self, args[0]], {}
-            )
+            for key in self._iter_operand_keys(tx, args[0]):
+                if key in self.items:
+                    return ConstantVariable.create(False)
+            return ConstantVariable.create(True)
         elif name == "intersection":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return SourcelessBuilder.create(
-                tx, polyfills.set_intersection
-            ).call_function(
-                tx,
-                [self, *args],
-                {"cls": self.python_type_var()},
-            )
+            out_items = dict(self.items)
+            for other in args:
+                other_keys = set(self._operand_keys(tx, other))
+                out_items = {k: v for k, v in out_items.items() if k in other_keys}
+            return self._new_set(out_items)
         elif name == "intersection_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return SourcelessBuilder.create(
-                tx, polyfills.set_intersection_update
-            ).call_function(tx, [self, *args], {})
+            kept = dict(self.items)
+            for other in args:
+                other_keys = set(self._operand_keys(tx, other))
+                kept = {k: v for k, v in kept.items() if k in other_keys}
+            tx.output.side_effects.mutation(self)
+            self.should_reconstruct_all = True
+            self.items.clear()
+            self.items.update(kept)
+            return ConstantVariable.create(None)
         elif name == "union":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return SourcelessBuilder.create(tx, polyfills.set_union).call_function(
-                tx,
-                [self, *args],
-                {"cls": self.python_type_var()},
-            )
+            out_items = dict(self.items)
+            for other in args:
+                for key in self._operand_keys(tx, other):
+                    out_items.setdefault(key, SetVariable._default_value())
+            return self._new_set(out_items)
         elif name == "difference":
             if kwargs:
                 raise_args_mismatch(
                     tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
                 )
-            return SourcelessBuilder.create(tx, polyfills.set_difference).call_function(
-                tx,
-                [self, *args],
-                {"cls": self.python_type_var()},
-            )
+            out_items = dict(self.items)
+            for other in args:
+                for key in self._operand_keys(tx, other):
+                    out_items.pop(key, None)
+            return self._new_set(out_items)
         elif name == "difference_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return SourcelessBuilder.create(
-                tx, polyfills.set_difference_update
-            ).call_function(tx, [self, *args], {})
+            tx.output.side_effects.mutation(self)
+            self.should_reconstruct_all = True
+            for other in args:
+                for key in self._operand_keys(tx, other):
+                    self.items.pop(key, None)
+            return ConstantVariable.create(None)
         elif name == "symmetric_difference":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -404,13 +446,12 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return SourcelessBuilder.create(
-                tx, polyfills.set_symmetric_difference
-            ).call_function(
-                tx,
-                [self, *args],
-                {"cls": self.python_type_var()},
+            other = dict.fromkeys(
+                self._operand_keys(tx, args[0]), SetVariable._default_value()
             )
+            out_items = {k: v for k, v in self.items.items() if k not in other}
+            out_items.update({k: v for k, v in other.items() if k not in self.items})
+            return self._new_set(out_items)
         elif name == "symmetric_difference_update":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -419,15 +460,24 @@ class SetVariable(VariableTracker):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return SourcelessBuilder.create(
-                tx, polyfills.set_symmetric_difference_update
-            ).call_function(tx, [self, *args], {})
+            other = dict.fromkeys(
+                self._operand_keys(tx, args[0]), SetVariable._default_value()
+            )
+            new_items = {k: v for k, v in self.items.items() if k not in other}
+            new_items.update({k: v for k, v in other.items() if k not in self.items})
+            tx.output.side_effects.mutation(self)
+            self.should_reconstruct_all = True
+            self.items.clear()
+            self.items.update(new_items)
+            return ConstantVariable.create(None)
         elif name == "update" and self.is_mutable():
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return SourcelessBuilder.create(tx, polyfills.set_update).call_function(
-                tx, [self, *args], {}
-            )
+            tx.output.side_effects.mutation(self)
+            for other in args:
+                for key in self._operand_keys(tx, other):
+                    self.items.setdefault(key, SetVariable._default_value())
+            return ConstantVariable.create(None)
         elif name == "remove":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
