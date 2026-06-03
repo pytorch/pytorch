@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     TEST_CUDA_GRAPH,
+    TEST_WITH_SLOW,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.logging_utils import logs_to_string
@@ -240,6 +241,71 @@ if HAS_CUDA_AND_TRITON:
             self.run_twc(foo_opt, ones)
             self.run_twc(foo_opt, zeros)
             self.assertEqual(self.get_root_children(), [0, 0])
+
+        def test_multithreaded_cudagraph_trees(self):
+            import queue
+            import threading
+            import traceback
+
+            def foo(x, y):
+                return torch.sin(x) + torch.cos(y)
+
+            opt_foo = torch.compile(foo, mode="reduce-overhead")
+            num_threads = 3
+            barrier = threading.Barrier(num_threads)
+            errors = queue.Queue()
+            results = queue.Queue()
+
+            def run_once(
+                check_manager: bool, start_barrier: threading.Barrier | None = None
+            ) -> None:
+                try:
+                    x = torch.rand(4, 4, device="cuda")
+                    y = torch.rand(4, 4, device="cuda")
+                    expected = foo(x, y)
+                    if start_barrier is not None:
+                        start_barrier.wait()
+                    opt_foo(x, y)
+                    result = opt_foo(x, y)
+                    if check_manager:
+                        manager = torch._inductor.cudagraph_trees.get_manager(
+                            x.device.index, create_if_none_exists=False
+                        )
+                        self.assertIsNotNone(manager)
+                    results.put((result, expected))
+                except Exception:
+                    errors.put(traceback.format_exc())
+
+            owner_thread = threading.Thread(target=run_once, args=(True,))
+            owner_thread.start()
+            owner_thread.join()
+
+            def check_errors() -> None:
+                if not errors.empty():
+                    messages = []
+                    while not errors.empty():
+                        messages.append(errors.get())
+                    self.fail("\n".join(messages))
+
+            check_errors()
+            result, expected = results.get()
+            torch.testing.assert_close(result, expected)
+            del result, expected
+
+            def worker() -> None:
+                run_once(True, barrier)
+
+            threads = [threading.Thread(target=worker) for _ in range(num_threads)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            check_errors()
+            while not results.empty():
+                result, expected = results.get()
+                torch.testing.assert_close(result, expected)
+                del result, expected
 
         def check_rng(self):
             @torch.compile(mode="reduce-overhead")
@@ -2387,45 +2453,28 @@ if HAS_CUDA_AND_TRITON:
 
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
 
-        def test_error_on_dealloc_use_after_recording_and_execution(self):
-            def run(loop_count):
-                torch._dynamo.reset()
-                cfn = torch.compile(torch.sin, mode="reduce-overhead")
-                cfn2 = torch.compile(torch.cos, mode="reduce-overhead")
-                for _ in range(loop_count):
-                    x = cfn2(torch.randn(5, device="cuda"))
+        def test_grad_accumulation_dealloc_error_message(self):
+            model = torch.nn.Linear(10, 1, device="cuda")
+            compiled_model = torch.compile(
+                model, fullgraph=True, mode="reduce-overhead"
+            )
 
-                with self.assertRaisesRegex(RuntimeError, "overwritten"):
-                    y = cfn(x)
-                    _ = y.cpu()
+            def run_iter():
+                torch.compiler.cudagraph_mark_step_begin()
+                x = torch.randn(
+                    (10,), dtype=torch.float32, requires_grad=True, device="cuda"
+                )
+                loss = compiled_model(x).clone().sum().clone()
+                loss.backward()
 
-                del x
+            run_iter()
 
-            for loop_count in (2, 3):
-                run(loop_count)
+            with self.assertRaises(RuntimeError) as exc:
+                run_iter()
 
-        def test_error_on_dealloc_use_after_cached_output(self):
-            @torch.compile(mode="reduce-overhead")
-            def foo(x):
-                return x + 1
-
-            stale = None
-            for _ in range(3):
-                stale = foo(torch.rand([4], device="cuda"))
-
-            self.assertIsNotNone(stale)
-            node = self.curr_node()
-            self.assertIs(stale, node.cached_tensor_outputs[0])
-
-            new = foo(torch.rand([4], device="cuda"))
-            self.assertIsNot(stale, new)
-            self.assertIs(new, self.curr_node().cached_tensor_outputs[0])
-            _ = new.cpu()
-
-            with self.assertRaisesRegex(RuntimeError, "overwritten"):
-                stale + 1
-
-            del stale, new
+            FileCheck().check("gradient tensor output of CUDAGraphs").check(
+                "gradient accumulation"
+            ).check(".grad tensor").run(str(exc.exception))
 
         def test_output_node_has_stack_traces_inference(self):
             """Test that output_stack_traces on the output node provides
@@ -5069,6 +5118,10 @@ if HAS_CUDA_AND_TRITON:
                         "def triton_poi_fused_add_", 1, exactly=True
                     ).run(code[0])
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_SLOW,
+            "https://github.com/pytorch/pytorch/issues/176144",
+        )
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
         )
