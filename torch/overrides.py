@@ -58,6 +58,7 @@ __all__ = [
     "is_tensor_method_or_property",
     "wrap_torch_function",
     "enable_reentrant_dispatch",
+    "redispatch_function",
 ]
 
 _P = ParamSpec("_P")
@@ -878,7 +879,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
             lambda input, target, weight=None, size_average=None, ignore_index=-100, reduce=None, reduction="mean", label_smoothing=0.0: -1
         ),
         torch.nn.functional.linear_cross_entropy: (
-            lambda input, linear_weight, target, weight=None, reduction="mean", ignore_index=None, label_smoothing=0.0: -1
+            lambda input, linear_weight, target, linear_bias=None, weight=None, reduction="mean", ignore_index=None, label_smoothing=0.0, options=None: -1
         ),
         torch.nn.functional.ctc_loss: (
             lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction="mean", zero_infinity=False: -1
@@ -2168,3 +2169,73 @@ def enable_reentrant_dispatch():
             yield
         finally:
             pass
+
+
+def redispatch_function(func, types, args, kwargs):
+    """Skip one level of ``__torch_function__`` dispatch and call the function.
+
+    This is primarily useful for **Tensor subclasses** that want to call into
+    a function's implementation while still intercepting PyTorch operations
+    inside that function.
+
+    Example with Tensor subclass. Only ops whose inputs include a
+    ``LoggingTensor`` are intercepted; once ``redispatch_function`` returns
+    a plain ``torch.Tensor``, subsequent ops (here ``+ 1``) are not logged.
+
+        >>> from torch.overrides import has_torch_function, handle_torch_function
+        >>> class LoggingTensor(torch.Tensor):
+        ...     depth = 0
+        ...
+        ...     @classmethod
+        ...     def __torch_function__(cls, func, types, args, kwargs=None):
+        ...         print(f"{'  ' * cls.depth}Calling {func.__name__}")
+        ...         cls.depth += 1
+        ...         r = torch.overrides.redispatch_function(func, types, args, kwargs)
+        ...         cls.depth -= 1
+        ...         return r
+        >>> def scaled_mul(a, b):
+        ...     if has_torch_function((a, b)):
+        ...         return handle_torch_function(scaled_mul, (a, b), a, b)
+        ...     return a * b + 1
+        >>> x = LoggingTensor(torch.tensor([3.0]))
+        >>> y = LoggingTensor(torch.tensor([4.0]))
+        >>> result = scaled_mul(x, y)
+        Calling scaled_mul
+          Calling mul
+        >>> result
+        tensor([13.])
+
+    Note that only ``mul`` is logged, not ``add``: ``redispatch_function``
+    returns a plain ``torch.Tensor``, so the ``+ 1`` inside ``scaled_mul``
+    no longer sees a ``LoggingTensor`` input and ``__torch_function__`` is
+    not triggered.
+
+    With ``TorchFunctionMode`` the mode stays active across all inner ops,
+    so the ``+ 1`` is now visible too.  Use ``with self:`` after
+    ``redispatch_function`` to re-enable the mode for those inner calls.
+
+        >>> from torch.overrides import TorchFunctionMode
+        >>> class LoggingMode(TorchFunctionMode):
+        ...     def __init__(self):
+        ...         self.depth = 0
+        ...
+        ...     def __torch_function__(self, func, types, args, kwargs=None):
+        ...         print(f"{'  ' * self.depth}Calling {func.__name__}")
+        ...         self.depth += 1
+        ...         with self:
+        ...             r = torch.overrides.redispatch_function(
+        ...                 func, types, args, kwargs
+        ...             )
+        ...         self.depth -= 1
+        ...         return r
+        >>> a = torch.tensor([3.0])
+        >>> b = torch.tensor([4.0])
+        >>> with LoggingMode():
+        ...     result = scaled_mul(a, b)
+        Calling scaled_mul
+          Calling mul
+          Calling add
+        >>> result
+        tensor([13.])
+    """
+    return torch._C._skip_one_hop_torch_function(func, types, args, kwargs)
