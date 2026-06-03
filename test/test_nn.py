@@ -14691,7 +14691,8 @@ if __name__ == '__main__':
         self.assertEqual(y, y_ref)
 
     def _test_linear_cross_entropy_loss(self, device='cpu', dtype=torch.float32,
-                                        acc_policy=None, acc_dtype=None, bias=False):
+                                        acc_policy=None, acc_dtype=None, bias=False,
+                                        none_reduction=False):
         """Test the chunked LCE forward + backward against an fp64 reference.
 
         Two metrics per gradient:
@@ -14762,7 +14763,20 @@ if __name__ == '__main__':
         # input/weight matmuls), so the cap is generally tighter than
         # the input/weight caps for the same combo.
         expected_linear_bias_grad_max_ulp_diff = 0
-        if _resolved_policy == "accurate":
+        if none_reduction:
+            # reduction='none' has distinct numerics from mean/sum: a
+            # per-sample (N,) loss, and a recompute backward driven here by
+            # out.sum().backward() (uniform grad_output). Its caps are being
+            # calibrated -- the block below is intentionally generous so the
+            # cross-host sweep can run; read the per-host values from the
+            # ``[none calibration]`` print and tighten per (policy, dtype,
+            # device, bias), mirroring the scalar caps above.
+            # TODO(none-reduction calibration): replace with measured caps.
+            expected_max_ulp_diff = 8
+            expected_input_grad_max_ulp_diff = 4096
+            expected_weight_grad_max_ulp_diff = 8192
+            expected_linear_bias_grad_max_ulp_diff = 4096 if bias else 0
+        elif _resolved_policy == "accurate":
             if "cpu" in device:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
@@ -14964,11 +14978,14 @@ if __name__ == '__main__':
                     options is None
                     or target.dtype.is_floating_point
                     or module_kwargs.get('out_features')
-                    or module_kwargs.get('reduction') == 'none'
+                    or (module_kwargs.get('reduction') == 'none') != none_reduction
                     or module_kwargs.get('label_smoothing') > 0
             ):
                 # skip samples that are not be processed via chunking
-                # algorithms
+                # algorithms. ``none_reduction`` selects the matching
+                # subset: reduction='none' samples when True, the
+                # scalar (mean/sum) samples when False -- the two have
+                # separate cap tables (different numerics).
                 continue
             if module_kwargs.get('bias', False) != bias:
                 # bias=True and bias=False samples have separate cap
@@ -15059,6 +15076,25 @@ if __name__ == '__main__':
                 if err > maximal_linear_bias_grad_err:
                     maximal_linear_bias_grad_err = err
                     worst_linear_bias_grad_err_kwargs = dict(module_kwargs)
+
+        if none_reduction:
+            # TEMP: calibration data for reduction='none' ULP caps. Re-run
+            # per host, copy the four observed values into the
+            # ``if none_reduction:`` cap block above (keyed on policy /
+            # dtype / device / bias), then delete this block.
+            print(
+                f"\n[none calibration] _resolved_policy={_resolved_policy!r}"
+                f" dtype={dtype} device={device} bias={bias}\n"
+                f"  output:        observed={maximal_output_max_ulp_diff:6d}"
+                f"  cap={expected_max_ulp_diff:6d}\n"
+                f"  input_grad:    observed={maximal_input_grad_max_ulp_diff:6d}"
+                f"  cap={expected_input_grad_max_ulp_diff:6d}\n"
+                f"  linear_weight: observed={maximal_linear_weight_grad_max_ulp_diff:6d}"
+                f"  cap={expected_weight_grad_max_ulp_diff:6d}\n"
+                f"  linear_bias:   observed={maximal_linear_bias_grad_max_ulp_diff:6d}"
+                f"  cap={expected_linear_bias_grad_max_ulp_diff:6d}",
+                flush=True,
+            )
 
         self.assertLessEqual(maximal_input_grad_err, feps,
                              msg=f"worst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
@@ -15246,6 +15282,152 @@ if __name__ == '__main__':
         self.assertEqual(gw_ref, gw)
         self.assertEqual(gb_ref, gb)
 
+    def test_linear_cross_entropy_none_reduction_chunked_matches_reference(self, device):
+        """``reduction='none'`` chunked path: the per-sample loss ``(N,)``
+        and the backward gradients (under a per-sample downstream
+        weighting ``g``, the masked-loss pattern) match the reference
+        ``linear`` + ``cross_entropy``. Unlike the scalar-reduction op,
+        backward recomputes the chunked grads with ``g`` folded into the
+        per-sample weight; this exercises that path across class weight,
+        ignore_index, and bias.
+        """
+        torch.manual_seed(0)
+        N, F_, C = 7, 6, 5
+        for bias in (False, True):
+            for use_weight in (False, True):
+                for ignore_index in (-100, 1):
+                    inp_ref = torch.randn(N, F_, device=device, requires_grad=True)
+                    lw_ref = torch.randn(C, F_, device=device, requires_grad=True)
+                    lb_ref = (
+                        torch.randn(C, device=device, requires_grad=True)
+                        if bias else None
+                    )
+                    target = torch.randint(0, C, (N,), device=device)
+                    target[::3] = ignore_index  # masked rows
+                    cw = (torch.rand(C, device=device) + 0.5) if use_weight else None
+                    g = torch.rand(N, device=device)  # per-sample downstream weight
+
+                    expected = nn.functional.cross_entropy(
+                        nn.functional.linear(inp_ref, lw_ref, lb_ref),
+                        target, weight=cw, reduction="none", ignore_index=ignore_index,
+                    )
+                    params_ref = [inp_ref, lw_ref] + ([lb_ref] if bias else [])
+                    grads_ref = torch.autograd.grad((expected * g).sum(), params_ref)
+
+                    inp = inp_ref.detach().clone().requires_grad_(True)
+                    lw = lw_ref.detach().clone().requires_grad_(True)
+                    lb = (
+                        lb_ref.detach().clone().requires_grad_(True) if bias else None
+                    )
+                    options = nn.LinearCrossEntropyOptions(batch_chunk_size=2)
+                    actual = nn.functional.linear_cross_entropy(
+                        inp, lw, target, linear_bias=lb, weight=cw,
+                        reduction="none", ignore_index=ignore_index, options=options,
+                    )
+                    params = [inp, lw] + ([lb] if bias else [])
+                    grads = torch.autograd.grad((actual * g).sum(), params)
+
+                    self.assertEqual(actual.shape, (N,))
+                    self.assertEqual(expected, actual)
+                    for ref_g, act_g in zip(grads_ref, grads):
+                        self.assertEqual(ref_g, act_g)
+
+    @parametrize_test("bias", [False, True])
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    def test_linear_cross_entropy_none_reduction_chunked(
+        self, device, dtype, bias
+    ):
+        """fp16/bf16 reduction='none': the chunked per-sample loss and the
+        recompute backward (including the bias-grad acc_dtype staging on
+        the mixed-precision path) stay close to an fp64 reference. The
+        scalar-reduction calibration harness (_test_linear_cross_entropy_loss)
+        skips reduction='none', so this is the half-precision coverage for
+        the no_reduction path. Inputs are kept modest so the softmax is
+        unsaturated (mild cancellation, error ~ dtype eps); worst-case ULP
+        calibration across (policy, dtype, device) belongs in the harness.
+        """
+        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
+            self.skipTest("bf16 requires SM80+ on CUDA")
+        torch.manual_seed(0)
+        N, F_, C = 16, 8, 32
+        inp = (torch.randn(N, F_, device=device, dtype=dtype) * 0.5).requires_grad_(True)
+        lw = (torch.randn(C, F_, device=device, dtype=dtype) * 0.5).requires_grad_(True)
+        lb = (
+            (torch.randn(C, device=device, dtype=dtype) * 0.5).requires_grad_(True)
+            if bias else None
+        )
+        target = torch.randint(0, C, (N,), device=device)
+        target[::4] = 1  # exercise ignore_index masking
+        cw = torch.rand(C, device=device, dtype=dtype) + 0.5
+        g = torch.rand(N, device=device, dtype=dtype)
+
+        # fp64 reference on CPU (gold standard for the half-precision path).
+        inp64 = inp.detach().double().cpu().requires_grad_(True)
+        lw64 = lw.detach().double().cpu().requires_grad_(True)
+        lb64 = lb.detach().double().cpu().requires_grad_(True) if bias else None
+        ref = nn.functional.cross_entropy(
+            nn.functional.linear(inp64, lw64, lb64), target.cpu(),
+            weight=cw.double().cpu(), reduction="none", ignore_index=1,
+        )
+        params64 = [inp64, lw64] + ([lb64] if bias else [])
+        grads64 = torch.autograd.grad((ref * g.double().cpu()).sum(), params64)
+
+        options = nn.LinearCrossEntropyOptions(
+            batch_chunk_size=4, acc_dtype=torch.float32,
+        )
+        out = nn.functional.linear_cross_entropy(
+            inp, lw, target, linear_bias=lb, weight=cw,
+            reduction="none", ignore_index=1, options=options,
+        )
+        params = [inp, lw] + ([lb] if bias else [])
+        grads = torch.autograd.grad((out * g).sum(), params)
+
+        def rel_err(actual, expected64):
+            actual = actual.detach().double().cpu()
+            return (
+                (actual - expected64).norm() / expected64.norm().clamp_min(1e-12)
+            ).item()
+
+        tol = 0.04 if dtype == torch.float16 else 0.1
+        self.assertEqual(out.shape, (N,))
+        self.assertLess(rel_err(out, ref), tol)
+        for grad, grad64 in zip(grads, grads64):
+            self.assertLess(rel_err(grad, grad64), tol)
+
+    def test_linear_cross_entropy_none_reduction_retain_graph(self, device):
+        """reduction='none' recompute backward supports retain_graph for
+        free: it recomputes from saved inputs and consumes no buffers, so
+        two backward passes give identical grads matching the reference --
+        with no ``allow_retain_graph`` flag (the scalar path needs it; see
+        test_linear_cross_entropy_retain_graph_default_raises).
+        """
+        torch.manual_seed(0)
+        N, F_, C = 8, 5, 4
+        inp = torch.randn(N, F_, device=device, requires_grad=True)
+        lw = torch.randn(C, F_, device=device, requires_grad=True)
+        target = torch.randint(0, C, (N,), device=device)
+        g = torch.rand(N, device=device)
+
+        inp_r = inp.detach().clone().requires_grad_(True)
+        lw_r = lw.detach().clone().requires_grad_(True)
+        ref = nn.functional.cross_entropy(
+            nn.functional.linear(inp_r, lw_r), target, reduction="none",
+        )
+        gi_ref, gw_ref = torch.autograd.grad((ref * g).sum(), [inp_r, lw_r])
+
+        # default options -> allow_retain_graph=False; the none op recomputes,
+        # so retain_graph works regardless.
+        options = nn.LinearCrossEntropyOptions(batch_chunk_size=2)
+        out = nn.functional.linear_cross_entropy(
+            inp, lw, target, reduction="none", options=options,
+        )
+        gi1, gw1 = torch.autograd.grad(out, [inp, lw], grad_outputs=g, retain_graph=True)
+        gi2, gw2 = torch.autograd.grad(out, [inp, lw], grad_outputs=g, retain_graph=True)
+        self.assertEqual(gi1, gi_ref)
+        self.assertEqual(gw1, gw_ref)
+        self.assertEqual(gi2, gi1)
+        self.assertEqual(gw2, gw1)
+
     @parametrize_test("out_features", [(), (3,), (3, 2)])
     def test_linear_cross_entropy_loss_bias(self, device, out_features):
         """``LinearCrossEntropyLoss(bias=True)`` forwards module.linear.bias
@@ -15322,6 +15504,25 @@ if __name__ == '__main__':
             device=device, dtype=dtype, acc_policy=acc_policy,
             acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
             bias=bias)
+
+    @parametrize_test("bias", [False, True])
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
+    def test_linear_cross_entropy_loss_none_reduction_with_acc_dtype(
+        self, device, dtype, acc_policy, bias
+    ):
+        # reduction='none' counterpart of
+        # test_linear_cross_entropy_loss_with_acc_dtype: exercises the
+        # no_reduction op (per-sample loss + recompute backward)
+        # against the fp64 reference across acc_policy / dtype / bias,
+        # with its own ULP caps. See the ``none_reduction`` cap block
+        # in _test_linear_cross_entropy_loss.
+        if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
+            self.skipTest("bf16 requires SM80+ on CUDA")
+        self._test_linear_cross_entropy_loss(
+            device=device, dtype=dtype, acc_policy=acc_policy,
+            acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
+            bias=bias, none_reduction=True)
 
     @parametrize_test("reduction", ["sum", "mean"])
     def test_linear_cross_entropy_chunk_size_invariance(self, device, reduction):

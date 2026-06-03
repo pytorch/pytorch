@@ -3841,15 +3841,14 @@ def linear_cross_entropy(
     # linear_weight.shape[0], not per-position over num_classes.
     if options is not None and (
         out_features
-        or reduction not in {"mean", "sum"}
+        or reduction not in {"mean", "sum", "none"}
         or label_smoothing != 0.0
         or target.dtype != torch.int64
         or torch.jit.is_tracing()
-        or linear_bias is not None
     ):
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
-            "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
+            "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
             " == int64, out_features == (). Got "
             f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
             f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
@@ -3861,12 +3860,11 @@ def linear_cross_entropy(
 
     if (
         options is not None
-        and reduction in {"mean", "sum"}
+        and reduction in {"mean", "sum", "none"}
         and label_smoothing == 0.0
         and target.dtype == torch.int64
         and not out_features
         and not torch.jit.is_tracing()
-        and linear_bias is None
     ):
         if input.dim() == 2:
             num_batches = input.shape[0]
@@ -3885,42 +3883,61 @@ def linear_cross_entropy(
             device=input.device,
         )
 
-        # Force allow_retain_graph=True under torch.compile: the default
-        # second-backward guard uses a Python ``ctx._gi = None`` mutation
-        # that Dynamo doesn't preserve, breaking double-backward.
-        if not options.allow_retain_graph and torch.compiler.is_compiling():
-            warnings.warn(
-                "linear_cross_entropy: forcing allow_retain_graph=True under "
-                "torch.compile (adds one gradient-sized allocation/call). "
-                "Construct options with allow_retain_graph=True to silence.",
-                stacklevel=2,
-            )
-            options = dataclasses.replace(options, allow_retain_graph=True)
-
         # Local import avoids a circular init via torch.library.custom_op.
         from torch.nn.modules.linear_cross_entropy import (
             _linear_cross_entropy_batch_chunked,
+            _linear_cross_entropy_batch_chunked_no_reduction,
         )
 
-        result = _linear_cross_entropy_batch_chunked(
-            input,
-            linear_weight,
-            target,
-            linear_bias,
-            weight,
-            reduction,
-            ignore_index,
-            label_smoothing,
-            options.batch_chunk_size,
-            options.acc_policy,
-            options.acc_dtype,
-            options.allow_retain_graph,
-            input.requires_grad and torch.is_grad_enabled(),
-            linear_weight.requires_grad and torch.is_grad_enabled(),
-            linear_bias is not None
-            and linear_bias.requires_grad
-            and torch.is_grad_enabled(),
-        )[0]
+        if reduction == "none":
+            # reduction='none' recomputes grads in backward (no forward
+            # precompute), so allow_retain_graph / compute_* flags do not
+            # apply -- the op takes a reduced argument list.
+            result = _linear_cross_entropy_batch_chunked_no_reduction(
+                input,
+                linear_weight,
+                target,
+                linear_bias,
+                weight,
+                ignore_index,
+                options.batch_chunk_size,
+                options.acc_policy,
+                options.acc_dtype,
+            )
+        else:
+            # Force allow_retain_graph=True under torch.compile: the default
+            # mode's second-backward guard relies on a Python ``ctx._gi = None``
+            # mutation that Dynamo's autograd tracing does not preserve, so
+            # without this override double-backward under torch.compile would
+            # silently return wrong gradients.
+            if not options.allow_retain_graph and torch.compiler.is_compiling():
+                warnings.warn(
+                    "linear_cross_entropy: forcing allow_retain_graph=True under "
+                    "torch.compile (adds one gradient-sized allocation/call). "
+                    "Construct options with allow_retain_graph=True to silence.",
+                    stacklevel=2,
+                )
+                options = dataclasses.replace(options, allow_retain_graph=True)
+
+            result = _linear_cross_entropy_batch_chunked(
+                input,
+                linear_weight,
+                target,
+                linear_bias,
+                weight,
+                reduction,
+                ignore_index,
+                label_smoothing,
+                options.batch_chunk_size,
+                options.acc_policy,
+                options.acc_dtype,
+                options.allow_retain_graph,
+                input.requires_grad and torch.is_grad_enabled(),
+                linear_weight.requires_grad and torch.is_grad_enabled(),
+                linear_bias is not None
+                and linear_bias.requires_grad
+                and torch.is_grad_enabled(),
+            )[0]
 
         if not has_batches:
             result = result.squeeze(0)

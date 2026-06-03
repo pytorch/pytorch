@@ -174,6 +174,10 @@ class _ChunkContext:
     reduction: str
     linear_weight: torch.Tensor
     linear_bias: torch.Tensor | None
+    # reduction='none' backward only: per-sample upstream grad (N,). When
+    # set, neg_weight_target folds it in so the shared grad loop produces
+    # the grad_output-weighted VJP. None on every other path.
+    loss_grad_output: torch.Tensor | None
 
     # The optional "when=" buffers (weight_grad_chunk, logits_acc_buf,
     # input_grad_acc_buf, input_chunk_acc_buf, grad_input,
@@ -231,8 +235,18 @@ class _ChunkContext:
         if self.reduction == "mean":
             d = neg_weight_target.sum()
             neg_weight_target.div_(torch.where(d == 0, torch.nan, -d))
-        else:  # "sum"
+        elif self.reduction == "sum":
             neg_weight_target.neg_()
+        else:  # "none"
+            # Forward (loss_grad_output is None) intentionally leaves the
+            # bare +W[T] unsigned: the loss-only branch needs the positive
+            # per-row loss weight. Only the backward (upstream grad set)
+            # negates and folds in grad_output[n] for the VJP -- do NOT add
+            # a .neg_() here to mirror the "sum" case.
+            if self.loss_grad_output is not None:
+                neg_weight_target.neg_().mul_(
+                    self.loss_grad_output.to(neg_weight_target.dtype)
+                )
         return neg_weight_target
 
     @cached_property
@@ -358,6 +372,7 @@ class _ChunkContext:
         compute_input_grad: bool,
         compute_linear_weight_grad: bool,
         compute_linear_bias_grad: bool,
+        loss_grad_output: torch.Tensor | None = None,
     ) -> "_ChunkContext":
         # ===== Validation =====
         if target.dtype != torch.int64:
@@ -368,7 +383,7 @@ class _ChunkContext:
             raise NotImplementedError(
                 "linear_cross_entropy does not support label smoothing"
             )
-        if reduction not in {"mean", "sum"}:
+        if reduction not in {"mean", "sum", "none"}:
             raise NotImplementedError(
                 f"linear_cross_entropy does not support {reduction=}"
             )
@@ -487,6 +502,7 @@ class _ChunkContext:
             reduction=reduction,
             linear_weight=linear_weight,
             linear_bias=linear_bias,
+            loss_grad_output=loss_grad_output,
             logits_buf=torch.empty(
                 (batch_chunk_size, num_classes),
                 dtype=logits_buf_dtype,
@@ -636,22 +652,7 @@ class _ChunkContext:
         return x.to(dtype)
 
 
-# Private op. Returns ``(loss, grad_input, grad_linear_weight, grad_linear_bias)``.
-# Shape invariants on outputs:
-#   ``grad_input.shape == input.shape``,
-#   ``grad_linear_weight.shape == linear_weight.shape``,
-#   ``grad_linear_bias.shape == linear_weight.shape[:-1]``.
-# The bias-shape invariant follows the (C, *out_features) layout, which
-# on this code path reduces to ``(C,)`` because the upstream gate
-# requires ``out_features == ()``.
-# ``torch.library.register_autograd`` has no ``save_for_backward``-style
-# state, so the grads flow via the return tuple, get stashed on ctx by
-# ``setup_context``, and backward mutates them in place via ``.mul_()``.
-# ``mutates_args=()`` reflects that inputs are not mutated.
-@torch.library.custom_op(
-    "torch_nn::_linear_cross_entropy_batch_chunked", mutates_args=()
-)
-def _linear_cross_entropy_batch_chunked(
+def _linear_cross_entropy_batch_chunked_accumulator(
     input: torch.Tensor,
     linear_weight: torch.Tensor,
     target: torch.Tensor,
@@ -663,15 +664,31 @@ def _linear_cross_entropy_batch_chunked(
     batch_chunk_size: int,
     acc_policy: str,
     acc_dtype: torch.dtype,
-    allow_retain_graph: bool,
     compute_input_grad: bool,
     compute_linear_weight_grad: bool,
     compute_linear_bias_grad: bool,
+    loss_grad_output: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Returns ``(loss, grad_input, grad_linear_weight, grad_linear_bias)``.
-    Gradients precomputed in forward and stashed on ctx; backward is a
-    single multiply by the upstream gradient. Computing grads in
-    forward is what lets chunking save memory.
+    """Chunked loop shared by all three custom-op entry points; returns
+    ``(loss, grad_input, grad_linear_weight, grad_linear_bias)``.
+
+    Caller -> branch:
+      scalar-op forward (reduction in {mean,sum})  -> main grad loop
+      no_reduction forward (none, loss_grad_output None) -> loss-only branch
+      no_reduction backward (none, loss_grad_output set) -> main grad loop
+
+    - ``_linear_cross_entropy_batch_chunked`` (scalar reduction): the
+      forward precomputes the scalar loss and all gradients in one pass;
+      backward just scales the stashed grads by the upstream gradient.
+    - ``_linear_cross_entropy_batch_chunked_no_reduction`` (forward):
+      ``reduction='none'`` with ``loss_grad_output is None`` takes the
+      loss-only branch, returning the per-sample loss ``(N,)`` and no
+      gradients (they are recomputed in its backward instead).
+    - ``_linear_cross_entropy_batch_chunked_no_reduction`` (backward):
+      ``loss_grad_output`` set folds the per-sample upstream grad into
+      ``neg_weight_target``, so this same loop recomputes the chunked
+      grads as the grad_output-weighted VJP (the scalar loss it also
+      accumulates is then meaningless and ignored).
 
     Dispatch contract
     -----------------
@@ -707,33 +724,6 @@ def _linear_cross_entropy_batch_chunked(
             f"unresolved acc_policy={acc_policy!r} or acc_dtype={acc_dtype!r};"
             " use F.linear_cross_entropy."
         )
-    # AOTAutograd/AOTInductor bake compute_*_grad at trace time; catch
-    # the silent-corruption case (False at trace, but grad-enabled at
-    # runtime with a requires_grad leaf).
-    grad_enabled = torch.is_grad_enabled()
-    if not compute_input_grad and input.requires_grad and grad_enabled:
-        raise RuntimeError(
-            "linear_cross_entropy chunked op: compute_input_grad was False at "
-            "trace time but input.requires_grad is True at runtime; recompile "
-            "the graph with the desired requires_grad."
-        )
-    if not compute_linear_weight_grad and linear_weight.requires_grad and grad_enabled:
-        raise RuntimeError(
-            "linear_cross_entropy chunked op: compute_linear_weight_grad was "
-            "False at trace time but linear_weight.requires_grad is True at "
-            "runtime; recompile the graph with the desired requires_grad."
-        )
-    if (
-        not compute_linear_bias_grad
-        and linear_bias is not None
-        and linear_bias.requires_grad
-        and grad_enabled
-    ):
-        raise RuntimeError(
-            "linear_cross_entropy chunked op: compute_linear_bias_grad was False at "
-            "trace time but linear_bias.requires_grad is True at runtime; recompile "
-            "the graph with the desired requires_grad."
-        )
     ctx = _ChunkContext.build(
         input,
         linear_weight,
@@ -749,8 +739,37 @@ def _linear_cross_entropy_batch_chunked(
         compute_input_grad,
         compute_linear_weight_grad,
         compute_linear_bias_grad,
+        loss_grad_output=loss_grad_output,
     )
     dtype = ctx.dtype
+    # reduction='none' forward (no upstream grad yet): per-sample loss
+    # into an (N,) output, no gradient precompute. ``chunk.weight_chunk``
+    # is the unsigned masked class weight here (neg_weight_target's "none"
+    # forward form), so each row's loss is W[T[n]] * (log denom -
+    # shifted_logit[T[n]]) = W[T[n]] * (-log_softmax). The "none" backward
+    # (loss_grad_output set) routes through the grad loop below instead.
+    if reduction == "none" and loss_grad_output is None:
+        linear_bias_cast = ctx.linear_bias_cast
+        out = torch.empty(ctx.num_batches, dtype=dtype, device=ctx.input.device)
+        for chunk in ctx.chunks():
+            logits = chunk.logits
+            ctx.mm(chunk.input, chunk.linear_weight.T, out=logits)
+            if linear_bias_cast is not None:
+                logits.add_(linear_bias_cast)
+            logits.sub_(ctx.amax(logits))
+            # Read the target logit BEFORE ``sumexp_`` -- it does ``exp_()``
+            # in place, overwriting logits with exp(shifted).
+            ls_target = logits.gather(1, chunk.target_chunk.unsqueeze(1)).squeeze(1)
+            softmax_denom = ctx.sumexp_(logits, dim=1)
+            loss_chunk = softmax_denom.log_().sub_(ls_target.to(softmax_denom.dtype))
+            loss_chunk.mul_(chunk.weight_chunk.to(softmax_denom.dtype))
+            out.narrow(0, chunk.bchunk_start, chunk.bchunk_size).copy_(loss_chunk)
+        return (
+            out,
+            ctx.grad_input.to(dtype),
+            ctx.grad_linear_weight,
+            ctx.grad_linear_bias,
+        )
     output = ctx.output
     grad_input = ctx.grad_input
     grad_linear_weight = ctx.grad_linear_weight
@@ -873,6 +892,88 @@ def _linear_cross_entropy_batch_chunked(
         grad_input.to(dtype),
         grad_linear_weight,
         grad_linear_bias,
+    )
+
+
+# Scalar-reduction (mean/sum) op. Returns
+# ``(loss, grad_input, grad_linear_weight, grad_linear_bias)`` with grads
+# precomputed in forward (the accumulator runs the full grad loop) and
+# stashed on ctx by ``setup_context``; backward mutates them in place via
+# ``.mul_()`` by the upstream gradient. ``torch.library.register_autograd``
+# has no ``save_for_backward``-style state, hence the return-tuple +
+# ctx-stash dance. ``mutates_args=()`` reflects that inputs are not mutated.
+# Shape invariants: grad_input.shape == input.shape,
+# grad_linear_weight.shape == linear_weight.shape, grad_linear_bias.shape ==
+# linear_weight.shape[:-1] (here (C,), since the upstream gate requires
+# out_features == ()).
+@torch.library.custom_op(
+    "torch_nn::_linear_cross_entropy_batch_chunked", mutates_args=()
+)
+def _linear_cross_entropy_batch_chunked(
+    input: torch.Tensor,
+    linear_weight: torch.Tensor,
+    target: torch.Tensor,
+    linear_bias: torch.Tensor | None,
+    weight: torch.Tensor | None,
+    reduction: str,
+    ignore_index: int,
+    label_smoothing: float,
+    batch_chunk_size: int,
+    acc_policy: str,
+    acc_dtype: torch.dtype,
+    allow_retain_graph: bool,
+    compute_input_grad: bool,
+    compute_linear_weight_grad: bool,
+    compute_linear_bias_grad: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Scalar-reduction (mean/sum) chunked op: precomputes the loss and
+    gradients in forward, backward scales by the upstream gradient. The
+    chunked math lives in ``_linear_cross_entropy_batch_chunked_accumulator``.
+    """
+    # AOTAutograd/AOTInductor bake compute_*_grad at trace time; catch
+    # the silent-corruption case (False at trace, but grad-enabled at
+    # runtime with a requires_grad leaf). These guards are specific to
+    # the precompute path -- the reduction='none' op recomputes grads in
+    # its own backward, so it does not route through here.
+    grad_enabled = torch.is_grad_enabled()
+    if not compute_input_grad and input.requires_grad and grad_enabled:
+        raise RuntimeError(
+            "linear_cross_entropy chunked op: compute_input_grad was False at "
+            "trace time but input.requires_grad is True at runtime; recompile "
+            "the graph with the desired requires_grad."
+        )
+    if not compute_linear_weight_grad and linear_weight.requires_grad and grad_enabled:
+        raise RuntimeError(
+            "linear_cross_entropy chunked op: compute_linear_weight_grad was "
+            "False at trace time but linear_weight.requires_grad is True at "
+            "runtime; recompile the graph with the desired requires_grad."
+        )
+    if (
+        not compute_linear_bias_grad
+        and linear_bias is not None
+        and linear_bias.requires_grad
+        and grad_enabled
+    ):
+        raise RuntimeError(
+            "linear_cross_entropy chunked op: compute_linear_bias_grad was False at "
+            "trace time but linear_bias.requires_grad is True at runtime; recompile "
+            "the graph with the desired requires_grad."
+        )
+    return _linear_cross_entropy_batch_chunked_accumulator(
+        input,
+        linear_weight,
+        target,
+        linear_bias,
+        weight,
+        reduction,
+        ignore_index,
+        label_smoothing,
+        batch_chunk_size,
+        acc_policy,
+        acc_dtype,
+        compute_input_grad,
+        compute_linear_weight_grad,
+        compute_linear_bias_grad,
     )
 
 
@@ -1017,4 +1118,168 @@ def _linear_cross_entropy_batch_chunked_backward(
 _linear_cross_entropy_batch_chunked.register_autograd(
     _linear_cross_entropy_batch_chunked_backward,
     setup_context=_linear_cross_entropy_batch_chunked_setup_context,
+)
+
+
+# reduction='none' op. Separate from the scalar-reduction op because the
+# autograd model differs: per-sample loss makes ``grad_output`` a vector,
+# so grad_linear_weight / grad_linear_bias cannot be precomputed in forward
+# (they need the per-sample upstream grad before summing over the batch, and
+# storing the per-sample (N, V) softmax would defeat chunking). Instead the
+# forward returns only the loss and saves its inputs; backward recomputes the
+# chunked grads with ``grad_output`` folded into ``weight_chunk`` (both share
+# ``_linear_cross_entropy_batch_chunked_accumulator``). Peak memory stays bounded to
+# (batch_chunk_size, num_classes); the cost is one recomputed logits matmul
+# per chunk in backward. Recompute-from-saved-inputs supports retain_graph
+# naturally (no consumed buffers), so no allow_retain_graph flag is needed.
+@torch.library.custom_op(
+    "torch_nn::_linear_cross_entropy_batch_chunked_no_reduction", mutates_args=()
+)
+def _linear_cross_entropy_batch_chunked_no_reduction(
+    input: torch.Tensor,
+    linear_weight: torch.Tensor,
+    target: torch.Tensor,
+    linear_bias: torch.Tensor | None,
+    weight: torch.Tensor | None,
+    ignore_index: int,
+    batch_chunk_size: int,
+    acc_policy: str,
+    acc_dtype: torch.dtype,
+) -> torch.Tensor:
+    """reduction='none' chunked forward: returns per-sample loss ``(N,)``.
+
+    Gradients are not precomputed (the per-sample upstream grad is
+    unknown at forward); the accumulator's loss-only branch runs here,
+    and the backward recomputes the chunked grads. See
+    ``_linear_cross_entropy_batch_chunked_accumulator``.
+    """
+    # loss_grad_output=None -> the accumulator's reduction='none' forward
+    # (loss-only) branch; compute_*=False since nothing is precomputed.
+    return _linear_cross_entropy_batch_chunked_accumulator(
+        input,
+        linear_weight,
+        target,
+        linear_bias,
+        weight,
+        "none",
+        ignore_index,
+        0.0,
+        batch_chunk_size,
+        acc_policy,
+        acc_dtype,
+        compute_input_grad=False,
+        compute_linear_weight_grad=False,
+        compute_linear_bias_grad=False,
+    )[0]
+
+
+def _linear_cross_entropy_batch_chunked_no_reduction_setup_context(ctx, inputs, output):
+    (
+        input,
+        linear_weight,
+        target,
+        linear_bias,
+        weight,
+        ignore_index,
+        batch_chunk_size,
+        acc_policy,
+        acc_dtype,
+    ) = inputs
+    ctx.save_for_backward(input, linear_weight, target, linear_bias, weight)
+    ctx._ignore_index = ignore_index
+    ctx._batch_chunk_size = batch_chunk_size
+    ctx._acc_policy = acc_policy
+    ctx._acc_dtype = acc_dtype
+
+
+@_linear_cross_entropy_batch_chunked_no_reduction.register_fake
+def _(
+    input,
+    linear_weight,
+    target,
+    linear_bias,
+    weight,
+    ignore_index,
+    batch_chunk_size,
+    acc_policy: str,
+    acc_dtype,
+):
+    return torch.empty(
+        input.shape[:1], dtype=input.dtype, device=input.device, requires_grad=False
+    )
+
+
+@_linear_cross_entropy_batch_chunked_no_reduction.register_vmap
+def _vmap_no_reduction(info, in_dims, *args):
+    """vmap rule (slow path: per-sample Python loop, mirrors the
+    scalar-reduction op). Stacks the per-sample ``(N,)`` losses.
+    """
+    batch_size = info.batch_size
+    moved_args = [
+        arg.movedim(in_dim, 0)
+        if in_dim is not None and isinstance(arg, torch.Tensor)
+        else arg
+        for arg, in_dim in zip(args, in_dims)
+    ]
+    outputs = [
+        _linear_cross_entropy_batch_chunked_no_reduction(
+            *[
+                arg[i] if in_dim is not None and isinstance(arg, torch.Tensor) else arg
+                for arg, in_dim in zip(moved_args, in_dims)
+            ]
+        )
+        for i in range(batch_size)
+    ]
+    return torch.stack(outputs), 0
+
+
+def _linear_cross_entropy_batch_chunked_no_reduction_backward(ctx, grad_output):
+    # grad_output is the per-sample upstream grad (N,). Forward arg order:
+    # (input, linear_weight, target, linear_bias, weight, ignore_index,
+    #  batch_chunk_size, acc_policy, acc_dtype).
+    input, linear_weight, target, linear_bias, weight = ctx.saved_tensors
+    needs = ctx.needs_input_grad
+    compute_input_grad = needs[0]
+    compute_linear_weight_grad = needs[1]
+    compute_linear_bias_grad = linear_bias is not None and needs[3]
+    result: list[torch.Tensor | None] = [None] * 9
+    if not (
+        compute_input_grad or compute_linear_weight_grad or compute_linear_bias_grad
+    ):
+        return tuple(result)
+    # loss_grad_output=grad_output -> the accumulator's grad loop with the
+    # per-sample upstream grad folded into neg_weight_target (the "none"
+    # backward path), recomputing the chunked grads as the VJP. The loss
+    # (result[0]) it also returns is the meaningless scalar and dropped.
+    _, grad_input, grad_linear_weight, grad_linear_bias = (
+        _linear_cross_entropy_batch_chunked_accumulator(
+            input,
+            linear_weight,
+            target,
+            linear_bias,
+            weight,
+            "none",
+            ctx._ignore_index,
+            0.0,  # label_smoothing
+            ctx._batch_chunk_size,
+            ctx._acc_policy,
+            ctx._acc_dtype,
+            compute_input_grad,
+            compute_linear_weight_grad,
+            compute_linear_bias_grad,
+            loss_grad_output=grad_output,
+        )
+    )
+    if compute_input_grad:
+        result[0] = grad_input
+    if compute_linear_weight_grad:
+        result[1] = grad_linear_weight
+    if compute_linear_bias_grad:
+        result[3] = grad_linear_bias
+    return tuple(result)
+
+
+_linear_cross_entropy_batch_chunked_no_reduction.register_autograd(
+    _linear_cross_entropy_batch_chunked_no_reduction_backward,
+    setup_context=_linear_cross_entropy_batch_chunked_no_reduction_setup_context,
 )
