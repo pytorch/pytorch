@@ -9,7 +9,7 @@ import torch
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Dim, draft_export, export
-from torch.export._draft_export import FailureType
+from torch.export._draft_export import DraftExportReport, FailureReport, FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
@@ -33,6 +33,34 @@ class TestDraftExport(TestCase):
 
     def tearDown(self):
         return
+
+    def test_report_warning_color_is_readable_on_light_background(self):
+        report = DraftExportReport(
+            [
+                FailureReport(
+                    FailureType.MISSING_FAKE_KERNEL,
+                    {"op": "mylib.foo.default"},
+                )
+            ],
+            {},
+            {},
+            {},
+        )
+
+        rendered = str(report)
+        self.assertIn("\033[31m", rendered)
+        self.assertNotIn("\033[93m", rendered)
+        self.assertLess(
+            rendered.index("\033[0m"),
+            rendered.index("1. Missing fake kernel."),
+        )
+
+    def test_report_success_color_is_readable_on_light_background(self):
+        report = DraftExportReport([], {}, {}, {})
+
+        rendered = str(report)
+        self.assertIn("\033[32m", rendered)
+        self.assertNotIn("\033[92m", rendered)
 
     def test_retry_on_constraint_violation_uses_dim_auto(self):
         class M(torch.nn.Module):
