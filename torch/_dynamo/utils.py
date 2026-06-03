@@ -1308,6 +1308,14 @@ def unpack_and_apply_fn(
     iterable: VariableTracker,
     apply_fn,
 ) -> None:
+    list(lazily_unpack_and_apply_fn(tx, iterable, apply_fn))
+
+
+def lazily_unpack_and_apply_fn(
+    tx: InstructionTranslatorBase,
+    iterable: VariableTracker,
+    apply_fn,
+):
     from . import variables
     from .exc import handle_observed_exception, ObservedUserStopIteration
     from .variables.object_protocol import generic_getiter, generic_iternext
@@ -1327,14 +1335,14 @@ def unpack_and_apply_fn(
         # avoid going through the generic iter/getiter/iternext protocol for
         # common builtin iterables, since it can be a bottleneck for large
         # iterables (e.g. unpacking a list of 1000 items)
-        [apply_fn(item) for item in iterable.unpack_var_sequence(tx)]  # type: ignore[bad-argument-type]
+        yield from [apply_fn(item) for item in iterable.unpack_var_sequence(tx)]  # type: ignore[bad-argument-type]
         return
 
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
     while True:
         try:
             item = generic_iternext(tx, iterator)  # type: ignore[bad-argument-type]
-            apply_fn(item)
+            yield apply_fn(item)
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
