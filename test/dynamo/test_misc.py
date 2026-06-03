@@ -2810,11 +2810,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         x = torch.randn(3, 2)
 
-        # Verify that fullgraph=True fails (confirms graph break occurs)
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, fullgraph=True, backend="eager")(x)
 
-        # Verify that it works without fullgraph
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         result = opt_fn(x)
         self.assertEqual(cnts.frame_count, 1)
@@ -2920,8 +2918,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """1""")
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.frame_count, """0""")
+            self.assertExpectedInline(cnts.op_count, """0""")
 
     def test_list_slice_mul(self):
         def fn(count):
@@ -2936,8 +2934,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """1""")
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.frame_count, """0""")
+            self.assertExpectedInline(cnts.op_count, """0""")
 
     def test_tuple_mul(self):
         def fn(count):
@@ -2951,8 +2949,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertExpectedInline(cnts.frame_count, """0""")
             self.assertExpectedInline(cnts.op_count, """0""")
         else:
-            self.assertExpectedInline(cnts.frame_count, """1""")
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.frame_count, """0""")
+            self.assertExpectedInline(cnts.op_count, """0""")
 
     def test_tuple_mul_with_shape(self):
         def fn(a):
@@ -6206,6 +6204,26 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(ref[1], res[1])
         self.assertEqual(cnts.frame_count, 1)
 
+    @torch._dynamo.config.patch(
+        graph_break_on_nn_param_ctor=False, trace_autograd_ops=True
+    )
+    def test_param_autograd_grad_in_forward(self):
+        def fn(x):
+            w = torch.nn.Parameter(torch.ones(4, 4))
+            y = (x @ w).sum()
+            (grad,) = torch.autograd.grad(y, w)
+            return grad is not None, w.grad is None, grad
+
+        x = torch.randn(4, 4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        res = opt_fn(x)
+
+        self.assertTrue(res[0])
+        self.assertTrue(res[1])
+        self.assertEqual(ref[2], res[2])
+
     def test_intermediary_tensor_grad_access(self):
         # This test creates a model, and accesses the grads
         # from its parameters and an entirely intermediary tensor.
@@ -7118,6 +7136,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         output = loss(input, target)
 
         self.assertTrue(torch.allclose(dynamo_output, output))
+
+    def test_cross_entropy_loss_prob_target_dynamic(self):
+        shapes = [(3, 5), (4, 7)]
+        compiled = torch.compile(F.cross_entropy, dynamic=True, backend="eager")
+        for N, C in shapes:
+            x = torch.randn(N, C)
+            target = torch.rand(N, C).softmax(dim=1)
+            weight = torch.rand(C)
+            for reduction in ["none", "mean", "sum"]:
+                for label_smoothing in [0.0, 0.5]:
+                    for w in [None, weight]:
+                        expected = F.cross_entropy(
+                            x,
+                            target,
+                            weight=w,
+                            reduction=reduction,
+                            label_smoothing=label_smoothing,
+                        )
+                        actual = compiled(
+                            x,
+                            target,
+                            weight=w,
+                            reduction=reduction,
+                            label_smoothing=label_smoothing,
+                        )
+                        self.assertEqual(expected, actual)
 
     def test_repr(self):
         class Config:
