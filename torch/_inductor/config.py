@@ -273,6 +273,10 @@ benchmark_harness = True
 # fuse pointwise into templates epilogues
 epilogue_fusion = True
 
+# fuse atomic-add scatter mutations into Triton template epilogues
+# Disabled by default because performance depends on index contention.
+epilogue_fusion_with_atomic_add = False
+
 # fuse pointwise into template prologues
 prologue_fusion = prologue_fusion_enabled()
 
@@ -1985,9 +1989,9 @@ class triton:
     force_cooperative_reductions = False
 
     # Lower/upper bounds between two-step variance and Welford variance for
-    # non-split CUDA Triton reductions. Mid-sized reductions use two-step for
-    # throughput; smaller reductions keep the old heuristic because training
-    # gradients are more sensitive to the different accumulation order.
+    # non-split CUDA Triton half/bfloat16 reductions. Mid-sized reductions use
+    # two-step for throughput; smaller reductions keep the old heuristic because
+    # training gradients are more sensitive to the different accumulation order.
     use_two_step_variance_min_numel = 1024
     use_two_step_variance_threshold = 32768
 
@@ -2978,6 +2982,14 @@ class eager_numerics:
 # emulate the eager numerics.
 emulate_precision_casts: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
+
+# Targeted variant of emulate_precision_casts for saved low-precision outputs.
+# When a low-precision pointwise result is saved for backward and also used by
+# later forward math, this inserts a downcast-upcast at the saved value so
+# forward and backward consume the same precision.
+emulate_precision_casts_on_saved_tensors: bool = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS_ON_SAVED_TENSORS", "1") == "1"
 )
 
 # adds patch, save_config, etc

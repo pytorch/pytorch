@@ -29,7 +29,7 @@ class TestVarianceReductionHeuristic(TestCase):
             self.skipTest("CUDA-specific variance heuristic")
 
     def _dtypes(self):
-        dtypes = [torch.float32, torch.float16]
+        dtypes = [torch.float16]
         if torch.cuda.is_bf16_supported():
             dtypes.append(torch.bfloat16)
         return dtypes
@@ -50,6 +50,19 @@ class TestVarianceReductionHeuristic(TestCase):
             self.assertEqual(result, expected)
             self.assertIn("tl.sum", source_code)
             self.assertNotIn("welford_reduce", source_code)
+
+    def test_var_mean_keeps_welford_for_float32_reductions(self):
+        self._skip_if_not_cuda()
+
+        def fn(x):
+            return torch.var_mean(x, dim=-1, correction=0)
+
+        x = torch.randn([4, 4096], device=GPU_TYPE, dtype=torch.float32)
+        expected = fn(x)
+        result, (source_code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+
+        self.assertEqual(result, expected)
+        self.assertIn("welford_", source_code)
 
     @config.patch("triton.force_cooperative_reductions", True)
     def test_var_mean_keeps_welford_for_small_reductions(self):
