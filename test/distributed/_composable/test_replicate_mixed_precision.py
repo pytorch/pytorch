@@ -83,7 +83,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_dtype=None,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, param_dtype)
@@ -148,7 +148,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_dtype=reduce_dtype,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -195,7 +195,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_dtype=reduce_dtype,
         )
         group = dist.distributed_c10d._get_default_group()
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -260,7 +260,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             replicate(mlp, mp_policy=mp_policy)
         replicate(model, mp_policy=mp_policy)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -516,7 +516,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         # Check that the reduce-scatter runs in bf16 even after we change the
         # model from bf16 to fp32
         model.to(torch.float32)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, torch.bfloat16)
