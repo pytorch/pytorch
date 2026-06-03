@@ -4353,7 +4353,18 @@ class CommonTemplate:
             a = torch.permute(a, [0, 2, 3, -3])
             return (a,)
 
-        self.common(fn, (torch.randn(4, 4),))
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_permute_unbacked_slice(self):
+        def eager(a, end_t):
+            b = a + 1
+            c = torch.permute(b, [0, 2, 1])
+            end = end_t.item()
+            return c[:, :end, :]
+
+        compiled = torch.compile(eager, backend="inductor")
+        a = torch.randn(4, 16, 8, device=self.device)
+        end_t = torch.tensor([5])
+        self.assertEqual(compiled(a, end_t), eager(a, end_t))
 
     def test_expand(self):
         def fn(a):
