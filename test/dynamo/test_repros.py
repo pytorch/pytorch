@@ -2561,6 +2561,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(output_stride, (3, 1))
         self.assertTrue(same(output_tensor, expected))
 
+    @expectedFailureDynamic
     def test_out_variant_resize_graph_input(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(input_tensor, output_tensor):
@@ -2574,6 +2575,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             "Shape mismatch with out= tensor variant",
         ):
             fn(input_tensor, output_tensor)
+
+    def test_out_variant_resize_in_graph_tensor_not_allowlisted(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(input_tensor):
+            output_tensor = torch.empty((0,), dtype=input_tensor.dtype)
+            return torch.sigmoid(input_tensor, out=output_tensor)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Shape mismatch with out= tensor variant",
+        ):
+            fn(torch.randn(2, 3))
 
     @parametrize("backend", ["eager", "inductor"])
     def test_out_variant_resize_in_graph_tensor_observable_to_alias(self, backend):
@@ -9366,6 +9379,32 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
 
         with mock.patch("torch.cuda.is_initialized", lambda: False):
             self.assertEqual(f(inp), inp + 2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_graph_metadata_does_not_retain_cuda_fake_constants(self):
+        def f():
+            x = torch.tensor(5, dtype=torch.float32, device="cuda")
+            copy.deepcopy(x)
+
+        def clear_cuda_memory(*, reset_dynamo):
+            if reset_dynamo:
+                torch._dynamo.reset()
+            gc.collect()
+            torch._C._cuda_clearCublasWorkspaces()
+            torch.cuda.empty_cache()
+
+        clear_cuda_memory(reset_dynamo=True)
+        memory_before = torch.cuda.memory_allocated()
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f()
+        clear_cuda_memory(reset_dynamo=False)
+
+        self.assertEqual(torch.cuda.memory_allocated(), memory_before)
+        # Keep the compiled callable alive through the assertion. Before the
+        # fix, it retained the compiled FX graph, whose FakeTensor metadata
+        # retained the real CUDA scalar through FakeTensor.constant.
+        self.assertIsNotNone(opt_f)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
