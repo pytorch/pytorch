@@ -4770,7 +4770,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else None
         )
         result_shape = list(self.dense_size_list())
-        result_shape[dim] = "1"
+        for i in range(dim, dim + self.num_reduction_dims):
+            result_shape[i] = "1"
         result_mask_vars = OrderedSet(
             var for var in masks if not prefix_is_reduction(var[0])
         )
