@@ -71,9 +71,14 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
     ) -> None:
         wrapper = V.graph.wrapper_code
         config = qtb.config
-        wrapper.add_import_once(
-            "from quack.gemm_epilogue_interface import gemm_epilogue"
-        )
+        if config.gemm_op == "scaled_grouped_mm":
+            wrapper.add_import_once(
+                "from quack.gemm_blockscaled_interface import mxfp8_varlen_k_scaled_mm_epilogue, mxfp8_varlen_m_scaled_mm_epilogue"
+            )
+        else:
+            wrapper.add_import_once(
+                "from quack.gemm_epilogue_interface import gemm_epilogue"
+            )
         if not hasattr(wrapper, "quack_gemm_epilogue_defs"):
             wrapper.quack_gemm_epilogue_defs = OrderedSet()
         if config.epilogue_name not in wrapper.quack_gemm_epilogue_defs:
@@ -85,11 +90,26 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
         call_kwargs += self._epilogue_kwargs(input_args, config)
         call_kwargs += self._local_reduce_kwargs(input_args, config)
         call_kwargs += f", tuned={config.tuned!r}, epilogue_source={config.epilogue_source!r}"
-        wrapper.writeline(
-            f"{qtb.get_name()} = gemm_epilogue("
-            f"{call_args[0]}, {call_args[1]}, "
-            f"{config.epilogue_name}, {config.epilogue_name!r}{call_kwargs})"
-        )
+        if config.gemm_op == "scaled_grouped_mm":
+            call_fn = (
+                "mxfp8_varlen_m_scaled_mm_epilogue"
+                if config.scaled_grouped_mm_kind == "varlen_m"
+                else "mxfp8_varlen_k_scaled_mm_epilogue"
+            )
+        else:
+            call_fn = "gemm_epilogue"
+        if config.gemm_op == "scaled_grouped_mm":
+            wrapper.writeline(
+                f"{qtb.get_name()} = {call_fn}("
+                f"{call_args[0]}, {call_args[1]}, {call_args[2]}, {call_args[3]}, {call_args[4]}, "
+                f"{config.epilogue_name}, {config.epilogue_name!r}{call_kwargs})"
+            )
+        else:
+            wrapper.writeline(
+                f"{qtb.get_name()} = {call_fn}("
+                f"{call_args[0]}, {call_args[1]}, "
+                f"{config.epilogue_name}, {config.epilogue_name!r}{call_kwargs})"
+            )
 
     def _epilogue_kwargs(
         self, input_args: list[str], config: ir.QuackGemmEpilogueConfig
@@ -165,6 +185,16 @@ class QuackGemmEpilogueScheduling(BaseScheduling):
         if config.gemm_op == "grouped_mm":
             return [input_args[0], input_args[1]], (
                 f", offs={input_args[2]}, out_dtype={config.out_dtype!r}"
+            )
+        if config.gemm_op == "scaled_grouped_mm":
+            if config.scaled_grouped_mm_kind == "varlen_m":
+                mat_a = input_args[0]
+                mat_b = f"{input_args[1]}.permute(2, 1, 0)"
+            else:
+                mat_a = f"{input_args[0]}.t().contiguous().t()"
+                mat_b = f"{input_args[1]}.contiguous().t()"
+            return [mat_a, mat_b, input_args[2], input_args[3], input_args[4]], (
+                f", out_dtype={config.out_dtype!r}"
             )
 
         out_dtype_kwargs = (

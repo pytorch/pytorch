@@ -8591,6 +8591,46 @@ def _validate_quack_scaled_mm_v2(kernel_options, quack_args) -> None:
         )
 
 
+def _validate_quack_scaled_grouped_mm_v2(kernel_options, quack_args) -> str:
+    from torch.nn.functional import ScalingType
+
+    metadata = kernel_options.get("_scaled_grouped_mm_v2", {})
+    expected_mxfp8_swizzle = _quack_mxfp8_expected_swizzle().value
+    if (
+        len(quack_args) != 5
+        or metadata.get("scale_a_len") != 1
+        or metadata.get("scale_b_len") != 1
+        or metadata.get("scale_recipe_a") != [ScalingType.BlockWise1x32.value]
+        or metadata.get("scale_recipe_b") != [ScalingType.BlockWise1x32.value]
+        or metadata.get("swizzle_a") != [expected_mxfp8_swizzle]
+        or metadata.get("swizzle_b") != [expected_mxfp8_swizzle]
+        or metadata.get("has_bias", False)
+        or metadata.get("contraction_dim")
+        or metadata.get("use_fast_accum", False)
+        or metadata.get("out_dtype") is None
+        or quack_args[0].get_dtype() != torch.float8_e4m3fn
+        or quack_args[1].get_dtype() != torch.float8_e4m3fn
+        or quack_args[2].get_dtype() != torch.float8_e8m0fnu
+        or quack_args[3].get_dtype() != torch.float8_e8m0fnu
+    ):
+        raise NotImplementedError(
+            "QUACK _scaled_grouped_mm_v2 epilogue currently supports only MXFP8 "
+            "BlockWise1x32 scales without bias/contraction_dim/use_fast_accum"
+        )
+    mat1_rank, mat2_rank = len(quack_args[0].get_size()), len(quack_args[1].get_size())
+    if (mat1_rank, mat2_rank) == (2, 3):
+        return "varlen_m"
+    if (mat1_rank, mat2_rank) == (2, 2):
+        if quack_args[0].get_stride()[1] == 1 and quack_args[1].get_stride()[0] == 1:
+            return "varlen_k"
+        raise NotImplementedError(
+            "QUACK _scaled_grouped_mm_v2 2D/2D varlen-K requires contiguous public A and transposed public B"
+        )
+    raise NotImplementedError(
+        "QUACK _scaled_grouped_mm_v2 epilogue currently supports only 2D/3D varlen-M and 2D/2D varlen-K"
+    )
+
+
 def _validate_quack_grouped_mm(kernel_options, quack_args) -> None:
     if (
         not kernel_options.get("grouped_mm_has_offs", False)
@@ -8641,7 +8681,11 @@ def _infer_quack_main_layout(
 
     mat1 = quack_args[gemm_op_info.mat1_index]
     mat2 = quack_args[gemm_op_info.mat2_index]
-    if gemm_op == torch.ops.aten._grouped_mm.default and len(mat2.get_size()) == 3:
+    grouped_gemm_ops = (
+        torch.ops.aten._grouped_mm.default,
+        torch.ops.aten._scaled_grouped_mm_v2.default,
+    )
+    if gemm_op in grouped_gemm_ops and len(mat2.get_size()) == 3:
         m, n = mat1.get_size()[0], mat2.get_size()[2]
         size = [m, n]
         stride = [n, 1]
@@ -8649,8 +8693,8 @@ def _infer_quack_main_layout(
         m, n = mat1.get_size()[1], mat2.get_size()[1]
         size = [m, n]
         stride = [n, 1]
-    elif gemm_op == torch.ops.aten._grouped_mm.default:
-        groups = quack_args[2].get_size()[0]
+    elif gemm_op in grouped_gemm_ops:
+        groups = quack_args[-1].get_size()[0]
         m, n = mat1.get_size()[0], mat2.get_size()[1]
         size = [groups, m, n]
         stride = [m * n, n, 1]
@@ -8810,6 +8854,7 @@ def _build_quack_epilogue_config(
     tuned,
     scaled_mm_scale_a_len=1,
     scaled_mm_scale_b_len=1,
+    scaled_grouped_mm_kind=None,
 ):
     return ir.QuackGemmEpilogueConfig(
         epilogue_name=epilogue_key,
@@ -8820,6 +8865,7 @@ def _build_quack_epilogue_config(
         out_dtype=main_output_dtype,
         scaled_mm_scale_a_len=scaled_mm_scale_a_len,
         scaled_mm_scale_b_len=scaled_mm_scale_b_len,
+        scaled_grouped_mm_kind=scaled_grouped_mm_kind,
         epilogue_arg_indices=epilogue_arg_indices,
         epilogue_arg_kinds=epilogue_arg_kinds,
         local_reduce_out_index=local_reduce_out_index,
@@ -8959,8 +9005,13 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
         quack_args = _quack_tensor_args(args)
         if gemm_op == torch.ops.aten._scaled_mm.default:
             _validate_quack_scaled_mm(gemm_kwargs, quack_args)
+        scaled_grouped_mm_kind = None
         if gemm_op == torch.ops.aten._scaled_mm_v2.default:
             _validate_quack_scaled_mm_v2(kernel_options, quack_args)
+        if gemm_op == torch.ops.aten._scaled_grouped_mm_v2.default:
+            scaled_grouped_mm_kind = _validate_quack_scaled_grouped_mm_v2(
+                kernel_options, quack_args
+            )
         if gemm_op == torch.ops.aten._grouped_mm.default:
             _validate_quack_grouped_mm(kernel_options, quack_args)
         (
@@ -9031,6 +9082,7 @@ def gemm_epilogue_fusion_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_o
                 scaled_mm_scale_b_len=kernel_options.get("_scaled_mm_v2", {}).get(
                     "scale_b_len", 1
                 ),
+                scaled_grouped_mm_kind=scaled_grouped_mm_kind,
             ),
             mutated_inputs=mutated_inputs or None,
         )

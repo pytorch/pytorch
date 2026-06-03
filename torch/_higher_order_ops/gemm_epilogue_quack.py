@@ -15,9 +15,10 @@ QUACK_GEMM_OPS = (
     torch.ops.aten.baddbmm.default,
     torch.ops.aten._scaled_mm.default,
     torch.ops.aten._scaled_mm_v2.default,
+    torch.ops.aten._scaled_grouped_mm_v2.default,
     torch.ops.aten._grouped_mm.default,
 )
-SUPPORTED_QUACK_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_scaled_mm_v2/_grouped_mm"
+SUPPORTED_QUACK_GEMM_OP_NAMES = "mm/addmm/bmm/baddbmm/_scaled_mm/_scaled_mm_v2/_scaled_grouped_mm_v2/_grouped_mm"
 QUACK_TENSORSSA_FRAGMENT_N = 32
 QUACK_REDUCE_DIM_M = 0
 QUACK_REDUCE_DIM_N = 1

@@ -41,7 +41,7 @@ GEMM_EPILOGUE_OPS = {
         "scaled_grouped_mm", 0, 1, supports_quack=False
     ),
     torch.ops.aten._scaled_grouped_mm_v2.default: GemmEpilogueOpInfo(
-        "scaled_grouped_mm", 0, 1, supports_quack=False
+        "scaled_grouped_mm", 0, 1
     ),
     torch.ops.aten._grouped_mm.default: GemmEpilogueOpInfo("grouped_mm", 0, 1),
 }

@@ -1679,6 +1679,139 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_routes_scaled_grouped_mm_v2_mxfp8_varlen_m(self):
+        if not PLATFORM_SUPPORTS_MX_GEMM:
+            self.skipTest("MX GEMM is not supported")
+
+        swizzle = (
+            F.SwizzleType.NO_SWIZZLE
+            if torch.version.hip
+            else F.SwizzleType.SWIZZLE_32_4_4
+        )
+        groups, m, n, k = 2, 128, 128, 128
+
+        def fn(a, b, scale_a, scale_b, offs):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_grouped_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={
+                    "scale_recipe_a": F.ScalingType.BlockWise1x32,
+                    "scale_recipe_b": F.ScalingType.BlockWise1x32,
+                    "swizzle_a": swizzle,
+                    "swizzle_b": swizzle,
+                    "offs": offs,
+                    "output_dtype": torch.bfloat16,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        torch.manual_seed(19)
+        a = (0.5 * torch.randn(m * groups, k, device="cuda", dtype=torch.bfloat16)).to(
+            torch.float8_e4m3fn
+        )
+        b = (0.5 * torch.randn(groups, n, k, device="cuda", dtype=torch.bfloat16)).to(
+            torch.float8_e4m3fn
+        ).transpose(-2, -1)
+        scale_a = torch.cat(
+            [
+                to_blocked(
+                    torch.ones(m, k // 32, device="cuda", dtype=torch.float8_e8m0fnu)
+                )
+                for _ in range(groups)
+            ]
+        ).reshape(m * groups, k // 32)
+        scale_b = torch.stack(
+            [
+                to_blocked(
+                    torch.ones(n, k // 32, device="cuda", dtype=torch.float8_e8m0fnu)
+                )
+                for _ in range(groups)
+            ]
+        )
+        offs = torch.arange(m, m * groups + 1, m, device="cuda", dtype=torch.int32)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale_a, scale_b, offs
+        )
+        expected = torch.cat(
+            [(a[i * m : (i + 1) * m].float() @ b[i].float()).relu() for i in range(groups)]
+        ).to(torch.bfloat16)
+
+        torch.testing.assert_close(actual, expected, atol=2e-1, rtol=5e-2)
+        FileCheck().check("mxfp8_varlen_m_scaled_mm_epilogue").check_not(
+            "extern_kernels._scaled_grouped_mm"
+        ).run(code)
+
+    @requires_cuda_and_triton
+    def test_cuda_inductor_quack_backend_routes_scaled_grouped_mm_v2_mxfp8_varlen_k(self):
+        if not PLATFORM_SUPPORTS_MX_GEMM:
+            self.skipTest("MX GEMM is not supported")
+
+        swizzle = (
+            F.SwizzleType.NO_SWIZZLE
+            if torch.version.hip
+            else F.SwizzleType.SWIZZLE_32_4_4
+        )
+        groups, m, n, k = 2, 128, 128, 128
+
+        def fn(a, b, scale_a, scale_b, offs):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_grouped_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: acc.relu(),
+                gemm_kwargs={
+                    "scale_recipe_a": F.ScalingType.BlockWise1x32,
+                    "scale_recipe_b": F.ScalingType.BlockWise1x32,
+                    "swizzle_a": swizzle,
+                    "swizzle_b": swizzle,
+                    "offs": offs,
+                    "output_dtype": torch.bfloat16,
+                },
+                kernel_options={"backend": "QUACK"},
+            )
+
+        torch.manual_seed(20)
+        a = (0.5 * torch.randn(m, k * groups, device="cuda", dtype=torch.bfloat16)).to(
+            torch.float8_e4m3fn
+        )
+        b = (0.5 * torch.randn(n, k * groups, device="cuda", dtype=torch.bfloat16)).to(
+            torch.float8_e4m3fn
+        ).t()
+        scale_a = torch.cat(
+            [
+                to_blocked(
+                    torch.ones(m, k // 32, device="cuda", dtype=torch.float8_e8m0fnu)
+                )
+                for _ in range(groups)
+            ]
+        ).reshape(m, groups * (k // 32))
+        scale_b = torch.cat(
+            [
+                to_blocked(
+                    torch.ones(n, k // 32, device="cuda", dtype=torch.float8_e8m0fnu)
+                )
+                for _ in range(groups)
+            ]
+        ).reshape(n, groups * (k // 32))
+        offs = torch.arange(k, k * groups + 1, k, device="cuda", dtype=torch.int32)
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, scale_a, scale_b, offs
+        )
+        expected = torch.stack(
+            [
+                (a[:, i * k : (i + 1) * k].float() @ b[i * k : (i + 1) * k].float()).relu()
+                for i in range(groups)
+            ]
+        ).to(torch.bfloat16)
+
+        torch.testing.assert_close(actual, expected, atol=2e-1, rtol=5e-2)
+        FileCheck().check("mxfp8_varlen_k_scaled_mm_epilogue").check_not(
+            "extern_kernels._scaled_grouped_mm"
+        ).run(code)
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_scaled_grouped_mm_epilogue(self):
         if not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM:
             self.skipTest("FP8 grouped GEMM is not supported")

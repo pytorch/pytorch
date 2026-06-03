@@ -6019,6 +6019,7 @@ class QuackGemmEpilogueConfig:
     out_dtype: Any | None = None
     scaled_mm_scale_a_len: int = 1
     scaled_mm_scale_b_len: int = 1
+    scaled_grouped_mm_kind: str | None = None
     epilogue_arg_indices: tuple[int, ...] = ()
     epilogue_arg_kinds: tuple[str, ...] = ()
     local_reduce_out_index: int | None = None
