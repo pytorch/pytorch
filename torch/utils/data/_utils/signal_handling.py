@@ -14,10 +14,10 @@ When a _BaseDataLoaderIter starts worker processes, their pids are registered in
 defined in `DataLoader.cpp`: id(_BaseDataLoaderIter) => Collection[ Worker pids ]
 via `_set_worker_pids`.
 
-When an error happens in a worker process, the main process received a SIGCHLD,
+When an error happens in a worker process, the main process receives a SIGCHLD,
 and Python will eventually call the handler registered below
 (in `_set_SIGCHLD_handler`). In the handler, the `_error_if_any_worker_fails`
-call checks all registered worker pids and raise proper error message to
+call checks all registered worker pids and raises a proper error message to
 prevent main process from hanging waiting for data from worker.
 
 Additionally, at the beginning of each worker's `_utils.worker._worker_loop`,

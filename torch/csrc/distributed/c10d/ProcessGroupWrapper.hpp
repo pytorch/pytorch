@@ -111,7 +111,7 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   // Agrees on an initial sequence number for the whole group by having rank 0
   // create it and broadcast it to other ranks using the store. Only implemented
   // for GLOO and NCCL backends currently.
-  // dont implement this
+  // don't implement this
   void setSequenceNumberForGroup() override;
 
   // Retrieves the current sequence number for the whole group, which should be

@@ -517,7 +517,7 @@ class InductorChoices:
                 divisors = sympy.divisors(reduction_numel_hint)
                 closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
                 if abs(closest - tmp_split_size) < 30:
-                    # prefer even splits, but never smalle than min_elements_per_thread
+                    # prefer even splits, but never smaller than min_elements_per_thread
                     split_size = max(closest, min_elements_per_thread)
                 else:
                     split_size = tmp_split_size

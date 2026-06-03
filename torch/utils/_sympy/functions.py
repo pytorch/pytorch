@@ -108,7 +108,7 @@ __all__ = [
 
 
 def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
-    # No need to check that two args are not the same, since expr is pr-optimized but we do it anyway.
+    # No need to check that two args are not the same, since expr is pre-optimized but we do it anyway.
     return (
         isinstance(expr, sympy.Expr)
         and expr.is_Add
