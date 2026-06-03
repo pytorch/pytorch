@@ -255,6 +255,20 @@ def create_symfloat(shape_env, f: float) -> SymFloat:
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
 )
 class TestPySymInt(TestCase):
+    def test_symint_array_ref_error_message(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 3, duck=False)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "SymIntArrayRef expected to contain only concrete integers.*"
+            "Found symbolic SymInt at index 0: s[0-9]+ in SymIntArrayRef "
+            r"\[s[0-9]+, 5, 10\].*"
+            "FakeTensorMode.*SymInt support.*Python dispatcher.*"
+            "specialize or guard",
+        ):
+            torch.empty((s0, 5, 10))
+
     def test_arith_ops(self):
         shape_env = ShapeEnv()
         symints = []

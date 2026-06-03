@@ -5,11 +5,48 @@
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;
+
+[[noreturn]] inline void reportSymIntArrayRefToIntArrayRefError(
+    c10::SymIntArrayRef ar,
+    size_t problem_index,
+    const char* file,
+    int64_t line) {
+  const bool is_symbolic = ar[problem_index].is_symbolic();
+  TORCH_CHECK(
+      false,
+      file,
+      ":",
+      line,
+      ": SymIntArrayRef expected to contain only concrete integers that are "
+      "stored inline and can be viewed as an IntArrayRef. Found ",
+      is_symbolic ? "symbolic SymInt" : "heap-allocated concrete SymInt",
+      " at index ",
+      problem_index,
+      ": ",
+      ar[problem_index],
+      " in SymIntArrayRef ",
+      ar,
+      is_symbolic
+          ? ". This commonly happens when an operator/kernel does not support "
+            "symbolic shapes at this dispatch key. Common causes include "
+            "calling an eager factory/kernel with a symbolic shape outside "
+            "FakeTensorMode, an operator/kernel missing SymInt support, or "
+            "running under a Python dispatch mode without the Python "
+            "dispatcher enabled. If this is expected during fake/meta "
+            "tracing, make sure FakeTensorMode and the Python dispatcher are "
+            "active; otherwise specialize or guard the symbolic size before "
+            "this call."
+          : ". This value is concrete, but the non-owning IntArrayRef "
+            "conversion used here cannot represent heap-allocated SymInt "
+            "values. Use an owning conversion or guard/specialize the value "
+            "before this call.");
+}
 
 inline at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
   return IntArrayRef(reinterpret_cast<const int64_t*>(ar.data()), ar.size());
@@ -36,13 +73,10 @@ inline at::IntArrayRef asIntArrayRefSlow(
     c10::SymIntArrayRef ar,
     const char* file,
     int64_t line) {
-  for (const c10::SymInt& sci : ar) {
-    TORCH_CHECK(
-        !sci.is_heap_allocated(),
-        file,
-        ":",
-        line,
-        ": SymIntArrayRef expected to contain only concrete integers");
+  for (const auto i : c10::irange(ar.size())) {
+    if (C10_UNLIKELY(ar[i].is_heap_allocated())) {
+      reportSymIntArrayRefToIntArrayRefError(ar, i, file, line);
+    }
   }
   return asIntArrayRefUnchecked(ar);
 }
@@ -91,7 +125,7 @@ inline c10::SymBool sym_equals(SymIntArrayRef LHS, SymIntArrayRef RHS) {
     return c10::SymBool(false);
   }
 
-  c10::SymBool result = sym_eq(LHS.size(), RHS.size());
+  c10::SymBool result(true);
   for (size_t i = 0; i < RHS.size(); ++i) {
     c10::SymBool equals = sym_eq(LHS[i], RHS[i]);
     std::optional<bool> equals_bool = equals.maybe_as_bool();
