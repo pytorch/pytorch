@@ -44,6 +44,7 @@ from torch._inductor.runtime.hints import (
     HeuristicType,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
+    ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
@@ -181,6 +182,42 @@ class TestTritonHeuristics(TestCase):
         )[0]
         self.assertEqual(cfg.kwargs["XBLOCK"], 512)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 128)
+
+    @skipIfRocm
+    def test_tiny_inner_persistent_reduction_uses_one_warp_config(self):
+        device = DeviceProperties(
+            type="cuda",
+            index=0,
+            multi_processor_count=1,
+            cc=80,
+            major=8,
+            max_threads_per_block=1024,
+            warp_size=32,
+        )
+        size_hints = {"x": 524288, "r0_": 64}
+        triton_meta = {"device": device}
+
+        cfgs = _persistent_reduction_configs(
+            size_hints=size_hints,
+            reduction_hint=ReductionHint.INNER,
+            inductor_meta={},
+            triton_meta=triton_meta,
+        )
+
+        self.assertEqual(len(cfgs), 1)
+        self.assertEqual(cfgs[0].kwargs["XBLOCK"], 8)
+        self.assertNotIn("R0_BLOCK", cfgs[0].kwargs)
+        self.assertEqual(cfgs[0].num_warps, 1)
+
+        tuned_cfgs = _persistent_reduction_configs(
+            size_hints=size_hints,
+            reduction_hint=ReductionHint.INNER,
+            inductor_meta={"max_autotune": True},
+            triton_meta=triton_meta,
+        )
+        self.assertTrue(
+            any(c.kwargs["XBLOCK"] == 8 and c.num_warps == 1 for c in tuned_cfgs)
+        )
 
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):

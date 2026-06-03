@@ -4656,47 +4656,73 @@ def _persistent_reduction_configs(
             rnumel,
         )
     ]
+    tiny_inner_configs = []
+    if (
+        reduction_hint == ReductionHint.INNER
+        and rnumel < 256
+        and triton_meta["device"].type == "cuda"
+    ):
+        tiny_inner_configs = [
+            triton_config_reduction(
+                size_hints,
+                min(1024 // rnumel, 8),
+                rnumel,
+                register_intensive=True,
+                num_warps=1,
+                min_num_warps=1,
+                reduction_hint=reduction_hint,
+            )
+        ]
 
     # defer to more autotuning, initially
     if "y" in size_hints:
         pass
     # TODO(jansel): we should be able to improve these heuristics
     elif not max_autotune_enabled:  # Do not filter configs when tuning
-        if reduction_hint == ReductionHint.INNER and rnumel >= 256:
-            if rnumel > 1024 or xnumel // 8 < 128 or inductor_meta.get("RSPLIT_SIZE"):
-                configs = configs[:1]
-            else:
-                if not torch.cuda.is_available():
-                    # TODO(Intel): CUDA uses num_warps = 1 to disable shared memory.
-                    # We apply different configurations from #168335.
-                    # We currently let cost model in Triton to decide whether to use shared memory.
-                    loads_and_stores = inductor_meta.get(
-                        "num_load", 0
-                    ) + inductor_meta.get("num_store", 0)
-                    x_block = 8
-                    if xnumel // x_block < 128 or loads_and_stores >= 5:
-                        x_block = 1
-                    num_warps, min_num_warps, reduction_hint = None, None, None
+        if reduction_hint == ReductionHint.INNER:
+            if tiny_inner_configs:
+                configs = tiny_inner_configs
+            elif rnumel >= 256:
+                if (
+                    rnumel > 1024
+                    or xnumel // 8 < 128
+                    or inductor_meta.get("RSPLIT_SIZE")
+                ):
+                    configs = configs[:1]
                 else:
-                    x_block = min(1024 // rnumel, 8)
-                    num_warps, min_num_warps = 1, 1
-                configs = [
-                    triton_config_reduction(
-                        size_hints,
-                        x_block,
-                        rnumel,
-                        register_intensive=True,
-                        num_warps=num_warps,
-                        min_num_warps=min_num_warps,
-                        reduction_hint=reduction_hint,
-                    )
-                ]
+                    if not torch.cuda.is_available():
+                        # TODO(Intel): CUDA uses num_warps = 1 to disable shared memory.
+                        # We apply different configurations from #168335.
+                        # We currently let cost model in Triton to decide whether to use shared memory.
+                        loads_and_stores = inductor_meta.get(
+                            "num_load", 0
+                        ) + inductor_meta.get("num_store", 0)
+                        x_block = 8
+                        if xnumel // x_block < 128 or loads_and_stores >= 5:
+                            x_block = 1
+                        num_warps, min_num_warps, reduction_hint = None, None, None
+                    else:
+                        x_block = min(1024 // rnumel, 8)
+                        num_warps, min_num_warps = 1, 1
+                    configs = [
+                        triton_config_reduction(
+                            size_hints,
+                            x_block,
+                            rnumel,
+                            register_intensive=True,
+                            num_warps=num_warps,
+                            min_num_warps=min_num_warps,
+                            reduction_hint=reduction_hint,
+                        )
+                    ]
 
         elif reduction_hint == ReductionHint.OUTER:
             configs = configs[-1:]
         elif reduction_hint == ReductionHint.OUTER_TINY:
             configs = tiny_configs
     else:
+        if tiny_inner_configs:
+            configs.extend(tiny_inner_configs)
         if torch.version.hip:
             # If autotune is enabled append tiny configs
             for conf in tiny_configs:
