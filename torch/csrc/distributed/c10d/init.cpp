@@ -2418,8 +2418,21 @@ communication mechanism.
 
               See :func:`torch.distributed.all_gather` for more details.)")
           .def(
+              "all_gather_single_coalesced",
+              &::c10d::ProcessGroup::all_gather_single_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Allgathers the input tensors from all processes across the process group.
+
+              See :func:`torch.distributed.all_gather` for more details.)")
+          // Deprecated alias of all_gather_single_coalesced, kept for backward
+          // compatibility. Bound to the new method to avoid referencing the
+          // deprecated C++ method.
+          .def(
               "allgather_into_tensor_coalesced",
-              &::c10d::ProcessGroup::allgather_into_tensor_coalesced,
+              &::c10d::ProcessGroup::all_gather_single_coalesced,
               py::arg("outputs"),
               py::arg("inputs"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -2548,8 +2561,21 @@ communication mechanism.
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "reduce_scatter_single_coalesced",
+              &::c10d::ProcessGroup::reduce_scatter_single_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Reduces and scatters the input tensors from all processes across the process group.
+
+              See :func:`torch.distributed.reduce_scatter` for more details.)")
+          // Deprecated alias of reduce_scatter_single_coalesced, kept for
+          // backward compatibility. Bound to the new method to avoid
+          // referencing the deprecated C++ method.
+          .def(
               "reduce_scatter_tensor_coalesced",
-              &::c10d::ProcessGroup::reduce_scatter_tensor_coalesced,
+              &::c10d::ProcessGroup::reduce_scatter_single_coalesced,
               py::arg("outputs"),
               py::arg("inputs"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
