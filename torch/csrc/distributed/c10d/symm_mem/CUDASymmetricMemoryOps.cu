@@ -1076,6 +1076,70 @@ at::Tensor reduce_scatter_out(
   }
   return output;
 }
+
+at::Tensor reduce_scatter_tensor_out(
+    at::Tensor input,
+    std::string reduce_op,
+    int64_t scatter_dim,
+    std::string group_name,
+    at::Tensor output) {
+  auto reduce_op_type = c10d::ReduceOp::SUM;
+  if (reduce_op == "avg") {
+    reduce_op_type = c10d::ReduceOp::AVG;
+  } else {
+    TORCH_CHECK(
+        reduce_op == "sum",
+        "reduce_scatter_tensor_out: reduce_op must be sum or avg, got ",
+        reduce_op);
+  }
+  TORCH_CHECK(
+      input.dim() > 0, "reduce_scatter_tensor_out: input must have at least 1 dim.");
+
+  const auto wrapped_scatter_dim =
+      scatter_dim < 0 ? scatter_dim + input.dim() : scatter_dim;
+  TORCH_CHECK(
+      wrapped_scatter_dim >= 0 && wrapped_scatter_dim < input.dim(),
+      "reduce_scatter_tensor_out: invalid scatter_dim ",
+      scatter_dim,
+      " for input dim ",
+      input.dim());
+
+  at::Tensor ret;
+  if (wrapped_scatter_dim == 0) {
+    TORCH_CHECK(
+        output.dim() == input.dim(),
+        "reduce_scatter_tensor_out: output must have the same rank as input for scatter_dim=0");
+    TORCH_CHECK(
+        output.size(0) * c10d::resolve_process_group(group_name)->getSize() ==
+            input.size(0),
+        "reduce_scatter_tensor_out: output dim 0 must equal input dim 0 / world_size");
+    TORCH_CHECK(
+        std::equal(
+            input.sizes().begin() + 1,
+            input.sizes().end(),
+            output.sizes().begin() + 1),
+        "reduce_scatter_tensor_out: output must match input on non-scatter dims for scatter_dim=0");
+    ret = reduce_scatter_out(
+        input.flatten(),
+        group_name,
+        false,
+        output.flatten());
+  } else if (wrapped_scatter_dim == input.dim() - 1) {
+    TORCH_CHECK(
+        output.dim() == input.dim(),
+        "reduce_scatter_tensor_out: output must have the same rank as input for last-dim scatter");
+    ret = reduce_scatter_out(input, group_name, true, output);
+  } else {
+    TORCH_CHECK(
+        false,
+        "reduce_scatter_tensor_out: only scatter_dim == 0 or the last dim is supported.");
+  }
+
+  if (reduce_op_type == c10d::ReduceOp::AVG && output.numel() > 0) {
+    ret.div_(c10d::resolve_process_group(group_name)->getSize());
+  }
+  return ret;
+}
 } // namespace
 #elif defined(CUDART_VERSION) && CUDART_VERSION < 12030
 namespace {
@@ -1171,6 +1235,16 @@ at::Tensor reduce_scatter_out(
     bool split_last_dim,
     at::Tensor output) {
   TORCH_CHECK(false, "reduce_scatter_out: requires CUDA 12.3+.");
+  return output;
+}
+
+at::Tensor reduce_scatter_tensor_out(
+    at::Tensor input,
+    std::string reduce_op,
+    int64_t scatter_dim,
+    std::string group_name,
+    at::Tensor output) {
+  TORCH_CHECK(false, "reduce_scatter_tensor_out: requires CUDA 12.3+.");
   return output;
 }
 
@@ -1316,6 +1390,7 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
   m.impl("two_shot_all_reduce_out", ::two_shot_all_reduce_out);
   m.impl("reduce_scatter_out", ::reduce_scatter_out);
+  m.impl("reduce_scatter_tensor_out", ::reduce_scatter_tensor_out);
 
   m.impl("_async_input_mm", c10d::cuda::detail::async_input_mm);
 #endif

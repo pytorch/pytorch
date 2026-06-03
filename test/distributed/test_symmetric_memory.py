@@ -1370,15 +1370,47 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         with self.assertRaisesRegex(RuntimeError, "divisible"):
             torch.ops.symm_mem.reduce_scatter_out(res, group_name, True, out)
 
-    def _verify_reduce_scatter_result(self, inp, res):
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(4)
+    @parametrize("scatter_dim", [0, 1])
+    @parametrize("reduce_op", ["sum", "avg"])
+    def test_reduce_scatter_tensor_out(
+        self, scatter_dim: int, reduce_op: str
+    ) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        inp = symm_mem.empty((32, 128), dtype=torch.bfloat16, device=self.device)
+        inp.normal_()
+        symm_mem.rendezvous(inp, group=group_name)
+
+        out_shape = list(inp.shape)
+        out_shape[scatter_dim] //= self.world_size
+        out = torch.empty(out_shape, dtype=inp.dtype, device=self.device)
+
+        torch.ops.symm_mem.reduce_scatter_tensor_out(
+            inp, reduce_op, scatter_dim, group_name, out
+        )
+
+        self._verify_reduce_scatter_result(
+            inp, out, scatter_dim=scatter_dim, reduce_op=reduce_op
+        )
+
+    def _verify_reduce_scatter_result(
+        self, inp, res, *, scatter_dim: int = -1, reduce_op: str = "sum"
+    ):
         gathered_res = all_gather_tensor(res, 0, "0").view(self.world_size, *res.shape)
         gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, *inp.shape)
-        sum_inps = gathered_inps.sum(0)
-        slice_width = sum_inps.shape[-1] // self.world_size
+        expected = gathered_inps.sum(0)
+        if reduce_op == "avg":
+            expected.div_(self.world_size)
+        scatter_dim = scatter_dim if scatter_dim >= 0 else scatter_dim + inp.dim()
+        slice_width = expected.shape[scatter_dim] // self.world_size
         for i in range(self.world_size):
             torch.testing.assert_close(
                 gathered_res[i],
-                sum_inps[..., i * slice_width : (i + 1) * slice_width],
+                expected.narrow(scatter_dim, i * slice_width, slice_width),
                 rtol=1e-01,
                 atol=1.1e-01,
             )

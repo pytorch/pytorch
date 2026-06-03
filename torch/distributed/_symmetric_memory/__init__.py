@@ -911,8 +911,7 @@ def _should_use_fused_all_gather_matmul_native(
     local_M = math.prod(A_shard.shape[:-1])
 
     return (
-        "TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP" in os.environ
-        and A_shard.is_contiguous()
+        A_shard.is_contiguous()
         and gather_dim == 0
         # _async_input_mm requires local_M to be divisible by world_size.
         and local_M % group.size() == 0
@@ -1368,6 +1367,47 @@ def _fused_scaled_matmul_reduce_scatter(
             out_dtype,
             use_fast_accum,
         )
+    backend = _select_fused_scaled_matmul_reduce_scatter_backend(
+        A,
+        orig_scatter_dim,
+        scatter_dim_after_maybe_reshape,
+        group_name,
+    )
+    if backend == "native":
+        return _fused_scaled_matmul_reduce_scatter_native(
+            torch.ops.aten._scaled_mm.out,
+            A,
+            B,
+            A_scale,
+            reduce_op,
+            orig_scatter_dim,
+            group_name,
+            output_shape,
+            {
+                "scale_b": B_scale,
+                "bias": bias,
+                "scale_result": result_scale,
+                "out_dtype": out_dtype,
+                "use_fast_accum": use_fast_accum,
+            },
+            out_dtype,
+        )
+    if backend == "fallback":
+        return _fused_scaled_matmul_reduce_scatter_fallback(
+            A,
+            B,
+            A_scale,
+            B_scale,
+            reduce_op,
+            orig_scatter_dim,
+            scatter_dim_after_maybe_reshape,
+            group_name,
+            output_shape,
+            bias,
+            result_scale,
+            out_dtype,
+            use_fast_accum,
+        )
     with torch.profiler.record_function("fused_scaled_matmul_reduce_scatter"):
         return _fused_scaled_matmul_reduce_scatter_impl(
             mm_out_op=torch.ops.aten._scaled_mm.out,
@@ -1441,6 +1481,95 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     return res
 
 
+def _select_fused_scaled_matmul_reduce_scatter_backend(
+    A: torch.Tensor,
+    orig_scatter_dim: int,
+    scatter_dim_after_maybe_reshape: int,
+    group_name: c10d.GroupName,
+) -> Literal["native", "fallback", "pipeline"]:
+    group = c10d._resolve_process_group(group_name)
+    local_M = math.prod(A.shape[:-1])
+
+    if not (
+        A.is_contiguous()
+        and orig_scatter_dim == 0
+        and scatter_dim_after_maybe_reshape == 0
+        and local_M % group.size() == 0
+    ):
+        return "pipeline"
+
+    # The crossover is empirical: native wins for small M, the plain
+    # scaled_mm + reduce_scatter fallback is best in a narrow midrange, and
+    # the pipelined fused path catches up again once M is large enough.
+    if local_M <= 2048:
+        return "native"
+    if local_M <= 4096:
+        return "fallback"
+    return "pipeline"
+
+
+def _fused_scaled_matmul_reduce_scatter_native(
+    mm_out_op: torch._ops.OpOverload,
+    A: torch.Tensor,
+    B: torch.Tensor,
+    A_scale: torch.Tensor,
+    reduce_op: str,
+    orig_scatter_dim: int,
+    group_name: c10d.GroupName,
+    output_shape: list[int],
+    kwargs: dict[str, Any],
+    out_dtype: torch.dtype | None,
+) -> torch.Tensor:
+    out_dtype = out_dtype or A.dtype
+    A_flat = A.flatten(0, -2)
+    if A_scale.numel() > 1:
+        if A_scale.shape[:-1] != A.shape[:-1]:
+            raise ValueError(
+                "For row-wise scaling, the leading dims of A_scale "
+                "must match the leading dims of A "
+                f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
+            )
+        A_scale_for_mm = A_scale.flatten(0, -2).contiguous()
+    elif A_scale.numel() == 1:
+        A_scale_for_mm = A_scale
+    else:
+        raise ValueError(
+            "Invalid A_scale shape "
+            f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
+        )
+
+    full_output_numel = math.prod(output_shape)
+    out_element_size = torch.empty(
+        (), dtype=out_dtype, device=A.device
+    ).element_size()
+    symm_mem = get_symm_mem_workspace(
+        group_name, full_output_numel * out_element_size
+    )
+    full_output = symm_mem.get_buffer(symm_mem.rank, output_shape, out_dtype)
+    full_output_2d = full_output.view(A_flat.shape[0], B.shape[1])
+
+    mm_out_op(
+        A_flat,
+        B,
+        scale_a=A_scale_for_mm,
+        **kwargs,
+        out=full_output_2d,
+    )
+
+    scattered_output_shape = list(output_shape)
+    group = c10d._resolve_process_group(group_name)
+    scattered_output_shape[orig_scatter_dim] //= group.size()
+    out = torch.empty(scattered_output_shape, dtype=out_dtype, device=A.device)
+    torch.ops.symm_mem.reduce_scatter_tensor_out(
+        full_output,
+        reduce_op,
+        orig_scatter_dim,
+        group_name,
+        out,
+    )
+    return out
+
+
 def _fused_scaled_matmul_reduce_scatter_impl(
     mm_out_op: torch._ops.OpOverload,
     A: torch.Tensor,
@@ -1473,6 +1602,77 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         raise ValueError("reduce_op must be sum or avg")
 
     group = c10d._resolve_process_group(group_name)
+
+    if scatter_dim_after_maybe_reshape == A.ndim - 1:
+        scale_b = kwargs["scale_b"]
+        A_flat = A.flatten(0, -2)
+        leading_dims = list(A.shape[:-1])
+
+        if A_scale.numel() == 1:
+            A_scale_flat = A_scale
+        else:
+            if A_scale.shape[:-1] != A.shape[:-1]:
+                raise ValueError(
+                    "For row-wise scaling, the leading dims of A_scale "
+                    "must match the leading dims of A "
+                    f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
+                )
+            A_scale_flat = A_scale.flatten(0, -2).contiguous()
+
+        B_shards = B.chunk(group.size(), dim=B.ndim - 1)
+        if scale_b.numel() == 1:
+            B_scale_shards = [scale_b] * group.size()
+        else:
+            B_scale_shards = list(scale_b.chunk(group.size(), dim=scale_b.ndim - 1))
+
+        bias = kwargs["bias"]
+        if bias is None or not isinstance(bias, torch.Tensor) or bias.numel() <= 1:
+            bias_shards = [bias] * group.size()
+        else:
+            bias_shards = list(bias.chunk(group.size(), dim=bias.ndim - 1))
+
+        scale_result = kwargs["scale_result"]
+        if (
+            scale_result is None
+            or not isinstance(scale_result, torch.Tensor)
+            or scale_result.numel() <= 1
+        ):
+            result_scale_shards = [scale_result] * group.size()
+        else:
+            result_scale_shards = list(
+                scale_result.chunk(group.size(), dim=scale_result.ndim - 1)
+            )
+
+        def chunk_producer(rank: int, out: torch.Tensor) -> None:
+            mm_out_op(
+                A_flat,
+                B_shards[rank],
+                scale_a=A_scale_flat,
+                scale_b=B_scale_shards[rank],
+                bias=bias_shards[rank],
+                scale_result=result_scale_shards[rank],
+                out_dtype=kwargs["out_dtype"],
+                use_fast_accum=kwargs["use_fast_accum"],
+                out=out,
+            )
+
+        stacked_partials = torch.empty(
+            (A_flat.shape[0], B.shape[1]),
+            dtype=out_dtype or A.dtype,
+            device=A.device,
+        )
+
+        _pipelined_produce_and_all2all(
+            chunk_producer,
+            stacked_partials,
+            group_name,
+            out_chunk_dim=1,
+        )
+
+        stacked_partials_view = stacked_partials.reshape(
+            *leading_dims, group.size(), -1
+        )
+        return reduce_fn(stacked_partials_view, dim=-2)
 
     # Move scatter to first dim, then shard the tensor along the first dim, so the chunk producer
     # can perform matmuls along the first dim.
