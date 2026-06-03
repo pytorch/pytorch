@@ -407,7 +407,7 @@ def conv_layout(
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
-        stride = ir.convert_shape_to_inductor(output.stride())
+        stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
 
     return ir.FixedLayout(
         x.get_device_or_error(),
@@ -458,6 +458,7 @@ def convolution(
     output_padding: Sequence[int],
     groups: int,
 ):
+    """Lower aten.convolution using Inductor convolution kernels or fallbacks."""
     stride = tuple(stride)
     padding = tuple(padding)
     dilation = tuple(dilation)
@@ -552,6 +553,9 @@ def convolution(
     if bias is not None and device_type != "cpu":
         # peel off the bias, cudnn is slower with it
         result = convolution(x, weight, None, **kwargs)
+        if V.graph.sizevars.statically_known_equals(result.get_size()[1], 0):
+            # we should not add bias when the output channel is 0
+            return result
         return L[aten.add](
             result, L[aten.view](bias, [result.get_size()[1]] + ndim * [1])
         )
@@ -592,8 +596,9 @@ def convolution(
         kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
+        bias = ir.ExternKernel.realize_input(bias)  # type: ignore[assignment]
+        assert bias is not None
         args = [x, weight, bias]
-        bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())
 
@@ -616,7 +621,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])
+        and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
             is_ones(kernel_shape)
@@ -651,6 +656,11 @@ def convolution(
             in_chan,
             dtype_size=dtype_size,
         ):
+            unroll = is_ones(kernel_shape)
+            # The non-unrolled loop in these templates triggers triton#1254
+            # with 8 warps, producing incorrect results for non-1x1 kernels.
+            num_warps = cfg.num_warps if unroll else min(cfg.num_warps, 4)
+
             if ndim == 2:
                 conv2d_template.maybe_append_choice(
                     choices,
@@ -665,10 +675,10 @@ def convolution(
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
+                    UNROLL=unroll,
                     ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
+                    num_warps=num_warps,
                     **cfg.kwargs,
                 )
             elif ndim == 3:
@@ -688,10 +698,10 @@ def convolution(
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
+                    UNROLL=unroll,
                     ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
+                    num_warps=num_warps,
                     **cfg.kwargs,
                 )
     if use_ck_conv_template(layout):
@@ -979,8 +989,13 @@ def convolution_backward_lowering(
 
     out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_int_seq(weight.get_size())
 
+    # The Triton bwd templates substitute DILATION_H/W into the generated
+    # kernel source, so they must be concrete Python ints. The fwd template
+    # gates on is_ones(dilation) and hard-codes dilation=1, so it can skip
+    # this guard.
     stride = tuple(V.graph.sizevars.guard_int_seq(stride))
     padding = tuple(V.graph.sizevars.guard_int_seq(padding))
+    dilation = tuple(V.graph.sizevars.guard_int_seq(dilation))
 
     input.realize()
     weight.realize()

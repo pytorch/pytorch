@@ -733,6 +733,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         kwargs = {"dim": 0}
         return torch.cat(*args, **kwargs)
 
+    def test_list_extend_set_and_dict_iterables(self):
+        def fn(x):
+            out = [x]
+            out.extend({1, 2, 3})
+
+            mapping = {"a": x + 1, "b": x + 2}
+            out.extend(mapping)
+            out.extend(mapping.keys())
+            out.extend(mapping.values())
+            out.extend(mapping.items())
+            return out
+
+        x = torch.ones(2, 2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(set(actual[1:4]), {1, 2, 3})
+        self.assertEqual(actual[4:], expected[4:])
+
     def test_list_slice(self):
         class Mock:
             def __init__(self):
@@ -4240,7 +4260,7 @@ class GraphModule(torch.nn.Module):
         return x + y
 
     @make_test
-    def test_map_list_extend(a):
+    def test_map_list_extend_2(a):
         y = [1]
 
         def inner(z):
@@ -4620,6 +4640,37 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(result, torch.sin(x))
 
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    def test_capture_triton_handled_during_tracing(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrapped = torch._library.capture_triton(sin_kernel)
+            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
+
+            return out
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+
+        x = torch.randn(1024, device=device_type)
+        result = compiled(x)
+
+        self.assertEqual(result, torch.sin(x))
+
     def test_property_descriptor_on_instance(self):
         class Foo:
             def __init__(self, x):
@@ -4881,6 +4932,24 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result5, x + 5)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_guard_on_pos_default_mapping(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def target(x, b=1, c=2):
+            return x + b
+
+        @torch.compile(backend=cnts)
+        def caller(x):
+            return target(x, c=3)
+
+        x = torch.ones(())
+        self.assertEqual(caller(x), x + 1)
+        self.assertEqual(cnts.frame_count, 1)
+
+        with patch.object(target, "__defaults__", (1,)):
+            expected_msg = "missing .* required positional argument: 'b'"
+            self.assertRaisesRegex(Exception, expected_msg, caller, x)
+
     def test_func_default_torch_args(self):
         """
         Tests other types of torch types as function default (size, dtype, device)
@@ -4903,6 +4972,30 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out.size(), compiled_out.size())
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_shadowed_dataclass_field_property_matches_eager(self):
+        @dataclass
+        class Data:
+            value: torch.Tensor
+            edges: torch.Tensor
+
+            @property
+            def edges(self) -> torch.Tensor:
+                return torch.randn(3)
+
+        def fn(x):
+            data = Data(value=x, edges=x)
+            return data.value.sum()
+
+        x = torch.randn(3)
+        expected_msg = (
+            r"(property 'edges' of .*Data' object has no setter"
+            r"|can't set attribute(?: 'edges')?)"
+        )
+        self.assertRaisesRegex(AttributeError, expected_msg, fn, x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertRaisesRegex(Exception, expected_msg, opt_fn, x)
 
     def test_dataclass_factory(self):
         @dataclass
@@ -5393,11 +5486,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(ref[1]), list(res[1]))
         self.assertIsInstance(res[1], zip)
 
-        # If nopython, should raise UserError
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+        # If nopython, should raise Unsupported
+        with self.assertRaisesRegex(Unsupported, "zip()"):
             nopython_fn(x, ys[:1], zs)
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+        with self.assertRaisesRegex(Unsupported, "zip()"):
             nopython_fn(x, ys, zs[:1])
 
         # Should cause fallback if allow graph break
@@ -5435,10 +5528,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(res[1], map)
 
         # If nopython, should raise UserError
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+        with self.assertRaisesRegex(Unsupported, "map()"):
             nopython_fn(x, ys[:1], zs)
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+        with self.assertRaisesRegex(Unsupported, "map()"):
             nopython_fn(x, ys, zs[:1])
 
         # Should cause fallback if allow graph break
@@ -6035,6 +6128,56 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
         self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
+
+    def test_full_with_parameter_fill_value_raises(self):
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.fill_value = torch.nn.Parameter(torch.tensor(2.5))
+
+            def forward(self, x):
+                return torch.full((x.shape[0], x.shape[1], 2), self.fill_value)
+
+        mod = Mod()
+        x = torch.randn(3, 4)
+
+        with self.assertRaises(TypeError):
+            mod(x)
+
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_mod(x)
+
+    def test_full_with_parameter_subclass_fill_value_raises(self):
+        class MyParam(torch.nn.Parameter):
+            pass
+
+        def func(x):
+            return torch.full((2,), x)
+
+        x = MyParam(torch.tensor(2.5))
+
+        with self.assertRaises(TypeError):
+            func(x)
+
+        func_compiled = torch.compile(func, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            func_compiled(x)
+
+    def test_full_with_tensor_subclass_fill_value(self):
+        class MyTensor(torch.Tensor):
+            pass
+
+        def func(x):
+            return torch.full((2,), x)
+
+        x = torch.tensor(5.0).as_subclass(MyTensor)
+        expected = func(x)
+
+        func_compiled = torch.compile(func, backend="eager", fullgraph=True)
+        result = func_compiled(x)
+
+        self.assertEqual(result, expected)
 
 
 instantiate_parametrized_tests(FunctionTests)

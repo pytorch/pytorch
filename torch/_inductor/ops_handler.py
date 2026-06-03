@@ -37,6 +37,10 @@ StoreMode = AtomicMode | Literal["tma"] | None
 ReductionType = Literal[
     "argmax",
     "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
     "welford_reduce",
     "welford_combine",
     "any",
@@ -134,9 +138,21 @@ class OpsHandler(Generic[T]):
 
     def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
         """
-        Converts a sympy expression into a scalar of type dtype.  expr is typically
-        an indexing expression, thus the name; however, it can also be used in
-        non-indexing situations.
+        Converts a sympy expression into a scalar suitable for indexing memory.
+        The kernel decides the actual computation dtype (typically int32) — the
+        ``dtype`` argument is advisory and is not honored when it would conflict
+        with the kernel's indexing dtype. For values that must respect the
+        requested dtype, use ``value_expr`` instead.
+        """
+        raise NotImplementedError
+
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
+        """
+        Converts a sympy expression into a scalar of type ``dtype`` that
+        participates in tensor value computation. Unlike ``index_expr``, the
+        result dtype is honored, so this is the right op when the user
+        explicitly requested the dtype (e.g. ``arange(dtype=torch.int64)``
+        whose result is added to a tensor rather than used as an index).
         """
         raise NotImplementedError
 
@@ -1183,7 +1199,7 @@ class SimpleCSEHandler(WrapperHandler):
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
-        return super().indirect_indexing(*args, **kwargs)
+        return super().indirect_indexing(*args, **kwargs)  # type: ignore[misc]
 
     def store(self, *args, **kwargs) -> None:
         raise NotImplementedError("store not implemented")

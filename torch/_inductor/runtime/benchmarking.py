@@ -11,20 +11,39 @@ from typing_extensions import ParamSpec, Self, TypeVar
 import torch
 import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch.utils._debug_mode import DebugMode
+from torch.utils._ordered_set import OrderedSet
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
-use_experimental_benchmarker = (
-    inductor_config.use_experimental_benchmarker and torch.cuda.is_available()
-)
+GPU_BENCHMARK_DEVICE_TYPES = ("cuda", "xpu", "mtia")
+_CALLABLE_PROFILE_EVENT_NAME = "_CALLABLE"
 
 
 MILLISECONDS_PER_SECOND = 1000
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+
+def _get_default_gpu_device_type() -> str:
+    avail_gpus = [
+        device_type
+        for device_type in GPU_BENCHMARK_DEVICE_TYPES
+        if getattr(torch, device_type).is_available()
+    ]
+    assert len(avail_gpus) <= 1
+    return "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+
+
+def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
+    if device_type is None:
+        return _get_default_gpu_device_type()
+    if isinstance(device_type, torch.device):
+        return device_type.type
+    return torch.device(device_type).type
 
 
 # Device-type → benchmarking function registry.
@@ -341,16 +360,96 @@ def _default_cpu_bench(self, f, *, warmup, rep, **kw):
 
 
 def _default_cuda_bench(self, f, *, warmup, rep, **kw):
+    kw.setdefault("device_type", "cuda")
     return self.benchmark_gpu(f, warmup=warmup, rep=rep, **kw)
 
 
 def _default_xpu_bench(self, f, *, warmup, rep, **kw):
+    kw.setdefault("device_type", "xpu")
     return self.benchmark_gpu(f, warmup=warmup, rep=rep, **kw)
 
 
 register_benchmarker("cpu", _default_cpu_bench, override=True)
 register_benchmarker("cuda", _default_cuda_bench, override=True)
 register_benchmarker("xpu", _default_xpu_bench, override=True)
+
+
+def _get_callable_device_kernel_time_us(
+    kineto_events: Any,
+    profiler_events: Any,
+    rep: int,
+    profiler_device_type: Any,
+) -> float:
+    from torch.autograd import DeviceType
+
+    benchmark_event_ids: OrderedSet[int] = OrderedSet()
+
+    def collect_cpu_event_ids(event: Any) -> None:
+        if event.device_type != DeviceType.CPU:
+            return
+
+        benchmark_event_ids.add(event.id)
+        for child in event.cpu_children:
+            collect_cpu_event_ids(child)
+
+    benchmark_events = [
+        event
+        for event in profiler_events
+        if event.name == _CALLABLE_PROFILE_EVENT_NAME
+        and event.device_type == DeviceType.CPU
+    ]
+    if len(benchmark_events) != rep:
+        raise RuntimeError(
+            f"Expected {rep} {_CALLABLE_PROFILE_EVENT_NAME} profiling events. "
+            f"Found {len(benchmark_events)} events."
+        )
+
+    for event in benchmark_events:
+        collect_cpu_event_ids(event)
+
+    # An op may re-dispatch internally (e.g. aten::sum with no dim calls
+    # aten::sum with dim), producing a kineto CPU event whose corr ID the
+    # device kernel links to but which is absent from the profiler event tree.
+    # Include kineto corr IDs of all CPU events within the _CALLABLE time
+    # window to cover these hidden dispatches.
+    callable_kineto_windows: list[tuple[int, int]] = []
+    for ev in kineto_events:
+        if (
+            ev.name() == _CALLABLE_PROFILE_EVENT_NAME
+            and ev.device_type() == DeviceType.CPU
+        ):
+            callable_kineto_windows.append((ev.start_ns(), ev.end_ns()))
+
+    if callable_kineto_windows:
+        for ev in kineto_events:
+            if ev.device_type() != DeviceType.CPU:
+                continue
+            ev_start = ev.start_ns()
+            ev_end = ev.end_ns()
+            for win_start, win_end in callable_kineto_windows:
+                if ev_start >= win_start and ev_end <= win_end:
+                    benchmark_event_ids.add(ev.correlation_id())
+                    break
+
+    device_time_us = 0.0
+    for event in kineto_events:
+        linked_correlation_id = event.linked_correlation_id()
+        correlation_id = event.correlation_id()
+        activity_type = event.activity_type()
+        if (
+            event.device_type() == profiler_device_type
+            and activity_type != "gpu_user_annotation"
+            and (
+                linked_correlation_id in benchmark_event_ids
+                or (
+                    linked_correlation_id == 0 and correlation_id in benchmark_event_ids
+                )
+            )
+            and event.name() != "Context Sync"
+        ):
+            device_time_us += (event.end_ns() - event.start_ns()) / 1000.0
+
+    return device_time_us
 
 
 class TritonBenchmarker(Benchmarker):
@@ -418,26 +517,44 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     @cached_property
     def L2_cache_size(self: Self) -> int:
         """Get the L2 cache size, in bytes, of the current device."""
-        device = torch.cuda.current_device()
-        props = torch.cuda.get_device_properties(device)
-        return props.L2_cache_size
+        return self.get_device_cache_size()
+
+    def get_device_cache_size(
+        self: Self, device_type: str | torch.device | None = None
+    ) -> int:
+        """Get the L2/global cache size, in bytes, of the current device."""
+        if "L2_cache_size" in self.__dict__:
+            return self.__dict__["L2_cache_size"]
+
+        device_type = _normalize_gpu_device_type(device_type)
+        device_interface = get_interface_for_device(device_type)
+        device = device_interface.current_device()
+        props = device_interface.get_device_properties(device)
+        for attr in ("L2_cache_size", "last_level_cache_size"):
+            cache_size = getattr(props, attr, None)
+            if cache_size:
+                return cache_size
+        return 256 * 1024 * 1024
 
     def get_event_pairs(
-        self: Self, iters: int
-    ) -> list[tuple[torch.cuda.Event, torch.cuda.Event]]:
-        """Get `iters` pairs of CUDA events."""
+        self: Self, iters: int, device_type: str | torch.device | None = None
+    ) -> list[tuple[Any, Any]]:
+        """Get `iters` pairs of device events."""
+        device_interface = get_interface_for_device(
+            _normalize_gpu_device_type(device_type)
+        )
         return [
             (
-                torch.cuda.Event(enable_timing=True),
-                torch.cuda.Event(enable_timing=True),
+                device_interface.Event(enable_timing=True),
+                device_interface.Event(enable_timing=True),
             )
             for _ in range(iters)
         ]
 
     def get_event_pairs_min_timing(
-        self: Self, event_pairs: list[tuple[torch.cuda.Event, torch.cuda.Event]]
+        self: Self, event_pairs: list[tuple[Any, Any]]
     ) -> float:
-        """Get the minimum timing, in milliseconds, for a group of CUDA event pairs."""
+        """Get the minimum timing, in milliseconds, for a group of event pairs."""
         return min(
             [
                 start_event.elapsed_time(end_event)
@@ -447,7 +564,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
     @may_distort_benchmarking_result
     @time_and_count
-    def benchmark_gpu(
+    def benchmark_gpu(  # type: ignore[override]
         self: Self,
         _callable: Callable[[], Any],
         estimation_iters: int = 5,
@@ -457,6 +574,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         return_mode: str = "min",
         grad_to_none: list[torch.Tensor] | None = None,
         is_vetted_benchmarking: bool = False,
+        device_type: str | torch.device | None = None,
         **kwargs: Any,
     ) -> float | list[float]:
         """Benchmark a GPU callable using a custom benchmarking implementation.
@@ -492,19 +610,26 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         if not is_vetted_benchmarking:
             may_ban_benchmarking()
 
+        device_type = _normalize_gpu_device_type(device_type)
+        device_interface = get_interface_for_device(device_type)
+
         # we don't want any outside errors propagating into benchmarking
-        torch.cuda.synchronize()
+        device_interface.synchronize()
 
         # warmup `_callable` (and catches any failures in the process)
         _callable()
-        torch.cuda.synchronize()
+        device_interface.synchronize()
 
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
-        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
+        buffer = torch.empty(
+            self.get_device_cache_size(device_type) // 4,
+            dtype=torch.int,
+            device=device_type,
+        )
         buffer.zero_()
 
         # estimate the runtime of `_callable`
-        event_pairs = self.get_event_pairs(estimation_iters)
+        event_pairs = self.get_event_pairs(estimation_iters, device_type=device_type)
         for start_event, end_event in event_pairs:
             # Clear gradients before timing (matches triton.testing.do_bench)
             if grad_to_none is not None:
@@ -514,7 +639,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             start_event.record()
             _callable()
             end_event.record()
-        torch.cuda.synchronize()
+        device_interface.synchronize()
         estimated_timing = self.get_event_pairs_min_timing(event_pairs)
 
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration
@@ -528,7 +653,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             buffer.zero_()
 
         # benchmark `_callable`
-        event_pairs = self.get_event_pairs(benchmark_iters)
+        event_pairs = self.get_event_pairs(benchmark_iters, device_type=device_type)
         for start_event, end_event in event_pairs:
             # Clear gradients before timing (matches triton.testing.do_bench)
             if grad_to_none is not None:
@@ -538,7 +663,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             start_event.record()
             _callable()
             end_event.record()
-        torch.cuda.synchronize()
+        device_interface.synchronize()
 
         # explicitly delete the buffer, sometimes helps memory
         # footprint metrics in OSS Inductor performance benchmarks
@@ -563,6 +688,173 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             )
 
 
-benchmarker = (
-    InductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
-)
+class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
+    """Benchmarker that uses torch.profiler for GPU kernel benchmarking."""
+
+    @time_and_count
+    def benchmark_gpu(  # type: ignore[override]
+        self: Self,
+        _callable: Callable[[], Any],
+        warmup: int = 25,
+        rep: int = 100,
+        estimation_iters: int = 5,
+        memory_warmup_iters: int = 10,
+        max_benchmark_duration: int = 25,
+        return_mode: str = "mean",
+        grad_to_none: list[torch.Tensor] | None = None,
+        device_type: str | torch.device | None = None,
+        **kwargs: Any,
+    ) -> float:
+        """Benchmark a GPU callable using torch.profiler.
+
+        Arguments:
+        - _callable: The callable to benchmark.
+
+        Keyword Arguments:
+        - warmup: Ignored (kept for API compat). Warmup is handled by the
+        estimation phase which runs estimation_iters with cache flushing.
+        - rep: Optionally, the maximum number of iterations to run during benchmarking.
+        - estimation_iters: Optionally, the number of iterations used to estimate
+        the runtime of `_callable` for dynamic rep adjustment. These iterations
+        also serve as warmup for the callable.
+        - memory_warmup_iters: Optionally, the number of buffer.zero_() iterations
+        to run after estimation to bring the cache into a steady state before
+        the profiled benchmark phase.
+        - max_benchmark_duration: Optionally, the maximum duration of the profiled
+        benchmark phase, in milliseconds. The rep count is reduced if the
+        estimated total would exceed this budget.
+        - return_mode: Return mode for benchmark results. Options are "min", "mean" (default),
+        or "max".
+        - grad_to_none: Optionally, a list of tensors whose gradients should be cleared
+        before each benchmark iteration.
+        - **kwargs: Additional kwargs that may be passed to the fallback.
+
+        Returns:
+        - The runtime of `_callable` in milliseconds, computed according to return_mode.
+        """
+        device_type = _normalize_gpu_device_type(device_type)
+        device_interface = get_interface_for_device(device_type)
+
+        # we don't want any outside errors propagating into benchmarking
+        device_interface.synchronize()
+
+        # warmup `_callable` (and catches any failures in the process)
+        _callable()
+        device_interface.synchronize()
+
+        # Keep Triton's 256 MB cache flush on ROCm. On other backends, reuse
+        # the shared L2-sized flush from InductorBenchmarker.
+        # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        if torch.version.hip:
+            buffer_size_bytes = 256 * 1024 * 1024
+        else:
+            buffer_size_bytes = self.get_device_cache_size(device_type)
+        buffer = torch.empty(
+            buffer_size_bytes // 4, dtype=torch.int, device=device_type
+        )
+        buffer.zero_()
+
+        # Estimation phase with separate event pairs — also serves as warmup.
+        # Using per-iteration event pairs lets us take the min, matching
+        # InductorBenchmarker's approach for a more robust estimate.
+        event_pairs = self.get_event_pairs(estimation_iters, device_type=device_type)
+        for start_event, end_event in event_pairs:
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
+            buffer.zero_()
+            start_event.record()
+            _callable()
+            end_event.record()
+        device_interface.synchronize()
+        estimated_ms = self.get_event_pairs_min_timing(event_pairs)
+        if estimated_ms > 0:
+            rep = max(min(rep, int(max_benchmark_duration / estimated_ms)), 1)
+
+        # Light memory warmup: flush the cache into a steady state before
+        # the profiled run.  No callable — estimation already warmed it.
+        for _ in range(memory_warmup_iters):
+            buffer.zero_()
+
+        # benchmark with profiler
+        # Use both CPU and device activities, otherwise record_function
+        # will not record the region.
+        device_type_upper = device_type.upper()
+        profile_activity = getattr(torch.profiler.ProfilerActivity, device_type_upper)
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                profile_activity,
+            ],
+            record_shapes=False,
+        ) as prof:
+            for _ in range(rep):
+                if grad_to_none is not None:
+                    for x in grad_to_none:
+                        x.grad = None
+                buffer.zero_()
+
+                with torch.profiler.record_function("_CALLABLE"):
+                    _callable()
+
+        device_interface.synchronize()
+
+        # Extract _CALLABLE GPU time directly from raw kineto events.
+        # This avoids prof.key_averages() which triggers expensive lazy
+        # processing: _parse_kineto_results (wrapping every raw event in
+        # a Python FunctionEvent), _build_tree, and grouping/aggregation.
+        from torch.autograd import DeviceType as _DeviceType
+
+        profiler_device_type = getattr(_DeviceType, device_type_upper)
+        callable_gpu_time_us = 0.0
+        for kineto_event in prof.profiler.kineto_results.events():
+            if (
+                kineto_event.name() == _CALLABLE_PROFILE_EVENT_NAME
+                and kineto_event.device_type() == profiler_device_type
+            ):
+                callable_gpu_time_us += (
+                    kineto_event.end_ns() - kineto_event.start_ns()
+                ) / 1000.0
+
+        if callable_gpu_time_us <= 0:
+            callable_gpu_time_us = _get_callable_device_kernel_time_us(
+                prof.profiler.kineto_results.events(),
+                prof.events(),
+                rep,
+                profiler_device_type,
+            )
+
+        if callable_gpu_time_us <= 0:
+            raise AssertionError(
+                f"TorchProfilerBenchmarker: '_CALLABLE' {device_type_upper} event not found in "
+                "raw kineto results, and no correlated device events were found."
+            )
+
+        # TODO: Revisit incorporating launch overhead effects.
+        total_time_us = callable_gpu_time_us
+        avg_time_ms = (total_time_us / rep) / 1000.0
+
+        # explicitly delete the buffer, sometimes helps memory
+        # footprint metrics in OSS Inductor performance benchmarks
+        del buffer
+
+        # Return based on the requested mode
+        # Note: For profiler-based benchmarking, we return the mean time per iteration
+        # min/max modes are kept for API compatibility but return the mean
+        if return_mode in ("min", "mean", "max"):
+            return avg_time_ms
+        else:
+            raise ValueError(
+                f"Unsupported return_mode: {return_mode}. Use 'min', 'mean', or 'max'."
+            )
+
+
+def _make_default_benchmarker() -> Benchmarker:
+    if inductor_config.use_torch_profiler_benchmarker:
+        return TorchProfilerBenchmarker()
+    if inductor_config.use_experimental_benchmarker:
+        return InductorBenchmarker()
+    return TritonBenchmarker()
+
+
+benchmarker = _make_default_benchmarker()

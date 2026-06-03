@@ -3,6 +3,11 @@
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/List.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/zeros.h>
+#endif
 #include <c10/core/DeviceType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/ArrayRef.h>
@@ -10,7 +15,9 @@
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/shim_exception_state.h>
 #include <optional>
+#include <type_traits>
 
 namespace torch::aot_inductor {
 TORCH_API const char* get_last_error();
@@ -20,13 +27,20 @@ TORCH_API void set_last_error(const char* msg);
 #define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)                     \
   try {                                                                     \
     __VA_ARGS__                                                             \
+  } catch (const c10::Error& e) {                                           \
+    torch::csrc::shim::details::set_torch_exception_what(e.what());         \
+    torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
+        e.what_without_backtrace());                                        \
+    return AOTI_TORCH_FAILURE;                                              \
   } catch (const std::exception& e) {                                       \
-    LOG(ERROR) << "Exception in aoti_torch: " << e.what();                  \
-    torch::aot_inductor::set_last_error(e.what());                          \
+    torch::csrc::shim::details::set_torch_exception_what(e.what());         \
+    torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
+        torch::csrc::shim::details::get_torch_exception_what());            \
     return AOTI_TORCH_FAILURE;                                              \
   } catch (...) {                                                           \
-    LOG(ERROR) << "Exception in aoti_torch: UNKNOWN";                       \
-    torch::aot_inductor::set_last_error("Unknown exception in aoti_torch"); \
+    torch::csrc::shim::details::set_torch_exception_what("UNKNOWN");        \
+    torch::csrc::shim::details::set_torch_exception_what_without_backtrace( \
+        torch::csrc::shim::details::get_torch_exception_what());            \
     return AOTI_TORCH_FAILURE;                                              \
   }                                                                         \
   return AOTI_TORCH_SUCCESS;
@@ -43,6 +57,13 @@ inline AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
 
 inline at::Tensor resolve_tensor_dispatch_flags(AtenTensorHandle handle) {
   at::Tensor* tensor{tensor_handle_to_tensor_pointer(handle)};
+  if (tensor->_is_zerotensor()) {
+    // ZeroTensors have null storage and rely on the ZeroTensor boxed fallback
+    // to materialize themselves before reaching a native ATen function.  Since
+    // the C-shim calls the native function directly, that fallback never runs,
+    // so we materialize here exactly as it does (see ZeroTensorFallback.cpp).
+    return at::zeros({}, tensor->options()).expand(tensor->sizes());
+  }
   if (tensor->is_conj() || tensor->is_neg()) {
     // If the conjugation or negation dispatch flags are set, runtime dispatch
     // handles them by cloning the tensor before passing them to the native ATen
@@ -220,14 +241,71 @@ inline std::array<bool, N> pointer_to_list(const int32_t* ptr) {
   return result;
 }
 
-// Utility function to convert a pointer to an optional list of values
+// Wrappers returned by pointer_to_optional_list.
+//
+// Both expose the same two implicit conversions so generated shim call sites
+// can pass the result into either c10::OptionalArrayRef<T> or
+// std::optional<c10::ArrayRef<T>> parameters uniformly.
+//
+// Two wrappers (not one) so the dispatch is compile-time: each call site of
+// pointer_to_optional_list resolves to exactly one type via `if constexpr`,
+// with no runtime tag.
+
+// Used when the wire element type matches T (modulo cv): the wire buffer can
+// be viewed directly as an ArrayRef. No allocation, no copy. The wire buffer
+// outlives the surrounding op call expression, so the view stays valid.
+template <class T>
+struct BorrowedOptionalArrayRef {
+  c10::OptionalArrayRef<T> storage;
+
+  /* implicit */ operator c10::OptionalArrayRef<T>() const noexcept {
+    return storage;
+  }
+  /* implicit */ operator std::optional<c10::ArrayRef<T>>() const {
+    return storage.has_value() ? std::make_optional(*storage) : std::nullopt;
+  }
+};
+
+// Used when the wire element type differs from T and pointer_to_list has to
+// materialize a converted std::vector<T> (e.g. int64_t wire -> c10::SymInt).
+// Owning the vector keeps it alive across the receiving op call so an
+// ArrayRef projected from it stays valid.
+//
+// Returning std::optional<c10::ArrayRef<T>> directly here was the original
+// bug: the ArrayRef viewed into a temporary vector destroyed at the end of
+// pointer_to_optional_list, surfaced by ASAN as a heap-use-after-free in
+// c10::SymInt::is_heap_allocated when convolution_backward_symint read freed
+// SymInt memory.
+template <class T>
+struct OwnedOptionalArrayRef {
+  std::optional<std::vector<T>> storage;
+
+  /* implicit */ operator c10::OptionalArrayRef<T>() const {
+    return storage ? c10::OptionalArrayRef<T>(c10::ArrayRef<T>(*storage))
+                   : c10::OptionalArrayRef<T>(std::nullopt);
+  }
+  /* implicit */ operator std::optional<c10::ArrayRef<T>>() const {
+    return storage ? std::make_optional(c10::ArrayRef<T>(*storage))
+                   : std::nullopt;
+  }
+};
+
+// Utility function to convert a pointer to an optional list of values.
+//
+// Compile-time dispatch on whether T matches the wire element type U (modulo
+// cv): same-type returns a borrowed view of the wire buffer (zero-copy);
+// different-type returns an owning wrapper around the converted vector.
 template <class T, class U>
-inline std::optional<c10::ArrayRef<T>> pointer_to_optional_list(
-    U** ptr,
-    int64_t len) {
-  return ptr
-      ? std::make_optional<c10::ArrayRef<T>>(pointer_to_list<T>(*ptr, len))
-      : std::nullopt;
+inline auto pointer_to_optional_list(U** ptr, int64_t len) {
+  if constexpr (std::is_same_v<T, std::remove_cv_t<U>>) {
+    return BorrowedOptionalArrayRef<T>{
+        ptr ? c10::OptionalArrayRef<T>(c10::ArrayRef<T>(*ptr, len))
+            : c10::OptionalArrayRef<T>(std::nullopt)};
+  } else {
+    return OwnedOptionalArrayRef<T>{
+        ptr ? std::optional<std::vector<T>>(pointer_to_list<T>(*ptr, len))
+            : std::nullopt};
+  }
 }
 
 template <typename T>

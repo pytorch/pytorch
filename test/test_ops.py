@@ -31,10 +31,13 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
     OpDTypes,
     ops,
+    skip,
     skipCUDAIfNotRocm,
     skipMeta,
     skipMPS,
+    skipOps,
     skipXPU,
+    xfail,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -49,11 +52,8 @@ from torch.testing._internal.common_methods_invocations import (
     python_ref_db,
     ReductionOpInfo,
     ReductionPythonRefInfo,
-    skip,
-    skipOps,
     SpectralFuncInfo,
     UnaryUfuncInfo,
-    xfail,
 )
 from torch.testing._internal.common_utils import (
     clone_input_helper,
@@ -1829,11 +1829,7 @@ class TestCommon(TestCase):
     # of other concrete devices (e.g. CPU and CUDA).
     @onlyCPU
     @ops([op for op in op_db if op.supports_out], allowed_dtypes=(torch.float32,))
-    @skipOps(
-        "TestCommon",
-        "test_meta_consistency_out_dtype_mismatch",
-        meta_consistency_out_dtype_mismatch_xfails,
-    )
+    @skipOps(meta_consistency_out_dtype_mismatch_xfails)
     @skipIfTorchDynamo("meta device runs only on eager")
     def test_meta_consistency_out_dtype_mismatch(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
@@ -2493,7 +2489,6 @@ class TestRefsOpsInfo(TestCase):
         "_refs.index_add_",
         "_refs.index_copy_",
         "_refs.index_fill_",
-        "_refs.native_group_norm",
     }
 
     not_in_decomp_table = {
@@ -2972,19 +2967,13 @@ class TestFakeTensor(TestCase):
 
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(
-        "TestFakeTensor", "test_fake_crossref_backward_no_amp", fake_backward_xfails
-    )
+    @skipOps(fake_backward_xfails)
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(
-        "TestFakeTensor",
-        "test_fake_crossref_backward_amp",
-        fake_backward_xfails | fake_autocast_backward_xfails,
-    )
+    @skipOps(fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 

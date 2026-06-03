@@ -20,6 +20,23 @@ TRITON_MAX_BLOCK = {
     "R1_": 2048 * 16,  # * 16 is multi-kernel only
 }
 TRITON_MAX_RSPLIT = 64
+TRITON_MAX_TENSOR_NUMEL = 1 << 20
+TRITON_DOT_MIN_BLOCK = 16
+
+
+def native_matmul_block_numel(
+    kwargs: typing.Mapping[str, int], r0_block: int | None = None
+) -> int:
+    return (
+        kwargs.get("XBLOCK", 1)
+        * kwargs.get("YBLOCK", 1)
+        * kwargs.get("ZBLOCK", 1)
+        * (kwargs.get("R0_BLOCK", 1) if r0_block is None else r0_block)
+    )
+
+
+def native_matmul_persistent_rblock(r0_block: int) -> int:
+    return max(r0_block, TRITON_DOT_MIN_BLOCK)
 
 
 class ReductionHint(Enum):
@@ -140,7 +157,7 @@ class AutotuneHint(Enum):
 class DeviceProperties(typing.NamedTuple):
     """Copy device properties into a data structure not requiring torch to be imported"""
 
-    type: str
+    type: str  # type: ignore[assignment]
     index: int  # type: ignore[assignment]
     multi_processor_count: int
     cc: int

@@ -15,7 +15,10 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
-from torch._inductor.custom_graph_pass import CustomInferenceAwareGraphPass
+from torch._inductor.custom_graph_pass import (
+    CustomInferenceAwareGraphPass,
+    get_custom_graph_passes,
+)
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
@@ -159,9 +162,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             reorder_for_locality
         )
 
-    fake_tensor_updater = FakeTensorUpdater(gm.graph)
+    fake_tensor_updater = FakeTensorUpdater(gm)
 
-    if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
+    for post_grad_custom_pre_pass in get_custom_graph_passes(
+        config.post_grad_custom_pre_pass
+    ):
         if isinstance(post_grad_custom_pre_pass, CustomInferenceAwareGraphPass):
             post_grad_custom_pre_pass = functools.partial(
                 post_grad_custom_pre_pass, is_inference=is_inference
@@ -231,7 +236,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                     ),
                 )
         if config.b2b_gemm_pass:
-            B2B_GEMM_PASS.apply(gm.graph)
+            B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
     if config._micro_pipeline_tp:
         micro_pipeline_tp_pass(gm.graph)
@@ -245,7 +250,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
         )
 
-    if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
+    for post_grad_custom_post_pass in get_custom_graph_passes(
+        config.post_grad_custom_post_pass
+    ):
         if isinstance(post_grad_custom_post_pass, CustomInferenceAwareGraphPass):
             post_grad_custom_post_pass = functools.partial(
                 post_grad_custom_post_pass, is_inference=is_inference
@@ -305,7 +312,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
-                config.bucket_reduce_scatters_bucket_mode,
+                config.bucket_reduce_scatters_bucket_mode,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -317,7 +324,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: bucket_all_reduce(
                 graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_all_reduces_fx_bucket_size_determinator,
-                config.bucket_all_reduces_fx,
+                config.bucket_all_reduces_fx,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -329,7 +336,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
 
         p = (
-            bucket_fsdp_all_gather
+            bucket_fsdp_all_gather  # type: ignore[assignment]
             if "fsdp" in config.bucket_all_gathers_fx
             else bucket_all_gather
         )
@@ -337,7 +344,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_all_gathers_fx_bucket_size_determinator,
-                config.bucket_all_gathers_bucket_mode,
+                config.bucket_all_gathers_bucket_mode,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -722,13 +729,13 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
             def cond_fn(*flat_args):
                 loop_idx, _, _, _, _ = pytree.tree_unflatten(
                     flat_args, operands_and_additional_inputs_spec
-                )
-                return loop_idx < scan_length
+                )  # type: ignore[has-type]
+                return loop_idx < scan_length  # type: ignore[has-type]
 
             def body_fn(*flat_args):
                 loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
                     flat_args,
-                    operands_and_additional_inputs_spec,
+                    operands_and_additional_inputs_spec,  # type: ignore[has-type]
                 )
 
                 idx_int = loop_idx.item()
@@ -1647,7 +1654,19 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         torch.bfloat16,
         torch.float16,
     ):
-        return
+        # Narrowing-cast unfuse (PR #183680) is XPU-only: it preserves
+        # precision on XPU pointwise but regresses accuracy on ROCm
+        # (basic_gnn_edgecnn training+amp fails on gfx950 otherwise).
+        if inp.meta["val"].device.type != "xpu":
+            return
+        if not (
+            inp.op == "call_function"
+            and inp.target is torch.ops.prims.convert_element_type.default
+            and inp.args[0].meta["val"].dtype.is_floating_point
+            and torch.finfo(inp.args[0].meta["val"].dtype).bits
+            > torch.finfo(inp.meta["val"].dtype).bits
+        ):
+            return
 
     def repl(inp, x1, x2, alpha, beta):
         mm_result = x1 @ x2
@@ -2067,7 +2086,7 @@ class ConstructorMoverPass:
                     cannot_move_to_gpu.update(dependencies)
                     break
 
-                # this node was used on a op which takes in multiple devices and output a gpu
+                # this node was used on an op which takes in multiple devices and output a gpu
                 # tensor. we can convert its cpu input to gpu without making further changes
                 if self.allow_cpu_device(user) and self.is_on_target_device(user):
                     del cpu_indeg[user]
