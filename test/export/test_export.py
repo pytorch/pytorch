@@ -6694,6 +6694,32 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep.module()(torch.tensor([5]))
         ep.module()(torch.tensor([1]))
 
+    def test_unbacked_infer_size_nonzero_broadcast(self):
+        class AddFoo(torch.nn.Module):
+            def forward(self, x, y):
+                i = torch.nonzero(x)
+                j = torch.nonzero(y)
+                return i + j
+
+        class ExpandFoo(torch.nn.Module):
+            def forward(self, x, y):
+                i = torch.nonzero(x)
+                j = torch.nonzero(y)
+                return i + j.expand(i.shape)
+
+        x = torch.tensor([[0, 5], [6, 7], [8, 0]], dtype=torch.float32)
+        y = torch.tensor([[5, 0], [6, 7], [0, 8]], dtype=torch.float32)
+        x2 = torch.tensor([[0, 5], [6, 7], [8, 0]], dtype=torch.float32)
+        y2 = torch.tensor([[0, 0], [6, 0], [0, 0]], dtype=torch.float32)
+        dynamic_shapes = {
+            "x": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+            "y": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+        }
+
+        for model in (AddFoo(), ExpandFoo()):
+            ep = export(model, (x, y), dynamic_shapes=dynamic_shapes)
+            self.assertEqual(ep.module()(x2, y2), model(x2, y2))
+
     def test_unbacked_pad(self):
         class Foo(torch.nn.Module):
             def forward(self, xs, pad):
@@ -15459,11 +15485,45 @@ def forward(self, x, y):
             ep.module()(torch.tensor([1, 1])).shape[0],
             1,
         )
+        self.assertEqual(
+            ep.module()(torch.tensor([1, 5])).shape[0],
+            5,
+        )
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(u0, u1\) .*",
+            r"Runtime assertion failed for expression Eq\(u0, 1\) \| Eq\(u1, u0\) .*",
         ):
-            ep.module()(torch.tensor([1, 5]))
+            ep.module()(torch.tensor([2, 5]))
+
+    def test_unbacked_expand_preserves_noop_stride(self):
+        import sympy
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1 = xs.tolist()
+                x = torch.empty_strided((u0,), (7,))
+                return x.expand(u1)
+
+        def symint_expr(x):
+            return x.node.expr if isinstance(x, torch.SymInt) else sympy.Integer(x)
+
+        ep = export(Foo(), (torch.tensor([1, 1]),))
+        empty_strided_node = next(
+            n
+            for n in ep.graph.nodes
+            if n.target is torch.ops.aten.empty_strided.default
+        )
+        expand_node = next(
+            n for n in ep.graph.nodes if n.target is torch.ops.aten.expand.default
+        )
+        input_size = symint_expr(empty_strided_node.meta["val"].shape[0])
+        output_size = symint_expr(expand_node.meta["val"].shape[0])
+        output_stride = symint_expr(expand_node.meta["val"].stride()[0])
+
+        self.assertEqual(output_stride.subs({input_size: 1, output_size: 1}), 7)
+        self.assertEqual(output_stride.subs({input_size: 1, output_size: 5}), 0)
+        self.assertEqual(ep.module()(torch.tensor([1, 1])).stride()[0], 7)
+        self.assertEqual(ep.module()(torch.tensor([1, 5])).stride()[0], 0)
 
     def test_reshape_view_helper(self):
         # see: https://github.com/pytorch/pytorch/issues/126607

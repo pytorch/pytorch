@@ -391,6 +391,7 @@ def _broadcast_shapes(*_shapes):
         guarding_hint_or_throw,
         has_guarding_hint,
         is_nested_int,
+        sym_or,
     )
 
     backed_so = torch.fx.experimental._config.backed_size_oblivious
@@ -424,29 +425,43 @@ def _broadcast_shapes(*_shapes):
                     shape[idx] == common_shape[idx]
                 ):
                     continue
-            else:
-                # When backed size oblivious is used, we specialize for broadcasting
-                # if its the only way to compile the example input.
-                # i.e: s0:1, s1:1 ==>
-                #           assert s0==s1, no specialization on ==1 or !=1.
-                #            The non-broadcast path is picked
-                #      s0:1, s1:4 ==>
-                #           specialize(s0) to be 1.
-                #      s0:4, s1:1 ==>
-                #           specialize(s1) to be 1.
-                if (
-                    backed_so
-                    and has_guarding_hint(shape[idx])
-                    and has_guarding_hint(common_shape[idx])
-                ):
-                    a = guarding_hint_or_throw(shape[idx])
-                    b = guarding_hint_or_throw(common_shape[idx])
-                    if a == 1 and b != 1:
-                        torch._check(shape[idx] == 1)
-                    if b == 1 and a != 1:
-                        torch._check(common_shape[idx] == 1)
-                if guard_or_false(shape[idx] == common_shape[idx]):
+                if guard_or_false(common_shape[idx] == 1):
+                    if shape[idx] < 0:
+                        raise ValueError(
+                            "Attempting to broadcast a dimension with negative length!"
+                        )
+                    common_shape[idx] = shape[idx]
                     continue
+                torch._check(
+                    common_shape[idx] == shape[idx],
+                    lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
+                    f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
+                    f"should be broadcastable to {common_shape}",
+                )
+                continue
+
+            # When backed size oblivious is used, we specialize for broadcasting
+            # if it's the only way to compile the example input.
+            # i.e: s0:1, s1:1 ==>
+            #           assert s0==s1, no specialization on ==1 or !=1.
+            #            The non-broadcast path is picked
+            #      s0:1, s1:4 ==>
+            #           specialize(s0) to be 1.
+            #      s0:4, s1:1 ==>
+            #           specialize(s1) to be 1.
+            if (
+                backed_so
+                and has_guarding_hint(shape[idx])
+                and has_guarding_hint(common_shape[idx])
+            ):
+                a = guarding_hint_or_throw(shape[idx])
+                b = guarding_hint_or_throw(common_shape[idx])
+                if a == 1 and b != 1:
+                    torch._check(shape[idx] == 1)
+                if b == 1 and a != 1:
+                    torch._check(common_shape[idx] == 1)
+            if guard_or_false(shape[idx] == common_shape[idx]):
+                continue
 
             if guard_or_false(common_shape[idx] == 1):
                 if shape[idx] < 0:
@@ -454,18 +469,20 @@ def _broadcast_shapes(*_shapes):
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
-
-            if not is_nested_int(shape[idx]) and guard_or_false(shape[idx] == 1):
-                # broadcast case .
+            elif guard_or_false(shape[idx] == 1):
                 continue
             else:
-                # If broadcasting is undecided we pick non-broadcast path and add runtime assertion.
                 torch._check(
-                    common_shape[idx] == shape[idx],
+                    sym_or(
+                        common_shape[idx] == 1,
+                        shape[idx] == 1,
+                        common_shape[idx] == shape[idx],
+                    ),
                     lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
                     f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
                     f"should be broadcastable to {common_shape}",
                 )
+                common_shape[idx] = torch.sym_max(common_shape[idx], shape[idx])
 
     return common_shape
 
@@ -477,34 +494,14 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
     )
 
     def should_expand(a: ShapeType, b: ShapeType) -> bool:
-        from torch.fx.experimental.symbolic_shapes import (
-            guard_or_false,
-            sym_and,
-            sym_or,
-        )
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
 
         if len(a) != len(b):
             return True
 
         for x, y in zip(a, b):
-            if guard_or_false(x != y):
-                # We know they are not the same.
+            if not guard_or_false(x == y):
                 return True
-
-            # They are the same or we do not know if they are the same or not.
-            # 1==1 no-broadcast
-            # u0==1 and 1==u0 cases. We broadcast!
-            if guard_or_false(sym_and(x == 1, y == 1)):
-                pass
-            elif guard_or_false(sym_or(x == 1, y == 1)):
-                # assume broadcasting.
-                return True
-
-            # u0==u1 assume the same, no broadcasting!
-            torch._check(
-                x == y,
-                lambda: "sizes assumed to be the same due to unbacked broadcasting semantics",
-            )
 
         return False
 
@@ -3167,15 +3164,13 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
         #
         # the code below is written for unbacked semantics s.t. we assume unbacked symbols don't
         # represent -1 unless explicitly specified, and the user is opting for case 2) or 3).
-        # the sym_or allows either case, but in the decomposition's current state, broadcast_in_dim()
-        # will either assume case 3) (via validate_shape() marking the expanded shape size-like), or will
-        # raise a data-dependent error trying to figure out if the stride is 0, requiring the user to manually
-        # select between the semantics of cases 2) and 3).
+            # The sym_or allows either case, and broadcast_in_dim() represents
+            # the ambiguous stride choice symbolically.
         if guard_or_false(requested_length == -1):
             shape_[offset_idx] = x
         else:
             # When backed size oblivious is used, we specialize for broadcasting
-            # if its the only way to compile the example input.
+            # if it's the only way to compile the example input.
             # i.e: x:1, requested_length:1 ==>
             #           assert x==requested_length, no specialization on ==1 or !=1.
             #            The non-broadcast path is picked

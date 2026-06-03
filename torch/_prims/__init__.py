@@ -1343,12 +1343,15 @@ def _broadcast_in_dim_meta(
                     new_strides.append(a.stride()[original_idx])
                 else:
                     new_strides.append(0)
-            else:
-                torch._check(
-                    a.shape[original_idx] == shape[idx],
-                    lambda: f"non-broadcasting semantics require {a.shape[original_idx]} == {shape[idx]}",
-                )
+            elif guard_or_false(a.shape[original_idx] == shape[idx]):
                 new_strides.append(a.stride()[original_idx])
+            else:
+                stride = a.stride()[original_idx]
+                new_strides.append(
+                    torch.sym_ite(
+                        a.shape[original_idx] == shape[idx], stride, stride * 0
+                    )
+                )
             original_idx = original_idx + 1
         else:
             if guard_or_true(shape[idx] != 1):
