@@ -868,7 +868,9 @@ class TestPatternMatcher(TestCase):
     @parametrize(
         "input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls",
         [
-            (torch.float32, torch.float16, False, 1),
+            (torch.float32, torch.float16, False, 2),
+            (torch.float32, torch.bfloat16, False, 2),
+            (torch.float32, torch.float64, False, 1),
             (torch.float32, torch.float16, True, 2),
             (torch.float16, torch.float32, True, 1),
         ],
@@ -1580,6 +1582,10 @@ class TestPatternMatcher(TestCase):
             "fx_graph_remote_cache": False,
             "keep_addmm_fused_for_half_dtypes": True,
         }
+    )
+    @unittest.skipIf(
+        GPU_TYPE != "xpu",
+        "narrowing-cast unfuse is XPU-only; CUDA/ROCm keep addmm fused",
     )
     def test_unfuse_bias_addmm_half_dtypes_narrowing_cast(self, dtype):
         # When bias is fp32 and cast to a half dtype (e.g. AMP), unfusing
