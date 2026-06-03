@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import os
 import sys
+import types
 import unittest
 
 import sympy
@@ -8,8 +9,10 @@ import sympy
 import torch
 from torch._dynamo.source import ConstantSource
 from torch._inductor.codegen.cpp import cexpr
+from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
+from torch._inductor.dependencies import MemoryDep
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.sizevars import (
     simplify_index_in_vec_range,
@@ -705,6 +708,61 @@ class ExprPrinterTests(InductorTestCase):
 
 instantiate_parametrized_tests(ExprPrinterTests)
 
+
+class TestIndexConstOverflowInt32(InductorTestCase):
+    """Sympy-level tests for
+    ``SIMDKernelFeatures._any_index_expr_const_overflows_int32``."""
+
+    def _make_feats(self, indices):
+        # name / var_names / size are unused by the checker; any value works.
+        deps = [MemoryDep(f"buf{i}", idx, (), ()) for i, idx in enumerate(indices)]
+        node = types.SimpleNamespace(
+            read_writes=types.SimpleNamespace(reads=deps, writes=[])
+        )
+        # Bypass __init__ (needs V.graph) and shadow scheduler_nodes().
+        feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
+        feats.scheduler_nodes = lambda: [node]
+        return feats
+
+    def _check(self, indices):
+        return self._make_feats(indices)._any_index_expr_const_overflows_int32()
+
+    def test_production_constant_detected(self):
+        # Exact form observed on PyTorch 2.8.0+cu126 / Triton 3.4.0:
+        #   tl.load(in_ptr0 + ((-2779057358) + x0 + 310*x1), ...)
+        x0, x1 = sympy.symbols("x0 x1", integer=True)
+        expr = sympy.Integer(-2_779_057_358) + x0 + 310 * x1
+        self.assertTrue(self._check([expr]))
+
+    def test_small_constant_not_flagged(self):
+        x0, x1 = sympy.symbols("x0 x1", integer=True)
+        expr = sympy.Integer(-1_000_000) + x0 + 310 * x1
+        self.assertFalse(self._check([expr]))
+
+    def test_boundary_at_int32_limits(self):
+        # int32 range is asymmetric: [-2**31, 2**31 - 1].  Both inclusive
+        # bounds must be treated as legal; in particular ``Abs(-2**31) >
+        # 2**31 - 1`` so a naive Abs-based check would mis-flag this.
+        x0 = sympy.Symbol("x0", integer=True)
+        self.assertFalse(self._check([sympy.Integer(2**31 - 1) + x0]))
+        self.assertFalse(self._check([sympy.Integer(-(2**31)) + x0]))
+
+    def test_boundary_just_outside_int32_limits(self):
+        x0 = sympy.Symbol("x0", integer=True)
+        self.assertTrue(self._check([sympy.Integer(2**31) + x0]))
+        self.assertTrue(self._check([sympy.Integer(-(2**31) - 1) + x0]))
+
+    def test_pure_constant_expression(self):
+        # Indices with no free symbols still need range-checking.
+        self.assertTrue(self._check([sympy.Integer(-(2**31) - 10)]))
+        self.assertFalse(self._check([sympy.Integer(0)]))
+
+    def test_any_offender_triggers_detection(self):
+        # Any single offending dep forces the whole kernel to int64.
+        x0 = sympy.Symbol("x0", integer=True)
+        good = sympy.Integer(42) + x0
+        bad = sympy.Integer(-(2**31) - 1) + x0
+        self.assertTrue(self._check([good, bad]))
 
 class TestEvaluateMinMax(InductorTestCase):
     def test_evaluate_min_multiple(self):
