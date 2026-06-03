@@ -1971,8 +1971,40 @@ class SIMDScheduling(BaseScheduling):
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
 
+    def __init__(self, scheduler: Any) -> None:
+        super().__init__(scheduler)
+        self.clear_tiling_caches()
+
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
+
+    def _get_node_tiling(self, node, numel, rnumel):
+        """Cached select_tiling per node. Unfused nodes with the same
+        group share a single tiling computation.
+
+        Cleared together with candidate_tilings via
+        clear_tiling_caches().
+        """
+        tc = self._tiling_cache
+        key = id(node)
+        if key not in tc:
+            nodes_list = node.get_nodes()
+            if len(nodes_list) == 1:
+                gtc = self._group_tiling_cache
+                gk = (node.group, numel, rnumel)
+                if gk not in gtc:
+                    gtc[gk] = self.select_tiling(nodes_list, numel, rnumel)
+                tc[key] = gtc[gk]
+            else:
+                tc[key] = self.select_tiling(nodes_list, numel, rnumel)
+        return tc[key]
+
+    def clear_tiling_caches(self) -> None:
+        """Clear all tiling caches. Called from
+        SchedulerNode.clear_loop_body_dependent_caches when loop
+        order changes invalidate tiling decisions."""
+        self._tiling_cache = {}
+        self._group_tiling_cache = {}
 
     def can_fuse(self, node1, node2):
         """
@@ -2092,8 +2124,8 @@ class SIMDScheduling(BaseScheduling):
                     return True
 
             # check for a bad combined tiling
-            tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
-            tiling2 = self.select_tiling(node2.get_nodes(), numel1, rnumel1)
+            tiling1 = self._get_node_tiling(node1, numel1, rnumel1)
+            tiling2 = self._get_node_tiling(node2, numel1, rnumel1)
             tiling3 = self.select_tiling(
                 node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
             )
