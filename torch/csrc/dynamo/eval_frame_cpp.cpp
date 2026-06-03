@@ -25,19 +25,37 @@ extern PyObject* guard_complete_hook;
 namespace {
 PyObject* bytecode_debugger_callback_obj = nullptr;
 std::unordered_set<PyCodeObject*> breakpoint_code_objects;
+thread_local int guard_eval_depth = 0;
+
+struct GuardEvalFrameDefault {
+  GuardEvalFrameDefault() {
+    guard_eval_depth++;
+  }
+
+  ~GuardEvalFrameDefault() {
+    guard_eval_depth--;
+  }
+
+  GuardEvalFrameDefault(const GuardEvalFrameDefault&) = delete;
+  GuardEvalFrameDefault& operator=(const GuardEvalFrameDefault&) = delete;
+  GuardEvalFrameDefault(GuardEvalFrameDefault&&) = delete;
+  GuardEvalFrameDefault& operator=(GuardEvalFrameDefault&&) = delete;
+};
 
 // RAII guard that calls __exit__ on a Python context manager when destroyed.
 struct DebugContextGuard {
   py::object ctx;
 
-  explicit DebugContextGuard(py::object c) : ctx(std::move(c)) {
+  explicit DebugContextGuard(const py::object& c) : ctx(c) {
     ctx.attr("__enter__")();
   }
 
   ~DebugContextGuard() {
     // Save any pending Python exception (e.g. KeyboardInterrupt from the
     // debugger's 'q' command) so calling __exit__ doesn't clobber it.
-    PyObject *exc_type, *exc_value, *exc_tb;
+    PyObject* exc_type = nullptr;
+    PyObject* exc_value = nullptr;
+    PyObject* exc_tb = nullptr;
     PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
     try {
       ctx.attr("__exit__")(py::none(), py::none(), py::none());
@@ -52,11 +70,17 @@ struct DebugContextGuard {
 
   DebugContextGuard(const DebugContextGuard&) = delete;
   DebugContextGuard& operator=(const DebugContextGuard&) = delete;
+  DebugContextGuard(DebugContextGuard&&) = delete;
+  DebugContextGuard& operator=(DebugContextGuard&&) = delete;
 };
 
 } // namespace
 
-void set_bytecode_debugger_callback(py::object callback) {
+extern "C" int dynamo_is_guard_eval(void) {
+  return guard_eval_depth > 0;
+}
+
+void set_bytecode_debugger_callback(const py::object& callback) {
   if (callback.is_none()) {
     Py_XSETREF(bytecode_debugger_callback_obj, nullptr);
   } else {
@@ -72,7 +96,7 @@ py::object get_bytecode_debugger_callback() {
       py::handle(bytecode_debugger_callback_obj));
 }
 
-void register_breakpoint_code(py::object code) {
+void register_breakpoint_code(const py::object& code) {
   breakpoint_code_objects.insert((PyCodeObject*)code.ptr());
 }
 
@@ -328,6 +352,10 @@ struct CRecursionLimitRAII {
   ~CRecursionLimitRAII() {
     this->tstate->c_recursion_remaining = this->old_recursion_remaining;
   }
+  CRecursionLimitRAII(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII& operator=(const CRecursionLimitRAII&) = delete;
+  CRecursionLimitRAII(CRecursionLimitRAII&&) = delete;
+  CRecursionLimitRAII& operator=(CRecursionLimitRAII&&) = delete;
 };
 
 #else
@@ -528,55 +556,60 @@ PyObject* dynamo__custom_eval_frame(
       std::make_unique<FrameLocalsMapping>(frame);
   PyObject* backend = get_backend(callback.ptr()); // borrowed
 
-  // We don't run the current custom_eval_frame behavior for guards.
-  // So we temporarily set the callback to Py_None to drive the correct behavior
-  // in the shim.
-  eval_frame_callback_set(Py_None);
-
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  _PytorchRecordFunctionState* rf =
-      _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = nullptr;
-  lookup(
-      extra,
-      locals.get(),
-      backend,
-      isolate_recompiles_id,
-      &maybe_cached_code,
-      &trace_annotation,
-      is_skip_guard_eval_unsafe);
-  _pytorch_record_function_exit(rf);
-
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
   bool run_only = strategy.cur_action == FrameAction::RUN_ONLY ||
-      callback.is(py::bool_(false));
+      Py_IsFalse(callback.ptr());
+
+  {
+    // We don't run the current custom_eval_frame behavior for guards.
+    // Recursive frames entered while guards or guard hooks run should go
+    // straight to the default evaluator, but mutating the callback object for
+    // every cache lookup is too expensive on run-only hot paths.
+    GuardEvalFrameDefault guard_eval;
+
+    _PytorchRecordFunctionState* rf =
+        _pytorch_record_function_enter(cache_lookup_profiler_str);
+    lookup(
+        extra,
+        locals.get(),
+        backend,
+        isolate_recompiles_id,
+        &maybe_cached_code,
+        &trace_annotation,
+        is_skip_guard_eval_unsafe);
+    _pytorch_record_function_exit(rf);
+
+    if (maybe_cached_code == nullptr) {
+      // guard eval failed, keep propagating
+      fail();
+      return eval_result;
+    }
+
+    // NB: We only do guard collectives when there are compiled code entries
+    // for the current region (or the default region); this reduces
+    // overtriggering and we don't need to do guard collectives the very first
+    // time we've seen a frame in this region.
+    bool has_relevant_entries =
+        extra->cache_entry_map.count(isolate_recompiles_id) > 0 ||
+        extra->cache_entry_map.count(-1) > 0;
+    if (guard_complete_hook != nullptr && has_relevant_entries) {
+      py::handle guard_complete_hook_handle(guard_complete_hook);
+      // False means force compilation (someone cache missed)
+      py::object res =
+          guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
+      if (!py::cast<bool>(res)) {
+        maybe_cached_code = Py_None; // NB: non-owning
+      }
+    }
+  }
+
   if (run_only) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
-  }
-
-  if (maybe_cached_code == nullptr) {
-    // guard eval failed, keep propagating
-    fail();
-    return eval_result;
-  }
-
-  // NB: We only do guard collectives when there are compiled code entries
-  // for the current region (or the default region); this reduces
-  // overtriggering and we don't need to do guard collectives the very first
-  // time we've seen a frame in this region.
-  bool has_relevant_entries =
-      extra->cache_entry_map.count(isolate_recompiles_id) > 0 ||
-      extra->cache_entry_map.count(-1) > 0;
-  if (guard_complete_hook != nullptr && has_relevant_entries) {
-    py::handle guard_complete_hook_handle(guard_complete_hook);
-    // False means force compilation (someone cache missed)
-    py::object res = guard_complete_hook_handle(!Py_IsNone(maybe_cached_code));
-    if (!py::cast<bool>(res)) {
-      maybe_cached_code = Py_None; // NB: non-owning
-    }
   }
 
   if (!Py_IsNone(maybe_cached_code)) {
@@ -605,6 +638,7 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // call callback
+  eval_frame_callback_set(Py_None);
   CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
   FrameState* frame_state = extract_frame_state(extra);
   py::object callback_result;
