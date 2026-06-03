@@ -422,7 +422,7 @@ def pad_packed_sequence(
                 f"total_length={total_length} and max sequence length being {max_seq_length}"
             )
         max_seq_length = total_length
-    if isinstance(max_seq_length, torch.SymInt):
+    if not torch.jit.is_scripting() and isinstance(max_seq_length, torch.SymInt):
         max_batch_size = cast(
             int | torch.SymInt,
             unsorted_indices.size(0)
