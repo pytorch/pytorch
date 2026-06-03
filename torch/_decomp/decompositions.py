@@ -3364,7 +3364,7 @@ def _index_add(
     # silently accepts negative/out-of-range indices, so re-add the check.
     aten._assert_async.msg(
         torch.all((index >= 0) & (index < size)),
-        "index_add(): index out of bounds",
+        f"index out of bounds for dimension {dim} with size {size}",
     )
     out = index_put(x1, idx, tensor, accumulate=True)
     if inplace:
