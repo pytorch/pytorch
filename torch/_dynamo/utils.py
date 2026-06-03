@@ -3919,6 +3919,33 @@ def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) 
     return msg
 
 
+def _is_custom_op_fake_tensor_subclass_data_ptr_error(
+    node: torch.fx.Node, args: Any, kwargs: Any, cause: BaseException
+) -> bool:
+    if node.op != "call_function":
+        return False
+
+    target = node.target
+    custom_op_namespace: str | None
+    if isinstance(target, torch._ops.OpOverload):
+        custom_op_namespace = target.namespace
+    elif isinstance(target, torch._ops.OpOverloadPacket):
+        custom_op_namespace = target._qualified_op_name.split("::", maxsplit=1)[0]
+    else:
+        custom_op_namespace = None
+
+    if (
+        custom_op_namespace is None
+        or custom_op_namespace in {"aten", "prim", "prims"}
+        or "Cannot access data pointer of Tensor" not in str(cause)
+    ):
+        return False
+
+    return pytree.tree_any(
+        lambda x: is_traceable_wrapper_subclass(x) and is_fake(x), (args, kwargs)
+    )
+
+
 def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> NoReturn:
     from .exc import TorchRuntimeError, Unsupported
 
@@ -4142,15 +4169,31 @@ def _get_fake_value_impl(
                 from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        _wrap_graph_break_with_torch_runtime_err(
-            lambda: unimplemented(
-                gb_type="RuntimeError when making fake tensor call",
-                context="",
-                explanation=msg,
-                hints=[*graph_break_hints.USER_ERROR],
-                from_exc=cause,
+        if _is_custom_op_fake_tensor_subclass_data_ptr_error(node, args, kwargs, cause):
+            _wrap_graph_break_with_torch_runtime_err(
+                lambda: unimplemented(
+                    gb_type="Custom op Tensor subclass data pointer access",
+                    context="",
+                    explanation=(
+                        "A Tensor subclass argument reached a custom op while Dynamo "
+                        f"was running fake tensor propagation: {msg}"
+                    ),
+                    hints=[
+                        *graph_break_hints.CUSTOM_OP_FAKE_TENSOR_SUBCLASS_DATA_PTR,
+                    ],
+                    from_exc=cause,
+                )
             )
-        )
+        else:
+            _wrap_graph_break_with_torch_runtime_err(
+                lambda: unimplemented(
+                    gb_type="RuntimeError when making fake tensor call",
+                    context="",
+                    explanation=msg,
+                    hints=[*graph_break_hints.USER_ERROR],
+                    from_exc=cause,
+                )
+            )
         raise AssertionError("should not reachable") from None
 
     if not allow_non_graph_fake:

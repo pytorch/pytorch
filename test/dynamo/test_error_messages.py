@@ -844,6 +844,93 @@ from user code:
     return torch.ops.mylib.error_messages_faketensor(x)""",
         )
 
+    def test_custom_op_tensor_subclass_data_ptr_error(self):
+        passthrough_ops = set()
+
+        class ScaledTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, scale):
+                t = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.shape,
+                    dtype=data.dtype,
+                    device=data.device,
+                )
+                t._data = data
+                t._scale = scale
+                return t
+
+            def __repr__(self):
+                return f"ScaledTensor(shape={self.shape}, scale={self._scale})"
+
+            def __tensor_flatten__(self):
+                return ["_data"], {"scale": self._scale}
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                return ScaledTensor(inner_tensors["_data"], metadata["scale"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func in passthrough_ops:
+                    return super().__torch_dispatch__(func, types, args, kwargs or {})
+
+                def unwrap(t):
+                    return t._data if isinstance(t, ScaledTensor) else t
+
+                return func(
+                    *python_pytree.tree_map(unwrap, args),
+                    **python_pytree.tree_map(unwrap, kwargs or {}),
+                )
+
+        @torch.library.custom_op(
+            "mylib::error_messages_tensor_subclass_custom_op",
+            mutates_args=(),
+        )
+        def tensor_subclass_custom_op(x: torch.Tensor) -> torch.Tensor:
+            if isinstance(x, ScaledTensor):
+                x._data.data_ptr()
+                return ScaledTensor(x._data * 2, x._scale)
+            x.data_ptr()
+            return x * 2
+
+        @tensor_subclass_custom_op.register_fake
+        def _(x):
+            if isinstance(x, ScaledTensor):
+                return ScaledTensor(x._data.new_empty(x.shape), x._scale)
+            return x.new_empty(x.shape)
+
+        passthrough_ops.add(
+            torch.ops.mylib.error_messages_tensor_subclass_custom_op.default
+        )
+
+        def fn(x):
+            return torch.ops.mylib.error_messages_tensor_subclass_custom_op(x)
+
+        with self.assertRaises(TorchRuntimeError) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                ScaledTensor(torch.randn(3), 0.5)
+            )
+
+        msg = str(cm.exception)
+        self.assertIn(
+            "A Tensor subclass argument reached this custom op during "
+            "fake-value propagation",
+            msg,
+        )
+        self.assertIn(
+            "the custom op implementation instead of the registered fake impl",
+            msg,
+        )
+        self.assertIn(
+            "the same custom op may still run correctly in eager with real tensors",
+            msg,
+        )
+        self.assertNotIn(
+            "Your code may result in an error when running in eager",
+            msg,
+        )
+
     def test_fx_node_error_bad_user_code(self):
         def fn(x, y):
             return x + y

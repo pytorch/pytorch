@@ -1170,6 +1170,16 @@ def register_fake(
     (and may not directly access the storage or data of any input or
     intermediate Tensors).
 
+    .. note::
+        When a custom op is called with a Tensor subclass, the fake impl is
+        used only if the dispatcher sees FakeTensor or meta tensor arguments
+        for the custom op. If the subclass's ``__torch_dispatch__`` passes a
+        FakeTensor-wrapped subclass through to the custom op, the custom op's
+        real implementation may run during fake-value propagation. In that
+        case, handle that subclass/FakeTensor path in the custom op
+        implementation or change the subclass dispatch to unwrap to operations
+        with fake implementations.
+
     This API may be used as a decorator (see examples).
 
     For a detailed guide on custom ops, please see
