@@ -1,4 +1,3 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
 """Step-time overhead benchmark for the CUPTI mux observers.
 
@@ -249,15 +248,26 @@ def run_profiler(make_step, warmup, samples, measure_steps, trace_out=None, trac
         step = summarize(
             [time_step_block(step_fn, measure_steps) for _ in range(samples)]
         )
-        # Capture a BOUNDED trace window: discard everything accumulated during
-        # the overhead phase, then record exactly `trace_steps` replays. The
-        # always-on observer otherwise holds every step's records, so the trace
-        # would be the whole run (each kernel repeated once per replay).
+        # Full-flush accounting: accumulate a fresh window of measure_steps,
+        # then time a SYNCHRONOUS drain (force CUPTI flush + assemble every
+        # kind's columns) so the cost of processing the ENTIRE record stream --
+        # including the CPU-side kinds (runtime/driver/overhead/sync/external-
+        # correlation) -- is an explicit number, not just the background-poll
+        # contention already folded into active_step.
+        obs.drain()
+        for _ in range(measure_steps):
+            step_fn()
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        data = obs.drain()
+        flush_drain_ms = (time.perf_counter() - t0) * 1e3
+        # A separate BOUNDED window for the trace file (so it isn't the whole
+        # run -- each kernel would otherwise repeat once per replay).
         obs.drain()
         for _ in range(trace_steps):
             step_fn()
         torch.cuda.synchronize()
-        data = obs.drain()
+        trace_data = obs.drain()
     finally:
         obs.close()
 
@@ -279,11 +289,15 @@ def run_profiler(make_step, warmup, samples, measure_steps, trace_out=None, trac
             lanes.update(zip(dev.tolist(), strm.tolist()))
 
     t0 = time.perf_counter()
-    trace = _to_chrome_trace(data)
+    trace = _to_chrome_trace(trace_data)
     build_ms = (time.perf_counter() - t0) * 1e3
     out = {
         "active_step": step,
+        # Per-kind record counts over the full measure_steps window (incl.
+        # CPU-side kinds) and the synchronous cost to flush + assemble them.
         "records": counts,
+        "total_records": sum(counts.values()),
+        "flush_drain_ms": round(flush_drain_ms, 3),
         "lanes": sorted(f"GPU{int(d)}/stream{int(s)}" for d, s in lanes),
         "n_trace_events": len(trace["traceEvents"]),
         "build_trace_ms": build_ms,

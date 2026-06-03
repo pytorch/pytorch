@@ -1,4 +1,3 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
 """Observers built on the CUPTI activity mux.
 

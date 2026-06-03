@@ -1,4 +1,3 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
 """In-process CUPTI activity multiplexing for torch.profiler.
 

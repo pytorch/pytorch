@@ -1,4 +1,3 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
 """Profiler *distortion* benchmark for the CUPTI mux observers.
 
@@ -117,12 +116,12 @@ def _run_worker(args) -> dict:
         if obs is not None and args.mode.startswith("timer"):
             # Summed kernel duration CUPTI attributes per replay (ground-truth
             # comparison): drain a clean window of measure_steps replays.
-            obs.drain()
+            obs.drain(flush=True)
             for _ in range(args.measure_steps):
                 step_fn()
             torch.cuda.synchronize()
-            data = obs.drain()  # {graph_node_id: (dur_ns, count)}
-            total_ns = sum(d for d, _ in data.values())
+            _g, _s, _e = obs.drain(flush=True)  # (graph_node_id, start, end) cols
+            total_ns = int((_e - _s).clip(min=0).sum())
             reported_us = total_ns / 1000.0 / args.measure_steps
     finally:
         if obs is not None:

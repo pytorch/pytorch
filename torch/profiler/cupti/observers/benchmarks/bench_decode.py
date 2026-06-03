@@ -1,4 +1,3 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
 """Decoder throughput microbenchmark for the CUPTI mux dispatcher.
 
@@ -137,8 +136,7 @@ def _headless_mux(observer: object, wants: "dict[int, set[int]]") -> CuptiActivi
 def _headless_node_timer(kinds: "list[int]") -> "tuple[object, dict[int, set[int]]]":
     obs = NodeTimerObserver.__new__(NodeTimerObserver)
     obs._lock = threading.Lock()  # type: ignore[attr-defined]
-    obs._dur_ns = {}  # type: ignore[attr-defined]
-    obs._count = {}  # type: ignore[attr-defined]
+    obs._chunks = []  # type: ignore[attr-defined]  # raw (gnode, start, end) chunks
     wants = {k: set(_TIMED_FIELDS[k]) for k in kinds}
     return obs, wants
 
@@ -295,6 +293,31 @@ def main() -> None:
             layout_fields=_padded_layout_fields(
                 prof_wants, [k.CONCURRENT_KERNEL, k.MEMCPY, k.MEMSET]
             ),
+        ),
+        # ProfilerObserver FULL parity: GPU kinds + the CPU-side kinds it now
+        # collects (runtime/driver/overhead/synchronization/external-
+        # correlation). Their narrower, differently-sized records add more
+        # distinct record sizes => the sequential KIND-walk.
+        _bench_one(
+            "profiler:full",
+            prof,
+            prof_wants,
+            list(prof_wants),
+            args.records,
+            args.iters,
+        ),
+        # Full parity, padded to one record size => stride+dispatch -- shows the
+        # uniform-padding fast path still applies across the wider CPU-side kind
+        # set (idealized: this bench's flat-8 layout always reaches a common
+        # size; the real subset-sum padding over discovered widths may not).
+        _bench_one(
+            "profiler:full_padded",
+            prof,
+            prof_wants,
+            list(prof_wants),
+            args.records,
+            args.iters,
+            layout_fields=_padded_layout_fields(prof_wants, list(prof_wants)),
         ),
     ]
     print(json.dumps(results, indent=2))

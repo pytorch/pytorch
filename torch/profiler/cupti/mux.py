@@ -1,4 +1,3 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
 
 """In-process CUPTI activity multiplexer (v2 user-defined records).
@@ -135,6 +134,8 @@ def _resolve_v2_libcupti() -> "ctypes.CDLL | None":
         "cuptiActivityRegisterCallbacks_v2",
         "cuptiActivityEnable_v2",
         "cuptiActivityDisable_v2",
+        "cuptiActivityPushExternalCorrelationId_v2",
+        "cuptiActivityPopExternalCorrelationId_v2",
     )
     for pth in paths:
         try:
@@ -348,6 +349,15 @@ class CuptiActivityMux:
             "cuptiActivityDisable_v2",
         ):
             getattr(lib, sym).restype = ctypes.c_int
+        # External-correlation push/pop tags the CUDA activities produced in a
+        # region with a user id, delivered as EXTERNAL_CORRELATION records
+        # (correlation_id -> external_id).
+        push = lib.cuptiActivityPushExternalCorrelationId_v2
+        push.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint64]
+        push.restype = ctypes.c_int
+        pop = lib.cuptiActivityPopExternalCorrelationId_v2
+        pop.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_uint64)]
+        pop.restype = ctypes.c_int
         if not self._arm(int(cupti.ActivityAttribute.ATTR_USER_DEFINED_RECORDS)):
             self.close()
             return
@@ -401,6 +411,35 @@ class CuptiActivityMux:
         # obs stays in the live set during _reconfigure's flush, so it still
         # gets its tail records before being dropped.
         self._reconfigure(prospective)
+
+    # --- external correlation (annotation joins) ---------------------------
+
+    def push_external_id(self, external_id: int, kind: int = 4) -> bool:
+        """Push a user external-correlation id (default kind CUSTOM1 = 4).
+        Every CUDA activity recorded until the matching ``pop_external_id``
+        gets an EXTERNAL_CORRELATION record linking its ``correlation_id`` to
+        ``external_id`` -- the basis for attributing kernels to named regions
+        (incl. eager kernels, which have no graph_node_id). Best-effort:
+        returns False if unsupported or the mux isn't armed."""
+        if not self._armed:
+            return False
+        return (
+            self._lib.cuptiActivityPushExternalCorrelationId_v2(
+                self._sub_h, ctypes.c_int(kind), ctypes.c_uint64(external_id)
+            )
+            == _CUPTI_SUCCESS
+        )
+
+    def pop_external_id(self, kind: int = 4) -> "int | None":
+        """Pop the most recent external-correlation id for ``kind``. Returns
+        the popped id, or None if unsupported/failed."""
+        if not self._armed:
+            return None
+        last = ctypes.c_uint64(0)
+        rc = self._lib.cuptiActivityPopExternalCorrelationId_v2(
+            self._sub_h, ctypes.c_int(kind), ctypes.byref(last)
+        )
+        return int(last.value) if rc == _CUPTI_SUCCESS else None
 
     def _effective_union(
         self, union: "dict[int, frozenset[int]]"

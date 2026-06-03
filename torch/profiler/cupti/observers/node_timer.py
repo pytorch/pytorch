@@ -1,20 +1,24 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
 """Always-on per-graph-node activity-duration observer.
 
 The smallest real consumer of the mux: registers for one or more activity
 kinds with just the compact fields needed for timing (START, END,
-GRAPH_NODE_ID) and accumulates total duration + count per graph node. The
-mux poll thread feeds records via the callback; consumers pull the running
-aggregate with ``drain()``.
+GRAPH_NODE_ID) and buffers the raw per-kernel spans the mux poll thread
+delivers. ``drain()`` returns them as flat numpy columns ``(graph_node_id,
+start_ns, end_ns)`` -- consumers aggregate or bucket as they need (e.g.
+total duration per node, or kernels bucketed into training steps by start
+time), staying vectorized.
 
-By default only CONCURRENT_KERNEL is timed -- the common case, and the one
-where the mux keeps its homogeneous (single-kind) vectorized bulk-parse
-fast-path. Opt into MEMCPY / MEMSET via ``kinds`` to time those nodes too,
-at the cost of that fast-path: mixing kinds makes the mux buffers
-heterogeneous, so its decode falls back to a per-record kind-walk. (This
-observer's own aggregation stays vectorized either way -- the cost is in
-the mux's decode, not here.)
+By default only CONCURRENT_KERNEL is timed -- the common case. Opt into
+MEMCPY / MEMSET via ``kinds`` to time those nodes too. This keeps the mux's
+vectorized bulk-parse: what the mux vectorizes over is record *size*, not
+kind. A single kind is pure stride; multiple kinds whose selected fields
+yield the same record size (as here -- every kind times the same 3 fields:
+START, END, GRAPH_NODE_ID, so all records are one size) still parse via
+stride + a vectorized kind-dispatch. The mux only falls back to a per-record
+kind-walk when the enabled kinds have *different* record sizes. (This
+observer just buffers the raw columns -- the cost is in the mux's decode,
+not here.)
 
 Durations are keyed by graph_node_id alone, kind-agnostic: each CUDA-graph
 node is a single op, so its kind is unambiguous. Eager (non-graph)
@@ -73,17 +77,19 @@ class NodeTimerObserver(MuxObserver):
                 f"timing supports {sorted(_TIMED_FIELDS)}"
             )
         self._lock = threading.Lock()
-        self._dur_ns: dict[int, int] = {}
-        self._count: dict[int, int] = {}
-        # Register last (base __init__) so aggregation state is ready before
-        # the mux poll thread can deliver records.
+        # Raw (graph_node_id, start_ns, end_ns) column chunks as the poll thread
+        # delivers them; grouped into per-node spans in drain(). Kept raw (not
+        # pre-aggregated to a per-node total) so consumers that need per-kernel
+        # timing -- e.g. bucketing kernels into steps by start time -- can build
+        # on this observer.
+        self._chunks: list[tuple[Any, Any, Any]] = []
+        # Register last (base __init__) so the buffer is ready before the mux
+        # poll thread can deliver records.
         super().__init__({k: set(_TIMED_FIELDS[k]) for k in self._kinds})
 
     def _on_records(self, kind: int, fields: dict[int, Any]) -> None:
-        # Runs on the mux poll thread; keep it to vectorized numpy + a short
-        # locked merge of the few distinct graph nodes.
-        import numpy as np
-
+        # Mux poll thread: just stash the columns (cheap append); grouping by
+        # node happens in drain(), off this hot path.
         spec = _TIMED_FIELDS.get(kind)
         if spec is None:
             return
@@ -93,23 +99,41 @@ class NodeTimerObserver(MuxObserver):
         gnode = fields.get(gf)
         if start is None or end is None or gnode is None:
             return
-        dur = (end.astype("<i8") - start.astype("<i8")).clip(min=0)
-        uniq, inv = np.unique(gnode, return_inverse=True)
-        sums = np.bincount(inv, weights=dur, minlength=uniq.size)
-        counts = np.bincount(inv, minlength=uniq.size)
         with self._lock:
-            for i, node in enumerate(uniq.tolist()):
-                self._dur_ns[node] = self._dur_ns.get(node, 0) + int(sums[i])
-                self._count[node] = self._count.get(node, 0) + int(counts[i])
+            self._chunks.append((gnode, start, end))
 
-    def drain(self) -> dict[int, tuple[int, int]]:
-        """Return ``{graph_node_id: (total_duration_ns, count)}`` accumulated
-        since the last call and reset."""
-        # Flush CUPTI so the tail of the interval is aggregated first. Must
-        # happen before taking _lock -- the flush delivers via _on_records.
-        self._mux.force_drain()
+    def drain(self, flush: bool = False) -> "tuple[Any, Any, Any]":
+        """Return the raw per-kernel spans delivered since the last call as
+        three parallel numpy columns ``(graph_node_id, start_ns, end_ns)``
+        (dtypes ``<u8, <i8, <i8``), and reset. Empty -> three length-0 arrays.
+
+        Flat and vectorized on purpose: consumers bucket/aggregate with numpy
+        (e.g. ``searchsorted``/``bincount``) without a Python loop over the
+        (~50k) kernels, so this can run on a poller thread without holding the
+        GIL. (A node's duration is ``end - start``; eager activities share
+        ``graph_node_id == 0``.)
+
+        Cheap by default: reads only what the mux poll thread has already
+        delivered -- this is the always-on path and is called on a rolling
+        basis, so it must NOT force a synchronous ``cuptiActivityFlushAll`` on
+        every call (records still buffered are picked up on the next drain).
+        Pass ``flush=True`` only to close a bounded measurement window where a
+        complete snapshot is required, accepting the cost of a forced flush."""
+        import numpy as np
+
+        if flush:
+            # Flush CUPTI so the tail lands first. Must happen before taking
+            # _lock -- the flush delivers via _on_records.
+            self._mux.force_drain()
         with self._lock:
-            out = {n: (self._dur_ns[n], self._count[n]) for n in self._dur_ns}
-            self._dur_ns = {}
-            self._count = {}
-        return out
+            chunks, self._chunks = self._chunks, []
+        if not chunks:
+            return (
+                np.empty(0, dtype="<u8"),
+                np.empty(0, dtype="<i8"),
+                np.empty(0, dtype="<i8"),
+            )
+        gnode = np.concatenate([c[0] for c in chunks]).astype("<u8", copy=False)
+        start = np.concatenate([c[1] for c in chunks]).astype("<i8", copy=False)
+        end = np.concatenate([c[2] for c in chunks]).astype("<i8", copy=False)
+        return gnode, start, end

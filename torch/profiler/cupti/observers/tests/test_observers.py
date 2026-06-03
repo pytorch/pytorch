@@ -1,4 +1,3 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
 """Tests for torch.profiler.cupti observers (adapted from the original
 CuptiMonitor tests onto the mux interface).
@@ -68,8 +67,8 @@ class TestCuptiObservers(TestCase):
             "    x.add_(1.0)\n"
             "torch.cuda.synchronize()\n"
             "instance().poll(force=True)\n"
-            "totals = obs.drain(); obs.close()\n"
-            "assert sum(c for _, c in totals.values()) > 0, totals\n"
+            "g, s, e = obs.drain(flush=True); obs.close()\n"
+            "assert g.size > 0, g.size\n"
             "print('OK')\n"
         )
         if "MUX_UNAVAILABLE" in p.stdout:
@@ -97,8 +96,8 @@ class TestCuptiObservers(TestCase):
             "_ = x.cpu()\n"
             "torch.cuda.synchronize()\n"
             "instance().poll(force=True)\n"
-            "totals = obs.drain(); obs.close()\n"
-            "assert sum(c for _, c in totals.values()) > 0, totals\n"
+            "g, s, e = obs.drain(flush=True); obs.close()\n"
+            "assert g.size > 0, g.size\n"
             "print('OK')\n"
         )
         if "MUX_UNAVAILABLE" in p.stdout:
@@ -136,11 +135,11 @@ class TestCuptiObservers(TestCase):
             "for _ in range(8):\n"
             "    x.add_(1.0)\n"
             "torch.cuda.synchronize()\n"
-            "totals = timer.drain(); timer.close()\n"
+            "g, s, e = timer.drain(flush=True); timer.close()\n"
             # All durations must be non-negative finite ns (a misparse from a
             # straddling buffer would surface as garbage durations).
-            "assert sum(c for _, c in totals.values()) >= 24, totals\n"
-            "assert all(d >= 0 for d, _ in totals.values()), totals\n"
+            "assert g.size >= 24, g.size\n"
+            "assert bool((e >= s).all()), 'negative duration'\n"
             "print('OK')\n"
         )
         if "MUX_UNAVAILABLE" in p.stdout:
@@ -169,6 +168,43 @@ class TestCuptiObservers(TestCase):
             "assert k.CONCURRENT_KERNEL in data, list(data)\n"
             "assert k.MEMCPY in data, list(data)\n"
             "assert int(data[k.MEMCPY][types.MemcpyField.BYTES][0]) == 4\n"
+            "print('OK')\n"
+        )
+        if "MUX_UNAVAILABLE" in p.stdout:
+            self.skipTest("CUPTI mux unavailable (needs CUPTI >= 13.2)")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("OK", p.stdout)
+
+    def test_profiler_merged_trace(self):
+        # Full profiled-window trace on eager work: a CPU runtime lane, ac2g
+        # flow arrows (launch -> kernel), and gpu_user_annotations attached to
+        # kernels via external correlation (annotate()).
+        p = _run(
+            "from cupti import cupti as _c\n"
+            "_s = _c.subscribe(lambda *a: None, 0); _c.unsubscribe(_s)\n"
+            "import torch\n"
+            "from torch.profiler.cupti import instance, CuptiProfiler\n"
+            "if not instance().available:\n"
+            "    print('MUX_UNAVAILABLE'); raise SystemExit(0)\n"
+            "prof = CuptiProfiler()\n"
+            "assert prof.start()\n"
+            "a = torch.randn(256, 256, device='cuda')\n"
+            "b = torch.randn(256, 256, device='cuda')\n"
+            "with prof.annotate('region_a'):\n"
+            "    for _ in range(16):\n"
+            "        a = (a @ b).relu()\n"
+            "torch.cuda.synchronize()\n"
+            "prof.stop()\n"
+            "evs = prof.chrome_trace()['traceEvents']\n"
+            "flows = [e for e in evs if e['ph'] in ('s', 'f')]\n"
+            "cpu = [e for e in evs if e['ph'] == 'X' "
+            "and str(e.get('pid', '')).startswith('CPU')]\n"
+            "tagged = [e for e in evs if e['ph'] == 'X' "
+            "and isinstance(e.get('args'), dict) "
+            "and e['args'].get('annotation') == 'region_a']\n"
+            "assert flows and len(flows) % 2 == 0, ('flows', len(flows))\n"
+            "assert cpu, 'no CPU runtime events'\n"
+            "assert tagged, 'no kernels tagged with annotation'\n"
             "print('OK')\n"
         )
         if "MUX_UNAVAILABLE" in p.stdout:

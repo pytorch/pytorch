@@ -1,4 +1,3 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
 """CUPTI activity kinds and user-defined field ids as IntEnums.
 
@@ -17,7 +16,13 @@ class ActivityKind(IntEnum):
 
     MEMCPY = 1
     MEMSET = 2
+    DRIVER = 4
+    RUNTIME = 5
     CONCURRENT_KERNEL = 10
+    OVERHEAD = 17
+    CUDA_EVENT = 36
+    SYNCHRONIZATION = 38
+    EXTERNAL_CORRELATION = 39
 
 
 class KernelField(IntEnum):
@@ -73,11 +78,77 @@ class MemsetField(IntEnum):
     GRAPH_ID = 12
 
 
+class ApiField(IntEnum):
+    """CUpti_ActivityApiFieldIds (API_FIELD_*); shared by the RUNTIME and
+    DRIVER kinds (both are CUpti_ActivityAPI). CBID maps to an API name via
+    cupti_runtime_cbid.h / cupti_driver_cbid.h."""
+
+    KIND = 0
+    CBID = 1
+    START = 2
+    END = 3
+    PROCESS_ID = 4
+    THREAD_ID = 5
+    CORRELATION_ID = 6
+    RETURN_VALUE = 7
+
+
+class ExternalCorrelationField(IntEnum):
+    """CUpti_ActivityExternalCorrelationFieldIds (EXTERNAL_CORRELATION_FIELD_*).
+    Links a CUDA ``correlation_id`` to a user-pushed ``external_id``."""
+
+    KIND = 0
+    EXTERNAL_KIND = 1
+    EXTERNAL_ID = 2
+    CORRELATION_ID = 3
+
+
+class OverheadField(IntEnum):
+    """CUpti_ActivityOverheadFieldIds (OVERHEAD_FIELD_*)."""
+
+    KIND = 0
+    OVERHEAD_KIND = 1
+    PROCESS_ID = 2
+    THREAD_ID = 3
+    START = 4
+    END = 5
+    CORRELATION_ID = 6
+
+
+class CudaEventField(IntEnum):
+    """CUpti_ActivityCudaEventFieldIds (CUDA_EVENT_FIELD_*)."""
+
+    KIND = 0
+    CORRELATION_ID = 1
+    CONTEXT_ID = 2
+    STREAM_ID = 3
+    EVENT_ID = 4
+    DEVICE_ID = 5
+
+
+class SyncField(IntEnum):
+    """CUpti_ActivitySynchronizationFieldIds (SYNCHRONIZATION_FIELD_*)."""
+
+    KIND = 0
+    TYPE = 1
+    START = 2
+    END = 3
+    CORRELATION_ID = 4
+    CONTEXT_ID = 5
+    STREAM_ID = 6
+
+
 # kind -> its field-id enum (members = the field ids the mux supports for it).
 FIELD_ENUMS: dict[int, type[IntEnum]] = {
     ActivityKind.CONCURRENT_KERNEL: KernelField,
     ActivityKind.MEMCPY: MemcpyField,
     ActivityKind.MEMSET: MemsetField,
+    ActivityKind.RUNTIME: ApiField,
+    ActivityKind.DRIVER: ApiField,
+    ActivityKind.EXTERNAL_CORRELATION: ExternalCorrelationField,
+    ActivityKind.OVERHEAD: OverheadField,
+    ActivityKind.CUDA_EVENT: CudaEventField,
+    ActivityKind.SYNCHRONIZATION: SyncField,
 }
 
 # kind -> frozenset of supported field ids; source of truth for validating
