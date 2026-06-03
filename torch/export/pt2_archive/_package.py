@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import os
+import pickle
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from torch._export.serde.serialize import (
     SerializedArtifact,
 )
 from torch._inductor.cpp_builder import normalize_path_separator
+from torch._library.opaque_object import is_opaque_value
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
@@ -48,6 +50,7 @@ from torch.export.pt2_archive.constants import (
     EXTRA_DIR,
     MODELS_DIR,
     MODELS_FILENAME_FORMAT,
+    OPAQUE_OBJ_FILENAME_PREFIX,
     SAMPLE_INPUTS_FILENAME_FORMAT,
     TENSOR_CONSTANT_FILENAME_PREFIX,
     WEIGHT_FILENAME_PREFIX,
@@ -270,7 +273,6 @@ def _package_aoti_files(
     ] = {}  # model_name -> (weight_name -> (filename, shape, stride, offset))
 
     for model_name, files in aoti_files.items():
-        num_so_files = 0
         weights_configs[model_name] = {}
 
         for file in files:
@@ -281,14 +283,8 @@ def _package_aoti_files(
                 all_weights[model_name] = file
                 continue
 
-            if file.endswith(".so"):
-                num_so_files += 1
-                if num_so_files > 1:
-                    raise RuntimeError(
-                        f"Multiple .so files found in {files}. "
-                        "You might need to clear your cache "
-                        "directory before calling aoti_compile again."
-                    )
+            # Note: Previously we rejected multiple .so cases. But Triton CPU AOTI
+            # has multiple .so files per model (wrapper, launcher, kernel).
 
             filename = os.path.basename(file)
             if filename.startswith(CUSTOM_OBJ_FILENAME_PREFIX):
@@ -493,7 +489,7 @@ def _package_constants(
 
     pickled_constants: list[tuple[str, torch.Tensor]] = []
     raw_constants: dict[str, tuple[torch.Tensor, TensorProperties]] = {}
-    custom_objects: list[tuple[str, torch._C.ScriptObject]] = []
+    custom_objects: list[tuple[str, Any]] = []
 
     # Categorize constants
     for constant_fqn, constant in exported_program.constants.items():
@@ -503,7 +499,7 @@ def _package_constants(
             else:
                 raw_constants[constant_fqn] = (constant, TensorProperties(constant))
 
-        elif isinstance(constant, torch._C.ScriptObject):
+        elif isinstance(constant, torch._C.ScriptObject) or is_opaque_value(constant):
             custom_objects.append((constant_fqn, constant))
 
         else:
@@ -514,6 +510,9 @@ def _package_constants(
     )
     custom_obj_idx = archive_writer.count_prefix(
         os.path.join(CONSTANTS_DIR, CUSTOM_OBJ_FILENAME_PREFIX)
+    )
+    opaque_obj_idx = archive_writer.count_prefix(
+        os.path.join(CONSTANTS_DIR, OPAQUE_OBJ_FILENAME_PREFIX)
     )
 
     # Save constants in pickle format
@@ -538,12 +537,21 @@ def _package_constants(
         tensor_idx,
     )
 
-    # Handle custom objects
+    # ScriptObjects use the torchbind-aware pickler (zip-archive format,
+    # readable from C++ at load time). Opaque values use standard Python
+    # pickle. Distinct filename prefixes act as the format discriminator
+    # for the reader.
     for constant_fqn, constant in custom_objects:
-        path_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
+        if isinstance(constant, torch._C.ScriptObject):
+            path_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
+            obj_bytes = torch._C._pickle_save(constant)
+            custom_obj_idx += 1
+        else:
+            path_name = f"{OPAQUE_OBJ_FILENAME_PREFIX}{opaque_obj_idx}"
+            obj_bytes = pickle.dumps(constant, protocol=pickle_protocol)
+            opaque_obj_idx += 1
         archive_path = os.path.join(CONSTANTS_DIR, path_name)
-        custom_obj_bytes = torch._C._pickle_save(constant)
-        archive_writer.write_bytes(archive_path, custom_obj_bytes)
+        archive_writer.write_bytes(archive_path, obj_bytes)
 
         constants_config[constant_fqn] = schema.PayloadMeta(
             path_name=path_name,
@@ -551,7 +559,6 @@ def _package_constants(
             use_pickle=True,
             tensor_meta=None,
         )
-        custom_obj_idx += 1
 
     return schema.PayloadConfig(config=constants_config)
 
@@ -783,33 +790,6 @@ class PT2ArchiveContents:
     extra_files: dict[str, Any]
 
 
-def _create_flat_tensor_from_bytes(
-    tensor_bytes: bytes,
-    tensor_meta: schema.TensorMeta,
-) -> torch.Tensor:
-    """
-    Create a flat tensor from raw bytes with dtype, device and requires_grad.
-    It will be re-strided based on size, stride, and storage_offset later.
-    """
-    dtype = deserialize_scalar_type(tensor_meta.dtype)
-    size = deserialize_size(tensor_meta.sizes)
-    device = deserialize_device(tensor_meta.device)
-
-    if len(tensor_bytes) != 0:
-        tensor = torch.frombuffer(
-            tensor_bytes, dtype=dtype, requires_grad=tensor_meta.requires_grad
-        ).to(device)
-    else:
-        # cannot call torch.frombuffer() on empty bytes
-        logger.warning(
-            "Cannot call torch.frombuffer() on empty bytes. "
-            "Creating a tensor with zeros as workaround."
-        )
-        tensor = torch.zeros(size, dtype=dtype, device=device)
-
-    return tensor
-
-
 def _build_file_map(
     archive_reader: PT2ArchiveReader,
     config: schema.PayloadConfig,
@@ -827,12 +807,40 @@ def _build_file_map(
         if payload_meta.path_name in file_map:
             continue
 
-        tensor_bytes = archive_reader.read_bytes(
-            os.path.join(base_dir, payload_meta.path_name)
-        )
         if payload_meta.tensor_meta is None:
             raise AssertionError("payload_meta.tensor_meta cannot be None")
-        tensor = _create_flat_tensor_from_bytes(tensor_bytes, payload_meta.tensor_meta)
+
+        tensor_meta = payload_meta.tensor_meta
+        dtype = deserialize_scalar_type(tensor_meta.dtype)
+        device = deserialize_device(tensor_meta.device)
+        record_name = os.path.join(base_dir, payload_meta.path_name)
+        nbytes = archive_reader.archive_file.get_record_size(record_name)
+
+        if nbytes == 0:
+            size = deserialize_size(tensor_meta.sizes)
+            tensor = torch.zeros(size, dtype=dtype, device=device)
+            if tensor_meta.requires_grad:
+                tensor.requires_grad_(True)
+        else:
+            element_size = torch._utils._element_size(dtype)
+            if nbytes % element_size != 0:
+                raise ValueError(
+                    f"Record {record_name}: size {nbytes} is not a multiple of "
+                    f"element size {element_size} for dtype {dtype}"
+                )
+            numel = nbytes // element_size
+            raw = archive_reader.archive_file.get_storage_from_record(
+                record_name, numel, dtype
+            )
+            # get_storage_from_record returns a tensor with empty DispatchKeySet,
+            # so we wrap the storage in a proper CPU tensor via set_().
+            tensor = torch.empty(0, dtype=dtype)
+            tensor.set_(raw.untyped_storage(), 0, (numel,), (1,))
+            if tensor_meta.requires_grad:
+                tensor.requires_grad_(True)
+            if device != torch.device("cpu"):
+                tensor = tensor.to(device)
+
         file_map[payload_meta.path_name] = tensor
 
     return file_map
@@ -962,6 +970,12 @@ def _load_constants(
                     os.path.join(CONSTANTS_DIR, path_name)
                 )
                 constants[constant_fqn] = torch._C._pickle_load_obj(constant_bytes)
+
+            elif path_name.startswith(OPAQUE_OBJ_FILENAME_PREFIX):
+                constant_bytes = archive_reader.read_bytes(
+                    os.path.join(CONSTANTS_DIR, path_name)
+                )
+                constants[constant_fqn] = pickle.loads(constant_bytes)
 
             else:
                 raise RuntimeError(f"Unsupported constant type: {path_name}")
