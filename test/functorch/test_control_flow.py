@@ -10443,21 +10443,59 @@ class TestHopSchema(TestCase):
         )
 
     def test_scan_gen_schema_with_multiple_additional_input_mutation(self):
-        def combine_fn(carry, x, buf1, buf2):
-            buf1.add_(x)
-            buf2.sub_(x)
-            return carry + x, carry * x
+        n_init, n_xs = 1, 1
 
-        schema = torch.ops.higher_order.scan.gen_schema(
-            combine_fn,
-            (torch.randn(3, 4),),
-            (torch.randn(5, 3, 4),),
-            (torch.randn(3, 4), torch.randn(3, 4)),
-        )
-        self.assertExpectedInline(
-            str(schema),
-            """scan(Any combine_fn, Tensor init0, Tensor xs0, Tensor(a3!) additional_input0, Tensor(a4!) additional_input1) -> (Tensor, Tensor)""",
-        )
+        def make_combine_fn(n_buf, mutated):
+            def combine_fn(carry, x, *bufs):
+                assert len(bufs) == n_buf  # noqa: S101
+                for i in mutated:
+                    bufs[i].add_(x)
+                return carry + x, carry * x
+
+            return combine_fn
+
+        def expected_schema(n_buf, mutated):
+            mutated_set = set(mutated)
+            parts = []
+            for i in range(n_buf):
+                if i in mutated_set:
+                    # combine_fn occupies arg_idx 0
+                    # then n_init inits
+                    # then n_xs xs
+                    # then additional_inputs
+                    aidx = 1 + n_init + n_xs + i
+                    parts.append(f"Tensor(a{aidx}!) additional_input{i}")
+                else:
+                    parts.append(f"Tensor additional_input{i}")
+            return (
+                "scan(Any combine_fn, Tensor init0, Tensor xs0, "
+                + ", ".join(parts)
+                + ") -> (Tensor, Tensor)"
+            )
+
+        cases = [
+            # 2 buffers: only first, only second (the case aorenste flagged),
+            # and both — covers all non-empty subsets at this size.
+            (2, (0,)),
+            (2, (1,)),
+            (2, (0, 1)),
+            # 3 buffers: only middle, only last, first+last (non-contiguous),
+            # and all — distinguishes start/middle/end positions and mixed
+            # selections that a constant offset would mismatch.
+            (3, (1,)),
+            (3, (2,)),
+            (3, (0, 2)),
+            (3, (0, 1, 2)),
+        ]
+        for n_buf, mutated in cases:
+            with self.subTest(n_buf=n_buf, mutated=mutated):
+                schema = torch.ops.higher_order.scan.gen_schema(
+                    make_combine_fn(n_buf, mutated),
+                    (torch.randn(3, 4),),
+                    (torch.randn(5, 3, 4),),
+                    tuple(torch.randn(3, 4) for _ in range(n_buf)),
+                )
+                self.assertEqual(str(schema), expected_schema(n_buf, mutated))
 
     def test_scan_gen_schema_init_mutation_raises(self):
         def combine_fn(carry, x):
