@@ -1918,14 +1918,17 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                         target = torch.full_like(target, ii)
                         yield module_args, module_kwargs, (input, target)
 
-        # Minimal bias=True coverage: one sample per (size, out_features)
-        # with the rest of the parametrization fixed at defaults. Bias is
-        # orthogonal to reduction / ignore_index / label_smoothing /
-        # weight / target_dtype (linear adds a constant to every logit
-        # element regardless of how cross_entropy reduces or weights
-        # them), so we don't expand against those axes. ``options=None``
-        # only -- the chunked path warns + falls back on linear_bias and
-        # gets covered by a dedicated unit test.
+        # Minimal bias=True coverage: one sample per (size, out_features,
+        # options-variant) with the rest of the parametrization fixed at
+        # defaults. Bias is orthogonal to reduction / ignore_index /
+        # label_smoothing / weight / target_dtype (linear adds a
+        # constant to every logit element regardless of how
+        # cross_entropy reduces or weights them), so we don't expand
+        # against those axes. We DO emit one chunked variant
+        # (``options != None``) per (size, out_features) so the chunked
+        # ``linear_bias`` path -- including the mixed-precision
+        # acc_dtype scratch + post-yield commit on fp16/bf16 inputs --
+        # gets gradient coverage through ``_test_linear_cross_entropy_loss``.
         for sizes in [(8, 5, 4), (None, 8, 4)]:
             num_batches, in_features, num_classes = sizes
             batch_dims = () if num_batches is None else (num_batches,)
@@ -1933,7 +1936,7 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                 if num_batches is None and of:
                     continue  # K-dim loss requires a batch dim.
                 module_args = (in_features, num_classes)
-                module_kwargs = dict(
+                base_module_kwargs = dict(
                     out_features=of,
                     bias=True,
                     device=device,
@@ -1942,11 +1945,31 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
                     weight=None,
                     ignore_index=None,
                     label_smoothing=0.0,
-                    options=None,
                 )
-                input = make_input(batch_dims, in_features)
-                target = make_target(num_classes, (*batch_dims, *of), torch.int64)
-                yield module_args, module_kwargs, (input, target)
+                # options=None: reference-path bias coverage.
+                # options=LinearCrossEntropyOptions(...): chunked-path
+                #   bias coverage (only fires when out_features == ();
+                #   K-dim chunked + bias falls back to the reference
+                #   path with a warning -- not a useful test sample).
+                #   ``batch_chunk_size=2`` forces >=2 chunks on every
+                #   device so the post-yield ``bias_grad_acc.zero_()``
+                #   reset between chunks gets exercised even on CPU
+                #   (where the ``aspect_ratio`` auto-heuristic for the
+                #   small (8, 5, 4) shape would otherwise produce a
+                #   single chunk).
+                options_variants = [None]
+                if not of:
+                    options_variants.append(
+                        torch.nn.LinearCrossEntropyOptions(
+                            allow_retain_graph=allow_retain_graph,
+                            batch_chunk_size=2,
+                        )
+                    )
+                for options in options_variants:
+                    module_kwargs = dict(base_module_kwargs, options=options)
+                    input = make_input(batch_dims, in_features)
+                    target = make_target(num_classes, (*batch_dims, *of), torch.int64)
+                    yield module_args, module_kwargs, (input, target)
 
     module_inputs = []
     for module_args, module_kwargs, (input, target) in samples():
