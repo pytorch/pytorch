@@ -67,20 +67,23 @@ class TokenSwitchNCCL(TokenSwitch):
         self,
         process_group: ProcessGroup,
         num_experts: int,
-        max_tokens_per_rank: int,
-        token_size_bytes: int,
+        max_dispatch_tokens_per_rank: int,
+        max_recv_tokens_per_rank: int,
+        max_token_bytes: int,
     ) -> None:
         c10d = torch._C._distributed_c10d
         if not hasattr(c10d, "_NcclEpGroup"):
             raise RuntimeError(
                 "TokenSwitchNCCL requires a build with NCCL EP (USE_NCCL_EP)."
             )
+        self._max_recv_tokens_per_rank = max_recv_tokens_per_rank
         # NCCL_EP_AUTO (0) for qp count and channel count
         self._group = c10d._NcclEpGroup.create(
             process_group,
             num_experts,
-            max_tokens_per_rank,
-            token_size_bytes,
+            max_dispatch_tokens_per_rank,
+            max_recv_tokens_per_rank,
+            max_token_bytes,
             0,
             0,
         )
@@ -112,7 +115,6 @@ class TokenSwitchNCCL(TokenSwitch):
             routing.handle,
             tokens,
             topk_weights,
-            routing.topk_idx,
             out_tokens,
             out_topk_weights,
             out_topk_idx,
