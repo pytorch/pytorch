@@ -1,4 +1,5 @@
 import collections
+import threading
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -73,7 +74,39 @@ def get_current_stream(device: torch.device) -> int:
     )
 
 
+_tls = threading.local()
+
+_shared_offload_stream: torch.cuda.Stream | None = None
+
+
+def _get_shared_offload_stream() -> torch.cuda.Stream:
+    global _shared_offload_stream
+    if _shared_offload_stream is None:
+        _shared_offload_stream = torch.cuda.Stream()
+    return _shared_offload_stream
+
+
+def _setup_stream_event_cache(
+    default_stream_indices: list[int],
+    new_stream_indices: list[int],
+    event_indices: list[int],
+) -> None:
+    _tls.stream_cache = {}
+    _tls.event_cache = {}
+    default_stream = torch.cuda.current_stream()
+    offload_stream = _get_shared_offload_stream()
+    for idx in default_stream_indices:
+        _tls.stream_cache[idx] = default_stream
+    for idx in new_stream_indices:
+        _tls.stream_cache[idx] = offload_stream
+    for idx in event_indices:
+        _tls.event_cache[idx] = torch.Event()
+
+
 def _get_stream_by_index(index: int) -> torch.Stream:
+    cache = getattr(_tls, "stream_cache", None)
+    if cache is not None and index in cache:
+        return cache[index]
     stream = get_external_object_by_index(index)
     if not isinstance(stream, torch.Stream):
         raise AssertionError(
@@ -83,6 +116,9 @@ def _get_stream_by_index(index: int) -> torch.Stream:
 
 
 def _get_event_by_index(index: int) -> torch.Event:
+    cache = getattr(_tls, "event_cache", None)
+    if cache is not None and index in cache:
+        return cache[index]
     event = get_external_object_by_index(index)
     if not isinstance(event, torch.Event):
         raise AssertionError(
