@@ -73,6 +73,14 @@ class TensorMeta(NamedTuple):
     dtype: torch.dtype
 
 
+def _hashable_dim(d: Any) -> Any:
+    # Symbolic SymInts are unhashable by design; map dims to a hashable surrogate
+    # so DTensorSpec stays hashable under dynamic shapes (constants keep int value).
+    if isinstance(d, torch.SymInt):
+        return int(d) if d.node.expr.is_number else str(d)
+    return d
+
+
 # used internally to propagate the placements
 @dataclass
 class DTensorSpec:
@@ -429,8 +437,8 @@ class DTensorSpec:
                 self.mesh,
                 self.placements,
                 self.shard_order,
-                self.tensor_meta.shape,
-                self.tensor_meta.stride,
+                tuple(_hashable_dim(d) for d in self.tensor_meta.shape),
+                tuple(_hashable_dim(d) for d in self.tensor_meta.stride),
                 self.tensor_meta.dtype,
             )
         return (self.mesh, self.placements, self.shard_order)
