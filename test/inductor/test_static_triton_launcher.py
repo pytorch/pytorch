@@ -779,10 +779,12 @@ class TestFastCudaLauncher(TestCase):
 )
 @skipIfRocm  # see TestFastCudaLauncher
 class TestFastCudaLauncherCompileResult(TestCase):
-    """E2E tests verifying _FastCudaLauncher is actually used by torch.compile.
+    """E2E tests verifying _FastCudaLauncher handling in torch.compile.
 
-    These tests assert both correctness (output matches eager) and that the
-    _FastCudaLauncher C extension was constructed, not silently skipped.
+    CUDA tests assert both correctness (output matches eager) and that the
+    _FastCudaLauncher C extension was constructed, not silently skipped. XPU
+    uses its own static launcher and must fall back without the CUDA-only fast
+    launcher.
     """
 
     def _patch_build_fast_launcher(self):
@@ -805,6 +807,7 @@ class TestFastCudaLauncherCompileResult(TestCase):
             CachingAutotuner, "_build_fast_launcher", tracking_build
         ), results
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181491")
     def test_basic_compile(self):
         """Verify torch.compile uses _FastCudaLauncher and produces correct output."""
         patcher, results = self._patch_build_fast_launcher()
@@ -817,9 +820,16 @@ class TestFastCudaLauncherCompileResult(TestCase):
             x = torch.randn(10, device=GPU_TYPE)
             y = torch.randn(10, device=GPU_TYPE)
             self.assertEqual(foo(x, y), x + y)
-            self.assertTrue(
-                any(results), "_FastCudaLauncher was not built by any CachingAutotuner"
-            )
+            if GPU_TYPE == "xpu":
+                self.assertTrue(results, "_build_fast_launcher was not reached on XPU")
+                self.assertFalse(
+                    any(results), "_FastCudaLauncher should not be built on XPU"
+                )
+            else:
+                self.assertTrue(
+                    any(results),
+                    "_FastCudaLauncher was not built by any CachingAutotuner",
+                )
 
     def test_disable_fast_launcher(self):
         """Verify disabling the config falls back to the regular launcher."""

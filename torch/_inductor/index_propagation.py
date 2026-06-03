@@ -16,8 +16,7 @@ The underlying handler would just see:
     ops.load("buf0", x * 2)
 
 This is limited by the set of operators handled in the sympy expression
-printers. So simple operations like minimum and maximum cannot be translated to
-SymPy expressions yet, despite sympy.Min and sympy.Max existing.
+printers.
 
 """
 
@@ -30,7 +29,7 @@ import sympy
 
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
+from torch.utils._sympy.functions import FloorDiv, Max, Min, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .ops_handler import DefaultHandler
@@ -96,6 +95,10 @@ class SymPyOps:
 
     @staticmethod
     def index_expr(value: sympy.Expr | int, dtype: torch.dtype) -> TypedExpr:
+        return TypedExpr(value, dtype)
+
+    @staticmethod
+    def value_expr(value: sympy.Expr | int, dtype: torch.dtype) -> TypedExpr:
         return TypedExpr(value, dtype)
 
     @staticmethod
@@ -172,12 +175,12 @@ class SymPyOps:
     @staticmethod
     def minimum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
-        return TypedExpr(sympy.Min(x.expr, y.expr), result_type)
+        return TypedExpr(Min(x.expr, y.expr), result_type)
 
     @staticmethod
     def maximum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
-        return TypedExpr(sympy.Max(x.expr, y.expr), result_type)
+        return TypedExpr(Max(x.expr, y.expr), result_type)
 
 
 @dataclass
@@ -237,6 +240,9 @@ class IndexPropagation(DefaultHandler):
             val = dtype_to_type(dtype)(expr)
             return self._inner.constant(val, dtype)
         return self._inner.index_expr(expr, dtype)
+
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> IndexPropResult:
+        return self.wrap(self._inner.value_expr(expr, dtype))
 
     def unwrap(self, a: Any | IndexPropVar) -> Any:
         if isinstance(a, (list, tuple)):

@@ -56,7 +56,7 @@ from torch._dynamo.utils import (
     dynamo_timed,
     get_metrics_context,
 )
-from torch._inductor import config, exc, metrics
+from torch._inductor import config, config_comms, exc, metrics
 from torch._inductor.codegen.common import (
     custom_backend_codegen_configs,
     custom_backend_passes,
@@ -84,7 +84,7 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
     run_asm_build_object,
 )
-from torch._inductor.cpu_vec_isa import pick_vec_isa
+from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
@@ -1301,6 +1301,10 @@ class FxGraphHashDetails:
         # so we add this explicitly.
         self.provenance_tracking_level = config.trace.provenance_tracking_level
 
+        # Factory ops with dtype=None are lowered using the ambient default dtype,
+        # so cached code compiled under one default dtype is not valid under another.
+        self.default_dtype = torch.get_default_dtype()
+
         # Global settings affecting matmul codegen.
         self.cuda_matmul_settings = (
             torch.backends.cuda.matmul.fp32_precision,
@@ -1330,6 +1334,11 @@ class FxGraphHashDetails:
         self.inductor_config = config.save_config_portable(
             ignore_private_configs=False, readonly_values=True
         )
+        # pyrefly: ignore [missing-attribute]
+        self.inductor_config_comms = config_comms.save_config_portable(
+            ignore_private_configs=False, readonly_values=True
+        )
+
         # Custom passes should provide an ID to hash when they run late (after cache lookup).
         if resolve_pre_grad_pass_timing() != "early":
             self.pre_grad_custom_pass = self._get_custom_pass_detail(
@@ -1655,6 +1664,7 @@ class InductorCacheArtifact(CacheArtifact):
     @override
     def populate_cache(self) -> None:
         FxGraphCache._write_to_local_cache(self.key, self.content)
+        FxGraphCache._emit_triton_bundle(self.content)
 
     @override
     @staticmethod
@@ -1934,6 +1944,15 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
         write_atomic(path, content, make_dirs=True)
+
+    @staticmethod
+    def _emit_triton_bundle(content: bytes) -> None:
+        if not TritonBundler.is_enabled():
+            return
+
+        graph = pickle.loads(content)
+        if bundle := graph._triton_bundle:
+            TritonBundler.read_and_emit(bundle)
 
     @staticmethod
     def _save_graph(
@@ -3348,6 +3367,7 @@ def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
 # because these headers need to be global, rather than ignored by fresh_cache.
 _HEADER_DIR = os.path.join(default_cache_dir(), "precompiled_headers")
 _HEADER_LOCK_DIR = os.path.join(_HEADER_DIR, "locks")
+_VEC_ISA_CPP_SOURCE_MARKERS = ("at::vec::", "prod_masked_reduce(")
 
 
 @functools.cache
@@ -3432,6 +3452,18 @@ def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     )
 
 
+def _resolve_needs_vec_isa(
+    base_device_type: str, source: str | None, explicit: bool | None
+) -> bool:
+    if explicit is not None:
+        return explicit
+    if source is None:
+        return False
+    if base_device_type == "cpu":
+        return True
+    return any(marker in source for marker in _VEC_ISA_CPP_SOURCE_MARKERS)
+
+
 @clear_on_fresh_cache
 class CppCodeCache:
     """Compiles and caches C++ libraries.  Users of this class supply the source code to
@@ -3483,15 +3515,36 @@ class CppCodeCache:
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
         optimized_code: str | None = None,
+        needs_vec_isa: bool | None = None,
+        kernel_needs_vec_isa: bool | None = None,
     ) -> Any:
         """Compile and load a C++ library.  Returns a callable that returns the loaded
         library."""
-        compile_command = {
+        base_device_type = device_type.split(":", maxsplit=1)[0]
+        main_needs_vec_isa = _resolve_needs_vec_isa(
+            base_device_type, main_code, needs_vec_isa
+        )
+        kernel_needs_vec_isa = _resolve_needs_vec_isa(
+            base_device_type, optimized_code, kernel_needs_vec_isa
+        )
+        picked_vec_isa = (
+            pick_vec_isa()
+            if main_needs_vec_isa or kernel_needs_vec_isa
+            else invalid_vec_isa
+        )
+        shared_compile_command = {
             **cls.cpp_compile_command_flags,
             "device_type": device_type,
             "extra_flags": extra_flags,
             "use_relative_path": config.is_fbcode(),
-            "vec_isa": pick_vec_isa(),
+        }
+        main_compile_command = {
+            **shared_compile_command,
+            "vec_isa": picked_vec_isa if main_needs_vec_isa else invalid_vec_isa,
+        }
+        optimized_compile_command = {
+            **shared_compile_command,
+            "vec_isa": picked_vec_isa if kernel_needs_vec_isa else invalid_vec_isa,
         }
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
@@ -3507,13 +3560,13 @@ class CppCodeCache:
             compile_only=bool(optimized_code),
             min_optimize=min_optimize,
             # pyrefly: ignore [bad-argument-type]
-            **compile_command,
+            **main_compile_command,
         )
         optimized_build_option = CppTorchDeviceOptions(
             # pyrefly: ignore [bad-argument-type]
             compile_only=True,
             # pyrefly: ignore [bad-argument-type]
-            **compile_command,
+            **optimized_compile_command,
         )
 
         def get_hashable_command_line(build_option: BuildOptionsBase) -> str:
@@ -3554,7 +3607,7 @@ class CppCodeCache:
                         header,
                         main_cmd_line,
                         min_optimize=min_optimize,
-                        **compile_command,
+                        **main_compile_command,
                     )
 
                 # Currently, the optimized_code field is only used for cpp kernel code,
@@ -3565,7 +3618,7 @@ class CppCodeCache:
                         # pyrefly: ignore [unbound-name]
                         header,
                         optimized_cmd_line,
-                        **compile_command,
+                        **optimized_compile_command,
                     )
 
             main_name, output_dir = get_name_and_dir_from_output_file_path(main_path)
@@ -3594,7 +3647,7 @@ class CppCodeCache:
                         optimized_builder.get_target_file_path(),
                     ],
                     # pyrefly: ignore [bad-argument-type]
-                    BuildOption=CppTorchDeviceOptions(**compile_command),
+                    BuildOption=CppTorchDeviceOptions(**shared_compile_command),
                     output_dir=output_dir,
                 )
 
@@ -3789,6 +3842,8 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         argtypes: Sequence[str],
         main_code: str,
         device_type: str = "cpu",
+        needs_vec_isa: bool | None = None,
+        kernel_needs_vec_isa: bool | None = None,
         num_outputs: int = -1,
         submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
@@ -3802,6 +3857,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             main_code: C++ source code containing ENTRY_FUNCTION().  Will be built at
                 -O3 if kernel_code is None (to maximize performance in any kernels that
                 are present), or -O1 otherwise (to minimize compile time).
+            needs_vec_isa: Whether the generated wrapper requires CPU vectorized
+                host helpers. If omitted, this is inferred from the generated
+                source as a conservative fallback.
+            kernel_needs_vec_isa: Whether the separately compiled kernel source
+                requires CPU vectorized host helpers. Only relevant when
+                kernel_code is provided.
             kernel_code: If present, C++ source code that will be built at -O3 and
                 linked to main_code.
 
@@ -3824,6 +3885,8 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             submit_fn=submit_fn,
             extra_flags=extra_flags,
             optimized_code=kernel_code,
+            needs_vec_isa=needs_vec_isa,
+            kernel_needs_vec_isa=kernel_needs_vec_isa,
         )
         result = None
 
@@ -3876,7 +3939,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             for (size_t i = 0; i < {array_len}; i++) {{
                 PyObject *elem =
                     arr[i] == nullptr
-                        ? Py_None
+                        ? Py_NewRef(Py_None)
                         // Store AtenTensorHandle as PyCapsulate
                         : PyCapsule_New(reinterpret_cast<void*>(arr[i]), NULL, NULL);
                 PyList_SET_ITEM(result, i, elem);

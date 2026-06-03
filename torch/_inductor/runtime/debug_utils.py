@@ -58,7 +58,7 @@ class BufferMemoryTracker:
     ) -> None:
         """Check only the delta changes since last step"""
 
-        # Check expected deaths - we dont currently distinguish between nodes which die in last step
+        # Check expected deaths - we don't currently distinguish between nodes which die in last step
         # and are returned as outputs, so skip if final_step.
         if not is_final_step:
             missing_deaths = OrderedSet(expected_freed) - self.died_since_last_step
