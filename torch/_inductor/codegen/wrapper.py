@@ -2348,20 +2348,43 @@ class PythonWrapperCodegen(CodeGen):
                 self.estimate_peak = EfficientPeakEstimate()
             self.memory_plan_reuse()
 
+    def maybe_emit_replacement_aliases(
+        self,
+        sym: sympy.Symbol,
+        bound_vars: OrderedSet[sympy.Symbol],
+    ) -> None:
+        # Deferred runtime asserts reference pre-replacement backed
+        # symbols (e.g. s77) that were replaced to this canonical
+        # symbol (s31) during constraint solving. Emit aliases so
+        # the asserts compile. Skip unbacked symbols — they are
+        # defined separately by the unbacked symbol codegen path.
+        sizevars = getattr(V.graph, "sizevars", None)
+        shape_env = getattr(sizevars, "shape_env", None)
+        if shape_env is None:
+            return
+        for src, tgt in shape_env.replacements.items():
+            if (
+                tgt == sym
+                and isinstance(src, sympy.Symbol)
+                and src not in bound_vars
+                and not symbol_is_type(src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+            ):
+                self.prefix.writeline(f"{src} = {sym}")
+                bound_vars.add(src)
+
     def codegen_input_symbol_assignment(
         self,
         name: str,
         value: ir.TensorBox,
         bound_vars: OrderedSet[sympy.Symbol],
     ):
-        code = self.prefix
-
         if isinstance(value, sympy.Expr):
             value = V.graph.sizevars.simplify(value)
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
-            code.writeline(f"{value} = {name}")
+            self.prefix.writeline(f"{value} = {name}")
             bound_vars.add(value)
+            self.maybe_emit_replacement_aliases(value, bound_vars)
         elif isinstance(
             value,
             (
@@ -2393,6 +2416,7 @@ class PythonWrapperCodegen(CodeGen):
         else:
             self.prefix.writeline(f"{sym} = {input_name}.stride()[{dim}]")
         bound_vars.add(sym)
+        self.maybe_emit_replacement_aliases(sym, bound_vars)
 
     def codegen_inputs(self):
         """Assign all symbolic shapes to locals"""
@@ -2412,11 +2436,35 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_input_symbol_assignment(name, value, bound_vars)
 
         for sym, (input_name, kind, dim) in V.graph.symbolic_input_sources.items():
+            sym = V.graph.sizevars.simplify(sym)
+            if not isinstance(sym, sympy.Symbol):
+                continue
             if sym in bound_vars:
                 continue
             if input_name not in graph_inputs:
                 continue
             self.bind_input_symbol(sym, input_name, kind, dim, bound_vars)
+
+        if config.size_asserts:
+            for input_name, value in inputs:
+                if not isinstance(value, ir.TensorBox):
+                    continue
+                if input_name not in V.graph.graph_input_names:
+                    continue
+                if sympy_product(value.get_size()) == 0:
+                    continue
+                for dim, size in enumerate(value.get_size()):
+                    size = V.graph.sizevars.simplify(size)
+                    if isinstance(size, sympy.Symbol):
+                        self.bind_input_symbol(
+                            size, input_name, "size", dim, bound_vars
+                        )
+                for dim, stride in enumerate(value.get_stride()):
+                    stride = V.graph.sizevars.simplify(stride)
+                    if isinstance(stride, sympy.Symbol):
+                        self.bind_input_symbol(
+                            stride, input_name, "stride", dim, bound_vars
+                        )
 
         def _verify_input_symbol_assignment(
             value: ir.TensorBox,

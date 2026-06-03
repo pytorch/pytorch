@@ -174,6 +174,116 @@ class TestPythonWrapperCodegen(TestCase):
 
         self.assertEqual(wrapper.prefix.getvalue().strip(), "s0 = arg0_1.size()[0]")
 
+    def test_codegen_inputs_binds_canonical_recorded_symbolic_input_source(self):
+        wrapper = self._new_wrapper()
+        raw = sympy.Symbol("s0")
+        canonical = sympy.Symbol("s1")
+        tensor = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="arg0_1",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[raw],
+                    stride=[1],
+                ),
+            )
+        )
+        graph = self._graph_with_sizevars(
+            graph_inputs={"arg0_1": tensor},
+            graph_input_names=["arg0_1"],
+            symbolic_input_sources={raw: ("arg0_1", "size", 0)},
+        )
+        graph.sizevars.simplify = lambda x: (
+            x.xreplace({raw: canonical}) if isinstance(x, sympy.Basic) else x
+        )
+        graph.sizevars.shape_env = SimpleNamespace(replacements={raw: canonical})
+
+        with (
+            V.set_graph_handler(graph),
+            torch._inductor.config.patch("size_asserts", False),
+        ):
+            wrapper.codegen_inputs()
+
+        self.assertExpectedInline(
+            wrapper.prefix.getvalue().strip(),
+            """\
+s1 = arg0_1.size()[0]
+s0 = s1""",
+        )
+
+    def test_codegen_inputs_binds_size_assert_symbols(self):
+        wrapper = self._new_wrapper()
+        s0 = sympy.Symbol("s0")
+        s1 = sympy.Symbol("s1")
+        tensor = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="arg0_1",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[s0],
+                    stride=[s1],
+                ),
+            )
+        )
+        graph = self._graph_with_sizevars(
+            graph_inputs={"arg0_1": tensor},
+            graph_input_names=["arg0_1"],
+            symbolic_input_sources={},
+        )
+
+        with (
+            V.set_graph_handler(graph),
+            torch._inductor.config.patch("size_asserts", True),
+        ):
+            wrapper.codegen_inputs()
+
+        self.assertExpectedInline(
+            wrapper.prefix.getvalue().strip(),
+            """\
+s0 = arg0_1.size()[0]
+s1 = arg0_1.stride()[0]""",
+        )
+
+    def test_codegen_inputs_binds_canonical_size_assert_symbol(self):
+        wrapper = self._new_wrapper()
+        raw = sympy.Symbol("s0")
+        canonical = sympy.Symbol("s1")
+        tensor = ir.TensorBox.create(
+            ir.InputBuffer(
+                name="arg0_1",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=[raw],
+                    stride=[1],
+                ),
+            )
+        )
+        graph = self._graph_with_sizevars(
+            graph_inputs={"arg0_1": tensor},
+            graph_input_names=["arg0_1"],
+            symbolic_input_sources={},
+        )
+        graph.sizevars.simplify = lambda x: (
+            x.xreplace({raw: canonical}) if isinstance(x, sympy.Basic) else x
+        )
+        graph.sizevars.shape_env = SimpleNamespace(replacements={raw: canonical})
+
+        with (
+            V.set_graph_handler(graph),
+            torch._inductor.config.patch("size_asserts", True),
+        ):
+            wrapper.codegen_inputs()
+
+        self.assertExpectedInline(
+            wrapper.prefix.getvalue().strip(),
+            """\
+s1 = arg0_1.size()[0]
+s0 = s1""",
+        )
+
     def test_codegen_inputs_rejects_unbound_input_symbol(self):
         wrapper = self._new_wrapper()
         s0 = sympy.Symbol("s0")
