@@ -309,9 +309,15 @@ function install_torchcomms() {
   pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
 }
 
+function install_spmd_types() {
+  local commit
+  commit=$(get_pinned_commit spmd_types)
+  retry pip_build_and_install "git+https://github.com/meta-pytorch/spmd_types.git@${commit}" dist/spmd_types
+}
+
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
-  pip_install flash-attn-4==4.0.0b5
+  pip_install flash-attn-4==4.0.0b15
   echo "FlashAttention 4 installation complete."
 }
 
