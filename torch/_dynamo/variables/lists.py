@@ -192,6 +192,25 @@ class BaseListVariable(VariableTracker):
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
 
+    def tp_iteritem_impl(
+        self, tx: "InstructionTranslatorBase", index: VariableTracker
+    ) -> tuple[VariableTracker, VariableTracker]:
+        # 3.15 _tp_iteritem slot.  list/tuple (and tuple subclasses like
+        # torch.Size) all share the same algorithm: index into self.items,
+        # bump the index, signal exhaustion with StopIteration.  Subclasses
+        # whose Python type does NOT install _tp_iteritem (range, deque)
+        # override this to fall back to the base "missing" behavior.
+        # ref: https://github.com/python/cpython/blob/f31a89bb9010/Objects/listobject.c#L3916-L3921 (list_iteritem)
+        # ref: https://github.com/python/cpython/blob/f31a89bb9010/Objects/tupleobject.c#L876-L885 (tuple_iteritem)
+        if not isinstance(self, (ListVariable, TupleVariable)):
+            return super().tp_iteritem_impl(tx, index)
+        i = index.as_python_constant()
+        if i < 0:
+            raise AssertionError(f"Invalid index {i}")
+        if i >= len(self.items):
+            raise_observed_exception(IndexError, tx)
+        return self.items[i], ConstantVariable.create(i + 1)
+
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
