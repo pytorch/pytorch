@@ -1,5 +1,6 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <ATen/DynamicLibrary.h>
+#include <c10/util/ScopeExit.h>
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
@@ -109,6 +110,7 @@ consider rebuild your model with the latest AOTInductor.");
   TRY_LOAD_SYMBOL(
       update_constants_from_blob_func_,
       "AOTInductorModelUpdateConstantsFromBlob")
+  TRY_LOAD_SYMBOL(get_last_error_func_, "AOTInductorGetLastError")
 #undef TRY_LOAD_SYMBOL
 
   // Hack to find the json file name from the model so file
@@ -164,6 +166,13 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
     const char* err = torch::aot_inductor::get_last_error();
     if (err) {
       throw std::runtime_error(err);
+    }
+    if (get_last_error_func_) {
+      const char* aoti_err = nullptr;
+      if (get_last_error_func_(&aoti_err) == AOTI_RUNTIME_SUCCESS && aoti_err &&
+          aoti_err[0]) {
+        throw std::runtime_error(aoti_err);
+      }
     }
     torch::headeronly::detail::throw_exception(
         "run_func_(...)", __FILE__, __LINE__);
@@ -350,14 +359,14 @@ void AOTIModelContainerRunner::update_constant_buffer_from_blob(
   if (hMapping == NULL) {
     TORCH_CHECK(false, "CreateFileMapping failed");
   }
+  auto mapping_guard =
+      c10::make_scope_exit([hMapping]() { CloseHandle(hMapping); });
 
   uint8_t* ptr = static_cast<uint8_t*>(
       MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, weights_size));
 
-  if (ptr == NULL) {
-    CloseHandle(hMapping);
-    TORCH_CHECK(false, "MapViewOfFile failed");
-  }
+  TORCH_CHECK(ptr != NULL, "MapViewOfFile failed");
+  auto view_guard = c10::make_scope_exit([ptr]() { UnmapViewOfFile(ptr); });
 
 #else
   // Unix/Linux implementation
@@ -369,19 +378,11 @@ void AOTIModelContainerRunner::update_constant_buffer_from_blob(
 
   close(fd);
   TORCH_CHECK(ptr != MAP_FAILED, "mmap() failed");
+  auto mmap_guard = c10::make_scope_exit(
+      [ptr, weights_size]() { munmap(ptr, weights_size); });
 #endif
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       update_constants_from_blob_func_(container_handle_, ptr));
-
-  // After update_constants_from_blob_func_ returns, the model has copied
-  // all the data from the mmap'd memory to its own internal storage,
-  // so we can safely unmap the memory now.
-#ifdef _WIN32
-  UnmapViewOfFile(ptr);
-  CloseHandle(hMapping);
-#else
-  munmap(ptr, weights_size);
-#endif
 }
 
 void AOTIModelContainerRunner::update_inactive_constant_buffer(

@@ -91,7 +91,7 @@ class SymmMemAllocMixin:
         # Force initialization of communicator; otherwise, the rendezvous may
         # see empty communicator.
         # TODO: Remove this, maybe by warning user to perform eager dist init.
-        # For now, it is okay since it isjust a one-time cost at init.
+        # For now, it is okay since it is just a one-time cost at init.
         dist.barrier(group=group)
 
     def allocate(
@@ -538,6 +538,7 @@ def foreach_reduce(
 ) -> tuple[
     torch.Tensor,
     torch.Event,
+    torch.Stream,
     torch.Event,
     torch.Tensor | None,
     torch.Event | None,
@@ -640,6 +641,7 @@ def foreach_reduce(
                 return (
                     reduce_scatter_input,
                     reduce_scatter_event,
+                    post_reduce_stream,
                     post_reduce_stream.record_event(),
                     all_reduce_input,
                     all_reduce_event,
@@ -765,6 +767,7 @@ def foreach_reduce(
     return (
         reduce_scatter_input,
         reduce_scatter_event,
+        post_reduce_stream,
         post_reduce_event,
         all_reduce_input,
         all_reduce_event,

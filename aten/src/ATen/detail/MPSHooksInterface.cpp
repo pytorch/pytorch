@@ -8,7 +8,7 @@ namespace detail {
 const MPSHooksInterface& getMPSHooks() {
   auto create_impl = [] {
 #if !defined C10_MOBILE
-    auto hooks = MPSHooksRegistry()->Create("MPSHooks", MPSHooksArgs{});
+    auto hooks = MPSHooksRegistry()->Create("MPSHooks");
     if (hooks) {
       return hooks;
     }
@@ -20,6 +20,6 @@ const MPSHooksInterface& getMPSHooks() {
 }
 } // namespace detail
 
-C10_DEFINE_REGISTRY(MPSHooksRegistry, MPSHooksInterface, MPSHooksArgs)
+C10_DEFINE_REGISTRY(MPSHooksRegistry, MPSHooksInterface)
 
 } // namespace at

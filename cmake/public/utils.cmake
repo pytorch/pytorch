@@ -265,7 +265,7 @@ endfunction()
 #
 macro(torch_cuda_based_add_library cuda_target)
   if(USE_ROCM)
-    hip_add_library(${cuda_target} ${ARGN})
+    add_library(${cuda_target} ${ARGN})
   elseif(USE_CUDA)
     add_library(${cuda_target} ${ARGN})
   else()

@@ -93,7 +93,7 @@ autograd_cache_normalize_inputs = not is_fbcode()
 #   - When False: Emits UserWarning on aliasing violations.
 #
 # Deprecated: Custom ops returning aliased outputs is deprecated and will
-# become an error in PyTorch 2.12. Currently error_on_custom_op_aliasing
+# become an error in a future version of PyTorch. Currently error_on_custom_op_aliasing
 # is True only in CI.
 check_custom_op_aliasing = True
 error_on_custom_op_aliasing = bool(os.getenv("CI"))
@@ -333,8 +333,9 @@ backward_pass_autocast = "same_as_forward"
 # False if a user wants to retain_graph=True for backward.
 donated_buffer = not is_fbcode()
 
-# Controls the default graph output format used by draw_graph
-# Supported formats are defined here https://graphviz.org/docs/outputs/
+# Controls the default graph output format used by draw_graph.
+# Most supported formats are defined here https://graphviz.org/docs/outputs/.
+# The "dot" and "raw" formats write raw DOT text without invoking Graphviz.
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 
 # Valid only if fake_tensor_propagate_real_tensors = True; if a fake-real
@@ -434,6 +435,13 @@ force_autograd_cache = False
 # annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor
 # on to explicitly annotate. This is currently only used by inductor lite mode.
 selective_decompose: bool = False
+
+# Complex Support
+# This config disallows decomposition of complex-valued Tensors using
+# `torch._subclasses.complex_tensor.ComplexTensor` by decomposing everything into
+# real-valued operations, passing through the regular pipeline as necessary,
+# then converting back to a regular tensor.
+enable_complex_wrapper: bool = False
 
 
 if TYPE_CHECKING:

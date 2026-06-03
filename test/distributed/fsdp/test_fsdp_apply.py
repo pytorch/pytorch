@@ -34,6 +34,10 @@ device_type = torch.device(get_devtype())
 
 
 class TestApply(FSDPTestContinuous):
+    # FSDP v1 has reference cycles that prevent GC from freeing model tensors,
+    # causing false positives in the CUDA memory leak checker.
+    _do_cuda_memory_leak_check = False
+
     @property
     def world_size(self):
         if torch.accelerator.is_available():
