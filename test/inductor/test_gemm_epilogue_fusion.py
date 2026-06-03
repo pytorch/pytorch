@@ -1633,6 +1633,52 @@ class GemmEpilogueFusionTests(TestCase):
         )
 
     @requires_cuda_and_triton
+    def test_cuda_inductor_scaled_grouped_mm_v2_epilogue_fuses_rowwise(self):
+        if not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM:
+            self.skipTest("FP8 grouped GEMM is not supported")
+
+        def fn(a, b, scale_a, scale_b, offs, row_bias, col_scale):
+            return gemm_epilogue_fusion(
+                torch.ops.aten._scaled_grouped_mm_v2.default,
+                (a, b, scale_a, scale_b),
+                lambda acc: ((acc.float() + row_bias) * col_scale).relu(),
+                gemm_kwargs={
+                    "scale_recipe_a": F.ScalingType.RowWise,
+                    "scale_recipe_b": F.ScalingType.RowWise,
+                    "offs": offs,
+                    "output_dtype": torch.bfloat16,
+                },
+            )
+
+        groups, m, n, k = 2, 64, 128, 64
+        a = torch.randn(m * groups, k, device="cuda", dtype=torch.bfloat16).to(
+            torch.float8_e4m3fn
+        )
+        b = torch.randn(groups, n, k, device="cuda", dtype=torch.bfloat16).to(
+            torch.float8_e4m3fn
+        ).transpose(-2, -1)
+        scale_a = torch.rand(m * groups, device="cuda", dtype=torch.float32)
+        scale_b = torch.rand(groups, n, device="cuda", dtype=torch.float32)
+        offs = torch.arange(m, m * groups + 1, m, device="cuda", dtype=torch.int32)
+        row_bias = torch.randn(m * groups, 1, device="cuda", dtype=torch.float32) * 0.1
+        col_scale = torch.randn(1, n, device="cuda", dtype=torch.float32) * 0.1
+
+        self._assert_compiled_matches(
+            fn,
+            a,
+            b,
+            scale_a,
+            scale_b,
+            offs,
+            row_bias,
+            col_scale,
+            atol=2e-1,
+            rtol=5e-2,
+            checks=("triton_", "scaled_grouped_mm"),
+            check_nots=("extern_kernels._scaled_grouped_mm",),
+        )
+
+    @requires_cuda_and_triton
     def test_cuda_inductor_quack_backend_rejects_scaled_grouped_mm_epilogue(self):
         if not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM:
             self.skipTest("FP8 grouped GEMM is not supported")
