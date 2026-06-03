@@ -70,6 +70,7 @@ class CapabilityBasedPartitioner:
         allows_single_node_partition: bool = False,
         non_compute_ops: Sequence[str] | None = None,
         allowed_single_node_partition_ops: Sequence[str] | None = None,
+        skip_horizontal_fusion: bool = False,
     ) -> None:
         self.graph_module = graph_module
         self.operator_support = operator_support
@@ -80,6 +81,7 @@ class CapabilityBasedPartitioner:
             if allowed_single_node_partition_ops is not None
             else []
         )
+        self.skip_horizontal_fusion = skip_horizontal_fusion
         self.dependency_viewer = _DependencyViewer(graph_module)
 
     def _is_node_supported(self, node: Node) -> bool:
@@ -109,6 +111,24 @@ class CapabilityBasedPartitioner:
         ] = {}  # mapping from partition_id to partition users
         new_partition_id = itertools.count()
 
+        def downstream_partitions(
+            user_nodes: Iterable[Node], source_ids: Iterable[int]
+        ) -> set[int]:
+            source_ids_set = set(source_ids)
+            downstream_partition_ids: set[int] = set()
+            for user_node in user_nodes:
+                for path_node in itertools.chain(
+                    (user_node,), self.dependency_viewer.downstreams_of(user_node)
+                ):
+                    target_id = assignment.get(path_node)
+                    if target_id is None:
+                        continue
+                    downstream_partition_ids.add(target_id)
+                    downstream_partition_ids.update(partition_map[target_id])
+
+            downstream_partition_ids.difference_update(source_ids_set)
+            return downstream_partition_ids
+
         # try to merge partition other_id into partition self_id
         # merge only happens if the end graph doesn't contain cyclic dependency
         # returns `True` when merge happens, `False` otherwise.
@@ -121,7 +141,9 @@ class CapabilityBasedPartitioner:
                 for user_node in all_user_nodes:
                     visited_partition_ids = set()
 
-                    for path_node in self.dependency_viewer.downstreams_of(user_node):
+                    for path_node in itertools.chain(
+                        (user_node,), self.dependency_viewer.downstreams_of(user_node)
+                    ):
                         # If any of the nodes in the dfs path of this node are in the merged_nodes
                         # list then there is a cycle in the graph.
                         if path_node in self_nodes or path_node in other_nodes:
@@ -182,19 +204,20 @@ class CapabilityBasedPartitioner:
             partition_users[merge_id] = all_user_nodes
             del partition_users[removed_id]
 
+            partition_map[merge_id].update(
+                downstream_partitions(all_user_nodes, (merge_id, removed_id))
+            )
+            partition_map[merge_id].discard(merge_id)
+            partition_map[merge_id].discard(removed_id)
+
             return merge_id, True
 
         def merge_single_node(
             node: Node, node_order: int | None, id: int | None
         ) -> None:
             def _update_partition_map(node: Node, id: int) -> None:
-                # Iterate through all the users of this node and update the partition map to indicate
-                # that there is a path from the partition id of this node to the target partition id.
-                for user_node in node.users:
-                    target_id = assignment.get(user_node)
-                    if target_id is not None:
-                        partition_map[id].add(target_id)
-                        partition_map[id].update(partition_map[target_id])
+                # Update reachability through both assigned and unsupported users.
+                partition_map[id].update(downstream_partitions(node.users, (id,)))
 
             if node in assignment:
                 partitions_by_id[assignment[node]].remove_node(node)
@@ -219,24 +242,34 @@ class CapabilityBasedPartitioner:
         for node_order, node in enumerate(reversed(self.graph_module.graph.nodes)):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
             merge_candidates: dict[int, None] = {}
+            created_partition = False
 
             # Note a limited horizontal fusion is enabled:
             #   when `node` is not supported, the code below attempts to fuse consumer of `node`.
             #
-            # I don't see a need to add a knob to disable horizontal fusion yet, we can short-cut
-            # the fusion by adding an `else` block here to skip horizontal fusion.
+            # When skip_horizontal_fusion is True, only merge the newly-created
+            # partition for this supported node with partitions for its direct users.
+            # This preserves data-dependent vertical fusion while avoiding fusion of
+            # independent consumer partitions around an unsupported node.
             if self._is_node_supported(node) and node not in assignment:
                 partition_id = next(new_partition_id)
                 nodes_order[node] = partition_id
                 partitions_order[partition_id] = partition_id
                 merge_single_node(node, node_order, partition_id)
                 merge_candidates[partition_id] = None
+                created_partition = True
 
-            # merge all possible partitions
-            for partition_id, _ in sorted(
-                partitions_order.items(), key=operator.itemgetter(1)
-            ):
-                merge_candidates[partition_id] = None
+            if self.skip_horizontal_fusion:
+                if created_partition:
+                    for user in node.users:
+                        if user in assignment:
+                            merge_candidates[assignment[user]] = None
+            else:
+                # merge all possible partitions
+                for partition_id, _ in sorted(
+                    partitions_order.items(), key=operator.itemgetter(1)
+                ):
+                    merge_candidates[partition_id] = None
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
