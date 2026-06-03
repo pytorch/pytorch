@@ -2497,6 +2497,72 @@ def forward(self, x):
         dynamo_result = out_graph(inp)
         self.assertEqual(dynamo_result, m(inp))
 
+    def test_export_preserves_metadata_during_normalization(self):
+        from torch._dynamo.output_graph import OutputGraph
+
+        orig_call_user_compiler = OutputGraph._call_user_compiler
+        graph_meta_key = "_test_export_graph_meta"
+        node_meta_key = "_test_export_node_meta"
+
+        def patched_call_user_compiler(output_graph, gm, example_inputs):
+            gm.meta[graph_meta_key] = {"preserved": True}
+            for node in gm.graph.nodes:
+                if node.op != "output":
+                    node.meta[node_meta_key] = node.name
+            return orig_call_user_compiler(output_graph, gm, example_inputs)
+
+        def f(x):
+            return x.sin() + 1
+
+        for aten_graph in (False, True):
+            with self.subTest(aten_graph=aten_graph):
+                with patch.object(
+                    OutputGraph, "_call_user_compiler", patched_call_user_compiler
+                ):
+                    gm, _ = torch._dynamo.export(f, aten_graph=aten_graph)(
+                        torch.randn(2)
+                    )
+
+                self.assertEqual(gm.meta[graph_meta_key], {"preserved": True})
+                node_meta = [
+                    node.meta[node_meta_key]
+                    for node in gm.graph.nodes
+                    if node.op != "output"
+                ]
+                self.assertEqual(node_meta, ["l_x_", "sin", "add"])
+
+    def test_functional_export_transform_preserves_metadata(self):
+        from torch._dynamo.functional_export import DynamoGraphTransformer
+        from torch._dynamo.output_graph import OutputReturnInfo
+
+        graph_meta_key = "_test_export_graph_meta"
+        node_meta_key = "_test_export_node_meta"
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta[node_meta_key] = "placeholder"
+        y = graph.call_function(torch.sin, (x,))
+        y.meta[node_meta_key] = "call_function"
+        graph.output((y,))
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        gm.meta[graph_meta_key] = {"preserved": True}
+
+        transformed = DynamoGraphTransformer(
+            gm,
+            [torch.randn(2)],
+            [set()],
+            {0: 0},
+            {0: OutputReturnInfo("graph_out", 0)},
+        ).transform()
+
+        self.assertEqual(transformed.meta[graph_meta_key], {"preserved": True})
+        node_meta = [
+            node.meta[node_meta_key]
+            for node in transformed.graph.nodes
+            if node.op != "output"
+        ]
+        self.assertEqual(node_meta, ["placeholder", "call_function"])
+
     def test_constraint_violation_error_messages(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
