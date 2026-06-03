@@ -743,7 +743,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
         dx = dx.transpose_(0, 1);
     }
 
-    return std::make_tuple(dx, dhx, dcx, workspace);
+    return std::make_tuple(std::move(dx), std::move(dhx), std::move(dcx), std::move(workspace));
 }
 
 std::vector<Tensor> miopen_rnn_backward_weight(
@@ -866,7 +866,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
             }
         }
     }
-    return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{dx, dhx, dcx, dw};
+    return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{std::move(dx), std::move(dhx), std::move(dcx), std::move(dw)};
 }
 
 namespace {
@@ -909,7 +909,7 @@ std::pair<Tensor, hidden_type> _miopen_impl(
         _batch_sizes.device().is_cpu(),
         "batch_sizes tensor should be on CPU, but got ",
         _batch_sizes.device());
-    IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
+    IntArrayRef batch_sizes { _batch_sizes.const_data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
     Tensor dropout_state = at::empty({0}, input.options());
 

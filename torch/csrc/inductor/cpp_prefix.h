@@ -7,8 +7,12 @@
 #include <cstdlib>
 #include <limits>
 #include <map>
+#include <unordered_map>
+
+#include <c10/util/hash.h>
 #include <memory>
 #include <optional>
+#include <type_traits>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
@@ -191,7 +195,16 @@ Welford<T> welford_combine(
   if (b.index == 0) {
     return a;
   }
+  // Guard against inf - inf = NaN when both means are infinite and equal.
+  // This occurs during FP16/BF16 LayerNorm when inputs overflow to inf.
   auto delta = b.mean - a.mean;
+  if constexpr (IsVecType<T>::value) {
+    delta = T::blendv(delta, T(0), a.mean == b.mean);
+  } else {
+    if (std::isinf(a.mean) && a.mean == b.mean) {
+      delta = T(0);
+    }
+  }
   auto a_weight = use_index ? T(a.index) : a.weight;
   auto b_weight = use_index ? T(b.index) : b.weight;
   auto new_weight = a_weight + b_weight;
@@ -485,7 +498,7 @@ struct IndexValueVec {
     index = at::vec::VectorizedN<int64_t, NI>(0);
   };
 
-  IndexValueVec() {};
+  IndexValueVec() = default;
 };
 
 template <
@@ -617,6 +630,15 @@ inline IndexValueVec<T, NV, NI>& argmin_combine_vec(
   return argmin_vec_impl(a, next_value, next_idx, tail_size);
 }
 
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmin_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmin_vec_impl(a, next_value, next_index, tail_size);
+}
+
 template <typename T, int NV, int NI, bool horizontal>
 inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
     IndexValueVec<T, NV, NI>& a,
@@ -625,6 +647,15 @@ inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
     std::optional<int64_t> tail_size = std::nullopt) {
   auto next_idx = create_index<T, NI, horizontal>(next_index);
   return argmax_vec_impl(a, next_value, next_idx, tail_size);
+}
+
+template <typename T, int NV, int NI>
+inline IndexValueVec<T, NV, NI>& argmax_combine_vec(
+    IndexValueVec<T, NV, NI>& a,
+    at::vec::VectorizedN<T, NV> next_value,
+    at::vec::VectorizedN<int64_t, NI> next_index,
+    std::optional<int64_t> tail_size = std::nullopt) {
+  return argmax_vec_impl(a, next_value, next_index, tail_size);
 }
 
 template <typename T, int NV, int NI>
@@ -776,9 +807,39 @@ Welford<scalar_t> welford_vec_reduce_all(
 }
 #endif
 
+inline std::atomic<int>* inductor_cpu_integer_div_error_flag = nullptr;
+
+inline void inductor_cpu_note_integer_div_by_zero() {
+  if (inductor_cpu_integer_div_error_flag != nullptr) {
+    inductor_cpu_integer_div_error_flag->store(1, std::memory_order_relaxed);
+  } else {
+    TORCH_CHECK(false, "ZeroDivisionError");
+  }
+}
+
+inline void inductor_cpu_throw_if_integer_div_error(std::atomic<int>& err) {
+  if (err.load(std::memory_order_acquire)) {
+    TORCH_CHECK(false, "ZeroDivisionError");
+  }
+}
+
 template <typename T, typename U>
-inline typename std::common_type_t<T, U> mod(T a, U b) {
-  return a % b;
+inline std::common_type_t<T, U> mod(T a, U b) {
+  using C = std::common_type_t<T, U>;
+  static_assert(
+      std::is_integral_v<C>,
+      "inductor template mod(T a, U b) is only for integral types; use the float/double specializations "
+      "for floating-point operands.");
+  if (C10_UNLIKELY_OR_CONST(b == 0)) {
+    inductor_cpu_note_integer_div_by_zero();
+    return C(0);
+  }
+  const C a_c = static_cast<C>(a);
+  const C b_c = static_cast<C>(b);
+  if (a_c == std::numeric_limits<C>::min() && b_c == C(-1)) {
+    return C(0);
+  }
+  return a_c % b_c;
 }
 template <>
 inline float mod(float a, float b) {
@@ -788,6 +849,61 @@ template <>
 inline double mod(double a, double b) {
   return std::fmod(a, b);
 }
+
+template <typename T>
+inline T remainder_integral(T a, T b) {
+  static_assert(
+      std::is_integral_v<T>, "remainder_integral expects integral scalar T");
+  if (C10_UNLIKELY_OR_CONST(b == 0)) {
+    inductor_cpu_note_integer_div_by_zero();
+    return T(0);
+  }
+  if (a == std::numeric_limits<T>::min() && b == T(-1)) {
+    return T(0);
+  }
+  T r = a % b;
+  if ((r != 0) && (c10::is_negative(r) != c10::is_negative(b))) {
+    r += b;
+  }
+  return r;
+}
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+inline at::vec::Vectorized<T> remainder_integral(
+    const at::vec::Vectorized<T>& a,
+    const at::vec::Vectorized<T>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "remainder_integral expects integral underlying type");
+  // Some Vectorized<T> (e.g. Vectorized8<int8_t>) deletes operator[];
+  // use store/load like
+  using Vec = at::vec::Vectorized<T>;
+  constexpr int kLen = Vec::size();
+  alignas(alignof(Vec)) T out_buf[kLen];
+  alignas(alignof(Vec)) T b_buf[kLen];
+  a.store(out_buf);
+  b.store(b_buf);
+  for (int i = 0; i < kLen; ++i) {
+    out_buf[i] = remainder_integral(out_buf[i], b_buf[i]);
+  }
+  return Vec::loadu(out_buf);
+}
+
+template <typename T, int N>
+inline at::vec::VectorizedN<T, N> remainder_integral(
+    const at::vec::VectorizedN<T, N>& a,
+    const at::vec::VectorizedN<T, N>& b) {
+  static_assert(
+      std::is_integral_v<T>,
+      "remainder_integral expects integral underlying type");
+  at::vec::VectorizedN<T, N> out;
+  for (int i = 0; i < N; ++i) {
+    out[i] = remainder_integral(a[i], b[i]);
+  }
+  return out;
+}
+#endif
 
 template <typename scalar_t>
 inline scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
@@ -991,16 +1107,14 @@ inline std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(
 }
 
 inline std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
-  thread_local std::map<int64_t, std::tuple<std::shared_ptr<int64_t[]>, int>>
-      cache;
-  auto it = cache.find(number);
-  if (it != cache.end()) {
-    return it->second;
-  } else {
-    auto factors = _get_factors(number);
-    cache[number] = factors;
-    return factors;
+  thread_local std::
+      unordered_map<int64_t, std::tuple<std::shared_ptr<int64_t[]>, int>>
+          cache;
+  auto [it, inserted] = cache.try_emplace(number);
+  if (inserted) {
+    it->second = _get_factors(number);
   }
+  return it->second;
 }
 // NOLINTEND(*-avoid-c-arrays)
 
@@ -1113,20 +1227,19 @@ inline void mm_get_thread_blocking(
     int64_t& Mt,
     int64_t& Nt,
     int64_t& Kt) {
-  thread_local std::map<
-      std::
-          tuple<int, int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>,
-      std::tuple<int64_t, int64_t, int64_t>>
-      cache;
+  using Key = std::
+      tuple<int, int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>;
+  thread_local std::
+      unordered_map<Key, std::tuple<int64_t, int64_t, int64_t>, c10::hash<Key>>
+          cache;
   auto key = std::make_tuple(num_threads, max_k_slices, M, N, K, Mr, Nr, Kr);
-  auto it = cache.find(key);
-  if (it != cache.end()) {
-    std::tie(Mt, Nt, Kt) = it->second;
-    return;
-  } else {
+  auto [it, inserted] = cache.try_emplace(key);
+  if (inserted) {
     _mm_get_thread_blocking(
         num_threads, max_k_slices, M, N, K, Mr, Nr, Kr, Mt, Nt, Kt);
-    cache[key] = std::make_tuple(Mt, Nt, Kt);
+    it->second = std::make_tuple(Mt, Nt, Kt);
+  } else {
+    std::tie(Mt, Nt, Kt) = it->second;
   }
 }
 
@@ -1208,22 +1321,22 @@ void mm_get_cache_blocking(
     int64_t& Kc_blocks,
     uint32_t L1_cache_size,
     uint32_t L2_cache_size) {
-  thread_local std::map<
-      std::tuple<
-          int,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t,
-          int64_t>,
-      std::tuple<int64_t, int64_t, int64_t>>
-      cache;
+  using Key = std::tuple<
+      int,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t,
+      int64_t>;
+  thread_local std::
+      unordered_map<Key, std::tuple<int64_t, int64_t, int64_t>, c10::hash<Key>>
+          cache;
   auto key = std::make_tuple(
       num_threads,
       M,
@@ -1237,11 +1350,8 @@ void mm_get_cache_blocking(
       Kt_blocks,
       L1_cache_size,
       L2_cache_size);
-  auto it = cache.find(key);
-  if (it != cache.end()) {
-    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = it->second;
-    return;
-  } else {
+  auto [it, inserted] = cache.try_emplace(key);
+  if (inserted) {
     _mm_get_cache_blocking<X_t, W_t>(
         num_threads,
         M,
@@ -1258,7 +1368,9 @@ void mm_get_cache_blocking(
         Kc_blocks,
         L1_cache_size,
         L2_cache_size);
-    cache[key] = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
+    it->second = std::make_tuple(Mc_blocks, Nc_blocks, Kc_blocks);
+  } else {
+    std::tie(Mc_blocks, Nc_blocks, Kc_blocks) = it->second;
   }
 }
 

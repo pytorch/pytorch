@@ -45,13 +45,16 @@
 
         offs_am = pid_m * BLOCK_M
         offs_bn = pid_n * BLOCK_N
+        offs_am_desc = offs_am.to(tl.int32)
+        offs_bn_desc = offs_bn.to(tl.int32)
 
         accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
         for ki in range(0, k_tiles):
             offs_k = ki * BLOCK_K
+            offs_k_desc = offs_k.to(tl.int32)
 
-            a = tl.load_tensor_descriptor(a_desc, [offs_am, offs_k])
-            b = tl.load_tensor_descriptor(b_desc, [offs_bn, offs_k])
+            a = tl.load_tensor_descriptor(a_desc, [offs_am_desc, offs_k_desc])
+            b = tl.load_tensor_descriptor(b_desc, [offs_bn_desc, offs_k_desc])
 
             {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.Blockwise128x128
             scale_a_block = blockwise128x128_scaling(
@@ -80,7 +83,7 @@
             )
             {%- endif %}
 
-            {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.Blockwise128x128
+            {%- if SCALE_RECIPE_B == 5 %}  # ScalingType.Blockwise128x128
             scale_b_block = blockwise128x128_scaling(
                 pid_n,
                 B_inverse_scale,

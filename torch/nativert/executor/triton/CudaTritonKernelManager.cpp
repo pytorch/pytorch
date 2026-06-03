@@ -14,12 +14,12 @@ const at::cuda::NVRTC& get_nvrtc() {
 }
 } // namespace
 
-#define CU_LOG_ERROR(fn, result, ...)                   \
-  {                                                     \
-    LOG(ERROR) << #fn << " returned error: " << result; \
-    const char* errMsg = nullptr;                       \
-    get_nvrtc().cuGetErrorString(result, &errMsg);      \
-    LOG(ERROR) << "cuGetErrorString: " << errMsg;       \
+#define CU_LOG_ERROR(fn, result, ...)                    \
+  {                                                      \
+    LOG(ERROR) << #fn << " returned error: " << result;  \
+    const char* errMsg = nullptr;                        \
+    (void)get_nvrtc().cuGetErrorString(result, &errMsg); \
+    LOG(ERROR) << "cuGetErrorString: " << errMsg;        \
   }
 
 namespace torch::nativert {
@@ -60,6 +60,12 @@ class CudaKernelInputs final : public KernelInputs {
     arg_ptrs_[arg_idx_] = arg;
     inputs_[arg_idx_] = reinterpret_cast<void*>(&arg_ptrs_[arg_idx_]);
     arg_idx_++;
+  }
+
+  void add_scalar_arg(const c10::IValue& value, std::string_view param_type)
+      override {
+    TORCH_CHECK(arg_idx_ < num_args_, "Too many args");
+    inputs_[arg_idx_++] = store_scalar_arg(value, param_type);
   }
 
  private:

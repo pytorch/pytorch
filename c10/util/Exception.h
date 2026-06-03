@@ -1,3 +1,4 @@
+// @allow-raw-throw
 #ifndef C10_UTIL_EXCEPTION_H_
 #define C10_UTIL_EXCEPTION_H_
 
@@ -236,7 +237,9 @@ struct C10_API WarnAlways {
 // Like Error, but we always report the C++ backtrace, instead of only
 // reporting when TORCH_SHOW_CPP_STACKTRACES
 class C10_API ErrorAlwaysShowCppStacktrace : public Error {
+ public:
   using Error::Error;
+  ErrorAlwaysShowCppStacktrace(SourceLocation source_location, std::string msg);
   const char* what_without_backtrace() const noexcept override {
     return what();
   }
@@ -246,60 +249,80 @@ class C10_API ErrorAlwaysShowCppStacktrace : public Error {
 // lazily inside a kernel (See: advanced indexing).  These turn into
 // IndexError when they cross to Python.
 class C10_API IndexError : public Error {
+ public:
   using Error::Error;
+  IndexError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for invalid values.  These turn into
 // ValueError when they cross to Python.
 class C10_API ValueError : public Error {
+ public:
   using Error::Error;
+  ValueError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for invalid types.  These turn into
 // TypeError when they cross to Python.
 class C10_API TypeError : public Error {
+ public:
   using Error::Error;
+  TypeError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for functionality that is not implemented.  These turn into
 // NotImplementedError when they cross to Python.
 class C10_API NotImplementedError : public Error {
+ public:
   using Error::Error;
+  NotImplementedError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for buffer-related errors, e.g. trying to create a DLPack of
 // an unsupported device.  These turn into BufferError when they cross to
 // Python.
 class C10_API BufferError : public Error {
+ public:
   using Error::Error;
+  BufferError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
 class C10_API EnforceFiniteError : public Error {
+ public:
   using Error::Error;
+  EnforceFiniteError(SourceLocation source_location, std::string msg);
 };
 
 // Used in Onnxifi backend lowering.  These turn into
 // ExitException when they cross to Python.
 class C10_API OnnxfiBackendSystemError : public Error {
+ public:
   using Error::Error;
+  OnnxfiBackendSystemError(SourceLocation source_location, std::string msg);
 };
 
 // Used for numerical errors from the linalg module. These
 // turn into LinAlgError when they cross into Python.
 class C10_API LinAlgError : public Error {
+ public:
   using Error::Error;
+  LinAlgError(SourceLocation source_location, std::string msg);
 };
 
 class C10_API OutOfMemoryError : public Error {
+ public:
   using Error::Error;
+  OutOfMemoryError(SourceLocation source_location, std::string msg);
 };
 
 // Used for handling syntactic errors in input arguments.
 // These turn into SyntaxError when the cross into Python.
 class C10_API SyntaxError : public Error {
+ public:
   using Error::Error;
+  SyntaxError(SourceLocation source_location, std::string msg);
 };
 
 // Raised when accelerator API call hits an error.
@@ -318,31 +341,41 @@ class C10_API AcceleratorError : public Error {
 // Base error type for all distributed errors.
 // These turn into DistError when they cross into Python.
 class C10_API DistError : public Error {
+ public:
   using Error::Error;
+  DistError(SourceLocation source_location, std::string msg);
 };
 
 // Used for collective communication library errors from the distributed module.
 // These turn into DistBackendError when they cross into Python.
 class C10_API DistBackendError : public DistError {
+ public:
   using DistError::DistError;
+  DistBackendError(SourceLocation source_location, std::string msg);
 };
 
 // Used for errors originating from the store.
 // These turn into DistStoreError when they cross into Python.
 class C10_API DistStoreError : public DistError {
+ public:
   using DistError::DistError;
+  DistStoreError(SourceLocation source_location, std::string msg);
 };
 
 // Used for errors originating from the TCP/IP stack and not from collective
 // libraries. These turn into DistNetworkError when they cross into Python.
 class C10_API DistNetworkError : public DistError {
+ public:
   using DistError::DistError;
+  DistNetworkError(SourceLocation source_location, std::string msg);
 };
 
 // Raised when a queue is empty and a non-blocking pop is called.
 // Translated to torch.distributed.QueueEmptyError in Python
 class C10_API DistQueueEmptyError : public DistStoreError {
+ public:
   using DistStoreError::DistStoreError;
+  DistQueueEmptyError(SourceLocation source_location, std::string msg);
 };
 
 // A utility function to return an exception std::string by prepending its
@@ -618,9 +651,19 @@ namespace c10::detail {
 #define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
   while (false)                               \
   C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
+// In release: TORCH_INTERNAL_ASSERT_DEBUG_ONLY is a no-op, so return
+// __VA_ARGS__ as a fallback. In debug: crashes via
+// TORCH_INTERNAL_ASSERT(false), so no return is emitted (avoids
+// -Wunreachable-code-return).
+#define TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(...) \
+  do {                                             \
+    return __VA_ARGS__;                            \
+  } while (0)
 #else
 #define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
   C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
+#define TORCH_INTERNAL_ASSERT_FALSE_OR_RETURN(...) \
+  C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(false))
 #endif
 
 // TODO: We're going to get a lot of similar looking string literals

@@ -178,7 +178,7 @@ Attempted to wrap a set with tensors
 
 from user code:
    File "test_sets.py", line N, in fn
-    for i in s:""",  # noqa: B950
+    for i in s:""",
         )
 
     def test_set_multiple_types(self):
@@ -447,7 +447,7 @@ class _FrozensetBase:
     @make_dynamo_test
     def test_in_frozenset(self):
         item = self.thetype("abc")
-        container = self.thetype([frozenset("abc")])  # noqa: C405
+        container = self.thetype([frozenset("abc")])
         self.assertIn(item, container)
 
     @make_dynamo_test
@@ -769,6 +769,21 @@ class OrderedSetTests(_SetBase, _BaseSetTests):
         # Test ^
         result = s1 ^ s2
         self.assertIsInstance(result, self.thetype)
+
+    @make_dynamo_test
+    def test_construct_from_generator(self):
+        s = self.thetype(x.upper() for x in ["a", "b", "c"])
+        self.assertEqual(list(s), ["A", "B", "C"])
+
+    @make_dynamo_test
+    def test_construct_from_map(self):
+        s = self.thetype(map(str, [1, 2, 3]))
+        self.assertEqual(list(s), ["1", "2", "3"])
+
+    @make_dynamo_test
+    def test_construct_from_range(self):
+        s = self.thetype(range(4))
+        self.assertEqual(list(s), [0, 1, 2, 3])
 
 
 if __name__ == "__main__":

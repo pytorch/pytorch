@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 __all__ = [
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_disabled",
     "caching_allocator_enable",
     "get_per_process_memory_fraction",
     "set_per_process_memory_fraction",
@@ -98,15 +99,6 @@ def _host_allocator():
     return torch._C._cuda_cudaHostAllocator()
 
 
-@contextlib.contextmanager
-def _free_mutex():
-    torch._C._cuda_lock_mutex()
-    try:
-        yield
-    finally:
-        torch._C._cuda_unlock_mutex()
-
-
 def caching_allocator_alloc(size, device: "Device" = None, stream=None):
     r"""Perform a memory allocation using the CUDA memory allocator.
 
@@ -137,7 +129,7 @@ def caching_allocator_alloc(size, device: "Device" = None, stream=None):
         raise TypeError(
             "Invalid type for stream argument, must be "
             "`torch.cuda.Stream` or `int` representing a pointer "
-            "to a existing stream"
+            "to an existing stream"
         )
     with torch.cuda.device(device):
         return torch._C._cuda_cudaCachingAllocator_raw_alloc(size, stream)
@@ -164,6 +156,18 @@ def caching_allocator_enable(value: bool = True) -> None:
     r"""Enable or disable the CUDA memory allocator. On by default."""
     if is_initialized():
         torch._C._cuda_cudaCachingAllocator_enable(value)
+
+
+@contextlib.contextmanager
+def caching_allocator_disabled():
+    r"""Context manager that temporarily disables the CUDA caching allocator."""
+    # pyrefly: ignore [missing-attribute]
+    prev = torch._C._cuda_cudaCachingAllocator_is_enabled()
+    caching_allocator_enable(False)
+    try:
+        yield
+    finally:
+        caching_allocator_enable(prev)
 
 
 def set_per_process_memory_fraction(fraction, device: "Device" = None) -> None:
@@ -277,6 +281,8 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
       cuMemMap and cudaMalloc.
     - ``"num_device_free"``: number of CUDA free calls. This includes both cuMemUnmap
       and cudaFree.
+    - ``"num_oom_rejections"``: number of allocations preemptively rejected by the
+        throw_on_cudamalloc_oom + per_process_memory_fraction policy.
 
     The caching allocator can be configured via ENV to not split blocks larger than a
     defined size (see Memory Management section of the Cuda Semantics documentation).
@@ -297,6 +303,12 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
     - ``"requested_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
       memory requested by client code, compare this with allocated_bytes to check if
       allocation rounding adds too much overhead.
+    - ``"reserved_bytes_by_private_pools"``: nested dictionary keyed by
+      ``torch.cuda.MemPool.id`` tuples. Each value has the same
+      ``{all,large_pool,small_pool}.{current,peak,allocated,freed}`` structure
+      as ``reserved_bytes``, but scoped to a single private pool. In
+      :func:`~torch.cuda.memory_stats`, tuple keys are flattened by joining
+      their stringified elements with ``"_"``, so ``(0, 1)`` becomes ``"0_1"``.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -313,12 +325,20 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
     """
     result = []
 
+    def _format_key(key):
+        if isinstance(key, str):
+            return key
+        if isinstance(key, tuple):
+            return "_".join(str(part) for part in key)
+        return str(key)
+
     def _recurse_add_to_result(prefix, obj):
         if isinstance(obj, dict):
             if len(prefix) > 0:
                 prefix += "."
             for k, v in obj.items():
-                _recurse_add_to_result(prefix + k, v)
+                key = _format_key(k)
+                _recurse_add_to_result(prefix + key, v)
         else:
             result.append((prefix, obj))
 
@@ -1027,6 +1047,9 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             total_size: int  #  cudaMalloc'd size of segment
             stream: int
             segment_type: Literal["small", "large"]  # 'large' (>1MB)
+            segment_pool_id: Tuple[
+                int, int
+            ]  # id of the memory pool owning this segment
             allocated_size: int  # size of memory in use
             active_size: int  # size of memory in use or in active_awaiting_free state
             blocks: List[Block]
@@ -1085,6 +1108,7 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
             stream: int
             device_free: int  # only present for OOM, the amount of
             # memory cuda still reports to be free
+            pool_id: Tuple[int, int]  # id of the memory pool for this entry
 
     Args:
         device: Device to capture snapshot for. If None, captures for current device.
@@ -1333,3 +1357,144 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
     finally:
         _cuda_endAllocateToPool(device_index, pool.id)
         _cuda_releasePool(device_index, pool.id)
+
+
+@contextlib.contextmanager
+def _use_uvm(device: "Device" = None):
+    r"""A context manager that routes CUDA allocations through ``cudaMallocManaged`` (UVM).
+
+    All tensors allocated inside this context use CUDA Unified Virtual Memory,
+    which allows oversubscribing GPU device memory by transparently paging to
+    system RAM on demand. Numerics are identical to regular device allocations;
+    only performance is affected due to page migration overhead.
+
+    Args:
+        device (torch.device or int, optional): selected device. Uses the
+            current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Example::
+
+        >>> # xdoctest: +SKIP(reason="requires CUDA and cuda-python")
+        >>> with torch.cuda._use_uvm():
+        ...     x = torch.randn(1024, 1024, device="cuda")
+        ...     y = x @ x.T  # computed on GPU, pages in/out as needed
+
+    .. note::
+        Only the current thread's allocations are routed to managed memory.
+        Allocations in threads spawned inside this context (e.g. by backward)
+        will use the default allocator. Use
+        ``torch.autograd.set_multithreading_enabled(False)`` to force backward
+        onto the calling thread so that backward allocations also use UVM.
+
+    .. note::
+        Requires the ``cuda-python`` package (``cuda.bindings``).
+    """
+    import logging
+    import traceback
+
+    try:
+        from cuda.bindings import runtime as _rt  # pyrefly: ignore[missing-import]
+    except ImportError:
+        raise ImportError(
+            "torch.cuda._use_uvm() requires the 'cuda-python' package "
+            "(cuda.bindings.runtime) for cudaMallocManaged, cudaMemAdvise, "
+            "and cudaFree."
+        ) from None
+
+    log = logging.getLogger(__name__)
+
+    _ALLOC_FN = ctypes.CFUNCTYPE(
+        ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+    )
+    _FREE_FN = ctypes.CFUNCTYPE(
+        None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+    )
+
+    def _check(result, msg: str = ""):
+        err = result if not isinstance(result, tuple) else result[0]
+        if err != _rt.cudaError_t.cudaSuccess:
+            raise RuntimeError(f"CUDA error: {err}. {msg}")
+
+    _advise_uses_struct = hasattr(_rt, "cudaMemLocation")
+
+    def _mem_advise(ptr, size, advice, device_id, _runtime=_rt):
+        """Call cudaMemAdvise, handling struct-vs-int API difference.
+
+        cuda-bindings 13.x requires a cudaMemLocation struct;
+        cuda-bindings 12.x expects a plain int device ordinal.
+        We try struct first and latch to int on TypeError.
+        """
+        nonlocal _advise_uses_struct
+        if _advise_uses_struct:
+            try:
+                loc = _runtime.cudaMemLocation()
+                loc.type = _runtime.cudaMemLocationType.cudaMemLocationTypeDevice
+                loc.id = device_id
+                return _runtime.cudaMemAdvise(ptr, size, advice, loc)
+            except TypeError:
+                _advise_uses_struct = False
+        return _runtime.cudaMemAdvise(ptr, size, advice, device_id)
+
+    def _uvm_alloc(size, device, stream, _runtime=_rt):
+        try:
+            err, ptr = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
+            _check(err, f"cudaMallocManaged({size})")
+            ptr = int(ptr)
+            if device >= 0:
+                _check(
+                    _mem_advise(
+                        ptr,
+                        size,
+                        _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
+                        device,
+                    ),
+                    "cudaMemAdvise(SetPreferredLocation)",
+                )
+                _check(
+                    _mem_advise(
+                        ptr,
+                        size,
+                        _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
+                        device,
+                    ),
+                    "cudaMemAdvise(SetAccessedBy)",
+                )
+            return ptr
+        except Exception:
+            log.error(
+                "[_use_uvm] FAILED to allocate %d bytes (%.2f GiB) via UVM."
+                " CUDACachingAllocator will raise an OOM error as a result."
+                " You can ignore free-memory numbers reported by PyTorch"
+                " as they are irrelevant for UVM.\nException:\n%s",
+                size,
+                size / (1024**3),
+                traceback.format_exc(),
+            )
+            return 0
+
+    def _uvm_free(ptr, size, device, stream, _runtime=_rt):
+        """Best-effort free; guards against interpreter shutdown."""
+        try:
+            if ptr:
+                _check(_runtime.cudaFree(ptr))
+        except Exception:
+            if log is not None and traceback is not None:
+                try:
+                    log.error(
+                        "[_use_uvm] exception in free:\n%s",
+                        traceback.format_exc(),
+                    )
+                except Exception:
+                    pass
+
+    c_alloc = _ALLOC_FN(_uvm_alloc)
+    c_free = _FREE_FN(_uvm_free)
+    alloc_ptr = ctypes.cast(c_alloc, ctypes.c_void_p).value
+    free_ptr = ctypes.cast(c_free, ctypes.c_void_p).value
+
+    # pyrefly: ignore[bad-argument-type]
+    allocator = torch._C._cuda_customAllocator(alloc_ptr, free_ptr)
+    pool = MemPool(allocator=allocator)
+    with use_mem_pool(pool, device=device):
+        yield pool

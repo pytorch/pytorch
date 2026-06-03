@@ -1074,6 +1074,10 @@ TEST(StaticRuntime, NanToNum) {
 }
 
 TEST(StaticRuntime, Stack) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  // See https://github.com/pytorch/pytorch/issues/178522.
+  GTEST_SKIP() << "Skipping StaticRuntime.Stack on AArch64.";
+#endif
   const auto stack_dim = R"JIT(
     def forward(self, a: Tensor, b: Tensor, dim: int):
         inputs = [a]
@@ -2307,6 +2311,10 @@ TEST(StaticRuntime, Append) {
 }
 
 TEST(StaticRuntime, QuantizedLinear) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  // See https://github.com/pytorch/pytorch/issues/178522.
+  GTEST_SKIP() << "Skipping QuantizedLinear on AArch64.";
+#endif
   const std::string quantize_script = R"IR(
     graph(%input: Tensor, %weights: Tensor):
         %scale: float = prim::Constant[value=1.]()

@@ -103,6 +103,8 @@ std::string get_cpu_capability() {
     case native::CPUCapability::ZVECTOR:
       return "Z VECTOR";
 #elif defined(HAVE_SVE_CPU_DEFINITION)
+    case native::CPUCapability::SVE128:
+      return "SVE128";
     case native::CPUCapability::SVE256:
       return "SVE256";
 #else
@@ -218,8 +220,9 @@ std::string get_cxx_flags() {
     "Buck does not populate the `CXX_FLAGS` field of Caffe2 build options. "
     "As a result, `get_cxx_flags` is OSS only."
   );
-  #endif
+  #else
   return caffe2::GetBuildOptions().at("CXX_FLAGS");
+  #endif
 }
 
 }

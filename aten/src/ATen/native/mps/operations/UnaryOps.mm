@@ -1,8 +1,10 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/ScanKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -115,9 +117,7 @@ static void unary_op(const Tensor& self,
                      std::string op_name,
                      UnaryOpBlock unaryBlock,
                      is_noop_p is_noop = is_empty_tensor) {
-  if (!output_.is_same_size(self)) {
-    output_.resize_(self.sizes());
-  }
+  at::native::resize_output(output_, self.sizes());
 
   if (is_noop(self)) {
     output_.copy_(self);
@@ -333,8 +333,21 @@ static void cumulative_op_impl(const Tensor& self,
               "(original dim is ",
               dim,
               ")");
-  TORCH_CHECK(!self.is_complex(), "cumulative ops are not yet supported for complex");
   auto input = dtype.has_value() ? self.to(dtype.value()) : self;
+  if (input.is_complex()) {
+    if (cumulativeOpType == MPSCumulativeOpType::CUMSUM) {
+      auto input_real = at::view_as_real(input.dim() == 0 ? input.view({1}) : input);
+      auto result_real = at::view_as_real(result.dim() == 0 ? result.view({1}) : result);
+      return cumulative_op_impl(
+          input_real, wrapped_dim, std::nullopt, result_real, MPSCumulativeOpType::CUMSUM, "cumsum_out_mps");
+    } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
+      auto input_view = input.dim() == 0 ? input.view({1}) : input;
+      auto result_view = result.dim() == 0 ? result.view({1}) : result;
+      return mps::scan_simple_mps_impl(input_view, result_view, wrapped_dim, "cumprod");
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
+    }
+  }
 
   // issue #103810551: cumsum / cumprod are broken for int8, int16 and as chances for overflow are pretty high, cast to
   // int32 fixed in macOS 13.3

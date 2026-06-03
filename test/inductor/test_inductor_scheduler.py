@@ -3,13 +3,27 @@
 from unittest import skipIf
 from unittest.mock import Mock
 
+import sympy
+
 import torch
+import torch._inductor.config as inductor_config
+import torch._inductor.ir as ir
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.dependencies import Dep, ReadWrites
-from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites
+from torch._inductor.ir import GraphPartitionSignature
+from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
+from torch._inductor.scheduler import (
+    _get_benchmarkable_extern_fn,
+    BaseSchedulerNode,
+    ExternKernelSchedulerNode,
+    NestedReduction,
+    Scheduler,
+)
+from torch._inductor.sizevars import SizeVarAllocator
+from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -22,9 +36,11 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfXpu,
     TestCase,
+    xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.inductor_utils import IS_BIG_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import FloorDiv
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -77,8 +93,426 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def _extern_snode_for_op(self, op_overload, python_kernel_name):
+        node = object.__new__(ir.ExternKernel)
+        node.op_overload = op_overload
+        node.python_kernel_name = python_kernel_name
+        snode = object.__new__(ExternKernelSchedulerNode)
+        snode.node = node
+        return snode
+
+    def test_get_benchmarkable_extern_fn_uses_op_overload(self):
+        self.assertIsNone(_get_benchmarkable_extern_fn(Mock(spec=BaseSchedulerNode)))
+        self.assertIs(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(torch.ops.aten.mm.out, "renamed_mm")
+            ),
+            torch.ops.aten.mm,
+        )
+        self.assertIs(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(
+                    torch.ops.aten._scaled_mm.out, "extern_kernels.mm"
+                )
+            ),
+            torch.ops.aten._scaled_mm,
+        )
+        self.assertIsNone(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(None, "extern_kernels.mm")
+            )
+        )
+        self.assertIsNone(
+            _get_benchmarkable_extern_fn(
+                self._extern_snode_for_op(
+                    torch.ops.aten.relu.out, "extern_kernels.relu"
+                )
+            )
+        )
+
+    def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
+        snode = Mock()
+        snode.node = Mock()
+        snode.node.inputs = [torch.empty(2, 2), torch.empty(2, 2)]
+        snode.node.constant_args = ()
+        snode.node.kwargs = {"out_dtype": torch.float16}
+        snode.node.op_overload = torch.ops.aten.mm.dtype_out
+        snode.node.fill_non_provided_args.side_effect = lambda args, kwargs: [
+            *args,
+            kwargs["out_dtype"],
+        ]
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual(args[2], torch.float16)
+        self.assertEqual(kwargs, {})
+
+    def test_snode_args_kwargs_preserves_keyword_only_kwargs(self):
+        snode = Mock()
+        snode.node = Mock()
+        snode.node.inputs = [
+            torch.empty(2, 2),
+            torch.empty(2, 2),
+            torch.empty(2, 2),
+        ]
+        snode.node.constant_args = ()
+        snode.node.kwargs = {"alpha": 2}
+        snode.node.op_overload = torch.ops.aten.addmm.out
+        snode.node.fill_non_provided_args.side_effect = lambda args, kwargs: args
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual(len(args), 3)
+        self.assertEqual(kwargs, {"alpha": 2})
+
+    def test_snode_args_kwargs_unflattens_fallback_kernel_args(self):
+        node = object.__new__(ir.FallbackKernel)
+        node.inputs = [torch.empty(2, 3), torch.empty(2, 3)]
+        node.constant_args = (1,)
+        node.kwargs = {}
+        node.op_overload = torch.ops.aten.cat.default
+        node.unflatten_args = lambda tensor_args, constant_args: (
+            [list(tensor_args)],
+            {"dim": constant_args[0]},
+        )
+        node.fill_non_provided_args = lambda args, kwargs: [*args, kwargs["dim"]]
+        snode = Mock()
+        snode.node = node
+
+        args, kwargs = snode_args_kwargs(snode)
+
+        self.assertEqual([tuple(t.shape) for t in args[0]], [(2, 3), (2, 3)])
+        self.assertEqual(args[1], 1)
+        self.assertEqual(kwargs, {})
+
+    def test_fusable_read_and_write_broadcast_requires_index_equivalence(self):
+        d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True, nonnegative=True)
+        w0, w1 = sympy.symbols("w0 w1", integer=True, nonnegative=True)
+
+        scheduler = Scheduler.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        scheduler.mode_requires_synchronization = lambda mode: False
+
+        graph = Mock(sizevars=SizeVarAllocator())
+        with V.set_graph_handler(graph):
+            write = MemoryDep("buf", 32 * w0 + w1, (w0, w1), (128, 32))
+            simple_write = MemoryDep("buf", w0, (w0,), (16,))
+            s0, s1 = sympy.symbols("s0 s1", integer=True, positive=True)
+            exact_gapped = MemoryDep("buf", 33 * d0 + d1, (d0, d1), (128, 32))
+            cases = [
+                (
+                    "quotient broadcast",
+                    MemoryDep(
+                        "buf",
+                        32 * d0 + FloorDiv(d1, 128),
+                        (d0, d1),
+                        (128, 4096),
+                    ),
+                    write,
+                    False,
+                    True,
+                ),
+                (
+                    "quotient tail remains",
+                    MemoryDep(
+                        "buf",
+                        32 * d0 + FloorDiv(d1, 128) + d1,
+                        (d0, d1),
+                        (128, 4096),
+                    ),
+                    write,
+                    False,
+                    False,
+                ),
+                (
+                    "pure broadcast",
+                    MemoryDep("buf", d1, (d0, d1), (1024, 16)),
+                    simple_write,
+                    False,
+                    True,
+                ),
+                (
+                    "dynamic dense",
+                    MemoryDep("buf", s1 * d0 + d1, (d0, d1), (s0, s1)),
+                    MemoryDep("buf", s1 * w0 + w1, (w0, w1), (s0, s1)),
+                    False,
+                    True,
+                ),
+                (
+                    "exact gapped",
+                    exact_gapped,
+                    exact_gapped,
+                    True,
+                    True,
+                ),
+                (
+                    "producer broadcast",
+                    MemoryDep("buf", d0, (d0, d1), (8, 4)),
+                    MemoryDep("buf", w1, (w0, w1), (8, 4)),
+                    False,
+                    False,
+                ),
+                (
+                    "producer alias",
+                    MemoryDep("buf", d0 + d1, (d0, d1), (2, 2)),
+                    MemoryDep("buf", w0 + w1, (w0, w1), (2, 2)),
+                    False,
+                    False,
+                ),
+            ]
+            for name, read, write, expected_default, expected_relaxed in cases:
+                with self.subTest(name):
+                    self.assertEqual(
+                        scheduler.fusable_read_and_write(read, write),
+                        expected_default,
+                    )
+                    self.assertEqual(
+                        scheduler.fusable_read_and_write(
+                            read,
+                            write,
+                            allow_index_equivalence=True,
+                        ),
+                        expected_relaxed,
+                    )
+
+            normalized_exact_gapped_read = MemoryDep(
+                "buf", 33 * d0 + d1, (d0, d1, d2), (128, 32, 7)
+            )
+            normalized_exact_gapped_write = MemoryDep(
+                "buf", 33 * w0 + w1, (w0, w1), (128, 32)
+            )
+            with inductor_config.patch(loop_ordering_after_fusion=True):
+                self.assertTrue(
+                    scheduler.fusable_read_and_write(
+                        normalized_exact_gapped_read,
+                        normalized_exact_gapped_write,
+                    )
+                )
+                self.assertTrue(
+                    scheduler.fusable_read_and_write(
+                        normalized_exact_gapped_read,
+                        normalized_exact_gapped_write,
+                        allow_index_equivalence=True,
+                    )
+                )
+
+    def test_nested_reduction_grouped_axis_from_ranges(self):
+        grouped = Mock()
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with V.set_graph_handler(graph):
+            grouped.get_ranges.return_value = ([128, 32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
+            )
+
+            grouped.get_ranges.return_value = ([8, 512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
+
+            grouped.get_ranges.return_value = ([32], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=1,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.R,
+            )
+
+            grouped.get_ranges.return_value = ([512], [16])
+            self.assertEqual(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=16,
+                    outer_rnumel=512,
+                    group_size=16,
+                ),
+                NestedReduction.GroupedAxis.X,
+            )
+
+            grouped.get_ranges.return_value = ([32, 128], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                )
+            )
+
+            grouped.get_ranges.return_value = ([4096], [16])
+            self.assertIsNone(
+                NestedReduction.get_grouped_axis(
+                    grouped,
+                    outer_numel=128,
+                    outer_rnumel=512,
+                    group_size=16,
+                )
+            )
+
+    def test_nested_reduction_axis_from_loop_body(self):
+        outer_x0, outer_x1, outer_r = sympy.symbols("outer_x0 outer_x1 outer_r")
+        grouped_x0, grouped_x1, grouped_r = sympy.symbols(
+            "grouped_x0 grouped_x1 grouped_r"
+        )
+
+        def make_body(index, iter_vars, reduce_vars):
+            body = Mock()
+            body.iter_vars = iter_vars
+            body.reduce_vars = reduce_vars
+            body.indexing_exprs = {"load": index}
+            body.memory_usage = {
+                MemoryUsageType.LOAD: [MemoryEntry("load", "arg0_1", None)]
+            }
+            return body
+
+        def make_reduction(index, iter_vars, reduce_vars):
+            node = Mock()
+            node.is_reduction.return_value = True
+            node.get_ranges.return_value = ([16, 16], [16])
+            node._body = make_body(index, iter_vars, reduce_vars)
+            return node
+
+        def classify(outer_index, grouped_index):
+            outer = make_reduction(outer_index, (outer_x0, outer_x1), (outer_r,))
+            grouped = make_reduction(
+                grouped_index, (grouped_x0, grouped_x1), (grouped_r,)
+            )
+            outer_node = Mock()
+            outer_node.get_nodes.return_value = [outer]
+            return NestedReduction._get_grouped_axis_from_loop_body(outer_node, grouped)
+
+        self.assertEqual(
+            classify(
+                256 * outer_x0 + 16 * outer_x1 + outer_r,
+                256 * grouped_x0 + 16 * grouped_x1 + grouped_r,
+            ),
+            NestedReduction.GroupedAxis.R,
+        )
+        self.assertEqual(
+            classify(
+                outer_x0 + 16 * outer_x1 + 256 * outer_r,
+                grouped_x0 + 16 * grouped_x1 + 256 * grouped_r,
+            ),
+            NestedReduction.GroupedAxis.R,
+        )
+        self.assertEqual(
+            classify(
+                256 * outer_x0 + 16 * outer_x1 + outer_r,
+                256 * grouped_x0 + grouped_x1 + 16 * grouped_r,
+            ),
+            NestedReduction.GroupedAxis.X,
+        )
+        self.assertEqual(
+            classify(
+                outer_x0 + 16 * outer_x1 + outer_r,
+                grouped_x0 + 16 * grouped_x1 + grouped_r,
+            ),
+            None,
+        )
+
+    def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
+        scheduler = Scheduler.__new__(Scheduler)
+
+        live_input = Mock()
+        preexisting_removed_input = Mock()
+        codegen_removed_input = Mock()
+
+        live_output = Mock()
+        live_output.maybe_get_name.return_value = "live_output"
+        preexisting_removed_output = Mock()
+        preexisting_removed_output.maybe_get_name.return_value = (
+            "preexisting_removed_output"
+        )
+        codegen_removed_output = Mock()
+        codegen_removed_output.maybe_get_name.return_value = "codegen_removed_output"
+
+        signature = GraphPartitionSignature(
+            symbol_inputs=OrderedSet(),
+            input_nodes={
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+                "codegen_removed_input": codegen_removed_input,
+            },
+            output_nodes=[
+                live_output,
+                preexisting_removed_output,
+                codegen_removed_output,
+            ],
+            input_deallocation={
+                "live_input": False,
+                "preexisting_removed_input": True,
+                "codegen_removed_input": False,
+            },
+            skip_cudagraph=False,
+            constant_names=[
+                "live_constant",
+                "preexisting_removed_constant",
+                "codegen_removed_constant",
+            ],
+        )
+
+        removed_buffers_before_codegen = OrderedSet(
+            [
+                "preexisting_removed_input",
+                "preexisting_removed_output",
+                "preexisting_removed_constant",
+            ]
+        )
+        removed_buffers_after_codegen = removed_buffers_before_codegen | OrderedSet(
+            [
+                "codegen_removed_input",
+                "codegen_removed_output",
+                "codegen_removed_constant",
+            ]
+        )
+        removed_buffers_during_codegen = (
+            removed_buffers_after_codegen - removed_buffers_before_codegen
+        )
+
+        cleaned = scheduler.clean_removed_buffer_from_partition_signatures(
+            signature, removed_buffers_during_codegen
+        )
+
+        self.assertEqual(
+            cleaned.input_nodes,
+            {
+                "live_input": live_input,
+                "preexisting_removed_input": preexisting_removed_input,
+            },
+        )
+        self.assertEqual(
+            cleaned.input_deallocation,
+            {"live_input": False, "preexisting_removed_input": True},
+        )
+        self.assertEqual(
+            cleaned.output_nodes,
+            [live_output, preexisting_removed_output],
+        )
+        self.assertEqual(
+            cleaned.constant_names,
+            ["live_constant", "preexisting_removed_constant"],
+        )
+        self.assertFalse(cleaned.skip_cudagraph)
+
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @xfailIfNoAcceleratorTriton
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
             return
@@ -97,6 +531,7 @@ class TestScheduler(TestCase):
             metrics.reset()
         torch._logging.set_logs()
 
+    @xfailIfNoAcceleratorTriton
     @skipIfXpu(
         msg="InvalidModule: Invalid SPIR-V module, "
         "https://github.com/intel/torch-xpu-ops/issues/2329"
@@ -116,7 +551,9 @@ class TestScheduler(TestCase):
             },
         ],
     )
-    @torch._inductor.config.patch({"force_disable_caches": True})
+    @torch._inductor.config.patch(
+        {"force_disable_caches": True, "shape_padding": False}
+    )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
@@ -219,6 +656,7 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
+    @xfailIfNoAcceleratorTriton
     @onlyCUDA
     def test_index_add_fusion_prevented(self):
         """
@@ -259,6 +697,7 @@ class TestScheduler(TestCase):
             f"compiled={compiled_result.mean().item():.6f}",
         )
 
+    @xfailIfNoAcceleratorTriton
     @onlyCUDA
     def test_atomic_add_no_fusion_correctness(self):
         """
@@ -290,7 +729,143 @@ class TestScheduler(TestCase):
         )
 
 
+class TestScoreFusionMemory(TestCase):
+    """
+    Tests for _score_fusion_memory_by_buffer_overlap.
+
+    These tests validate the fusion scoring logic that determines when nodes
+    should be fused together based on their memory access patterns.
+
+    Key scenarios:
+    1. Exact matches: read/write has exact matches → should fuse (1 kernel)
+    2. Large overlap (split/cat): reads on different offset but overlap is huge
+       → should fuse because the benefit is large (1 kernel)
+    3. Small overlap: reads on different offset but overlap is small → don't fuse (2 kernels)
+    """
+
+    @skipIf(not HAS_GPU, "GPU not available")
+    @inductor_config.patch("score_fusion_memory_threshold", 1)
+    @inductor_config.patch("min_overlap_ratio", 0.5)
+    def test_exact_same_reads_should_fuse(self) -> None:
+        """
+        Case 1: Exact matches in read/write → should fuse into 1 kernel.
+
+        Two operations reading from the exact same input tensor should be
+        fused together since they can share the data read from memory.
+        """
+
+        def exact_reads(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            # Both operations read the exact same input
+            out1 = x * 2
+            out2 = x + 1
+            return out1, out2
+
+        torch._dynamo.reset()
+        metrics.reset()
+
+        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
+
+        compiled_fn = torch.compile(exact_reads, backend="inductor", fullgraph=True)
+        out1_eager, out2_eager = exact_reads(x)
+        out1_compiled, out2_compiled = compiled_fn(x)
+
+        self.assertTrue(torch.allclose(out1_eager, out1_compiled, atol=1e-3, rtol=1e-3))
+        self.assertTrue(torch.allclose(out2_eager, out2_compiled, atol=1e-3, rtol=1e-3))
+        # Should fuse into 1 kernel since both ops read exact same buffer
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @skipIf(not HAS_GPU, "GPU not available")
+    @inductor_config.patch("score_fusion_memory_threshold", 1)
+    @inductor_config.patch("min_overlap_ratio", 0.5)
+    def test_split_cat_large_overlap_should_fuse(self) -> None:
+        """
+        Case 2: Reads on different offset but overlap is huge (split/cat) → should fuse into 1 kernel.
+
+        Split operations read from the same input buffer at different offsets.
+        Since the overlap is large (same underlying buffer), fusing these
+        operations together saves reads and kernel launches.
+        """
+
+        def split_and_process(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            s1, s2, s3, s4 = torch.split(x, x.shape[-1] // 4, dim=-1)
+            out1 = torch.cat([s4, s3], dim=-1)
+            out2 = torch.cat([s2, s1], dim=-1)
+            return out1, out2
+
+        torch._dynamo.reset()
+        metrics.reset()
+
+        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
+
+        compiled_fn = torch.compile(
+            split_and_process, backend="inductor", fullgraph=True
+        )
+        out1_eager, out2_eager = split_and_process(x)
+        out1_compiled, out2_compiled = compiled_fn(x)
+
+        self.assertTrue(torch.allclose(out1_eager, out1_compiled, atol=1e-3, rtol=1e-3))
+        self.assertTrue(torch.allclose(out2_eager, out2_compiled, atol=1e-3, rtol=1e-3))
+        # Should fuse into 1 kernel since all ops read from the same underlying buffer
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
+    @skipIf(not HAS_GPU, "GPU not available")
+    @inductor_config.patch("score_fusion_memory_threshold", 1)
+    def test_partial_overlap_below_threshold(self) -> None:
+        """
+        Case 3: Partial overlap below the 0.5 threshold → should NOT fuse (2 kernels).
+
+        Similar to test_split_cat_large_overlap_should_fuse, but each operation
+        also reads from a separate large tensor, making the shared buffer portion
+        less than 50% of total reads.
+
+        Example scenario:
+        - Split x into 4 slices: s1, s2, s3, s4 (each 25% of x)
+        - op1 reads: s1 (from x, ~25%) + y (separate tensor, ~75%) → total 100%
+        - op2 reads: s2 (from x, ~25%) + z (separate tensor, ~75%) → total 100%
+        - Common buffer is x, but each op only reads 25% of their total from x
+        - overlap_ratio = 25% / 100% = 0.25 < 0.5 threshold → score = 0
+        - Result: 2 separate kernels (not fused)
+        """
+
+        def partial_overlap_split(
+            x: torch.Tensor, y: torch.Tensor, z: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            # Split x into 4 parts, use different slices in each output
+            s1, s2, _, _ = torch.split(x, x.shape[-1] // 4, dim=-1)
+            # op1 reads: s1 (small slice of x) + y (large separate tensor)
+            # op2 reads: s2 (small slice of x) + z (large separate tensor)
+            # The slices s1 and s2 come from the same buffer x,
+            # but each is only ~25% of total reads for that op
+            out1 = torch.cat([s1, y, y, y], dim=-1)
+            out2 = torch.cat([s2, z, z, z], dim=-1)
+            return out1, out2
+
+        torch._dynamo.reset()
+        metrics.reset()
+
+        # x is split into 4 parts (each 128 elements)
+        # y and z are 3x larger (384 elements each)
+        # So each op reads: 128 (from x slice) + 384 (from y or z) = 512 total
+        # overlap_ratio = 128 / 512 = 0.25 < 0.5 threshold
+        x = torch.randn(8, 512, device=GPU_TYPE, dtype=torch.float16)
+        y = torch.randn(8, 128, device=GPU_TYPE, dtype=torch.float16)
+        z = torch.randn(8, 128, device=GPU_TYPE, dtype=torch.float16)
+
+        compiled_fn = torch.compile(
+            partial_overlap_split, backend="inductor", fullgraph=True
+        )
+        out1_eager, out2_eager = partial_overlap_split(x, y, z)
+        out1_compiled, out2_compiled = compiled_fn(x, y, z)
+
+        self.assertTrue(torch.allclose(out1_eager, out1_compiled, atol=1e-3, rtol=1e-3))
+        self.assertTrue(torch.allclose(out2_eager, out2_compiled, atol=1e-3, rtol=1e-3))
+        # Should NOT fuse (2 kernels) because overlap_ratio = 0.25 < 0.5 threshold
+        # The _score_fusion_memory_by_buffer_overlap returns 0 for this case
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+
 instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestScoreFusionMemory, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

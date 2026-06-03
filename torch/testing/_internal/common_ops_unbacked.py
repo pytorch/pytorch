@@ -7,13 +7,7 @@ These lists are used by both test_ops_unbacked.py (base tensor tests)
 and test_dtensor_ops.py (DTensor tests with unbacked dimensions).
 """
 
-
-def xfail(op_name, variant_name="", *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, True)
-
-
-def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, False)
+from torch.testing._internal.common_device_type import skip, xfail
 
 
 # Ops that have data-dependent errors with unbacked dimensions.
@@ -24,7 +18,6 @@ ops_dde_xfail = {
     xfail("_upsample_bilinear2d_aa"),
     xfail("addmv"),
     xfail("allclose"),
-    xfail("as_strided_scatter"),
     xfail("baddbmm"),
     xfail("bernoulli"),
     xfail("cauchy"),
@@ -38,7 +31,6 @@ ops_dde_xfail = {
     xfail("cummax"),
     xfail("cummin"),
     xfail("cumulative_trapezoid"),
-    xfail("diagonal_scatter"),
     xfail("diff"),
     xfail("dsplit"),
     xfail("equal"),
@@ -92,7 +84,6 @@ ops_dde_xfail = {
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
     xfail("linalg.pinv", "singular"),
-    xfail("linalg.qr"),
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
     xfail("linalg.solve_triangular"),
@@ -103,7 +94,6 @@ ops_dde_xfail = {
     xfail("logdet"),
     xfail("logsumexp"),
     xfail("lu_solve"),
-    xfail("lu_unpack"),
     xfail("masked.amax"),
     xfail("masked.amin"),
     xfail("masked.argmax"),
@@ -124,7 +114,6 @@ ops_dde_xfail = {
     xfail("masked.var"),
     xfail("max_pool2d_with_indices_backward"),
     xfail("multinomial"),
-    xfail("nanquantile"),
     xfail("nn.functional.adaptive_avg_pool1d"),
     xfail("nn.functional.adaptive_avg_pool2d"),
     xfail("nn.functional.adaptive_avg_pool3d"),
@@ -153,7 +142,6 @@ ops_dde_xfail = {
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
     xfail("nn.functional.gaussian_nll_loss"),
-    xfail("nn.functional.glu"),
     xfail("nn.functional.grid_sample"),
     xfail("nn.functional.group_norm"),
     xfail("nn.functional.huber_loss"),
@@ -164,6 +152,8 @@ ops_dde_xfail = {
     xfail("nn.functional.interpolate", "linear"),
     xfail("nn.functional.interpolate", "trilinear"),
     xfail("nn.functional.l1_loss"),
+    xfail("nn.functional.linear_cross_entropy"),
+    xfail("nn.functional.linear_cross_entropy", "chunked"),
     xfail("nn.functional.local_response_norm"),
     xfail("nn.functional.max_pool1d"),
     xfail("nn.functional.max_pool2d"),
@@ -179,11 +169,8 @@ ops_dde_xfail = {
     xfail("nn.functional.multilabel_margin_loss"),
     xfail("nn.functional.nll_loss"),
     xfail("nn.functional.pad", "circular"),
-    xfail("nn.functional.pad", "reflect"),
     xfail("nn.functional.pad", "replicate"),
     xfail("nn.functional.pad", "replicate_negative"),
-    xfail("nn.functional.pdist"),
-    xfail("nn.functional.pixel_shuffle"),
     xfail("nn.functional.prelu"),
     xfail("nn.functional.rrelu"),
     xfail("nn.functional.scaled_dot_product_attention"),
@@ -196,8 +183,6 @@ ops_dde_xfail = {
     xfail("ormqr"),
     xfail("pca_lowrank"),
     xfail("pinverse"),
-    xfail("quantile"),
-    xfail("qr"),
     xfail("rand_like"),
     xfail("randint_like"),
     xfail("randn_like"),
@@ -258,4 +243,6 @@ ops_unbacked_skip = {
     skip("zeros"),
     # Sparse ops that can't be deepcopied
     skip("sparse.sampled_addmm"),
+    # Flaky in CI: https://github.com/pytorch/pytorch/issues/179881
+    skip("norm", "nuc"),
 }

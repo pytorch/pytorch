@@ -40,7 +40,7 @@ def is_dynamic_shape_test(test_name):
 
 
 aten = torch.ops.aten
-lib = torch.library.Library("custom", "DEF")  # noqa: TOR901
+lib = torch.library.Library("custom", "DEF")  # noqa: SCOPED_LIBRARY
 lib.define("maybe_dupe_op(Tensor a) -> (Tensor, Tensor)")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
@@ -256,29 +256,26 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         # for gm in gms:
         #     print("GM CODE", gm.code)
 
-        self.assertEqual(counter.frame_count, 4)
+        self.assertEqual(counter.frame_count, 2)
         self.assertEqual(counter.op_count, 7)
         # Graph 1
-        # def forward(self, x : torch.nn.parameter.Parameter, y : torch.Tensor):
-        #     mul = x * y;  x = y = None
-        #     return (mul,)
-        # BREAK
-        # Graph 2
-        # def forward(self, y : torch.Tensor):
-        #     getitem = y[0];  y = None
+        # def forward(self, L_x_ : torch.nn.parameter.Parameter, L_y_ : torch.Tensor):
+        #     l_x_ = L_x_
+        #     l_y_ = L_y_
+        #     a = l_x_ * l_y_;  l_x_ = l_y_ = None
+        #     getitem = a[0]
         #     getitem_1 = getitem[0];  getitem = None
         #     lt = getitem_1 < 3;  getitem_1 = None
-        #     return (lt,)
+        #     return (lt, a)
         # BREAK
-        # Graph 3
-        # def forward(self, param : torch.Tensor, y : torch.Tensor):
-        #     add = y + param;  y = param = None
-        #     return (add,)
-        # BREAK
-        # Graph 4
-        # def forward(self, _stack0 : torch.Tensor, x : torch.nn.parameter.Parameter, y : torch.Tensor):
-        #     add = x + y;  x = y = None
-        #     mul = _stack0 * add;  _stack0 = add = None
+        # Graph 2
+        # def forward(self, L_nested_frame_values_0_1_ : torch.Tensor, L_x_ : torch.nn.parameter.Parameter, L_y_ : torch.Tensor):
+        #     l_nested_frame_values_0_1_ = L_nested_frame_values_0_1_
+        #     l_x_ = L_x_
+        #     l_y_ = L_y_
+        #     a = l_nested_frame_values_0_1_ + l_nested_frame_values_0_1_;  l_nested_frame_values_0_1_ = None
+        #     b = l_x_ + l_y_;  l_x_ = l_y_ = None
+        #     mul = a * b;  a = b = None
         #     return (mul,)
 
         # Run fn with AOT
@@ -1819,6 +1816,106 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         # Should only compile once regardless of batch size changes
         self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @patch.object(torch._dynamo.config, "capture_dynamic_output_shape_ops", True)
+    def test_partitioner_filters_symbool_saved_for_bw(self):
+        """When cross-rank sync injects SymBool nodes (whose only consumers are
+        _assert_scalar) into saved_values, the partitioner must filter them out
+        so they don't become backward graph inputs that Inductor can't lower.
+
+        In multi-GPU MoE training, different EP ranks can produce different
+        min-cut partitioner decisions due to data-dependent shapes. The
+        cross-rank sync (_sync_decision_cross_ranks) picks one rank's decision
+        for all, which may include SymBool assertion nodes that weren't in
+        another rank's saved set. We simulate this by patching
+        _sync_decision_cross_ranks to inject all SymBool nodes.
+
+        Regression test for https://github.com/pytorch/pytorch/pull/179315
+        """
+        import torch._functorch.config as functorch_config
+        import torch._functorch.partitioners as P
+
+        # Simulate cross-rank sync picking a rank that saved SymBool nodes
+        def inject_symbool_nodes(joint_graph, saved_values):
+            for node in joint_graph.nodes:
+                val = node.meta.get("val")
+                if isinstance(val, torch.SymBool) and node not in saved_values:
+                    saved_values = saved_values + [node]
+            return saved_values
+
+        def fn(x, splits_tensor, mask):
+            splits = splits_tensor.tolist()
+            indices = torch.nonzero(mask).squeeze(-1)
+            y = x[indices]
+            # split verifies sum(splits) == y.shape[0], creating an
+            # Equality SymBool node consumed only by _assert_scalar
+            chunks = torch.split(y, splits, dim=0)
+            return torch.cat([c * 2.0 for c in chunks], dim=0).sum()
+
+        x = torch.randn(20, 16, requires_grad=True, device="cuda")
+        splits_tensor = torch.tensor([3, 5], device="cuda")
+        mask = torch.zeros(20, dtype=torch.bool, device="cuda")
+        mask[:8] = True
+
+        with (
+            patch.object(P, "_sync_decision_cross_ranks", inject_symbool_nodes),
+            patch.object(functorch_config, "_sync_decision_cross_ranks", True),
+        ):
+            compiled_fn = torch.compile(fn)
+            loss = compiled_fn(x, splits_tensor, mask)
+            # Without the fix, this raises:
+            # InductorError: Unsupported inductor graph input type:
+            #   <class 'sympy.core.relational.GreaterThan'>
+            loss.backward()
+        self.assertIsNotNone(x.grad)
+
+        captured_fw_graphs = []
+
+        def fw_compiler(gm, inputs):
+            captured_fw_graphs.append(gm)
+            return gm
+
+        from functorch.compile import aot_function, default_partition, nop
+
+        x = torch.randn(20, 16, requires_grad=True, device="cuda")
+        compiled_fn = aot_function(
+            fn,
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            partition_fn=default_partition,
+            dynamic=True,
+        )
+        loss = compiled_fn(x, splits_tensor, mask)
+        loss.backward()
+        self.assertEqual(len(captured_fw_graphs), 1)
+        output_node = next(
+            node for node in captured_fw_graphs[0].graph.nodes if node.op == "output"
+        )
+        outputs = output_node.args[0]
+        if not isinstance(outputs, (list, tuple)):
+            outputs = (outputs,)
+        self.assertFalse(
+            any(
+                isinstance(node, torch.fx.Node)
+                and isinstance(node.meta.get("val"), torch.SymBool)
+                for node in outputs
+            )
+        )
+
+    def test_batched_matmul_inference_mode(self):
+        # Regression test for torch.compile crash with batched matmul in inference_mode
+        x = torch.randn(2, 4, 8)
+        w = torch.randn(8, 8)
+
+        def f(x, w):
+            with torch.inference_mode():
+                return (x @ w).sum()
+
+        torch._dynamo.reset()
+        result = torch.compile(f)(x, w)
+        self.assertIsInstance(result, torch.Tensor)
 
 
 if __name__ == "__main__":

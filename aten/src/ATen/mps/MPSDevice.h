@@ -7,8 +7,11 @@
 #include <c10/util/Exception.h>
 
 #ifdef __OBJC__
-#include <Foundation/Foundation.h>
+// Metal.h pulls in Foundation.h, which transitively includes CarbonCore
+// headers that emit a flood of -Wdeprecated-declarations on recent macOS SDKs.
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #include <Metal/Metal.h>
+C10_DIAGNOSTIC_POP()
 typedef id<MTLDevice> MTLDevice_t;
 #else
 typedef void* MTLDevice_t;
@@ -23,6 +26,7 @@ enum class MacOSVersion : uint32_t {
   MACOS_VER_15_1_PLUS,
   MACOS_VER_15_2_PLUS,
   MACOS_VER_26_0_PLUS,
+  MACOS_VER_26_4_PLUS,
 };
 
 //-----------------------------------------------------------------

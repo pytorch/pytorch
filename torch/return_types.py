@@ -34,6 +34,7 @@ for _name in dir(return_types):
     globals()[_name] = _attr
 
     if not _name.startswith("_"):
+        # pyrefly: ignore [unresolvable-dunder-all]
         __all__.append(_name)
         all_return_types.append(_attr)
 

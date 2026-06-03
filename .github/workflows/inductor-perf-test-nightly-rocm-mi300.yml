@@ -63,7 +63,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
+  actions: read
 
 jobs:
   get-label-type:
@@ -79,10 +82,10 @@ jobs:
 
   linux-jammy-rocm-py3_10-inductor-benchmark-build:
     if: github.repository_owner == 'pytorch'
-    name: rocm-py3_10-inductor-benchmark-build
+    name: linux-jammy-rocm-py3.10-mi300
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-rocm-py3_10
+      build-environment: linux-jammy-rocm-py3.10-mi300
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
@@ -110,16 +113,31 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-rocm-py3_10-inductor-benchmark-test:
-    permissions:
-      id-token: write
-      contents: read
-    name: rocm-py3_10-inductor-benchmark-test
+  test-periodically:
+    name: linux-jammy-rocm-py3.10-mi300
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_10-inductor-benchmark-build
+    if: github.event.schedule == '15 0 * * *'
     with:
       build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.build-environment }}
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true
+      docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}
+      timeout-minutes: 720
+      # Disable monitor in perf tests for more investigation
+      disable-monitor: true
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 2
+    secrets: inherit
+
+  test:
+    name: linux-jammy-rocm-py3.10-mi300
+    uses: ./.github/workflows/_rocm-test.yml
+    needs: linux-jammy-rocm-py3_10-inductor-benchmark-build
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
+    with:
+      build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.build-environment }}
+      dashboard-tag: training-${{ inputs.training || 'true' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cudagraphs-${{ inputs.cudagraphs || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'true' }}-aotinductor-${{ inputs.aotinductor || 'true' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'true' }}
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}
       timeout-minutes: 720

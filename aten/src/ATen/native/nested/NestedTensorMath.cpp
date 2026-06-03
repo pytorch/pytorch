@@ -232,8 +232,7 @@ Tensor nested_from_padded_generic(
   std::vector<at::Tensor> masks;
   std::vector<at::Tensor> all_sizes = sizes.unbind();
   for (const auto& size : all_sizes) {
-    IntArrayRef sizes_i(
-        size.data_ptr<int64_t>(), size.data_ptr<int64_t>() + size.numel());
+    IntArrayRef sizes_i(size.const_data_ptr<int64_t>(), size.numel());
     at::Tensor mask_i = padded_transformed.new_full(
         sizes_i, true, kBool, std::nullopt, std::nullopt, std::nullopt);
     masks.push_back(pad_tensor_to_shape(mask_i, target_size_arr));
@@ -273,7 +272,7 @@ Tensor NestedTensor_to_padded_tensor_generic(
 
   const auto sizes_num_rows = sizes.sizes()[0];
   const auto sizes_num_columns = sizes.sizes()[1];
-  const auto sizes_data_start = sizes.data_ptr<int64_t>();
+  const auto sizes_data_start = sizes.const_data_ptr<int64_t>();
   const auto sizes_data_end = sizes_data_start + sizes.numel();
   std::vector<int64_t> split_sizes;
   split_sizes.reserve(sizes_num_rows);
@@ -430,7 +429,7 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
   auto self_ptr = get_nested_tensor_impl(self);
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
                            strides = NestedTensor_get_strides(self_ptr);
-  int64_t *offsets_ptr = self_ptr->get_storage_offsets().data_ptr<int64_t>();
+  const int64_t *offsets_ptr = self_ptr->get_storage_offsets().const_data_ptr<int64_t>();
   const at::Tensor& buffer = self_ptr->get_unsafe_storage_as_tensor();
   int64_t positive_dim = at::maybe_wrap_dim(dim, self_ptr->dim());
   int64_t ntensors = self_ptr->size(0);
@@ -615,7 +614,6 @@ Tensor squeeze_nested(const Tensor& self) {
   "squeeze(): For nested tensors, squeeze without the dim argument is not supported ",
   "at the moment, however you can use squeeze(Tensor self, int dim) instead ",
   "if you need this feature, please open an issue on github describing your use case.");
-  return self;
 }
 
 Tensor squeeze_dim_nested(const Tensor& self, IntArrayRef dims) {
@@ -994,8 +992,8 @@ static bool can_cat_nested_sizes(const Tensor& nested_sizes1, const Tensor& nest
     return false;
   }
 
-  auto nested_sizes1_ptr = nested_sizes1.data_ptr<int64_t>();
-  auto nested_sizes2_ptr = nested_sizes2.data_ptr<int64_t>();
+  auto nested_sizes1_ptr = nested_sizes1.const_data_ptr<int64_t>();
+  auto nested_sizes2_ptr = nested_sizes2.const_data_ptr<int64_t>();
   const auto num_components = nested_sizes1.size(0);
   const auto num_dims = nested_sizes1.size(1);
   for (auto c : c10::irange(num_components)) {
@@ -1022,6 +1020,7 @@ static Tensor cat_nested_as_jagged(
   const auto first_item_dim = first_item.dim();
   const auto first_item_batch_size = first_item.size(0);
   std::vector<Tensor> jagged_views;
+  jagged_views.reserve(tensors.size());
   for (auto i : c10::irange(tensors.size())) {
     auto t = tensors[i].get();
     TORCH_CHECK(t.is_nested(),
@@ -1073,6 +1072,8 @@ static Tensor cat_nested_impl(
     // handle simple case of dim=0: concat NT components
     std::vector<at::Tensor> buffers;
     std::vector<at::Tensor> sizes;
+    buffers.reserve(tensors.size());
+    sizes.reserve(tensors.size());
     for (const auto i : c10::irange(tensors.size())) {
       const Tensor& t = tensors[i];
       TORCH_CHECK(

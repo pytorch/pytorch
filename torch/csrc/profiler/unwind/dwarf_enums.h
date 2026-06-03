@@ -30,6 +30,7 @@ enum {
   DW_CFA_advance_loc1 = 0x02,
   DW_CFA_advance_loc2 = 0x03,
   DW_CFA_advance_loc4 = 0x04,
+  DW_CFA_offset_extended = 0x05,
   DW_CFA_restore_extended = 0x06,
   DW_CFA_undefined = 0x07,
   DW_CFA_register = 0x09,

@@ -20,6 +20,23 @@ TRITON_MAX_BLOCK = {
     "R1_": 2048 * 16,  # * 16 is multi-kernel only
 }
 TRITON_MAX_RSPLIT = 64
+TRITON_MAX_TENSOR_NUMEL = 1 << 20
+TRITON_DOT_MIN_BLOCK = 16
+
+
+def native_matmul_block_numel(
+    kwargs: typing.Mapping[str, int], r0_block: int | None = None
+) -> int:
+    return (
+        kwargs.get("XBLOCK", 1)
+        * kwargs.get("YBLOCK", 1)
+        * kwargs.get("ZBLOCK", 1)
+        * (kwargs.get("R0_BLOCK", 1) if r0_block is None else r0_block)
+    )
+
+
+def native_matmul_persistent_rblock(r0_block: int) -> int:
+    return max(r0_block, TRITON_DOT_MIN_BLOCK)
 
 
 class ReductionHint(Enum):
@@ -47,6 +64,7 @@ if has_triton_package():
         def AttrsDescriptorWrapper(
             divisible_by_16=None,
             equal_to_1=None,
+            pointer_range_32=None,
         ):
             # Prepare the arguments for AttrsDescriptor
             kwargs = {
@@ -69,6 +87,7 @@ if has_triton_package():
         def AttrsDescriptorWrapper(
             divisible_by_16=None,
             equal_to_1=None,
+            pointer_range_32=None,
         ):
             # Prepare the arguments for AttrsDescriptor
             kwargs = {
@@ -88,17 +107,27 @@ if has_triton_package():
         def AttrsDescriptorWrapper(
             divisible_by_16=None,
             equal_to_1=None,
+            pointer_range_32=None,
         ):
             # pyrefly: ignore [not-iterable]
-            return {(x,): [["tt.divisibility", 16]] for x in divisible_by_16}
+            # Build attr dict merging divisibility and pointer_range per arg index,
+            # since a single arg can carry both attributes.
+            result = {(x,): [["tt.divisibility", 16]] for x in (divisible_by_16 or ())}
+            for x in pointer_range_32 or ():
+                key = (x,)
+                if key in result:
+                    result[key].append(["tt.pointer_range", 32])
+                else:
+                    result[key] = [["tt.pointer_range", 32]]
+            return result
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
     AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef, name-match]
         # pyrefly: ignore [invalid-argument]
         "AttrsDescriptor",
-        ["divisible_by_16", "equal_to_1"],
-        defaults=[(), ()],
+        ["divisible_by_16", "equal_to_1", "pointer_range_32"],
+        defaults=[(), (), ()],
     )
 
 

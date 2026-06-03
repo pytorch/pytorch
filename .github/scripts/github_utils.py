@@ -1,14 +1,19 @@
 """GitHub Utilities"""
 
+from __future__ import annotations
+
 import json
 import os
 import warnings
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, TYPE_CHECKING
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 GITHUB_API_URL = "https://api.github.com"
@@ -19,9 +24,9 @@ class GitHubComment:
     body_text: str
     created_at: str
     author_login: str
-    author_url: Optional[str]
+    author_url: str | None
     author_association: str
-    editor_login: Optional[str]
+    editor_login: str | None
     database_id: int
     url: str
 
@@ -29,9 +34,9 @@ class GitHubComment:
 def gh_fetch_url_and_headers(
     url: str,
     *,
-    headers: Optional[dict[str, str]] = None,
-    data: Union[Optional[dict[str, Any]], str] = None,
-    method: Optional[str] = None,
+    headers: dict[str, str] | None = None,
+    data: dict[str, Any] | None | str = None,
+    method: str | None = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
 ) -> tuple[Any, Any]:
     if headers is None:
@@ -72,9 +77,9 @@ def gh_fetch_url_and_headers(
 def gh_fetch_url(
     url: str,
     *,
-    headers: Optional[dict[str, str]] = None,
-    data: Union[Optional[dict[str, Any]], str] = None,
-    method: Optional[str] = None,
+    headers: dict[str, str] | None = None,
+    data: dict[str, Any] | None | str = None,
+    method: str | None = None,
     reader: Callable[[Any], Any] = json.load,
 ) -> Any:
     return gh_fetch_url_and_headers(
@@ -84,9 +89,9 @@ def gh_fetch_url(
 
 def gh_fetch_json(
     url: str,
-    params: Optional[dict[str, Any]] = None,
-    data: Optional[dict[str, Any]] = None,
-    method: Optional[str] = None,
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+    method: str | None = None,
 ) -> list[dict[str, Any]]:
     headers = {"Accept": "application/vnd.github.v3+json"}
     if params is not None and len(params) > 0:
@@ -101,8 +106,8 @@ def gh_fetch_json(
 
 def _gh_fetch_json_any(
     url: str,
-    params: Optional[dict[str, Any]] = None,
-    data: Optional[dict[str, Any]] = None,
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> Any:
     headers = {"Accept": "application/vnd.github.v3+json"}
     if params is not None and len(params) > 0:
@@ -114,16 +119,16 @@ def _gh_fetch_json_any(
 
 def gh_fetch_json_list(
     url: str,
-    params: Optional[dict[str, Any]] = None,
-    data: Optional[dict[str, Any]] = None,
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     return cast(list[dict[str, Any]], _gh_fetch_json_any(url, params, data))
 
 
 def gh_fetch_json_dict(
     url: str,
-    params: Optional[dict[str, Any]] = None,
-    data: Optional[dict[str, Any]] = None,
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return cast(dict[str, Any], _gh_fetch_json_any(url, params, data))
 

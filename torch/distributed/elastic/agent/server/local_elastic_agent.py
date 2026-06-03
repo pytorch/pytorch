@@ -7,6 +7,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
 
 import json
 import os
@@ -19,6 +20,7 @@ from string import Template
 from typing import Any, TYPE_CHECKING
 
 import torch.distributed.elastic.timer as timer
+from torch._utils_internal import justknobs_check
 from torch.distributed.elastic import events
 from torch.distributed.elastic.agent.server.api import (
     RunResult,
@@ -39,9 +41,15 @@ from torch.distributed.elastic.multiprocessing import (
 )
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.distributed.elastic.utils.process_state import (
+    is_uninterruptible_state,
+    read_proc_state,
+)
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.distributed.elastic.events.api import EventMetadataValue
 
 logger = get_logger(__name__)
@@ -51,11 +59,60 @@ __all__ = [
     "TORCHELASTIC_ENABLE_FILE_TIMER",
     "TORCHELASTIC_TIMER_FILE",
     "TORCHELASTIC_HEALTH_CHECK_PORT",
+    "TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT",
 ]
 
 TORCHELASTIC_ENABLE_FILE_TIMER = "TORCHELASTIC_ENABLE_FILE_TIMER"
 TORCHELASTIC_HEALTH_CHECK_PORT = "TORCHELASTIC_HEALTH_CHECK_PORT"
 TORCHELASTIC_TIMER_FILE = "TORCHELASTIC_TIMER_FILE"
+# Seconds a worker may spend in Linux uninterruptible kernel sleep (D-state)
+# before the agent marks the worker group UNHEALTHY. Used as the default when
+# ``uninterruptible_state_timeout`` is not passed to ``LocalElasticAgent``.
+# Unset / non-positive disables the check. Linux-only.
+TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT = (
+    "TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT"
+)
+
+
+def _resolve_uninterruptible_state_timeout(explicit: float | None) -> float:
+    """Resolve the uninterruptible-state timeout once.
+
+    Precedence: explicit constructor arg > ``TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT``
+    env var > 0 (disabled). Non-positive / unparsable values disable the check.
+    """
+    if explicit is not None:
+        return max(0.0, float(explicit))
+    raw = os.environ.get(TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT, "")
+    if not raw:
+        return 0.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 0.0
+    return max(0.0, value)
+
+
+class _AliveCallbackProxy:
+    """Mutable callback wrapper for the health check server.
+
+    The C++ pybind ``HealthCheckThriftServer`` binds its ``alive_callback``
+    at construction time and cannot update it afterward.  This proxy is
+    created *before* the health check server so it can be passed as the
+    callback.  Initially it returns ``time.time()`` (signalling "alive").
+    After the agent is constructed, :meth:`set_delegate` wires it to
+    ``agent._get_alive_time`` for real liveness tracking.
+    """
+
+    def __init__(self) -> None:
+        self._delegate: Callable[[], int] | None = None
+
+    def __call__(self) -> int:
+        if self._delegate is not None:
+            return self._delegate()
+        return int(time.time())
+
+    def set_delegate(self, delegate: Callable[[], int]) -> None:
+        self._delegate = delegate
 
 
 class LocalElasticAgent(SimpleElasticAgent):
@@ -155,6 +212,8 @@ class LocalElasticAgent(SimpleElasticAgent):
         exit_barrier_timeout: float = 300,
         log_line_prefix_template: str | None = None,
         shutdown_timeout: int = 30,
+        health_check_server: HealthCheckServer | None = None,
+        uninterruptible_state_timeout: float | None = None,
     ):
         super().__init__(spec, exit_barrier_timeout, shutdown_timeout)
         self._start_method = start_method
@@ -163,7 +222,17 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._log_line_prefix_template = log_line_prefix_template
         self._worker_watchdog: timer.FileTimerServer | None = None
         self._logs_specs = logs_specs
-        self._health_check_server: HealthCheckServer | None = None
+        self._health_check_server = health_check_server
+        # Resolve the uninterruptible-state timeout once at construction time.
+        # Explicit constructor arg wins; otherwise fall back to the env var.
+        # Non-positive / unparsable values disable the check.
+        self._uninterruptible_state_timeout: float = (
+            _resolve_uninterruptible_state_timeout(uninterruptible_state_timeout)
+        )
+        # Maps PID -> monotonic timestamp when the PID was first observed in
+        # an uninterruptible (D-state) sleep. Cleared per-PID when the worker
+        # leaves that state or exits.
+        self._uninterruptible_state_first_seen: dict[int, float] = {}
 
     def _setup_local_watchdog(self, envs: dict[int, dict[str, str]]) -> None:
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
@@ -206,6 +275,27 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _get_current_time_secs() -> int:
         return int(time.time())
 
+    def _get_alive_time(self) -> int:
+        """Return the last progress time from the watchdog, or the current time.
+
+        This callback is passed to the health check server at startup and
+        is called on every TW health check poll. During initialization
+        (before rendezvous and worker launch), the watchdog does not exist
+        yet, so we return the current time to signal the agent is alive.
+        Once workers are running and the watchdog is active, we delegate
+        to the watchdog's ``get_last_progress_time`` for real liveness
+        tracking.
+
+        During the exit barrier wait, workers have finished and the watchdog
+        progress time is stale. We return the current time to prevent TW
+        from killing the task while agents coordinate shutdown.
+        """
+        if self._in_exit_barrier:
+            return int(time.time())
+        if self._worker_watchdog is not None:
+            return self._worker_watchdog.get_last_progress_time()
+        return int(time.time())
+
     def _setup_healthcheck(self) -> None:
         healthcheck_port_env_name = TORCHELASTIC_HEALTH_CHECK_PORT
         healthcheck_port = os.getenv(healthcheck_port_env_name)
@@ -215,13 +305,28 @@ class LocalElasticAgent(SimpleElasticAgent):
                 healthcheck_port_env_name,
                 healthcheck_port,
             )
-            if self._worker_watchdog is None:
-                logger.info(
-                    "FileTimerServer doesn't exist, using current time as dummy callback"
-                )
-                alive_callback = LocalElasticAgent._get_current_time_secs
+
+            if justknobs_check(
+                "ai_infra/pytorch_distributed:torchelastic_enable_healthcheck_before_rendezvous",
+                default=False,
+            ):
+                # New behavior: idempotent guard + dynamic callback that
+                # returns current time before watchdog exists and delegates
+                # to watchdog once workers are running.
+                if self._health_check_server is not None:
+                    return
+                alive_callback = self._get_alive_time
             else:
-                alive_callback = self._worker_watchdog.get_last_progress_time
+                # Original behavior: pick callback based on watchdog state
+                # at call time (only called from _start_workers where
+                # watchdog is already set up).
+                if self._worker_watchdog is None:
+                    logger.info(
+                        "FileTimerServer doesn't exist, using current time as dummy callback"
+                    )
+                    alive_callback = LocalElasticAgent._get_current_time_secs
+                else:
+                    alive_callback = self._worker_watchdog.get_last_progress_time
 
             try:
                 healthcheck_port_as_int = int(healthcheck_port)
@@ -421,6 +526,73 @@ class LocalElasticAgent(SimpleElasticAgent):
         if self._pcontext:
             self._pcontext.close(death_sig, timeout)
 
+    def _check_uninterruptible_state_timeout(
+        self, worker_group: WorkerGroup, timeout: float
+    ) -> RunResult | None:
+        """Return UNHEALTHY when any worker has been in Linux uninterruptible
+        sleep (D-state) for at least ``timeout`` seconds; otherwise update
+        bookkeeping and return None.
+        """
+        if self._pcontext is None:
+            return None
+        role = worker_group.spec.role
+        live_pids = set(self._pcontext.pids().values())
+        # Drop bookkeeping for pids that have exited since the last check.
+        for pid in list(self._uninterruptible_state_first_seen):
+            if pid not in live_pids:
+                self._uninterruptible_state_first_seen.pop(pid, None)
+
+        timed_out: list[tuple[int, float]] = []
+        for pid in live_pids:
+            elapsed = self._update_uninterruptible_dwell(pid, role, timeout)
+            if elapsed is not None and elapsed >= timeout:
+                timed_out.append((pid, elapsed))
+
+        if not timed_out:
+            return None
+        for pid, elapsed in timed_out:
+            logger.error(
+                "[%s] Worker pid=%s stuck in uninterruptible sleep (D-state)"
+                " for %.1fs (>= %.1fs); marking worker group UNHEALTHY and"
+                " disabling restarts.",
+                role,
+                pid,
+                elapsed,
+                timeout,
+            )
+        # Disable restarts: a wedged worker is holding a kernel resource
+        # (GPU, NIC) that a fresh worker on the same host would conflict
+        # with. Force the supervising loop into the _stop_workers branch
+        # so the agent can exit promptly.
+        self._remaining_restarts = 0
+        return RunResult(state=WorkerState.UNHEALTHY)
+
+    def _update_uninterruptible_dwell(
+        self, pid: int, role: str, timeout: float
+    ) -> float | None:
+        """Update bookkeeping for ``pid`` and return how long (seconds) it has
+        been continuously in uninterruptible sleep, or ``None`` if it isn't
+        (or its state can't be read).
+        """
+        state = read_proc_state(pid)
+        if state is None:
+            return None
+        if not is_uninterruptible_state(state):
+            self._uninterruptible_state_first_seen.pop(pid, None)
+            return None
+        first = self._uninterruptible_state_first_seen.get(pid)
+        if first is None:
+            self._uninterruptible_state_first_seen[pid] = time.monotonic()
+            logger.warning(
+                "[%s] Worker pid=%s entered uninterruptible sleep (D-state);"
+                " will mark UNHEALTHY if it remains for %.1fs.",
+                role,
+                pid,
+                timeout,
+            )
+            return 0.0
+        return time.monotonic() - first
+
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
@@ -463,4 +635,11 @@ class LocalElasticAgent(SimpleElasticAgent):
                     return_values=workers_ret_vals,
                 )
         else:
+            timeout = self._uninterruptible_state_timeout
+            if timeout > 0:
+                ustate_result = self._check_uninterruptible_state_timeout(
+                    worker_group, timeout
+                )
+                if ustate_result is not None:
+                    return ustate_result
             return RunResult(state=WorkerState.HEALTHY)

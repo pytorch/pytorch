@@ -1,4 +1,5 @@
 import hashlib
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -6,6 +7,11 @@ from tempfile import mktemp
 
 import click
 import spin
+
+
+CWD = Path(__file__).absolute().parent.parent
+sys.path.insert(0, str(CWD))  # this only affects the current process
+from tools.clean import clean as _clean
 
 
 def file_digest(file, algorithm: str):
@@ -133,7 +139,6 @@ def regenerate_clangtidy_files():
 #: These linters are expected to need less than 3s cpu time total
 VERY_FAST_LINTERS = {
     "ATEN_CPU_GPU_AGNOSTIC",
-    "BAZEL_LINTER",
     "C10_NODISCARD",
     "C10_UNUSED",
     "CALL_ONCE",
@@ -160,7 +165,9 @@ VERY_FAST_LINTERS = {
     "PYPROJECT",
     "RAWCUDA",
     "RAWCUDADEVICE",
+    "RAWTHROW",
     "ROOT_LOGGING",
+    "SYMPY_MINMAX",
     "TABS",
     "TESTOWNERS",
     "TYPEIGNORE",
@@ -193,11 +200,13 @@ SLOW_LINTERS = {
     "CODESPELL",
     "FLAKE8",
     "GB_REGISTRY",
+    "GENERATED_SHIMS_VERSION",
     "PYFMT",
     "STABLE_SHIM_USAGE",
     "STABLE_SHIM_VERSION",
     "TEST_DEVICE_BIAS",
     "TEST_HAS_MAIN",
+    "SCOPED_LIBRARY",
 }
 
 
@@ -236,16 +245,14 @@ def _check_linters():
     unknown_linters = linters - ALL_LINTERS
     missing_linters = ALL_LINTERS - linters
     if unknown_linters:
-        click.secho(
+        raise click.ClickException(
             f"Unknown linters found; please add them to the correct category "
-            f"in .spin/cmds.py: {', '.join(unknown_linters)}",
-            fg="yellow",
+            f"in .spin/cmds.py: {', '.join(sorted(unknown_linters))}"
         )
     if missing_linters:
-        click.secho(
+        raise click.ClickException(
             f"Missing linters found; please update the corresponding category "
-            f"in .spin/cmds.py: {', '.join(missing_linters)}",
-            fg="yellow",
+            f"in .spin/cmds.py: {', '.join(sorted(missing_linters))}"
         )
     return unknown_linters, missing_linters
 
@@ -442,7 +449,59 @@ def quickfix(ctx, *, lintrunner_args, **kwargs):
 
 
 @click.command()
+def clean():
+    """Clean, that is remove all files in .gitignore except in the NOT-CLEAN-FILES section."""
+    _clean()
+
+
+@click.command()
 def regenerate_github_workflows():
     """Regenerate GitHub workflows from templates."""
     cmd = [sys.executable, "scripts/generate_ci_workflows.py"]
     spin.util.run(cmd, cwd="./.github")
+
+
+PYREFLY_LINTER_SCRIPT = CWD / "tools" / "linter" / "adapters" / "pyrefly_linter.py"
+PYREFLY_CONFIG = CWD / "pyrefly.toml"
+
+
+def _pyrefly_version() -> str:
+    """Read the pyrefly version pinned in the linter adapter so spin stays in sync."""
+    text = PYREFLY_LINTER_SCRIPT.read_text()
+    match = re.search(r'"pyrefly==([^"]+)"', text)
+    if not match:
+        raise RuntimeError(
+            f"Could not find pinned pyrefly version in {PYREFLY_LINTER_SCRIPT}"
+        )
+    return match.group(1)
+
+
+def _pyrefly_base_cmd() -> list[str]:
+    return ["uvx", "--python", "3.12", f"pyrefly@{_pyrefly_version()}"]
+
+
+def _pyrefly_init():
+    cmd = _pyrefly_base_cmd() + ["init"]
+    spin.util.run(cmd)
+
+
+@click.group()
+def pyrefly():
+    """Commands for managing PyRefly stubs and checks."""
+    click.echo("Starting Pyrefly...")
+
+
+@pyrefly.command()
+@click.argument("files", metavar="", nargs=-1)
+def infer(files):
+    """Infer type annotations using `pyrefly infer`.
+
+    Note: pyrefly's `infer` is still under development and has a known bug
+    around imports. Review generated annotations before committing.
+    """
+    click.echo(
+        "Warning: `pyrefly infer` is experimental and has a known bug with "
+        "imports. Review the generated annotations carefully."
+    )
+    cmd = _pyrefly_base_cmd() + ["infer", "--config", str(PYREFLY_CONFIG)] + list(files)
+    spin.util.run(cmd)

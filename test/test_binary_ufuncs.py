@@ -2535,8 +2535,8 @@ class TestBinaryUfuncs(TestCase):
             # Use double copysign to verify the correctness of 0.0 and -0.0, since
             # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the
             # magnitude to verify the sign between torch and numpy results, elementwise.
-            # Special case: NaN conversions between FP32 and FP16 is not bitwise
-            # equivalent to pass this assertion.
+            # NaN sign can be lost during float16/bfloat16 to float32 promotion,
+            # so skip sign verification for half-precision types.
             if a.dtype != torch.float16 and b.dtype != torch.float16:
                 self.assertEqual(
                     torch.copysign(torch.tensor(1.0), torch_result),
@@ -2561,7 +2561,7 @@ class TestBinaryUfuncs(TestCase):
         # 0.0/-0.0/inf/-inf/nan
         cases = [0.0, -0.0, float("inf"), float("-inf"), float("nan")]
         # torch.bfloat16 can not hold '-nan'
-        # torch.half can not hold '-nan' on CUDA
+        # torch.half NaN sign can be lost during dtype promotion
         types = [torch.float32, torch.float64]
         if device == "cpu":
             types.append(torch.float16)
@@ -2578,6 +2578,35 @@ class TestBinaryUfuncs(TestCase):
                 _test_copysign_numpy(
                     a, torch.tensor([case], device=device, dtype=dtypes[1])
                 )
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_copysign_nan_sign(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181804
+        # Create NaN with explicit sign bits via bit manipulation to avoid
+        # relying on negation preserving NaN sign across all GPU architectures.
+        if dtype == torch.float16:
+            pos_nan_bits = torch.tensor([0x7E00, 0x7E00], dtype=torch.int16)
+            neg_nan_bits = torch.tensor(
+                [0xFE00 - 0x10000, 0xFE00 - 0x10000], dtype=torch.int16
+            )
+        else:
+            pos_nan_bits = torch.tensor([0x7FC0, 0x7FC0], dtype=torch.int16)
+            neg_nan_bits = torch.tensor(
+                [0xFFC0 - 0x10000, 0xFFC0 - 0x10000], dtype=torch.int16
+            )
+        pos_nan = pos_nan_bits.view(dtype).to(device)
+        neg_nan = neg_nan_bits.view(dtype).to(device)
+        mag = torch.tensor([1.0, 1.0], dtype=dtype, device=device)
+
+        result_pos = torch.copysign(mag, pos_nan)
+        result_neg = torch.copysign(mag, neg_nan)
+        self.assertEqual(
+            result_pos, torch.tensor([1.0, 1.0], dtype=dtype, device=device)
+        )
+        self.assertEqual(
+            result_neg, torch.tensor([-1.0, -1.0], dtype=dtype, device=device)
+        )
 
     @dtypes(
         *product(
@@ -4049,7 +4078,7 @@ class TestBinaryUfuncs(TestCase):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, dx=dx, dim=dim)
             if int(np.__version__.split(".")[0]) >= 2:
-                expected = np.trapezoid(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
+                expected = np.trapezoid(t.cpu().numpy(), dx=dx, axis=dim)
             else:
                 expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
@@ -4059,7 +4088,7 @@ class TestBinaryUfuncs(TestCase):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
             if int(np.__version__.split(".")[0]) >= 2:
-                expected = np.trapezoid(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
+                expected = np.trapezoid(t.cpu().numpy(), x=x, axis=dim)
             else:
                 expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)

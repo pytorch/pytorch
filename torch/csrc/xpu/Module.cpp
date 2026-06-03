@@ -299,11 +299,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
   auto gpu_subslice_count = [](const DeviceProp& prop) {
     return (prop.gpu_eu_count / prop.gpu_eu_count_per_subslice);
   };
-#if SYCL_COMPILER_VERSION >= 20250000
   auto get_device_architecture = [](const DeviceProp& prop) {
     return static_cast<int64_t>(prop.architecture);
   };
-#endif
   // Wrapper class for XPU UUID
   struct XPUuuid {
     XPUuuid(const std::array<unsigned char, 16>& uuid) : bytes(uuid) {}
@@ -336,6 +334,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(gpu_eu_count)                                           \
       ._(max_work_group_size)                                    \
       ._(max_num_sub_groups)                                     \
+      ._(memory_clock_rate)                                      \
+      ._(memory_bus_width)                                       \
       ._(sub_group_sizes)                                        \
       ._(local_mem_size)                                         \
       ._(has_fp16)                                               \
@@ -347,11 +347,14 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(has_subgroup_2d_block_io)
 
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
-      .def_readonly("total_memory", &DeviceProp::global_mem_size)
-      .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
-#if SYCL_COMPILER_VERSION >= 20250000
-      .def_property_readonly("architecture", get_device_architecture)
+#if SYCL_COMPILER_VERSION >= 20260000
+      .def_readonly("is_integrated_gpu", &DeviceProp::is_integrated_gpu)
 #endif
+      .def_readonly("total_memory", &DeviceProp::global_mem_size)
+      // TODO: Expose cache size by level when available from SYCL
+      .def_readonly("last_level_cache_size", &DeviceProp::global_mem_cache_size)
+      .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
+      .def_property_readonly("architecture", get_device_architecture)
       .def_property_readonly("type", get_device_type)
       .def_property_readonly(
           "uuid",
@@ -370,15 +373,23 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024)
                    << "MB, local_mem_size=" << prop.local_mem_size / 1024ull
+                   << "KB, last_level_cache_size="
+                   << prop.global_mem_cache_size / 1024ull
                    << "KB, max_compute_units=" << prop.max_compute_units
-                   << ", gpu_eu_count=" << prop.gpu_eu_count
+                   << ", memory_clock_rate=" << prop.memory_clock_rate
+                   << "MHz, memory_bus_width=" << prop.memory_bus_width
+                   << "-bit, gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
                    << ", max_work_group_size=" << prop.max_work_group_size
                    << ", max_num_sub_groups=" << prop.max_num_sub_groups
                    << ", sub_group_sizes=[" << prop.sub_group_sizes
                    << "], has_fp16=" << prop.has_fp16
                    << ", has_fp64=" << prop.has_fp64
-                   << ", has_atomic64=" << prop.has_atomic64 << ')';
+                   << ", has_atomic64=" << prop.has_atomic64
+#if SYCL_COMPILER_VERSION >= 20260000
+                   << ", is_integrated_gpu=" << prop.is_integrated_gpu
+#endif
+                   << ")";
             return stream.str();
           });
 }
@@ -390,6 +401,14 @@ static void registerXpuPluggableAllocator(PyObject* module) {
       c10::xpu::XPUCachingAllocator::XPUAllocator,
       std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>>(
       m, "_xpu_XPUAllocator");
+
+  // Register concrete XPUPluggableAllocator type with inheritance
+  py::class_<
+      torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator,
+      c10::xpu::XPUCachingAllocator::XPUAllocator,
+      std::shared_ptr<
+          torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator>>(
+      m, "_XPUPluggableAllocator");
 
   m.def("_xpu_getAllocator", []() {
     return py::cast(torch::xpu::XPUPluggableAllocator::getCurrentAllocator());

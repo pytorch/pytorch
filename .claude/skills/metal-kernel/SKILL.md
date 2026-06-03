@@ -73,6 +73,15 @@ When migrating an existing operator from MPSGraph to native Metal, **consolidate
 
 **Key change:** Replace `MPS: my_op_out_mps` with adding `MPS` to the shared dispatch line (e.g., `CPU, CUDA, MPS: my_op_out`).
 
+**Update every overload.** A single op typically has several
+`native_functions.yaml` entries — functional / inplace / `.out`, plus
+`Tensor` and `Scalar` variants. Each entry has its own `dispatch:` block, and
+each one must be moved over. Any entry left pointing at `MPS: my_op_mps`
+still routes that overload to the MPSGraph code, so callers can silently
+land on the old path depending on which overload they hit. Before declaring
+the migration done, grep the legacy function name and confirm no entry still
+references it.
+
 **Dispatch naming conventions:**
 - `MPS: function_name_mps` - MPS-specific implementation (old MPSGraph pattern)
 - `CPU, CUDA, MPS: function_name` - Shared stub implementation (native Metal pattern)
@@ -324,6 +333,214 @@ python test/test_mps.py -k test_output_match_my_op
 # Or run full MPS test suite
 python test/test_mps.py
 ```
+
+## Debugging Metal Kernels with `torch.mps.compile_shader`
+
+Use `torch.mps.compile_shader` to JIT-compile and test individual Metal kernels in isolation. This is invaluable for debugging multi-kernel pipelines where you need to verify each stage independently.
+
+### Basic Usage
+
+```python
+import torch
+
+source = '''
+#include <metal_stdlib>
+using namespace metal;
+
+kernel void my_kernel(
+    const device float* input [[buffer(0)]],
+    device float* output [[buffer(1)]],
+    uint tid [[thread_position_in_grid]]) {
+  output[tid] = input[tid] * 2.0;
+}
+'''
+
+lib = torch.mps.compile_shader(source)
+
+inp = torch.tensor([1.0, 2.0, 3.0], device='mps')
+out = torch.zeros(3, device='mps')
+lib.my_kernel(inp, out, threads=[3, 1, 1], group_size=[3, 1, 1])
+torch.mps.synchronize()
+print(out)  # tensor([2., 4., 6.], device='mps:0')
+```
+
+### Dispatch Semantics
+
+`compile_shader` uses **`dispatchThreads`** semantics (same as `mtl_dispatch1DJob` in PyTorch):
+- `threads=[N, 1, 1]` — total number of threads (NOT threadgroups)
+- `group_size=[G, 1, 1]` — threads per threadgroup
+
+This differs from the `dispatchThreadgroups` API used by some host-side code. To match `dispatchThreadgroups:MTLSizeMake(num_tgs, num_slices, 1) threadsPerThreadgroup:MTLSizeMake(TG_SIZE, 1, 1)`:
+
+```python
+# Equivalent compile_shader call:
+lib.kernel(args...,
+    threads=[num_tgs * TG_SIZE, num_slices, 1],
+    group_size=[TG_SIZE, 1, 1])
+```
+
+### Constant Buffer Parameters
+
+Pass scalar constants as single-element tensors:
+
+```python
+slice_size = torch.tensor([1024], dtype=torch.int32, device='mps')
+lib.my_kernel(data, output, slice_size, threads=[1024, 1, 1], group_size=[256, 1, 1])
+```
+
+### Debugging Strategy for Multi-Kernel Pipelines
+
+When a pipeline of kernels (e.g., histogram → prefix_sum → scatter) produces wrong results, test each kernel individually and verify its output against a Python/NumPy reference:
+
+```python
+# 1. Run GPU kernel
+lib.histogram(keys, hist, ..., threads=[N, 1, 1], group_size=[256, 1, 1])
+torch.mps.synchronize()
+
+# 2. Compute reference in Python
+ref_hist = compute_histogram_cpu(keys.cpu().numpy(), ...)
+
+# 3. Compare
+assert np.array_equal(hist.cpu().numpy(), ref_hist), "Histogram mismatch!"
+```
+
+This isolates which kernel in the pipeline is broken, rather than debugging the entire pipeline at once.
+
+### Common Pitfalls
+
+- **Wrong `threads` count** — `threads` is total threads, not threadgroups. For 5 threadgroups of 256, use `threads=[1280, 1, 1]`.
+- **Threadgroup memory** — `compile_shader` doesn't support `[[threadgroup(N)]]` parameters directly. If your kernel needs threadgroup memory, restructure to use `threadgroup` arrays declared inside the kernel body instead.
+
+## Working with TensorIterators
+
+`REGISTER_UNARY_OP` / `REGISTER_BINARY_OP` hide the iterator plumbing. Kernels
+with extra params or non-elementwise layouts have to drive `TensorIterator`
+directly. The non-obvious rules:
+
+- **Pass `TensorIteratorBase&`, not `Tensor&`.** `Tensor&` loses the
+  offset/shape info `with_32bit_indexing()` produces. When the stub hands you
+  a `const TensorBase&` (e.g. `bernoulli_scalar_stub`), build the iter inline
+  with `at::TensorIterator::borrowing_nullary_op(self)` rather than
+  const-casting.
+
+- **`iter.tensor(0)` returns the *whole* tensor for sub-iters.** After
+  `with_32bit_indexing()`, sub-iters still reference the original storage, so
+  binding `iter.tensor(0)` naively makes every sub-iter overwrite the same
+  prefix and leaves the tail uninitialized. Use `bind_iter_tensors`, which
+  computes the per-chunk offset and binds buffer 0 to the slice. Dispatch
+  with `iter.numel()`, never `iter.tensor(0).numel()`:
+  ```cpp
+  bind_iter_tensors(computeEncoder, iter, /*ntensors=*/1);
+  mtl_setArgs<1>(computeEncoder, params, ..., numel);
+  mtl_dispatch1DJob(computeEncoder, pso, threads);
+  ```
+
+- **Prefer `mtl_setArgs<N>` over chained `mtl_setBytes`.**
+  `mtl_setArgs<1>(encoder, a, b, c)` binds `a`/`b`/`c` at slots 1/2/3 with the
+  same overload resolution as the macros (`std::array<long,2>` →
+  `constant long2&`).
+
+- **Use `ceil_div`.** Host: `at::ceil_div` from `<ATen/ceil_div.h>`. Metal:
+  `c10::metal::ceil_div` from `<c10/metal/common.h>` (unqualified after
+  `using namespace c10::metal;`). Both wrap `(a + b - 1) / b`.
+
+- **`IF_CONSTEXPR` for Metal 3/4 portability.** Metal 4 has `if constexpr`;
+  Metal 3 doesn't. Use the macro from `<c10/metal/common.h>`, e.g.
+  `if IF_CONSTEXPR (sizeof(T) == 8) { ... }`.
+
+- **Share the CPU/CUDA stub via `REGISTER_MPS_DISPATCH`.** When the op has a
+  `DECLARE_DISPATCH` stub upstream (distributions, fused ops), wire MPS in
+  with `REGISTER_MPS_DISPATCH(stub_name, &fn)` instead of an MPS-specific
+  `native_functions.yaml` entry. The stub already takes `TensorIteratorBase&`.
+
+## Working with Large Tensors
+
+Most Metal kernels take `numel` as `uint32_t` and index in 32 bits, so anything
+past `INT32_MAX` needs host-side splitting. Drive this through `TensorIterator`
+rather than slicing manually.
+
+**Decompose via `iter.with_32bit_indexing()`:**
+
+```cpp
+if (!iter.can_use_32bit_indexing()) {
+  for (auto&& sub_iter : iter.with_32bit_indexing()) {
+    my_kernel_impl(sub_iter, ...);
+  }
+  return;
+}
+```
+
+Every yielded sub-iter satisfies `can_use_32bit_indexing()`, so recursion
+terminates after one level. The threshold is `INT32_MAX` (TensorIterator uses
+signed 32-bit offsets), not `UINT32_MAX` — a test just past `INT32_MAX`
+exercises the split but not the `uint32_t` cast; the cast itself only matters
+for `numel > 2^32`.
+
+**Use a checked cast when narrowing:**
+
+```cpp
+const uint32_t numel = c10::checked_convert<uint32_t>(iter.numel(), "uint32_t");
+```
+
+Use `c10::checked_convert` (`<c10/util/TypeCast.h>`) so wraparound becomes a
+`TORCH_CHECK` failure instead of a corrupt output.
+
+## Error Reporting from Kernels
+
+**NEVER copy results to CPU for the purposes of error checking.** Any
+`.item()`, `.cpu()`, or other host read on a GPU tensor forces a full
+GPU->CPU sync that drains every in-flight op on the stream — not just the
+reduction you're inspecting. In a realistic pipeline this stalls the
+whole queue, and the cost dwarfs the actual check. Guarding the sync
+behind `is_mps()` doesn't help; the stall happens every time the op runs.
+Validate on-device instead and report errors through the mechanism below.
+
+GPU code can't throw, but kernels can write into a shared error buffer that the
+host raises as `c10::AcceleratorError` on the next sync. Use
+`TORCH_REPORT_ERROR(error_buf, ...)` from `<c10/metal/error.h>`. Variadic
+arguments are concatenated; integers are formatted in base 10. Delivery is
+asynchronous — the failing thread keeps running, and the error surfaces
+whenever `MPSStream::checkLastError()` next runs (after a `synchronize()` or
+the next op that drains the stream), so don't rely on it for control flow
+inside the same dispatch. Crucially, this adds *no* forced sync: the error
+piggybacks on whatever sync the user's code already does.
+
+**Kernel side:** take a `device ErrorMessages* error_buf` argument and call
+`TORCH_REPORT_ERROR` on the bad path. Skip the offending element afterwards so
+you don't also corrupt memory:
+
+```metal
+#include <c10/metal/error.h>
+
+kernel void index_set_1d(
+    device float* self,
+    constant float* values,
+    constant long* indices,
+    constant uint& self_numel,
+    device ::c10::metal::ErrorMessages* error_buf,
+    uint tid [[thread_position_in_grid]]) {
+  long idx = indices[tid];
+  if (idx < 0 || idx >= long(self_numel)) {
+    TORCH_REPORT_ERROR(
+        error_buf, "index ", idx, " out of bounds for size ", long(self_numel));
+    return;
+  }
+  self[idx] = values[tid];
+}
+```
+
+**Host side:** bind the stream's error buffer as the corresponding argument.
+`mtl_setArgs` accepts it directly:
+
+```objc
+auto* stream = getCurrentMPSStream();
+mtl_setArgs(encoder, self, values, indices, uint32_t(self.numel()),
+            stream->getErrorBuffer());
+```
+
+The buffer is owned by `MPSStream`, sized for 30 messages, and reset after
+each `checkLastError()` drain. Only the first message is reported; later ones
+are kept for debugging but the `AcceleratorError` carries `msg[0]`.
 
 ## Checklist
 

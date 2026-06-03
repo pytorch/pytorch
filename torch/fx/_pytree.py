@@ -6,7 +6,7 @@ from typing_extensions import NamedTuple
 from torch.utils._pytree import PyTree, structseq, tree_flatten, TreeSpec
 
 
-FlattenFnSpec = Callable[[PyTree, TreeSpec], list]
+FlattenFnSpec = Callable[[PyTree, TreeSpec], list[Any]]
 FlattenFnExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
 
 # Keep deprecated alias for backward compatibility
@@ -51,7 +51,7 @@ def tree_flatten_spec(
     if spec.type in SUPPORTED_NODES:
         flatten_fn_spec = SUPPORTED_NODES[spec.type]
         child_pytrees = flatten_fn_spec(pytree, spec)
-        result = []
+        result: list[Any] = []
         for child, child_spec in zip(child_pytrees, spec.children()):
             flat = tree_flatten_spec(child, child_spec)
             result += flat

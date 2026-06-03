@@ -79,6 +79,21 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
     }
   }
 
+  // Capture input element counts per node (frame is populated after warmup).
+  results.inputElementsPerNode.resize(numNodes, 0);
+  for (const auto i : c10::irange(numNodes)) {
+    int64_t total_elements = 0;
+    for (const auto& input : nodeKernels_[i]->node()->inputs()) {
+      if (input.value && input.value->type().kind() == Type::Kind::Tensor) {
+        const auto& iv = executionFrame.getIValue(input.value->id());
+        if (iv.isTensor()) {
+          total_elements += iv.toTensor().numel();
+        }
+      }
+    }
+    results.inputElementsPerNode[i] = total_elements;
+  }
+
   // Execute kernels
   caffe2::Timer timer;
   executionFrame.withManagedMemory([&](auto) {

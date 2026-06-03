@@ -37,6 +37,10 @@ StoreMode = AtomicMode | Literal["tma"] | None
 ReductionType = Literal[
     "argmax",
     "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
     "welford_reduce",
     "welford_combine",
     "any",
@@ -98,6 +102,12 @@ class OpsHandler(Generic[T]):
         """Computes inductor_prims.random with mode="rand".  offset has dtype int32."""
         raise NotImplementedError
 
+    def rand_eager(
+        self, seed: T, base_offset: T, threads_per_round: T, tid: T, vec: T
+    ) -> T:
+        """Computes inductor_prims.random with mode="rand_eager".  offset has dtype int32."""
+        raise NotImplementedError
+
     def randn(self, seed: T, offset: T) -> T:
         """Computes inductor_prims.random with mode="randn".  offset has dtype int32."""
         raise NotImplementedError
@@ -128,9 +138,21 @@ class OpsHandler(Generic[T]):
 
     def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
         """
-        Converts a sympy expression into a scalar of type dtype.  expr is typically
-        an indexing expression, thus the name; however, it can also be used in
-        non-indexing situations.
+        Converts a sympy expression into a scalar suitable for indexing memory.
+        The kernel decides the actual computation dtype (typically int32) — the
+        ``dtype`` argument is advisory and is not honored when it would conflict
+        with the kernel's indexing dtype. For values that must respect the
+        requested dtype, use ``value_expr`` instead.
+        """
+        raise NotImplementedError
+
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
+        """
+        Converts a sympy expression into a scalar of type ``dtype`` that
+        participates in tensor value computation. Unlike ``index_expr``, the
+        result dtype is honored, so this is the right op when the user
+        explicitly requested the dtype (e.g. ``arange(dtype=torch.int64)``
+        whose result is added to a tensor rather than used as an index).
         """
         raise NotImplementedError
 
@@ -735,6 +757,7 @@ class OpsHandler(Generic[T]):
         dtype: torch.dtype = torch.float32,
         is_pure: bool = True,
         pack: int = 1,
+        input_dtypes: tuple[torch.dtype, ...] | None = None,
     ) -> T:
         raise NotImplementedError
 
@@ -846,6 +869,7 @@ class NoopHandler(DefaultHandler):
         return None
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x) -> tuple[None, None]:
         return (None, None)
 
@@ -858,6 +882,7 @@ class NoopHandler(DefaultHandler):
         return (None,) * len(values)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy.S.Zero
 
@@ -955,6 +980,7 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def frexp(x):
         return (f"ops.frexp({x})[0]", f"ops.frexp({x})[1]")
 
@@ -973,6 +999,7 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         )
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
 

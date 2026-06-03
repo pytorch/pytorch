@@ -2,10 +2,10 @@
 import functools
 import inspect
 import logging
-import math
 import warnings
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
@@ -20,6 +20,24 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
+
+
+_INFERENCE_ONLY_SFDP_PATTERNS = frozenset(
+    OrderedSet(
+        [
+            "_sfdp_pattern_13",
+            "_sfdp_pattern_15",
+            "_sfdp_pattern_17",
+            "_sfdp_pattern_18",
+            "_sfdp_pattern_19",
+            "_sfdp_pattern_20",
+            "_sfdp_pattern_21",
+            "_sfdp_pattern_22",
+            "_sfdp_pattern_23",
+            "_sfdp_pattern_24",
+        ]
+    )
+)
 
 
 def _sfdp_pattern_1(query, key, value, inv_scale):
@@ -108,15 +126,15 @@ def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
     )
 
 
-def _sfdp_pattern_5(query, key, value, attn_mask):
+def _sfdp_pattern_5(query, key, value, attn_mask, inv_scale):
     attn_weight = torch.softmax(
-        (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask, dim=-1
+        (query @ key.transpose(-2, -1) / (inv_scale)) + attn_mask, dim=-1
     )
     # attn_weight = torch.dropout(attn_weight, dropout_p)
     return attn_weight @ value
 
 
-def _sfdp_replacement_5(query, key, value, attn_mask):
+def _sfdp_replacement_5(query, key, value, attn_mask, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -124,19 +142,20 @@ def _sfdp_replacement_5(query, key, value, attn_mask):
         value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=0.0,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
 
-def _sfdp_pattern_6(query, key, value, attn_mask, dropout_p):
+def _sfdp_pattern_6(query, key, value, attn_mask, inv_scale, dropout_p):
     attn_weight = torch.softmax(
-        (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask, dim=-1
+        (query @ key.transpose(-2, -1) / inv_scale) + attn_mask, dim=-1
     )
     attn_weight = torch.dropout(attn_weight, dropout_p, True)
     return attn_weight @ value
 
 
-def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
+def _sfdp_replacement_6(query, key, value, attn_mask, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
         query,
@@ -144,26 +163,28 @@ def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
         value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=dropout_p,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
 
-def _sfdp_pattern_7(query, key, value, dropout_p):
+def _sfdp_pattern_7(query, key, value, inv_scale, dropout_p):
     # in real workloads inputs to matmul are permuted
     # causing matmul to expand to a series of expand and clone calls
     # we want the same to happen during pattern tracing
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
+    div = q @ k.transpose(-2, -1) / inv_scale
     div = div.to(torch.float32)
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p, True)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
-def _sfdp_replacement_7(query, key, value, dropout_p):
+def _sfdp_replacement_7(query, key, value, inv_scale, dropout_p):
     # sdpa prefers inputs in permuted format
     # it makes a copy to put them in this format
     # if they aren't already
@@ -179,23 +200,25 @@ def _sfdp_replacement_7(query, key, value, dropout_p):
         v,
         attn_mask=None,  # attn_mask,
         dropout_p=dropout_p,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
 
-def _sfdp_pattern_8(query, key, value):
+def _sfdp_pattern_8(query, key, value, inv_scale):
     # no dropout version of pattern 7
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
+    div = q @ k.transpose(-2, -1) / inv_scale
     div = div.to(torch.float32)
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
-def _sfdp_replacement_8(query, key, value):
+def _sfdp_replacement_8(query, key, value, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -206,24 +229,26 @@ def _sfdp_replacement_8(query, key, value):
         v,
         attn_mask=None,  # attn_mask,
         dropout_p=0.0,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
 
-def _sfdp_pattern_9(query, key, value, dropout_p):
+def _sfdp_pattern_9(query, key, value, inv_scale, dropout_p):
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    q = q / math.sqrt(q.size(-1))
+    q = q / inv_scale
     div = q @ k.transpose(-2, -1)
     div = div.to(torch.float32)
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p, True)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
-def _sfdp_replacement_9(query, key, value, dropout_p):
+def _sfdp_replacement_9(query, key, value, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -234,24 +259,26 @@ def _sfdp_replacement_9(query, key, value, dropout_p):
         v,
         attn_mask=None,  # attn_mask,
         dropout_p=dropout_p,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
 
-def _sfdp_pattern_10(query, key, value):
+def _sfdp_pattern_10(query, key, value, inv_scale):
     # no dropout version of 9
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
     v = value.permute(0, 2, 1, 3)
-    q = q / math.sqrt(q.size(-1))
+    q = q / inv_scale
     div = q @ k.transpose(-2, -1)
     div = div.to(torch.float32)
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
-def _sfdp_replacement_10(query, key, value):
+def _sfdp_replacement_10(query, key, value, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
@@ -262,6 +289,7 @@ def _sfdp_replacement_10(query, key, value):
         v,
         attn_mask=None,  # attn_mask,
         dropout_p=0.0,
+        scale=1.0 / inv_scale,
         is_causal=False,
     )
 
@@ -460,7 +488,7 @@ def _sfdp_replacement_17(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
-def _sfdp_pattern_18(query, key, value, causal_mask, dropout_p):
+def _sfdp_pattern_18(query, key, value, causal_mask, inv_scale, dropout_p):
     # for hf_GPT2 with dropout (introduces clone node) for inference
     # it also returns permuted key & value
     query = query.permute([0, 2, 1, 3])
@@ -469,7 +497,7 @@ def _sfdp_pattern_18(query, key, value, causal_mask, dropout_p):
     attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
     inv_scale = torch.full(
         [],
-        value.size(-1) ** 0.5,
+        inv_scale,
         dtype=attn_weights.dtype,
         device=attn_weights.device,
     )
@@ -489,7 +517,7 @@ def _sfdp_pattern_18(query, key, value, causal_mask, dropout_p):
     )
 
 
-def _sfdp_replacement_18(query, key, value, causal_mask, dropout_p):
+def _sfdp_replacement_18(query, key, value, causal_mask, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     permuted_key = key.transpose(1, 2)
     permuted_value = value.transpose(1, 2)
@@ -501,19 +529,19 @@ def _sfdp_replacement_18(query, key, value, causal_mask, dropout_p):
             attn_mask=causal_mask,
             dropout_p=dropout_p,
             is_causal=False,
-            scale=1.0 / math.sqrt(value.size(-1)),
+            scale=1.0 / inv_scale,
         ),
         permuted_key,
         permuted_value,
     )
 
 
-def _sfdp_pattern_19(query, key, value, causal_mask, attn_mask, dropout_p):
+def _sfdp_pattern_19(query, key, value, causal_mask, attn_mask, inv_scale, dropout_p):
     # for token-classification+gpt2 / text-generation+gpt2
     attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
     inv_scale = torch.full(
         [],
-        value.size(-1) ** 0.5,
+        inv_scale,
         dtype=attn_weights.dtype,
         device=attn_weights.device,
     )
@@ -527,7 +555,9 @@ def _sfdp_pattern_19(query, key, value, causal_mask, attn_mask, dropout_p):
     return torch.nn.functional.dropout(attn_weights, dropout_p).matmul(value)
 
 
-def _sfdp_replacement_19(query, key, value, causal_mask, attn_mask, dropout_p):
+def _sfdp_replacement_19(
+    query, key, value, causal_mask, attn_mask, inv_scale, dropout_p
+):
     counters["inductor"]["fuse_attention"] += 1
     fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
     attn_mask = torch.where(causal_mask, attn_mask, fill_value)
@@ -538,18 +568,18 @@ def _sfdp_replacement_19(query, key, value, causal_mask, attn_mask, dropout_p):
         attn_mask=attn_mask,
         dropout_p=dropout_p,
         is_causal=False,
-        scale=1.0 / math.sqrt(value.size(-1)),
+        scale=1.0 / inv_scale,
     )
 
 
-def _sfdp_pattern_20(query, key, value, attn_mask, dropout_p):
+def _sfdp_pattern_20(query, key, value, attn_mask, inv_scale, dropout_p):
     # for DistilBert with dropout transformers==4.44.2
     q = query.permute([0, 2, 1, 3])
     k = key.permute([0, 2, 1, 3])
     v = value.permute([0, 2, 1, 3])
     bs = q.size(0)
     k_len = k.size(-2)
-    q = q.div(math.sqrt(q.size(-1)))
+    q = q.div(inv_scale)
     scores = q @ k.transpose(-2, -1)
     fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
     attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
@@ -561,7 +591,7 @@ def _sfdp_pattern_20(query, key, value, attn_mask, dropout_p):
     )
 
 
-def _sfdp_replacement_20(query, key, value, attn_mask, dropout_p):
+def _sfdp_replacement_20(query, key, value, attn_mask, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     bs = query.size(0)
     n_head = query.size(2)
@@ -578,7 +608,7 @@ def _sfdp_replacement_20(query, key, value, attn_mask, dropout_p):
         attn_mask=attn_mask.to(dtype=torch.bool),
         dropout_p=dropout_p,
         is_causal=False,
-        scale=1.0 / math.sqrt(query.size(-1)),
+        scale=1.0 / inv_scale,
     )
 
 
@@ -811,6 +841,25 @@ def _sfdp_replacement_27(query, key, value, dropout_p):
     )
 
 
+def _sfdp_pattern_28(query, key, value, scale_factor, dropout_p):
+    # Visformer pattern
+    # same as pattern 4 but non-contiguous q/k/v
+    return _sfdp_pattern_4(query, key, value, scale_factor, dropout_p)
+
+
+def _sfdp_replacement_28(query, key, value, scale_factor, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    return _scaled_dot_product_attention(
+        query.contiguous(),
+        key.contiguous(),
+        value.contiguous(),
+        attn_mask=None,
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=scale_factor,
+    )
+
+
 @functools.lru_cache(None)
 def _warn_tf32_disabled() -> None:
     if (
@@ -935,6 +984,14 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
     g_inp = functools.partial(
         torch.empty, (2, 4, 8, 16), device=device, requires_grad=True
     )
+    # non-contiguous input to cover more patterns.
+    gn_inp = functools.partial(
+        torch.empty_strided,
+        (2, 6, 16, 8),
+        (2304, 128, 1, 16),
+        device=device,
+        requires_grad=True,
+    )
     # attn_mask
     b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
@@ -945,6 +1002,8 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
     # workaround https://github.com/pytorch/pytorch/issues/97894
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     d = {"dropout_p": 0.113377}
+    s = {"inv_scale": 0.66666}
+    sd = {"inv_scale": 0.66666, "dropout_p": 0.113377}
 
     # we could also generate all these patterns in 3d.. TODO
     g_3d_inp = functools.partial(
@@ -963,6 +1022,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
     # but will not in float, so we generate a pattern for both
     for dtype in [torch.float, torch.half]:
         g = functools.partial(g_inp, dtype=dtype)
+        gn = functools.partial(gn_inp, dtype=dtype)
         b = functools.partial(b_inp, dtype=dtype)
         b_float = functools.partial(b_inp, dtype=torch.float)
         b_bool = functools.partial(b_inp, dtype=torch.bool)
@@ -1010,42 +1070,42 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_pattern_5,
                 _sfdp_replacement_5,
                 [g(), g(), g(), b()],
-                {},
+                s,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_6,
                 _sfdp_replacement_6,
                 [g(), g(), g(), b()],
-                d,
+                sd,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_7,
                 _sfdp_replacement_7,
                 [g(), g(), g()],
-                d,
+                sd,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_8,
                 _sfdp_replacement_8,
                 [g(), g(), g()],
-                {},
+                s,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_9,
                 _sfdp_replacement_9,
                 [g(), g(), g()],
-                d,
+                sd,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_10,
                 _sfdp_replacement_10,
                 [g(), g(), g()],
-                {},
+                s,
                 _sfdp_params_check,
             ),
             (
@@ -1113,29 +1173,29 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g(), g(), g(), m_bool()],
-                d,
+                sd,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
-                d,
+                sd,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_19,
                 _sfdp_replacement_19,
                 [g(), g(), g(), b_bool(), b_float()],
-                d,
+                sd,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_20,
                 _sfdp_replacement_20,
                 [g(), g(), g(), m_2d()],
-                d,
-                _sfdp_extra_check(aten.div.Tensor),
+                sd,
+                _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_21,
@@ -1228,6 +1288,13 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 d,
                 _sfdp_extra_check(disable_cuda=True),
             ),
+            (
+                _sfdp_pattern_28,
+                _sfdp_replacement_28,
+                [gn(), gn(), gn(), c()],
+                d,
+                _sfdp_extra_check(aten.mul.Tensor),
+            ),
         ]
         mask_fp32_patterns = ["pattern_16"]
         if dtype == torch.half:
@@ -1262,6 +1329,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
             # gets serialized to a python file and does not require tracing at runtime.
             assert isinstance(workaround, dict)
             name = pattern.__name__
+            pattern_name = name
 
             if dtype != torch.float:
                 name += "_half"
@@ -1273,29 +1341,32 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
             if args[0].size(0) == 1:
                 name += "_bs1"
 
-            training_name = name + "_training"
-            yield (
-                training_name,
-                {
-                    "search_fn": pattern,
-                    "replace_fn": replacement,
-                    "example_inputs": args,
-                    "trace_fn": joint_fwd_bwd,
-                    "pass_dicts": patterns,
-                    "extra_check": extra_check,
-                    "scalar_workaround": workaround,
-                    "skip_duplicates": True,
-                },
-            )
-
-            if workaround:
-                assert len(workaround) == 1 and "dropout_p" in workaround
-                # functools.partial insufficient because we look at signature downstream
-                pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
-                replacement = partialize_and_update_signature(
-                    replacement, dropout_p=0.0
+            if pattern_name not in _INFERENCE_ONLY_SFDP_PATTERNS:
+                training_name = name + "_training"
+                yield (
+                    training_name,
+                    {
+                        "search_fn": pattern,
+                        "replace_fn": replacement,
+                        "example_inputs": args,
+                        "trace_fn": joint_fwd_bwd,
+                        "pass_dicts": patterns,
+                        "extra_check": extra_check,
+                        "scalar_workaround": workaround,
+                        "skip_duplicates": True,
+                    },
                 )
-                workaround = {}
+            inference_workaround = {}
+            if workaround:
+                assert len(workaround) <= 2
+                if "inv_scale" in workaround:
+                    inference_workaround["inv_scale"] = workaround["inv_scale"]
+                if "dropout_p" in workaround:
+                    # functools.partial insufficient because we look at signature downstream
+                    pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
+                    replacement = partialize_and_update_signature(
+                        replacement, dropout_p=0.0
+                    )
 
             inference_name = name + "_inference"
             yield (
@@ -1307,7 +1378,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     "trace_fn": fwd_only,
                     "pass_dicts": patterns,
                     "extra_check": extra_check,
-                    "scalar_workaround": workaround,
+                    "scalar_workaround": inference_workaround,
                     # with dropout turned into clone, we end up with a number of
                     # semantically identical graphs
                     "skip_duplicates": True,

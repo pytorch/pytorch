@@ -20,6 +20,7 @@ on:
       - rocm-mi300
       - rocm-mi355
       - rocm-navi31
+      - rocm-nightly
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124
@@ -29,7 +30,6 @@ on:
       - inductor-perf-nightly-rocm-mi300
       - inductor-perf-nightly-rocm-mi355
       - mac-mps
-      - linux-aarch64
     types:
       - completed
 

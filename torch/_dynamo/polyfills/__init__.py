@@ -10,8 +10,9 @@ import types
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
-from operator import eq, ne
-from typing import Any, TYPE_CHECKING, TypeVar
+from operator import eq, ge, gt, le, lt, ne
+from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
+from typing_extensions import TypeIs
 
 import torch
 
@@ -62,6 +63,16 @@ class NoEnterTorchFunctionMode(BaseTorchFunctionMode):
         pass
 
 
+# Used by WrappedUserFunctionVariable and similar to inline decorated function
+# calls with bytecode backing. Without this, the context enter/exit happens in
+# Python-level VT code, so a nested graph break inside `fn` would skip applying
+# the context in the compiled fn/resume. By inlining through this polyfill, the
+# `with` statement has real bytecode that the resume function can continue from.
+def _fn_with_ctx(ctx: Any, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    with ctx:
+        return fn(*args, **kwargs)
+
+
 def index(
     iterator: Iterator[T], item: T, start: int = 0, end: int | None = None
 ) -> int:
@@ -85,11 +96,11 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
-def impl_IS_MAPPING(a: object) -> bool:
+def impl_IS_MAPPING(a: object) -> TypeIs[Mapping[Any, Any]]:
     return isinstance(a, Mapping)
 
 
-def impl_MATCH_SEQUENCE(a: object) -> bool:
+def impl_MATCH_SEQUENCE(a: object) -> TypeGuard[Sequence[Any]]:
     return isinstance(a, Sequence) and not isinstance(a, (str, bytes, bytearray))
 
 
@@ -154,7 +165,8 @@ def impl_MATCH_CLASS(
 
 
 def impl_MATCH_KEYS(obj: Mapping[T, U], keys: tuple[T, ...]) -> tuple[U, ...] | None:
-    assert isinstance(obj, Mapping)
+    if not isinstance(obj, Mapping):
+        raise AssertionError(f"Expected a Mapping, got {type(obj)}")
     if all(key in obj for key in keys):
         return tuple(obj[key] for key in keys)
     else:
@@ -163,27 +175,69 @@ def impl_MATCH_KEYS(obj: Mapping[T, U], keys: tuple[T, ...]) -> tuple[U, ...] | 
 
 def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # performs fallback "a in b"
+    # CPython: PySequence_Contains → _PySequence_IterSearch → PyObject_GetIter
+    # PyObject_GetIter itself falls back to PySequence_GetItem when tp_iter is NULL.
     if hasattr(b, "__iter__"):
-        # use __iter__ if __contains__ is not available
         for x in b:
             if x == a:
                 return True
         return False
+    if hasattr(b, "__getitem__"):
+        i = 0
+        while True:
+            try:
+                if b.__getitem__(i) == a:
+                    return True
+                i += 1
+            except IndexError:
+                return False
     raise TypeError(f"argument of type {type(b)} is not iterable")
 
 
-def accumulate_grad(x: torch.Tensor, new_grad: torch.Tensor | None) -> None:
+def accumulate_grad(
+    x: torch.Tensor,
+    variable_grad: torch.Tensor | None,
+    new_grad: torch.Tensor | None,
+) -> torch.Tensor | None:
     # polyfills according to the Gradient Layout Contract
     if new_grad is None:
-        return
+        return variable_grad
     new_grad_strided = torch.empty_like(x)
     new_grad_strided.copy_(new_grad)
-    if x.grad is None:
-        x.grad = new_grad_strided
+    if variable_grad is None:
+        return new_grad_strided
+    elif variable_grad.is_sparse and not new_grad_strided.is_sparse:
+        return new_grad_strided + variable_grad
     elif torch.is_grad_enabled():
-        x.grad = x.grad + new_grad_strided
+        return variable_grad + new_grad_strided
     else:
-        x.grad.add_(new_grad_strided)
+        variable_grad.add_(new_grad_strided)
+        return variable_grad
+
+
+def accumulate_grad_no_alias(
+    x: torch.Tensor,
+    variable_grad: torch.Tensor | None,
+    new_grad: torch.Tensor | None,
+) -> torch.Tensor | None:
+    # Mirrors inductor::accumulate_grad_: same gradient layout logic as
+    # accumulate_grad, but the returned grad must not alias any input.
+    if new_grad is None:
+        if variable_grad is None:
+            return None
+        return variable_grad.clone()
+    new_grad_strided = torch.empty_like(x)
+    new_grad_strided.copy_(new_grad)
+    if variable_grad is None:
+        return new_grad_strided
+    elif variable_grad.is_sparse and not new_grad_strided.is_sparse:
+        return new_grad_strided + variable_grad
+    elif torch.is_grad_enabled():
+        return variable_grad + new_grad_strided
+    else:
+        result = variable_grad.clone()
+        result.add_(new_grad_strided)
+        return result
 
 
 # This mirrors
@@ -224,6 +278,43 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
             return False
 
     return True
+
+
+def dictview_richcompare(
+    op: Callable[[Any, Any], bool], self: Iterable[T], other: Iterable[T]
+) -> bool:
+    """Mirrors dictview_richcompare for dict_keys/dict_items vs set/frozenset.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L5952-L6010
+    Uses len() and ``in`` so that Dynamo traces through sq_length/sq_contains.
+    """
+    len_self = len(self)  # type: ignore[arg-type]
+    len_other = len(other)  # type: ignore[arg-type]
+
+    if op is eq:
+        if len_self != len_other:
+            return False
+        return all(item in other for item in self)
+    if op is ne:
+        if len_self != len_other:
+            return True
+        return not all(item in other for item in self)
+    if op is lt:
+        if len_self >= len_other:
+            return False
+        return all(item in other for item in self)
+    if op is le:
+        if len_self > len_other:
+            return False
+        return all(item in other for item in self)
+    if op is gt:
+        if len_self <= len_other:
+            return False
+        return all(item in self for item in other)
+    # ge
+    if len_self < len_other:
+        return False
+    return all(item in self for item in other)
 
 
 def set_symmetric_difference(
@@ -316,7 +407,7 @@ def set_union(
         set_update(union_set, set2)
 
     # frozenset also uses this function
-    # pyrefly: ignore[not-callable]
+    # pyrefly: ignore [bad-argument-count, not-callable]
     return cls(union_set)
 
 
@@ -392,6 +483,11 @@ def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
     return fn(*args[2:], **kwargs)
 
 
+def getattr_and_trace_no_nested_graph_breaks(*args: Any, **kwargs: Any) -> Any:
+    with torch._dynamo.disable_nested_graph_breaks():
+        return getattr_and_trace(*args, **kwargs)
+
+
 def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | None:
     try:
         return obj.__getitem__(key)
@@ -404,9 +500,12 @@ def instantiate_user_defined_class_object(
 ) -> T:
     obj = cls.__new__(cls, *args, **kwargs)
 
-    # Only call __init__ if the object is an instance of the class
+    # Only call __init__ if the object's type is a subclass of cls.
+    # CPython uses PyType_IsSubtype(Py_TYPE(obj), type) at the C level, which does NOT
+    # go through metaclass __instancecheck__. Using isinstance() here would be wrong
+    # for classes with custom __instancecheck__ (e.g. torch.ByteStorage).
     # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
-    if isinstance(obj, cls):
+    if issubclass(type(obj), cls):
         obj.__init__(*args, **kwargs)
     return obj
 
@@ -533,76 +632,12 @@ def foreach_pow_scalar(
     return torch._foreach_pow([scalar for _ in exps], exps)
 
 
-def addcmul_inplace(
-    self, tensor1: torch.Tensor, tensor2: torch.Tensor, value: Any
-) -> None:
-    return self.add_(tensor1 * tensor2 * value)
-
-
 def predicate(obj: object) -> bool:
     # This will cause the rest of dynamo to handle the if statement correctly, so we don't have to rewrite it here.
     # We can't just use bool() here since we can't trace into that in general.
     if obj:
         return True
     return False
-
-
-def cmp_eq(a: object, b: object) -> bool:
-    # Note that the commented `is` check should ideally be removed. This is a
-    # CPython optimization that skips the __eq__ checks it the obj id's are
-    # same. But, these lines adds many `is` nodes in the Fx graph for
-    # SymNodeVariable. For now, we can just skip this check. This is STILL
-    # correct because one of the __eq__ checks will pass later, just could be
-    # slow in some corner cases.
-    # if a is b:
-    #     return True
-    result = a.__eq__(b)
-    if result is NotImplemented:
-        result = b.__eq__(a)
-    return result is not NotImplemented and result
-
-
-def cmp_ne(a: object, b: object) -> bool:
-    # Check if __ne__ is overridden
-    if isinstance(type(a).__ne__, types.FunctionType):
-        result = a.__ne__(b)
-        if result is not NotImplemented:
-            return result
-        # Fall through to try b.__ne__(a) or cmp_eq
-    if isinstance(type(b).__ne__, types.FunctionType):
-        result = b.__ne__(a)
-        if result is not NotImplemented:
-            return result
-    return not cmp_eq(a, b)
-
-
-def cmp_lt(a: Any, b: Any) -> bool:
-    result = a.__lt__(b)
-    if result is NotImplemented:
-        raise TypeError(f"{type(a)} does not support the < operator")
-    return result
-
-
-def cmp_le(a: Any, b: Any) -> bool:
-    # Check if __le__ is overridden
-    if isinstance(type(a).__le__, types.FunctionType):
-        return a.__le__(b)
-    return cmp_eq(a, b) or cmp_lt(a, b)
-
-
-def cmp_gt(a: Any, b: Any) -> bool:
-    # Check if __gt__ is overridden
-    if isinstance(type(a).__gt__, types.FunctionType):
-        return a.__gt__(b)
-    # a > b is equivalent to b < a
-    return cmp_lt(b, a)
-
-
-def cmp_ge(a: Any, b: Any) -> bool:
-    # Check if __ge__ is overridden
-    if isinstance(type(a).__ge__, types.FunctionType):
-        return a.__ge__(b)
-    return cmp_eq(a, b) or cmp_gt(a, b)
 
 
 def group_tensors_by_device_and_dtype(

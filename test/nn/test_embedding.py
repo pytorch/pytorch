@@ -323,6 +323,38 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, "'weight' must be 2-D"):
                 torch.nn.functional.embedding(indices, weight)
 
+    def test_embedding_float_indices_error(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/178042
+        # torch.compile should raise the same dtype error as eager when
+        # nn.Embedding receives float indices, even if the result is unused.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=1)
+                self.embedding = torch.nn.Embedding(100, 32)
+                self.fc = torch.nn.Linear(16 * 32 * 32, 10)
+
+            def forward(self, x, token_ids):
+                conv_out = self.conv(x)
+                gelu_out = torch.nn.functional.gelu(conv_out)
+                self.embedding(token_ids)  # result unused (dead code)
+                return self.fc(gelu_out.view(x.size(0), -1))
+
+        model = Model().to(device)
+        x = torch.randn(2, 3, 32, 32, device=device)
+        float_indices = torch.randn(2, 8, device=device)
+
+        error_msg = "Expected tensor for argument #1 'indices'"
+
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            model(x, float_indices)
+
+        for backend in ["aot_eager", "inductor"]:
+            torch._dynamo.reset()
+            compiled = torch.compile(model, backend=backend, fullgraph=True)
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                compiled(x, float_indices)
+
     @dtypesIfCUDA(torch.float16, torch.float64)
     @dtypesIfXPU(torch.float16, torch.float64)
     @dtypes(torch.float64)

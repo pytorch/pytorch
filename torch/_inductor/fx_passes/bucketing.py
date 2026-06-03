@@ -3,7 +3,9 @@ import logging
 import operator
 from collections import defaultdict
 from collections.abc import Callable
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, TYPE_CHECKING, TypeAlias
+
+import sympy
 
 import torch
 import torch.distributed as dist
@@ -14,6 +16,7 @@ from torch._inductor.comm_analysis import (
     get_collective_type_from_kernel_name,
     NCCL_COLL,
 )
+from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -21,42 +24,66 @@ from torch.fx.traceback import NodeSource, NodeSourceAction
 from torch.utils._ordered_set import OrderedSet
 
 
+if TYPE_CHECKING:
+    from torch.distributed.distributed_c10d import GroupName
+
+
 logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
-BucketMode: TypeAlias = Literal["default", "custom_ops", "custom_ops_multidtype"]
+
+def _resolve_group_name(group_name: Any) -> "GroupName":
+    """Resolve group_name to a GroupName string.
+
+    In compile-on-one-rank graphs, collective ops receive their
+    group_name argument as an FX Node reference (pointing to a
+    mesh_get_process_group call) rather than a string literal. For
+    bucketing key purposes we resolve via the ProcessGroup stored in
+    node.meta["val"].
+    """
+    if isinstance(group_name, str):
+        return group_name  # pyrefly: ignore [bad-return]
+    pg = group_name.meta["val"]
+    return pg.group_name
+
+
+BucketMode: TypeAlias = Literal[
+    "default", "custom_ops", "custom_ops_multidtype", "coalesced"
+]
+
+
+def _default_bucket_mode() -> BucketMode:
+    from torch._inductor import config
+
+    return config.aten_distributed_optimizations.bucket_mode or "default"
 
 
 # Helper functions moved to top for better organization
 def _ag_group_key(node: torch.fx.Node) -> tuple[str, torch.dtype]:  # type: ignore[name-defined]
     _, group_size, group_name = node.args
     dtype = node.meta["val"].dtype
-    assert isinstance(group_name, str)
-    return (group_name, dtype)
+    return (_resolve_group_name(group_name), dtype)
 
 
 def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[str]:
     _, group_size, group_name = node.args
-    assert isinstance(group_name, str)
-    return (group_name,)
+    return (_resolve_group_name(group_name),)
 
 
 def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:  # type: ignore[name-defined]
     _, reduce_op, group_size, group_name = node.args
     dtype = node.meta["val"].dtype
-    assert isinstance(group_name, str)
     assert isinstance(reduce_op, str)
-    return (group_name, reduce_op, dtype)
+    return (_resolve_group_name(group_name), reduce_op, dtype)
 
 
 def _ar_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
     _, reduce_op, group_name = node.args
     dtype = node.meta["val"].dtype
-    assert isinstance(group_name, str)
     assert isinstance(reduce_op, str)
-    return (group_name, reduce_op, dtype)
+    return (_resolve_group_name(group_name), reduce_op, dtype)
 
 
 def _compute_foreach_groups(
@@ -71,13 +98,14 @@ def _compute_foreach_groups(
     Returns a flat list with -1 as group delimiter, or None if only one group exists.
     For example, groups [[0, 2], [1]] would be encoded as [0, 2, -1, 1].
     """
-    from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
-
     groups: defaultdict[tuple[torch.dtype, torch.dtype, tuple[int, ...]], list[int]] = (
         defaultdict(list)
     )
     for i, (ag_in, out_dtype) in enumerate(zip(ag_ins, out_dtypes)):
-        shape = tuple(guarding_hint_or_throw(s) for s in ag_in.shape)
+        shape = tuple(
+            _hint_int_or_raise(s, context="all-gather foreach grouping")
+            for s in ag_in.shape
+        )
         key = (ag_in.dtype, out_dtype, shape)
         groups[key].append(i)
 
@@ -94,23 +122,94 @@ def _compute_foreach_groups(
     return result
 
 
-def _schedulable_wait_node(node: torch.fx.Node) -> bool:
-    """
-    Add additional check on if the wait node is schedulable
-    We should not schedule a fx node that is:
-        1. wait on a collective that is not callable
-        2. wait on a non-NCCL communication node
+# Bucketing has two separate shape contracts:
+#
+# 1. Semantic tensor shapes stay symbolic.  The traced bucket merge graph must
+#    preserve runtime tensor expressions such as numel(), split sizes,
+#    torch.empty extents, narrow offsets/lengths, and reshape shapes.  Those
+#    values describe actual tensor semantics and must not be specialized from
+#    optimization hints.
+#
+# 2. Optimization-policy choices may use hints.  Bucket byte accounting and
+#    foreach grouping need Python integers to decide how to group collectives.
+#    For those policy-only decisions, concrete ints, backed SymInts, hinted
+#    unbacked SymInts, and derived expressions from hinted symbols are valid.
+#    Unhinted symbolic values fail fast instead of forcing guards or guessing.
+#
+# In short: hints may decide which bucket/group we choose, but they must never
+# replace symbolic sizes in the graph we trace for the bucketed collective.
+def _hint_int_or_raise(value: object, *, context: str) -> int:
+    if type(value) is int:
+        return value
+
+    if not isinstance(value, torch.SymInt):
+        raise AssertionError(f"Expected int or SymInt for {context}, got {type(value)}")
+
+    node = value.node
+    if node._hint is not None:
+        return int(node._hint)
+    shape_env = node.shape_env
+    if shape_env is None:
+        raise AssertionError(f"ShapeEnv is required to hint {context}: {value}")
+
+    expr = sympy.sympify(node.expr).xreplace(shape_env.replacements)
+    expr = expr.xreplace(shape_env.backed_var_to_val)
+    expr = expr.xreplace(shape_env.var_to_hint_override)
+    if isinstance(expr, sympy.Expr):
+        expr = expr.expand(identity=True)
+    if getattr(expr, "free_symbols", None):
+        raise RuntimeError(
+            f"Could not extract optimization hint for {context}: {value}. "
+            "Collective bucketing requires hinted symbolic sizes for policy "
+            "decisions."
+        )
+    return int(expr)
+
+
+def _numel_hint_or_raise(tensor: torch.Tensor, *, context: str) -> int:
+    return _hint_int_or_raise(tensor.numel(), context=context)
+
+
+def _size_bytes_hint_or_raise(
+    tensor: torch.Tensor,
+    *,
+    dtype: torch.dtype | None = None,
+    context: str,
+) -> int:
+    element_size = tensor.element_size() if dtype is None else dtype.itemsize
+    return _numel_hint_or_raise(tensor, context=context) * element_size
+
+
+def _get_collective_node_from_wait(node: torch.fx.Node) -> torch.fx.Node | None:
+    """Given a wait node, return the collective it waits on.
+
+    Handles both standard (wait -> collective) and coalesced
+    (wait -> getitem -> coalesced_collective) patterns.
+    Returns None if the node is not a wait on a recognized NCCL collective.
     """
     if not is_wait_tensor(node):
-        return False
-    assert isinstance(node.args[0], torch.fx.Node)
-    if not isinstance(node.args[0].target, Callable):
-        return False
-    is_callable: bool = node.args[0].op == "call_function"
+        return None
+    arg = node.args[0]
+    assert isinstance(arg, torch.fx.Node)
+    if arg.op != "call_function":
+        return None
+    if arg.target is operator.getitem:
+        assert isinstance(arg.args[0], torch.fx.Node)
+        arg = arg.args[0]
+        if arg.op != "call_function":
+            return None
+    if not isinstance(arg.target, Callable):
+        return None
     # pyrefly: ignore [missing-attribute]
-    coll: NCCL_COLL = get_collective_type_from_kernel_name(node.args[0].target.name())
-    is_collective: bool = coll != NCCL_COLL.UNSUPPORTED
-    return is_callable and is_collective
+    coll: NCCL_COLL = get_collective_type_from_kernel_name(arg.target.name())
+    if coll == NCCL_COLL.UNSUPPORTED:
+        return None
+    return arg
+
+
+def _schedulable_wait_node(node: torch.fx.Node) -> bool:
+    """Check if this wait node is schedulable (waits on a recognized NCCL collective)."""
+    return _get_collective_node_from_wait(node) is not None
 
 
 def _populate_node_meta(
@@ -195,8 +294,9 @@ def bucket_cap_mb_by_bucket_idx_default(bucket_id: int) -> float:
 def bucket_all_gather(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> None:
+    mode = mode or _default_bucket_mode()
     if bucket_cap_mb_by_bucket_idx is None:
         from torch._inductor.fx_passes.bucketing import (
             bucket_cap_mb_by_bucket_idx_default,  # pyrefly: ignore [missing-module-attribute]
@@ -212,8 +312,9 @@ def bucket_all_gather(
 def bucket_reduce_scatter(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> None:
+    mode = mode or _default_bucket_mode()
     if bucket_cap_mb_by_bucket_idx is None:
         from torch._inductor.fx_passes.bucketing import (
             bucket_cap_mb_by_bucket_idx_default,  # pyrefly: ignore [missing-module-attribute]
@@ -275,7 +376,7 @@ def get_collective_type(node: torch.fx.Node) -> str:
 
 
 def get_full_bucket_key(
-    node: torch.fx.Node, bucket_mode: BucketMode
+    node: torch.fx.Node, bucket_mode: BucketMode | None
 ) -> tuple[str, Any]:
     """Get the full bucket key including collective type and bucket key."""
     return (get_collective_type(node), bucket_key(node, mode=bucket_mode))
@@ -287,22 +388,23 @@ def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
 
 def is_fsdp_all_gather(
     node: torch.fx.Node,
-    all_node_ancestors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]],
+    all_node_ancestors: BitsetAncestors | None = None,
 ) -> bool:
-    """
-    Check if the node is a FSDP-related all_gather by its recursive ancestors.
-    On the path from the all-gather to its originate placeholder, there should not be any compute node
-    So there should be ONLY ONE placeholder in its recursive ancestors.
+    """Check if an all_gather derives from exactly one placeholder (parameter).
+
+    When all_node_ancestors is provided, uses it for O(|ancestors|) lookup.
+    Otherwise delegates to the BFS implementation in fsdp.py.
     """
     if not is_all_gather_into_tensor(node):
         return False
+    if all_node_ancestors is not None:
+        phs = (
+            a for a in all_node_ancestors.iter_ancestors(node) if a.op == "placeholder"
+        )
+        return next(phs, None) is not None and next(phs, None) is None
+    from torch._inductor.fx_passes.fsdp import is_fsdp_all_gather as _is_fsdp_all_gather
 
-    seen_placeholders = 0
-    for ancestor in all_node_ancestors[node]:
-        if ancestor.op == "placeholder":
-            seen_placeholders += 1
-
-    return seen_placeholders == 1
+    return _is_fsdp_all_gather(node)
 
 
 def is_fsdp_reduce_scatter(node: torch.fx.Node) -> bool:
@@ -391,8 +493,11 @@ def greedy_bucket_collective_by_mb(
     if not found_candidates:
         return []
 
-    # TODO: pearce kelly algorithm for detecting cycles
-    node_descendents = collect_node_descendants(gm.graph)
+    # Build forward adjacency list for incremental descendant tracking
+    children: dict[torch.fx.Node, list[torch.fx.Node]] = collections.defaultdict(list)
+    for node in g.nodes:
+        for inp in node._input_nodes:
+            children[inp].append(node)
 
     nodes_groups: list[list[torch.fx.Node]] = []
     cur_group: list[torch.fx.Node] = []
@@ -414,6 +519,16 @@ def greedy_bucket_collective_by_mb(
     if len(cur_group) > 1:
         nodes_groups.append(cur_group)
 
+    def _add_descendants(node: torch.fx.Node, desc: OrderedSet[torch.fx.Node]) -> None:
+        """Forward BFS from node, adding all reachable nodes to desc."""
+        stack = [node]
+        while stack:
+            n = stack.pop()
+            for child in children[n]:
+                if child not in desc:
+                    desc.add(child)
+                    stack.append(child)
+
     buckets: list[list[torch.fx.Node]] = []
     for nodes in nodes_groups:
         cur_bucket: list[torch.fx.Node] = []
@@ -429,9 +544,13 @@ def greedy_bucket_collective_by_mb(
                 continue
             assert "val" in node.meta
             n_val = node.meta["val"]
-            out_size_bytes = n_val.numel() * n_val.element_size()
+            out_size_bytes = _size_bytes_hint_or_raise(
+                n_val, context="collective bucket output size"
+            )
             n_input_val = node.all_input_nodes[0].meta["val"]
-            in_size_bytes = n_input_val.numel() * n_input_val.element_size()
+            in_size_bytes = _size_bytes_hint_or_raise(
+                n_input_val, context="collective bucket input size"
+            )
             size_bytes = max(out_size_bytes, in_size_bytes)
             if cur_bucket_size_bytes + size_bytes > bucket_size_bytes and cur_bucket:
                 # Current bucket is full, create new bucket
@@ -443,7 +562,7 @@ def greedy_bucket_collective_by_mb(
                 cur_bucket_descendents = OrderedSet()
             cur_bucket_size_bytes += size_bytes
             cur_bucket.append(node)
-            cur_bucket_descendents |= node_descendents[node]
+            _add_descendants(node, cur_bucket_descendents)
         if len(cur_bucket) > 1:
             buckets.append(cur_bucket)
     return buckets
@@ -453,7 +572,7 @@ def bucket_all_gather_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all all_gather nodes and groups them into buckets,
@@ -472,6 +591,7 @@ def bucket_all_gather_by_mb(
     Returns:
         list[list[torch.fx.Node]]: List of buckets, where each bucket is a list of all_gather nodes.
     """
+    mode = mode or _default_bucket_mode()
 
     group_key_fn = (
         _ag_group_key_multidtype if mode and "multidtype" in mode else _ag_group_key
@@ -490,7 +610,7 @@ def bucket_reduce_scatter_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all reduce_scatter nodes and groups them into buckets,
@@ -507,8 +627,9 @@ def bucket_reduce_scatter_by_mb(
     Returns:
         list[list[torch.fx.Node]]: List of buckets, where each bucket is a list of reduce_scatter nodes.
     """
+    mode = mode or _default_bucket_mode()
 
-    assert "multidtype" not in mode, (
+    assert mode is None or "multidtype" not in mode, (
         "reduce scatter bucketing does not support multidtype"
     )
 
@@ -558,7 +679,7 @@ def _pre_bucket_reduce_scatter(
     rs_ins: list[torch.Tensor],
     group_size: int,
 ) -> torch.Tensor:
-    rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
+    rs_ins_flattened = [x.reshape(group_size, -1) for x in rs_ins]
     new_rs_in = torch.cat(rs_ins_flattened, dim=1).flatten()
     return new_rs_in
 
@@ -576,8 +697,8 @@ _pre_bucket_reduce_scatter.register_fake(_pre_bucket_reduce_scatter_fake)
 
 def reduce_scatter_merge_fn_to_trace_custom_ops(
     rs_ins: list[torch.Tensor],
+    group_name: Any,
     group_size: int,
-    group_name: str,
     reduce_op: str,
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
     device: torch.device,  # type: ignore[name-defined]
@@ -595,19 +716,19 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
         )
     )
     new_out_flat = new_rs_out.split(new_out_numels, 0)
-    new_outs = [x.view(s) for x, s in zip(new_out_flat, new_out_sizes)]
+    new_outs = [x.reshape(s) for x, s in zip(new_out_flat, new_out_sizes)]
     return new_outs
 
 
 def reduce_scatter_merge_fn_to_trace(
     rs_ins: list[torch.Tensor],
+    group_name: Any,
     group_size: int,
-    group_name: str,
     reduce_op: str,
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
     device: torch.device,  # type: ignore[name-defined]
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
-    rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
+    rs_ins_flattened = [x.reshape(group_size, -1) for x in rs_ins]
 
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
     new_out_numels = [x.numel() // group_size for x in rs_ins]
@@ -620,25 +741,48 @@ def reduce_scatter_merge_fn_to_trace(
         )
     )
     new_out_flat = new_rs_out.split(new_out_numels, 0)
-    new_outs = [x.view(s) for x, s in zip(new_out_flat, new_out_sizes)]
+    new_outs = [x.reshape(s) for x, s in zip(new_out_flat, new_out_sizes)]
     return new_outs
+
+
+def reduce_scatter_merge_fn_coalesced(
+    rs_ins: list[torch.Tensor],
+    group_name: Any,
+    group_size: int,
+    reduce_op: str,
+    reduce_dtype: torch.dtype,
+    device: torch.device,
+) -> list[torch.Tensor]:
+    """Bucketed RS via NCCL's coalesced API (ncclGroupStart/End).
+
+    Avoids cat-ing inputs into one buffer; instead passes the tensor list
+    directly to reduce_scatter_tensor_coalesced for zero-copy batching.
+    """
+    rs_ins_flat = [x.reshape(-1) for x in rs_ins]
+    new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
+
+    rs_outs = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
+        rs_ins_flat, reduce_op, group_size, group_name
+    )
+    rs_outs = [torch.ops.c10d_functional.wait_tensor(o) for o in rs_outs]
+    return [o.reshape(s) for o, s in zip(rs_outs, new_out_sizes)]
 
 
 def all_reduce_merge_fn_to_trace(
     ar_ins: list[torch.Tensor],
-    group_name: str,
+    group_name: Any,
     reduce_op: str,
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
     device: torch.device,  # type: ignore[name-defined]
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
-    ar_ins_flattened = [x.view(-1) for x in ar_ins]
+    ar_ins_flattened = [x.reshape(-1) for x in ar_ins]
     new_ar_in = torch.cat(ar_ins_flattened)
     new_ar_out = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.all_reduce.default(new_ar_in, reduce_op, group_name)
     )
     split_sizes = [x.numel() for x in ar_ins]
     new_outs_flat = new_ar_out.split(split_sizes)
-    new_outs = [x.view(ar_in.shape) for x, ar_in in zip(new_outs_flat, ar_ins)]
+    new_outs = [x.reshape(ar_in.shape) for x, ar_in in zip(new_outs_flat, ar_ins)]
     return new_outs
 
 
@@ -657,7 +801,6 @@ _ALL_DTYPES = tuple(
 def _pre_bucket_all_gather(
     ag_ins: list[torch.Tensor],
     group_size: int,
-    group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
     out_dtype_ints: list[
         int
@@ -671,7 +814,6 @@ def _pre_bucket_all_gather(
     Args:
         ag_ins: Input tensors to gather
         group_size: Size of the process group
-        group_name: Name of the process group
         dtype: Target dtype for the bucket
         out_dtype_ints: Dtype enum values for each input
         rank: Current rank
@@ -730,7 +872,6 @@ def _pre_bucket_all_gather(
 def _pre_bucket_all_gather_fake(
     ag_ins: list[torch.Tensor],
     group_size: int,
-    group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
     out_dtype_ints: list[int],
     rank: int,
@@ -756,8 +897,8 @@ _pre_bucket_all_gather.register_fake(_pre_bucket_all_gather_fake)
 
 def all_gather_merge_fn_to_trace_custom_ops(
     _ag_ins: list[torch.Tensor],
+    group_name: Any,
     group_size: int,
-    group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
     out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
     rank: int,
@@ -786,7 +927,6 @@ def all_gather_merge_fn_to_trace_custom_ops(
     new_ag_out = torch.ops.bucketing._pre_bucket_all_gather(
         ag_ins,
         group_size,
-        group_name,
         dtype,
         out_dtype_ints,
         rank,
@@ -813,8 +953,8 @@ def all_gather_merge_fn_to_trace_custom_ops(
 
 def all_gather_merge_fn_to_trace(
     ag_ins: list[torch.Tensor],
+    group_name: Any,
     group_size: int,
-    group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
     out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
     rank: int,
@@ -825,9 +965,11 @@ def all_gather_merge_fn_to_trace(
     device = ag_ins[0].device
     new_ag_out = torch.empty(ag_input_numel * group_size, dtype=dtype, device=device)
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
-    foreach_copy_dsts = torch.split(new_ag_in, ins_split_sizes)
     ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
-    torch._foreach_copy_(foreach_copy_dsts, ag_ins_flattened)
+    # Inductor fuses copy_(cat(...)) into 1 Triton kernel with no allocation for cat.
+    # _foreach_copy_(..., ag_ins_flattened) emits separate kernel per item,
+    # resulting in large number of small triton kernels to launch.
+    new_ag_in.copy_(torch.cat(ag_ins_flattened))
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.all_gather_into_tensor_out.default(
             new_ag_in, group_size, group_name, out=new_ag_out
@@ -848,8 +990,8 @@ def all_gather_merge_fn_to_trace(
 
 def all_gather_merge_fn_to_trace_functional(
     ag_ins: list[torch.Tensor],
+    group_name: Any,
     group_size: int,
-    group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
     out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
     rank: int,
@@ -891,14 +1033,29 @@ def _trace(fn, inps) -> torch.fx.GraphModule:  # type: ignore[no-untyped-def]
     with dynamo_timed("fx.bucketing._trace", log_pt2_compile_event=True):
         fake_mode = detect_fake_mode(inps)
         assert fake_mode is not None
-        with fake_mode, enable_python_dispatcher():
-            out = make_fx(fn)(*inps)
-            for node in out.graph.find_nodes(
-                op="call_function", target=torch.ops.aten.detach.default
-            ):
-                node.replace_all_uses_with(node.args[0])
-                out.graph.erase_node(node)
-            return out
+        shape_env = fake_mode.shape_env
+        pending_unbacked = None
+        ignorable_unbacked = None
+        if shape_env is not None:
+            pending_unbacked = list(shape_env.pending_fresh_unbacked_symbols)
+            ignorable_unbacked = list(shape_env.ignorable_fresh_unbacked_symbols)
+            shape_env.pending_fresh_unbacked_symbols.clear()
+            shape_env.ignorable_fresh_unbacked_symbols.clear()
+        try:
+            with fake_mode, enable_python_dispatcher():
+                out = make_fx(fn)(*inps)
+        finally:
+            if shape_env is not None:
+                assert pending_unbacked is not None
+                assert ignorable_unbacked is not None
+                shape_env.pending_fresh_unbacked_symbols[:] = pending_unbacked
+                shape_env.ignorable_fresh_unbacked_symbols[:] = ignorable_unbacked
+        for node in out.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.detach.default
+        ):
+            node.replace_all_uses_with(node.args[0])
+            out.graph.erase_node(node)
+        return out
 
 
 def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
@@ -967,6 +1124,67 @@ def has_mergeable_all_gather_convert_dtype(n: torch.fx.Node) -> bool:
     )
 
 
+def _sort_bucket_region(
+    g: torch.fx.Graph,
+    new_nodes: list[torch.fx.Node],
+    new_nodes_inputs: list[torch.fx.Node],
+) -> None:
+    """Topologically sort the smallest region spanning *new_nodes* and their inputs.
+
+    After bucketing inserts *new_nodes*, some *new_nodes_inputs* may sit after
+    the new collective in the linked list.  This sorts just the affected
+    region so every input precedes its consumer.
+
+    Complexity: O(D) where D = distance between the farthest input and
+    new_nodes in the linked list.  No full-graph enumeration.
+    """
+    if not new_nodes or not new_nodes_inputs:
+        return
+
+    new_set: OrderedSet[torch.fx.Node] = OrderedSet(new_nodes)
+    external: OrderedSet[torch.fx.Node] = OrderedSet(
+        [inp for inp in new_nodes_inputs if inp not in new_set]
+    )
+    if not external:
+        return
+
+    # Walk backward/forward from the new_nodes span to find all external
+    # inputs.  ``remaining`` counts how many we still need to locate;
+    # each walk stops as soon as its share is found.
+    first = new_nodes[0]
+    last = new_nodes[-1]
+    remaining = len(external)
+
+    cursor: torch.fx.Node | None = first.prev
+    while cursor is not None and cursor.op != "placeholder" and remaining > 0:
+        if cursor in external:
+            first = cursor
+            remaining -= 1
+        cursor = cursor.prev
+
+    cursor = last.next
+    while cursor is not None and cursor.op != "output" and remaining > 0:
+        if cursor in external:
+            last = cursor
+            remaining -= 1
+        cursor = cursor.next
+
+    if first is last:
+        return
+
+    region: OrderedSet[torch.fx.Node] = OrderedSet()
+    cursor = first
+    while cursor is not None:
+        region.add(cursor)
+        if cursor is last:
+            break
+        cursor = cursor.next
+
+    from torch._dynamo.graph_deduplication import _stable_topological_sort_region
+
+    _stable_topological_sort_region(g, region)
+
+
 def process_collective_bucket(
     g: torch.fx.Graph,
     bucket_nodes: list[torch.fx.Node],
@@ -974,6 +1192,7 @@ def process_collective_bucket(
     trace_args_fn: Callable[[list[torch.fx.Node]], tuple[Any, ...]],
     insert_before: torch.fx.Node | None = None,
     wait_insertion_point: torch.fx.Node | None = None,
+    extra_graph_inps: list[torch.fx.Node] | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     """
     Process a single bucket of collective operation nodes with flexible insertion control.
@@ -985,6 +1204,10 @@ def process_collective_bucket(
         trace_args_fn: Function to create trace arguments from inputs
         insert_before: Where to insert the traced function (default: after last bucket node)
         wait_insertion_point: If provided, move all nodes from wait() onwards to before this node
+        extra_graph_inps: Additional non-tensor graph nodes to wire as traced
+            inputs (appended after tensor inputs). Used for compile-on-one-rank
+            graphs where group_name is a Node reference that make_fx proxies
+            as an opaque input.
 
     Returns:
         new_nodes: List of all newly inserted nodes
@@ -1018,13 +1241,15 @@ def process_collective_bucket(
     if insert_before is None:
         insert_before = bucket_nodes[-1].next
 
+    g_fn_inps = bucket_ins + (extra_graph_inps or [])
+
     # Insert traced function and get replacements + new nodes
     replacements, new_nodes = _insert_fn_trace_before_node(
         g,
         fn_to_trace,
         trace_args,
         insert_before,
-        bucket_ins,
+        g_fn_inps,
         bucket_waits,
     )
 
@@ -1060,20 +1285,24 @@ def process_collective_bucket(
         for pre_node in reversed(ag_node_to_pre_nodes[node]):
             g.erase_node(pre_node)
 
+    _sort_bucket_region(g, new_nodes, g_fn_inps)
+
     return new_nodes, replacements
 
 
 def merge_reduce_scatter_bucket(
     g: torch.fx.Graph,
     rs_nodes: list[torch.fx.Node],
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
     insert_before: torch.fx.Node | None = None,
     wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
+    mode = mode or _default_bucket_mode()
     # Validate bucket consistency
     rs0 = rs_nodes[0]
     rs0_val = rs0.meta["val"]
     _, reduce_op, group_size, group_name = rs0.args
+    group_name_str = _resolve_group_name(group_name)
     reduce_dtype = rs0_val.dtype
     device = rs0_val.device
 
@@ -1082,22 +1311,27 @@ def merge_reduce_scatter_bucket(
         assert (
             n.args[1] == reduce_op
             and n.args[2] == group_size
-            and n.args[3] == group_name
+            and _resolve_group_name(n.args[3]) == group_name_str
             and rs_val.device == device
             and rs_val.dtype == reduce_dtype
         )
 
     # Choose merge function based on mode
     rs_merge_fn = reduce_scatter_merge_fn_to_trace
-    if mode and "custom_ops" in mode:
+    if mode == "coalesced":
+        rs_merge_fn = reduce_scatter_merge_fn_coalesced
+    elif mode and "custom_ops" in mode:
         rs_merge_fn = reduce_scatter_merge_fn_to_trace_custom_ops
 
-    # Process bucket with lazy input collection
+    group_name_val = (
+        group_name.meta["val"] if isinstance(group_name, torch.fx.Node) else group_name
+    )
+
     def create_trace_args(bucket_ins: list[torch.fx.Node]) -> tuple[Any, ...]:
         return (
             pytree.tree_map(lambda node: node.meta["val"], bucket_ins),
+            group_name_val,
             group_size,
-            group_name,
             reduce_op,
             reduce_dtype,
             device,
@@ -1110,6 +1344,9 @@ def merge_reduce_scatter_bucket(
         create_trace_args,
         insert_before=insert_before,
         wait_insertion_point=wait_insertion_point,
+        extra_graph_inps=(
+            [group_name] if isinstance(group_name, torch.fx.Node) else None
+        ),
     )
 
 
@@ -1123,6 +1360,7 @@ def merge_all_reduce_bucket(
     ar0 = ar_nodes[0]
     ar0_val = ar0.meta["val"]
     _, reduce_op, group_name = ar0.args
+    group_name_str = _resolve_group_name(group_name)
     reduce_dtype = ar0_val.dtype
     device = ar0_val.device
 
@@ -1130,17 +1368,21 @@ def merge_all_reduce_bucket(
         ar_val = n.meta["val"]
         assert (
             n.args[1] == reduce_op
-            and n.args[2] == group_name
+            and _resolve_group_name(n.args[2]) == group_name_str
             and ar_val.device == device
             and ar_val.dtype == reduce_dtype
         )
 
     ar_merge_fn = all_reduce_merge_fn_to_trace
 
+    group_name_val = (
+        group_name.meta["val"] if isinstance(group_name, torch.fx.Node) else group_name
+    )
+
     def create_trace_args(bucket_ins: list[torch.fx.Node]) -> tuple[Any, ...]:
         return (
             pytree.tree_map(lambda node: node.meta["val"], bucket_ins),
-            group_name,
+            group_name_val,
             reduce_op,
             reduce_dtype,
             device,
@@ -1153,43 +1395,54 @@ def merge_all_reduce_bucket(
         create_trace_args,
         insert_before=insert_before,
         wait_insertion_point=wait_insertion_point,
+        extra_graph_inps=(
+            [group_name] if isinstance(group_name, torch.fx.Node) else None
+        ),
     )
 
 
 def merge_all_gather_bucket(
     g: torch.fx.Graph,
     ag_nodes: list[torch.fx.Node],
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
     insert_before: torch.fx.Node | None = None,
     wait_insertion_point: torch.fx.Node | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
+    mode = mode or _default_bucket_mode()
     from torch.distributed.distributed_c10d import _resolve_process_group
 
     ag0 = ag_nodes[0]
     _, group_size, group_name = ag0.args
-    assert isinstance(group_name, str)
+    group_name_str = _resolve_group_name(group_name)
     _ag_dtypes: list[torch.dtype] = []  # type: ignore[name-defined]
 
     for n in ag_nodes:
-        assert n.args[1] == group_size and n.args[2] == group_name
+        assert (
+            n.args[1] == group_size and _resolve_group_name(n.args[2]) == group_name_str
+        )
         _ag_dtypes.append(n.meta["val"].dtype)
 
     bucket_dtype = pick_bucket_dtype(_ag_dtypes)
 
     # Choose merge function based on mode
     ag_merge_fn = all_gather_merge_fn_to_trace
-    if mode is not None and "custom_ops" in mode:
+    if mode == "coalesced":
+        logger.info("coalesced bucket_mode not supported for all_gather, using default")
+    elif mode and "custom_ops" in mode:
         ag_merge_fn = all_gather_merge_fn_to_trace_custom_ops  # type: ignore[assignment]
 
-    # Process bucket with lazy input collection
     # pyrefly: ignore [bad-argument-type]
-    rank: int = dist.get_rank(_resolve_process_group(group_name))
+    rank: int = dist.get_rank(_resolve_process_group(group_name_str))
+
+    group_name_val = (
+        group_name.meta["val"] if isinstance(group_name, torch.fx.Node) else group_name
+    )
 
     def create_trace_args(bucket_ins: list[torch.fx.Node]) -> tuple[Any, ...]:
         return (
             pytree.tree_map(lambda node: node.meta["val"], bucket_ins),
+            group_name_val,
             group_size,
-            group_name,
             bucket_dtype,
             _ag_dtypes,
             rank,
@@ -1200,18 +1453,23 @@ def merge_all_gather_bucket(
         ag_nodes,
         ag_merge_fn,
         create_trace_args,
+        insert_before=insert_before,
         wait_insertion_point=wait_insertion_point,
+        extra_graph_inps=(
+            [group_name] if isinstance(group_name, torch.fx.Node) else None
+        ),
     )
 
 
 def merge_reduce_scatter(
     gm: torch.fx.GraphModule,
     rs_buckets: list[list[torch.fx.Node]],
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> None:
     """
     Merges specified buckets of reduce_scatter to joint reduce_scatter.
     """
+    mode = mode or _default_bucket_mode()
     with dynamo_timed("fx.bucketing.merge_reduce_scatter", log_pt2_compile_event=True):
         trace_structured(
             "artifact",
@@ -1231,11 +1489,12 @@ def merge_reduce_scatter(
 def merge_all_gather(
     gm: torch.fx.GraphModule,
     ag_buckets: list[list[torch.fx.Node]],
-    mode: BucketMode = "default",
+    mode: BucketMode | None = None,
 ) -> None:
     """
     Merges specified buckets of all_gather to joint all_gather.
     """
+    mode = mode or _default_bucket_mode()
     with dynamo_timed("fx.bucketing.merge_all_gather", log_pt2_compile_event=True):
         trace_structured(
             "artifact",

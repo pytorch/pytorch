@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import logging
 import math
-import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast, TYPE_CHECKING
@@ -15,6 +14,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
+from torch.utils._sympy.functions import FloorDiv, Mod
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
@@ -34,6 +34,7 @@ from .common import (
     infer_dense_strides,
     load_flex_template,
     maybe_realize,
+    realize_captures_for_cutedsl,
     set_head_dim_values,
     SubgraphResults,
 )
@@ -44,6 +45,7 @@ from .flex_flash_attention import (
     _use_flex_flash_attention_backward,
     create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
+    has_unsupported_captured_scalars,
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
@@ -118,10 +120,11 @@ def flex_attention(
     mask_mod_other_buffers,
 ):
     """The main lowering for the flex_attention hop
-    This can currently lower to one of 3 templates:
+    This can currently lower to one of 4 templates:
     1. Base Triton Template
     2. Flex Decode Triton Template
     3. Cpu specific CPP template
+    4. MPS specific Metal template
     """
     if query.get_device().type == "cpu":
         return lower_cpu(
@@ -135,7 +138,21 @@ def flex_attention(
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
-    # below is cuda path if device is not cpu
+    if query.get_device().type == "mps":
+        from .flex_mps import lower_mps
+
+        return lower_mps(
+            query,
+            key,
+            value,
+            subgraph,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
+    # below is cuda path if device is not cpu or mps
     # tl.dot does not support embedding size less than 16
     small_dqk = V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-1], 16))
     small_dv = V.graph.sizevars.evaluate_expr(sympy.Lt(value.get_size()[-1], 16))
@@ -156,6 +173,10 @@ def flex_attention(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        _,  # dq_write_order (backward-only)
+        _,  # dq_write_order_full (backward-only)
+        _,  # dq_kv_order (backward-only)
+        _,  # dq_kv_order_spt (backward-only)
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -166,9 +187,7 @@ def flex_attention(
     # Early check for FLASH backend: detect unsupported captured scalars before
     # building subgraph buffers (which can trigger unbacked_bindings errors)
     if backend == "FLASH":
-        from .flex_flash_attention import _has_unsupported_captured_scalars
-
-        if _has_unsupported_captured_scalars(
+        if has_unsupported_captured_scalars(
             score_mod_other_buffers, mask_mod_other_buffers
         ):
             raise RuntimeError(
@@ -178,6 +197,10 @@ def flex_attention(
                 "Workarounds: use BACKEND='TRITON', compile with dynamic=False, or pass the "
                 "value as a tensor on device instead of capturing a Python scalar."
             )
+
+    if backend == "FLASH":
+        score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
+        mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
 
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -318,10 +341,16 @@ def flex_attention(
 
     B = Bq
 
-    if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
-        kernel_options.setdefault("IS_DIVISIBLE", False)
-    else:
+    seq_q_divisible = V.graph.sizevars.statically_known_true(
+        sympy.Eq(Mod(seq_len_q, 128), 0)
+    )
+    seq_kv_divisible = V.graph.sizevars.statically_known_true(
+        sympy.Eq(Mod(seq_len_kv, 128), 0)
+    )
+    if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
+    else:
+        kernel_options.setdefault("IS_DIVISIBLE", False)
 
     # NB it is okay that the v_head_dim is different
     # We are using these to match fill order of the output.
@@ -353,7 +382,7 @@ def flex_attention(
     kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA broadcast factor.
-    gqa_shared_heads = Hq // Hkv
+    gqa_shared_heads = FloorDiv(Hq, Hkv)
     kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
 
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
@@ -485,7 +514,7 @@ def flex_attention(
         8: create_indices_fake,
     }
 
-    out = autotune_select_algorithm(
+    out, _ = autotune_select_algorithm(
         "flex_attention",
         choices,
         # Need to filter out symbols since there is an invariant
@@ -633,6 +662,11 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers,
         mask_mod_other_buffers,
     ) = args
+    if query.get_device().type == "mps":
+        raise NotImplementedError(
+            "flex_attention backward is not yet supported on MPS. "
+            "Use torch.no_grad() for inference."
+        )
     (
         _,  # q_length
         _,  # kv_length
@@ -644,6 +678,10 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        dq_write_order,
+        dq_write_order_full,
+        dq_kv_order,
+        dq_kv_order_spt,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -663,6 +701,9 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        dq_write_order,
+        dq_write_order_full,
+        dq_kv_order,
     ) = maybe_realize(
         [
             query,
@@ -678,6 +719,9 @@ def flex_attention_backward(*args, **kwargs):
             q_indices,
             full_q_num_blocks,
             full_q_indices,
+            dq_write_order,
+            dq_write_order_full,
+            dq_kv_order,
         ]
     )
 
@@ -691,6 +735,10 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    if backend == "FLASH":
+        score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
+        mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
+
     # Add check for mixed dtypes
     if query.dtype != key.dtype or query.dtype != value.dtype:
         raise ValueError(
@@ -704,8 +752,16 @@ def flex_attention_backward(*args, **kwargs):
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
-    seq_q_divisible = V.graph.sizevars.statically_known_true(seq_len_q % 128 == 0)
-    seq_kv_divisible = V.graph.sizevars.statically_known_true(seq_len_kv % 128 == 0)
+    kernel_options.setdefault("PRESCALE_QK", False)
+    kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
+    kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
+    kernel_options.setdefault("WRITE_DQ", True)
+    seq_q_divisible = V.graph.sizevars.statically_known_true(
+        sympy.Eq(Mod(seq_len_q, 128), 0)
+    )
+    seq_kv_divisible = V.graph.sizevars.statically_known_true(
+        sympy.Eq(Mod(seq_len_kv, 128), 0)
+    )
     if seq_q_divisible and seq_kv_divisible:
         kernel_options.setdefault("IS_DIVISIBLE", True)
     else:
@@ -769,20 +825,7 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers=score_mod_other_buffers,
     ):
         needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
-        if (
-            torch.are_deterministic_algorithms_enabled()
-            and not torch.is_deterministic_algorithms_warn_only_enabled()
-            and needs_block_mask
-        ):
-            raise NotImplementedError(
-                "Deterministic backward for flex_attention with block_mask using the FLASH backend "
-                "is not yet implemented. The TRITON backend supports deterministic backward."
-            )
-        if torch.is_deterministic_algorithms_warn_only_enabled() and needs_block_mask:
-            warnings.warn(
-                "Deterministic backward for flex_attention with block_mask using the FLASH backend "
-                "is not yet implemented. Running non-deterministic backward.",
-            )
+
         # TODO: Implement dLSE support in flash-attention backward by folding
         # grad_logsumexp into the dPsum preprocess step.
         if grad_logsumexp is not None:
@@ -814,6 +857,10 @@ def flex_attention_backward(*args, **kwargs):
             q_indices=q_indices if needs_block_mask else None,
             full_q_num_blocks=full_q_num_blocks if needs_block_mask else None,
             full_q_indices=full_q_indices if needs_block_mask else None,
+            dq_write_order=dq_write_order if needs_block_mask else None,
+            dq_write_order_full=dq_write_order_full if needs_block_mask else None,
+            dq_kv_order=dq_kv_order if needs_block_mask else None,
+            dq_kv_order_spt=dq_kv_order_spt,
         )
 
     # Construct layout with stride order matching K
@@ -865,7 +912,7 @@ def flex_attention_backward(*args, **kwargs):
     kernel_options.setdefault("SM_SCALE", scale)
 
     # Determine GQA factor
-    gqa_shared_heads = Hq // Hkv
+    gqa_shared_heads = FloorDiv(Hq, Hkv)
     kernel_options.setdefault("GQA_SHARED_HEADS", gqa_shared_heads)
 
     # Inside of Triton kernel, only apply partial masking if partial blocks are computed.
@@ -1012,7 +1059,7 @@ def flex_attention_backward(*args, **kwargs):
         15: create_indices_fake,
     }
 
-    broadcasted_grad_key = autotune_select_algorithm(
+    broadcasted_grad_key, _ = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
         [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],

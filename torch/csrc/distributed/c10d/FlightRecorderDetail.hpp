@@ -89,13 +89,13 @@ typename FlightRecorder<EventType>::TraceIdentifier FlightRecorder<EventType>::
   if (!enabled_) {
     return TraceIdentifier{std::nullopt, std::nullopt};
   }
+  auto traceback =
+      torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
+  std::lock_guard<std::mutex> guard(mutex_);
   if (all_pg_status_.find(pg_id) == all_pg_status_.end()) {
     // Current pg_status is not in FR.
     all_pg_status_[pg_id] = std::move(pg_status);
   }
-  auto traceback =
-      torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
-  std::lock_guard<std::mutex> guard(mutex_);
 
   TORCH_CHECK(
       reset_epoch_start_idx_.find(reset_epoch_) !=

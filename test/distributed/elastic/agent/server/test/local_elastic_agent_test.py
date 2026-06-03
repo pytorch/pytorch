@@ -6,6 +6,8 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+from __future__ import annotations
+
 import json
 import multiprocessing as mp
 import os
@@ -16,8 +18,8 @@ import tempfile
 import time
 import unittest
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from unittest import mock
 from unittest.mock import Mock, patch
 
@@ -32,19 +34,26 @@ from torch.distributed.elastic.agent.server.api import (
 )
 from torch.distributed.elastic.agent.server.local_elastic_agent import (
     LocalElasticAgent,
+    TORCHELASTIC_ENABLE_FILE_TIMER,
     TORCHELASTIC_HEALTH_CHECK_PORT,
     TORCHELASTIC_TIMER_FILE,
+    TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT,
 )
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, Std
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.utils.process_state import read_proc_state
 from torch.distributed.rpc.backend_registry import BackendType
 from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def init_rpc(name, backend):
@@ -275,6 +284,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         cls._etcd_server.stop()
 
     def setUp(self):
+        super().setUp()
         self._test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
         self._run_id = str(uuid.uuid4()).split("-")[0]
 
@@ -1466,6 +1476,462 @@ class LocalElasticAgentTest(unittest.TestCase):
     )
     def test_rank_restart_after_failure(self):
         self.run_test_with_backend(backend="c10d", test_to_run=self.fail_rank_one_once)
+
+    def test_get_alive_time_without_watchdog(self):
+        """Test _get_alive_time returns current time when watchdog is not set."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        # Use a mocked rendezvous handler to avoid blocking on real connections
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Watchdog is None by default at initialization
+        self.assertIsNone(agent._worker_watchdog)
+
+        # _get_alive_time should return current time when watchdog is None
+        before = int(time.time())
+        alive_time = agent._get_alive_time()
+        after = int(time.time())
+
+        self.assertGreaterEqual(alive_time, before)
+        self.assertLessEqual(alive_time, after)
+
+    def test_get_alive_time_with_watchdog(self):
+        """Test _get_alive_time returns watchdog time when watchdog is active."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        # Use a mocked rendezvous handler to avoid blocking on real connections
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Mock the watchdog with a specific return value
+        mock_watchdog = Mock()
+        expected_time = 1234567890
+        mock_watchdog.get_last_progress_time.return_value = expected_time
+        agent._worker_watchdog = mock_watchdog
+
+        # _get_alive_time should delegate to watchdog when available
+        alive_time = agent._get_alive_time()
+
+        self.assertEqual(alive_time, expected_time)
+        mock_watchdog.get_last_progress_time.assert_called_once()
+
+    def test_get_alive_time_during_exit_barrier(self):
+        """When _in_exit_barrier is True, _get_alive_time returns current time
+        even if the watchdog exists (since watchdog progress time is stale)."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Set up a mock watchdog with a stale time
+        mock_watchdog = Mock()
+        mock_watchdog.get_last_progress_time.return_value = 1000  # very old
+        agent._worker_watchdog = mock_watchdog
+
+        # Without exit barrier flag, should return watchdog time
+        agent._in_exit_barrier = False
+        self.assertEqual(agent._get_alive_time(), 1000)
+
+        # With exit barrier flag, should return current time (not stale watchdog time)
+        agent._in_exit_barrier = True
+        alive_time = agent._get_alive_time()
+        now = int(time.time())
+        self.assertAlmostEqual(alive_time, now, delta=2)
+
+    def test_healthcheck_reports_healthy_during_exit_barrier(self):
+        """Verify health check callback returns current time during exit barrier,
+        preventing TW from killing the task while agents coordinate shutdown."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Simulate post-training state: watchdog exists but progress time is stale
+        mock_watchdog = Mock()
+        stale_time = int(time.time()) - 600  # 10 minutes ago
+        mock_watchdog.get_last_progress_time.return_value = stale_time
+        agent._worker_watchdog = mock_watchdog
+
+        # Before exit barrier: alive_time is stale (would fail TW health check)
+        alive_time = agent._get_alive_time()
+        self.assertEqual(alive_time, stale_time)
+
+        # During exit barrier: alive_time is current (TW health check passes)
+        agent._in_exit_barrier = True
+        alive_time = agent._get_alive_time()
+        now = int(time.time())
+        self.assertAlmostEqual(alive_time, now, delta=2)
+
+        # After exit barrier: back to watchdog time
+        agent._in_exit_barrier = False
+        alive_time = agent._get_alive_time()
+        self.assertEqual(alive_time, stale_time)
+
+    def test_in_exit_barrier_initialized_false(self):
+        """Verify _in_exit_barrier is False on agent construction."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+        self.assertFalse(agent._in_exit_barrier)
+
+    def test_setup_healthcheck_idempotent(self):
+        """Test _setup_healthcheck is idempotent and does not recreate server when JK is enabled."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        # Use a mocked rendezvous handler to avoid blocking on real connections
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Pre-set a mock health check server
+        mock_server = Mock()
+        agent._health_check_server = mock_server
+
+        # Set the env for healthcheck port
+        healthcheck_port_env_name = TORCHELASTIC_HEALTH_CHECK_PORT
+        original_value = os.environ.get(healthcheck_port_env_name)
+        os.environ[healthcheck_port_env_name] = "12345"
+
+        try:
+            # Patch justknobs_check to return True for the healthcheck knob
+            with patch(
+                "torch.distributed.elastic.agent.server.local_elastic_agent.justknobs_check",
+                return_value=True,
+            ):
+                # Call _setup_healthcheck - should be a no-op since server already exists
+                agent._setup_healthcheck()
+
+            # Verify the mock server was not replaced or modified
+            self.assertIs(agent._health_check_server, mock_server)
+            # Verify start was not called on the mock (it was already "running")
+            mock_server.start.assert_not_called()
+        finally:
+            # Restore env
+            if original_value is None:
+                if healthcheck_port_env_name in os.environ:
+                    del os.environ[healthcheck_port_env_name]
+            else:
+                os.environ[healthcheck_port_env_name] = original_value
+
+    def test_setup_healthcheck_creates_server_when_none(self):
+        """Test _setup_healthcheck creates server when none exists."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+        self._backend = "c10d"
+        self._endpoint = f"localhost:{acquire_available_port()}"
+        spec = self.get_worker_spec(node_conf)
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Ensure no health check server exists
+        self.assertIsNone(agent._health_check_server)
+
+        # Set the env for healthcheck
+        healthcheck_port_env_name = TORCHELASTIC_HEALTH_CHECK_PORT
+        original_value = os.environ.get(healthcheck_port_env_name)
+        healthcheck_port = str(acquire_available_port())
+        os.environ[healthcheck_port_env_name] = healthcheck_port
+
+        try:
+            # Call _setup_healthcheck
+            agent._setup_healthcheck()
+
+            # Verify a health check server was created
+            self.assertIsNotNone(agent._health_check_server)
+        finally:
+            # Cleanup
+            if agent._health_check_server is not None:
+                agent._health_check_server.stop()
+                agent._health_check_server = None
+            if original_value is None:
+                if healthcheck_port_env_name in os.environ:
+                    del os.environ[healthcheck_port_env_name]
+            else:
+                os.environ[healthcheck_port_env_name] = original_value
+
+    def test_healthcheck_with_watchdog_enabled(self):
+        """Test healthcheck works with watchdog enabled during agent run."""
+        # Set the env for watchdog and healthcheck
+        watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
+        healthcheck_port_env_name = TORCHELASTIC_HEALTH_CHECK_PORT
+
+        original_watchdog = os.environ.get(watchdog_env_name)
+        original_healthcheck = os.environ.get(healthcheck_port_env_name)
+
+        os.environ[watchdog_env_name] = "1"
+        os.environ[healthcheck_port_env_name] = str(acquire_available_port())
+
+        try:
+            node_conf = Conf(
+                entrypoint=_check_local_watchdog_setup,
+                local_world_size=1,
+                args=(TORCHELASTIC_ENABLE_FILE_TIMER, True),
+            )
+
+            def run_test():
+                spec = self.get_worker_spec(node_conf, max_restarts=0)
+                agent = self.get_agent(spec, node_config=node_conf)
+
+                # Run the agent with justknobs_check returning True
+                with patch(
+                    "torch.distributed.elastic.agent.server.local_elastic_agent.justknobs_check",
+                    return_value=True,
+                ):
+                    res = agent.run()
+                self.assertFalse(res.is_failed())
+
+            self.run_test_with_backend(backend="c10d", test_to_run=run_test)
+        finally:
+            # Restore env
+            if original_watchdog is None:
+                if watchdog_env_name in os.environ:
+                    del os.environ[watchdog_env_name]
+            else:
+                os.environ[watchdog_env_name] = original_watchdog
+            if original_healthcheck is None:
+                if healthcheck_port_env_name in os.environ:
+                    del os.environ[healthcheck_port_env_name]
+            else:
+                os.environ[healthcheck_port_env_name] = original_healthcheck
+
+
+class LocalElasticAgentUninterruptibleStateTest(unittest.TestCase):
+    """Unit tests for uninterruptible (D-state) detection helpers in LocalElasticAgent.
+
+    These tests do not require etcd or a real rendezvous and directly
+    exercise the helpers with a mocked process context.
+    """
+
+    def _make_agent(
+        self, uninterruptible_state_timeout: float | None = None
+    ) -> LocalElasticAgent:
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role="default",
+            local_world_size=1,
+            entrypoint=_happy_function,
+            args=(),
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        log_dir = tempfile.mkdtemp(prefix="LocalElasticAgentUninterruptibleStateTest")
+        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
+        return LocalElasticAgent(
+            spec,
+            start_method="spawn",
+            exit_barrier_timeout=5,
+            logs_specs=DefaultLogsSpecs(log_dir=log_dir),
+            uninterruptible_state_timeout=uninterruptible_state_timeout,
+        )
+
+    @staticmethod
+    def _stat_data(state: str) -> str:
+        # /proc/<pid>/stat format: pid (comm) state ppid ...
+        return f"1234 (python) {state} 1 1 0 0 -1 0 0 0\n"
+
+    def test_read_proc_state_parses_state(self):
+        with mock.patch(
+            "builtins.open",
+            mock.mock_open(read_data=self._stat_data("D")),
+        ):
+            self.assertEqual(read_proc_state(1234), "D")
+
+    def test_read_proc_state_handles_comm_with_spaces(self):
+        # comm field can contain spaces and parens; parser must use last ')'
+        data = "1234 (py (worker)) R 1 1 0 0 -1 0 0 0\n"
+        with mock.patch("builtins.open", mock.mock_open(read_data=data)):
+            self.assertEqual(read_proc_state(1234), "R")
+
+    def test_read_proc_state_returns_none_when_missing(self):
+        with mock.patch("builtins.open", side_effect=FileNotFoundError):
+            self.assertIsNone(read_proc_state(1234))
+
+    def test_check_uninterruptible_state_timeout_below_threshold(self):
+        agent = self._make_agent()
+        agent._pcontext = Mock()
+        agent._pcontext.pids.return_value = {0: 4321}
+        with mock.patch(
+            "torch.distributed.elastic.agent.server.local_elastic_agent.read_proc_state",
+            return_value="D",
+        ):
+            # First observation: just records timestamp, returns None.
+            self.assertIsNone(
+                agent._check_uninterruptible_state_timeout(
+                    agent._worker_group, timeout=300
+                )
+            )
+            self.assertIn(4321, agent._uninterruptible_state_first_seen)
+
+    def test_check_uninterruptible_state_timeout_fires(self):
+        agent = self._make_agent()
+        agent._pcontext = Mock()
+        agent._pcontext.pids.return_value = {0: 4321}
+        # Pre-seed the first-seen timestamp far in the past.
+        agent._uninterruptible_state_first_seen[4321] = time.monotonic() - 600
+        agent._remaining_restarts = 3
+        with mock.patch(
+            "torch.distributed.elastic.agent.server.local_elastic_agent.read_proc_state",
+            return_value="D",
+        ):
+            result = agent._check_uninterruptible_state_timeout(
+                agent._worker_group, timeout=60
+            )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.state, WorkerState.UNHEALTHY)
+        # D-state workers wedge the host; restarting on the same host would
+        # conflict. _check_uninterruptible_state_timeout should disable
+        # restarts so the supervising loop exits via _stop_workers instead
+        # of relaunching.
+        self.assertEqual(agent._remaining_restarts, 0)
+
+    def test_check_uninterruptible_state_timeout_clears_on_recovery(self):
+        agent = self._make_agent()
+        agent._pcontext = Mock()
+        agent._pcontext.pids.return_value = {0: 4321}
+        agent._uninterruptible_state_first_seen[4321] = time.monotonic() - 5
+        with mock.patch(
+            "torch.distributed.elastic.agent.server.local_elastic_agent.read_proc_state",
+            return_value="S",
+        ):
+            result = agent._check_uninterruptible_state_timeout(
+                agent._worker_group, timeout=1
+            )
+        self.assertIsNone(result)
+        self.assertNotIn(4321, agent._uninterruptible_state_first_seen)
+
+    def test_check_uninterruptible_state_timeout_drops_dead_pids(self):
+        agent = self._make_agent()
+        agent._pcontext = Mock()
+        # No live pids; bookkeeping for stale pid should be removed.
+        agent._pcontext.pids.return_value = {}
+        agent._uninterruptible_state_first_seen[9999] = time.monotonic() - 10
+        result = agent._check_uninterruptible_state_timeout(
+            agent._worker_group, timeout=1
+        )
+        self.assertIsNone(result)
+        self.assertNotIn(9999, agent._uninterruptible_state_first_seen)
+
+    def test_monitor_workers_disabled_when_arg_unset(self):
+        # Construct with no env var and no constructor arg: check is disabled.
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k != TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            agent = self._make_agent()
+        self.assertEqual(agent._uninterruptible_state_timeout, 0.0)
+        agent._pcontext = Mock()
+        agent._pcontext.pids.return_value = {0: 4321}
+        agent._pcontext.wait.return_value = None
+        agent._worker_group.workers = [
+            type("W", (), {"id": 4321, "global_rank": 0, "local_rank": 0})()
+        ]
+        with mock.patch.object(
+            agent, "_check_uninterruptible_state_timeout"
+        ) as check_mock:
+            result = agent._monitor_workers(agent._worker_group)
+        check_mock.assert_not_called()
+        self.assertEqual(result.state, WorkerState.HEALTHY)
+
+    def test_monitor_workers_calls_check_when_arg_set(self):
+        agent = self._make_agent(uninterruptible_state_timeout=5.0)
+        self.assertEqual(agent._uninterruptible_state_timeout, 5.0)
+        agent._pcontext = Mock()
+        agent._pcontext.pids.return_value = {0: 4321}
+        agent._pcontext.wait.return_value = None
+        agent._worker_group.workers = [
+            type("W", (), {"id": 4321, "global_rank": 0, "local_rank": 0})()
+        ]
+        with mock.patch.object(
+            agent,
+            "_check_uninterruptible_state_timeout",
+            return_value=RunResult(state=WorkerState.UNHEALTHY),
+        ) as check_mock:
+            result = agent._monitor_workers(agent._worker_group)
+        check_mock.assert_called_once()
+        self.assertEqual(result.state, WorkerState.UNHEALTHY)
+
+    def test_env_var_used_when_arg_omitted(self):
+        # When the constructor arg is None the env var is read exactly once.
+        with mock.patch.dict(
+            os.environ, {TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT: "7.5"}
+        ):
+            agent = self._make_agent()
+        self.assertEqual(agent._uninterruptible_state_timeout, 7.5)
+        # Subsequent env mutation does NOT affect the resolved timeout.
+        with mock.patch.dict(
+            os.environ, {TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT: "99"}
+        ):
+            self.assertEqual(agent._uninterruptible_state_timeout, 7.5)
+
+    def test_arg_overrides_env_var(self):
+        with mock.patch.dict(
+            os.environ, {TORCHELASTIC_UNINTERRUPTIBLE_STATE_TIMEOUT: "7.5"}
+        ):
+            agent = self._make_agent(uninterruptible_state_timeout=2.0)
+        self.assertEqual(agent._uninterruptible_state_timeout, 2.0)
 
 
 if __name__ == "__main__":

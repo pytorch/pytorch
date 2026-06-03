@@ -371,7 +371,7 @@ inline ShapeSymbol merge_primitive(
 // dims, partially known and fully known shapes are all supported.
 struct TORCH_API SymbolicShape {
   // Unranked shape constructor.
-  SymbolicShape() : dims_(std::nullopt) {}
+  SymbolicShape() = default;
 
   // Known rank but unknown dimensions.
   SymbolicShape(std::optional<size_t> rank) : dims_(std::nullopt) {

@@ -1,4 +1,40 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, TypeAlias
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+__all__ = [
+    "ApplyBroadcasting",
+    "BinConstraintD",
+    "BinConstraintT",
+    "BinaryConstraint",
+    "BVar",
+    "CalcConv",
+    "CalcMaxPool",
+    "CalcProduct",
+    "CanReshape",
+    "Conj",
+    "Constraint",
+    "DGreatestUpperBound",
+    "Disj",
+    "DVar",
+    "F",
+    "GetItem",
+    "GetItemTensor",
+    "IndexSelect",
+    "Prod",
+    "T",
+    "TGreatestUpperBound",
+    "Transpose",
+    "TVar",
+    "is_algebraic_expression",
+    "is_bool_expr",
+    "is_dim",
+]
+
 from torch.fx.experimental.migrate_gradual_types.operation import (
     op_add,
     op_div,
@@ -10,7 +46,7 @@ from torch.fx.experimental.migrate_gradual_types.operation import (
     op_neq,
     op_sub,
 )
-from torch.fx.tensor_type import Dyn, TensorType
+from torch.fx.tensor_type import _DynType, Dyn, TensorType
 
 
 class Constraint:
@@ -18,55 +54,53 @@ class Constraint:
 
 
 class Conj(Constraint):
-    def __init__(self, conjuncts):
+    def __init__(self, conjuncts: Sequence[Constraint]) -> None:
         """
         :param conjuncts: Conjunction of constraints
         """
-        self.conjucts = conjuncts
+        self.conjucts = list(conjuncts)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, Conj):
-            return self.conjucts == other.conjucts and self.conjucts == other.conjucts
+            return self.conjucts == other.conjucts
         else:
             return False
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"And({self.conjucts})"
 
 
 class Disj(Constraint):
-    def __init__(self, disjuncts):
+    def __init__(self, disjuncts: Sequence[Constraint]) -> None:
         """
         :param disjuncts: Disjunction of constraints
         """
-        self.disjuncts = disjuncts
+        self.disjuncts = list(disjuncts)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, Disj):
-            return (
-                self.disjuncts == other.disjuncts and self.disjuncts == other.disjuncts
-            )
+            return self.disjuncts == other.disjuncts
         else:
             return False
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Or({self.disjuncts})"
 
 
 class Prod(Constraint):
-    def __init__(self, products):
+    def __init__(self, products: Sequence[DVar | int | _DynType]) -> None:
         """
         :param products: lists of dimensions to multiply
         """
-        self.products = products
+        self.products = list(products)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, Prod):
-            return self.products == other.products and self.products == other.products
+            return self.products == other.products
         else:
             return False
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Product({self.products})"
 
 
@@ -78,10 +112,10 @@ class T(Constraint):
     def __init__(self) -> None:
         pass
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, T)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "True"
 
 
@@ -93,10 +127,10 @@ class F(Constraint):
     def __init__(self) -> None:
         pass
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, F)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "False"
 
 
@@ -105,7 +139,7 @@ class BinaryConstraint(Constraint):
     Represents all binary operations
     """
 
-    def __init__(self, lhs, rhs, op):
+    def __init__(self, lhs: _Operand, rhs: _Operand, op: str | None) -> None:
         """
         :param lhs: lhs of the constraint
         :param rhs: rhs of the constraint
@@ -115,7 +149,7 @@ class BinaryConstraint(Constraint):
         self.rhs = rhs
         self.op = op
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, BinaryConstraint):
             return (
                 self.lhs == other.lhs and self.rhs == other.rhs and self.op == other.op
@@ -123,7 +157,7 @@ class BinaryConstraint(Constraint):
         else:
             return False
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"({self.lhs} {self.op} {self.rhs})"
 
 
@@ -132,7 +166,7 @@ class BinConstraintT(BinaryConstraint):
     Binary constraints about tensors
     """
 
-    def __init__(self, lhs, rhs, op):
+    def __init__(self, lhs: _Operand, rhs: _Operand, op: str | None) -> None:
         if not (
             (isinstance(lhs, (TVar, TensorType, int)) or lhs == Dyn)
             and (isinstance(rhs, (TVar, TensorType, int)) or rhs == Dyn)
@@ -146,7 +180,7 @@ class BinConstraintD(BinaryConstraint):
     Binary constraints about dimensions
     """
 
-    def __init__(self, lhs, rhs, op):
+    def __init__(self, lhs: _Operand, rhs: _Operand, op: str | None) -> None:
         if not (is_algebraic_expression(lhs) or is_dim(lhs) or is_bool_expr(lhs)):
             raise AssertionError(f"Invalid lhs type: {type(lhs)}")
         if not (is_algebraic_expression(rhs) or is_dim(rhs) or is_bool_expr(rhs)):
@@ -160,7 +194,7 @@ class TGreatestUpperBound(Constraint):
     Greatest Upper bound for tensors with dynamic type
     """
 
-    def __init__(self, res, rhs1, rhs2):
+    def __init__(self, res: TVar, rhs1: TVar, rhs2: TVar) -> None:
         """
         :param res: tensor variable that stores the result of the output
         :param rhs1: tensor or tensor variable
@@ -170,10 +204,10 @@ class TGreatestUpperBound(Constraint):
         self.rhs1 = rhs1
         self.rhs2 = rhs2
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.res} = {self.rhs1}\u2294*{self.rhs2}"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, TGreatestUpperBound):
             return (
                 self.res == other.res
@@ -189,7 +223,12 @@ class DGreatestUpperBound(Constraint):
     Greatest Upper bound for dimensions
     """
 
-    def __init__(self, res, rhs1, rhs2):
+    def __init__(
+        self,
+        res: DVar | int | _DynType,
+        rhs1: DVar | int | _DynType,
+        rhs2: DVar | int | _DynType,
+    ) -> None:
         """
         :param res: Dimension variable to store the result
         :param rhs1: dimension variable 1
@@ -206,10 +245,10 @@ class DGreatestUpperBound(Constraint):
         self.rhs1 = rhs1
         self.rhs2 = rhs2
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.res} = {self.rhs1}\u2294{self.rhs2}"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, DGreatestUpperBound):
             return (
                 self.res == other.res
@@ -225,7 +264,7 @@ class CanReshape(Constraint):
     can_reshape constraint
     """
 
-    def __init__(self, src, target):
+    def __init__(self, src: TVar, target: TensorType) -> None:
         """
         :param src: tensor variable
         :param target: tensor
@@ -233,10 +272,10 @@ class CanReshape(Constraint):
         self.src = src
         self.target = target
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"can-reshape({self.src}, {self.target})"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, CanReshape):
             return self.src == other.src and self.target == other.target
         else:
@@ -244,7 +283,14 @@ class CanReshape(Constraint):
 
 
 class IndexSelect(Constraint):
-    def __init__(self, tensor_size, input_var, dim_replace, index, output):
+    def __init__(
+        self,
+        tensor_size: int,
+        input_var: TVar,
+        dim_replace: DVar | _DynType,
+        index: int,
+        output: TVar,
+    ) -> None:
         """
         Args:
             input_var: input to index_select
@@ -268,7 +314,7 @@ class IndexSelect(Constraint):
         self.index = index
         self.output = output
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f" {self.output} = "
             f"IndexSelect({self.input_var}, "
@@ -277,7 +323,7 @@ class IndexSelect(Constraint):
             f"{self.index})"
         )
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, IndexSelect):
             return (
                 self.tensor_size == other.tensor_size
@@ -291,7 +337,9 @@ class IndexSelect(Constraint):
 
 
 class Transpose(Constraint):
-    def __init__(self, tensor_size, input_var, index1, index2, output):
+    def __init__(
+        self, tensor_size: int, input_var: TVar, index1: int, index2: int, output: TVar
+    ) -> None:
         """
         Args:
             tensor_size: current tensor size
@@ -315,7 +363,7 @@ class Transpose(Constraint):
         self.index2 = index2
         self.output = output
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f" {self.output} = "
             f"Transpose({self.input_var}, "
@@ -324,7 +372,7 @@ class Transpose(Constraint):
             f"{self.index2})"
         )
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, Transpose):
             return (
                 self.tensor_size == other.tensor_size
@@ -338,7 +386,9 @@ class Transpose(Constraint):
 
 
 class GetItem(Constraint):
-    def __init__(self, tensor_size, index, res, input_var):
+    def __init__(
+        self, tensor_size: int, index: int, res: DVar, input_var: TVar
+    ) -> None:
         """
         Constraint for getting item given a tensor size
         :param tensor_size: actual number
@@ -354,10 +404,10 @@ class GetItem(Constraint):
         self.index = index
         self.input_var = input_var
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f" {self.res} = GetItem({self.input_var}, tensor_size: {self.tensor_size}, {self.index})"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, GetItem):
             return (
                 self.res == other.res
@@ -370,7 +420,13 @@ class GetItem(Constraint):
 
 
 class GetItemTensor(Constraint):
-    def __init__(self, tensor_size, index_tuple, res, input_var):
+    def __init__(
+        self,
+        tensor_size: int,
+        index_tuple: tuple[None | slice, ...],
+        res: TVar,
+        input_var: TVar,
+    ) -> None:
         """
         Constraint for getting item given a tensor size
         However, when the argument is a tuple, we will
@@ -388,10 +444,10 @@ class GetItemTensor(Constraint):
         self.index_tuple = index_tuple
         self.input_var = input_var
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f" {self.res} = GetItemT({self.input_var}, tensor_size: {self.tensor_size}, {self.index_tuple})"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, GetItemTensor):
             return (
                 self.res == other.res
@@ -406,15 +462,15 @@ class GetItemTensor(Constraint):
 class CalcConv(Constraint):
     def __init__(
         self,
-        conv_result,
-        input_var,
-        c_out,
-        kernel,
-        padding,
-        stride,
-        dilation,
-        matching_constraint_vars,
-    ):
+        conv_result: TVar,
+        input_var: TVar,
+        c_out: int,
+        kernel: int | tuple[int, int],
+        padding: int | tuple[int, int],
+        stride: int | tuple[int, int],
+        dilation: int | tuple[int, int],
+        matching_constraint_vars: list[DVar],
+    ) -> None:
         """
         :param conv_result: the convolution result
         :param input_var: input to convolution
@@ -430,7 +486,7 @@ class CalcConv(Constraint):
         self.dilation = dilation
         self.matching_constraint = matching_constraint_vars
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"{self.conv_result} ="
             f" calc-conv({self.input_var},"
@@ -439,7 +495,7 @@ class CalcConv(Constraint):
             f" {self.dilation})"
         )
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, CalcConv):
             return (
                 self.conv_result == other.conv_result
@@ -458,14 +514,14 @@ class CalcConv(Constraint):
 class CalcMaxPool(Constraint):
     def __init__(
         self,
-        maxpool_result,
-        input_var,
-        kernel,
-        padding,
-        stride,
-        dilation,
-        matching_constraint_vars,
-    ):
+        maxpool_result: TVar,
+        input_var: TVar,
+        kernel: int | tuple[int, int],
+        padding: int | tuple[int, int],
+        stride: int | tuple[int, int],
+        dilation: int | tuple[int, int],
+        matching_constraint_vars: list[DVar],
+    ) -> None:
         """
         :param maxpool_result: the result of maxpool
         :param input_var: input to convolution
@@ -479,7 +535,7 @@ class CalcMaxPool(Constraint):
         self.dilation = dilation
         self.matching_constraint = matching_constraint_vars
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"{self.maxpool_result} ="
             f" calc-maxpool({self.input_var},"
@@ -488,7 +544,7 @@ class CalcMaxPool(Constraint):
             f" {self.dilation})"
         )
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, CalcMaxPool):
             return (
                 self.maxpool_result == other.maxpool_result
@@ -504,7 +560,7 @@ class CalcMaxPool(Constraint):
 
 
 class ApplyBroadcasting(Constraint):
-    def __init__(self, res1, res2, input1, input2):
+    def __init__(self, res1: TVar, res2: TVar, input1: TVar, input2: TVar) -> None:
         """
         :param res1: resulting tensor 1
         :param res2: resulting tensor 2
@@ -516,7 +572,7 @@ class ApplyBroadcasting(Constraint):
         self.input1 = input1
         self.input2 = input2
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, ApplyBroadcasting):
             return (
                 self.res1 == other.res1
@@ -527,7 +583,7 @@ class ApplyBroadcasting(Constraint):
         else:
             return False
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"{self.res1}, {self.res2} ="
             f" apply-broadcasting({self.input1},"
@@ -540,7 +596,9 @@ class CalcProduct(Constraint):
     Given correct dimensions, calculate the product for flatten accounting for Dyn
     """
 
-    def __init__(self, start, end, flattened, dims_to_flatten):
+    def __init__(
+        self, start: int, end: int, flattened: TVar, dims_to_flatten: list[DVar]
+    ) -> None:
         """
         :param start: start index
         :param end: end index
@@ -561,7 +619,7 @@ class CalcProduct(Constraint):
         self.dims_to_flatten = dims_to_flatten
         self.flattened = flattened
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, CalcProduct):
             return (
                 self.start == other.start
@@ -573,7 +631,7 @@ class CalcProduct(Constraint):
         else:
             return False
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.flattened} = CalcProduct({self.start}, {self.end}, {self.dims_to_flatten})"
 
 
@@ -582,16 +640,16 @@ class TVar:
     Tensor variable with no tensor constructor
     """
 
-    def __init__(self, tvar):
+    def __init__(self, tvar: int) -> None:
         """
         :param tvar: tensor variable
         """
         self.tvar = tvar
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"TV({self.tvar})"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, TVar):
             return self.tvar == other.tvar
         else:
@@ -603,16 +661,16 @@ class DVar:
     Dimension variable
     """
 
-    def __init__(self, c):
+    def __init__(self, c: int) -> None:
         """
         :param c: character or number
         """
         self.c = c
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"DV({self.c})"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, DVar):
             return self.c == other.c
         else:
@@ -624,35 +682,52 @@ class BVar:
     Boolean variable
     """
 
-    def __init__(self, c):
+    def __init__(self, c: int) -> None:
         """
         :param c: character or number
         """
         self.c = c
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"BV({self.c})"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, BVar):
             return self.c == other.c
         else:
             return False
 
 
-def is_algebraic_expression(constraint):
+_Operand: TypeAlias = (
+    TVar
+    | TensorType
+    | DVar
+    | int
+    | float
+    | bool
+    | _DynType
+    | BinConstraintD
+    | Prod
+    | BVar
+    | Conj
+    | Disj
+    | None
+)
+
+
+def is_algebraic_expression(constraint: object) -> bool:
     if isinstance(constraint, BinConstraintD):
         return constraint.op in [op_add, op_sub, op_div, op_mul, op_mod]
     else:
         return isinstance(constraint, Prod)
 
 
-def is_bool_expr(constraint):
+def is_bool_expr(constraint: object) -> bool:
     if isinstance(constraint, BinConstraintD):
         return constraint.op in [op_gt, op_lt, op_neq, op_eq]
     else:
         return isinstance(constraint, (BVar, Conj, Disj))
 
 
-def is_dim(d):
+def is_dim(d: object) -> bool:
     return isinstance(d, (DVar, int)) or d == Dyn

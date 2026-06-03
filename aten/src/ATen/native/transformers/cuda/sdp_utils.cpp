@@ -22,7 +22,9 @@
 #include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
+#include <c10/core/SymBool.h>
 #include <c10/core/SymInt.h>
+#include <cstdint>
 
 #if USE_ROCM
 #if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)
@@ -87,8 +89,12 @@ bool check_prefer_cudnn_attention() {
   try {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     auto major = dprops->major;
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 13000)
     auto minor = dprops->minor;
     return cudnn_version > 91500 && (major == 9 || major == 10) && (!minor || minor == 3);
+#else
+    return cudnn_version > 91500 && (major == 9 || major == 10);
+#endif
   } catch ([[maybe_unused]] c10::Error const& e) {
 #ifdef DEBUG
     TORCH_WARN("check_prefer_cudnn_attention() caught exception ", e.what());
@@ -140,19 +146,11 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
   return matmul_alignment_mn;
 }
 
-// On ROCM, ME and FA share the backend, and hence they share the checking
-// function for fundamental limitations by the GPU kernel
-// caller_is_meff is added to make the TORCH_WARN message showing the correct result
-template<bool caller_is_meff = false>
-bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
 #if USE_ROCM_ATTENTION
-  if (at::cuda::device_count() == 0) {
-    return false;
-  }
-  // AOTriton 0.9+ supports head_dim up to 512
-  const static auto max_hdim = []() {
+inline int aotriton_max_hdim() {
+  static const int max_hdim = []() {
 #if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
-    // gfx11xx only support hdim <= 256 on AOTriton 0.11
+    // gfx11xx only support hdim <= 256 on AOTriton 0.11/0.12
     auto dprops = at::cuda::getCurrentDeviceProperties();
     const c10::basic_string_view<char> arch(dprops->gcnArchName);
     if (arch.starts_with("gfx11")) {
@@ -165,7 +163,28 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
     return 256;
 #endif
   }();
-  const auto max_size = c10::SymInt(max_hdim);
+  return max_hdim;
+}
+#endif // USE_ROCM_ATTENTION
+
+// For AOTriton <= 0.11:
+// On ROCM, ME and FA share the backend, and hence they share the checking
+// function for fundamental limitations by the GPU kernel
+// caller_is_meff is added to make the TORCH_WARN message showing the correct result
+//
+// FIXME: revert this reuse when removing AOTriton <= 0.11 support
+//
+// AOTriton 0.12 supports hdim_qk != hdim_vo, but we cannot enable this in
+// check_head_dim_size_flash because it changes the backend selection logic for
+// FA, which can break certain workloads that rely on the behavior of rejecting
+// FA for hdim_qk != hdim_vo
+template<bool caller_is_meff = false>
+bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
+#if USE_ROCM_ATTENTION
+  if (at::cuda::device_count() == 0) {
+    return false;
+  }
+  const auto max_size = c10::SymInt(aotriton_max_hdim());
 #else
   // All head_dim sizes must be equal and less than 256
   const auto max_size = c10::SymInt(256);
@@ -245,9 +264,20 @@ bool check_head_dim_size_flash_nested(sdp_params const& params, bool debug) {
 }
 
 bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
+#if USE_ROCM_ATTENTION
+#if AOTRITON_VERSION_CURRENT < AOTRITON_VERSION_INT(0, 12)
+  return check_head_dim_size_flash_nested<true /* caller_is_meff */>(params, debug);
+#endif
+#endif
   const auto query_size_last = params.query.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
+#ifdef USE_ROCM
+  bool is_half = (params.query.dtype() == at::kHalf) ||
+      (params.query.dtype() == at::kBFloat16);
+  const int64_t alignment = is_half ? 8 : 4;
+#else
   const int64_t alignment = minimum_gemm_alignment(params);
+#endif
   if (!(query_size_last == params.key.sym_size(-1) &&
         query_size_last % alignment == 0 && query_size_last > 0 &&
         value_size_last % alignment == 0 && value_size_last > 0)) {
@@ -266,7 +296,78 @@ bool check_head_dim_size_mem_efficient(sdp_params const& params, bool debug) {
     }
     return false;
   }
+#if USE_ROCM_ATTENTION
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
+  const auto max_size = c10::SymInt(aotriton_max_hdim());
+  if (!(query_size_last <= max_size && value_size_last <= max_size)) {
+    if (debug) {
+      TORCH_WARN(
+          "Mem efficient attention on ROCM requires last dimension of inputs to less or equal than ",
+          max_size,
+          ". ",
+          "Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          params.key.sym_size(-1),
+          ", Value.size(-1): ",
+          params.value.sym_size(-1),
+          " instead. (Note this limit differs among architectures)");
+    }
+    return false;
+  }
+#endif // AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 12)
+#endif // USE_ROCM_ATTENTION
   return true;
+}
+
+bool check_data_ptr_alignment_mem_efficient(sdp_params const& params, bool debug) {
+#if defined(USE_ROCM)
+  return true;
+#else
+  if (!has_only_dense_inputs(params)) {
+    return true;
+  }
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (dprops->major < 8) {
+    return true;
+  }
+  const int64_t alignment_bytes =
+      minimum_gemm_alignment(params) * params.query.element_size();
+  // The CUDA caching allocator returns base pointers aligned to >= 256 bytes,
+  // which exceeds the alignment_bytes the CUTLASS kernels require. So pointer
+  // alignment is fully determined by storage_offset * element_size. Computing
+  // it symbolically avoids touching data_ptr() (which calls numel() and would
+  // throw on FakeTensors with symbolic shapes during tracing).
+  const auto offset_bytes = [](const at::Tensor& tensor) {
+    return tensor.sym_storage_offset() * tensor.element_size();
+  };
+  // Empty tensors need no alignment. For symbolic offsets (FakeTensors),
+  // assume aligned so the chooser does not regress tracing; the eager runtime
+  // call re-checks.
+  const auto is_aligned = [&](const at::Tensor& tensor) {
+    const auto offset_is_aligned =
+        (offset_bytes(tensor) % alignment_bytes).sym_eq(0);
+    return TORCH_GUARD_OR_FALSE(tensor.sym_numel().sym_eq(0)) ||
+        TORCH_GUARD_OR_TRUE(offset_is_aligned);
+  };
+  if (!is_aligned(params.query) || !is_aligned(params.key) ||
+      !is_aligned(params.value)) {
+    if (debug) {
+      TORCH_WARN(
+          "Mem efficient attention on sm80 or newer requires q, k, and v storage offsets * element_size to be aligned to ",
+          alignment_bytes,
+          " bytes. Got query.storage_offset() * element_size % alignment_bytes: ",
+          offset_bytes(params.query) % alignment_bytes,
+          ", key.storage_offset() * element_size % alignment_bytes: ",
+          offset_bytes(params.key) % alignment_bytes,
+          ", value.storage_offset() * element_size % alignment_bytes: ",
+          offset_bytes(params.value) % alignment_bytes,
+          ".");
+    }
+    return false;
+  }
+  return true;
+#endif
 }
 
 template <int Major, int Minor>
@@ -496,6 +597,18 @@ bool check_cudnn_dropout(sdp_params const& params, bool debug) {
 }
 
 bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
+  constexpr int64_t max_cudnn_dim_size = 65535;
+  const auto b = params.query.sym_size(0);
+  const auto h = params.query.sym_size(1);
+  if (b > max_cudnn_dim_size || h > max_cudnn_dim_size) {
+    if (debug) {
+      TORCH_WARN(
+          "cuDNN SDPA does not support batch size or num_heads greater than ",
+          max_cudnn_dim_size,
+          ". Got batch size: ", b, ", num_heads: ", h);
+    }
+    return false;
+  }
   const auto s_q = params.query.sym_size(2);
   const auto s_k = params.key.sym_size(2);
   const auto d_qk = params.query.sym_size(3);
@@ -880,11 +993,8 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
-#ifdef USE_ROCM
-      check_head_dim_size_flash<true /* caller_is_meff */>
-#else
-      check_head_dim_size_mem_efficient
-#endif
+      check_head_dim_size_mem_efficient,
+      check_data_ptr_alignment_mem_efficient
   );
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
@@ -894,11 +1004,6 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 
   if (has_for_nested_inputs(params)) {
     constexpr auto nested_constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
-#ifndef USE_ROCM  // ME and FA shares backend on ROCM and thus supports training
-        check_requires_grad_and_nested,
-#else // Meanwhile ME on ROCM share the limits of FA about head dimensions
-        check_head_dim_size_flash_nested<true /* caller_is_meff */>,
-#endif
         check_batch_size_nested,
         check_for_seq_len_0_nested_tensor);
     for (auto& constraint : nested_constraints) {
@@ -937,8 +1042,8 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   if (dprop->major >= 8) {
     return check_tensor_dtype(params, greater_than_or_equal_sm80_mem_efficient_dtypes, debug);
   }
-#endif
   return check_tensor_dtype(params, less_than_sm80_mem_efficient_dtypes, debug);
+#endif
 }
 
 SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
@@ -1015,7 +1120,7 @@ bool check_for_seq_len_1_nested_tensor(sdp_params const& params, bool debug) {
   const auto nt_q_tensor_impl =
       at::native::get_nested_tensor_impl(params.query);
   const at::Tensor& sizes = nt_q_tensor_impl->get_nested_sizes();
-  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  const auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
   const int64_t n_tensors = params.query.size(0);
   const int64_t size_tensor_stride = sizes.stride(0);
 

@@ -168,11 +168,8 @@ struct RNNParams {
   }
 };
 
-template<bool is_single_direction>
 static std::vector<int64_t> _output_size(const RNNParams& rnn) {
-  auto output_channels = is_single_direction ? rnn.hidden_size
-                                             : rnn.hidden_size * rnn.num_directions;
-  return {rnn.seq_length, rnn.mini_batch, output_channels};
+  return {rnn.seq_length, rnn.mini_batch, rnn.hidden_size};
 }
 
 // MKLDNN GRU gate order is different from PyTorch's which requires gates shuffle
@@ -239,7 +236,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       batch_first,
       train);
 
-  auto output_size = _output_size</*is_single_direction*/ true>(rnn);
+  auto output_size = _output_size(rnn);
   auto output = at::empty(output_size, input.options());
 
   auto hy_ = at::empty(hx_.sizes(), hx_.options());
@@ -333,7 +330,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
       bidirectional,
       batch_first,
       train);
-  auto output_size = _output_size</*is_single_direction*/ true>(rnn);
+  auto output_size = _output_size(rnn);
 
   auto weight_ih = _shuffle_weight(weight0, rnn.mode);
   auto weight_hh = _shuffle_weight(weight1, rnn.mode);
@@ -432,7 +429,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
       forward_hint.workspace_desc(), workspace.template data_ptr<uint8_t>());
   ideep::lstm_backward::compute(forward_hint, x, hx, cx, w1, w2, b, y, hy, cy, diff_y, diff_hy, diff_cy, mkldnn_workspace, diff_x, diff_hx, diff_cx, diff_w1, diff_w2, diff_b, reverse);
   auto diff_b2_ = at::clone(diff_b_);
-  return std::make_tuple(diff_x_, diff_w1_, diff_w2_, diff_b_, diff_b2_, diff_hx_, diff_cx_);
+  return std::make_tuple(std::move(diff_x_), std::move(diff_w1_), std::move(diff_w2_), std::move(diff_b_), std::move(diff_b2_), std::move(diff_hx_), std::move(diff_cx_));
 }
 
 // MKLDNN RNN integration notes:
@@ -530,7 +527,7 @@ static std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
   if (batch_first) {
     output = output.transpose(0, 1);
   }
-  return std::make_tuple(output, hy, cy);
+  return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
