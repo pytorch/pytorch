@@ -123,10 +123,12 @@ def _create_graph(
             _allow_token_discovery=True,
         )
 
+    # TODO: revisit once shallow_copy_data_ FakeTensor semantics are
+    # fully correct and no longer mutate placeholder devices during tracing.
     # Save original FakeTensor devices before make_fx, which may mutate
-    # them via in-graph set_() (e.g. cross-device tensor.data = ...).
-    # After tracing, we restore them so the backend compiler sees the
-    # correct input devices on placeholder nodes.
+    # them via in-graph shallow_copy_data_ / set_() for cross-device
+    # tensor.data = ... After tracing, we restore them so the backend
+    # compiler sees the correct input devices on placeholder nodes.
     original_fake_devices = {
         i: arg.fake_device
         for i, arg in enumerate(args)

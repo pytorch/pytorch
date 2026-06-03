@@ -49,21 +49,12 @@ TORCH_LIBRARY_FRAGMENT(aten, m) {
   m.def("shallow_copy_data_(Tensor(a!) self, Tensor source) -> Tensor(a!)");
 }
 
-TORCH_LIBRARY_IMPL(aten, CPU, m) {
-  m.impl("shallow_copy_data_", shallow_copy_data_);
-}
-
-TORCH_LIBRARY_IMPL(aten, CUDA, m) {
-  m.impl("shallow_copy_data_", shallow_copy_data_);
-}
-
-TORCH_LIBRARY_IMPL(aten, Meta, m) {
-  m.impl("shallow_copy_data_", shallow_copy_data_);
-}
-
-TORCH_LIBRARY_IMPL(aten, MPS, m) {
-  m.impl("shallow_copy_data_", shallow_copy_data_);
-}
+// shallow_copy_from operates on TensorImpl and handles dispatch keys
+// internally, so the implementation is device-agnostic.
+TORCH_LIBRARY_IMPL(aten, CPU, m) { m.impl("shallow_copy_data_", shallow_copy_data_); }
+TORCH_LIBRARY_IMPL(aten, CUDA, m) { m.impl("shallow_copy_data_", shallow_copy_data_); }
+TORCH_LIBRARY_IMPL(aten, Meta, m) { m.impl("shallow_copy_data_", shallow_copy_data_); }
+TORCH_LIBRARY_IMPL(aten, MPS, m) { m.impl("shallow_copy_data_", shallow_copy_data_); }
 
 TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   m.impl("shallow_copy_data_", shallow_copy_data_functionalize);
