@@ -525,6 +525,13 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
+        if left is right:
+            return True
+        # Fast path for concrete integers -- avoids creating sympy.Eq object
+        if isinstance(left, (int, sympy.Integer)) and isinstance(
+            right, (int, sympy.Integer)
+        ):
+            return int(left) == int(right)
         return self.statically_known_true(sympy.Eq(left, right))  # type: ignore[arg-type]
 
     def statically_known_list_equals(
@@ -848,6 +855,12 @@ class SizeVarAllocator:
         return sympy_subs(left, self.inv_precomputed_replacements)
 
     def check_leq(self, left: Expr, right: Expr) -> None:
+        # Fast path: concrete integers don't need sympy guards
+        if isinstance(left, (int, sympy.Integer)) and isinstance(
+            right, (int, sympy.Integer)
+        ):
+            assert int(left) <= int(right)
+            return
         self.check(sympy.Le(left, right))
 
     def check_lt(self, left: Expr, right: Expr) -> None:
