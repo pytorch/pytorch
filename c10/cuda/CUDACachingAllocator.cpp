@@ -1379,8 +1379,7 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
   if (!nvml_init) {
     TORCH_WARN_ONCE(
         "nvmlInit_v2 failed; omitting per-process memory info from CUDA "
-        "out-of-memory messages. This is expected on platforms with partial "
-        "NVML support such as Tegra/Jetson.");
+        "out-of-memory messages.");
     return "";
   }
 
