@@ -3,6 +3,7 @@
 
 import collections
 import contextlib
+import contextvars
 import functools
 import gc
 import io
@@ -69,6 +70,7 @@ from torch.testing._internal.common_utils import (
     gradgradcheck,
     instantiate_parametrized_tests,
     IS_ARM64,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     parametrize,
@@ -83,6 +85,8 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
     slowTest,
+    TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
     TestCase,
@@ -7928,6 +7932,70 @@ for shape in [(1,), ()]:
                 lambda x: x.sin(), x, use_reentrant=True, context_fn=context_fn
             )
 
+    def test_checkpointing_without_reentrant_context_fn_exits_on_forward_exception(
+        self,
+    ):
+        active_context = contextvars.ContextVar("active_context", default=False)
+        events = []
+        exit_exc = []
+
+        class Context:
+            def __enter__(self):
+                events.append("enter")
+                self.token = active_context.set(True)
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                events.append("exit")
+                exit_exc.append((exc_type, exc_value))
+                active_context.reset(self.token)
+
+        def context_fn():
+            return Context(), contextlib.nullcontext()
+
+        def fn(x):
+            self.assertTrue(active_context.get())
+            raise RuntimeError("forward failed")
+
+        exc = None
+        x = torch.tensor(1.0, requires_grad=True)
+        try:
+            checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+        except RuntimeError as e:
+            exc = e
+
+        self.assertIsNotNone(exc)
+        self.assertEqual(events, ["enter", "exit"])
+        self.assertEqual(exit_exc[0][0], RuntimeError)
+        self.assertEqual(str(exit_exc[0][1]), "forward failed")
+        self.assertFalse(active_context.get())
+
+    def test_checkpointing_without_reentrant_context_fn_cannot_suppress_forward_exception(
+        self,
+    ):
+        class Context:
+            def __enter__(self):
+                pass
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                self.exc_type = exc_type
+                self.exc_value = exc_value
+                return True
+
+        context = Context()
+
+        def context_fn():
+            return context, contextlib.nullcontext()
+
+        def fn(x):
+            raise ValueError("forward failed")
+
+        x = torch.tensor(1.0, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "context_fn suppressed"):
+            checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+
+        self.assertEqual(context.exc_type, ValueError)
+        self.assertEqual(str(context.exc_value), "forward failed")
+
     def test_checkpoint_warns_if_use_reentrant_not_passed_explcitly(self):
         a = torch.randn(1, requires_grad=True)
 
@@ -9057,6 +9125,9 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX, "https://github.com/pytorch/pytorch/issues/180489"
+    )
     @skipIfTorchDynamo("boxed_grads_call is incompatible with compiled autograd")
     def test_custom_function_boxed_grads(self):
         """Test boxed_grads_call mechanism without torch.compile.
@@ -9147,6 +9218,9 @@ for shape in [(1,), ()]:
         out.sum().backward()
         self.assertEqual(x.grad, torch.full_like(x, 2.0))
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX, "https://github.com/pytorch/pytorch/issues/180521"
+    )
     @skipIfTorchDynamo("boxed_grads_call is incompatible with compiled autograd")
     def test_custom_function_boxed_grads_cleanup_on_error(self):
         """Grads list is not leaked when backward raises."""
@@ -9360,6 +9434,10 @@ for shape in [(1,), ()]:
         self.assertEqual(len(received_grads[0]), 1)
         self.assertIs(received_grads[0][0], user_list)
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/176112",
+    )
     @skipIfTorchDynamo("dynamo accesses saved_tensors multiple times")
     def test_clear_saved_tensors_on_access(self):
         class MyFn(Function):
@@ -9383,6 +9461,10 @@ for shape in [(1,), ()]:
         y = MyFn.apply(x.clone())
         y.sum().backward()
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/176142",
+    )
     @skipIfTorchDynamo("test tests an error that dynamo does not reproduce")
     def test_clear_saved_tensors_on_access_double_access_error(self):
         class MyFn(Function):
@@ -13085,8 +13167,8 @@ class TestAutogradDeviceType(TestCase):
             nnz = 0 if empty_nnz else 5
             _test(sparse_size + dense_size, len(sparse_size), nnz, device)
 
-    @skipMeta
     @skipIfMPS
+    @skipMeta
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_backward(self, device, dtype):
         class FixedGradientFunction(Function):
@@ -13131,7 +13213,6 @@ class TestAutogradDeviceType(TestCase):
         (fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().abs().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
-    @skipIfMPS
     def test_sparse_mask_autograd(self, device):
         tensor = torch.randn(3, requires_grad=True, device=device)
         mask = torch.ones(3, device=device)
@@ -13141,7 +13222,6 @@ class TestAutogradDeviceType(TestCase):
         converted.sum().backward()
         self.assertEqual(tensor.grad, mask.to_dense())
 
-    @skipIfMPS  # the test doesn't work on MPS as double types are not supported
     def test_pyscalar_conversions(self, device):
         def _test_pyscalar_conversions(t, integral_conv):
             # integral -> integral
@@ -13276,7 +13356,7 @@ class TestAutogradDeviceType(TestCase):
             @staticmethod
             def backward(ctx, grad):
                 # Reentrant backward in child will take much longer.
-                reentrant_root.backward()
+                reentrant_root.backward(grad)
                 return grad
 
         # Parent gpu graph.
@@ -13317,8 +13397,8 @@ class TestAutogradDeviceType(TestCase):
 
         self.assertEqual(before, after)
 
-    @skipIfMPS  # the test doesn't work on MPS
     # TODO: see if these tests can be ported to OpInfos or moved to where's test suite
+    @skipIfMPS  # the test doesn't work on MPS
     def test_where_functional(self, device):
         x = torch.randn(5, 5, dtype=torch.double, device=device, requires_grad=True)
         y = torch.randn(5, 5, dtype=torch.double, device=device, requires_grad=True)
@@ -13410,7 +13490,6 @@ class TestAutogradDeviceType(TestCase):
         with emit_itt():
             a.add(1.0)
 
-    @skipIfMPS  # the test doesn't work as randn is not supported with type long
     @deviceCountAtLeast(1)
     def test_grad_assignment(self, devices):
         x = torch.randn(5, 5, device=devices[0])
@@ -13848,6 +13927,13 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(lambda x: x.to("cuda"), (x,))
 
     @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181229"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/181203",
+    )
+    @unittest.skipIf(
         IS_WINDOWS and IS_ARM64, "Fails on Windows ARM64; see issue #181228"
     )
     def test_strided_leaf_grad_layout(self, device):
@@ -13932,9 +14018,14 @@ class TestAutogradDeviceType(TestCase):
         a.grad = None
 
         # --- as a decorator ---
+        torch._C._set_grad_layout_enforcement_enabled(True)
+
         @torch.autograd.enforce_grad_layout_policy(False)
         def do_backward():
             ContiguousGrad.apply(a).backward()
+
+        # Check that the flag doesn't leak during function decoration.
+        self.assertTrue(torch._C._is_grad_layout_enforcement_enabled())
 
         do_backward()
         self.assertTrue(a.grad.is_contiguous())
@@ -16696,6 +16787,9 @@ class TestAutogradMultipleDispatch(TestCase):
                 )
             )
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181272"
+    )
     @onlyCUDA
     def test_backward_single_threaded(self):
         threads_eq = None
@@ -16747,6 +16841,13 @@ class TestAutogradMultipleDispatch(TestCase):
         TestFn.apply(inp, None).sum().backward()
         self.assertEqual(local.my_obj[10], 5)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181323"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/181228",
+    )
     @unittest.skipIf(
         IS_WINDOWS and IS_ARM64, "Fails on Windows ARM64; see issue #181228"
     )

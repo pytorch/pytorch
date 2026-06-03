@@ -4,69 +4,6 @@ import sys
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo import config
-from torch._dynamo.testing import make_test_cls_with_patches
-
-
-try:
-    # from . import test_ctx_manager
-    pass
-except ImportError:
-    # import test_aot_autograd
-    # import test_ctx_manager
-
-    # import test_export
-    # import test_functions
-    # import test_higher_order_ops
-    # import test_misc
-    # import test_modules
-    # import test_repros
-    # import test_sdpa
-    # import test_subgraphs
-    pass
-
-
-test_classes = {}
-
-
-def make_nested_cls(cls):
-    suffix = "_nested_graph_breaks"
-
-    cls_prefix = "NestedGraphBreaks"
-
-    test_class = make_test_cls_with_patches(
-        cls,
-        cls_prefix,
-        suffix,
-        (config, "debug_force_nested_calls", True),
-        (config, "debug_force_graph_break_on_leaf_return", True),
-        (config, "debug_disable_compile_counter", True),
-        xfail_prop="_expected_failure_nested_graph_breaks",
-    )
-
-    test_classes[test_class.__name__] = test_class
-    # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
-    # globals()[test_class.__name__] = test_class
-    test_class.__module__ = __name__
-    return test_class
-
-
-tests = [
-    # test_ctx_manager.CtxManagerTests,
-    # test_functions.FunctionTests,
-    # test_misc.MiscTests,
-    # test_repros.ReproTests,
-    # test_modules.NNModuleTests,
-    # test_subgraphs.SubGraphTests,
-    # test_higher_order_ops.HigherOrderOpTests,
-    # test_higher_order_ops.FuncTorchHigherOrderOpTests,
-    # test_aot_autograd.AotAutogradFallbackTests,
-    # test_sdpa.TestSDPA,
-]
-test = None
-for test in tests:
-    make_nested_cls(test)
-del test
 
 
 # for use in test_side_effects_globals
@@ -965,6 +902,52 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # 2 frames from each of f5+f4, f3, f2, f1
         self.assertEqual(cnts.frame_count, 8)
         self.assertEqual(cnts.op_count, 10)
+
+    def test_disable_nested_graph_breaks_context_manager(self):
+        """disable_nested_graph_breaks as a context manager."""
+        global f1, f2, f3
+
+        def f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def f2(x):
+            return f1(x + 4) + 8
+
+        def f3(x):
+            with torch._dynamo.disable_nested_graph_breaks():
+                x = f2(x + 16) + 32
+            return x + 64
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f3)
+        x = torch.zeros(3)
+        res = f3(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 6)
+
+    def test_recursive_compiled_fn_with_graph_break(self):
+        """Recursive compiled functions should not disable NGB on self-calls.
+
+        When a compiled function recursively calls itself, the inner call
+        should NOT be treated as a nested torch.compile (which would disable
+        NGB). Only calls to a *different* torch.compile wrapper should.
+        """
+
+        def fn(x, n):
+            if n <= 0:
+                return x
+            torch._dynamo.graph_break()
+            return fn(x + 1, n - 1)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(fn)
+        x = torch.zeros(3)
+        ref = fn(x, 3)
+        res = opt_fn(x, 3)
+        self.assertEqual(ref, res)
 
     def test_nested_store_attr_graph_break(self):
         class Foo:
