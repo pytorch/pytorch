@@ -48,6 +48,7 @@ from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
+from torch._library.opaque_object import _OPAQUE_TYPES_BY_NAME
 from torch._subclasses import FakeTensorMode
 from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._trace import (
@@ -14111,15 +14112,16 @@ graph():
                 return x + f.int_1 + f.int_2
 
         torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
-        try:
-            ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
+        self.addCleanup(
+            lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
+                torch._C._unregister_opaque_type(name),
+                _OPAQUE_TYPES_BY_NAME.pop(name, None),
+            )
+        )
+        ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
 
-            inp = torch.ones(2, 2)
-            self.assertEqual(ep.module()(inp, MyInput(4, 4)), Foo()(inp, MyInput(4, 4)))
-        finally:
-            opaque_name = torch._library.opaque_object.get_opaque_type_name(MyInput)
-            if torch._C._is_opaque_type_registered(opaque_name):
-                torch._C._unregister_opaque_type(opaque_name)
+        inp = torch.ones(2, 2)
+        self.assertEqual(ep.module()(inp, MyInput(4, 4)), Foo()(inp, MyInput(4, 4)))
 
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
