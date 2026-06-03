@@ -80,6 +80,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfHpu,
     skipIfRocm,
+    skipIfXpu,
     skipIfWindows,
     TEST_WITH_ROCM,
     xfailIfS390X,
@@ -8422,6 +8423,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         mem_after = torch.accelerator.memory_allocated()
         self.assertEqual(mem_before, mem_after)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3835")
     def test_sdpa_dynamic_shapes(self, device):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)
