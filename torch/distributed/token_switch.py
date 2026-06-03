@@ -73,19 +73,25 @@ class _CombineAutograd(torch.autograd.Function):
         N = grad_out_tokens.shape[0]
         K = ctx.top_k
         dtype = ctx.expert_dtype
-        grad_expert = grad_out_tokens.new_zeros(M, H).to(dtype)
+        # ncclEpDispatch requires the output buffer sized to the group's
+        # max_recv_tokens_per_rank, regardless of what shape expert_tokens had
+        # in forward (often a slice like out_tokens[:M]). Allocate full-size,
+        # run dispatch, then slice to ctx.expert_shape so the returned grad
+        # matches the input that produced it.
+        max_recv = ctx.ts._max_recv_tokens_per_rank
+        grad_expert_full = grad_out_tokens.new_zeros(max_recv, H).to(dtype)
         dummy_weights = grad_out_tokens.new_zeros(N, K, dtype=torch.float32)
-        dummy_out_weights = grad_out_tokens.new_zeros(M, K, dtype=torch.float32)
-        dummy_out_idx = ctx.routing.topk_idx.new_zeros(M, K)
+        dummy_out_weights = grad_out_tokens.new_zeros(max_recv, K, dtype=torch.float32)
+        dummy_out_idx = ctx.routing.topk_idx.new_zeros(max_recv, K)
         ctx.ts._dispatch(
             ctx.routing,
             grad_out_tokens.to(dtype).contiguous(),
             dummy_weights,
-            grad_expert,
+            grad_expert_full,
             dummy_out_weights,
             dummy_out_idx,
         )
-        return None, None, grad_expert
+        return None, None, grad_expert_full[:M].contiguous()
 
 
 class TokenSwitch(abc.ABC):
@@ -179,20 +185,23 @@ class TokenSwitchNCCL(TokenSwitch):
         self,
         process_group: ProcessGroup,
         num_experts: int,
-        max_tokens_per_rank: int,
-        token_size_bytes: int,
+        max_dispatch_tokens_per_rank: int,
+        max_recv_tokens_per_rank: int,
+        max_token_bytes: int,
     ) -> None:
         c10d = torch._C._distributed_c10d
         if not hasattr(c10d, "_NcclEpGroup"):
             raise RuntimeError(
                 "TokenSwitchNCCL requires a build with NCCL EP (USE_NCCL_EP)."
             )
+        self._max_recv_tokens_per_rank = max_recv_tokens_per_rank
         # NCCL_EP_AUTO (0) for qp count and channel count
         self._group = c10d._NcclEpGroup.create(
             process_group,
             num_experts,
-            max_tokens_per_rank,
-            token_size_bytes,
+            max_dispatch_tokens_per_rank,
+            max_recv_tokens_per_rank,
+            max_token_bytes,
             0,
             0,
         )
@@ -224,7 +233,6 @@ class TokenSwitchNCCL(TokenSwitch):
             routing.handle,
             tokens,
             topk_weights,
-            routing.topk_idx,
             out_tokens,
             out_topk_weights,
             out_topk_idx,

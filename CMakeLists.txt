@@ -304,6 +304,7 @@ cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
                        OFF)
+# Builds NCCL-EP if true.
 cmake_dependent_option(USE_NCCL_EP "Build NCCL EP contrib library" OFF
                        "USE_NCCL;USE_CUDA;NOT USE_SYSTEM_NCCL" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON

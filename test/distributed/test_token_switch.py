@@ -61,7 +61,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
             print(f"rank {rank} creating token switch")
             dist.barrier(pg)
             cls._cached_token_switch = TokenSwitchNCCL(
-                pg, world_size, NUM_TOKENS, TOKEN_SIZE_BYTES
+                pg, world_size, NUM_TOKENS, world_size * NUM_TOKENS, TOKEN_SIZE_BYTES
             )
         return cls._cached_token_switch
 
@@ -85,11 +85,6 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
         self.assertEqual(per_expert_counts.dtype, torch.int32)
         self.assertEqual(per_expert_counts.numel(), num_local_experts)
         self.assertEqual(per_expert_counts.item(), NUM_TOKENS)
-
-        topk_idx, _topk_weights = _generate_topk(
-            self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
-        )
-        ts.create_routing(topk_idx)
         torch.cuda.synchronize()
 
     @skip_if_lt_x_gpu(2)
