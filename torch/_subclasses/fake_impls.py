@@ -680,6 +680,14 @@ def meta_select(
         # index is data-dependent, we do not know which index we are accessing it could be index or index+size!
         # we assign a new data-dependent symbol for the storage offset.
         new_storage_offset = fake_mode.shape_env.create_unbacked_symint()
+        # The index's unbacked symbol is consumed into the opaque storage offset
+        # above and does not appear in the output, so it is not a pending binding
+        # site. Mark it ignorable so compute_unbacked_bindings does not flag it.
+        if isinstance(index, torch.SymInt):
+            from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+            for s in free_unbacked_symbols(index):
+                fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(s)
 
     del new_size[dim]
     del new_stride[dim]
@@ -687,6 +695,44 @@ def meta_select(
         raise AssertionError("new_storage_offset must not be None")
     # pyrefly: ignore[bad-return]
     return self.as_strided(new_size, new_stride, new_storage_offset)
+
+
+@register_op_impl(aten.select_copy.int)
+def meta_select_copy(
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    self: FakeTensor,
+    dim: int,
+    index: IntLikeType,
+) -> FakeTensor:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if self.is_sparse:
+        return NotImplemented
+
+    ndim = self.dim()
+    torch._check_index(
+        ndim != 0,
+        lambda: "select() cannot be applied to a 0-dim tensor.",
+    )
+
+    dim = dim if dim >= 0 else dim + ndim
+    size = self.size(dim)
+
+    if guard_or_false(index >= size) or guard_or_false(index < -size):
+        torch._check_index(
+            False,
+            lambda: f"select(): index {index} out of range for tensor of size "
+            f"{list(self.size())} at dimension {dim}",
+        )
+
+    # Unlike select, select_copy returns a contiguous copy, so it has no
+    # data-dependent storage offset to reason about and can index by a
+    # data-dependent (unbacked) index without specializing it.
+    new_size = list(self.size())
+    del new_size[dim]
+    # pyrefly: ignore[bad-return]
+    return self.new_empty(new_size)
 
 
 @register_op_impl(aten.unique_dim.default)
