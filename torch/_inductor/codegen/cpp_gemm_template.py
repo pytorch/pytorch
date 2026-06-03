@@ -194,15 +194,21 @@ extern "C" {{export_declaration}}
 GEMM_TEMPLATE = r"""
 {{ template.codegen_gemm_stub_def() }}
 {
-    {{ kernel.maybe_codegen_profile() }}
+    {{ kernel.maybe_codegen_profile(template.get_kernel_prefix_name()) }}
     {{ template.codegen_blocks(
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W
     ) }}
 
 {%- if maybe_k_slicing %}
     std::unique_ptr<std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[]> local_buf_ptrs;
+    const int64_t num_Mc_blocks_per_thread_block = (Mt_blocks + Mc_blocks - 1) / Mc_blocks;
+    const int64_t num_Nc_blocks_per_thread_block = (Nt_blocks + Nc_blocks - 1) / Nc_blocks;
     if (num_Kt_blocks > 1) {
-        local_buf_ptrs.reset(new std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[num_Mc_blocks * num_Nc_blocks * num_Kt_blocks]);
+        local_buf_ptrs.reset(new std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[
+            num_Mt_blocks * num_Nt_blocks *
+            num_Mc_blocks_per_thread_block * num_Nc_blocks_per_thread_block *
+            num_Kt_blocks
+        ]);
     }
 {%- endif %}
 
@@ -277,7 +283,12 @@ GEMM_TEMPLATE = r"""
                 }
 {%- if maybe_k_slicing %}
                 if (num_Kt_blocks > 1) {
-                    const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
+                    const int64_t n_cache_block_id = (nc - n_block_start) / Nc_blocks;
+                    const int64_t mxn_cache_block_id =
+                        ((n_group_id * num_Nt_blocks + n_slice_id) *
+                         num_Mc_blocks_per_thread_block + my_mc_block_id) *
+                            num_Nc_blocks_per_thread_block +
+                        n_cache_block_id;
                     local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + k_slice_id].reset(
                         {{ kernel.release_buffer(acc_buf_name) }});
                 } else
@@ -309,24 +320,32 @@ GEMM_TEMPLATE = r"""
                     const int64_t m_end = std::min(m_start_unsliced + m_slice_size * (k_slice_id + 1), m_end_unsliced);
                     const int64_t m_size = m_end - m_start;
                     const int64_t m_offset = m_start - m_start_unsliced;
+                    const int64_t m_cache_block_id = (mc - m_block_start) / Mc_blocks;
                     for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
                         const int64_t n_start = nc * Nr;
                         const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
                         const int64_t n_size = n_end - n_start;
-                        const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
+                        const int64_t n_cache_block_id = (nc - n_block_start) / Nc_blocks;
+                        const int64_t mxn_cache_block_id =
+                            ((n_group_id * num_Nt_blocks + n_slice_id) *
+                             num_Mc_blocks_per_thread_block + m_cache_block_id) *
+                                num_Nc_blocks_per_thread_block +
+                            n_cache_block_id;
                         auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks].get();
                         for (int64_t other_slice = 1; other_slice < num_Kt_blocks; other_slice++) {
                             auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + other_slice].get();
                             for (int64_t m = m_offset; m < m_offset + m_size; m++) {
                                 #pragma omp simd
                                 for (int64_t n = 0; n < n_size; n++) {
-                                    {{acc_buf_name}}[m*Nr + n] += other_acc[m*Nr + n];
+                                    {{acc_buf_name}}[m*Nc_blocks*Nr + n] += other_acc[m*Nc_blocks*Nr + n];
                                 }
                             }
                         }
-        {%- set tile_acc_m_slice = kernel.slice_nd(tile_acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
+        {%- set tile_Y_m_slice = kernel.slice_nd(Y_2d, [("m_start", "m_start + m_size"), ("n_start", "n_start + n_size")]) %}
+        {%- set tile_acc_full = kernel.slice_nd(acc, [("0", "m_size_unsliced"), ("0", "n_size")]) %}
+        {%- set tile_acc_m_slice = kernel.slice_nd(tile_acc_full, [("m_offset", "m_offset + m_size"), ()]) %}
                         {{ kernel.store_output(
-                            tile_Y, tile_acc_m_slice, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
+                            tile_Y_m_slice, tile_acc_m_slice, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                         )|indent(20, false)
                         }}
                     }
@@ -1355,7 +1374,7 @@ class CppGemmTemplate(CppTemplate):
                 vnni_view_size = list(new_size)
                 vnni_view_size[-2] = k // vnni_size
                 vnni_view_size.insert(-1, vnni_size)
-                W = W.view(vnni_view_size).transpose(-1, -2).contiguous().view(new_size)
+                W = W.view(vnni_view_size).transpose(-1, -2).reshape(new_size)
             # normalize stride to be "contiguous_strides" per size
             # this avoids the problems in L.view during template codegen
             new_stride = [1]
@@ -1644,6 +1663,9 @@ class CppGemmTemplate(CppTemplate):
             and X.get_dtype() is torch.bfloat16
             and W.get_dtype() is torch.int8
         )
+
+    def get_kernel_prefix_name(self) -> str:
+        return f"gemm_m{self.m}n{self.n}k{self.k}"
 
     def render(  # type: ignore[override, return]
         self,

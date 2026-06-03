@@ -97,9 +97,7 @@ def _validate_out_schema(schema: "str | torch._C.FunctionSchema") -> None:
             f"Got: {schema}"
         )
     unsupported_mutable = [
-        arg
-        for arg in mutable_args
-        if isinstance(arg.type, (torch.OptionalType, torch.ListType))
+        arg for arg in mutable_args if not isinstance(arg.type, torch.TensorType)
     ]
     if unsupported_mutable:
         names = [a.name for a in unsupported_mutable]
@@ -177,10 +175,20 @@ def _validate_inplace_schema(schema: "str | torch._C.FunctionSchema") -> None:
             f"(the first argument). Got {len(returns)} returns. Got: {schema}"
         )
     ret = returns[0]
+    if not isinstance(ret.type, torch.TensorType):
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return must be a Tensor, got type '{ret.type}'). Got: {schema}"
+        )
     if ret.alias_info is None:
         raise ValueError(
             f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
             f"(return must alias the first argument). Got: {schema}"
+        )
+    if not ret.alias_info.is_write:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return must be a mutable alias, e.g., Tensor(a!)). Got: {schema}"
         )
     if ret.alias_info.before_set != first_arg.alias_info.before_set:
         raise ValueError(
@@ -1062,11 +1070,12 @@ def register_autocast(
 ):
     r"""Register an autocast dispatch rule for this custom op.
 
-    Valid `device_type` include: "cpu" and "cuda".
+    Valid ``device_type`` values include any device type that supports autocast.
+    See :func:`torch.amp.is_autocast_available` for details.
 
     Args:
         op (str | OpOverload): The operator to register an autocast dispatch rule to.
-        device_type(str):  Device type to use. 'cuda' or 'cpu'.
+        device_type(str):  Device type to use. 'cuda', 'cpu', 'xpu', or any other device type that supports autocast.
             The type is the same as the `type` attribute of a :class:`torch.device`.
             Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
         cast_inputs (:class:`torch.dtype`): When custom op runs in an autocast-enabled region,
@@ -1095,8 +1104,8 @@ def register_autocast(
 
     """
     op = _resolve_op_for_registration(op, "register_autocast")
-    if device_type not in ["cpu", "cuda"]:
-        raise ValueError(f"Unknown device type: {device_type}")
+    if not torch._C._is_autocast_available(device_type):
+        raise ValueError(f"Device type '{device_type}' does not support autocast.")
 
     if isinstance(op, CustomOpDef):
         return op.register_autocast(device_type, cast_inputs)
@@ -1106,6 +1115,9 @@ def register_autocast(
     namespace, opname = torch._library.utils.parse_namespace(qualname)
     use_lib = _library_for_registration(namespace, lib)
 
+    autocast_key = "Autocast" + torch._C._dispatch_key_for_device(device_type)
+    autocast_dispatch_key = getattr(torch._C.DispatchKey, autocast_key)
+
     def _maybe_override_py_impl(op: torch._ops.OpOverload, dispatch_key):
         def inner(kernel):
             if op.has_kernel_for_dispatch_key(dispatch_key):
@@ -1114,15 +1126,13 @@ def register_autocast(
 
         return inner
 
-    @_maybe_override_py_impl(_op, torch._C.DispatchKey.AutocastCPU)
-    @_maybe_override_py_impl(_op, torch._C.DispatchKey.AutocastCUDA)
+    @_maybe_override_py_impl(_op, autocast_dispatch_key)
     def _autocast_py_impl(*args, **kwargs):
         if len(kwargs) != 0:
             raise AssertionError("Custom ops do not support kwargs yet.")
-        autocast_keyset = torch._C.DispatchKeySet(
-            torch._C.DispatchKey.AutocastCPU
-        ) | torch._C.DispatchKeySet(torch._C.DispatchKey.AutocastCUDA)
-        with torch._C._ExcludeDispatchKeyGuard(autocast_keyset):
+        with torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(autocast_dispatch_key)
+        ):
             return _op(*_cast(args, device_type, cast_inputs))
 
     def kernel(_, *args, **kwargs):
@@ -1130,11 +1140,7 @@ def register_autocast(
             raise AssertionError("Custom ops do not support kwargs yet.")
         return _autocast_py_impl(*args, **kwargs)
 
-    if device_type == "cuda":
-        return use_lib.impl(opname, kernel, "AutocastCUDA", with_keyset=True)
-    else:
-        # device_type is "cpu"
-        return use_lib.impl(opname, kernel, "AutocastCPU", with_keyset=True)
+    return use_lib.impl(opname, kernel, autocast_key, with_keyset=True)
 
 
 def register_fake(
@@ -1399,6 +1405,11 @@ def register_autograd(
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
     schema = op._schema
+    if _library.utils.is_out(op):
+        raise RuntimeError(
+            f"Cannot register autograd formula for operator tagged with "
+            f"torch.Tag.out: {op}. Out variants do not support autograd."
+        )
     if not _library.utils.is_functional_schema(schema):
         raise RuntimeError(
             f"Cannot register autograd formula for non-functional operator "
