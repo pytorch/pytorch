@@ -189,8 +189,7 @@ inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
     TORCH_CHECK(result.storage().device() == storage.device(),
                 "Attempted to set the storage of a tensor on device \"", result.storage().device(),
                 "\" to a storage on different device \"", storage.device(),
-                "\".  This is no longer allowed; the devices must match."
-                "  If you need cross-device set_, use aten::set_.source_Tensor.");
+                "\".  This is no longer allowed; the devices must match.");
     result.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
   }
 }

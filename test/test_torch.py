@@ -4544,15 +4544,10 @@ class TestTorchDeviceType(TestCase):
         f_cuda0 = torch.randn((2, 3), dtype=torch.float32, device=devices[0])
         f_cuda1 = torch.randn((2, 3), dtype=torch.float32, device=devices[1])
 
-        # Storage-based cross-device set_ is not allowed
         self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1.storage()))
         self.assertRaises(RuntimeError,
                           lambda: f_cuda0.set_(f_cuda1.storage(), 0, f_cuda1.size(), f_cuda1.stride()))
-
-        # Tensor-based cross-device set_ is allowed
-        f_cuda0_copy = f_cuda0.clone()
-        f_cuda0_copy.set_(f_cuda1)
-        self.assertEqual(f_cuda0_copy.device, f_cuda1.device)
+        self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1))
 
     # FIXME: move to test_serialization
     @onlyCUDA
@@ -7084,25 +7079,17 @@ class TestTorch(TestCase):
         if torch.cuda.is_available():
             f_cuda = torch.randn((2, 3), dtype=torch.float32, device='cuda')
 
-            # Storage-based cross-device set_ is not allowed
             # cpu -> cuda
             self.assertRaises(RuntimeError, lambda: f_cpu.set_(f_cuda.storage()))
             self.assertRaises(RuntimeError,
                               lambda: f_cpu.set_(f_cuda.storage(), 0, f_cuda.size(), f_cuda.stride()))
+            self.assertRaises(RuntimeError, lambda: f_cpu.set_(f_cuda))
 
             # cuda -> cpu
             self.assertRaises(RuntimeError, lambda: f_cuda.set_(f_cpu.storage()))
             self.assertRaises(RuntimeError,
                               lambda: f_cuda.set_(f_cpu.storage(), 0, f_cpu.size(), f_cpu.stride()))
-
-            # Tensor-based cross-device set_ is allowed
-            f_cpu2 = torch.randn((2, 3), dtype=torch.float32)
-            f_cpu2.set_(f_cuda)
-            self.assertEqual(f_cpu2.device, f_cuda.device)
-
-            f_cuda2 = torch.randn((2, 3), dtype=torch.float32, device='cuda')
-            f_cuda2.set_(f_cpu)
-            self.assertEqual(f_cuda2.device, f_cpu.device)
+            self.assertRaises(RuntimeError, lambda: f_cuda.set_(f_cpu))
 
     # FIXME: move this test test_testing.py (along with allclose testing)
     # NOTE: test_equal will be deprecated in favor of torch.testing.assert_close

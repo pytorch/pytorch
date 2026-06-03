@@ -1369,14 +1369,13 @@ class _InProcessFxCompile(FxCompile):
                     # Restore example_inputs devices that may have been
                     # mutated by set_() during FakeTensorProp.
                     for inp, orig_dev in zip(example_inputs, orig_input_devices):
-                        if (
-                            orig_dev is not None
-                            and hasattr(inp, "fake_device")
-                            and inp.fake_device != orig_dev
-                        ):
-                            inp.fake_device = (
-                                orig_dev  # pyrefly: ignore[missing-attribute]
-                            )
+                        if orig_dev is not None and hasattr(inp, "fake_device"):
+                            if (
+                                inp.fake_device != orig_dev
+                            ):  # pyrefly: ignore[missing-attribute]
+                                inp.fake_device = (  # pyrefly: ignore[missing-attribute]
+                                    orig_dev
+                                )
 
             _recursive_record_original_output_strides(gm)
 
