@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import hashlib
 import itertools
 import logging
 from collections import defaultdict
@@ -23,7 +24,7 @@ from .utils import DTYPE_TO_CUTLASS_TYPE
 if TYPE_CHECKING:
     from .template import ArgInfo
 
-from ...autotune_process import CUTLASSBenchmarkRequest
+from ...autotune_process import CUTLASSBenchmarkRequest, TensorMeta
 from ...ir import (
     Buffer,
     ChoiceCaller,
@@ -31,6 +32,7 @@ from ...ir import (
     IRNode,
     Layout,
     PrimitiveInfoType,
+    TemplateBuffer,
     TensorBox,
 )
 from ...utils import sympy_product
@@ -711,3 +713,120 @@ class CUTLASSTemplateCaller(ChoiceCaller):
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]
         return TensorBox.create(buffer)
+
+    def benchmark_fused(
+        self,
+        template_buffer: TemplateBuffer,
+        epilogue_nodes: list[BaseSchedulerNode],
+    ) -> float:
+        """
+        Benchmark this CUTLASS kernel with fused epilogue nodes.
+
+        This renders the kernel with the epilogue fused, builds a new
+        CUTLASSBenchmarkRequest for the fused kernel, and benchmarks it.
+        This allows autotune to select GEMM configs based on fused runtime
+        rather than bare mm runtime.
+
+        Returns the benchmark time in milliseconds, or float("inf") on failure.
+        """
+        assert self.supports_epilogue_fusion, (
+            "benchmark_fused called on a kernel that does not support epilogue fusion"
+        )
+
+        # 1. Render the kernel with fused epilogue
+        # pyrefly: ignore[bad-argument-type]
+        kernel, render = self.make_kernel_render(template_buffer, epilogue_nodes)
+
+        # Mark the template buffer as removed (fused into the kernel).
+        # This prevents CutlassEVTCodegen from creating a tmp_0 = accum alias
+        # which would cause a multi-parent DAG in the EVT trace pipeline.
+        kernel.removed_buffers.add(template_buffer.get_name())
+
+        with V.set_kernel_handler(kernel):
+            src_code = render()
+
+        # 2. Extract call args (buffer names) and build tensor metadata
+        _, call_args, _, arg_types = kernel.args.python_argdefs()
+
+        # Separate pointer args (tensors) from size vars
+        # python_argdefs returns: inplace_buffers, input_buffers, output_buffers, sizevars
+        # For CUTLASS, tensor args have torch.dtype type, size vars have sympy type
+        tensor_args = []
+        for arg, arg_type in zip(call_args, arg_types):
+            if isinstance(arg_type, torch_dtype):
+                tensor_args.append(arg)
+
+        # The last tensor arg is the output; the rest are inputs
+        if not tensor_args:
+            return float("inf")
+
+        input_names = tensor_args[:-1]
+        output_name = tensor_args[-1]
+
+        # Build TensorMeta from IR buffers (check both name_to_buffer and graph_inputs)
+        def _lookup_buffer(name: str):
+            buf = V.graph.name_to_buffer.get(name)
+            if buf is None:
+                buf = V.graph.graph_inputs.get(name)
+            return buf
+
+        input_metas: list[TensorMeta] = []
+        for name in input_names:
+            buf = _lookup_buffer(name)
+            if buf is None:
+                log.warning("benchmark_fused: cannot find buffer %s", name)
+                return float("inf")
+            meta = TensorMeta.from_irnodes(buf)
+            assert isinstance(meta, TensorMeta)
+            input_metas.append(meta)
+
+        output_buf = _lookup_buffer(output_name)
+        if output_buf is None:
+            log.warning("benchmark_fused: cannot find output buffer %s", output_name)
+            return float("inf")
+        output_meta = TensorMeta.from_irnodes(output_buf)
+
+        # 3. Compute extra_args (size_args + offset_args + runtime_arg_values)
+        size_args = V.graph.sizevars.optimization_hints(kernel.get_dynamic_shape_args())
+        offset_args = V.graph.sizevars.optimization_hints(kernel.get_offset_args())
+        extra_args = tuple(
+            list(size_args) + list(offset_args) + list(kernel.runtime_arg_values)
+        )
+
+        # 4. Create the fused benchmark request
+        kernel_hash = hashlib.sha256(src_code.encode("utf-8")).hexdigest()[:8]
+        kernel_name = f"cutlass_fused_{kernel_hash}"
+        src_code = src_code.replace(str(Placeholder.KERNEL_NAME), kernel_name)
+
+        try:
+            fused_bmreq = CUTLASSBenchmarkRequest(
+                kernel_name=kernel_name,
+                input_tensor_meta=input_metas,  # pyrefly: ignore[bad-argument-type]
+                output_tensor_meta=output_meta,
+                extra_args=extra_args,
+                source_code=src_code,
+                device_type=self.template.device_type,
+            )
+            fused_bmreq.update_workspace_size()
+        except Exception:
+            log.warning(
+                "benchmark_fused: failed to create benchmark request", exc_info=True
+            )
+            return float("inf")
+
+        # 5. Benchmark
+        try:
+            input_tensors = [
+                meta.to_tensor() for meta in input_metas
+            ]  # pyrefly: ignore[missing-attribute]
+            output_tensor = (
+                output_meta.to_tensor()  # pyrefly: ignore[missing-attribute]
+            )
+
+            if config.profile_bandwidth_with_do_bench_using_profiling:
+                algo = fused_bmreq.make_run_fn(*input_tensors, out=output_tensor)
+                return do_bench_using_profiling(algo)
+            return fused_bmreq.benchmark(*input_tensors, out=output_tensor)
+        except Exception:
+            log.warning("benchmark_fused: benchmarking failed", exc_info=True)
+            return float("inf")

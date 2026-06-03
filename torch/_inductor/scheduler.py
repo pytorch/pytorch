@@ -5193,6 +5193,18 @@ class Scheduler:
                 out_buffer.layout = multi_node.layout
                 self._replace_node(out_buffer, multi_node, i, node)
 
+    @staticmethod
+    def _remove_buffer_from_graph(buf: ir.OperationBuffer) -> None:
+        """Remove a buffer that was temporarily registered in V.graph."""
+        name = buf.get_name()
+        op_name = buf.get_operation_name()
+        V.graph.name_to_buffer.pop(name, None)
+        V.graph.name_to_op.pop(op_name, None)
+        if buf in V.graph.buffers:
+            V.graph.buffers.remove(buf)
+        if buf in V.graph.operations:
+            V.graph.operations.remove(buf)
+
     def _replace_node(
         self,
         out_buffer: ir.OperationBuffer,
@@ -5539,7 +5551,22 @@ class Scheduler:
                         continue
 
             if len(future_choices) == 0:
-                return FusionResult.fuse(False)
+                # If bench_epilogue is enabled and there are CUTLASS choices
+                # that support epilogue fusion, don't bail out early.
+                if bench_epilogue and epilogue_fusion:
+                    from torch._inductor.codegen.cutlass.kernel import (
+                        CUTLASSTemplateCaller,
+                    )
+
+                    has_cutlass_epilogue_choices = any(
+                        isinstance(c, CUTLASSTemplateCaller)
+                        and c.supports_epilogue_fusion
+                        for c in multi_node.choices
+                    )
+                    if not has_cutlass_epilogue_choices:
+                        return FusionResult.fuse(False)
+                else:
+                    return FusionResult.fuse(False)
 
             def benchmark_when_ready() -> bool:
                 nonlocal choice_timings, future_choices, ms1, min_choice, multi_node
@@ -5626,13 +5653,77 @@ class Scheduler:
                                 ms_fused_choice = choice
                                 break
 
+                # Benchmark CUTLASS choices with fused epilogue
+                if bench_epilogue and epilogue_fusion:
+                    from torch._inductor.codegen.cutlass.kernel import (
+                        CUTLASSTemplateCaller,
+                    )
+
+                    cutlass_choices_benchmarked = 0
+                    for (
+                        choice
+                    ) in multi_node.choices:  # pyrefly: ignore[missing-attribute]
+                        if not isinstance(choice, CUTLASSTemplateCaller):
+                            continue
+                        if not choice.supports_epilogue_fusion:
+                            continue
+                        if (
+                            cutlass_choices_benchmarked
+                            >= config.max_epilogue_benchmarked_choices
+                        ):
+                            break
+
+                        # Get epilogue scheduler nodes
+                        epilogue_scheduler_nodes = (
+                            list(node_list_2) if epilogue_fusion else list(node_list_1)
+                        )
+
+                        # Use multi_node directly as template_buffer so its name
+                        # matches what the epilogue nodes reference (required for
+                        # EVT to identify the accumulator correctly).
+                        try:
+                            ms_cutlass = choice.benchmark_fused(
+                                multi_node,  # pyrefly: ignore[bad-argument-type]
+                                epilogue_scheduler_nodes,
+                            )
+                        except Exception as e:
+                            if fusion_log.isEnabledFor(logging.DEBUG):
+                                fusion_log.debug(
+                                    "Exception benchmarking CUTLASS fused: %s", e
+                                )
+                            continue
+
+                        cutlass_choices_benchmarked += 1
+                        new_timings[choice] = ms_cutlass
+                        if ms_cutlass < min_ms_fused:
+                            min_ms_fused = ms_cutlass
+                            ms_fused_choice = choice
+
                 if bench_epilogue:
                     log_fusion(min_ms_fused, ms1, ms2)
 
                 if (
                     not bench_epilogue or min_ms_fused < (ms1 + ms2)
                 ) and ms_fused_choice is not None:
-                    if config.multi_kernel_hints:
+                    from torch._inductor.codegen.cutlass.kernel import (
+                        CUTLASSTemplateCaller,
+                    )
+
+                    if isinstance(ms_fused_choice, CUTLASSTemplateCaller):
+                        # CUTLASS choice won: replace MTB with CUTLASSTemplateBuffer
+                        # pyrefly: ignore[missing-attribute]
+                        with ir.IRNode.current_origins(multi_node.origins):
+                            out_tensorbox = ms_fused_choice.output_node()
+                        out_storage = out_tensorbox.data
+                        assert isinstance(out_storage, ir.StorageBox)
+                        cutlass_buffer = out_storage.data
+                        assert isinstance(cutlass_buffer, ir.CUTLASSTemplateBuffer)
+                        # pyrefly: ignore[missing-attribute]
+                        cutlass_buffer.layout = multi_node.layout
+                        # pyrefly: ignore[bad-argument-type]
+                        _replace_operation_buffer(multi_node, cutlass_buffer)
+                        node1.node = cutlass_buffer
+                    elif config.multi_kernel_hints:
                         hint_override_best_fusion_choice[None] = ms_fused_choice
                         # pyrefly: ignore [missing-attribute]
                         multi_node.finalize_as_triton_callers(
@@ -5650,7 +5741,8 @@ class Scheduler:
                     return False
 
             return FusionResult.from_callable(
-                benchmark_when_ready, future_choices[0][1]
+                benchmark_when_ready,
+                future_choices[0][1] if future_choices else None,
             )
 
         else:

@@ -2305,6 +2305,76 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "CUTLASS",
+            "cutlass.cutlass_max_profiling_configs": 4,
+            "benchmark_epilogue_fusion": True,
+            "max_epilogue_benchmarked_choices": 4,
+            "cutlass.cutlass_tma_only": GPU_TYPE == "cuda",
+            "cutlass.cutlass_epilogue_fusion_enabled": True,
+        }
+    )
+    def test_evt_benchmark_epilogue_fusion(self):
+        # Verify that with benchmark_epilogue_fusion=True, CUTLASS configs
+        # are benchmarked WITH the fused gelu epilogue and the best fused
+        # config is selected. Correctness + fusion counter must hold.
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.nn.functional.gelu(a @ b)
+
+        M = 1024
+        N = 512
+        a = torch.randn(M, N, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(N, N, device=GPU_TYPE, dtype=torch.float16)
+        model = TestModel().to(GPU_TYPE)
+
+        ref_result = model(a, b)
+        result = torch.compile(model)(a, b)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result, atol=1e-2, rtol=1e-2)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "CUTLASS",
+            "cutlass.cutlass_max_profiling_configs": 4,
+            "benchmark_epilogue_fusion": True,
+            "max_epilogue_benchmarked_choices": 4,
+            "cutlass.cutlass_tma_only": GPU_TYPE == "cuda",
+            "cutlass.cutlass_epilogue_fusion_enabled": True,
+        }
+    )
+    def test_evt_benchmark_epilogue_fusion_relu(self):
+        # Same as above but with relu to test a simpler activation.
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.relu(a @ b)
+
+        M = 1024
+        N = 512
+        a = torch.randn(M, N, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(N, N, device=GPU_TYPE, dtype=torch.float16)
+        model = TestModel().to(GPU_TYPE)
+
+        ref_result = model(a, b)
+        result = torch.compile(model)(a, b)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
+        )
+        torch.testing.assert_close(result, ref_result, atol=1e-2, rtol=1e-2)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @use_evt_config
     @evt_all_ops
     def test_evt_mixed_dtypes(self, op):
