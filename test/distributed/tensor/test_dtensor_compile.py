@@ -392,6 +392,53 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             compiled_out = compiled_fn(x)
             self.assertEqual(opt_fn, compiled_out)
 
+    def test_strided_shard_view_unbacked_local(self):
+        # Regression for torchtitan #3409: during compile-time sharding
+        # propagation for any _StridedShard view op,
+        # _StridedShard.local_shard_size_and_offset used to materialize
+        # offsets via .tolist() on a fake offsets tensor, allocating one
+        # unbacked SymInt per element. These symbols never reached the
+        # returned DTensor's tensor_meta, tripping the downstream
+        # PendingUnbackedSymbolNotFound check. The bug triggers for any
+        # _StridedShard view under compile regardless of whether the local
+        # tensor has backed or unbacked dims; torch.nonzero (producing an
+        # unbacked dim 0) is simply how torchtitan #3409 surfaced it.
+        #
+        # The bug lives in pure sharding-propagation arithmetic on rank 0
+        # alone (no collectives are issued during fake-tensor view tracing),
+        # so the FakeStore + world_size=2 setup used by this test class is
+        # equivalent to the multi-rank scenario for the no-offset path
+        # being exercised here.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        global_bs = 16
+        slen = 4
+        dim = 4
+        split_factor = 8
+
+        def fn(sentinel):
+            nz = torch.nonzero(sentinel).flatten()
+            n_unbacked = nz.size(0)
+            torch._check(n_unbacked >= 1)
+            torch._check(n_unbacked <= global_bs)
+            local = torch.randn(n_unbacked, slen, dim)
+            dt = DTensor.from_local(
+                local,
+                mesh,
+                (_StridedShard(dim=0, split_factor=split_factor),),
+                shape=(global_bs, slen, dim),
+                stride=(slen * dim, dim, 1),
+                run_check=False,
+            )
+            return dt.view(-1, dim)
+
+        sentinel = torch.ones(global_bs, dtype=torch.int64)
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(sentinel)
+        self.assertEqual(
+            out.placements,
+            (_StridedShard(dim=0, split_factor=split_factor),),
+        )
+        self.assertEqual(out.shape, (global_bs * slen, dim))
+
     def test_device_mesh_compile(self):
         def fn(x: DeviceMesh):
             # test size()
