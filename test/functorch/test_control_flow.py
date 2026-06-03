@@ -1661,9 +1661,6 @@ def forward(self, pred_1, x_1):
 
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_closed_over_indexing(self, compile_mode):
-        # The combine_fn closes over a tensor and indexes it with the per-step
-        # integer xs element (a common JAX idiom, e.g. table[:, t] in HMMs and
-        # decoding loops). The xs slice is data-dependent during tracing.
         scan_fct = compile_mode_helper(scan, compile_mode)
 
         table = torch.rand(2, 4)
@@ -1681,9 +1678,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(out, exp_out)
 
     def test_scan_closed_over_indexing_autograd(self):
-        # Differentiate through closed-over indexing. The per-step index value is
-        # an unbacked SymInt; the backward must recompute it (rather than stack
-        # it) and use a data-dependent-friendly select_copy meta.
         table = torch.rand(2, 4, dtype=torch.float64, requires_grad=True)
         transition = torch.rand(2, 2, dtype=torch.float64, requires_grad=True)
         init = torch.tensor([0.6, 0.4], dtype=torch.float64, requires_grad=True)
