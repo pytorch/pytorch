@@ -4447,6 +4447,10 @@ class CompiledAutograd1(torch.nn.Module):
         not torch.distributed.is_available(),
         "FakePG relies on distributed build",
     )
+    @unittest.skipIf(
+        sys.platform == "darwin",
+        "FakePG DTensor test is not supported on macOS",
+    )
     def test_dtensor_backward_symints_do_not_reuse_native_sharding_cache(self):
         def run_case():
             torch._dynamo.reset()
