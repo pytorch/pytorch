@@ -1068,6 +1068,7 @@ def register_pointwise(
     convert_input_to_bool=False,
     override_return_dtype=None,
     override_fn_when_input_bool=None,
+    require_integer_or_boolean=False,
     allow_alpha=False,
     use_fma_for_alpha=False,
     triton_fallback=None,
@@ -1091,6 +1092,20 @@ def register_pointwise(
         use_fma_for_alpha=use_fma_for_alpha,
         triton_fallback=triton_fallback,
     )
+    if require_integer_or_boolean:
+        pointwise_fn = fn
+
+        def fn(*args, **kwargs):
+            for arg in itertools.chain(args, kwargs.values()):
+                if not isinstance(arg, TensorBox):
+                    continue
+                dtype = arg.get_dtype()
+                if not (is_boolean_dtype(dtype) or is_integer_dtype(dtype)):
+                    raise NotImplementedError(
+                        f"{name} is only implemented for integer and Boolean tensors"
+                    )
+            return pointwise_fn(*args, **kwargs)
+
     fn = register_lowering(
         aten_fn,
         broadcast=broadcast,
@@ -8085,14 +8100,16 @@ _foreach_addcdiv_scalar = register_foreach_pointwise(
 register_pointwise_numeric_ldf64(aten.cos)
 register_pointwise_numeric_ldf64(aten.sin)
 abs = register_pointwise(aten.abs)
-bitwise_and = register_pointwise(aten.bitwise_and)
+bitwise_and = register_pointwise(aten.bitwise_and, require_integer_or_boolean=True)
 bitwise_left_shift = register_pointwise(aten.bitwise_left_shift)
 bitwise_not = register_pointwise(
-    aten.bitwise_not, override_fn_when_input_bool="logical_not"
+    aten.bitwise_not,
+    override_fn_when_input_bool="logical_not",
+    require_integer_or_boolean=True,
 )
-bitwise_or = register_pointwise(aten.bitwise_or)
+bitwise_or = register_pointwise(aten.bitwise_or, require_integer_or_boolean=True)
 bitwise_right_shift = register_pointwise(aten.bitwise_right_shift)
-bitwise_xor = register_pointwise(aten.bitwise_xor)
+bitwise_xor = register_pointwise(aten.bitwise_xor, require_integer_or_boolean=True)
 register_pointwise_numeric(aten.lgamma)
 erf = register_pointwise_numeric(aten.erf)
 register_lowering(
