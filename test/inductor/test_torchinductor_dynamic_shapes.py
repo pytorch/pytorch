@@ -169,6 +169,18 @@ class TestInductorDynamic(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
+    def test_combinations_dynamic(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.combinations(x.flatten(), r=2)
+
+        x = torch.randn(3, 1, 1, device=device)
+        model = Model()
+        compiled_model = torch.compile(model, backend="aot_eager", dynamic=True)
+        out = compiled_model(x)
+        expected = model(x)
+        self.assertEqual(out, expected)
+
     def test_constant_fold_uniform_value_dynamic(self, device):
         def full_add_zero(x):
             a = torch.full(x.shape, 1, dtype=x.dtype, device=x.device)
