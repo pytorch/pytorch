@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <vector_types.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
+#include <torch/csrc/distributed/c10d/NCCLCommProvider.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
@@ -176,10 +177,21 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     auto group = resolve_process_group(group_name_);
     rank_ = group->getRank();
     world_size_ = group->getSize();
-    auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
-        group->getBackend(c10::DeviceType::CUDA).get());
-    TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
-    comm_ = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
+    auto backend = group->getBackend(c10::DeviceType::CUDA);
+    if (auto* ncclPg =
+            dynamic_cast<c10d::ProcessGroupNCCL*>(backend.get())) {
+      comm_ = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
+    } else if (auto* commProvider =
+                   dynamic_cast<c10d::NCCLCommProvider*>(backend.get())) {
+      comm_ = reinterpret_cast<ncclComm_t>(commProvider->getNCCLCommPtr());
+    } else {
+      TORCH_CHECK(
+          false,
+          "NCCL symmetric memory requires a ProcessGroupNCCL backend or a backend that exposes NCCLCommProvider");
+    }
+    TORCH_CHECK(
+        comm_ != nullptr,
+        "NCCL symmetric memory requires a non-null NCCL communicator");
 
     // Register a single window over the combined buffer + signal pad region.
     // Layout inside the registration:
