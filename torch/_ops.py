@@ -1161,6 +1161,35 @@ def _has_script_object_arg(schema: torch.FunctionSchema) -> bool:
 # You can obtain an OpOverload object through attribute query.
 class OpOverloadPacket(Generic[_P, _T]):
     __file__: ClassVar[str] = "torch.ops"
+    __name__: str
+    _qualified_op_name: str
+    _op: Callable[_P, _T]
+    _overload_names: list[str]
+    _dir: list[str]
+    _has_torchbind_op_overload: bool
+
+    def __new__(
+        cls,
+        qualified_op_name: str | None = None,
+        op_name: str | None = None,
+        op: Callable[_P, _T] | None = None,
+        overload_names: list[str] | None = None,
+    ) -> "OpOverloadPacket[_P, _T]":
+        self: OpOverloadPacket[_P, _T] = super().__new__(cls)
+        if (
+            qualified_op_name is not None
+            and op_name is not None
+            and op is not None
+            and overload_names is not None
+        ):
+            # Tracing/profiling hooks can inspect self at the entry of __init__.
+            # Initialize fields used by __repr__, __str__, and __getattr__ first.
+            self._qualified_op_name = qualified_op_name
+            self.__name__ = op_name
+            self._op = op
+            self._overload_names = overload_names
+            self._dir = []
+        return self
 
     def __init__(
         self,
@@ -1171,16 +1200,14 @@ class OpOverloadPacket(Generic[_P, _T]):
     ) -> None:
         # These attributes are accessible on the object through the properties
         # defined below but are immutable
-        self._qualified_op_name = qualified_op_name
-        self.__name__ = op_name
-        self._op = op
-        self._overload_names = overload_names
-        self._dir: list[str] = []
         self._has_torchbind_op_overload = any(
             _has_script_object_arg(schema) for schema in self._schemas.values()
         )
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
+    def __copy__(self):
+        return self
+
     def __deepcopy__(self, memo=None):
         return self
 
