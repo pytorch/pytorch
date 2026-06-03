@@ -687,6 +687,7 @@ if rank == 0:
 
 ```{eval-rst}
 .. autoclass:: ReduceOp
+    :members:
 ```
 
 ```{eval-rst}
