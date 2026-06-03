@@ -40,7 +40,7 @@ aten = torch.ops.aten
 from torch.testing._internal.common_fsdp import get_devtype
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 
 import torch
