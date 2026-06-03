@@ -12426,6 +12426,40 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([144, 144]),))
 
+    def test_argmax_argmin_unsupported_input_raises(self):
+        def argmax_fn(x, values):
+            idx = torch.argmax(x, dim=1)
+            return values[idx].sum()
+
+        def argmin_fn(x, values):
+            idx = torch.argmin(x, dim=1)
+            return values[idx].sum()
+
+        scores = torch.tensor(
+            [[-1.0, 2.0, -3.0], [4.0, -5.0, 6.0]], dtype=torch.float32
+        )
+        values = torch.tensor([10.0, 20.0, 30.0])
+        cases = (
+            (argmax_fn, scores > 0.0, r"argmax\(\): does not support bool input"),
+            (argmin_fn, scores > 0.0, r"argmin\(\): does not support bool input"),
+            (
+                argmax_fn,
+                scores.to(torch.complex64),
+                r"argmax\(\): does not support complex input",
+            ),
+            (
+                argmin_fn,
+                scores.to(torch.complex64),
+                r"argmin\(\): does not support complex input",
+            ),
+        )
+
+        for fn, x, msg in cases:
+            with self.subTest(fn=fn.__name__, dtype=x.dtype):
+                compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    compiled(x, values)
+
     def test_argmax_argmin_with_duplicates(self):
         def fn(x):
             return (

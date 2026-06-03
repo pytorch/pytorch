@@ -7921,6 +7921,14 @@ def zero_numel_check_dims(self, dim, fn_name):
 
 # From aten/src/ATen/native/ReduceOps.cpp
 def check_argmax_argmin(name, self, dim):
+    torch._check(
+        not self.is_complex(),
+        lambda: f"{name}(): does not support complex input",
+    )
+    torch._check(
+        self.dtype is not torch.bool,
+        lambda: f"{name}(): does not support bool input",
+    )
     if dim is not None:
         dim = maybe_wrap_dim(dim, self.dim())
         zero_numel_check_dims(self, dim, name)
@@ -7931,12 +7939,21 @@ def check_argmax_argmin(name, self, dim):
         )
 
 
-@register_meta([aten.argmax.default, aten.argmin.default])
-def argmax_argmin_meta(self, dim=None, keepdim=False):
-    check_argmax_argmin("argmax", self, dim)
+def _argmax_argmin_meta(name, self, dim=None, keepdim=False):
+    check_argmax_argmin(name, self, dim)
     dims = utils.reduction_dims(self.shape, (dim,) if dim is not None else None)
     shape = _compute_reduction_shape(self, dims, keepdim)
     return self.new_empty(shape, dtype=torch.int64)
+
+
+@register_meta(aten.argmax.default)
+def argmax_meta(self, dim=None, keepdim=False):
+    return _argmax_argmin_meta("argmax", self, dim, keepdim)
+
+
+@register_meta(aten.argmin.default)
+def argmin_meta(self, dim=None, keepdim=False):
+    return _argmax_argmin_meta("argmin", self, dim, keepdim)
 
 
 @register_meta(aten.scalar_tensor.default)
