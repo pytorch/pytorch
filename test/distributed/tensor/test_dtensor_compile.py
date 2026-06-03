@@ -2475,6 +2475,43 @@ class outer_fn(torch.nn.Module):
             "Placeholder dim should be symbolic",
         )
 
+    def test_make_fx_tp_embedding_no_shadow_nodes(self):
+        """make_fx through a TP-sharded embedding must not produce dead shadow nodes.
+
+        DTensor's ShardingPropagator runs each op on fake global-shape tensors
+        to derive output metadata. Without disable_proxy_modes_tracing, make_fx
+        traces those internal metadata ops, leaving dead "shadow" nodes backed
+        by empty_strided placeholders. For aten.embedding, the shadow node reads
+        uninitialized indices and crashes with out-of-bounds access at runtime.
+        """
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        vocab_size, embed_dim = 32, 16
+        weight = distribute_tensor(torch.randn(vocab_size, embed_dim), mesh, [Shard(0)])
+
+        def fn(weight, indices):
+            dt_indices = DTensor.from_local(
+                indices, mesh, [Replicate()], run_check=False
+            )
+            return torch.nn.functional.embedding(dt_indices, weight).to_local()
+
+        indices = torch.randint(0, vocab_size, (4,))
+
+        traced = make_fx(fn, tracing_mode="fake")(weight, indices)
+
+        empty_strided_nodes = [
+            n
+            for n in traced.graph.nodes
+            if n.op == "call_function"
+            and n.target == torch.ops.aten.empty_strided.default
+        ]
+        self.assertEqual(
+            len(empty_strided_nodes),
+            0,
+            "Shadow empty_strided nodes from ShardingPropagator leaked into "
+            "the make_fx graph; disable_proxy_modes_tracing is not active",
+        )
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):

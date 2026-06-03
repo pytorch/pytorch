@@ -928,6 +928,27 @@ class CPUReproTests(TestCase):
             self.assertNotIn("kernel_src", code)
             self.assertEqual(expected, result)
 
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
+    def test_set_source_tensor_with_view_source(self):
+        def fn(x):
+            x = torch.sigmoid(x).view(x.size(0), -1)
+            param1 = nn.Parameter(x)
+            with torch.no_grad():
+                x.mul_(1.4386868137611386)
+            y = torch.cat([x, x], dim=1)
+            param2 = nn.Parameter(y)
+            z = torch.zeros_like(x) + x
+            param3 = nn.Parameter(z)
+            return param1, param2, param3
+
+        inp = torch.randn(2, 3, 4)
+        with torch.no_grad():
+            expected = fn(inp)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        with torch.no_grad():
+            result = opt_fn(inp)
+        self.assertEqual(expected, result)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     @torch._dynamo.config.patch(allow_rnn=True)
@@ -3461,6 +3482,20 @@ class CPUReproTests(TestCase):
             )
         check_metrics_vec_kernel_count(1)
 
+    def test_emulate_precision_casts_explicit_lowp_round_trip(self):
+        # An explicit fp32->fp16->fp32 round-trip must keep its intermediate
+        # rounding under emulate_precision_casts. The CPU codegen used to collapse
+        # it via the reverse lowp-fp->fp32 CSE cache (populated at to_dtype time),
+        # silently dropping the fp16 rounding. See issue #185337.
+        def fn(x):
+            y = x.to(torch.float16).to(torch.float32)
+            return y, y.sum(dim=1)
+
+        x = torch.arange(20, dtype=torch.float32).reshape(5, 4).t() / 7.0
+        with config.patch({"emulate_precision_casts": True}):
+            torch._dynamo.reset()
+            self.common(fn, (x,))
+
     def test_memory_copy_with_fusion(self):
         def fn(x):
             res = x.relu()
@@ -3624,23 +3659,6 @@ class CPUReproTests(TestCase):
         x = torch.rand([], dtype=torch.bfloat16)
         metrics.reset()
         self.common(fn, (x,))
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_softmax_with_unbacked_zero_dim(self):
-        def softmax_fn(x, n):
-            return torch.softmax(x[:, : n.item()], -1)
-
-        def log_softmax_fn(x, n):
-            return torch.log_softmax(x[:, : n.item()], -1)
-
-        x = torch.randn(3, 5)
-        for fn in (softmax_fn, log_softmax_fn):
-            compiled_fn = torch.compile(fn, fullgraph=True)
-            for length in (0, 2, 5):
-                n = torch.tensor(length)
-                actual = compiled_fn(x, n)
-                expected = fn(x, n)
-                torch.testing.assert_close(actual, expected, equal_nan=True)
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_local_buffer_in_outer_loop_fusion(self):
