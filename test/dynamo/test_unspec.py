@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import datetime
 import math
 import random
 import unittest
@@ -78,6 +79,152 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x, y, z)
         self.assertTrue(same(res1, res2, relax_numpy_equality=True))
+
+    def test_datetime_now_attr_fullgraph(self):
+        def fn(x):
+            current_time = datetime.datetime.now()
+            return x + current_time.second
+
+        x = torch.ones(3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+        seconds = res - x
+        self.assertEqual(seconds, seconds[0].expand_as(seconds))
+        self.assertGreaterEqual(seconds[0].item(), 0)
+        self.assertLessEqual(seconds[0].item(), 59)
+
+    def test_datetime_now_attr_import_alias_fullgraph(self):
+        from datetime import datetime as dt
+
+        def fn(x):
+            current_time = dt.now()
+            return x * current_time.minute
+
+        x = torch.ones(3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+        minutes = res / x
+        self.assertEqual(minutes, minutes[0].expand_as(minutes))
+        self.assertGreaterEqual(minutes[0].item(), 0)
+        self.assertLessEqual(minutes[0].item(), 59)
+
+    def test_datetime_now_attr_runtime_value(self):
+        import torch._dynamo.variables.user_defined as user_defined
+
+        original_get_attrs = user_defined._get_datetime_now_attrs
+        calls = []
+
+        def fake_get_attrs():
+            calls.append(None)
+            return tuple(len(calls) for _ in user_defined._DATETIME_NOW_ATTRS)
+
+        user_defined._get_datetime_now_attrs = fake_get_attrs
+        try:
+
+            def fn(x):
+                current_time = datetime.datetime.now()
+                return (
+                    x + current_time.second,
+                    x + current_time.minute - current_time.second,
+                )
+
+            x = torch.zeros(())
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+            res1, diff1 = opt_fn(x)
+            res2, diff2 = opt_fn(x)
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(res1.item(), 2)
+            self.assertEqual(res2.item(), 3)
+            self.assertEqual(diff1.item(), 0)
+            self.assertEqual(diff2.item(), 0)
+            self.assertEqual(len(calls), 3)
+        finally:
+            user_defined._get_datetime_now_attrs = original_get_attrs
+            torch._dynamo.reset()
+
+    def test_datetime_now_attr_runtime_value_preserves_call_order(self):
+        import torch._dynamo.variables.user_defined as user_defined
+
+        original_get_attrs = user_defined._get_datetime_now_attrs
+        calls = []
+
+        def fake_get_attrs():
+            calls.append(None)
+            return tuple(len(calls) for _ in user_defined._DATETIME_NOW_ATTRS)
+
+        user_defined._get_datetime_now_attrs = fake_get_attrs
+        try:
+
+            def fn(x):
+                current_time1 = datetime.datetime.now()
+                current_time2 = datetime.datetime.now()
+                return x + current_time2.microsecond - current_time1.microsecond
+
+            x = torch.zeros(())
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+            res1 = opt_fn(x)
+            res2 = opt_fn(x)
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(res1.item(), 1)
+            self.assertEqual(res2.item(), 1)
+            self.assertEqual(len(calls), 6)
+        finally:
+            user_defined._get_datetime_now_attrs = original_get_attrs
+            torch._dynamo.reset()
+
+    def test_datetime_now_reconstruct_across_graph_break(self):
+        import torch._dynamo.variables.user_defined as user_defined
+
+        original_get_attrs = user_defined._get_datetime_now_attrs
+        calls = []
+
+        def fake_get_attrs():
+            calls.append(None)
+            return tuple(len(calls) for _ in user_defined._DATETIME_NOW_ATTRS)
+
+        user_defined._get_datetime_now_attrs = fake_get_attrs
+        try:
+
+            def fn(x):
+                current_time = datetime.datetime.now()
+                before = current_time.microsecond
+                torch._dynamo.graph_break()
+                return x + current_time.microsecond - before
+
+            x = torch.ones(3)
+            res1 = torch.compile(fn, backend="eager")(x)
+            res2 = torch.compile(fn, backend="eager")(x)
+            self.assertEqual(res1, x)
+            self.assertEqual(res2, x)
+            self.assertEqual(len(calls), 4)
+        finally:
+            user_defined._get_datetime_now_attrs = original_get_attrs
+            torch._dynamo.reset()
+
+    def test_datetime_now_clone_copies_attr_cache(self):
+        import torch._dynamo.variables.user_defined as user_defined
+        from torch._dynamo.source import RandomValueSource
+        from torch._dynamo.variables.constant import ConstantVariable
+
+        original_second = ConstantVariable.create(1)
+        cloned_second = ConstantVariable.create(2)
+        var = user_defined.DatetimeNowVariable(
+            attrs_source=RandomValueSource(0),
+            attrs=tuple(range(len(user_defined._DATETIME_NOW_ATTRS))),
+            attr_vars={"second": original_second},
+        )
+
+        clone = var.clone()
+        self.assertIsNot(clone.attr_vars, var.attr_vars)
+        clone.attr_vars["second"] = cloned_second
+        self.assertIs(var.attr_vars["second"], original_second)
+        self.assertIs(clone.attr_vars["second"], cloned_second)
 
     def test_feed_random_values_into_graph_only(self):
         def fn(shape):
