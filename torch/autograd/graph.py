@@ -47,6 +47,7 @@ __all__ = [
     "increment_version",
     "set_warn_on_accumulate_grad_stream_mismatch",
     "set_override_stale_capture_stream",
+    "list_saved_tensors",
 ]
 
 
@@ -917,3 +918,37 @@ def _engine_run_backward(
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]
         torch._C._stash_obj_in_tls("context", None)
+
+
+def list_saved_tensors(
+    tensor: torch.Tensor,
+) -> list[tuple[Node, list[torch.Tensor]]]:
+    result = []
+    seen: set[Node] = set()
+
+    def traverse(node: Node) -> None:
+        if node in seen:
+            return
+        seen.add(node)
+
+        saved = []
+        for attr in dir(node):
+            if not attr.startswith("_saved_"):
+                continue
+            val = getattr(node, attr)
+            if torch.is_tensor(val):
+                saved.append(val)
+            elif isinstance(val, tuple):
+                saved.extend(t for t in val if torch.is_tensor(t))
+
+        if saved:
+            result.append((node, saved))
+
+        for child, _ in node.next_functions:
+            if child is not None:
+                traverse(child)
+
+    if tensor.grad_fn is not None:
+        traverse(tensor.grad_fn)
+
+    return result

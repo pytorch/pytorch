@@ -40,7 +40,7 @@ from torch.autograd import (
     Variable,
 )
 from torch.autograd.function import InplaceFunction, once_differentiable
-from torch.autograd.graph import GradientEdge
+from torch.autograd.graph import GradientEdge, list_saved_tensors
 from torch.autograd.profiler import emit_itt, emit_nvtx, profile, record_function
 from torch.autograd.profiler_util import (
     _format_time,
@@ -11542,6 +11542,28 @@ for shape in [(1,), ()]:
             # 3 is saved as a saved tensor because it is a wrapped number, but
             # wrapped numbers should be special cased to not trigger saved variable hooks
             torch.autograd.grad(out, (a,))
+
+    def test_list_saved_tensors(self):
+        self.assertEqual(list_saved_tensors(torch.tensor(1.0)), [])
+
+        x = torch.tensor([-1.0, 2.0, -3.0], requires_grad=True)
+        y = x * x
+        z = torch.relu(y)
+        loss = (z + x).sum()
+
+        result = list_saved_tensors(loss)
+        self.assertEqual(len(result), 2)
+
+        node0, tensors0 = result[0]
+        self.assertEqual(node0.name(), "ReluBackward0")
+        self.assertEqual(len(tensors0), 1)
+        self.assertTrue(torch.equal(tensors0[0], z))
+
+        node1, tensors1 = result[1]
+        self.assertEqual(node1.name(), "MulBackward0")
+        self.assertEqual(len(tensors1), 2)
+        self.assertTrue(torch.equal(tensors1[0], x))
+        self.assertTrue(torch.equal(tensors1[1], x))
 
     def test_graph_save_on_cpu(self):
         def test(get_input, cuda, pin_memory):
