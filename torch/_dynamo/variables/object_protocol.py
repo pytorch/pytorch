@@ -1065,7 +1065,7 @@ def sequence_inplace_repeat(
 
 
 def validate_sequence_repeat_count(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     count: VariableTracker,
 ) -> None:
     n = count.as_python_constant()
