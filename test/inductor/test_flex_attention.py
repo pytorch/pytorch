@@ -6530,6 +6530,71 @@ class TestBlockMask(InductorTestCase):
             )
 
     @supported_platform
+    def test_getitem_seq_lengths(self, device):
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            causal_mask,
+            B=None,
+            H=None,
+            Q_LEN=1024,
+            KV_LEN=1025,
+            device=device,
+            BLOCK_SIZE=256,
+        )
+
+        self.assertEqual(block_mask[:, :, :1].shape, (1, 1, 256, 1025))
+        self.assertEqual(block_mask[:, :, 1:].shape, (1, 1, 768, 1025))
+
+        partial_q_block_mask = create_block_mask(
+            causal_mask,
+            B=None,
+            H=None,
+            Q_LEN=1023,
+            KV_LEN=1025,
+            device=device,
+            BLOCK_SIZE=256,
+        )
+
+        self.assertEqual(partial_q_block_mask[:, :, :3].shape, (1, 1, 768, 1025))
+        self.assertEqual(partial_q_block_mask[:, :, :4].shape, (1, 1, 1023, 1025))
+        self.assertEqual(partial_q_block_mask[:, :, 2:4].shape, (1, 1, 511, 1025))
+        self.assertEqual(partial_q_block_mask[:, :, 1:].shape, (1, 1, 767, 1025))
+        self.assertEqual(partial_q_block_mask[:, :, -1].shape, (1, 1, 255, 1025))
+
+        q_index = torch.tensor([3], dtype=torch.int64)
+        self.assertEqual(partial_q_block_mask[:, :, q_index].shape, (1, 1, 255, 1025))
+
+        batched_partial_q_block_mask = create_block_mask(
+            causal_mask,
+            B=2,
+            H=3,
+            Q_LEN=1023,
+            KV_LEN=1025,
+            device=device,
+            BLOCK_SIZE=256,
+        )
+        q_scalar_index = torch.tensor(3, dtype=torch.int64, device=device)
+        self.assertEqual(
+            batched_partial_q_block_mask[:, :, q_scalar_index].shape,
+            (2, 3, 255, 1025),
+        )
+        self.assertEqual(
+            batched_partial_q_block_mask[:, :, q_scalar_index].kv_indices.shape,
+            (2, 3, 1, 5),
+        )
+
+        with self.assertRaisesRegex(NotImplementedError, "contiguous range"):
+            batched_partial_q_block_mask[
+                :, :, torch.tensor([3, 3], dtype=torch.int64, device=device)
+            ]
+        with self.assertRaisesRegex(NotImplementedError, "contiguous range"):
+            batched_partial_q_block_mask[
+                :, :, torch.tensor([3, 0], dtype=torch.int64, device=device)
+            ]
+
+    @supported_platform
     def test_block_mask_positional_constructor_preserves_block_size(self, device):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
