@@ -1242,17 +1242,47 @@ template <>
   return v;
 }
 
+// Shared by the CPU and CUDA (non-jiterator) gcd/lcm kernels.
 template <typename T>
-inline typename std::enable_if_t<std::is_integral_v<T>, T>
+inline C10_HOST_DEVICE typename std::enable_if_t<std::is_integral_v<T>, T>
 calc_gcd(T a, T b) {
-  a = abs_impl(a);
-  b = abs_impl(b);
-  while (a != 0) {
-    T c = a;
-    a = b % a;
-    b = c;
+  // Compute in the unsigned type: abs of the most negative signed value
+  // overflows, which used to yield a wrong negative gcd.
+  using U = std::make_unsigned_t<T>;
+  U ua = static_cast<U>(a);
+  U ub = static_cast<U>(b);
+  if constexpr (std::is_signed_v<T>) {
+    if (a < 0) {
+      ua = U(0) - ua;
+    }
+    if (b < 0) {
+      ub = U(0) - ub;
+    }
   }
-  return b;
+  while (ua != 0) {
+    U c = ua;
+    ua = ub % ua;
+    ub = c;
+  }
+  return static_cast<T>(ub);
+}
+
+template <typename T>
+inline C10_HOST_DEVICE typename std::enable_if_t<std::is_integral_v<T>, T>
+calc_lcm(T a, T b) {
+  T g = calc_gcd(a, b);
+  if (g == T(0)) {
+    return T(0);
+  }
+  // Equivalent to abs(a / g * b) but without signed-overflow UB: the multiply
+  // and the abs are done in the unsigned type at integer-promoted width, so
+  // out-of-range results wrap exactly like the plain expression does on
+  // wrapping hardware. a / g is exact and cannot overflow (g divides a, and
+  // g == INT_MIN only when a is 0 or INT_MIN).
+  using P = std::conditional_t<(sizeof(T) < sizeof(int)), int, T>;
+  using U = std::make_unsigned_t<P>;
+  U m = static_cast<U>(static_cast<P>(a / g)) * static_cast<U>(static_cast<P>(b));
+  return static_cast<T>(static_cast<P>(m) < P(0) ? U(0) - m : m);
 }
 
 template <typename T>

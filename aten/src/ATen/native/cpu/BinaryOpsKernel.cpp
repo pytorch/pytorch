@@ -1194,8 +1194,7 @@ void gcd_kernel(TensorIteratorBase& iter) {
 void lcm_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "lcm_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-      scalar_t g = calc_gcd(a, b);
-      return (g == 0) ? 0 : std::abs(a / g * b);
+      return calc_lcm(a, b);
     });
   });
 }

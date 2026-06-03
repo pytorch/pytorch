@@ -189,34 +189,28 @@ const auto log_ndtr_string = jiterator_stringify(
 const auto gcd_string = jiterator_stringify(
   template <typename T>
   T gcd(const T a_in, const T b_in) {
-    T a = abs(a_in);
-    T b = abs(b_in);
+    // Compute in unsigned 64-bit, mirroring the unsigned arithmetic in
+    // calc_gcd (ATen/native/Math.h): abs of the most negative value and
+    // INT_MIN % -1 are signed-overflow UB. The jitted preamble has no
+    // make_unsigned, so use the widest unsigned type; gcd magnitudes fit.
+    unsigned long long a = a_in < T{0}
+        ? 0ULL - static_cast<unsigned long long>(a_in)
+        : static_cast<unsigned long long>(a_in);
+    unsigned long long b = b_in < T{0}
+        ? 0ULL - static_cast<unsigned long long>(b_in)
+        : static_cast<unsigned long long>(b_in);
 
-    while (a != T{0}) {
-      T c = a;
+    while (a != 0ULL) {
+      unsigned long long c = a;
       a = b % a;
       b = c;
     }
 
-    return b;
+    return static_cast<T>(b);
   }
 ); // gcd_string
 
-const auto lcm_string = jiterator_stringify(
-  template <typename T>
-  T gcd(const T a_in, const T b_in) {
-    T a = abs(a_in);
-    T b = abs(b_in);
-
-    while (a != T{0}) {
-      T c = a;
-      a = b % a;
-      b = c;
-    }
-
-    return b;
-  }
-
+const auto lcm_string = gcd_string + jiterator_stringify(
   template <typename T>
   T lcm(const T a, const T b) {
     T g = gcd(a, b);
@@ -3053,17 +3047,9 @@ const auto spherical_bessel_j0_string = jiterator_stringify(
 
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
 
-template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
-  scalar_t a = ::abs(a_in);
-  scalar_t b = ::abs(b_in);
-  while (a != 0) {
-    scalar_t c = a;
-    a = b % a;
-    b = c;
-  }
-  return b;
-}
+// calc_gcd (non-jiterator path) is shared with the CPU kernel; see
+// ATen/native/Math.h. The jiterator gcd/lcm strings above are runtime-compiled
+// and cannot share that code, so they carry their own INT_MIN-safe copy.
 
 /*
  * For licensing information, please refer to the cpu implementation located in "ATen/native/Math.h".

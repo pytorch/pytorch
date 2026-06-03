@@ -439,8 +439,10 @@ struct gcd_functor {
     // device analog of C++20 std::countr_zero) instead of integer
     // division/modulo, which is emulated (and slow) for 64-bit ints on MPS.
     // ctz is only ever evaluated on values guarded to be non-zero.
-    T u = a < 0 ? -a : a;
-    T v = b < 0 ? -b : b;
+    // Work unsigned: abs of the most negative value overflows and hangs.
+    using U = ::metal::make_unsigned_t<T>;
+    U u = a < 0 ? U(0) - U(a) : U(a);
+    U v = b < 0 ? U(0) - U(b) : U(b);
     if (u == 0) {
       return v;
     }
@@ -455,7 +457,7 @@ struct gcd_functor {
     do {
       v >>= ::metal::ctz(v);
       if (u > v) {
-        T t = u;
+        U t = u;
         u = v;
         v = t;
       }
