@@ -248,7 +248,11 @@ def _check_for_seq_len_0_nested(params: SDPAParams, debug=False) -> bool:
 
 
 def _check_query_seq_len_cudnn_nested(params: SDPAParams, debug=False) -> bool:
-    if params.query._get_max_seqlen() <= 128:
+    query = params.query
+    if not isinstance(query, NestedTensor):
+        raise AssertionError("query should be a jagged NT")
+
+    if query._get_max_seqlen() <= 128:
         if debug:
             log.warning(
                 "cuDNN attention does not support nested tensor query sequence "
