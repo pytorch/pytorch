@@ -2,6 +2,7 @@
 
 import contextlib
 import os
+import tempfile
 import unittest
 
 import torch
@@ -912,7 +913,7 @@ class TestDTensorDebugMode(TestCase):
         "Being conservative, test peak memory is 25MB?",
     )
     def test_tensor_hash_redistribute(self):
-        # test that hashing collectives gives correct results
+        # test that hashing waits after collectives gives correct results
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         local_tensor = torch.ones(2**18, device=self.device_type)
@@ -921,7 +922,7 @@ class TestDTensorDebugMode(TestCase):
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
             dt.redistribute(mesh, [Replicate()])
 
-        # Find all_gather hash
+        # Functional collective outputs should not be hashed before wait_tensor.
         all_gather_logs = [
             op
             for op in debug_mode.logs
@@ -929,7 +930,16 @@ class TestDTensorDebugMode(TestCase):
             and op.op == torch.ops._c10d_functional.all_gather_into_tensor.default
         ]
         self.assertEqual(len(all_gather_logs), 1)
-        actual_hash = all_gather_logs[0].log["hash"]
+        self.assertNotIn("hash", all_gather_logs[0].log or {})
+
+        wait_logs = [
+            op
+            for op in debug_mode.logs
+            if isinstance(op, _OpCall)
+            and op.op == torch.ops._c10d_functional.wait_tensor.default
+        ]
+        self.assertEqual(len(wait_logs), 1)
+        actual_hash = wait_logs[0].log["hash"]
         self.assertEqual(actual_hash, float(local_tensor.numel() * self.world_size))
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
@@ -1126,7 +1136,7 @@ class TestDTensorDebugMode(TestCase):
 
 
 class TestDebugModeUtils(TestCase):
-    """Test DebugMode with NCCL backend without using DTensor."""
+    """Test DebugMode utilities without DTensor."""
 
     def test_hash_empty_tensor(self):
         t = torch.tensor([])
@@ -1135,6 +1145,70 @@ class TestDebugModeUtils(TestCase):
         self.assertTrue(isinstance(out, torch.Tensor))
         out = torch.utils._debug_mode.hash_tensor_fn(t, use_scalar=True)
         self.assertTrue(isinstance(out, int))
+
+    def test_functional_collective_hashes_only_wait_outputs(self):
+        if dist.is_initialized():
+            self.skipTest("requires no existing process group")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            init_file = os.path.join(tmpdir, "debug_mode_collective_init")
+            dist.init_process_group(
+                "gloo",
+                init_method=f"file://{init_file}",
+                rank=0,
+                world_size=1,
+            )
+            try:
+                x = torch.ones(2)
+                with (
+                    DebugMode(record_torchfunction=False) as debug_mode,
+                    DebugMode.log_tensor_hashes(hash_inputs=True),
+                ):
+                    result = _functional_collectives.all_reduce(
+                        x, "sum", dist.group.WORLD
+                    )
+                    viewed = result.view(2)
+                    waited = result.wait()
+                    result_for_add = _functional_collectives.all_reduce(
+                        x, "sum", dist.group.WORLD
+                    )
+                    added = result_for_add + 1
+            finally:
+                dist.destroy_process_group()
+
+        def logs_for(op):
+            return [
+                log
+                for log in debug_mode.logs
+                if isinstance(log, _OpCall) and log.op == op
+            ]
+
+        for op in (
+            torch.ops._c10d_functional.all_reduce.default,
+            torch.ops._c10d_functional._wrap_tensor_autograd.default,
+        ):
+            op_logs = logs_for(op)
+            self.assertEqual(len(op_logs), 2)
+            for op_log in op_logs:
+                self.assertNotIn("hash", op_log.log or {})
+                self.assertNotIn("input_hash", op_log.log or {})
+
+        view_logs = logs_for(torch.ops.aten.view.default)
+        self.assertEqual(len(view_logs), 1)
+        self.assertNotIn("hash", view_logs[0].log or {})
+        self.assertNotIn("input_hash", view_logs[0].log or {})
+
+        add_logs = logs_for(torch.ops.aten.add.Tensor)
+        self.assertEqual(len(add_logs), 1)
+        self.assertNotIn("input_hash", add_logs[0].log or {})
+        self.assertEqual(add_logs[0].log["hash"], norm_hash_fn(added, use_scalar=True))
+
+        wait_logs = logs_for(torch.ops._c10d_functional.wait_tensor.default)
+        self.assertEqual(len(wait_logs), 1)
+        wait_log = wait_logs[0].log
+        self.assertNotIn("input_hash", wait_log or {})
+        self.assertEqual(wait_log["hash"], norm_hash_fn(waited, use_scalar=True))
+        self.assertIsInstance(viewed, _functional_collectives.AsyncCollectiveTensor)
 
 
 class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
@@ -1241,11 +1315,18 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
             result = _functional_collectives.all_gather_tensor(
                 tensor, gather_dim=0, group=dist.group.WORLD
             )
+            result = result.wait()
 
-        result = result.wait()
         hash_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
 
-        self.assertEqual(debug_mode.operators[-1].log["hash"], hash_(result))
+        wait_logs = [
+            op
+            for op in debug_mode.logs
+            if isinstance(op, _OpCall)
+            and op.op == torch.ops._c10d_functional.wait_tensor.default
+        ]
+        self.assertEqual(len(wait_logs), 1)
+        self.assertEqual(wait_logs[0].log["hash"], hash_(result))
 
         self.assertTrue(
             "_c10d_functional::all_gather_into_tensor" in debug_mode.debug_string()
