@@ -1550,10 +1550,13 @@ static void svd_kernel_mps(const Tensor& A,
   Tensor in = (transposed ? A.mH() : A).contiguous().reshape({batch, wm, k});
 
   auto opts = A.options();
-  Tensor S_k = at::empty({batch, k}, opts.dtype(c10::toRealValueType(A.scalar_type())));
+  const bool S_direct = S.is_contiguous() && S.scalar_type() == c10::toRealValueType(A.scalar_type());
+  const bool info_direct = info.is_contiguous() && info.scalar_type() == kInt;
+  Tensor S_k =
+      S_direct ? S.reshape({batch, k}) : at::empty({batch, k}, opts.dtype(c10::toRealValueType(A.scalar_type())));
   // Device-memory accumulator only when V is not staged; tiny placeholder otherwise.
   Tensor Vacc_k = stage_v ? at::empty({1}, opts) : at::empty({batch, k, k}, opts);
-  Tensor info_b = at::zeros({batch}, opts.dtype(kInt));
+  Tensor info_b = info_direct ? info.reshape({batch}) : at::empty({batch}, opts.dtype(kInt));
   // svdvals: U/Vh empty, so bind scratch for the kernel's (still-run) U writeback.
   Tensor U_scratch, Vh_scratch;
   if (!compute_uv) {
@@ -1604,8 +1607,12 @@ static void svd_kernel_mps(const Tensor& A,
     }
   });
 
-  const_cast<Tensor&>(S).copy_(S_k.reshape(S.sizes()));
-  const_cast<Tensor&>(info).copy_(info_b.reshape(info.sizes()));
+  if (!S_direct) {
+    const_cast<Tensor&>(S).copy_(S_k.reshape(S.sizes()));
+  }
+  if (!info_direct) {
+    const_cast<Tensor&>(info).copy_(info_b.reshape(info.sizes()));
+  }
 
   if (compute_uv && full_matrices && (m != k || n != k)) {
     // full_matrices: complete cols k.. via an orthonormal basis of (I - Q Q^H).
@@ -1682,8 +1689,11 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
   }
 
   Tensor V = eigenvectors.reshape({batch, n, n});
-  Tensor W = at::empty({batch, n}, eigenvectors.options().dtype(c10::toRealValueType(dtype)));
-  Tensor info_b = at::zeros({batch}, eigenvectors.options().dtype(kInt));
+  const bool W_direct = eigenvalues.is_contiguous() && eigenvalues.scalar_type() == c10::toRealValueType(dtype);
+  const bool info_direct = infos.is_contiguous() && infos.scalar_type() == kInt;
+  Tensor W = W_direct ? eigenvalues.reshape({batch, n})
+                      : at::empty({batch, n}, eigenvectors.options().dtype(c10::toRealValueType(dtype)));
+  Tensor info_b = info_direct ? infos.reshape({batch}) : at::empty({batch}, eigenvectors.options().dtype(kInt));
 
   EighParams params{static_cast<uint32_t>(n),
                     /*max_sweeps=*/80u,
@@ -1702,7 +1712,7 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
       // threadgroup memory before any device writeback.
       mtl_setArgs(enc, V, W, V, info_b, params);
       [enc setThreadgroupMemoryLength:n * n * elem_size atIndex:0];
-      [enc setThreadgroupMemoryLength:n * n * elem_size atIndex:1];
+      [enc setThreadgroupMemoryLength:(compute_eigenvectors ? n * n * elem_size : elem_size) atIndex:1];
       const NSUInteger simd = 32;
       const NSUInteger kMaxSimdGroups = 16;
       const NSUInteger maxThreads = pso.maxTotalThreadsPerThreadgroup;
@@ -1714,8 +1724,12 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
     }
   });
 
-  const_cast<Tensor&>(eigenvalues).copy_(W.reshape(eigenvalues.sizes()));
-  const_cast<Tensor&>(infos).copy_(info_b.reshape(infos.sizes()));
+  if (!W_direct) {
+    const_cast<Tensor&>(eigenvalues).copy_(W.reshape(eigenvalues.sizes()));
+  }
+  if (!info_direct) {
+    const_cast<Tensor&>(infos).copy_(info_b.reshape(infos.sizes()));
+  }
 }
 
 static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, bool upper) {
