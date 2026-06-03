@@ -8763,6 +8763,7 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
         )
         if has_wait_stream:
             for void_op in void_ops:
+                assert isinstance(void_op, ir.ExternKernel)
                 for arg in args:
                     for arg_leaf in pytree.tree_leaves(arg):
                         if not isinstance(arg_leaf, IRNode):
