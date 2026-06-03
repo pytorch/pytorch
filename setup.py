@@ -900,6 +900,86 @@ def check_pydep(importname: str, module: str) -> None:
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
+    # Crates compiled via cargo. Each entry is the package directory containing
+    # Cargo.toml; its [lib] name must match the PyO3 #[pymodule] function name.
+    RUST_EXTENSIONS: ClassVar[list[tuple[str, str]]] = [
+        # (cargo manifest dir relative to setup.py, dotted python module path)
+        ("torch/_rust", "torch._rust"),
+    ]
+
+    @staticmethod
+    def _find_cargo() -> str:
+        cargo = os.environ.get("CARGO") or shutil.which("cargo")
+        if cargo:
+            return cargo
+        # Common install locations when not on PATH (e.g. PEP-517 subprocess).
+        home = Path.home()
+        for candidate in [home / ".cargo" / "bin" / "cargo"]:
+            if candidate.exists():
+                return str(candidate)
+        raise RuntimeError(
+            "cargo not found. Install Rust (https://rustup.rs) or set the "
+            "CARGO env var to your cargo binary."
+        )
+
+    def _build_rust_extensions(self) -> None:
+        import sysconfig
+
+        cargo = self._find_cargo()
+
+        for manifest_dir, dotted_module in self.RUST_EXTENSIONS:
+            manifest = CWD / manifest_dir / "Cargo.toml"
+            if not manifest.exists():
+                continue
+
+            *pkg_parts, lib_name = dotted_module.split(".")
+            profile = "release"
+            target_dir = Path(self.build_temp) / "rust" / lib_name
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            # Point pyo3 at the interpreter we're building against — otherwise
+            # it falls back to $CONDA_PREFIX/bin/python which may not exist.
+            env = os.environ.copy()
+            env.setdefault("PYO3_PYTHON", sys.executable)
+            # Cargo invokes rustc/rustup-proxy from PATH; if cargo was found via
+            # CARGO env var or shutil.which on a non-default path, its sibling
+            # rustc may not be on PATH in this subprocess.
+            cargo_bin_dir = str(Path(cargo).resolve().parent)
+            env["PATH"] = cargo_bin_dir + os.pathsep + env.get("PATH", "")
+
+            report(f"-- Building Rust extension {dotted_module}")
+            subprocess.check_call(
+                [
+                    cargo,
+                    "build",
+                    f"--profile={profile}",
+                    "--manifest-path",
+                    str(manifest),
+                    "--target-dir",
+                    str(target_dir),
+                ],
+                env=env,
+            )
+
+            if IS_WINDOWS:
+                produced = target_dir / profile / f"{lib_name}.dll"
+            elif IS_DARWIN:
+                produced = target_dir / profile / f"lib{lib_name}.dylib"
+            else:
+                produced = target_dir / profile / f"lib{lib_name}.so"
+
+            ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
+            target_filename = f"{lib_name}{ext_suffix}"
+
+            dest_pkg_dir = Path(self.build_lib).joinpath(*pkg_parts)
+            dest_pkg_dir.mkdir(parents=True, exist_ok=True)
+            self.copy_file(produced, dest_pkg_dir / target_filename)
+
+            # For `pip install -e .` the source tree is what gets imported.
+            if self.inplace:
+                inplace_pkg_dir = CWD.joinpath(*pkg_parts)
+                self.copy_file(produced, inplace_pkg_dir / target_filename)
+
     def run(self) -> None:
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists
         # and we can get an accurate report on what is used and what is not.
@@ -970,8 +1050,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report("-- Using ITT")
         else:
             report("-- Not using ITT")
+        report("-- Building Rust extensions")
 
         super().run()
+
+        self._build_rust_extensions()
 
         # Copy the essential export library to compile C++ extensions.
         if IS_WINDOWS:

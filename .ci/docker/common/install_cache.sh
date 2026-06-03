@@ -5,21 +5,20 @@ set -ex
 install_ubuntu() {
   echo "Installing pkg-config and libssl-dev"
   apt-get update && apt-get install -y pkg-config libssl-dev curl
-  echo "Installing rust"
-  curl https://sh.rustup.rs -sSf | sh -s -- -y
   echo "Checking out sccache repo"
   git clone https://github.com/mozilla/sccache -b v0.13.0
   cd sccache
   echo "Patch dist build on aarch64"
   sed -i '/all(target_os = "linux", target_arch = "x86_64"),/{ p; s/x86_64/aarch64/; }' src/bin/sccache-dist/main.rs
   echo "Building sccache"
-  . "$HOME/.cargo/env" && cargo build --release --features="dist-client dist-server"
+  # Use the system-wide toolchain from install_rust.sh; keep crate downloads out
+  # of the persistent CARGO_HOME to avoid bloating the image.
+  CARGO_HOME="$(pwd)/.cargo_home" cargo build --release --features="dist-client dist-server"
   cp target/release/sccache /opt/cache/bin
   cp target/release/sccache-dist /opt/cache/bin
   echo "Cleaning up"
   cd ..
   rm -rf sccache
-  rustup self uninstall -y
   apt-get remove -y pkg-config libssl-dev
   apt-get autoclean && apt-get clean
 
