@@ -206,9 +206,14 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
 
 @register_decomposition(aten.hardtanh_backward)
 @out_wrapper("grad_input")
+@pw_cast_for_opmath
 def hardtanh_backward(
     grad_output: Tensor, self: Tensor, min_val: float, max_val: float
 ):
+    # Compare in opmath (compute) dtype to match the eager kernel, which casts
+    # self to opmath_t before comparing against the float bounds. Comparing in
+    # the low-precision input dtype would round the bound and misclassify
+    # boundary values (e.g. bf16(0.7) == 0.69921875 vs max_val=0.7).
     return torch.where((self <= min_val) | (self >= max_val), 0.0, grad_output)
 
 
@@ -298,7 +303,7 @@ def silu(self: Tensor) -> Tensor:
 @out_wrapper("grad_input")
 @pw_cast_for_opmath
 def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
-    sigmoid = 1 / (1 + torch.exp(-self))
+    sigmoid = torch.sigmoid(self)
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 
@@ -1380,21 +1385,25 @@ def embedding_dense_backward(
     )
     grad_output = grad_output.to(computation_dtype)
     indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
+    valid_indices = (indices >= 0) & (indices < num_weights)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
-        counts = aten._unsafe_index_put(counts, [indices], ones, accumulate=True)
-        grad_weights_scale = counts[indices]
+        counts = aten._unsafe_masked_index_put_accumulate(
+            counts, valid_indices, [indices], ones
+        )
+        grad_weights_scale = aten._unsafe_masked_index(
+            counts, valid_indices, [indices], 1
+        )
         grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
-    mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
-    grad = grad_output.masked_fill(mask, 0)
+    mask = _unsqueeze_to_dim(valid_indices & (indices != padding_idx), grad_output.ndim)
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return aten._unsafe_index_put(grad_weight, [indices], grad, accumulate=True).to(
-        result_dtype
-    )
+    return aten._unsafe_masked_index_put_accumulate(
+        grad_weight, mask, [indices], grad_output
+    ).to(result_dtype)
 
 
 def prod(x: list[int]):
@@ -1531,10 +1540,17 @@ def unsafe_split_with_sizes(
 def split(self: Tensor, split_size: int, dim: int = 0) -> tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
+    torch._check(
+        split_size >= 0,
+        lambda: f"split expects split_size be non-negative, but got split_size={split_size}",
+    )
     if dim_size == 0:
         return (self.detach(),)
-    if split_size == 0:
-        raise AssertionError(f"split_size is 0 but dim_size is {dim_size}, expected 0")
+    torch._check(
+        split_size > 0,
+        lambda: "split_size can only be 0 if dimension size is 0, "
+        f"but got dimension size of {dim_size}",
+    )
     chunks = (dim_size + split_size - 1) // split_size
 
     # Avoid importing sympy at a module level
@@ -3284,6 +3300,8 @@ def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 def _index_copy(
     x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
         x.device == index.device and x.device == tensor.device,
@@ -3297,6 +3315,45 @@ def _index_copy(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
+    num_indices = index.numel()
+    if tensor.ndim == 0:
+        torch._check(
+            num_indices == 1,
+            lambda: (
+                "index_copy_(): When source is scalar, index should have "
+                f"one element (got {num_indices})"
+            ),
+        )
+    elif x.ndim != 0:
+        torch._check(
+            tensor.ndim == x.ndim,
+            lambda: (
+                "index_copy_(): When source and destination are not scalars, "
+                "their dimensionality must match. Source dimensionality "
+                f"({tensor.ndim}), destination dimensionality ({x.ndim})"
+            ),
+        )
+
+    x_sliced_shape = x.shape[:dim] + x.shape[dim + 1 :] if x.ndim > 0 else ()
+    tensor_sliced_shape = (
+        tensor.shape[:dim] + tensor.shape[dim + 1 :] if tensor.ndim > 0 else ()
+    )
+    torch._check(
+        sym_eq(x_sliced_shape, tensor_sliced_shape),
+        lambda: (
+            "index_copy_(): Source/destination tensor must have same slice shapes. "
+            f"Destination slice shape: {x_sliced_shape} at dimension {dim} "
+            f"and source slice shape: {tensor_sliced_shape} at dimension 0."
+        ),
+    )
+    if tensor.ndim != 0:
+        torch._check(
+            num_indices == tensor.size(dim),
+            lambda: (
+                f"index_copy_(): Number of indices ({num_indices}) should be "
+                f"equal to source.size(dim) ({tensor.size(dim)})"
+            ),
+        )
     # Treat scalars as elements of \R^1
     zero_dim = x.ndim == 0
     x1 = x.unsqueeze(0) if zero_dim else x
@@ -3563,13 +3620,13 @@ def _upsample_nearest(
     indices = [None, None] + spatial_indices
     result = aten._unsafe_index(input, indices)
 
-    if result.ndim == 4:
+    if result.ndim in (4, 5):
         # convert output to correct memory format, if necessary
         memory_format = utils.suggest_memory_format(input)
 
         # following "heuristic: only use channels_last path when it's faster than the contiguous path"
         n_channels = input.shape[1]
-        if input.device.type == "cuda" and n_channels < 4:
+        if result.ndim == 4 and input.device.type == "cuda" and n_channels < 4:
             memory_format = torch.contiguous_format
 
         result = result.contiguous(memory_format=memory_format)
