@@ -788,11 +788,14 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
     Attributes:
         num_streams: Number of streams (determined by user annotations on nodes).
         stream_idx_to_user_obj_idx: Maps stream_idx → user_object_index for
-            retrieving user stream objects via get_external_object_by_index.
+            retrieving user stream objects via _get_stream_by_index.
     """
 
     num_streams: int = 1
     stream_idx_to_user_obj_idx: dict[int, int] = dataclasses.field(default_factory=dict)
+    stream_op_stream_indices: set[int] = dataclasses.field(default_factory=set)
+    stream_op_event_indices: set[int] = dataclasses.field(default_factory=set)
+    setup_stream_cache: bool = True
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Generate context switching and stream retrieval code."""
@@ -800,15 +803,33 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
             super().codegen(code)
         else:
             super().codegen(code)
-            code.writeline(f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}")
 
-            if self.num_streams > 1:
-                for i in range(1, self.num_streams):
-                    user_obj_idx = self.stream_idx_to_user_obj_idx[i]
+            if self.setup_stream_cache:
+                code.writeline(f"{DEFAULT_STREAM} = torch.cuda.current_stream()")
+
+                if self.num_streams > 1:
+                    non_default_user_obj_indices = set(self.stream_idx_to_user_obj_idx.values())
+                    default_indices = sorted(self.stream_op_stream_indices - non_default_user_obj_indices)
+                    new_indices = sorted(non_default_user_obj_indices & self.stream_op_stream_indices)
+                    event_indices = sorted(self.stream_op_event_indices)
+
+                    if default_indices or new_indices or event_indices:
+                        code.writeline(
+                            "from torch._dynamo.variables.streams import _setup_stream_event_cache"
+                        )
+                        code.writeline(
+                            f"_setup_stream_event_cache({default_indices}, {new_indices}, {event_indices})"
+                        )
+
                     code.writeline(
-                        f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
-                        f"= get_external_object_by_index({user_obj_idx})",
+                        "from torch._dynamo.variables.streams import _get_stream_by_index"
                     )
+                    for i in range(1, self.num_streams):
+                        user_obj_idx = self.stream_idx_to_user_obj_idx[i]
+                        code.writeline(
+                            f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
+                            f"= _get_stream_by_index({user_obj_idx})",
+                        )
 
 
 @dataclasses.dataclass
@@ -1826,26 +1847,29 @@ class PythonWrapperCodegen(CodeGen):
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
+    _stream_cache_setup_done: bool = False
+
     def codegen_device_guard_enter(
         self,
         device_idx: int,
         num_streams: int = 1,
         stream_idx_to_user_obj_idx: dict[int, int] | None = None,
+        stream_op_stream_indices: set[int] | None = None,
+        stream_op_event_indices: set[int] | None = None,
     ) -> None:
         if num_streams > 1:
             assert stream_idx_to_user_obj_idx is not None
-            import_line = (
-                "from torch._dynamo.graph_bytecode_inputs import "
-                "get_external_object_by_index"
-            )
-            if not self.imports.contains(import_line):
-                self.imports.writeline(import_line)
+            setup_stream_cache = not self._stream_cache_setup_done
+            self._stream_cache_setup_done = True
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
                     self.last_seen_device_guard_index,
                     num_streams,
                     stream_idx_to_user_obj_idx,
+                    stream_op_stream_indices=stream_op_stream_indices or set(),
+                    stream_op_event_indices=stream_op_event_indices or set(),
+                    setup_stream_cache=setup_stream_cache,
                 ),
             )
         else:
@@ -1906,8 +1930,13 @@ class PythonWrapperCodegen(CodeGen):
         """Generate data structure for exiting a CUDA Stream context."""
         self.writeline(ExitCudaStreamContextLine())
 
+    _graph_return_counter: int = 0
+
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
+            graph_idx = PythonWrapperCodegen._graph_return_counter
+            PythonWrapperCodegen._graph_return_counter += 1
+
             if config.nan_asserts:
                 self.wrapper_call.writeline(
                     "return_vars = (" + ", ".join(output_refs) + ", )"
@@ -1919,6 +1948,18 @@ class PythonWrapperCodegen(CodeGen):
                 self.wrapper_call.writeline("assert not var.isnan().any().item()")
                 self.wrapper_call.writeline("assert not var.isinf().any().item()")
                 self.wrapper_call.do_unindent(2)
+
+            all_indices = "none"
+            sync_env = f"_sync_env_{graph_idx}"
+            self.wrapper_call.writeline(
+                f'{sync_env} = __import__("os").environ.get("INDUCTOR_SYNC_GRAPHS", "{all_indices}")'
+            )
+            self.wrapper_call.writeline(
+                f'if {sync_env} != "none" and "{graph_idx}" in {sync_env}.split(","):'
+            )
+            self.wrapper_call.do_indent()
+            self.wrapper_call.writeline("torch.cuda.synchronize()")
+            self.wrapper_call.do_unindent()
 
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
