@@ -793,6 +793,7 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
 
     num_streams: int = 1
     stream_idx_to_user_obj_idx: dict[int, int] = dataclasses.field(default_factory=dict)
+    setup_stream_cache: bool = True
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Generate context switching and stream retrieval code."""
@@ -800,15 +801,17 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
             super().codegen(code)
         else:
             super().codegen(code)
-            code.writeline(f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}")
 
-            if self.num_streams > 1:
-                for i in range(1, self.num_streams):
-                    user_obj_idx = self.stream_idx_to_user_obj_idx[i]
-                    code.writeline(
-                        f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
-                        f"= get_external_object_by_index({user_obj_idx})",
-                    )
+            if self.setup_stream_cache:
+                code.writeline(f"{DEFAULT_STREAM} = torch.cuda.current_stream()")
+
+                if self.num_streams > 1:
+                    for i in range(1, self.num_streams):
+                        user_obj_idx = self.stream_idx_to_user_obj_idx[i]
+                        code.writeline(
+                            f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
+                            f"= get_external_object_by_index({user_obj_idx})",
+                        )
 
 
 @dataclasses.dataclass
@@ -1823,6 +1826,8 @@ class PythonWrapperCodegen(CodeGen):
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
+    _stream_cache_setup_done: bool = False
+
     def codegen_device_guard_enter(
         self,
         device_idx: int,
@@ -1831,6 +1836,8 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         if num_streams > 1:
             assert stream_idx_to_user_obj_idx is not None
+            setup_stream_cache = not self._stream_cache_setup_done
+            self._stream_cache_setup_done = True
             import_line = (
                 "from torch._dynamo.graph_bytecode_inputs import "
                 "get_external_object_by_index"
@@ -1843,6 +1850,7 @@ class PythonWrapperCodegen(CodeGen):
                     self.last_seen_device_guard_index,
                     num_streams,
                     stream_idx_to_user_obj_idx,
+                    setup_stream_cache=setup_stream_cache,
                 ),
             )
         else:
