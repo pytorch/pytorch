@@ -80,8 +80,8 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfHpu,
     skipIfRocm,
-    skipIfXpu,
     skipIfWindows,
+    skipIfXpu,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
