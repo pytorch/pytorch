@@ -725,7 +725,7 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
 
                 @torch._dynamo.disable
                 def _multi_grad_callback(
-                    grads: Sequence[torch.Tensor],
+                    grads: Sequence[torch.Tensor | None],
                 ) -> None:
                     _, hook_spec = pytree.tree_flatten((tuple(grads), {}))
                     invoke_leaf_function(
