@@ -12,7 +12,13 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
-from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+    IS_WINDOWS,
+    requires_cuda,
+    TEST_WITH_ROCM,
+)
 
 
 def remove_file_comment(gm_str: str) -> str:
@@ -503,7 +509,7 @@ class GraphModule(torch.nn.Module):
             # No stacktrace found for following nodes
             record_event_default = torch.ops.streams.record_event.default(2, 0)
             return (record_event_default, dep_0, dep_1, dep_2)
-""",  # noqa: B950
+""",
         )
 
     @requires_cuda
@@ -609,7 +615,7 @@ class GraphModule(torch.nn.Module):
             # No stacktrace found for following nodes
             record_event_default = torch.ops.streams.record_event.default(3, 0)
             return (record_event_default, dep_0)
-""",  # noqa: B950
+""",
         )
 
     @requires_cuda
@@ -642,6 +648,37 @@ class <lambda>(torch.nn.Module):
         return (copy_,)
 """,
         )
+
+    @requires_cuda
+    def test_recorded_cuda_events_append_runtime_objects(self):
+        events = []
+
+        def fn(x):
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+
+            start_event.record()
+            out = torch.matmul(x, x)
+            end_event.record()
+
+            events.append(start_event)
+            events.append(end_event)
+            return out
+
+        x = torch.randn(16, 16, device="cuda")
+        expected = fn(x)
+        torch.cuda.synchronize()
+        events[0].elapsed_time(events[1])
+        events.clear()
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch.cuda.synchronize()
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(len(events), 2)
+        self.assertIsInstance(events[0], torch.Event)
+        self.assertIsInstance(events[1], torch.Event)
+        self.assertGreaterEqual(events[0].elapsed_time(events[1]), 0.0)
 
     @requires_cuda
     def test_run_opcheck_fork_join(self):
@@ -794,7 +831,7 @@ class GraphModule(torch.nn.Module):
             # No stacktrace found for following nodes
             record_event_default = torch.ops.streams.record_event.default(4, 2)
             return (record_event_default, dep_0)
-""",  # noqa: B950
+""",
         )
 
     @requires_cuda
@@ -1005,7 +1042,7 @@ class GraphModule(torch.nn.Module):
             # No stacktrace found for following nodes
             record_event_default = torch.ops.streams.record_event.default(13, 3)
             return (record_event_default, dep_0)
-""",  # noqa: B950
+""",
         )
 
     @requires_cuda
@@ -1719,6 +1756,10 @@ class GraphModule(torch.nn.Module):
                 torch.ones(2, 2, device="cuda")
             )
 
+    @unittest.skipIf(
+        IS_LINUX or IS_MACOS or TEST_WITH_ROCM or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/178155",
+    )
     @requires_cuda
     @unittest.skip("https://github.com/pytorch/pytorch/issues/177771")
     def test_cuda_event_record_on_stream(self):
@@ -1766,7 +1807,7 @@ class <lambda>(torch.nn.Module):
             #
             synchronize_event_default = torch.ops.streams.synchronize_event.default(0)
             return (synchronize_event_default, dep_0)
-""",  # noqa: B950
+""",
         )
 
     @requires_cuda
@@ -1980,7 +2021,7 @@ class <lambda>(torch.nn.Module):
             #
             synchronize_event_default = torch.ops.streams.synchronize_event.default(0)
             return (synchronize_event_default, dep_0)
-""",  # noqa: B950
+""",
         )
 
     @requires_cuda
@@ -2041,7 +2082,6 @@ class <lambda>(torch.nn.Module):
         compiled_result = f_compiled(x)
         self.assertEqual(eager_result, compiled_result)
 
-
     def test_expand_dict_returning_deps_triton_kernel(self) -> None:
         """Triton kernel dicts must not be passed through control_deps.
 
@@ -2056,9 +2096,7 @@ class <lambda>(torch.nn.Module):
         """
         import operator
 
-        from torch._functorch._aot_autograd.streams import (
-            _expand_dict_returning_deps,
-        )
+        from torch._functorch._aot_autograd.streams import _expand_dict_returning_deps
 
         graph = torch.fx.Graph()
         # Placeholder input

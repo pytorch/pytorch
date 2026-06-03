@@ -1350,14 +1350,14 @@ static bool is_random_op(const c10::OperatorHandle& op) {
       memcmp(op_name.name.data(), "aten::", aten_namespace_prefix_len) != 0) {
     return false;
   }
-  static constexpr std::array<std::string_view, 6> random_names = {{
+  static constexpr auto random_names = std::to_array<std::string_view>({
       "native_dropout",
       "normal_",
       "rand_like",
       "randn_like",
       "uniform_",
       "bernoulli",
-  }};
+  });
   std::string_view name_without_namespace(
       op_name.name.c_str() + aten_namespace_prefix_len,
       op_name.name.size() - aten_namespace_prefix_len);
@@ -2929,8 +2929,7 @@ static PyObject* THPVariable_get_names(PyObject* self, void* unused) {
       // - https://docs.python.org/3/c-api/tuple.html#c.PyTuple_SetItem
       // -
       // https://stackoverflow.com/questions/16400600/how-to-return-a-tuple-containing-a-none-value-from-the-c-api
-      Py_INCREF(Py_None);
-      str = Py_None;
+      str = Py_NewRef(Py_None);
     } else {
       str = THPUtils_packString(dimnames[i].symbol().toUnqualString());
       if (!str)

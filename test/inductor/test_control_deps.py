@@ -326,6 +326,39 @@ class TestControlDeps(InductorTestCase):
             f"void_names={void_names}, referenced={referenced}",
         )
 
+    def test_reinplace_not_blocked_by_control_deps_ordering_dep(self):
+        """Views in control_deps' ordering-only deps should not block reinplacing.
+
+        When a tensor appears only in control_deps' additional_deps (args[0])
+        and NOT in the pass-through args (args[2:]), it is an ordering-only
+        dependency.  The reinplace pass must not treat this as a real data use.
+        """
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch._inductor.fx_passes.reinplace import (
+            _is_control_deps_ordering_only_use,
+        )
+
+        g = torch.fx.Graph()
+        view = g.placeholder("view")
+        other = g.placeholder("other")
+        subgraph = g.placeholder("subgraph")
+
+        # view only in ordering deps (args[0]) -> ordering only, not a real use
+        ctrl = g.call_function(control_deps, args=((view,), subgraph, other))
+        self.assertTrue(_is_control_deps_ordering_only_use(ctrl, view))
+
+        # view in both ordering deps AND pass-through -> real data use
+        ctrl2 = g.call_function(control_deps, args=((view,), subgraph, view))
+        self.assertFalse(_is_control_deps_ordering_only_use(ctrl2, view))
+
+        # view only in pass-through, not in ordering deps -> real data use
+        ctrl3 = g.call_function(control_deps, args=((other,), subgraph, view))
+        self.assertFalse(_is_control_deps_ordering_only_use(ctrl3, view))
+
+        # non-control_deps node -> not ordering only
+        add = g.call_function(torch.ops.aten.add.Tensor, args=(view, other))
+        self.assertFalse(_is_control_deps_ordering_only_use(add, view))
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:
