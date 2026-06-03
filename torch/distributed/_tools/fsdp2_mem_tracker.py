@@ -405,20 +405,24 @@ class FSDPMemTracker(MemTracker):
                     )
 
                     fsdp_state._post_forward_hook_handle = module.register_forward_hook(
-                        self._fsdp_state_post_forward(module, fsdp_state._post_forward),
+                        self._fsdp_state_post_forward(
+                            module,
+                            fsdp_state._post_forward,  # pyrefly: ignore[bad-argument-type]
+                        ),
                         prepend=False,
                         always_call=True,
                     )
                     self._fsdp_mod_to_saved_methods[module] = _SavedFSDPMethods(
                         fsdp_param_group.pre_backward,
-                        fsdp_param_group.post_backward,
+                        fsdp_param_group.post_backward,  # pyrefly: ignore[bad-argument-type]
                     )
                     fsdp_param_group.pre_backward = self._fsdp_param_group_pre_backward(  # type: ignore[assignment]
                         module, fsdp_param_group.pre_backward
                     )
                     fsdp_param_group.post_backward = (  # type: ignore[assignment]
-                        self._fsdp_param_group_post_backward(
-                            module, fsdp_param_group.post_backward
+                        self._fsdp_param_group_post_backward(  # pyrefly: ignore[bad-assignment]
+                            module,
+                            fsdp_param_group.post_backward,  # pyrefly: ignore[bad-argument-type]
                         )
                     )
 

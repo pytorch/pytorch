@@ -122,13 +122,14 @@ class FSDPState(_State):
                 self._pre_forward, prepend=True, with_kwargs=True
             )
             self._post_forward_hook_handle = modules[0].register_forward_hook(
-                self._post_forward, prepend=False
+                self._post_forward,  # pyrefly: ignore[bad-argument-type]
+                prepend=False,
             )
         else:
             hook_handle = _register_group_forward_hooks(
                 modules,
                 self._pre_forward,
-                self._post_forward,
+                self._post_forward,  # pyrefly: ignore[bad-argument-type]
                 self._modules_to_run_forward,
                 self._cast_output_dtype,
             )

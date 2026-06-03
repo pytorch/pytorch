@@ -20,7 +20,7 @@ if dist._is_spmd_types_available():
     from spmd_types.runtime import get_partition_spec
     from spmd_types.types import (
         normalize_local_type,
-        normalize_partition_spec,
+        normalize_partition_spec,  # pyrefly: ignore[missing-module-attribute]
         partition_spec_get_shard,
     )
 
