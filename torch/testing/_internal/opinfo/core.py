@@ -1714,9 +1714,12 @@ class sample_skips_and_xfails:
             )
 
         if hasattr(fn, "sample_skips_and_xfails"):
-            fn.sample_skips_and_xfails.append(self.rules)
+            for rule in self.rules:
+                if rule not in fn.sample_skips_and_xfails:
+                    fn.sample_skips_and_xfails.append(rule)
+        else:
+            fn.sample_skips_and_xfails = self.rules
 
-        fn.sample_skips_and_xfails = self.rules
         return fn
 
 
