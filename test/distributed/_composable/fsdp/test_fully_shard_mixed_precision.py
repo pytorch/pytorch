@@ -122,7 +122,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             use_shard_placement_fn=use_shard_placement_fn,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, param_dtype)
@@ -155,8 +155,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 elif predivide_factor is None:
                     param.grad.div_(self.world_size)
                 output = torch.zeros_like(torch.chunk(param.grad, self.world_size)[0])
-                dist.reduce_scatter_tensor(output, param.grad)
-                dist.all_gather_into_tensor(param.grad, output)
+                dist.reduce_scatter_single(output, param.grad)
+                dist.all_gather_single(param.grad, output)
                 if postdivide_factor is not None and postdivide_factor > 1:
                     param.grad.div_(postdivide_factor)
             for param_fp32, param_bf16 in zip(
@@ -212,7 +212,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             use_shard_placement_fn=use_shard_placement_fn,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -261,7 +261,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             use_shard_placement_fn=use_shard_placement_fn,
         )
         group = dist.distributed_c10d._get_default_group()
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -330,7 +330,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             model, reshard_after_forward=reshard_after_forward, mp_policy=mp_policy
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, reduce_dtype)
@@ -769,7 +769,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         # Check that the reduce-scatter runs in bf16 even after we change the
         # model from bf16 to fp32
         model.to(torch.float32)
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def assert_fn(output: torch.Tensor):
             self.assertEqual(output.dtype, torch.bfloat16)

@@ -524,8 +524,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
-        orig_all_gather = dist.all_gather_into_tensor
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_all_gather = dist.all_gather_single
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def delayed_all_gather(*args, **kwargs):
             device_sleep(
