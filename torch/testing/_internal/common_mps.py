@@ -567,7 +567,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
                 torch.int16,
             ],
-            "nn.functional.norm": None,
             "ormqr": None,
             "rounddecimals_0": [
                 torch.uint8,
@@ -581,15 +580,8 @@ if torch.backends.mps.is_available():
             # sign-flip encode + ulong atomic_min/max bracket and work fine.
             # bool prod/mean are excluded via dtypesIfMPS in the OpInfo itself.
             "scatter_reduceprod": [torch.int64],
-            "segment_reduce": None,
-            "_segment.reduce": None,
-            "segment.reduce": None,
-            "segment_reduce_offsets": None,
-            "_segment_reduce_offsets": None,
-            "_segment_reduce_lengths": None,
             "_segment_reducelengths": None,
             "_segment_reduceoffsets": None,
-            "sparse.mm": None,
             "sparse.sampled_addmm": None,
             "sparse.mmreduce": None,
             "special.airy_ai": None,
@@ -599,10 +591,8 @@ if torch.backends.mps.is_available():
             "special.ndtri": None,
             "stft": [torch.float16, torch.bfloat16],
             "svd_lowrank": None,
-            "symeig": None,
             "take": None,
             "to": None,
-            "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
             "cdouble": None,
@@ -633,7 +623,8 @@ if torch.backends.mps.is_available():
                 torch.float16,
             ],
             # Unsupported dtypes
-            # GEMM on MPS is not supported for integral types
+            # _mps_linear rejects non-float inputs; unlike mm/matmul it has no
+            # integral Metal GEMM fallback.
             "nn.functional.linear": [
                 torch.int16,
                 torch.int32,
@@ -641,7 +632,6 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            "mat": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             # returned output on CPU is float64
             "bincount": [
                 torch.int16,
@@ -863,15 +853,13 @@ if torch.backends.mps.is_available():
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
             # Unimplemented ops
-            "_segment_reduce": [torch.float16, torch.float32],
             "_chunk_cat": [torch.float16, torch.float32],
             "_upsample_bilinear2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
-            "_upsample_bicubic2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
+            "_upsample_bicubic2d_aa": None,  # `_upsample_bicubic2d_aa_backward_out` not implemented for MPS
             "sparse.mmreduce": [torch.float32],  # csr not supported
             "linalg.householder_product": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
-            "masked.scatter": [torch.float16, torch.float32],
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
