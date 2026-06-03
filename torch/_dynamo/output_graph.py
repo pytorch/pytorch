@@ -84,7 +84,9 @@ from torch.fx.experimental.symbolic_shapes import (
     uninteresting_files,
 )
 from torch.fx.node import Target
-from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+from torch.fx.passes.runtime_assert import (
+    _insert_deferred_runtime_asserts as insert_deferred_runtime_asserts,
+)
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -4201,7 +4203,10 @@ class SubgraphTracer(fx.Tracer):
             #
             # Also see NOTE: [Export inputs must be explicitly passed in]
             is_strict_export = self.is_export
-            is_non_strict_export = torch.compiler.is_compiling()
+            # Use is_exporting() (not is_compiling()) to detect non-strict
+            # export. is_compiling() is now also True during regular
+            # torch.compile sessions, but only export sets is_exporting().
+            is_non_strict_export = torch.compiler.is_exporting()
             if (is_strict_export and config.lift_export_input_symbols) or (
                 not is_strict_export and not is_non_strict_export
             ):

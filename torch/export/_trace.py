@@ -647,7 +647,11 @@ def _tracked_fake_for_source(symint: torch.SymInt, source: Source) -> Any | None
     if shape_env is None:
         return None
 
-    for tracked_fake in getattr(shape_env, "tracked_fakes", ()):
+    return _tracked_fake_for_source_in_shape_env(shape_env, source)
+
+
+def _tracked_fake_for_source_in_shape_env(shape_env: Any, source: Source) -> Any | None:
+    for tracked_fake in getattr(shape_env, "tracked_fakes", None) or ():
         if tracked_fake.source == source:
             return tracked_fake.fake
     return None
@@ -688,8 +692,46 @@ def _unlift_symbolic_placeholders(
         # The placeholder boundary mutates as lifted inputs are unlifted.
         return next((n for n in gm.graph.nodes if n.op != "placeholder"), None)
 
+    def placeholder_value_for_public_input(source: Source, value: Any) -> Any:
+        fake_mode = detect_fake_mode(
+            [node.meta.get("val") for node in gm.graph.find_nodes(op="placeholder")]
+        )
+        if fake_mode is not None and fake_mode.shape_env is not None:
+            tracked_fake = _tracked_fake_for_source_in_shape_env(
+                fake_mode.shape_env, source
+            )
+            if tracked_fake is not None:
+                return tracked_fake
+        if (
+            isinstance(value, torch.Tensor)
+            and fake_mode is not None
+            and not fake_mode.is_our_fake(value)
+        ):
+            return fake_mode.from_tensor(value)
+        return value
+
     removed_placeholders: set[str] = set()
     reintroduced_user_inputs: list[str] = []
+
+    def reintroduce_user_input(source: Source, value: Any) -> None:
+        value = placeholder_value_for_public_input(source, value)
+        first_non_placeholder = first_non_placeholder_node()
+        with gm.graph.inserting_before(first_non_placeholder):
+            node = gm.graph.placeholder(f"arg{len(placeholders_by_name)}_1")
+        node.meta["val"] = value
+        node._dynamo_source = source  # type: ignore[attr-defined]
+        placeholders_by_name[node.name] = node
+        input_name_to_source[node.name] = source
+        source_to_input_name[source] = node.name
+        reintroduced_user_inputs.append(node.name)
+
+    for source in public_input_sources:
+        if source in source_to_input_name:
+            continue
+        value = source_to_public_input_value.get(source)
+        if isinstance(value, torch.Tensor):
+            reintroduce_user_input(source, value)
+
     for node_name, source in list(input_name_to_source.items()):
         if not isinstance(source, TensorPropertySource):
             continue
@@ -712,15 +754,8 @@ def _unlift_symbolic_placeholders(
                 raise AssertionError(
                     f"Could not find tensor input for lifted source {source.name}"
                 )
-            first_non_placeholder = first_non_placeholder_node()
-            with gm.graph.inserting_before(first_non_placeholder):
-                base_node = gm.graph.placeholder(f"arg{len(placeholders_by_name)}_1")
-            base_node.meta["val"] = base_value
-            base_node._dynamo_source = source.base  # type: ignore[attr-defined]
-            placeholders_by_name[base_node.name] = base_node
-            input_name_to_source[base_node.name] = source.base
-            source_to_input_name[source.base] = base_node.name
-            reintroduced_user_inputs.append(base_node.name)
+            reintroduce_user_input(source.base, base_value)
+            base_node = placeholders_by_name[source_to_input_name[source.base]]
 
         if node.users:
             if source.prop is TensorProperty.SIZE:
@@ -752,7 +787,7 @@ def _unlift_symbolic_placeholders(
         gm.graph.erase_node(node)
         removed_placeholders.add(node.name)
 
-    if removed_placeholders:
+    if removed_placeholders or reintroduced_user_inputs:
         remaining_user_inputs = [
             name
             for name in graph_signature.user_inputs
@@ -1118,8 +1153,10 @@ def _export_to_torch_ir(
                     )
 
                     if use_legacy_dynamo_graph_capture():
-                        if (constraints or dynamic_shapes) and not isinstance(
-                            f, torch.fx.GraphModule
+                        if (
+                            (constraints or dynamic_shapes)
+                            and not isinstance(f, torch.fx.GraphModule)
+                            and not torch._dynamo.config.install_free_tensors
                         ):
                             # Dynamic export needs bytecode-flattened capture here:
                             # the transformer capture keeps the public signature
@@ -1153,6 +1190,37 @@ def _export_to_torch_ir(
                     # see test_export.py::test_custom_tag_metadata_re_export
                     # Once we delete the old strict export, we can use
                     gm_torch_level = dynamo_graph_capture(*args, **kwargs)
+                    if (
+                        (constraints or dynamic_shapes)
+                        and not disable_constraint_solver
+                        and isinstance(f, torch.nn.Module)
+                        and "fake_mode" in gm_torch_level.meta
+                    ):
+                        # Bytecode export capture returns before Dynamo's
+                        # normal export guard finalization, so run the same
+                        # constraint solver here while the capture fake mode is
+                        # still attached to the graph.
+                        (
+                            _,
+                            _,
+                            _,
+                            equalities_inputs,
+                            original_signature,
+                            dynamic_shapes,
+                        ) = make_fake_inputs(
+                            f,
+                            args,
+                            kwargs,
+                            dynamic_shapes,
+                            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                        )
+                        produce_guards_and_solve_constraints(
+                            fake_mode=gm_torch_level.meta["fake_mode"],
+                            gm=gm_torch_level,
+                            dynamic_shapes=dynamic_shapes,
+                            equalities_inputs=equalities_inputs,
+                            original_signature=original_signature,
+                        )
                     # We can't serialize entire fake mode yet, so this is to make sure
                     # things like copy.deepcopy(ep.graph_module) not crash.
                     # see test_export.py::test_custom_tag_metadata_re_export

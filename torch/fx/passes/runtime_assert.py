@@ -57,6 +57,15 @@ def insert_deferred_runtime_asserts(
     shape_env: ShapeEnv,
     name: str,
     export: bool = False,
+) -> None:
+    _insert_deferred_runtime_asserts(gm, shape_env, name, export=export)
+
+
+def _insert_deferred_runtime_asserts(
+    gm: GraphModule,
+    shape_env: ShapeEnv,
+    name: str,
+    export: bool = False,
     emit_runtime_asserts: bool = True,
 ) -> None:
     """
@@ -687,3 +696,6 @@ def insert_deferred_runtime_asserts(
         ):
             log.debug("deleting unused reified symbol for %s", expr)
             gm.graph.erase_node(proxy.node)
+
+
+insert_deferred_runtime_asserts.__doc__ = _insert_deferred_runtime_asserts.__doc__

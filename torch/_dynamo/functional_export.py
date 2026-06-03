@@ -805,9 +805,16 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
 
     def process_inputs(self, *inputs: Any) -> Any:
         self._inputs = inputs
-        self._inputs_already_flattened = len(self._flat_placeholder_values) != len(
-            self.orig_arg_names
-        ) and len(inputs) == len(self._flat_placeholder_values)
+        has_recoverable_symbolic_placeholders = any(
+            inp is None and isinstance(meta_value, torch.SymInt)
+            for inp, meta_value in zip(inputs, self._flat_placeholder_values)
+        )
+        self._inputs_already_flattened = len(inputs) == len(
+            self._flat_placeholder_values
+        ) and (
+            len(self._flat_placeholder_values) != len(self.orig_arg_names)
+            or has_recoverable_symbolic_placeholders
+        )
         if self._inputs_already_flattened:
             # AOTAutograd's FX interpreter calls with graph placeholders,
             # not the original public pytree signature. Symbolic placeholders
