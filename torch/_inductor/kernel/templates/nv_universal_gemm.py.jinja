@@ -1,0 +1,137 @@
+import torch
+import cutlass
+import cutlass_api
+from cutlass_api.artifact import CompiledArtifact
+from torch._inductor.codegen.nv_universal_gemm.kernel_cache import get_kernel_by_name
+from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set
+{% if is_scaled %}
+from cutlass_api.arguments import ScaledTensor
+from cutlass_api.library import ScaleMode, ScaleSwizzleMode
+{% endif %}
+
+_KERNEL_NAME = "{{ kernel_name_str }}"
+_DISK_CACHE_CONFIG_KEY = (_KERNEL_NAME,)
+_compiled_cache = {}
+_disk_fn_cache = {}
+
+{% macro create_args() %}
+{% if is_grouped %}
+    args = cutlass_api.arguments.GroupedGemmArguments(
+        in_ptr0,
+        in_ptr1,
+        out_ptr0,
+        accumulator_type={{ acc_dtype }},
+        offsets=in_ptr2,
+    )
+{% elif is_scaled %}
+    scaled_a = ScaledTensor(
+        in_ptr0, in_ptr2, ScaleMode.{{ scale_mode_a }}, ScaleSwizzleMode.{{ swizzle_mode_a }}
+    )
+    scaled_b = ScaledTensor(
+        in_ptr1, in_ptr3, ScaleMode.{{ scale_mode_b }}, ScaleSwizzleMode.{{ swizzle_mode_b }}
+    )
+    args = cutlass_api.arguments.GemmArguments(
+        scaled_a,
+        scaled_b,
+        out_ptr0,
+        accumulator_type={{ acc_dtype }},
+    )
+{% else %}
+    args = cutlass_api.arguments.GemmArguments(
+        in_ptr0,
+        in_ptr1,
+        out_ptr0,
+        accumulator_type={{ acc_dtype }},
+    )
+{% endif %}
+{% endmacro %}
+
+{% macro compute_cache_key() %}
+{% if is_grouped %}
+    cache_key = (
+        in_ptr0.shape, in_ptr0.stride(), in_ptr0.dtype,
+        in_ptr1.shape, in_ptr1.stride(), in_ptr1.dtype,
+        in_ptr2.shape, in_ptr2.stride(), in_ptr2.dtype,
+        out_ptr0.shape, out_ptr0.stride(), out_ptr0.dtype,
+    )
+{% elif is_scaled %}
+    cache_key = (
+        in_ptr0.shape, in_ptr0.stride(), in_ptr0.dtype,
+        in_ptr1.shape, in_ptr1.stride(), in_ptr1.dtype,
+        in_ptr2.shape, in_ptr2.stride(), in_ptr2.dtype,
+        in_ptr3.shape, in_ptr3.stride(), in_ptr3.dtype,
+        out_ptr0.shape, out_ptr0.stride(), out_ptr0.dtype,
+    )
+{% else %}
+    cache_key = (
+        in_ptr0.shape, in_ptr0.stride(), in_ptr0.dtype,
+        in_ptr1.shape, in_ptr1.stride(), in_ptr1.dtype,
+        out_ptr0.shape, out_ptr0.stride(), out_ptr0.dtype,
+    )
+{% endif %}
+{% endmacro %}
+
+def {{ kernel_name }}_main({{ params_str }}):
+    global _compiled_cache
+
+    kernel = get_kernel_by_name(_KERNEL_NAME)
+    if kernel is None:
+        raise RuntimeError(f"Could not find kernel: {_KERNEL_NAME}")
+
+{{ create_args() }}
+    dev_idx = in_ptr0.device.index or 0
+{{ compute_cache_key() }}
+    mem_key = (cache_key, dev_idx)
+    artifact = _compiled_cache.get(mem_key)
+    if artifact is None:
+        compiled_fn = disk_cache_get(
+            _disk_fn_cache, __file__, _DISK_CACHE_CONFIG_KEY,
+            cache_key, dev_idx,
+        )
+        if compiled_fn is not None:
+            artifact = CompiledArtifact(compiled_fn, kernel)
+        else:
+            artifact = kernel.compile(args)
+            disk_cache_set(
+                _disk_fn_cache, __file__, _DISK_CACHE_CONFIG_KEY,
+                cache_key, artifact.compiled_obj, dev_idx,
+            )
+        _compiled_cache[mem_key] = artifact
+
+    kernel.run(args, artifact, stream=stream, workspace={{ workspace_arg }}, assume_supported_args=True)
+
+
+def {{ kernel_name }}_precompile(precompile_shapes, precompile_strides, precompile_dtypes, device_index=0, device_capability=None):
+    global _compiled_cache
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    device = f"cuda:{device_index}"
+    with FakeTensorMode():
+{% for ptr_name in input_ptrs %}
+        {{ ptr_name }} = torch.empty_strided(
+            tuple(precompile_shapes["{{ ptr_name }}"]),
+            tuple(precompile_strides["{{ ptr_name }}"]),
+            device=device,
+            dtype=getattr(torch, precompile_dtypes["{{ ptr_name }}"]))
+{% endfor %}
+        out_ptr0 = torch.empty_strided(
+            tuple(precompile_shapes["output"]),
+            tuple(precompile_strides["output"]),
+            device=device,
+            dtype=getattr(torch, precompile_dtypes["output"]))
+
+    kernel = get_kernel_by_name(_KERNEL_NAME)
+    if kernel is None:
+        return
+
+{{ create_args() }}
+{{ compute_cache_key() }}
+    mem_key = (cache_key, device_index)
+    if mem_key not in _compiled_cache:
+        artifact = kernel.compile(args)
+        disk_cache_set(
+            _disk_fn_cache, __file__, _DISK_CACHE_CONFIG_KEY,
+            cache_key, artifact.compiled_obj, device_index,
+            device_capability=device_capability,
+        )
+        _compiled_cache[mem_key] = artifact
