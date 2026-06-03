@@ -201,6 +201,64 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue("online_softmax_reduce" in code)
         self.assertTrue("online_softmax_combine_with_sum" in code)
 
+    def test_noncontiguous_bias_epilogue_fusion(self):
+        """
+        T5 reuses position bias with the head dimension innermost.  The softmax
+        epilogue should stay fused with the online-softmax reduction even though
+        recomputing scores + bias reads the bias with a non-contiguous stride.
+        """
+
+        B, H, S = 2, 4, 128
+
+        def softmax_epilogue(scores, position_bias):
+            attn_weights = scores.view(B, H, S, S) + position_bias
+            attn_weights = attn_weights.float().softmax(dim=-1).to(scores.dtype)
+            return attn_weights * 1.25
+
+        def softmax_dropout(scores, position_bias):
+            attn_weights = scores.view(B, H, S, S) + position_bias
+            attn_weights = attn_weights.float().softmax(dim=-1).to(scores.dtype)
+            return F.dropout(attn_weights, p=0.1, training=True)
+
+        scores = torch.randn(B * H, S, S, dtype=torch.float16, device=GPU_TYPE)
+        position_bias = torch.empty_strided(
+            (B, H, S, S),
+            (H * S * S, 1, S * H, H),
+            dtype=torch.float32,
+            device=GPU_TYPE,
+        )
+        position_bias.normal_()
+
+        ref = softmax_epilogue(scores, position_bias)
+        act, (code,) = run_and_get_code(
+            torch.compile(softmax_epilogue, fullgraph=True), scores, position_bias
+        )
+
+        self.assertEqual(ref, act, atol=1e-3, rtol=1e-3)
+        self.assertIn("triton_per_fused", code)
+        self.assertIn("prepare_softmax_online", code)
+        self.assertEqual(code.count("def triton"), 1)
+
+        _, (dropout_code,) = run_and_get_code(
+            torch.compile(softmax_dropout, fullgraph=True), scores, position_bias
+        )
+        self.assertIn("triton_per_fused", dropout_code)
+        self.assertIn("prepare_softmax_online", dropout_code)
+        self.assertIn("native_dropout", dropout_code)
+        self.assertEqual(dropout_code.count("def triton"), 1)
+
+    def test_transposed_softmax_not_forced_inner(self):
+        def f(x):
+            return x.transpose(-1, -2).softmax(dim=-1)
+
+        x = torch.randn(2, 4, 128, 128, dtype=torch.float16, device=GPU_TYPE)
+
+        ref = f(x)
+        act, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+
+        self.assertEqual(ref, act, atol=1e-3, rtol=1e-3)
+        self.assertNotIn("triton_per_fused", code)
+
     @parametrize("dtype", [torch.bfloat16, torch.half, torch.float32])
     def test_prepare_softmax_acc_with_fp64(self, dtype):
         if USE_LARGE_INPUT:
