@@ -12472,8 +12472,8 @@ def ___make_guard_fn():
 
     def test_iter_version(self):
         def fn(x):
+            s = 0
             for i in torch.__version__:
-                s = 0
                 try:
                     s += int(i)
                 except ValueError:
