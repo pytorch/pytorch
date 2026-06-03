@@ -182,36 +182,32 @@ def is_standard_delattr(val: object) -> bool:
 
 def is_forbidden_context_manager(ctx: object) -> bool:
     f_ctxs: list[Any] = []
-
-    # pytest >= 8.4 moved RaisesContext into _pytest.raises and renamed it to RaisesExc,
-    # also adding RaisesGroup for ExceptionGroup matching. Keep both old and new names
-    # in independent try blocks so that one missing symbol doesn't drop the others.
-    try:
-        from _pytest.raises import RaisesExc, RaisesGroup  # type: ignore[attr-defined]
-
-        f_ctxs.append(RaisesExc)
-        f_ctxs.append(RaisesGroup)
-    except ImportError:
-        pass
-
-    try:
-        from _pytest.python_api import RaisesContext  # type: ignore[attr-defined]
-
-        f_ctxs.append(RaisesContext)
-    except ImportError:
-        pass
-
-    try:
-        from _pytest.recwarn import WarningsChecker  # type: ignore[attr-defined]
-
-        f_ctxs.append(WarningsChecker)
-    except ImportError:
-        pass
+    if m := sys.modules.get("_pytest.raises"):
+        if raises_exc := getattr(m, "RaisesExc", None):
+            f_ctxs.append(raises_exc)
+        if raises_group := getattr(m, "RaisesGroup", None):
+            f_ctxs.append(raises_group)
+    if m := sys.modules.get("_pytest.python_api"):
+        if raises_context := getattr(m, "RaisesContext", None):
+            f_ctxs.append(raises_context)
+    if m := sys.modules.get("_pytest.recwarn"):
+        if warnings_checker := getattr(m, "WarningsChecker", None):
+            f_ctxs.append(warnings_checker)
 
     if m := sys.modules.get("torch.testing._internal.jit_utils"):
         f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
 
     return ctx in f_ctxs
+
+
+def _get_loaded_optree_registry() -> tuple[Any, Any] | None:
+    optree = sys.modules.get("optree")
+    registry_mod = sys.modules.get("optree.registry")
+    if optree is None or registry_mod is None:
+        return None
+    if not hasattr(registry_mod, "_NODETYPE_REGISTRY"):
+        return None
+    return optree, registry_mod._NODETYPE_REGISTRY
 
 
 def is_cython_function(obj: object) -> bool:
@@ -3712,14 +3708,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Check optree's registry - need to handle namespaces
             # In optree, types can be registered globally (type in registry)
             # or with a namespace ((namespace, type) in registry)
-            try:
-                import optree
-                from optree.registry import _NODETYPE_REGISTRY
-
+            optree_registry = _get_loaded_optree_registry()
+            if optree_registry is not None:
+                optree, node_type_registry = optree_registry
                 # Check if registered globally
                 # Namedtuples and structseqs are implicitly pytree nodes
                 is_registered = (
-                    self.value_type in _NODETYPE_REGISTRY
+                    self.value_type in node_type_registry
                     or optree.is_namedtuple_class(self.value_type)
                     or optree.is_structseq_class(self.value_type)
                 )
@@ -3734,7 +3729,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             is_registered = (
                                 namespace,
                                 self.value_type,
-                            ) in _NODETYPE_REGISTRY
+                            ) in node_type_registry
                         except NotImplementedError:
                             # Can't determine namespace at compile time, fall back
                             return self._tree_map_fallback(
@@ -3744,7 +3739,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                                 rest,
                                 tree_map_kwargs,
                             )
-            except ImportError:
+            else:
                 # Can't import optree registry, fall back to tracing
                 import logging
 
@@ -3803,12 +3798,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         is_optree = tree_map_module.startswith("optree")
 
         if is_optree:
-            try:
-                import optree
-                from optree.registry import _NODETYPE_REGISTRY
-
+            optree_registry = _get_loaded_optree_registry()
+            if optree_registry is not None:
+                optree, node_type_registry = optree_registry
                 is_registered = (
-                    self.value_type in _NODETYPE_REGISTRY
+                    self.value_type in node_type_registry
                     or optree.is_namedtuple_class(self.value_type)
                     or optree.is_structseq_class(self.value_type)
                 )
@@ -3821,7 +3815,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             is_registered = (
                                 namespace,
                                 self.value_type,
-                            ) in _NODETYPE_REGISTRY
+                            ) in node_type_registry
                         except NotImplementedError:
                             return self._tree_map_with_path_fallback(
                                 tx,
@@ -3831,7 +3825,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                                 tree_map_kwargs,
                                 keypath,
                             )
-            except ImportError:
+            else:
                 return self._tree_map_with_path_fallback(
                     tx,
                     tree_map_fn,
@@ -4113,11 +4107,8 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         return mod is not None and type(obj) is mod.KeyedJaggedTensor
 
     def __init__(self, value: object, **kwargs: Any) -> None:
-        from torchrec.sparse.jagged_tensor import (  # type: ignore[import-not-found]
-            KeyedJaggedTensor,
-        )
-
-        if type(value) is not KeyedJaggedTensor:
+        mod = sys.modules.get("torchrec.sparse.jagged_tensor")
+        if mod is None or type(value) is not mod.KeyedJaggedTensor:
             raise AssertionError(f"Expected KeyedJaggedTensor, got {type(value)}")
         super().__init__(value, **kwargs)
 

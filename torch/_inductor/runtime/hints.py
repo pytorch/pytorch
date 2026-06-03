@@ -51,84 +51,67 @@ class TileHint(Enum):
     DEFAULT = 1
 
 
-# Define `AttrsDescriptorWrapper` function with clear conditional handling
-if has_triton_package():
+_FallbackAttrsDescriptor: typing.Any = collections.namedtuple(
+    # pyrefly: ignore [invalid-argument]
+    "AttrsDescriptor",
+    ["divisible_by_16", "equal_to_1", "pointer_range_32"],
+    defaults=[(), (), ()],
+)
+
+
+def AttrsDescriptorWrapper(
+    divisible_by_16=None,
+    equal_to_1=None,
+    pointer_range_32=None,
+):
+    if not has_triton_package():
+        return _FallbackAttrsDescriptor(
+            divisible_by_16,
+            equal_to_1,
+            pointer_range_32,
+        )
+
     import triton
     import triton.backends.compiler
     import triton.compiler.compiler
 
     if hasattr(triton.backends.compiler, "AttrsDescriptor"):
-        # Triton 3.2.0 - the second implementation
         from triton.backends.compiler import AttrsDescriptor
 
-        def AttrsDescriptorWrapper(
-            divisible_by_16=None,
-            equal_to_1=None,
-            pointer_range_32=None,
-        ):
-            # Prepare the arguments for AttrsDescriptor
-            kwargs = {
-                "tt.divisibility": divisible_by_16,
-                "tt.equal_to": equal_to_1,
-            }
+        kwargs = {
+            "tt.divisibility": divisible_by_16,
+            "tt.equal_to": equal_to_1,
+        }
 
-            # Instantiate AttrsDescriptor with the prepared arguments
-            res = AttrsDescriptor.from_dict(
-                {"arg_properties": kwargs, "cls": AttrsDescriptor.__name__}
-            )
-            assert res.property_values["tt.divisibility"] == 16
-            assert res.property_values["tt.equal_to"] == 1
-            return res
+        res = AttrsDescriptor.from_dict(
+            {"arg_properties": kwargs, "cls": AttrsDescriptor.__name__}
+        )
+        assert res.property_values["tt.divisibility"] == 16
+        assert res.property_values["tt.equal_to"] == 1
+        return res
 
-    elif hasattr(triton.compiler.compiler, "AttrsDescriptor"):
-        # Triton 3.0.0 - the original implementation
+    if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
         from triton.compiler.compiler import AttrsDescriptor
 
-        def AttrsDescriptorWrapper(
-            divisible_by_16=None,
-            equal_to_1=None,
-            pointer_range_32=None,
-        ):
-            # Prepare the arguments for AttrsDescriptor
-            kwargs = {
-                "divisible_by_16": divisible_by_16,
-                "equal_to_1": equal_to_1,
-            }
+        kwargs = {
+            "divisible_by_16": divisible_by_16,
+            "equal_to_1": equal_to_1,
+        }
+        return AttrsDescriptor(**kwargs)
 
-            # Instantiate AttrsDescriptor with the prepared arguments
-            return AttrsDescriptor(**kwargs)
-
-    else:
-        # Triton in 2025:
-        # note: there's also a range of triton commits not currently supported
-        # from ~Dec 9, 2024 to Jan 1 2025, in which AttrsDescriptors are still
-        # used, but the contents are different.
-
-        def AttrsDescriptorWrapper(
-            divisible_by_16=None,
-            equal_to_1=None,
-            pointer_range_32=None,
-        ):
-            # pyrefly: ignore [not-iterable]
-            # Build attr dict merging divisibility and pointer_range per arg index,
-            # since a single arg can carry both attributes.
-            result = {(x,): [["tt.divisibility", 16]] for x in (divisible_by_16 or ())}
-            for x in pointer_range_32 or ():
-                key = (x,)
-                if key in result:
-                    result[key].append(["tt.pointer_range", 32])
-                else:
-                    result[key] = [["tt.pointer_range", 32]]
-            return result
-
-else:
-    # Define a namedtuple as a fallback when AttrsDescriptor is not available
-    AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef, name-match]
-        # pyrefly: ignore [invalid-argument]
-        "AttrsDescriptor",
-        ["divisible_by_16", "equal_to_1", "pointer_range_32"],
-        defaults=[(), (), ()],
-    )
+    # Triton in 2025:
+    # note: there's also a range of triton commits not currently supported
+    # from ~Dec 9, 2024 to Jan 1 2025, in which AttrsDescriptors are still
+    # used, but the contents are different.
+    # pyrefly: ignore [not-iterable]
+    result = {(x,): [["tt.divisibility", 16]] for x in (divisible_by_16 or ())}
+    for x in pointer_range_32 or ():
+        key = (x,)
+        if key in result:
+            result[key].append(["tt.pointer_range", 32])
+        else:
+            result[key] = [["tt.pointer_range", 32]]
+    return result
 
 
 _NUM_THREADS_PER_WARP = 32
