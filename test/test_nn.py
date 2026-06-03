@@ -5163,22 +5163,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, torch.rand(size))
 
-    def test_native_batch_norm_raises_error_if_running_stats_empty(self):
-        # torch.native_batch_norm bypasses the F.batch_norm size validation,
-        # so an empty (but defined) running_mean/running_var used to segfault.
-        # See https://github.com/pytorch/pytorch/issues/169208
-        input = torch.randn(10, 8)
-        weight = torch.ones(8)
-        bias = torch.zeros(8)
-        full = torch.zeros(8)
-        empty = torch.zeros(0)
-        with self.assertRaisesRegex(RuntimeError, "running_var should contain 8 elements not 0"):
-            torch.native_batch_norm(input, weight, bias, full, empty,
-                                    training=True, momentum=0.1, eps=1e-5)
-        with self.assertRaisesRegex(RuntimeError, "running_mean should contain 8 elements not 0"):
-            torch.native_batch_norm(input, weight, bias, empty, full,
-                                    training=True, momentum=0.1, eps=1e-5)
-
     def test_batchnorm_raises_error_if_weight_is_not_same_size_as_input(self):
         input = torch.rand(2, 10)
         running_mean = torch.rand(10)

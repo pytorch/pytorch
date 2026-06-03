@@ -505,6 +505,33 @@ def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwa
         yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
 
 
+def error_inputs_native_batch_norm(op_info, device, **kwargs):
+    # The empty running_mean/running_var guard lives in batch_norm_cpu_out, so
+    # the error is only raised on CPU; skip other devices to keep test_errors green.
+    if torch.device(device).type != 'cpu':
+        return
+
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
+
+    # A defined but empty running_mean/running_var bypasses the F.batch_norm
+    # size validation and used to segfault in batch_norm_cpu_out (CPU-only path).
+    # See https://github.com/pytorch/pytorch/issues/169208
+    channels = 8
+    inp = make_arg((10, channels))
+    weight = make_arg(channels)
+    bias = make_arg(channels)
+    full = make_arg(channels)
+    empty = make_arg(0)
+
+    err_msg = "running_mean should contain 8 elements not 0"
+    s1 = SampleInput(inp, args=(weight, bias, empty, full, True, 0.1, 1e-5))
+    yield ErrorInput(s1, error_regex=err_msg)
+
+    err_msg = "running_var should contain 8 elements not 0"
+    s2 = SampleInput(inp, args=(weight, bias, full, empty, True, 0.1, 1e-5))
+    yield ErrorInput(s2, error_regex=err_msg)
+
+
 def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad, **kwargs):
     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
     for sample in samples:
@@ -16012,6 +16039,7 @@ op_db: list[OpInfo] = [
            allow_cow_input_materialize_forward=[3, 4],
            allow_cow_input_materialize_backward=[3, 4],
            sample_inputs_func=sample_inputs_native_batch_norm,
+           error_inputs_func=error_inputs_native_batch_norm,
            skips=(
                # NotImplementedError: Could not run
                # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
