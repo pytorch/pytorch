@@ -1320,7 +1320,9 @@ def unpack_and_apply_fn(
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
+            variables.RangeVariable,
             variables.SetVariable,
+            variables.TensorVariable,
             variables.TupleVariable,
         ),
     ):
