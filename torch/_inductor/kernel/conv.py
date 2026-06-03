@@ -755,7 +755,7 @@ def convolution(
             n_spatial_dimensions=ndim,
         )
 
-    if not choices:
+    if not choices and config.max_autotune_conv_backends.strip():
         choices.append(
             aten_convolution.bind(
                 args,
