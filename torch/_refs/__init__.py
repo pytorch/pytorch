@@ -3164,8 +3164,8 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
         #
         # the code below is written for unbacked semantics s.t. we assume unbacked symbols don't
         # represent -1 unless explicitly specified, and the user is opting for case 2) or 3).
-            # The sym_or allows either case, and broadcast_in_dim() represents
-            # the ambiguous stride choice symbolically.
+        # The sym_or allows either case, and broadcast_in_dim() represents
+        # the ambiguous stride choice symbolically.
         if guard_or_false(requested_length == -1):
             shape_[offset_idx] = x
         else:

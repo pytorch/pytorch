@@ -221,7 +221,7 @@ def dim_atleast_3d(ndim: int) -> DimMap:
 
 def expand(input_shape: Shape, shape: Shape) -> DimMap:
     """Implement broadcast on multiple dimensions."""
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
     if not len(shape) >= len(input_shape):
         raise AssertionError(
@@ -241,14 +241,13 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
             if not isinstance(p, InputDim):
                 raise AssertionError(f"DimSpec not supported in expand: {p}")
             actual_s = input_shape[p.input_dim]
-            if not (
-                guard_or_false(actual_s == 1)
-                or guard_or_false(desired_s == -1)
-                or guard_or_false(desired_s == actual_s)
-            ):
-                raise AssertionError(
-                    f"Expected actual_s == 1 or desired_s == -1 or "
-                    f"desired_s == actual_s, got actual_s={actual_s}, desired_s={desired_s}"
+            if not guard_or_false(desired_s == -1):
+                torch._check(
+                    sym_or(actual_s == 1, desired_s == actual_s),
+                    lambda: (
+                        f"Expected actual_s == 1 or desired_s == -1 or "
+                        f"desired_s == actual_s, got actual_s={actual_s}, desired_s={desired_s}"
+                    ),
                 )
         mapping.append(
             p
@@ -964,6 +963,10 @@ class _ViewShardingPropagator:
             return self._analyze_flatten(cmd)
         elif isinstance(cmd, Split):
             return self._analyze_split(cmd)
+        elif isinstance(cmd, Broadcast):
+            for in_dim in self._analyze_dim(cmd.dim):
+                self.shard_allowed[in_dim.input_dim] = [False] * self.mesh_ndim
+            return []
         elif isinstance(cmd, Repeat):
             in_dims = self._analyze_dim(cmd.input_dim)
             for d in in_dims:

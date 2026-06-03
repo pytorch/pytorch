@@ -1284,6 +1284,8 @@ def _broadcast_in_dim_meta(
         sym_or,
     )
 
+    backed_so = torch.fx.experimental._config.backed_size_oblivious
+
     # Type checks
     if not isinstance(a, TensorLike):
         raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
@@ -1338,19 +1340,25 @@ def _broadcast_in_dim_meta(
         if idx in broadcast_dimensions:
             # Assigns a stride of zero to dimensions
             # which were actually broadcast
-            if guard_or_false(a.shape[original_idx] == 1):
-                if guard_or_false(a.shape[original_idx] == shape[idx]):
-                    new_strides.append(a.stride()[original_idx])
+            input_size = a.shape[original_idx]
+            output_size = shape[idx]
+            stride = a.stride()[original_idx]
+            if guard_or_false(input_size == 1):
+                if guard_or_false(input_size == output_size):
+                    new_strides.append(stride)
                 else:
                     new_strides.append(0)
-            elif guard_or_false(a.shape[original_idx] == shape[idx]):
-                new_strides.append(a.stride()[original_idx])
+            elif backed_so:
+                torch._check(
+                    input_size == output_size,
+                    lambda: f"non-broadcasting semantics require {input_size} == {output_size}",
+                )
+                new_strides.append(stride)
+            elif guard_or_false(input_size == output_size):
+                new_strides.append(stride)
             else:
-                stride = a.stride()[original_idx]
                 new_strides.append(
-                    torch.sym_ite(
-                        a.shape[original_idx] == shape[idx], stride, stride * 0
-                    )
+                    torch.sym_ite(input_size == output_size, stride, stride * 0)
                 )
             original_idx = original_idx + 1
         else:

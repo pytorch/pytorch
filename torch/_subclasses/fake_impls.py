@@ -1852,7 +1852,11 @@ def register_fast_op_impl(
 def infer_size(
     a: Sequence[IntLikeType], b: Sequence[IntLikeType]
 ) -> tuple[IntLikeType, ...]:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        has_guarding_hint,
+        sym_or,
+    )
 
     dimsA = len(a)
     dimsB = len(b)
@@ -1865,10 +1869,23 @@ def infer_size(
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
 
-        # If broadcasting is symbolically ambiguous, keep all valid runtime
-        # cases in the assertion and use max(sizeA, sizeB) as the result size.
-        # Under the broadcast precondition this is exact: equal sizes return
-        # that size, and singleton broadcasting returns the non-singleton size.
+        if has_guarding_hint(sizeA) and has_guarding_hint(sizeB):
+            torch._check(
+                guard_or_false(sizeA == 1)
+                or guard_or_false(sizeB == 1)
+                or sizeA == sizeB,
+                lambda: f"The size of tensor a ({sizeA}) "
+                f"must match the size of tensor b ({sizeB}) "
+                f"at non-singleton dimension {i})",
+            )
+            expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
+            continue
+
+        # If unbacked broadcasting is symbolically ambiguous, keep all valid
+        # runtime cases in the assertion and use max(sizeA, sizeB) as the result
+        # size. Under the broadcast precondition this is exact: equal sizes
+        # return that size, and singleton broadcasting returns the non-singleton
+        # size.
         torch._check(
             sym_or(sizeA == 1, sizeB == 1, sizeA == sizeB),
             lambda: f"The size of tensor a ({sizeA}) "
