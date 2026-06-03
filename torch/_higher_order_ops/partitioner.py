@@ -253,12 +253,20 @@ class HopJointGraph:
         By marking the recompute polify for complex nodes as MUST_RECOMPUTE, the partitioning boundary
         no longer contains complex expressions.
 
-        Note that this pass doesn't exclude basic symbols from partitioning boundary
-        and it's up to the downstream to decide whether to return the basic symbol
-        or have a separate graph pass to remove them.
+        We also recompute unbacked basic symbols (e.g. the value produced by a
+        data-dependent ``.item()`` from a per-step xs element used to index a
+        closed-over tensor). Such a symbol varies across iterations, so it cannot
+        be threaded through the boundary as a single value, and it is always
+        recomputable in backward from the (read-only) inputs it was derived from.
+
+        Note that this pass doesn't exclude loop-invariant basic symbols (e.g.
+        backed shape symbols) from the partitioning boundary and it's up to the
+        downstream to decide whether to return the basic symbol or have a
+        separate graph pass to remove them.
         """
 
         from torch._functorch.partitioners import CheckpointPolicy
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
         for n in (
             node for node in self.joint_gm.graph.nodes if node.op == "call_function"
@@ -266,7 +274,9 @@ class HopJointGraph:
             if "val" not in n.meta:
                 continue
             val = n.meta["val"]
-            if isinstance(val, torch.SymInt) and is_complex_expr(val.node.expr):
+            if isinstance(val, torch.SymInt) and (
+                is_complex_expr(val.node.expr) or free_unbacked_symbols(val.node.expr)
+            ):
                 if n.meta.get("recompute", None) is not None:
                     raise AssertionError(
                         f"node {n} with complex SymInt expression should not have recompute policy set"
