@@ -24,6 +24,23 @@ from cli.lib.core.vllm.lib import clone_vllm, run_test_plan, sample_vllm_test_li
 
 logger = logging.getLogger(__name__)
 
+# generate_binary_build_matrix.py is not importable as a package (it lives in
+# .github/scripts, outside the cli package), so add that dir to sys.path the
+# same way .github/scripts/get_ci_variable.py does.
+_SCRIPTS_DIR = Path(__file__).resolve().parents[6] / ".github" / "scripts"
+
+
+def _stable_torch_backend() -> str:
+    # The uv --torch-backend channel must match the CUDA toolchain of the
+    # build, so reuse CUDA_STABLE from generate_binary_build_matrix.py (the
+    # single source of truth for the stable CUDA version, e.g. "13.0" -> cu130)
+    # rather than hardcoding the channel here.
+    if str(_SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(_SCRIPTS_DIR))
+    from generate_binary_build_matrix import CUDA_STABLE
+
+    return f"cu{CUDA_STABLE.replace('.', '')}"
+
 
 @dataclass
 class VllmTestParameters:
@@ -175,7 +192,7 @@ class VllmTestRunner(BaseRunner):
             "-o test/cuda.txt "
             "--index-strategy unsafe-best-match "
             "--constraint snapshot_constraint.txt "
-            "--torch-backend cu129"
+            f"--torch-backend {_stable_torch_backend()}"
         )
         pip_install_packages(requirements="test/cuda.txt", prefer_uv=True)
         logger.info("Done. installed requirements for test dependencies")
