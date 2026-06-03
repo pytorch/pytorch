@@ -6411,12 +6411,18 @@ class Scheduler:
 
         # Check inputs that can be potentially reused
         lhs_dep_nodes = _find_single_user_inputs(node1)
+        if not lhs_dep_nodes:
+            return False
         rhs_dep_nodes = _find_single_user_inputs(node2)
+        if not rhs_dep_nodes:
+            return False
 
         lhs_reuse_keys = OrderedSet(buffer_reuse_key(buf) for buf in lhs_dep_nodes)
         rhs_reuse_keys = OrderedSet(buffer_reuse_key(buf) for buf in rhs_dep_nodes)
 
         common_reuse_keys = lhs_reuse_keys.intersection(rhs_reuse_keys)
+        if not common_reuse_keys:
+            return False
 
         memory_overhead = 0
         for key in common_reuse_keys:
