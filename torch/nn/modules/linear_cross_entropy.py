@@ -39,8 +39,7 @@ def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
 @dataclasses.dataclass
 class _ChunkViews:
     """Per-iteration tensor views; each property picks the right operand
-    variant or scratch destination from ctx dispatch flags so the
-    chunked-loop call sites read like raw tensor operations.
+    or scratch from ctx dispatch flags so call sites read raw.
     """
 
     ctx: "_ChunkContext"
@@ -118,14 +117,11 @@ class _ChunkViews:
 
 @dataclasses.dataclass
 class _ChunkContext:
-    """Per-call state for the chunked loop. Built once via
-    ``_ChunkContext.build`` before the loop. Methods hide
-    dtype/device/acc_policy dispatch behind single math operations;
-    per-iteration math without dispatch is inlined into the loop body.
-
-    Buffers that dispatch decided are not needed are present as
-    rank-matching empty tensors (``_make_empty``/``_make_zeros`` with
-    ``when=False``) so the dataclass surface stays uniform.
+    """Per-call state for the chunked loop, built once via ``build``.
+    Methods hide dtype/device/acc_policy dispatch behind single math ops;
+    dispatch-free per-iter math is inlined into the loop body. Buffers
+    dispatch decided are not needed are rank-matching empty tensors
+    (``when=False`` in ``_make_*``) so the dataclass surface stays uniform.
     """
 
     dtype: torch.dtype
@@ -147,9 +143,9 @@ class _ChunkContext:
     reduction: str
     linear_weight: torch.Tensor
 
-    # The optional "when=" buffers (weight_grad_chunk, logits_acc_buf,
-    # input_grad_acc_buf, input_chunk_acc_buf, grad_input,
-    # grad_linear_weight) are cached_properties below.
+    # Optional "when=" buffers (weight_grad_chunk, logits_acc_buf,
+    # input_grad_acc_buf, input_chunk_acc_buf, grad_input, grad_linear_weight)
+    # are cached_properties below.
     logits_buf: torch.Tensor
     tmp: torch.Tensor
     output: torch.Tensor
@@ -319,10 +315,8 @@ class _ChunkContext:
             )
         use_acc_dtype = dtype != acc_dtype
 
-        # ===== Internal dtype layout =====
-        # "compact" follows the same dtype layout as "balanced"; the
-        # extra savings come from skipping the weight_grad_chunk
-        # scratch later, not from a different dtype layout.
+        # Internal dtype layout. ``compact`` reuses ``balanced``'s layout;
+        # its savings come from skipping the weight_grad_chunk scratch, not dtype.
         is_memory_like = acc_policy in {"balanced", "compact"}
         if use_acc_dtype:
             output_dtype = acc_dtype if dtype == torch.float16 else dtype
@@ -432,9 +426,9 @@ class _ChunkContext:
         )
 
     def chunks(self):
-        """Yield a ``_ChunkViews`` per iter. Post-yield, commit the
-        buf-and-copy input-grad slice into ``grad_input`` (skipped on
-        the fast path where ``grad_input_chunk`` aliases ``grad_input``).
+        """Yield a ``_ChunkViews`` per iter. Post-yield, commit the buf-and-copy
+        input-grad slice into ``grad_input`` (skipped when ``grad_input_chunk``
+        aliases ``grad_input``).
         """
         batch_chunk_size = self.logits_buf.shape[0]
         for bchunk_start in range(0, self.num_batches, batch_chunk_size):
@@ -530,11 +524,9 @@ class _ChunkContext:
         return x.to(dtype)
 
 
-# Private op. Returns ``(loss, grad_input, grad_linear_weight)``:
-# ``torch.library.register_autograd`` has no ``save_for_backward``-style
-# state, so the grads flow via the return tuple, get stashed on ctx by
-# ``setup_context``, and backward mutates them in place via ``.mul_()``.
-# ``mutates_args=()`` reflects that inputs are not mutated.
+# Private op. Returns ``(loss, grad_input, grad_linear_weight)`` because
+# register_autograd has no save_for_backward: grads flow via return tuple,
+# stash on ctx in ``setup_context``, backward mutates them in place (``.mul_()``).
 @torch.library.custom_op(
     "torch_nn::_linear_cross_entropy_batch_chunked", mutates_args=()
 )
@@ -553,10 +545,9 @@ def _linear_cross_entropy_batch_chunked(
     compute_input_grad: bool,
     compute_linear_weight_grad: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Returns ``(loss, grad_input, grad_linear_weight)``. Gradients
-    precomputed in forward and stashed on ctx; backward is a single
-    multiply by the upstream gradient. Computing grads in forward is
-    what lets chunking save memory.
+    """Returns ``(loss, grad_input, grad_linear_weight)``. Grads precomputed
+    in forward and stashed on ctx; backward is a single multiply by the
+    upstream grad -- computing in forward is what lets chunking save memory.
     """
     # Direct callers must resolve "auto" / None via _adjust first.
     if acc_policy == "auto" or acc_dtype is None:
@@ -628,9 +619,8 @@ def _linear_cross_entropy_batch_chunked(
                 out=logits,
             )
         # output -= <weight_chunk, log(softmax_denom)>
-        # softmax_denom is always in acc_dtype (see ``sumexp_``); the
-        # dot needs matching dtypes, so promote weight_chunk up
-        # rather than rounding the wider denominator down.
+        # softmax_denom is in acc_dtype (see ``sumexp_``); promote weight_chunk
+        # for the dot rather than rounding the wider denominator down.
         output.sub_(weight_chunk.to(softmax_denom.dtype).dot(softmax_denom.log_()))
 
         if compute_grads:
@@ -690,9 +680,8 @@ def _linear_cross_entropy_batch_chunked(
     )
 
 
-# Op arg count; backward returns this many slots. Hand-maintained
-# because CustomOpDef has no public arg-introspection. Update on
-# signature change.
+# Op arg count; backward returns this many slots. Hand-maintained because
+# CustomOpDef has no public arg-introspection. Update on signature change.
 _NUM_OP_INPUTS = 13
 
 
@@ -738,9 +727,8 @@ def _(
 
 @_linear_cross_entropy_batch_chunked.register_vmap
 def _vmap(info, in_dims, *args):
-    """vmap rule (slow path: per-sample Python loop). A fold-into-
-    num_batches fast path would need ``reduction="none"`` support in
-    the chunked op.
+    """vmap rule (slow path: per-sample Python loop). A fold-into-num_batches
+    fast path would need ``reduction="none"`` in the chunked op.
     """
     batch_size = info.batch_size
 

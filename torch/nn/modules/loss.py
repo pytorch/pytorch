@@ -1743,7 +1743,7 @@ class MarginRankingLoss(_Loss):
     inputs :math:`x1`, :math:`x2`, two 1D mini-batch or 0D `Tensors`,
     and a label 1D mini-batch or 0D `Tensor` :math:`y` (containing 1 or -1).
 
-    If :math:`y = 1` then it assumed the first input should be ranked higher
+    If :math:`y = 1` then it is assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for :math:`y = -1`.
 
     The loss function for each pair of samples in the mini-batch is:

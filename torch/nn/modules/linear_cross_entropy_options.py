@@ -12,14 +12,10 @@ class _AutoDefault(NamedTuple):
     chunking_method: str
 
 
-# Defaults filled in for the ``"auto"`` sentinel of ``acc_policy`` and
-# ``chunking_method``, keyed by ``(device_type, input_dtype)``. Each
-# pick is the Pareto-best throughput / accuracy trade-off observed in
-# a sweep against an fp64 reference jacobian. CPU entries pick
-# ``"accurate"`` because it is the only chunked policy that runs the
-# weight-grad mm in fp32 on CPU; the others fall through to CPU's
-# emulated low-precision matmul (20-50x slower). Hardware-conditional
-# ``acc_dtype`` is resolved separately by ``_resolve_auto_acc_dtype``.
+# Defaults for the ``"auto"`` sentinel of ``acc_policy`` / ``chunking_method``,
+# keyed by ``(device_type, input_dtype)`` -- Pareto picks from an fp64-jacobian
+# sweep. CPU picks ``"accurate"`` (only chunked policy with fp32 weight-grad mm
+# on CPU; others hit emulated low-precision matmul, ~20-50x slower).
 _AUTO_DEFAULTS: dict[tuple[str, torch.dtype], _AutoDefault] = {
     ("cuda", torch.bfloat16): _AutoDefault("compact", "aspect_ratio:2"),
     ("cuda", torch.float16): _AutoDefault("compact", "aspect_ratio:2"),
@@ -157,8 +153,7 @@ class LinearCrossEntropyOptions:
             raise ValueError(
                 f"batch_chunk_size must be positive int or None, got {self.batch_chunk_size!r}"
             )
-        # fp64 is allowed for the internal ``_adjust`` path (fp64 inputs);
-        # user-facing fp64-vs-low-precision mismatches are caught at runtime.
+        # fp64 is allowed for the internal ``_adjust`` path (fp64 inputs).
         _SUPPORTED_ACC_DTYPES = {
             torch.float16,
             torch.bfloat16,
@@ -167,10 +162,9 @@ class LinearCrossEntropyOptions:
         }
         if self.acc_dtype is not None and self.acc_dtype not in _SUPPORTED_ACC_DTYPES:
             raise ValueError(
-                f"acc_dtype must be one of {{None, torch.float16, "
-                f"torch.bfloat16, torch.float32, torch.float64}}, got "
-                f"{self.acc_dtype!r}. Pass acc_dtype=None to let the chunked "
-                "op pick automatically."
+                f"acc_dtype must be one of {{None, torch.float16, torch.bfloat16, "
+                f"torch.float32, torch.float64}}, got {self.acc_dtype!r}. Pass "
+                "acc_dtype=None to let the op pick automatically."
             )
 
     @staticmethod
@@ -210,13 +204,9 @@ class LinearCrossEntropyOptions:
     ) -> int:
         """Compute batch_chunk_size from chunking_method given input shapes.
 
-        Pass ``method`` explicitly to use a post-``_adjust`` resolved
-        value (e.g., when ``self.chunking_method == "auto"``); by
-        default falls back to ``self.chunking_method``.
-
-        To add a new method: extend the if/elif chain here with the
-        parsing and size formula, and add the prefix to ``__post_init__``'s
-        validation.
+        Pass ``method`` to use a post-``_adjust`` resolved value (e.g. when
+        ``self.chunking_method == "auto"``); otherwise uses ``self.chunking_method``.
+        To add a method: extend the if/elif chain plus ``__post_init__`` validation.
         """
         method = str(method if method is not None else self.chunking_method)
 
