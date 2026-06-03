@@ -107,7 +107,6 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .sizevars import SizeVarAllocator
 from .utils import (
-    convert_shape_to_inductor,
     gather_origins,
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
@@ -593,7 +592,7 @@ class GraphLowering(torch.fx.Interpreter):
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
 
-    def symbolic_sizes_strides(
+    def get_placeholder_sizes_strides(
         self, ex: torch.Tensor
     ) -> tuple[Sequence[int | Expr], Sequence[int | Expr]]:
         sizes, strides, _ = self.symbolic_sizes_strides_storage_offset(ex)
@@ -608,14 +607,8 @@ class GraphLowering(torch.fx.Interpreter):
         have the same size they get assigned the same symbolic variable.
         """
         if self.reuse_shape_env:
+            size, stride = ex.size(), ex.stride()
             storage_offset = ex.storage_offset()
-            return (
-                convert_shape_to_inductor(ex.size()),
-                convert_shape_to_inductor(ex.stride()),
-                storage_offset.node.expr
-                if isinstance(storage_offset, torch.SymInt)
-                else sympy.sympify(storage_offset),
-            )
         else:
             from torch._dynamo.source import ConstantSource
 
@@ -639,8 +632,8 @@ class GraphLowering(torch.fx.Interpreter):
                 source,
             )
 
-        r_size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
-        r_stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
+        r_size = [sympy.sympify(i) for i in size]
+        r_stride = [sympy.sympify(i) for i in stride]
         r_storage_offset = (
             storage_offset.node.expr
             if isinstance(storage_offset, torch.SymInt)
@@ -1295,12 +1288,6 @@ class GraphLowering(torch.fx.Interpreter):
             return None
         # See note: Note: [Generator arguments in AOTDispatcher]
         elif isinstance(example, torch.Generator):
-            assert len(V.graph.current_node.users) == 1 and next(
-                iter(V.graph.current_node.users)
-            ).target in (
-                torch._prims.rng_prims.graphsafe_run_with_rng_state,
-                torch.ops.higher_order.invoke_subgraph,
-            )
             gen = ir.GeneratorState(name=target, device=example.device)
             self.graph_inputs[target] = gen  # type: ignore[assignment]
             self.graph_input_names.append(target)
@@ -1401,7 +1388,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
                 log.info(
                     "Creating implicit fallback for:\n%s",
-                    error.operator_str(target, args, kwargs),
+                    LazyString(error.operator_str, target, args, kwargs),
                 )
 
                 tag: torch._C.Tag | None = get_layout_constraint_tag(
