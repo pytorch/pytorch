@@ -305,6 +305,10 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     install_torchcomms
   fi
 
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *spmd_types* ]]; then
+    install_spmd_types
+  fi
+
   if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
     echo "Checking that xpu is compiled"
     pushd dist/
