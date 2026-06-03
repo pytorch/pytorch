@@ -3046,13 +3046,24 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 """
 
 
-@functools.cache
+def _is_dtensor_loaded() -> bool:
+    dtensor_api = sys.modules.get("torch.distributed.tensor._api")
+    return dtensor_api is not None and hasattr(dtensor_api, "DTensor")
+
+
 def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
+    return _get_torch_obj_rule_map(_is_dtensor_loaded())
+
+
+@functools.cache
+def _get_torch_obj_rule_map(
+    dtensor_loaded: bool,
+) -> dict[Any, type["VariableTracker"]]:
     d: dict[Any, type[VariableTracker]] = {}
     for m in torch_name_rule_map:
         for k, v in m.items():  # type: ignore[attr-defined]
             if ".py#" not in k:
-                obj = load_object(k)
+                obj = load_object(k, allow_dtensor_import=dtensor_loaded)
             else:
                 torch_dir = _module_dir(torch)
                 if torch_dir is None:
@@ -3080,8 +3091,10 @@ Load string represented torch objects.
 """
 
 
-def load_object(name: str) -> Any:
+def load_object(name: str, *, allow_dtensor_import: bool = True) -> Any:
     try:
+        if name.startswith("torch.distributed.tensor.") and not allow_dtensor_import:
+            return None
         x = name.split("#")
         if len(x) == 2:
             obj = _load_obj_from_str(x[0])
@@ -4208,7 +4221,7 @@ def _lookup_inner(
 
 
 def clear_lru_cache() -> None:
-    torch._dynamo.trace_rules.get_torch_obj_rule_map.cache_clear()
+    torch._dynamo.trace_rules._get_torch_obj_rule_map.cache_clear()
     torch._dynamo.trace_rules.get_tensor_method.cache_clear()
     torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
     torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()

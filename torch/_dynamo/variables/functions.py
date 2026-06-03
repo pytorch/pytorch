@@ -98,12 +98,6 @@ from .constant import ConstantVariable
 from .user_defined import UserDefinedObjectVariable
 
 
-try:
-    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None  # type: ignore[assignment]
-
-
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import (
@@ -293,6 +287,15 @@ def wrap_bound_arg(
         # Create a lazy variable to avoid guarding on __defaults__ unless really
         # needed.
         return variables.LazyVariableTracker.create(val, source, tx=tx)
+
+
+def _is_fsdp_use_training_state(fn: object) -> bool:
+    fsdp_param_group = sys.modules.get(
+        "torch.distributed.fsdp._fully_shard._fsdp_param_group"
+    )
+    if fsdp_param_group is None:
+        return False
+    return fn is fsdp_param_group.FSDPParamGroup.use_training_state
 
 
 def wrap_args_kwargs(tx: "InstructionTranslatorBase", result: dict[str, Any]) -> None:
@@ -1231,9 +1234,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/genobject.c#L831
         return self
 
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return False
-
     # no nested graph breaks in generators
     def should_allow_nested_graph_breaks(self) -> Literal[False]:
         return False
@@ -1696,10 +1696,7 @@ class UserMethodVariable(UserFunctionVariable):
                 return self.obj.call_method(
                     tx, self.fn.__name__, list(args), kwargs, constant=self.is_constant
                 )
-        elif (
-            _fsdp_param_group is not None
-            and self.fn is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
-        ):
+        elif _is_fsdp_use_training_state(self.fn):
             return variables.TorchCtxManagerClassVariable(self.fn).call_function(
                 tx, [self.obj, *args], kwargs
             )
@@ -3267,7 +3264,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
         self, configs: Any, tx: Optional["InstructionTranslatorBase"]
     ) -> list[Any]:
         # unpack the list of configs
-        configs = configs.unpack_var_sequence(tx)
+        if tx is None:
+            raise AssertionError("tx must not be None")
+        configs = unpack_iterable(tx, configs)
 
         # guard_as_python_constant inserts guards for Dynamo to check if the configs object changed.
         configs = [config.guard_as_python_constant() for config in configs]

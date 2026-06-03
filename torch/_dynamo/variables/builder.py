@@ -178,6 +178,7 @@ from ..utils import (
     is_parameter_freezing,
     is_pybind11_enum_member,
     is_torch_class,
+    is_triton_language_dtype,
     is_typing,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -268,7 +269,6 @@ from .misc import (
     RandomVariable,
     SavedTensorBox,
     StringFormatVariable,
-    TorchVersionVariable,
     TypingVariable,
     WeakRefVariable,
 )
@@ -966,7 +966,6 @@ class VariableBuilder:
                     **self.install_guards(GuardBuilder.CLOSURE_MATCH),
                 ),
             ),
-            (torch.__version__, lambda self, value: TorchVersionVariable()),
         ]
 
         # pyrefly: ignore [implicit-any]
@@ -1036,6 +1035,10 @@ class VariableBuilder:
         type_dispatch = self._type_dispatch().get(type(value))
         if type_dispatch is not None:
             return type_dispatch(self, value)
+
+        if is_triton_language_dtype(value):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ConstantLikeVariable(value, source=self.source)
 
         # Handle exact id() match
         id_dispatch = self._id_dispatch().get(id(value))

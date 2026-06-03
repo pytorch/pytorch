@@ -31,6 +31,7 @@ import inspect
 import logging
 import math
 import re
+import sys
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
@@ -82,6 +83,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     product,
     proxy_args_kwargs,
+    unpack_iterable,
     unwrap_if_wrapper,
 )
 from .base import typestr, VariableTracker
@@ -98,6 +100,7 @@ from .functions import (
     NestedUserFunctionVariable,
 )
 from .lists import ListVariable, TupleVariable
+from .object_protocol import vt_is_iterable
 from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -113,12 +116,6 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
-try:
-    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
-except ModuleNotFoundError:
-    _fsdp_param_group = None  # type: ignore[assignment]
-
-
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._opaque_base import OpaqueBase
@@ -129,6 +126,16 @@ V = TypeVar("V")
 T = TypeVar("T")
 
 log = logging.getLogger(__name__)
+
+
+def _is_fsdp_use_training_state(value: object) -> bool:
+    fsdp_param_group = sys.modules.get(
+        "torch.distributed.fsdp._fully_shard._fsdp_param_group"
+    )
+    if fsdp_param_group is None:
+        return False
+    return value is fsdp_param_group.FSDPParamGroup.use_training_state
+
 
 supported_ctx_manager_classes = dict.fromkeys(
     [
@@ -823,10 +830,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
             )
-        elif (
-            _fsdp_param_group is not None
-            and self.value is _fsdp_param_group.FSDPParamGroup.use_training_state
-        ):
+        elif _is_fsdp_use_training_state(self.value):
             if len(args) != 2:
                 raise AssertionError(
                     f"FSDPParamGroup.use_training_state expects 2 args, got {len(args)}"
@@ -1478,7 +1482,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 tf_state.skip_next = False
                 return VariableTracker.build(tx, False)
             elems = (
-                args[0].unpack_var_sequence(tx)
+                unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
                 else args
             )
@@ -1511,7 +1515,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             try:
                 return func.call_function(
                     tx,
-                    args.unpack_var_sequence(tx),
+                    unpack_iterable(tx, args),
                     kwargs.keys_as_python_constant(),  # type: ignore[attr-defined]
                 )
             finally:
@@ -3346,9 +3350,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
-        flat_args_vts, input_spec_vt = _make_inlined(tx, tree_flatten)(
-            VariableTracker.build(tx, (args_with_states, kwargs_with_states))
-        ).unpack_var_sequence(tx)
+        flat_args_vts, input_spec_vt = unpack_iterable(
+            tx,
+            _make_inlined(tx, tree_flatten)(
+                VariableTracker.build(tx, (args_with_states, kwargs_with_states))
+            ),
+        )
         if not isinstance(flat_args_vts, ListVariable):
             raise AssertionError(
                 f"Expected flat_args_vts to be a ListVariable, got {type(flat_args_vts)}"
@@ -3558,12 +3565,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         ) -> TypeIs[Union["NNModuleVariable", "UnspecializedNNModuleVariable"]]:
             return isinstance(var, (NNModuleVariable, UnspecializedNNModuleVariable))
 
-        flat_args_var, tree_spec_var = _make_inlined(tx, pytree.tree_flatten)(
-            VariableTracker.build(tx, (args, kwargs))
-        ).unpack_var_sequence(tx)
+        flat_args_var, tree_spec_var = unpack_iterable(
+            tx,
+            _make_inlined(tx, pytree.tree_flatten)(
+                VariableTracker.build(tx, (args, kwargs))
+            ),
+        )
 
         module_to_index: dict[int, int] = {}
-        for arg in flat_args_var.unpack_var_sequence(tx):
+        for arg in unpack_iterable(tx, flat_args_var):
             if is_module_variable(arg):
                 if arg.source is None:
                     unimplemented(
@@ -3596,7 +3606,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         result_var = _make_inlined(tx, convert_modules_to_states)(
             VariableTracker.build(tx, (args, kwargs)), module_to_index_var
         )
-        return result_var.unpack_var_sequence(tx)  # pyrefly: ignore [bad-return]
+        return unpack_iterable(tx, result_var)  # pyrefly: ignore [bad-return]
 
     def _call_leaf_function(
         self,
@@ -3630,11 +3640,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             tx, args, kwargs
         )
 
-        flat_args_var, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
-            VariableTracker.build(tx, (args_with_states, kwargs_with_states))
-        ).unpack_var_sequence(tx)
+        flat_args_var, input_spec_var = unpack_iterable(
+            tx,
+            _make_inlined(tx, pytree.tree_flatten)(
+                VariableTracker.build(tx, (args_with_states, kwargs_with_states))
+            ),
+        )
         flat_arg_proxies = [
-            arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
+            arg.as_proxy() for arg in unpack_iterable(tx, flat_args_var)
         ]
         input_spec = input_spec_var.as_python_constant()
 
@@ -3715,10 +3728,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             raise AssertionError(f"_ntuple expects no kwargs, got {len(kwargs)}")
 
         def handle_ntuple(value: VariableTracker) -> VariableTracker:
-            if value.has_unpack_var_sequence(tx):
-                return variables.TupleVariable(
-                    list(value.unpack_var_sequence(tx)),
-                )
+            if vt_is_iterable(value):
+                return variables.TupleVariable(unpack_iterable(tx, value))
             elif value.is_python_constant():
                 # constant prop through it
                 return VariableTracker.build(

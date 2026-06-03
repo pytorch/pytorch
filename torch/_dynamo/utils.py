@@ -1320,7 +1320,9 @@ def unpack_and_apply_fn(
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
+            variables.RangeVariable,
             variables.SetVariable,
+            variables.TensorVariable,
             variables.TupleVariable,
         ),
     ):
@@ -2892,6 +2894,11 @@ def _get_triton_language_dtype() -> Any:
     if triton_language is None:
         triton_language = sys.modules.get("triton.language")
     return getattr(triton_language, "dtype", None)
+
+
+def is_triton_language_dtype(value: object) -> bool:
+    triton_language_dtype = _get_triton_language_dtype()
+    return triton_language_dtype is not None and type(value) is triton_language_dtype
 
 
 def is_safe_constant(v: Any) -> bool:

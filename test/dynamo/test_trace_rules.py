@@ -85,6 +85,14 @@ ignored_c_binding_in_graph_function_names = {
     "torch._validate_sparse_bsc_tensor_args",
     "torch._validate_compressed_sparse_indices",
 }
+
+
+def uncached_torch_obj_rule_map() -> dict[Any, Any]:
+    return torch._dynamo.trace_rules._get_torch_obj_rule_map.__wrapped__(  # type: ignore[attr-defined]
+        torch._dynamo.trace_rules._is_dtensor_loaded()
+    )
+
+
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
         "torch._C._te.set_llvm_aot_workflow",
@@ -407,7 +415,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             ),
             unittest.mock.patch(
                 "torch._dynamo.trace_rules.get_torch_obj_rule_map",
-                torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,  # bypass functools.lru_cache
+                uncached_torch_obj_rule_map,
             ),
         ):
             x = torch.rand(3)
@@ -441,7 +449,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             ),
             unittest.mock.patch(
                 "torch._dynamo.trace_rules.get_torch_obj_rule_map",
-                torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,
+                uncached_torch_obj_rule_map,
             ),
         ):
             # First adding the module to SKIP_DIRS so that it will be skipped by default.
@@ -457,6 +465,22 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             finally:
                 torch._dynamo.trace_rules.SKIP_DIRS = skip_dirs_backup
                 torch._dynamo.trace_rules.SKIP_DIRS_RE = skip_dirs_re_backup
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_dtensor_rule_map_updates_after_dtensor_import(self):
+        trace_rules = torch._dynamo.trace_rules
+        if trace_rules._is_dtensor_loaded():
+            self.skipTest("DTensor already loaded")
+
+        trace_rules.clear_lru_cache()
+        before = trace_rules.get_torch_obj_rule_map()
+        self.assertFalse(trace_rules._is_dtensor_loaded())
+
+        from torch.distributed.tensor import DTensor
+
+        after = trace_rules.get_torch_obj_rule_map()
+        self.assertNotIn(DTensor.from_local, before)
+        self.assertIn(DTensor.from_local, after)
 
     def test_no_special_handlers_for_torch_non_c_bindings(self):
         handlers = TorchInGraphFunctionVariable._get_handlers()
