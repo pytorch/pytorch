@@ -224,6 +224,7 @@ from .functions import (
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
     GetSetDescriptorVariable,
+    LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
     MethodWrapperVariable,
     SysFunctionVariable,
@@ -1740,6 +1741,27 @@ class VariableBuilder:
             result = RandomVariable(value, source=self.source)
             self.tx.output.side_effects.track_mutable(value, result)
             return result
+        elif istype(value, types.GeneratorType) and (
+            inspect.getgeneratorstate(value) == inspect.GEN_CREATED
+        ):
+            # An unstarted generator object passed into the compiled region:
+            # creating a generator runs no body code, so re-inline its body as
+            # if its function were called here. Its identity is pinned with an
+            # ID_MATCH guard so a different generator object recompiles.
+            self.install_guards(GuardBuilder.ID_MATCH)
+            code = value.gi_code
+            frame = value.gi_frame
+            if frame is None:
+                raise AssertionError("GEN_CREATED implies a live frame")
+            frame_locals = frame.f_locals
+            closure = tuple(types.CellType(frame_locals[n]) for n in code.co_freevars)
+            fn = types.FunctionType(code, frame.f_globals, closure=closure)
+            args = [
+                VariableTracker.build(self.tx, frame_locals[n])
+                for n in code.co_varnames[: code.co_argcount]
+            ]
+            genfn = LocalGeneratorFunctionVariable(VariableTracker.build(self.tx, fn))
+            return genfn.call_function(self.tx, args, {})
         # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
