@@ -579,7 +579,7 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
 
 # Resume tracing in nested frames if a nested graph break occurs
 # Old behavior is to bubble up the graph break to the top level frame.
-nested_graph_breaks: bool = False
+nested_graph_breaks: bool = not is_fbcode()
 
 # If True, error if Dynamo attempts to trace more code while running compiled code in fullgraph=True.
 # If Dynamo determines that it should skip tracing the code (either at the C/C++ or Python level),
