@@ -72,7 +72,7 @@ class VllmTestRunner(BaseRunner):
             self.test_plan = args.test_plan
             self.test_type = TestInpuType.TEST_PLAN
 
-        # Matches the structeur in the artifacts.zip from torcb build
+        # Matches the structure in the artifacts.zip from torcb build
         self.TORCH_WHL_PATH_REGEX = "torch*.whl"
         self.TORCH_WHL_EXTRA = "opt-einsum"
         self.TORCH_ADDITIONAL_WHLS_REGEX = [
