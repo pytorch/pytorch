@@ -776,6 +776,20 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
     TORCH_CHECK(pivots.scalar_type() == at::kInt,
         "torch.lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype.\n"
         "Note: this function is intended to be used with the output produced by torch.linalg.lu_factor");
+    TORCH_CHECK(
+        pivots.dim() == LU.dim() - 1,
+        "torch.lu_unpack: Expected LU_pivots to have one fewer dimension than LU_data, but got LU_data with shape ",
+        LU.sizes(),
+        " and LU_pivots with shape ",
+        pivots.sizes(),
+        " instead");
+    TORCH_CHECK(
+        LU.sizes().slice(0, LU.dim() - 2).equals(pivots.sizes().slice(0, pivots.dim() - 1)),
+        "torch.lu_unpack: Expected LU_pivots.shape[:-1] to match LU_data.shape[:-2], but got LU_data with shape ",
+        LU.sizes(),
+        " and LU_pivots with shape ",
+        pivots.sizes(),
+        " instead");
   }
 
   auto sizes = LU.sizes().vec();
@@ -786,6 +800,14 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (unpack_pivots) {
+    TORCH_CHECK(
+        pivots.size(-1) == k,
+        "torch.lu_unpack: Number of pivots per batch should be min(LU_data.size(-2), LU_data.size(-1)). ",
+        "Expected ",
+        k,
+        ", but got ",
+        pivots.size(-1),
+        " instead");
     set_output_raw_strided(0, sizes, {}, LU.options(), {});
   } else {
     set_output_raw_strided(0, {0}, {}, LU.options(), {});

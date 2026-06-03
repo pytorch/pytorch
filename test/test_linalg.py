@@ -5817,6 +5817,11 @@ class TestLinalg(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "torch.int32 dtype"):
             torch.lu_unpack(lu_data, lu_pivots.long())
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Number of pivots per batch should be min\\(LU_data.size\\(-2\\), LU_data.size\\(-1\\)\\)",
+        ):
+            torch.lu_unpack(lu_data, lu_pivots[..., :0])
 
         # check that once flags are unset, Nones are returned
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False)

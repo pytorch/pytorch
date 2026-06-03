@@ -1596,12 +1596,33 @@ def lu_unpack_meta(
                 "Note: this function is intended to be used with the output produced by torch.linalg.lu_factor"
             ),
         )
+        torch._check(
+            pivots.ndim == LU.ndim - 1,
+            lambda: (
+                "torch.lu_unpack: Expected LU_pivots to have one fewer dimension than LU_data, "
+                f"but got LU_data with shape {LU.shape} and LU_pivots with shape {pivots.shape} instead"
+            ),
+        )
+        torch._check(
+            pivots.shape[:-1] == LU.shape[:-2],
+            lambda: (
+                "torch.lu_unpack: Expected LU_pivots.shape[:-1] to match LU_data.shape[:-2], "
+                f"but got LU_data with shape {LU.shape} and LU_pivots with shape {pivots.shape} instead"
+            ),
+        )
     sizes = list(LU.shape)
     m = sizes[-2]
     n = sizes[-1]
     k = sym_min(m, n)
     sizes[-1] = m
     if unpack_pivots:
+        torch._check(
+            pivots.size(-1) == k,
+            lambda: (
+                "torch.lu_unpack: Number of pivots per batch should be min(LU_data.size(-2), "
+                f"LU_data.size(-1)). Expected {k}, but got {pivots.size(-1)} instead"
+            ),
+        )
         P = LU.new_empty(sizes)
     else:
         P = LU.new_empty([0])
