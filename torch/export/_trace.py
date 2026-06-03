@@ -110,7 +110,12 @@ from .exported_program import (
     ModuleCallEntry,
     ModuleCallSignature,
 )
-from .graph_signature import _convert_to_export_graph_signature, ExportGraphSignature
+from .graph_signature import (
+    _convert_to_export_graph_signature,
+    ExportGraphSignature,
+    InputSpec,
+    TensorArgument,
+)
 
 
 log = logging.getLogger(__name__)
@@ -745,6 +750,266 @@ def _rename_constants_nodes(
             if node.name in buffer_to_constant:
                 node.name = node.target = buffer_to_constant[node.name]
         mod.recompile()
+
+
+def _lift_cond_subgraph_tensor_constants(
+    gm: torch.fx.GraphModule,
+    graph_signature: ExportGraphSignature,
+    constants: dict[str, _ConstantAttributeType],
+) -> None:
+    """
+    Lift tensor constants captured inside cond subgraphs to top-level constants.
+
+    A cond subgraph can own a tensor constant as a GraphModule buffer. During
+    run_decompositions, AOTDispatcher functionalizes buffers, so retracing the
+    nested subgraph can otherwise see a FunctionalTensor buffer without the
+    corresponding FunctionalTensorMode.
+    """
+    Requirements = list[tuple[str, str, torch.Tensor]]
+
+    def is_unused_tensor_constant(node: torch.fx.Node) -> bool:
+        if len(node.users) != 1:
+            return False
+        lift_node = next(iter(node.users))
+        if not (
+            lift_node.op == "call_function"
+            and lift_node.target
+            in (
+                torch.ops.aten.lift_fresh.default,
+                torch.ops.aten.lift_fresh_copy.default,
+            )
+        ):
+            return False
+        if len(lift_node.users) == 0:
+            return True
+        if len(lift_node.users) != 1:
+            return False
+        detach_node = next(iter(lift_node.users))
+        return (
+            detach_node.op == "call_function"
+            and detach_node.target
+            in (torch.ops.aten.detach.default, torch.ops.aten.detach_.default)
+            and len(detach_node.users) == 0
+        )
+
+    def erase_unused_tensor_constant(node: torch.fx.Node) -> None:
+        lift_node = next(iter(node.users))
+        users = list(lift_node.users)
+        if users:
+            node.graph.erase_node(users[0])
+        node.graph.erase_node(lift_node)
+        node.graph.erase_node(node)
+
+    input_specs = graph_signature.input_specs
+    used_top_level_names = {node.name for node in gm.graph.nodes}
+    used_targets = {spec.target for spec in input_specs if spec.target is not None}
+
+    root_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    if len(root_placeholders) != len(input_specs):
+        raise AssertionError(
+            f"placeholder count {len(root_placeholders)} does not match "
+            f"input_specs count {len(input_specs)}"
+        )
+
+    first_user_input_loc = len(input_specs)
+    first_user_input: torch.fx.Node | None = None
+    for i, (node, spec) in enumerate(zip(root_placeholders, input_specs)):
+        if spec.kind == InputKind.USER_INPUT:
+            first_user_input_loc = i
+            first_user_input = node
+            break
+
+    def unique_name(prefix: str, used_names: set[str]) -> str:
+        name = prefix
+        idx = 0
+        while name in used_names:
+            idx += 1
+            name = f"{prefix}_{idx}"
+        used_names.add(name)
+        return name
+
+    def placeholder_by_name(
+        graph_module: torch.fx.GraphModule, name: str
+    ) -> torch.fx.Node | None:
+        for node in graph_module.graph.nodes:
+            if node.op == "placeholder" and node.name == name:
+                return node
+        return None
+
+    def insert_placeholder(
+        graph_module: torch.fx.GraphModule,
+        name: str,
+        tensor: torch.Tensor,
+        before_node: torch.fx.Node | None = None,
+    ) -> torch.fx.Node:
+        existing = placeholder_by_name(graph_module, name)
+        if existing is not None:
+            return existing
+
+        placeholders = [
+            node for node in graph_module.graph.nodes if node.op == "placeholder"
+        ]
+        if before_node is not None:
+            ctx = graph_module.graph.inserting_before(before_node)
+        elif placeholders:
+            ctx = graph_module.graph.inserting_after(placeholders[-1])
+        else:
+            ctx = graph_module.graph.inserting_before(
+                next(iter(graph_module.graph.nodes))
+            )
+
+        with ctx:
+            placeholder = graph_module.graph.placeholder(name)
+            placeholder.target = placeholder.name
+            placeholder.meta["val"] = tensor
+        return placeholder
+
+    def add_root_input_spec(name: str, target: str) -> None:
+        nonlocal first_user_input_loc
+        if target in constants:
+            return
+        input_specs.insert(
+            first_user_input_loc,
+            InputSpec(
+                kind=InputKind.CONSTANT_TENSOR,
+                arg=TensorArgument(name=name),
+                target=target,
+            ),
+        )
+        first_user_input_loc += 1
+
+    def make_requirement(graph_attr: str, buffer_name: str, tensor: torch.Tensor):
+        base_target = re.sub(r"[^0-9A-Za-z_]", "_", f"{graph_attr}_{buffer_name}")
+        target = base_target
+        target_suffix = 0
+        while target in used_targets:
+            target_suffix += 1
+            target = f"{base_target}_{target_suffix}"
+        used_targets.add(target)
+        name = unique_name(
+            placeholder_prefixes[InputKind.CONSTANT_TENSOR]
+            + re.sub(r"[^0-9A-Za-z_]", "_", target),
+            used_top_level_names,
+        )
+        return name, target, tensor
+
+    def get_subgraph(
+        graph_module: torch.fx.GraphModule, get_attr_node: torch.fx.Node
+    ) -> torch.fx.GraphModule | None:
+        if get_attr_node.op != "get_attr" or not isinstance(get_attr_node.target, str):
+            return None
+        subgraph = getattr(graph_module, get_attr_node.target, None)
+        return subgraph if isinstance(subgraph, torch.fx.GraphModule) else None
+
+    def process_graph_module(
+        graph_module: torch.fx.GraphModule, is_root: bool
+    ) -> Requirements:
+        required_by_this_graph: Requirements = []
+        required_names: set[str] = set()
+
+        for node in list(graph_module.graph.nodes):
+            if node.op != "call_function" or node.target != torch.ops.higher_order.cond:
+                continue
+            if len(node.args) != 4:
+                continue
+            pred, true_attr, false_attr, operands = node.args
+            if not isinstance(true_attr, torch.fx.Node) or not isinstance(
+                false_attr, torch.fx.Node
+            ):
+                continue
+            true_graph = get_subgraph(graph_module, true_attr)
+            false_graph = get_subgraph(graph_module, false_attr)
+            if true_graph is None or false_graph is None:
+                continue
+            if not isinstance(operands, (tuple, list)):
+                continue
+
+            true_requirements = process_graph_module(true_graph, False)
+            false_requirements = process_graph_module(false_graph, False)
+
+            branch_constants: list[
+                tuple[
+                    torch.fx.GraphModule, torch.fx.Node, tuple[str, str, torch.Tensor]
+                ]
+            ] = []
+            for graph_attr, subgraph in (
+                (true_attr.target, true_graph),
+                (false_attr.target, false_graph),
+            ):
+                if not isinstance(graph_attr, str):
+                    continue
+                for sub_node in list(subgraph.graph.nodes):
+                    if sub_node.op != "get_attr" or not isinstance(
+                        sub_node.target, str
+                    ):
+                        continue
+                    constant = getattr(subgraph, sub_node.target, None)
+                    if not isinstance(constant, torch.Tensor):
+                        continue
+                    if is_unused_tensor_constant(sub_node):
+                        erase_unused_tensor_constant(sub_node)
+                        subgraph._buffers.pop(sub_node.target, None)
+                        continue
+                    branch_constants.append(
+                        (
+                            subgraph,
+                            sub_node,
+                            make_requirement(graph_attr, sub_node.target, constant),
+                        )
+                    )
+
+            cond_requirements: Requirements = []
+            cond_requirements.extend(true_requirements)
+            cond_requirements.extend(false_requirements)
+            cond_requirements.extend(req for _, _, req in branch_constants)
+
+            if not cond_requirements:
+                true_graph.recompile()
+                false_graph.recompile()
+                continue
+
+            new_operands = list(operands)
+            for req_name, req_target, req_tensor in cond_requirements:
+                placeholder = insert_placeholder(
+                    graph_module,
+                    req_name,
+                    req_tensor,
+                    first_user_input if is_root else None,
+                )
+                if is_root:
+                    add_root_input_spec(req_name, req_target)
+                    constants[req_target] = req_tensor
+                elif req_name not in required_names:
+                    required_names.add(req_name)
+                    required_by_this_graph.append((req_name, req_target, req_tensor))
+
+                new_operands.append(placeholder)
+                for subgraph in (true_graph, false_graph):
+                    insert_placeholder(subgraph, req_name, req_tensor)
+
+            for owning_graph, get_attr_node, (
+                req_name,
+                _,
+                req_tensor,
+            ) in branch_constants:
+                replacement = insert_placeholder(owning_graph, req_name, req_tensor)
+                buffer_name = get_attr_node.target
+                if not isinstance(buffer_name, str):
+                    raise AssertionError(
+                        f"expected string get_attr target, got {buffer_name}"
+                    )
+                get_attr_node.replace_all_uses_with(replacement)
+                owning_graph.graph.erase_node(get_attr_node)
+                owning_graph._buffers.pop(buffer_name, None)
+
+            node.args = (pred, true_attr, false_attr, tuple(new_operands))
+            true_graph.recompile()
+            false_graph.recompile()
+
+        graph_module.recompile()
+        return required_by_this_graph
+
+    process_graph_module(gm, True)
 
 
 def _restore_state_dict(
@@ -1742,6 +2007,10 @@ def _strict_export(
     # 5. Rename constants nodes in graph module from buffers to constants
     _rename_constants_nodes(gm, export_graph_signature)
 
+    # 6. Move cond branch-owned tensor constants to top-level constants and
+    # pass them into the branch graphs as explicit operands.
+    _lift_cond_subgraph_tensor_constants(gm, export_graph_signature, constants)
+
     if orig_out_spec is None:
         out_spec = aten_export_artifact.inferred_out_spec
         if wrap_tuple:
@@ -2328,6 +2597,11 @@ def _export_for_training(
                     warnings.warn(error_msg, stacklevel=2)
 
     export_graph_signature = export_artifact.aten.sig
+    _lift_cond_subgraph_tensor_constants(
+        export_artifact.aten.gm,
+        export_graph_signature,
+        export_artifact.aten.constants,
+    )
 
     forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
     inline_constraints = _get_inline_constraints(export_artifact.fake_mode)
@@ -2548,6 +2822,11 @@ def _export(
         ),
     )
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
+    _lift_cond_subgraph_tensor_constants(
+        export_artifact.aten.gm,
+        export_graph_signature,
+        export_artifact.aten.constants,
+    )
 
     forward_arg_names = _get_forward_arg_names(mod, args, kwargs)
     inline_constraints = _get_inline_constraints(export_artifact.fake_mode)

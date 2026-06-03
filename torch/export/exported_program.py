@@ -546,7 +546,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
             gm,
             new_graph_signature,
             ep.graph_signature,
-            unwrapped_params_buffers,
         )
 
         # When we apply parameterization rule to unwrap
@@ -823,14 +822,9 @@ def _remove_unused_new_graph_buffers(
     gm: torch.fx.GraphModule,
     new_graph_signature: ExportGraphSignature,
     old_graph_signature: ExportGraphSignature,
-    unwrapped_params_buffers,
 ) -> tuple[torch.fx.GraphModule, ExportGraphSignature]:
     """
     Removes unused buffer placeholders introduced while re-exporting.
-
-    HOP subgraph-local tensor constants can be registered as buffers on the
-    subgraph modules so AOTDispatcher can functionalize them, but the top-level
-    graph should not expose dead placeholders for them as ExportedProgram state.
     """
     placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
     if len(placeholders) != len(new_graph_signature.input_specs):
@@ -849,13 +843,6 @@ def _remove_unused_new_graph_buffers(
             and spec.target not in old_buffers
             and len(node.users) == 0
         ):
-            if spec.target in unwrapped_params_buffers:
-                # Keep the real tensor available to nested HOP subgraphs that
-                # still read it through get_attr after the dead top-level
-                # placeholder is removed from the ExportGraphSignature.
-                torch.fx.graph_module._assign_attr(
-                    unwrapped_params_buffers[spec.target], gm, spec.target
-                )
             gm.graph.erase_node(node)
             changed = True
             continue

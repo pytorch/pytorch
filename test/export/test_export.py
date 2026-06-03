@@ -3102,17 +3102,30 @@ class GraphModule(torch.nn.Module):
         inp = torch.ones(())
         self.assertEqual(decomp_ep.module()(inp), M()(inp))
 
-        def assert_no_lifted_buffer_leak(decomp_ep):
-            self.assertEqual(dict(decomp_ep.state_dict), {})
-            self.assertEqual(decomp_ep.graph_signature.buffers, ())
+        def assert_no_branch_buffer_leak(
+            ep,
+            expected_constants,
+            expected_state_keys=(),
+            expected_buffers=(),
+        ):
+            self.assertEqual(set(ep.state_dict), set(expected_state_keys))
+            self.assertEqual(set(ep.graph_signature.buffers), set(expected_buffers))
+            self.assertEqual(set(ep.constants), expected_constants)
+            self.assertEqual(
+                set(ep.graph_signature.lifted_tensor_constants), expected_constants
+            )
             for node, spec in zip(
-                decomp_ep.graph.find_nodes(op="placeholder"),
-                decomp_ep.graph_signature.input_specs,
+                ep.graph.find_nodes(op="placeholder"),
+                ep.graph_signature.input_specs,
             ):
                 self.assertGreater(len(node.users), 0)
-                self.assertNotEqual(spec.kind, InputKind.BUFFER)
+                if spec.target not in expected_buffers:
+                    self.assertNotEqual(spec.kind, InputKind.BUFFER)
+            for _, mod in ep.graph_module.named_modules():
+                self.assertEqual(list(mod.named_buffers(recurse=False)), [])
 
-        assert_no_lifted_buffer_leak(decomp_ep)
+        assert_no_branch_buffer_leak(ep, set())
+        assert_no_branch_buffer_leak(decomp_ep, set())
 
         class UsedConstant(torch.nn.Module):
             def forward(self, x):
@@ -3124,12 +3137,77 @@ class GraphModule(torch.nn.Module):
 
                 return torch.cond(x.any(), true_fn, false_fn, (x,))
 
-        used_decomp_ep = torch.export.export(
-            UsedConstant(), (torch.ones(()),)
-        ).run_decompositions()
+        used_ep = torch.export.export(UsedConstant(), (torch.ones(()),))
+        expected_constants = {
+            "true_graph_0__tensor_constant0",
+            "false_graph_0__tensor_constant0",
+        }
+        assert_no_branch_buffer_leak(used_ep, expected_constants)
+        used_decomp_ep = used_ep.run_decompositions()
         self.assertEqual(used_decomp_ep.module()(torch.ones(())), torch.tensor(3.0))
         self.assertEqual(used_decomp_ep.module()(torch.zeros(())), torch.tensor(4.0))
-        assert_no_lifted_buffer_leak(used_decomp_ep)
+        assert_no_branch_buffer_leak(used_decomp_ep, expected_constants)
+
+        class NoUserInputWithBuffer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(()))
+
+            def forward(self):
+                def true_fn():
+                    return self.buf + torch.tensor(2.0)
+
+                def false_fn():
+                    return self.buf + torch.tensor(4.0)
+
+                return torch.cond(self.buf.any(), true_fn, false_fn, ())
+
+        no_user_ep = torch.export.export(NoUserInputWithBuffer(), ())
+        no_user_constants = {
+            "true_graph_0__tensor_constant0",
+            "false_graph_0__tensor_constant0",
+        }
+        assert_no_branch_buffer_leak(no_user_ep, no_user_constants, ["buf"], ["buf"])
+        no_user_decomp_ep = no_user_ep.run_decompositions()
+        self.assertEqual(no_user_decomp_ep.module()(), torch.tensor(3.0))
+        assert_no_branch_buffer_leak(
+            no_user_decomp_ep, no_user_constants, ["buf"], ["buf"]
+        )
+
+        class NestedCond(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    def nested_true_fn(x):
+                        return x + torch.tensor(2.0)
+
+                    def nested_false_fn(x):
+                        return x + torch.tensor(3.0)
+
+                    return torch.cond(x > 1, nested_true_fn, nested_false_fn, (x,))
+
+                def false_fn(x):
+                    return x + torch.tensor(4.0)
+
+                return torch.cond(x > 0, true_fn, false_fn, (x,))
+
+        nested_ep = torch.export.export(NestedCond(), (torch.ones(()),))
+        nested_constants = set(nested_ep.constants)
+        self.assertEqual(
+            {constant.item() for constant in nested_ep.constants.values()},
+            {2.0, 3.0, 4.0},
+        )
+        assert_no_branch_buffer_leak(nested_ep, nested_constants)
+        nested_decomp_ep = nested_ep.run_decompositions()
+        self.assertEqual(
+            nested_decomp_ep.module()(torch.tensor(2.0)), torch.tensor(4.0)
+        )
+        self.assertEqual(
+            nested_decomp_ep.module()(torch.tensor(0.5)), torch.tensor(3.5)
+        )
+        self.assertEqual(
+            nested_decomp_ep.module()(torch.tensor(-1.0)), torch.tensor(3.0)
+        )
+        assert_no_branch_buffer_leak(nested_decomp_ep, nested_constants)
 
     def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
