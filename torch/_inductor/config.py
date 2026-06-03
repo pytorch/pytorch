@@ -867,13 +867,20 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
-realize_opcount_threshold = 30
+_realize_opcount_threshold_default = 30
+realize_opcount_threshold: int | None = None
+# CPU kernels tolerate larger fused pointwise bodies than GPU kernels, and
+# materializing moderate CPU expressions can add expensive full-buffer traffic.
+realize_cpu_opcount_threshold = 50
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
-realize_acc_reads_threshold = 8
+_realize_acc_reads_threshold_default = 8
+realize_acc_reads_threshold: int | None = None
+realize_cpu_acc_reads_threshold = 12
 realize_acc_reads_size_threshold: int | None = (
     None  # TODO(xuanzh): harden this to make it non optional
 )
+
 
 # Defer early realization of cheap output nodes (0 buffer reads, small opcount)
 # to prevent cascade materialization in fullgraph compilation.
