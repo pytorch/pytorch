@@ -19,6 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
 from .. import config
+from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 from .descriptors import AOTInput, BackwardTokenAOTInput
 from .functional_utils import (
     assert_functional_graph,
@@ -32,7 +33,14 @@ from .graph_capture_wrappers import (
     fn_prepped_for_autograd,
     handle_effect_tokens_fn,
 )
-from .schemas import AOTConfig, FxValue, SubclassMeta, TraceFn, ViewAndMutationMeta
+from .schemas import (
+    AOTConfig,
+    FxValue,
+    OutputType,
+    SubclassMeta,
+    TraceFn,
+    ViewAndMutationMeta,
+)
 from .streams import (
     assign_backward_streams,
     assign_epilogue_copy_streams,
@@ -136,50 +144,45 @@ def _create_graph(
         )(*args)
 
         if args_descs is not None:
-            flat_args_descs, _ = pytree.tree_flatten(args_descs)
-            flat_out_descs, _ = pytree.tree_flatten(out_descs)
-
-            # Unfortunately, flat_args_descs is not guaranteed to match the
-            # number of actual arguments that show up on the FX graph.
-            # Specifically, allow_token_discovery=True means that we will
-            # silently add extra token arguments to the backwards graph.
-            #
-            # Although there are a few ways to detect what these tokens are,
-            # we are going to settle for something dodgy but simple to
-            # implement: match tangents_token placeholders specifically,
-            # as these are the only placeholders that are created by token
-            # discovery (NB: there is NO other code that treats this name
-            # as load bearing, so this is a bit naughty!)
-            #
-            # I originally wanted to detect tokens in exactly the same way
-            # that they are detected at normal runtime, but to be honest
-            # the normal runtime detection is pretty strange: it seems the
-            # backward tokens are not reliably at the end of the argument list
-            # but *precede* the RNG arguments (I don't understand why this is
-            # the case).  And in unlift_tokens, token arguments are detected
-            # by seeing if they feed into an effects call!  Dastardly.  Why
-            # didn't we just introduce a new type.
-
-            i = 0
-            j = 0
-            for n in fx_g.graph.nodes:
-                if n.op == "placeholder":
-                    if n.name.startswith("tangents_token"):
-                        n.meta["desc"] = BackwardTokenAOTInput(j)
-                        j += 1
-                    else:
-                        if i >= len(flat_args_descs):
-                            raise AssertionError(
-                                f"i={i} >= len(flat_args_descs)={len(flat_args_descs)}: "
-                                f"fn_wrappers={fn_wrappers(inner_f)}, "
-                                f"placeholders={[n for n in fx_g.graph.nodes if n.op == 'placeholder']}"
-                            )
-                        n.meta["desc"] = flat_args_descs[i]
-                        i += 1
-                elif n.op == "output":
-                    n.meta["desc"] = flat_out_descs
+            if out_descs is None:
+                raise AssertionError("out_descs must not be None")
+            _assign_graph_node_descs(fx_g, args_descs, out_descs, inner_f)
 
     return fx_g
+
+
+def _assign_graph_node_descs(
+    fx_g: torch.fx.GraphModule,
+    args_descs: Any,
+    out_descs: Any,
+    wrapped_fn: Callable[..., Any],
+) -> None:
+    flat_args_descs, _ = pytree.tree_flatten(args_descs)
+    flat_out_descs, _ = pytree.tree_flatten(out_descs)
+
+    # Unfortunately, flat_args_descs is not guaranteed to match the number of
+    # actual arguments that show up on the FX graph.  Specifically,
+    # allow_token_discovery=True can silently add extra token arguments to the
+    # backwards graph.  Match tangents_token placeholders specifically, as these
+    # are the only placeholders created by token discovery.
+    i = 0
+    j = 0
+    for n in fx_g.graph.nodes:
+        if n.op == "placeholder":
+            if n.name.startswith("tangents_token"):
+                n.meta["desc"] = BackwardTokenAOTInput(j)
+                j += 1
+            else:
+                if i >= len(flat_args_descs):
+                    raise AssertionError(
+                        f"i={i} >= len(flat_args_descs)={len(flat_args_descs)}: "
+                        f"fn_wrappers={fn_wrappers(wrapped_fn)}, "
+                        f"placeholders={[n for n in fx_g.graph.nodes if n.op == 'placeholder']}"
+                    )
+                n.meta["desc"] = flat_args_descs[i]
+                i += 1
+        elif n.op == "output":
+            n.meta["desc"] = flat_out_descs
 
 
 # TODO: Refactor the following code so detach() persists item_memo
@@ -280,6 +283,89 @@ def _create_graph_and_save_traced_inputs(
     )
 
 
+def _can_reuse_precomputed_fw_graph(
+    fw_metadata: ViewAndMutationMeta,
+    *,
+    aot_config: AOTConfig,
+) -> bool:
+    if (
+        aot_config.disable_functionalization
+        or aot_config.is_export
+        or aot_config.pre_dispatch
+    ):
+        return False
+
+    # Metadata can reveal that the normal stage-1 wrappers need to alter the
+    # calling convention after the trace has already run.  In those cases,
+    # discard the precomputed graph and re-enter the existing capture path.
+    return (
+        fw_metadata.num_mutated_inp_runtime_indices == 0
+        and fw_metadata.num_mutated_graph_handled_indices == 0
+        and fw_metadata.num_outputs_aliased == 0
+        and fw_metadata.num_unsafe_view_outputs == 0
+        and fw_metadata.num_intermediate_bases == 0
+        and len(fw_metadata.tokens) == 0
+        and fw_metadata.grad_enabled_mutation is None
+        and all(
+            info.output_type == OutputType.non_alias for info in fw_metadata.output_info
+        )
+    )
+
+
+def _create_graph_and_collect_metadata(
+    f: Callable[..., Any],
+    args: list[Any],
+    args_descs: list[AOTInput],
+    *,
+    aot_config: AOTConfig,
+) -> tuple[torch.fx.GraphModule, list[Any], list[AOTInput], ViewAndMutationMeta]:
+    if aot_config.disable_functionalization:
+        raise AssertionError("cannot collect functionalization metadata when disabled")
+
+    saved_flat_args = _detach_traced_inputs(args)
+    metadata_fn = run_functionalized_fw_and_collect_metadata(
+        f,
+        flat_args_descs=args_descs,
+        static_input_indices=aot_config.static_input_indices,
+        keep_input_mutations=aot_config.keep_inference_input_mutations,
+        pre_dispatch=aot_config.pre_dispatch,
+        _return_graph_outputs=True,
+    )
+    out_descs = None
+    fw_metadata = None
+
+    @simple_wraps(f)
+    def inner_f(*args: Any) -> Any:
+        nonlocal out_descs, fw_metadata
+        if out_descs is not None:
+            raise AssertionError("out_descs must be None")
+        result = metadata_fn(*args)
+        if not (isinstance(result, tuple) and len(result) == 3):
+            raise AssertionError(
+                f"expected tuple of length 3, got {type(result)} with value {result}"
+            )
+        out, out_descs, fw_metadata = result
+        return out
+
+    with enable_python_dispatcher():
+        fx_g = make_fx(
+            inner_f,
+            decomposition_table=aot_config.decompositions,
+            record_module_stack=True,
+            pre_dispatch=aot_config.pre_dispatch,
+            _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
+        )(*args)
+
+    if out_descs is None:
+        raise AssertionError("out_descs must not be None")
+    if not isinstance(fw_metadata, ViewAndMutationMeta):
+        raise AssertionError(f"expected ViewAndMutationMeta, got {type(fw_metadata)}")
+
+    _assign_graph_node_descs(fx_g, args_descs, out_descs, inner_f)
+
+    return fx_g, saved_flat_args, args_descs, fw_metadata
+
+
 def aot_dispatch_base_graph(
     flat_fn: TraceFn,
     flat_args: list[FxValue],
@@ -287,6 +373,9 @@ def aot_dispatch_base_graph(
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
+    precomputed_fw_module: torch.fx.GraphModule | None = None,
+    precomputed_flat_args: list[Any] | None = None,
+    precomputed_flat_args_descs: list[AOTInput] | None = None,
 ) -> tuple[torch.fx.GraphModule, list[FxValue], list[AOTInput], SubclassMeta | None]:
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
@@ -301,76 +390,92 @@ def aot_dispatch_base_graph(
         fw_metadata,
         keep_data_input_mutations=aot_config.keep_inference_input_mutations,
     )
-    # TODO: replace with AOTDispatchSubclassWrapper once we refactor
-    # fn_input_mutations_to_outputs and create_functionalized_fn
-    # into CompilerWrappers.
-    tracing_state = _prepare_graph_capture_tracing(
-        fn_to_trace,
-        flat_args,
-        flat_args_descs,
-        flat_fn,
-        fw_metadata=fw_metadata,
-        aot_config=aot_config,
-        trace_joint=False,
-    )
-    fn_to_trace = tracing_state.fn_to_trace
-    updated_flat_args_subclasses_desugared = tracing_state.flat_args
-    updated_flat_args_subclasses_desugared_descs = tracing_state.flat_args_descs
-    maybe_subclass_meta = tracing_state.maybe_subclass_meta
+    if precomputed_fw_module is not None and _can_reuse_precomputed_fw_graph(
+        fw_metadata, aot_config=aot_config
+    ):
+        if precomputed_flat_args is None or precomputed_flat_args_descs is None:
+            raise AssertionError("precomputed graph inputs must be provided")
+        fw_module = precomputed_fw_module
+        saved_updated_flat_args_subclasses_desugared = precomputed_flat_args
+        saved_updated_flat_args_subclasses_desugared_descs = precomputed_flat_args_descs
+        maybe_subclass_meta = None
+    else:
+        # TODO: replace with AOTDispatchSubclassWrapper once we refactor
+        # fn_input_mutations_to_outputs and create_functionalized_fn
+        # into CompilerWrappers.
+        tracing_state = _prepare_graph_capture_tracing(
+            fn_to_trace,
+            flat_args,
+            flat_args_descs,
+            flat_fn,
+            fw_metadata=fw_metadata,
+            aot_config=aot_config,
+            trace_joint=False,
+        )
+        fn_to_trace = tracing_state.fn_to_trace
+        updated_flat_args_subclasses_desugared = tracing_state.flat_args
+        updated_flat_args_subclasses_desugared_descs = tracing_state.flat_args_descs
+        maybe_subclass_meta = tracing_state.maybe_subclass_meta
 
-    aot_graphs_log.debug(
-        "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
-        aot_config.aot_id,
-        fw_metadata,
-        maybe_subclass_meta,
-    )
-
-    # We track buffer assignments when exporting in non-strict mode.
-    # (In contrast, strict mode errors on any attribute assignment.)
-    mod_when_exporting_non_strict = root_module_when_exporting_non_strict(flat_fn)
-    if aot_config.is_export and mod_when_exporting_non_strict is not None:
-        # For any buffer that is assigned, we want to associate it to the final proxy node
-        # that it is assigned to. This node can then be added as a buffer mutation output.
-        assigned_buffers: dict[str, str] = {}
-        hook = register_buffer_assignment_hook(
-            mod_when_exporting_non_strict, assigned_buffers
+        aot_graphs_log.debug(
+            "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
+            aot_config.aot_id,
+            fw_metadata,
+            maybe_subclass_meta,
         )
 
-    (
-        fw_module,
-        saved_updated_flat_args_subclasses_desugared,
-    ) = _create_graph_and_save_traced_inputs(
-        fn_to_trace,
-        updated_flat_args_subclasses_desugared,
-        updated_flat_args_subclasses_desugared_descs,
-        aot_config=aot_config,
-    )
-    saved_updated_flat_args_subclasses_desugared_descs = (
-        updated_flat_args_subclasses_desugared_descs
-    )
+        # We track buffer assignments when exporting in non-strict mode.
+        # (In contrast, strict mode errors on any attribute assignment.)
+        mod_when_exporting_non_strict = root_module_when_exporting_non_strict(flat_fn)
+        assigned_buffers: dict[str, str] = {}
+        hook = None
+        if aot_config.is_export and mod_when_exporting_non_strict is not None:
+            # For any buffer that is assigned, we want to associate it to the final proxy node
+            # that it is assigned to. This node can then be added as a buffer mutation output.
+            hook = register_buffer_assignment_hook(
+                mod_when_exporting_non_strict, assigned_buffers
+            )
 
-    if aot_config.is_export and mod_when_exporting_non_strict is not None:
-        # We update metadata to consider any assigned buffers as buffer mutations.
-        i = len(dict(mod_when_exporting_non_strict.named_parameters()))
-        for name, _ in mod_when_exporting_non_strict.named_buffers():
-            if name in assigned_buffers and not fw_metadata.input_info[i].mutates_data:  # type: ignore[possibly-undefined]
-                fw_metadata.input_info[i] = dataclasses.replace(
-                    fw_metadata.input_info[i], mutates_data=True
-                )
-                fw_metadata.num_mutated_inp_runtime_indices += 1
-            i += 1
+        (
+            fw_module,
+            saved_updated_flat_args_subclasses_desugared,
+        ) = _create_graph_and_save_traced_inputs(
+            fn_to_trace,
+            updated_flat_args_subclasses_desugared,
+            updated_flat_args_subclasses_desugared_descs,
+            aot_config=aot_config,
+        )
+        saved_updated_flat_args_subclasses_desugared_descs = (
+            updated_flat_args_subclasses_desugared_descs
+        )
 
-        # We add nodes corresponding to buffer assignments as output nodes in the graph.
-        add_nodes = []
-        output_node = list(fw_module.graph.nodes)[-1]
-        for name in assigned_buffers.values():  # type: ignore[possibly-undefined]
-            for node in fw_module.graph.nodes:
-                if node.name == name:
-                    add_nodes.append(node)
-                    node.users[output_node] = None
-        output_node.args = ((*add_nodes, *output_node.args[0]),)
+        if aot_config.is_export and mod_when_exporting_non_strict is not None:
+            # We update metadata to consider any assigned buffers as buffer mutations.
+            i = len(dict(mod_when_exporting_non_strict.named_parameters()))
+            for name, _ in mod_when_exporting_non_strict.named_buffers():
+                if (
+                    name in assigned_buffers
+                    and not fw_metadata.input_info[i].mutates_data
+                ):
+                    fw_metadata.input_info[i] = dataclasses.replace(
+                        fw_metadata.input_info[i], mutates_data=True
+                    )
+                    fw_metadata.num_mutated_inp_runtime_indices += 1
+                i += 1
 
-        hook.remove()  # type: ignore[possibly-undefined]
+            # We add nodes corresponding to buffer assignments as output nodes in the graph.
+            add_nodes = []
+            output_node = list(fw_module.graph.nodes)[-1]
+            for name in assigned_buffers.values():
+                for node in fw_module.graph.nodes:
+                    if node.name == name:
+                        add_nodes.append(node)
+                        node.users[output_node] = None
+            output_node.args = ((*add_nodes, *output_node.args[0]),)
+
+            if hook is None:
+                raise AssertionError("buffer assignment hook must not be None")
+            hook.remove()
 
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.

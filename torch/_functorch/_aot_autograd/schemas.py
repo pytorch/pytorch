@@ -1263,6 +1263,14 @@ class AOTState:
     # original trace.
     fake_mode: FakeTensorMode
 
+    # For simple inference graphs, metadata collection can happen while tracing
+    # the forward graph.  These fields hold that trace so stage 1 can avoid
+    # running the same forward a second time when no wrappers need to change the
+    # calling convention.
+    precomputed_fw_module: torch.fx.GraphModule | None = None
+    precomputed_flat_args: list[Any] | None = None
+    precomputed_flat_args_descs: list[AOTInput] | None = None
+
 
 FxValue = Tensor | int | SymInt | BackwardState | OpaqueBase
 

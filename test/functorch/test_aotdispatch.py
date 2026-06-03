@@ -464,6 +464,53 @@ class TestAOTAutograd(AOTTestCase):
             )
         return compiled_f
 
+    # Keep debug_assert from intentionally re-running metadata collection.
+    @patch("torch._functorch.config.debug_assert", False)
+    def test_inference_metadata_collection_reuses_graph_trace(self):
+        calls = 0
+
+        def f(x):
+            nonlocal calls
+            calls += 1
+            return x.sin().cos()
+
+        compiled_f = aot_function(f, fw_compiler=nop)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled_f(x), x.sin().cos())
+        self.assertEqual(calls, 1)
+
+    # Keep debug_assert from intentionally re-running metadata collection.
+    @patch("torch._functorch.config.debug_assert", False)
+    def test_inference_metadata_collection_discards_alias_trace(self):
+        calls = 0
+        trace_and_metadata_calls = 0
+
+        def f(x):
+            nonlocal calls
+            calls += 1
+            return x.view_as(x)
+
+        import torch._functorch.aot_autograd as aot_autograd
+
+        orig = aot_autograd._create_graph_and_collect_metadata
+
+        def counted_create_graph_and_collect_metadata(*args, **kwargs):
+            nonlocal trace_and_metadata_calls
+            trace_and_metadata_calls += 1
+            return orig(*args, **kwargs)
+
+        with patch(
+            "torch._functorch.aot_autograd._create_graph_and_collect_metadata",
+            counted_create_graph_and_collect_metadata,
+        ):
+            compiled_f = aot_function(f, fw_compiler=nop)
+            x = torch.randn(4)
+
+            self.assertEqual(compiled_f(x), x)
+        self.assertEqual(trace_and_metadata_calls, 1)
+        self.assertEqual(calls, 2)
+
     # test_mutation will:
     # - Ensure that inputs are non-leaves, so our graphs can mutate them
     # - try to mutate outputs of the graph (to ensure that autograd meta is set properly on outputs)

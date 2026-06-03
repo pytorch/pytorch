@@ -260,6 +260,9 @@ def aot_stage1_graph_capture(
                     aot_state.flat_args_descs,
                     graph_capture_aot_config,
                     fw_metadata=aot_state.fw_metadata,
+                    precomputed_fw_module=aot_state.precomputed_fw_module,
+                    precomputed_flat_args=aot_state.precomputed_flat_args,
+                    precomputed_flat_args_descs=aot_state.precomputed_flat_args_descs,
                 )
             )
     if config.selective_decompose:

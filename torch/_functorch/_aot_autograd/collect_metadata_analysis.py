@@ -171,7 +171,8 @@ def run_functionalized_fw_and_collect_metadata(
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: list[int] | None = None,
     pre_dispatch: bool = False,
-) -> Callable[..., ViewAndMutationMeta]:
+    _return_graph_outputs: bool = False,
+) -> Callable[..., Any]:
     memo: dict[Tensor, Tensor] = {}
 
     # TODO: see if we can rewrite this to be more accurate using
@@ -187,7 +188,7 @@ def run_functionalized_fw_and_collect_metadata(
             return t
 
     @simple_wraps(f)
-    def inner(*flat_args: Any) -> ViewAndMutationMeta:
+    def inner(*flat_args: Any) -> Any:
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         if not all(
             isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
@@ -833,15 +834,20 @@ from a multi-output view call"
             for inp, info in zip(flat_f_args, input_info)
             if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ]
-        # Build the full list of forward graph outputs so the subclass wrapping
-        # code knows exactly which graph outputs to wrap back into subclasses.
-        # Including intermediate_bases unconditionally is safe: they are only
-        # populated when outputs require grad (line ~539), so they are naturally
-        # empty during pure inference.  In the "downgrade from training to
-        # inference" path, num_intermediate_bases > 0 is already gated behind
-        # `assert not req_subclass_dispatch` (aot_autograd.py), so the subclass
-        # wrapping code that consumes subclass_fw_graph_out_meta never sees them.
+        f_mutated_inputs_descs = [
+            InputMutationAOTOutput(inp_desc)
+            for inp_desc, info in zip(flat_f_args_descs, input_info)
+            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
+        ]
+        # Match the compiled forward output convention so graph capture can
+        # reuse this execution when no wrappers need to change the calling
+        # convention.
         f_fw_graph_outs = [*f_mutated_inputs, *flat_f_outs, *intermediate_bases]
+        f_fw_graph_outs_descs = [
+            *f_mutated_inputs_descs,
+            *flat_f_outs_descs,
+            *intermediate_bases_descs,
+        ]
         fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
 
         grad_enabled_mutation = None
@@ -878,6 +884,8 @@ from a multi-output view call"
             static_input_indices=static_input_indices,
             tokens=mode._tokens,
         )
+        if _return_graph_outputs:
+            return tuple(fw_graph_outs), tuple(f_fw_graph_outs_descs), metadata
         return metadata
 
     return inner
