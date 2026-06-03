@@ -17,7 +17,9 @@ _lazy_constant_iter_summary = {}
 _lazy_constant_popitem_summary = {}
 _lazy_constant_delitem_summary = {}
 _lazy_constant_view_summary = {}
+_lazy_constant_repr_summary = {}
 _lazy_constant_ordered_dict_summary = collections.OrderedDict()
+_lazy_constant_ordered_dict_repr_summary = collections.OrderedDict()
 
 
 class LazyConstantVariableTests(TestCase):
@@ -819,6 +821,52 @@ class LazyConstantVariableTests(TestCase):
         x = torch.randn(4)
         self.assertEqual(mod(x), x + 1)
         self.assertEqual(_lazy_constant_view_summary, {"mod_a": 1})
+
+    def test_source_backed_lazy_constant_dict_key_overwrite_then_repr(self):
+        global _lazy_constant_repr_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                _lazy_constant_repr_summary[self.name] = 1
+                return x + len(repr(_lazy_constant_repr_summary))
+
+        mod = SubMod("mod_a")
+        _lazy_constant_repr_summary = {"mod_a": 0}
+        x = torch.randn(4)
+        expected_summary = {"mod_a": 1}
+        self.assertEqual(mod(x), x + len(repr(expected_summary)))
+        self.assertEqual(_lazy_constant_repr_summary, expected_summary)
+
+    def test_source_backed_lazy_constant_ordered_dict_key_overwrite_then_repr(self):
+        global _lazy_constant_ordered_dict_repr_summary
+
+        counter = CompileCounter()
+
+        class SubMod(torch.nn.Module):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            @torch.compile(backend=counter)
+            def forward(self, x):
+                _lazy_constant_ordered_dict_repr_summary[self.name] = 1
+                return x + len(repr(_lazy_constant_ordered_dict_repr_summary))
+
+        mod = SubMod("mod_a")
+        _lazy_constant_ordered_dict_repr_summary = collections.OrderedDict(
+            [("mod_a", 0)]
+        )
+        x = torch.randn(4)
+        expected_summary = collections.OrderedDict([("mod_a", 1)])
+        self.assertEqual(mod(x), x + len(repr(expected_summary)))
+        self.assertEqual(_lazy_constant_ordered_dict_repr_summary, expected_summary)
 
 
 if __name__ == "__main__":
