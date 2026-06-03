@@ -10154,6 +10154,44 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
         )
 
+    def test_index_copy_error_checks(self):
+        cases = (
+            (
+                torch.randn(4, device=self.device),
+                0,
+                torch.tensor([0, 1], device=self.device),
+                torch.tensor(1.0, device=self.device),
+                "When source is scalar",
+            ),
+            (
+                torch.randn(4, 5, device=self.device),
+                0,
+                torch.tensor([0, 1], device=self.device),
+                torch.randn(2, device=self.device),
+                "their dimensionality must match",
+            ),
+            (
+                torch.randn(4, 5, 6, device=self.device),
+                0,
+                torch.tensor([0, 2], device=self.device),
+                torch.randn(1, 1, 6, device=self.device),
+                "Source/destination tensor must have same slice shapes",
+            ),
+            (
+                torch.randn(4, 5, device=self.device),
+                0,
+                torch.tensor([0, 1], device=self.device),
+                torch.randn(3, 5, device=self.device),
+                "Number of indices",
+            ),
+        )
+
+        for x, dim, index, y, msg in cases:
+            with self.subTest(msg=msg):
+                fn = torch.compile(torch.index_copy)
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    fn(x, dim, index, y)
+
     def test_index_put2(self):
         def fn(a, b, c):
             return torch.index_put(a, [b], c, True)
