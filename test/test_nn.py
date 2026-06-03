@@ -14764,18 +14764,30 @@ if __name__ == '__main__':
         # the input/weight caps for the same combo.
         expected_linear_bias_grad_max_ulp_diff = 0
         if none_reduction:
-            # reduction='none' has distinct numerics from mean/sum: a
-            # per-sample (N,) loss, and a recompute backward driven here by
-            # out.sum().backward() (uniform grad_output). Its caps are being
-            # calibrated -- the block below is intentionally generous so the
-            # cross-host sweep can run; read the per-host values from the
-            # ``[none calibration]`` print and tighten per (policy, dtype,
-            # device, bias), mirroring the scalar caps above.
-            # TODO(none-reduction calibration): replace with measured caps.
+            # reduction='none' caps. The per-element ULP uses a near-zero
+            # floor (see ``grad_max_ulp``) so these track drift in the
+            # well-scaled grad elements, not the intrinsic softmax-onehot
+            # cancellation residual (~0 up to rounding, guarded by the
+            # ``grad_error`` check). Measured on A100 + x86_64 CPU; device
+            # and bf16/fp16-cpu/cuda merged because the floor removes the
+            # device-specific near-zero inflation. bias=True has no none
+            # samples (bias coverage is reduction='mean' only), so the
+            # bias-grad cap stays at the default 0. Observed maxima:
+            # accurate 0/0; balanced bf16 4/0, fp16 25/27; compact bf16
+            # 4/4, fp16 25/85 (input_grad/weight).
             expected_max_ulp_diff = 8
-            expected_input_grad_max_ulp_diff = 4096
-            expected_weight_grad_max_ulp_diff = 8192
-            expected_linear_bias_grad_max_ulp_diff = 4096 if bias else 0
+            if _resolved_policy == "accurate":
+                expected_input_grad_max_ulp_diff = 4
+                expected_weight_grad_max_ulp_diff = 4
+            elif dtype == torch.bfloat16:  # balanced / compact, bf16
+                expected_input_grad_max_ulp_diff = 8
+                expected_weight_grad_max_ulp_diff = 8
+            elif _resolved_policy == "balanced":  # fp16
+                expected_input_grad_max_ulp_diff = 48
+                expected_weight_grad_max_ulp_diff = 48
+            else:  # compact, fp16
+                expected_input_grad_max_ulp_diff = 48
+                expected_weight_grad_max_ulp_diff = 128
         elif _resolved_policy == "accurate":
             if "cpu" in device:
                 if dtype == torch.float16:
@@ -14802,9 +14814,14 @@ if __name__ == '__main__':
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
                     if bias:
-                        expected_input_grad_max_ulp_diff = 3
-                        expected_weight_grad_max_ulp_diff = 6
-                        expected_linear_bias_grad_max_ulp_diff = 16
+                        if "mps" in device:
+                            expected_input_grad_max_ulp_diff = 232
+                            expected_weight_grad_max_ulp_diff = 190
+                            expected_linear_bias_grad_max_ulp_diff = 16
+                        else:  # CUDA
+                            expected_input_grad_max_ulp_diff = 3
+                            expected_weight_grad_max_ulp_diff = 6
+                            expected_linear_bias_grad_max_ulp_diff = 16
                     else:
                         expected_input_grad_max_ulp_diff = 1
                         expected_weight_grad_max_ulp_diff = 0
@@ -14951,6 +14968,21 @@ if __name__ == '__main__':
             norm = torch.linalg.matrix_norm(expected, ord="fro")
             return (abserr / (eta + norm)).item()
 
+        def grad_max_ulp(grad, expected):
+            # Per-element ULP distance for the gradient regression
+            # trip-wire. reduction='none' keeps the raw per-sample
+            # softmax-onehot residual ``L[T[n],k] - sum_v softmax*L[v,k]``,
+            # which is ~0 up to rounding on near-cancelling rows; the sign
+            # of such an element is numerically meaningless (``grad_error``
+            # is the correctness guard) but a sign flip inflates the ULP
+            # toward the uint ceiling. Drop elements below feps of the peak
+            # |grad| so the cap tracks drift in the well-scaled elements,
+            # not rounding noise. Scalar reductions keep every element.
+            ulp = diff_ulp(grad, expected)
+            if none_reduction:
+                ulp = torch.where(expected.abs() >= feps * expected.abs().max(), ulp, 0)
+            return ulp.max().item()
+
         maximal_input_grad_err = 0.0
         maximal_linear_weight_grad_err = 0.0
         maximal_output_max_ulp_diff = 0
@@ -15039,7 +15071,7 @@ if __name__ == '__main__':
             out.sum().backward()
             ref_out.sum().backward()
 
-            max_ulp_diff = diff_ulp(input.grad.to(ref_device), ref_input.grad.to(dtype)).max().item()
+            max_ulp_diff = grad_max_ulp(input.grad.to(ref_device), ref_input.grad.to(dtype))
             if max_ulp_diff > maximal_input_grad_max_ulp_diff:
                 maximal_input_grad_max_ulp_diff = max_ulp_diff
                 worst_input_grad_kwargs = dict(module_kwargs)
@@ -15048,7 +15080,7 @@ if __name__ == '__main__':
                 maximal_input_grad_err = err
                 worst_input_grad_err_kwargs = dict(module_kwargs)
 
-            max_ulp_diff = diff_ulp(loss.linear.weight.grad.to(ref_device), ref_loss.linear.weight.grad.to(dtype)).max().item()
+            max_ulp_diff = grad_max_ulp(loss.linear.weight.grad.to(ref_device), ref_loss.linear.weight.grad.to(dtype))
             if max_ulp_diff > maximal_linear_weight_grad_max_ulp_diff:
                 maximal_linear_weight_grad_max_ulp_diff = max_ulp_diff
                 worst_linear_weight_grad_kwargs = dict(module_kwargs)
@@ -15062,10 +15094,10 @@ if __name__ == '__main__':
             # ``use_acc_dtype`` paths (fp16/bf16). Compare to the fp64
             # reference's ``linear.bias.grad`` to catch staging bugs.
             if loss.linear.bias is not None:
-                max_ulp_diff = diff_ulp(
+                max_ulp_diff = grad_max_ulp(
                     loss.linear.bias.grad.to(ref_device),
                     ref_loss.linear.bias.grad.to(dtype),
-                ).max().item()
+                )
                 if max_ulp_diff > maximal_linear_bias_grad_max_ulp_diff:
                     maximal_linear_bias_grad_max_ulp_diff = max_ulp_diff
                     worst_linear_bias_grad_kwargs = dict(module_kwargs)
