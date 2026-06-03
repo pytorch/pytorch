@@ -228,7 +228,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
 
 
 template <typename traits, typename cb_t>
-inline void unroll_contiguous_scalar_checks(
+C10_ALWAYS_INLINE void unroll_contiguous_scalar_checks(
     const int64_t* /*strides*/,
     std::index_sequence<> /*unused*/,
     cb_t&& cb) {
@@ -236,7 +236,7 @@ inline void unroll_contiguous_scalar_checks(
 }
 
 template <typename traits, typename cb_t, size_t INDEX0, size_t ...INDEX>
-inline void unroll_contiguous_scalar_checks(
+C10_ALWAYS_INLINE void unroll_contiguous_scalar_checks(
     const int64_t* strides,
     std::index_sequence<INDEX0, INDEX...> /*unused*/,
     cb_t&& cb) {
