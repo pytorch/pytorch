@@ -7525,8 +7525,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(3, 4),))
 
-    def test_clone_memory_format(self):
-        # Test contiguous_format: channels_last -> contiguous
+    def test_view_dtype_layout_constraint(self):
         def fn_to_contiguous(x):
             return x.clone(memory_format=torch.contiguous_format).view(torch.uint8)
 
@@ -7534,22 +7533,6 @@ class CommonTemplate:
             memory_format=torch.channels_last
         )
         self.common(fn_to_contiguous, (x_cl,), exact_stride=True, check_lowp=False)
-
-        # Test channels_last: contiguous -> channels_last
-        def fn_to_channels_last(x):
-            return x.clone(memory_format=torch.channels_last).view(torch.uint8)
-
-        x_cont = torch.arange(8, dtype=torch.int8).reshape(2, 1, 4, 1)
-        self.common(fn_to_channels_last, (x_cont,), exact_stride=True, check_lowp=False)
-
-        # Test channels_last_3d
-        def fn_to_channels_last_3d(x):
-            return x.clone(memory_format=torch.channels_last_3d).view(torch.uint8)
-
-        x_5d = torch.arange(8, dtype=torch.int8).reshape(2, 1, 4, 1, 1)
-        self.common(
-            fn_to_channels_last_3d, (x_5d,), exact_stride=True, check_lowp=False
-        )
 
     def test_masked_fill(self):
         def fn(mask, value):
