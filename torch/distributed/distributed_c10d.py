@@ -3090,18 +3090,40 @@ def _chunked_batch_p2p(
     device: torch.device,
     peer_kwarg: Callable[[P2POp], dict[str, int]],
 ) -> list[Work]:
-    """Split P2P ops into separate coalescing groups per peer rank.
+    """Split P2P ops into round-robin tournament rounds.
 
-    Groups operations by peer rank (sorted) and issues each group as a
-    separate coalescing call.  This prevents NCCL's internal plan splitting
-    from diverging across ranks when multiple peers are batched together.
+    Uses a round-robin tournament schedule so that in each round,
+    communicating rank pairs are matched on both sides.  This avoids
+    NCCL plan-splitting divergence while preventing hotspots and
+    deadlocks.
     """
     ops_by_peer: dict[int, list[P2POp]] = {}
     for op in p2p_op_list:
         ops_by_peer.setdefault(op.peer, []).append(op)
 
+    my_rank = group.rank()
+
+    # Build round-robin tournament schedule (circle method).
+    participants = sorted(set(ops_by_peer.keys()) | {my_rank})
+    n = len(participants)
+    if n % 2 == 1:
+        participants.append(-1)
+        n += 1
+
+    rank_to_idx = {r: i for i, r in enumerate(participants)}
+    my_idx = rank_to_idx[my_rank]
+
     all_works: list[Work] = []
-    for _peer, ops in sorted(ops_by_peer.items()):
+    for round_num in range(n - 1):
+        circle = [0] + [1 + (round_num + i) % (n - 1) for i in range(n - 1)]
+        my_pos = circle.index(my_idx)
+        partner_idx = circle[n - 1 - my_pos]
+        partner_rank = participants[partner_idx]
+
+        if partner_rank == -1 or partner_rank not in ops_by_peer:
+            continue
+
+        ops = ops_by_peer[partner_rank]
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in ops:
                 p2p_op.op(
