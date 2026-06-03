@@ -994,16 +994,14 @@ bool gemm_supported_dtype(c10::ScalarType dt) {
       c10::isIntegralType(dt, /*includeBool=*/false);
 }
 
-bool gemm_use_tensor_unit() {
-  static const bool ok = []() {
-    if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_4_PLUS)) {
-      return false;
-    }
-    // MTLGPUFamilyApple10 (M5, the first tensor-unit family) only exists in the
-    // macOS 26+ SDK; use the same fallback constant as Linear.mm.
-    constexpr auto kApple10 = static_cast<MTLGPUFamily>(1010);
-    return static_cast<bool>([MPSDevice::getInstance()->device() supportsFamily:kApple10]);
-  }();
+bool gemm_use_mpp() {
+  // matmul2d (MetalPerformancePrimitives) is gated only on the OS deployment
+  // target - the SDK exposes it at macOS 26.2+ with no GPU-family requirement, and
+  // it lowers to the NAX matrix unit where present and to simdgroup execution
+  // otherwise. macOS 26.4 also guarantees kernels_40.metallib (the metal4.0 build
+  // holding these kernels) is loaded; below it only the metal3.1 simd/gemv kernels
+  // exist, so the simd path is taken instead.
+  static const bool ok = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_4_PLUS);
   return ok;
 }
 
@@ -1105,8 +1103,8 @@ void mps_gemm(
       // VEC/NWARPS heuristic (clamped to the matrix's row-stride|offset alignment).
       const int64_t mat_align = mat.ld | vmat.storage_offset();
       const GemvCfg cfg = use_t
-          ? pick_gemv_t(dt, outlen, K, mat_align, gemm_use_tensor_unit())
-          : pick_gemv_nt(dt, K, mat_align, gemm_use_tensor_unit());
+          ? pick_gemv_t(dt, outlen, K, mat_align, gemm_use_mpp())
+          : pick_gemv_nt(dt, K, mat_align, gemm_use_mpp());
       const std::string fname = use_t ? gemv_t_name(dt_str, cfg.nw, cfg.vec, epi)
                                       : gemv_nt_name(dt_str, cfg.nw, cfg.vec, epi);
       auto pso = lib.getPipelineStateForFunc(fname);
@@ -1180,23 +1178,23 @@ void mps_gemm(
   const std::array<float, 2> alpha_beta = {
       static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
 
-  // Tensor-unit routing (M5+): m5_tensor handles every resolvable layout - packed,
+  // matmul2d routing: the mpp kernel handles every resolvable layout - packed,
   // transposed (column-major) and arbitrary leading dim all ride its strided
   // tensor view + matmul2d transpose flags. The only requirement is a row-major
-  // (unit-inner-stride) output, which `target` guarantees. Everything else (no
-  // tensor unit, or a tiny shape below the tile floor) falls to the portable simd
+  // (unit-inner-stride) output, which `target` guarantees. Everything else (matmul2d
+  // unavailable, or a tiny shape below the tile floor) falls to the portable simd
   // kernel. fp32 defaults to TF32-relaxed (the chosen MPS speed default); set
   // PYTORCH_MPS_PREFER_FP32_PRECISE for exact fp32, except that precise fp32 with a
-  // transposed operand has no m5_tensor instantiation and routes to the fp32-exact
+  // transposed operand has no mpp instantiation and routes to the fp32-exact
   // simd kernel. bf16/fp16 accumulate in fp32, so they are inherently "relaxed".
-  const bool tensor_unit = gemm_use_tensor_unit();
+  const bool use_mpp = gemm_use_mpp();
   static const bool precise_fp32 = c10::utils::has_env("PYTORCH_MPS_PREFER_FP32_PRECISE");
   const bool want_relaxed = (dt != kFloat) || (!precise_fp32 && !force_precise_fp32);
   const bool transposed = ra.trans || rb.trans;
   // Precise fp32 + transposed is the one tensor-unit combo we do not instantiate.
   const bool m5t_has_variant = want_relaxed || !transposed;
   const bool use_m5t =
-      tensor_unit && m5t_has_variant && M >= 2 && N >= 32 && K >= 64;
+      use_mpp && m5t_has_variant && M >= 2 && N >= 32 && K >= 64;
   const bool relaxed = want_relaxed;
 
   if (use_m5t) {
@@ -1223,7 +1221,7 @@ void mps_gemm(
       const NSUInteger tg = static_cast<NSUInteger>(t.NSG * 32);
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {
-          getMPSProfiler().beginProfileKernel(pso, "gemm_m5_tensor", {ra.view, rb.view});
+          getMPSProfiler().beginProfileKernel(pso, "mpp_gemm", {ra.view, rb.view});
           auto enc = stream->commandEncoder();
           [enc setComputePipelineState:pso];
           mtl_setArgs(enc, ra.view, rb.view, target, dims, self_e, alpha_beta);

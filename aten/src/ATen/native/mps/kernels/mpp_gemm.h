@@ -1,7 +1,10 @@
 #pragma once
-// gemm_m5_tensor.h - the PRIMARY GEMM backend: mpp::tensor_ops::matmul2d on the
-// Apple tensor unit. Metal-4 only (cooperative tensors), so the whole file is
-// guarded by __METAL_VERSION__ >= 400 and only populates kernels_40.metallib.
+// mpp_gemm.h - the PRIMARY GEMM backend: mpp::tensor_ops::matmul2d
+// (MetalPerformancePrimitives). Metal-4 only (cooperative tensors), so the whole
+// file is guarded by __METAL_VERSION__ >= 400 and only populates kernels_40.metallib.
+// matmul2d is gated only on the OS (macOS 26.2+ per the SDK); it lowers to the NAX
+// matrix unit where present and to plain simdgroup execution otherwise, so it is
+// not tied to any specific GPU family.
 //
 // Fully-templated port of metalBLAS mpp_tensor.h. Handles packed, transposed
 // (column-major) and arbitrary-leading-dim operands through strided tensor_inline

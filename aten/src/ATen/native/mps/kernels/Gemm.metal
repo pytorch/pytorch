@@ -12,9 +12,9 @@
 #include <ATen/native/mps/kernels/gemm_conv1x1.h>
 #include <ATen/native/mps/kernels/gemm_gemv.h>
 #include <ATen/native/mps/kernels/gemm_int.h>
-#include <ATen/native/mps/kernels/gemm_m5_tensor.h>
 #include <ATen/native/mps/kernels/gemm_simd.h>
 #include <ATen/native/mps/kernels/gemm_splitk.h>
+#include <ATen/native/mps/kernels/mpp_gemm.h>
 
 namespace at_gemm {
 

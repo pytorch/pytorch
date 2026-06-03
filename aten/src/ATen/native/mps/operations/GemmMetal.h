@@ -9,10 +9,12 @@
 
 namespace at::native::mps {
 
-// True when the current device + OS support the M5 tensor unit (mpp matmul2d):
-// macOS 26.4+ AND Apple10 (M5) GPU family. When false, all float GEMM is served
-// by the Metal-3 simd/gemv kernels, so the MPSGraph path can be dropped fully.
-bool gemm_use_tensor_unit();
+// True when matmul2d (MetalPerformancePrimitives) is available: macOS 26.4+, which
+// guarantees kernels_40.metallib (the metal4.0 build holding these kernels) is
+// loaded. No GPU-family gate - matmul2d lowers to the NAX matrix unit where present
+// and to simdgroup execution otherwise. When false, all float GEMM is served by the
+// Metal-3 simd/gemv kernels, so the MPSGraph path can be dropped fully.
+bool gemm_use_mpp();
 
 // True for dtypes the native real/integer GEMM kernels handle directly
 // (float/half/bfloat + signed/unsigned integers). Complex is handled separately
