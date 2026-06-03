@@ -1,3 +1,4 @@
+#include <ATen/native/Distributions.h>
 #include <c10/metal/atomic.h>
 #include <c10/metal/error.h>
 #include <c10/metal/random.h>
@@ -666,3 +667,30 @@ kernel void standard_gamma_grad(
 REGISTER_GAMMA_GRAD(float);
 REGISTER_GAMMA_GRAD(half);
 REGISTER_GAMMA_GRAD(bfloat);
+
+template <typename T>
+kernel void dirichlet_grad(
+    device T* output [[buffer(0)]],
+    device const T* x_data [[buffer(1)]],
+    device const T* alpha_data [[buffer(2)]],
+    device const T* total_data [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  float x = static_cast<float>(x_data[tid]);
+  float alpha = static_cast<float>(alpha_data[tid]);
+  float total = static_cast<float>(total_data[tid]);
+  float result = dirichlet_grad_one<float, float>(x, alpha, total);
+  output[tid] = static_cast<T>(result);
+}
+
+#define REGISTER_DIRICHLET_GRAD(DTYPE)             \
+  template [[host_name("dirichlet_grad_" #DTYPE)]] \
+  kernel void dirichlet_grad<DTYPE>(               \
+      device DTYPE*,                               \
+      device const DTYPE*,                         \
+      device const DTYPE*,                         \
+      device const DTYPE*,                         \
+      uint)
+
+REGISTER_DIRICHLET_GRAD(float);
+REGISTER_DIRICHLET_GRAD(half);
+REGISTER_DIRICHLET_GRAD(bfloat);
