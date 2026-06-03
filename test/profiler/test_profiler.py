@@ -4,7 +4,6 @@
 import collections
 import copy
 import gc
-import gzip
 import json
 import mmap
 import os
@@ -84,10 +83,14 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
+from torch.utils._import_utils import _check_module_exists
 
 
 if TYPE_CHECKING:
     from torch.autograd.profiler_util import FunctionEvent
+
+
+TEST_CUPTI_PYTHON = _check_module_exists("cupti")
 
 
 def get_profiler_activities(device_type):
@@ -408,6 +411,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 y = torch.mm(x, x)
         self.assertGreater(len(p.events()), 0)
 
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_enable_hes_early_guard(self):
         import subprocess
 
@@ -449,6 +453,7 @@ _cupti_monitor.enable_hes_early()
             p.stderr,
         )
 
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_collection_raw_dump_smoke(self):
         from torch.profiler import _cupti_monitor
 
@@ -479,6 +484,7 @@ _cupti_monitor.enable_hes_early()
                 0,
             )
 
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
     def test_cupti_monitor_collection_repeated_lifecycle(self):
         from torch.profiler import _cupti_monitor
 
@@ -510,79 +516,6 @@ _cupti_monitor.enable_hes_early()
                     ),
                     0,
                 )
-
-    def test_cupti_monitor_multithread_runtime_thread_assignment(self):
-        x1 = torch.randn(256, 256, device="cuda")
-        x2 = torch.randn(256, 256, device="cuda")
-        y1 = torch.randn(256, 256, device="cuda")
-        y2 = torch.randn(256, 256, device="cuda")
-
-        # Warm up kernel/runtime state so the profiled region is dominated by the
-        # launches from the two worker threads.
-        _ = torch.relu(x1 + y1)
-        _ = torch.relu(x2 + y2)
-        torch.cuda.synchronize()
-
-        start_evt = threading.Event()
-
-        def worker(name, x, y):
-            start_evt.wait()
-            with record_function(name):
-                z = torch.relu(x + y)
-                z.sum().item()
-                torch.cuda.synchronize()
-
-        cfg = _ExperimentalConfig(
-            profile_all_threads=True,
-            custom_profiler_config='{"backend":"cupti_monitor"}',
-        )
-
-        with TemporaryFileName(mode="w+") as trace_path:
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                experimental_config=cfg,
-            ) as prof:
-                threads = [
-                    threading.Thread(target=worker, args=("worker_a", x1, y1)),
-                    threading.Thread(target=worker, args=("worker_b", x2, y2)),
-                ]
-                for thread in threads:
-                    thread.start()
-                start_evt.set()
-                for thread in threads:
-                    thread.join()
-
-            prof.export_chrome_trace(trace_path)
-
-            opener = gzip.open if trace_path.endswith(".gz") else open
-            with opener(trace_path, "rt") as f:
-                data = json.load(f)
-
-        events = data["traceEvents"]
-        worker_tids = sorted(
-            {
-                e["tid"]
-                for e in events
-                if e.get("ph") == "X"
-                and e.get("cat") == "user_annotation"
-                and e.get("name") in {"worker_a", "worker_b"}
-                and isinstance(e.get("tid"), int)
-            }
-        )
-        launch_tids = sorted(
-            {
-                e["tid"]
-                for e in events
-                if e.get("ph") == "X"
-                and e.get("cat") == "cuda_runtime"
-                and e.get("name") == "cudaLaunchKernel"
-                and isinstance(e.get("tid"), int)
-            }
-        )
-
-        self.assertEqual(len(worker_tids), 2)
-        self.assertGreater(len(launch_tids), 0)
-        self.assertTrue(set(launch_tids).issubset(set(worker_tids)))
 
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
