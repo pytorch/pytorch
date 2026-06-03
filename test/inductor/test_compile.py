@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import ast
 import os
 import shlex
 import subprocess
@@ -10,6 +11,7 @@ import torch
 from torch import _dynamo as dynamo, _inductor as inductor
 from torch._inductor import config
 from torch._inductor.codecache import write
+from torch._inductor.codegen.cpp import _format_cpp_pybinding_source
 from torch._inductor.cpp_builder import CppBuilder, CppOptions, CppTorchOptions
 from torch._inductor.cpu_vec_isa import invalid_vec_isa
 from torch._inductor.test_case import run_tests, TestCase
@@ -274,6 +276,44 @@ class TestStandaloneInductor(TestCase):
         with config.patch({"cpp.march": ""}):
             arch_flags = self._aot_cpp_arch_flags()
         self.assertEqual(arch_flags, [])
+
+    def test_cpp_pybinding_source_literal_handles_windows_paths(self):
+        source = (
+            '#include "C:\\Users\\lemon\\AppData\\Local\\Temp\\'
+            'torchinductor_lemon\\sk\\csk.h"\n'
+            "void kernel(float* out) { out[0] = 0.0; }"
+        )
+        generated = (
+            "async_compile.cpp_pybinding(['float*'], "
+            f"{_format_cpp_pybinding_source(source)})"
+        )
+
+        ast.parse(generated)
+        calls = []
+        async_compile = mock.Mock()
+        async_compile.cpp_pybinding.side_effect = lambda argtypes, src: calls.append(
+            (argtypes, src)
+        )
+        exec(generated, {"async_compile": async_compile})
+
+        self.assertEqual(calls, [(["float*"], f"\n{source}\n")])
+
+    def test_cpp_pybinding_source_literal_falls_back_for_triple_quotes(self):
+        source = "void kernel() { /* ''' */ }"
+        generated = (
+            f"async_compile.cpp_pybinding([], {_format_cpp_pybinding_source(source)})"
+        )
+
+        self.assertNotIn("r'''", generated)
+        ast.parse(generated)
+        calls = []
+        async_compile = mock.Mock()
+        async_compile.cpp_pybinding.side_effect = lambda argtypes, src: calls.append(
+            (argtypes, src)
+        )
+        exec(generated, {"async_compile": async_compile})
+
+        self.assertEqual(calls, [([], f"\n{source}\n")])
 
 
 if __name__ == "__main__":
