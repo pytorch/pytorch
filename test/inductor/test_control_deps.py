@@ -359,6 +359,51 @@ class TestControlDeps(InductorTestCase):
         add = g.call_function(torch.ops.aten.add.Tensor, args=(view, other))
         self.assertFalse(_is_control_deps_ordering_only_use(add, view))
 
+    @requires_gpu()
+    def test_control_deps_passthrough_creates_mutation_output(self):
+        """Pass-through values in control_deps must create MutationOutput.
+
+        When an input passes through control_deps unchanged, the subgraph
+        operations add MutationOutput entries so the scheduler's mutation
+        rename chain forces consumers after the subgraph boundary.
+        """
+        from torch._inductor.virtualized import V
+
+        captured: list[dict] = []
+
+        def capture(nodes):
+            mutation_count = 0
+            for op in V.graph.operations:
+                if hasattr(op, "mutation_outputs"):
+                    mutation_count += len(op.mutation_outputs)
+            captured.append({"mutation_count": mutation_count})
+            return nodes
+
+        def fn(x):
+            s = torch.Stream(device=GPU_TYPE)
+            e = torch.Event()
+            with s:
+                y = x + 1
+                e.record()
+            e.wait()
+            return y * 2
+
+        torch._dynamo.reset()
+        with config.patch(_pre_fusion_custom_pass=capture):
+            x = torch.ones(4, device=GPU_TYPE)
+            result = torch.compile(fn)(x)
+
+        expected = fn(torch.ones(4, device=GPU_TYPE))
+        torch.testing.assert_close(result, expected)
+
+        self.assertTrue(captured, "expected at least one Inductor compile")
+        total_mutations = sum(c["mutation_count"] for c in captured)
+        self.assertGreater(
+            total_mutations,
+            0,
+            "expected MutationOutput entries for pass-through values in control_deps",
+        )
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU_AND_TRITON:
