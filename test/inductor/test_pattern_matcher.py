@@ -8,6 +8,7 @@ import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
+import torch._inductor.pattern_matcher as pattern_matcher
 import torch.nn.functional as F
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
@@ -867,7 +868,9 @@ class TestPatternMatcher(TestCase):
     @parametrize(
         "input_dtype, intermediate_dtype, emulate_precision_casts, expected_calls",
         [
-            (torch.float32, torch.float16, False, 1),
+            (torch.float32, torch.float16, False, 2),
+            (torch.float32, torch.bfloat16, False, 2),
+            (torch.float32, torch.float64, False, 1),
             (torch.float32, torch.float16, True, 2),
             (torch.float16, torch.float32, True, 1),
         ],
@@ -1212,6 +1215,228 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, int(fn is fn0))
                 torch.testing.assert_close(actual, expected)
 
+    def test_mutation_region_ids_update_after_replacement_adds_mutation(self):
+        insert_mutation_pass = PatternMatcherPass()
+
+        @register_graph_pattern(
+            CallFunction(aten.sin.default, KeywordArg("x")),
+            pass_dict=insert_mutation_pass,
+        )
+        def insert_mutation(match: Match, x):
+            def repl(a):
+                y = torch.sin(a)
+                a.copy_(a)
+                return y
+
+            match.replace_by_example(repl, [x], run_functional_passes=False)
+
+        later_pass = PatternMatcherPass()
+        later_matches = 0
+
+        @register_graph_pattern(
+            CallFunction(
+                aten.cos.default,
+                CallFunction(aten.sin.default, KeywordArg("x")),
+            ),
+            pass_dict=later_pass,
+        )
+        def match_across_mutation(match: Match, x):
+            nonlocal later_matches
+            later_matches += 1
+
+        def fn(x):
+            y = torch.sin(x)
+            return torch.cos(y)
+
+        gm = make_fx(fn)(torch.randn(4))
+        graph = gm.graph
+
+        self.assertEqual(insert_mutation_pass.apply(graph), 1)
+        self.assertEqual(later_pass.apply(graph), 0)
+        self.assertEqual(later_matches, 0)
+
+        nodes_by_target = {
+            node.target: node for node in graph.nodes if node.op == "call_function"
+        }
+        self.assertEqual(
+            nodes_by_target[aten.sin.default].meta["mutation_region_id"], 0
+        )
+        self.assertEqual(
+            nodes_by_target[aten.copy_.default].meta["mutation_region_id"], 1
+        )
+        self.assertEqual(
+            nodes_by_target[aten.cos.default].meta["mutation_region_id"], 1
+        )
+
+    def test_pure_replacement_skips_mutation_region_refresh(self):
+        pure_replacement_pass = PatternMatcherPass()
+
+        def pattern(x):
+            return torch.sin(x)
+
+        def replacement(x):
+            return torch.cos(x)
+
+        register_replacement(
+            pattern,
+            replacement,
+            [torch.randn(4)],
+            fwd_only,
+            pure_replacement_pass,
+        )
+
+        gm = make_fx(pattern)(torch.randn(4))
+        with unittest.mock.patch.object(
+            pattern_matcher,
+            "_mutation_region_refresh",
+            side_effect=AssertionError("pure replacements should not refresh"),
+        ):
+            self.assertEqual(pure_replacement_pass.apply(gm.graph), 1)
+
+    def test_pure_graph_pattern_skips_mutation_region_refresh(self):
+        pure_graph_pass = PatternMatcherPass()
+
+        @register_graph_pattern(
+            CallFunction(aten.sin.default, KeywordArg("x")),
+            pass_dict=pure_graph_pass,
+        )
+        def pure_graph_pattern(match: Match, x):
+            pass
+
+        def fn(x):
+            return torch.sin(x)
+
+        gm = make_fx(fn)(torch.randn(4))
+        pattern_matcher.compute_mutation_region_ids(gm.graph)
+        with unittest.mock.patch.object(
+            pattern_matcher,
+            "compute_mutation_region_ids",
+            side_effect=AssertionError("pure graph patterns should not refresh"),
+        ):
+            self.assertEqual(pure_graph_pass.apply(gm.graph), 1)
+
+    def test_mutating_register_replacement_refreshes_mutation_regions(self):
+        insert_mutation_pass = PatternMatcherPass()
+
+        def pattern(x):
+            return torch.sin(x)
+
+        def replacement(x):
+            y = torch.sin(x)
+            x.copy_(x)
+            return y
+
+        register_replacement(
+            pattern,
+            replacement,
+            [torch.randn(4)],
+            fwd_only,
+            insert_mutation_pass,
+        )
+
+        later_pass = PatternMatcherPass()
+        later_matches = 0
+
+        @register_graph_pattern(
+            CallFunction(
+                aten.cos.default,
+                CallFunction(aten.sin.default, KeywordArg("x")),
+            ),
+            pass_dict=later_pass,
+        )
+        def match_across_mutation(match: Match, x):
+            nonlocal later_matches
+            later_matches += 1
+
+        def fn(x):
+            y = torch.sin(x)
+            return torch.cos(y)
+
+        gm = make_fx(fn)(torch.randn(4))
+        graph = gm.graph
+
+        self.assertEqual(insert_mutation_pass.apply(graph), 1)
+        self.assertEqual(later_pass.apply(graph), 0)
+        self.assertEqual(later_matches, 0)
+
+        nodes_by_target = {
+            node.target: node for node in graph.nodes if node.op == "call_function"
+        }
+        self.assertEqual(
+            nodes_by_target[aten.sin.default].meta["mutation_region_id"], 0
+        )
+        self.assertEqual(
+            nodes_by_target[aten.copy_.default].meta["mutation_region_id"], 1
+        )
+        self.assertEqual(
+            nodes_by_target[aten.cos.default].meta["mutation_region_id"], 1
+        )
+
+    def test_graph_pattern_mutation_before_match_refreshes_full_graph(self):
+        insert_mutation_pass = PatternMatcherPass()
+
+        @register_graph_pattern(
+            CallFunction(
+                aten.relu.default,
+                CallFunction(aten.neg.default, KeywordArg("z")),
+            ),
+            pass_dict=insert_mutation_pass,
+        )
+        def insert_mutation_before_match(match: Match, z):
+            sin_node = z.args[0]
+            x = sin_node.args[0]
+            with match.graph.inserting_before(z):
+                match.graph.call_function(aten.copy_.default, (x, x))
+
+        later_pass = PatternMatcherPass()
+        later_matches = 0
+
+        @register_graph_pattern(
+            CallFunction(
+                aten.relu.default,
+                CallFunction(
+                    aten.neg.default,
+                    CallFunction(
+                        aten.cos.default,
+                        CallFunction(aten.sin.default, KeywordArg("x")),
+                    ),
+                ),
+            ),
+            pass_dict=later_pass,
+        )
+        def match_across_mutation(match: Match, x):
+            nonlocal later_matches
+            later_matches += 1
+
+        def fn(x):
+            return torch.relu(torch.neg(torch.cos(torch.sin(x))))
+
+        gm = make_fx(fn)(torch.randn(4))
+        graph = gm.graph
+
+        self.assertEqual(insert_mutation_pass.apply(graph), 1)
+        self.assertEqual(later_pass.apply(graph), 0)
+        self.assertEqual(later_matches, 0)
+
+        nodes_by_target = {
+            node.target: node for node in graph.nodes if node.op == "call_function"
+        }
+        self.assertEqual(
+            nodes_by_target[aten.sin.default].meta["mutation_region_id"], 0
+        )
+        self.assertEqual(
+            nodes_by_target[aten.copy_.default].meta["mutation_region_id"], 1
+        )
+        self.assertEqual(
+            nodes_by_target[aten.cos.default].meta["mutation_region_id"], 1
+        )
+        self.assertEqual(
+            nodes_by_target[aten.neg.default].meta["mutation_region_id"], 1
+        )
+        self.assertEqual(
+            nodes_by_target[aten.relu.default].meta["mutation_region_id"], 1
+        )
+
     def test_remove_pointless_clones(self):
         @torch.compile(fullgraph=True)
         def fn(a, b):
@@ -1252,60 +1477,6 @@ class TestPatternMatcher(TestCase):
         # hit the view path
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
-
-    def test_preserve_accumulator_addmm_with_pointwise(self):
-        args = [
-            torch.randn(10, 20, device=GPU_TYPE),
-            torch.randn(10, 15, device=GPU_TYPE),
-            torch.randn(15, 20, device=GPU_TYPE),
-        ]
-
-        @torch.compile()
-        def fn(inp, a, b):
-            return torch.nn.functional.gelu(torch.ops.aten.addmm(inp, a, b))
-
-        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
-        self.assertEqual(actual, torch.nn.functional.gelu(torch.addmm(*args)))
-        FileCheck().check("extern_kernels.addmm(").run(code[0])
-
-    def test_unfuse_expanded_bias_addmm(self):
-        bias = torch.randn(20, device=GPU_TYPE).unsqueeze(0).expand(10, 20)
-        args = [
-            bias,
-            torch.randn(10, 15, device=GPU_TYPE),
-            torch.randn(15, 20, device=GPU_TYPE),
-        ]
-        self.assertEqual(bias.stride(0), 0)
-
-        @torch.compile()
-        def fn(inp, a, b):
-            return torch.ops.aten.addmm(inp, a, b).relu()
-
-        actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
-        self.assertEqual(actual, torch.addmm(*args).relu())
-        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
-
-    @parametrize("inplace", [False, True])
-    def test_accumulator_addmm_loop_does_not_delay_pointwise(self, inplace):
-        def fn(x, ws):
-            buf = torch.zeros_like(x)
-            for w in ws:
-                if inplace:
-                    buf.addmm_(w, w)
-                else:
-                    buf = torch.addmm(buf, w, w)
-                buf = torch.cos(buf)
-            return buf
-
-        args = [
-            torch.randn(32, 32, device=GPU_TYPE),
-            [torch.randn(32, 32, device=GPU_TYPE) for _ in range(3)],
-        ]
-
-        actual, (code) = run_and_get_code(torch.compile(fn), args[0], args[1])
-        self.assertEqual(actual, fn(*args))
-        self.assertEqual(code[0].count("extern_kernels.addmm("), 3)
-        self.assertNotIn("extern_kernels.mm(", code[0])
 
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @inductor_config.patch(
@@ -1357,6 +1528,10 @@ class TestPatternMatcher(TestCase):
             "fx_graph_remote_cache": False,
             "keep_addmm_fused_for_half_dtypes": True,
         }
+    )
+    @unittest.skipIf(
+        GPU_TYPE != "xpu",
+        "narrowing-cast unfuse is XPU-only; CUDA/ROCm keep addmm fused",
     )
     def test_unfuse_bias_addmm_half_dtypes_narrowing_cast(self, dtype):
         # When bias is fp32 and cast to a half dtype (e.g. AMP), unfusing
@@ -1525,15 +1700,14 @@ class TestPatternMatcher(TestCase):
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_original_aten_preserved_split_addmm(self):
-        # bias addmm -> elementwise should be decomposed into
-        # mm -> add -> elementwise.
+        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
         def fn(x, y, z):
             return torch.addmm(z, x, y).sin()
 
         args = [
             torch.randn(16, 24, device=GPU_TYPE),
             torch.randn(24, 32, device=GPU_TYPE),
-            torch.randn(32, device=GPU_TYPE),
+            torch.randn(16, 32, device=GPU_TYPE),
         ]
 
         counters.clear()
