@@ -1,6 +1,12 @@
 # Owner(s): ["module: ci"]
 
 import os
+import subprocess
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
+from types import SimpleNamespace
 
 import run_test
 
@@ -128,6 +134,60 @@ class DeterminationTest(TestCase):
     def test_new_test_script(self):
         """New test script triggers nothing (since it's not in run_tests.py)"""
         self.assertEqual(self.determined_tests(["test/test_new_test_script.py"]), [])
+
+
+class PytestArgsTest(TestCase):
+    def test_pytest_args_hide_captured_output_by_default(self):
+        options = SimpleNamespace(additional_args=[], pytest_k_expr="")
+
+        self.assertIn("--show-capture=no", run_test.get_pytest_args(options))
+
+    def test_pytest_args_respect_explicit_show_capture(self):
+        options = SimpleNamespace(
+            additional_args=["--show-capture=all"], pytest_k_expr=""
+        )
+
+        self.assertNotIn("--show-capture=no", run_test.get_pytest_args(options))
+
+    def test_pytest_output_keeps_summary_next_to_traceback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir) / "test_capture_output.py"
+            test_file.write_text(
+                textwrap.dedent(
+                    """
+                    import sys
+
+
+                    def test_capture_output():
+                        print("stdout marker")
+                        print("stderr marker", file=sys.stderr)
+                        assert False, "needle failure"
+                    """
+                )
+            )
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-vv",
+                    "-rfEX",
+                    "-x",
+                    "--show-capture=no",
+                    str(test_file),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("AssertionError: needle failure", proc.stdout)
+        self.assertIn("short test summary info", proc.stdout)
+        self.assertNotIn("Captured stdout call", proc.stdout)
+        self.assertNotIn("Captured stderr call", proc.stdout)
 
 
 if __name__ == "__main__":
