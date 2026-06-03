@@ -405,6 +405,7 @@ if __name__ == '__main__':
             self.assertIn('errors=1', stderr)
 
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/106308")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
@@ -2467,6 +2468,7 @@ class TestImports(TestCase):
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.scatter_add",  # depends on cutlass
+                           "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
