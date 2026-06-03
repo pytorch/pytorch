@@ -19,7 +19,11 @@ from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
 from ...virtualized import V
-from .aux_vectorization import select_mask_mod_vec_size, select_score_mod_vec_size
+from .aux_vectorization import (
+    DEFAULT_MASK_MOD_VEC_SIZE,
+    select_mask_mod_vec_size,
+    select_score_mod_vec_size,
+)
 from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
@@ -27,6 +31,7 @@ from .common import (
     load_flex_template,
     SubgraphResults,
 )
+from .interval_mask_packing import PackedMaskInterval, select_packed_mask_intervals
 
 
 @dataclasses.dataclass
@@ -40,12 +45,12 @@ class FlexFlashConfig:
     mask_mod_vec_size: Number of consecutive KV lanes evaluated per mask_mod
         call. Maps to mask_mod.__vec_size__ in CuTe flash attention and to
         the direct captured-tensor vector-load width for mask_mod.
-    mask_mod_vec_size_forced: Whether callers explicitly forced mask_mod_vec_size.
+    mask_mod_packed_intervals: Precomputed 32-lane packed mask intervals.
     """
 
     score_mod_vec_size: int | None = None
     mask_mod_vec_size: int | None = None
-    mask_mod_vec_size_forced: bool = False
+    mask_mod_packed_intervals: tuple[PackedMaskInterval, ...] | None = None
 
 
 def get_flex_flash_fwd_configs(
@@ -79,6 +84,16 @@ def get_flex_flash_fwd_configs(
         graph_module=score_mod_graph_module,
         other_buffers=score_mod_other_buffers,
     )
+    mask_mod_packed_intervals = None
+    if has_mask_mod and cuda_major in (10, 11) and mask_mod_graph_module is not None:
+        mask_mod_packed_intervals = select_packed_mask_intervals(mask_mod_graph_module)
+    if mask_mod_packed_intervals is not None:
+        if any(isinstance(buf, sympy.Expr) for buf in mask_mod_other_buffers):
+            # Packed interval rendering addresses tensor captures through aux_tensors,
+            # but symbolic scalar captures are not aux tensor inputs.
+            mask_mod_packed_intervals = None
+        else:
+            mask_mod_vec_size = DEFAULT_MASK_MOD_VEC_SIZE
 
     if (
         has_score_mod
@@ -91,7 +106,11 @@ def get_flex_flash_fwd_configs(
     else:
         score_mod_vec_sizes = (score_mod_vec_size,)
     configs = [
-        FlexFlashConfig(score_mod_vec_size=v, mask_mod_vec_size=mask_mod_vec_size)
+        FlexFlashConfig(
+            score_mod_vec_size=v,
+            mask_mod_vec_size=mask_mod_vec_size,
+            mask_mod_packed_intervals=mask_mod_packed_intervals,
+        )
         for v in score_mod_vec_sizes
     ]
     max_configs = torch._inductor.config.test_configs.max_flex_configs
@@ -477,6 +496,8 @@ def create_flex_flash_attention_kernel(
                 HAS_SCORE_MOD=has_score_mod,
                 SCORE_MOD_VEC_SIZE=conf.score_mod_vec_size,
                 MASK_MOD_VEC_SIZE=conf.mask_mod_vec_size,
+                MASK_MOD_PACKED_INTERVALS=conf.mask_mod_packed_intervals,
+                MASK_MOD_OTHER_BUFFERS=mask_mod_other_buffers,
                 NEEDS_BLOCK_MASK=needs_block_mask,
                 SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
                 SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
