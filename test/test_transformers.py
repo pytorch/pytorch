@@ -830,6 +830,7 @@ class TestTransformers(NNTestCase):
                 src_key_padding_mask=padding_mask,
             )
 
+    @xfailIfNoAcceleratorTriton
     def test_transformer_encoder_layer_fwd_fake(self, device):
         model = torch.nn.TransformerEncoder(
             torch.nn.TransformerEncoderLayer(
@@ -3249,6 +3250,10 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(q.grad, q_cpu.grad.cuda().half(), atol=7e-3, rtol=5e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Flash attention is required as the cudnn fallback when seq_len=1 with dropout",
+    )
     def test_cudnn_attention_seqlen1_dropout_heuristic(self):
         q = torch.randn(2, 8, 1, 128, dtype=torch.half, device='cuda', requires_grad=True)
         grad = torch.randn_like(q)

@@ -1835,7 +1835,6 @@ def get_selected_tests(options) -> list[str]:
                     "test_testing",
                     # Features not supported on Windows ( e.g. rowwise scaling)
                     "test_decomp",
-                    "test_transformers",
                     "test_ops",
                     # Output mismatch errors and long running tests
                     "test_linalg",

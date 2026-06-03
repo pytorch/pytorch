@@ -803,9 +803,10 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     // For mem-eff attention this will cause the expand call to error
     // For now I am going to turn of that path not have to deal with all the annoying
     // Mask type shape grossness
+    // backend falls through to legacy bmm -> softmax path. Produces Nans for large inputs. Use SDPA for math
     if (!mask.has_value() && no_seq_len_1_nested &&
         (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention ||
-         backend == sdp::SDPBackend::cudnn_attention)) {
+         backend == sdp::SDPBackend::cudnn_attention || backend == sdp::SDPBackend::math)) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
       auto chunks = x.chunk(3, -1);
       auto x_size_0 = x.size(0);
@@ -823,7 +824,6 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
       return std::make_tuple(
           at::linear(past_sdp, proj_weight, proj_bias), Tensor());
     }
-    // Returned math or error lets not use it
   }
 
   // shape: [B, T, 3 x D]
