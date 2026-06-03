@@ -367,6 +367,7 @@ dtensor_fails_no_strategy = {
     xfail("histogramdd"),
     xfail("isin"),
     xfail("linalg.matrix_power"),
+    xfail("linalg.polar"),
     xfail("linspace", "tensor_overload"),
     xfail("log_normal"),
     xfail("logspace", "tensor_overload"),
