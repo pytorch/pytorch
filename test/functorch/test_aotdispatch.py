@@ -8215,6 +8215,12 @@ def forward(self, primals_1, tangents_1):
         out = f(x)
         (grad_x,) = torch.autograd.grad(out.sum(), x, create_graph=True)
         self.assertEqual(grad_x, 2 * x)
+        self.assertTrue(grad_x.requires_grad)
+        self.assertIsNotNone(grad_x.grad_fn)
+        with self.assertRaisesRegex(
+            RuntimeError, "does not currently support double backward"
+        ):
+            grad_x.sum().backward()
 
     def test_compiled_backward_multiple_outputs(self):
         @torch.compile(backend="aot_eager")
@@ -8254,7 +8260,9 @@ def forward(self, primals_1, tangents_1):
             _codegen_compiled_backward,
         )
 
-        bwd_fn = _codegen_compiled_backward(num_rng=0, num_tensors_no_vc_check=None)
+        bwd_fn = _codegen_compiled_backward(
+            num_rng=0, num_tensors_no_vc_check=None, inputs_require_grad=False
+        )
 
         def noop(*a, **kw):
             return None
