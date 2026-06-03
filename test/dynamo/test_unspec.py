@@ -179,17 +179,52 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.reset()
 
     def test_datetime_now_reconstruct_across_graph_break(self):
-        def fn(x):
-            current_time = datetime.datetime.now()
-            torch._dynamo.graph_break()
-            return x + current_time.second
+        import torch._dynamo.variables.user_defined as user_defined
 
-        x = torch.ones(3)
-        res = torch.compile(fn, backend="eager")(x)
-        seconds = res - x
-        self.assertEqual(seconds, seconds[0].expand_as(seconds))
-        self.assertGreaterEqual(seconds[0].item(), 0)
-        self.assertLessEqual(seconds[0].item(), 59)
+        original_get_attrs = user_defined._get_datetime_now_attrs
+        calls = []
+
+        def fake_get_attrs():
+            calls.append(None)
+            return tuple(len(calls) for _ in user_defined._DATETIME_NOW_ATTRS)
+
+        user_defined._get_datetime_now_attrs = fake_get_attrs
+        try:
+
+            def fn(x):
+                current_time = datetime.datetime.now()
+                before = current_time.microsecond
+                torch._dynamo.graph_break()
+                return x + current_time.microsecond - before
+
+            x = torch.ones(3)
+            res1 = torch.compile(fn, backend="eager")(x)
+            res2 = torch.compile(fn, backend="eager")(x)
+            self.assertEqual(res1, x)
+            self.assertEqual(res2, x)
+            self.assertEqual(len(calls), 4)
+        finally:
+            user_defined._get_datetime_now_attrs = original_get_attrs
+            torch._dynamo.reset()
+
+    def test_datetime_now_clone_copies_attr_cache(self):
+        import torch._dynamo.variables.user_defined as user_defined
+        from torch._dynamo.source import RandomValueSource
+        from torch._dynamo.variables.constant import ConstantVariable
+
+        original_second = ConstantVariable.create(1)
+        cloned_second = ConstantVariable.create(2)
+        var = user_defined.DatetimeNowVariable(
+            attrs_source=RandomValueSource(0),
+            attrs=tuple(range(len(user_defined._DATETIME_NOW_ATTRS))),
+            attr_vars={"second": original_second},
+        )
+
+        clone = var.clone()
+        self.assertIsNot(clone.attr_vars, var.attr_vars)
+        clone.attr_vars["second"] = cloned_second
+        self.assertIs(var.attr_vars["second"], original_second)
+        self.assertIs(clone.attr_vars["second"], cloned_second)
 
     def test_feed_random_values_into_graph_only(self):
         def fn(shape):

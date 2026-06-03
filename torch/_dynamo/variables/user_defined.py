@@ -1028,13 +1028,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             attrs_source = RandomValueSource(random_call_index)
             tx.output.random_calls.append((_get_datetime_now_attrs, (), {}))
 
-            source = self.source
-            if source:
-                source = CallFunctionNoArgsSource(AttrSource(source, "now"))
             return DatetimeNowVariable(
                 attrs_source=attrs_source,
                 attrs=attrs,
-                source=source,
             )
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_len
@@ -1683,6 +1679,11 @@ class DatetimeNowVariable(VariableTracker):
     def python_type(self) -> type[datetime.datetime]:
         return datetime.datetime
 
+    def clone(self, **kwargs: Any) -> VariableTracker:
+        if "attr_vars" not in kwargs:
+            kwargs["attr_vars"] = dict(self.attr_vars)
+        return super().clone(**kwargs)
+
     def var_getattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
@@ -1698,18 +1699,18 @@ class DatetimeNowVariable(VariableTracker):
         return super().var_getattr(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        # Reconstruct a fresh datetime after graph breaks, matching other runtime
-        # values such as random calls rather than reusing the pre-break sample.
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
                     codegen.create_load_python_module(datetime),
                     codegen.create_load_attr("datetime"),
-                    codegen.create_load_attr("now"),
                 ]
             )
         )
-        codegen.call_function(0, False)
+        codegen.foreach(
+            GetItemSource(self.attrs_source, i) for i in range(len(_DATETIME_NOW_ATTRS))
+        )
+        codegen.extend_output(create_call_function(len(_DATETIME_NOW_ATTRS), False))
 
 
 class UserDefinedObjectVariable(UserDefinedVariable):
