@@ -119,34 +119,34 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
-    copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
+        def test_bincount_weighted_count_nonzero_dtype(self):
+            def fn(x, weights):
+                counts = torch.bincount(x, weights=weights, minlength=6)
+                return counts, counts.count_nonzero()
 
-    def test_bincount_weighted_count_nonzero_dtype(self):
-        def fn(x, weights):
-            counts = torch.bincount(x, weights=weights, minlength=6)
-            return counts.count_nonzero()
-
-        x = torch.tensor(
-            [0, 2, 2, 3, 1, 0, 3, 3],
-            dtype=torch.int64,
-        )
-        weights = torch.tensor(
-            [1.0, -2.0, 3.0, 0.0, 4.0, -5.0, 6.0, 7.0],
-            dtype=torch.float32,
-        )
-
-        expected = fn(x, weights)
-        for dynamic in [False, True]:
-            torch._dynamo.reset()
-            compiled_fn = torch.compile(
-                fn,
-                backend="indcutor",
-                fullgraph=True,
-                dynamic=dynamic,
+            x = torch.tensor(
+                [0, 2, 2, 3, 1, 0, 3, 3],
+                dtype=torch.int64,
             )
-            actual = compiled_fn(x, weights)
-            self.assertEqual(actual[0], expected[0])
-            self.assertEqual(actual[1], expected[1])
+            weights = torch.tensor(
+                [1.0, -2.0, 3.0, 0.0, 4.0, -5.0, 6.0, 7.0],
+                dtype=torch.float32,
+            )
+
+            expected = fn(x, weights)
+            for dynamic in [False, True]:
+                torch._dynamo.reset()
+                compiled_fn = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    dynamic=dynamic,
+                )
+                actual = compiled_fn(x, weights)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[1], expected[1])
+
+    copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
 if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
