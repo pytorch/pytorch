@@ -4,7 +4,7 @@ import textwrap
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast, Optional, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 from sympy import Integer, Symbol
@@ -27,6 +27,7 @@ from ..virtualized import V
 
 if TYPE_CHECKING:
     import triton
+
 from .common import (
     ArgName,
     ConstexprArg,
@@ -472,8 +473,7 @@ class ComboKernel(Kernel):
         self.num_warps = 8
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
-        # Optional single config; bypasses autotune when set.
-        self.no_bench_stitched_config: Optional["triton.Config"] = None
+        self.no_bench_stitched_config: triton.Config | None = None
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
@@ -628,7 +628,7 @@ class ComboKernel(Kernel):
     def select_combo_heuristics(
         self, heuristics_list: list[str], size_hints_list: list[dict[str, int]]
     ) -> tuple[str, dict[str, int], TritonKernel]:
-        if not self.enable_autotune:
+        if not self.enable_autotune and self.no_bench_stitched_config is None:
             return "foreach", size_hints_list[0], self.sub_kernels[0]
         if "reduction" in heuristics_list:
             i, _ = max(
@@ -841,12 +841,9 @@ class ComboKernel(Kernel):
 
     def codegen_blocks(self, code: IndentedBuffer) -> None:
         has_yblock = any(self.y_tree_list)
-        # Must mirror the per_subkernel_blocks guard in combo_grid_meta or
-        # grid/body block sizes diverge.
         stitched_kwargs = (
             self.no_bench_stitched_config.kwargs
-            if self.per_subkernel_blocks
-            and self.no_bench_stitched_config is not None
+            if self.no_bench_stitched_config is not None
             else None
         )
 
@@ -1201,12 +1198,10 @@ class ComboKernel(Kernel):
 
         if not self.enable_autotune:
             default_config: dict[str, int] = {}
-            if self.per_subkernel_blocks and self.no_bench_stitched_config is not None:
+            if self.no_bench_stitched_config is not None:
                 default_config = dict(self.no_bench_stitched_config.kwargs)
                 meta["stitched_num_warps"] = self.no_bench_stitched_config.num_warps
-                meta["stitched_num_stages"] = (
-                    self.no_bench_stitched_config.num_stages
-                )
+                meta["stitched_num_stages"] = self.no_bench_stitched_config.num_stages
             elif self.per_subkernel_blocks:
                 # Per-subkernel block sizes: XBLOCK_0, XBLOCK_1, etc.
                 for num, sub_kernel in enumerate(self.sub_kernels):

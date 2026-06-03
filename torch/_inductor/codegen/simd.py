@@ -49,9 +49,13 @@ from ..optimize_indexing import (
     indexing_dtype_strength_reduction,
 )
 from ..runtime.coordinate_descent_tuner import CoordescTuner
-from ..runtime.hints import DeviceProperties
-from ..runtime.hints import TileHint
-from ..runtime.runtime_utils import green_text, last_power_of_2, next_power_of_2, yellow_text
+from ..runtime.hints import DeviceProperties, TileHint
+from ..runtime.runtime_utils import (
+    green_text,
+    last_power_of_2,
+    next_power_of_2,
+    yellow_text,
+)
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
@@ -3407,7 +3411,7 @@ class SIMDScheduling(BaseScheduling):
 
     def _codegen_standalone_kernel(
         self, node_info: NodeInfo, only_gen_src_code: bool
-    ) -> tuple[str, "TritonKernel"]:
+    ) -> tuple[str, TritonKernel]:
         kernel_kwargs: dict[str, Any] = {}
         self.kernel_type.apply_feature_required_overrides(
             node_info.features, kernel_kwargs
@@ -3423,9 +3427,7 @@ class SIMDScheduling(BaseScheduling):
             src_code = kernel.codegen_kernel()
         return src_code, kernel
 
-    def _probe_subkernel_heuristic(
-        self, node_info: NodeInfo
-    ) -> tuple[list[Any], bool]:
+    def _probe_subkernel_heuristic(self, node_info: NodeInfo) -> list[Any]:
         from ..runtime.triton_heuristics import (
             persistent_reduction,
             pointwise,
@@ -3433,12 +3435,6 @@ class SIMDScheduling(BaseScheduling):
         )
         from .triton_utils import non_constexpr_signature
 
-        # Match ComboKernel.create_triton_kernel's construction so the probe
-        # sees the same persistent_reduction / no_x_dim flags the real combo
-        # subkernel will. Combo subkernels always disable cooperative
-        # reduction; without this override the probe can pick the wrong
-        # configs for kernels where the standalone heuristic would have
-        # gone cooperative.
         kernel_kwargs: dict[str, Any] = dict(
             is_combo_kernel=True,
             override_cooperative_reduction=False,
@@ -3454,17 +3450,14 @@ class SIMDScheduling(BaseScheduling):
         )
         config_patches = self._collect_config_patches(node_info.node_schedule)
         config_patches["benchmark_kernel"] = False
-        # decide_inplace_update -> make_inplace can mutate
-        # V.graph.unaligned_buffers; restore after the probe even on error.
         unaligned_snapshot = OrderedSet(V.graph.unaligned_buffers)
         try:
             with config.patch(**config_patches), V.set_kernel_handler(kernel):
                 self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
-                # codegen_kernel populates kernel.triton_meta, which the
-                # heuristics below consume; the returned source is discarded.
                 _ = kernel.codegen_kernel()
         finally:
             V.graph.unaligned_buffers = unaligned_snapshot
+            # pyrefly: ignore [bad-assignment]
             metrics.generated_kernel_count -= 1
 
         size_hints = {
@@ -3479,9 +3472,7 @@ class SIMDScheduling(BaseScheduling):
         if kernel.persistent_reduction:
             configs = persistent_reduction(
                 size_hints,
-                reduction_hint=kernel.features.get_reduction_hint(
-                    kernel.tiling_scores
-                ),
+                reduction_hint=kernel.features.get_reduction_hint(kernel.tiling_scores),
                 triton_meta=kernel.triton_meta,
                 inductor_meta=inductor_meta,
                 return_configs=True,
@@ -3489,9 +3480,7 @@ class SIMDScheduling(BaseScheduling):
         elif kernel.inside_reduction:
             configs = reduction(
                 size_hints,
-                reduction_hint=kernel.features.get_reduction_hint(
-                    kernel.tiling_scores
-                ),
+                reduction_hint=kernel.features.get_reduction_hint(kernel.tiling_scores),
                 triton_meta=kernel.triton_meta,
                 inductor_meta=inductor_meta,
                 return_configs=True,
@@ -3512,42 +3501,29 @@ class SIMDScheduling(BaseScheduling):
                 inductor_meta=inductor_meta,
                 return_configs=True,
             )
-        return configs, kernel.persistent_reduction
+        return configs
 
     @staticmethod
-    def _stitch_no_bench_combo_config(
-        chosen_configs: list[Any],
-        fusion_persistent: list[bool],
-    ) -> Any:
+    def _stitch_no_bench_combo_config(chosen_configs: list[Any]) -> Any:
         import triton
 
-        # R*_BLOCK is hardcoded into static numels for persistent reductions
-        # (not in block_args). Skipping these keeps stitched kwargs in sync
-        # with the kernel body's tl.constexpr declarations.
-        def live_block_keys(i: int, cfg: Any) -> list[str]:
-            keys = []
-            for k in cfg.kwargs:
-                if not k.endswith("BLOCK"):
-                    continue
-                if fusion_persistent[i] and k.startswith("R"):
-                    continue
-                keys.append(k)
-            return keys
+        def block_keys(cfg: Any) -> list[str]:
+            return [k for k in cfg.kwargs if k.endswith("BLOCK")]
 
-        def effective_tile_elems(i: int, cfg: Any) -> int:
+        def effective_tile_elems(cfg: Any) -> int:
             te = 1
-            for k in live_block_keys(i, cfg):
+            for k in block_keys(cfg):
                 te *= int(cfg.kwargs[k])
             return te
 
         stitched_kwargs: dict[str, Any] = {}
         for i, cfg in enumerate(chosen_configs):
-            for key in live_block_keys(i, cfg):
+            for key in block_keys(cfg):
                 stitched_kwargs[f"{key}_{i}"] = int(cfg.kwargs[key])
 
         configs_by_tile_elems = sorted(
             enumerate(chosen_configs),
-            key=lambda iv: effective_tile_elems(iv[0], iv[1]),
+            key=lambda iv: effective_tile_elems(iv[1]),
             reverse=True,
         )
         top_k = max(1, len(configs_by_tile_elems) // 2)
@@ -3681,23 +3657,18 @@ class SIMDScheduling(BaseScheduling):
                 )
                 fusion_pns: list[Any] = []
                 fusion_configs: list[Any] = []
-                fusion_persistent: list[bool] = []
                 carve_out_pns: list[Any] = []
                 if no_bench_mode:
                     for pn in node_group:
-                        configs, persistent = self._probe_subkernel_heuristic(
-                            node_schedule_map[pn]
-                        )
+                        configs = self._probe_subkernel_heuristic(node_schedule_map[pn])
                         if configs and len(configs) <= 2:
                             fusion_pns.append(pn)
                             fusion_configs.append(configs[0])
-                            fusion_persistent.append(persistent)
                         else:
                             carve_out_pns.append(pn)
                     if len(fusion_pns) < 2:
                         fusion_pns = []
                         fusion_configs = []
-                        fusion_persistent = []
                         carve_out_pns = list(node_group)
                 else:
                     fusion_pns = list(node_group)
@@ -3727,10 +3698,7 @@ class SIMDScheduling(BaseScheduling):
 
                     if no_bench_mode and fusion_configs:
                         kernel.no_bench_stitched_config = (
-                            self._stitch_no_bench_combo_config(
-                                fusion_configs,
-                                fusion_persistent,
-                            )
+                            self._stitch_no_bench_combo_config(fusion_configs)
                         )
 
                     src_code = kernel.codegen_kernel()

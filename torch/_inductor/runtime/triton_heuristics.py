@@ -3550,6 +3550,21 @@ def _handle_combo_kernel_per_subkernel_blocks(
     if combo_meta is None or "heuristic_0" not in combo_meta:
         return None
 
+    # CAP no-bench: combo_grid_meta carries a stitched config; skip the
+    # combo_tuning_groups computation and return a single stitched config.
+    # Kwargs stay empty because XBLOCK_i is body-inline constexpr (not a
+    # kernel-signature arg) under enable_autotune=False; the grid still
+    # reads XBLOCK_i from combo_grid_meta["default_config"].
+    stitched_warps = combo_meta.get("stitched_num_warps")
+    if stitched_warps is not None:
+        return [
+            triton.Config(
+                {},
+                num_warps=stitched_warps,
+                num_stages=combo_meta["stitched_num_stages"],
+            )
+        ]
+
     num_kernels = combo_meta["num_kernels"]
     inductor_meta_clean = {
         k: v for k, v in inductor_meta.items() if k != "combo_grid_meta"
@@ -4993,21 +5008,9 @@ def foreach(triton_meta, filename=None, inductor_meta=None):
     Compile a triton foreach kernel
     """
     configs = []
-    inductor_meta = inductor_meta or {}
 
-    combo_meta = inductor_meta.get("combo_grid_meta") or {}
-    # If combo_grid_meta carries a stitched config, skip the autotune sweep.
-    stitched_warps = combo_meta.get("stitched_num_warps")
-    if stitched_warps is not None:
-        configs.append(
-            triton.Config(
-                {},
-                num_stages=combo_meta["stitched_num_stages"],
-                num_warps=stitched_warps,
-            )
-        )
     # Naive autotuning path for num_warps
-    elif not (
+    if not (
         inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
     ):
         configs.append(triton.Config({}, num_stages=1, num_warps=8))
