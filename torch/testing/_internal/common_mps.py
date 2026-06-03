@@ -29,6 +29,8 @@ if torch.backends.mps.is_available():
             "abs",
             "add",
             "addbmm",
+            "addmm",
+            "addr",
             "alias_copy",
             "argwhere",
             "atleast_1d",

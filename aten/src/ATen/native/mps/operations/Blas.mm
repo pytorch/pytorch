@@ -53,69 +53,25 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 
 Tensor dot_mps(const Tensor& self, const Tensor& other) {
   using namespace mps;
-  using CachedGraph = MPSBinaryCachedGraph;
 
-  if (self.numel() == 0 & other.numel() == 0) {
+  if (self.numel() == 0 && other.numel() == 0) {
     return zeros({}, self.options());
   }
 
   dot_check(self, other);
 
-  auto output = at::empty({}, self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-
-  MPSStream* stream = at::mps::getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string key = "dot_mps" + getTensorsStringKey({self, other});
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, other);
-
-      MPSGraphTensor* castSelf = nil;
-      MPSGraphTensor* castOther = nil;
-
-      if (self.scalar_type() == ScalarType::Short || self.scalar_type() == ScalarType::Byte ||
-          self.scalar_type() == ScalarType::Char) {
-        castSelf = [mpsGraph castTensor:selfTensor toType:MPSDataTypeInt32 name:@"castSelfTensor"];
-        castOther = [mpsGraph castTensor:otherTensor toType:MPSDataTypeInt32 name:@"castOtherTensor"];
-      } else {
-        castSelf = selfTensor;
-        castOther = otherTensor;
-      }
-      if (self.is_conj()) {
-        castSelf = [mpsGraph conjugateWithTensor:selfTensor name:nil];
-      }
-      if (other.is_conj()) {
-        castOther = [mpsGraph conjugateWithTensor:otherTensor name:nil];
-      }
-
-      MPSGraphTensor* dot = [mpsGraph multiplicationWithPrimaryTensor:castSelf
-                                                      secondaryTensor:castOther
-                                                                 name:@"multiplication"];
-
-      MPSGraphTensor* dotProductTensor = [mpsGraph reductionSumWithTensor:dot axes:nil name:@"dotProduct"];
-
-      if (self.scalar_type() == ScalarType::Short || self.scalar_type() == ScalarType::Byte ||
-          self.scalar_type() == ScalarType::Char)
-        dotProductTensor = [mpsGraph castTensor:dotProductTensor
-                                         toType:getMPSDataType(self)
-                                           name:@"castDotProductTensor"];
-
-      newCachedGraph->inputTensor_ = selfTensor;
-      newCachedGraph->otherTensor_ = otherTensor;
-      newCachedGraph->outputTensor_ = dotProductTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, otherPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  // Route the inner product through the hand-written Metal GEMM kernels (no
+  // MPSGraph): (1, K) @ (K, 1) -> (1, 1) -> 0-D scalar. at::mm dispatches by dtype
+  // (real / integer -> mps_gemm, complex -> mps_gemm_complex) and resolves conj
+  // views, so dot matches metalBLAS (which also lowers dot to a matmul). bool has
+  // no GEMM kernel, so compute it in int32 and cast back (sum of ANDs != 0).
+  const int64_t K = self.numel();
+  if (self.scalar_type() == kBool) {
+    return at::mm(self.to(kInt).reshape({1, K}), other.to(kInt).reshape({K, 1}))
+        .reshape({})
+        .to(kBool);
   }
-
-  return output;
+  return at::mm(self.reshape({1, K}), other.reshape({K, 1})).reshape({});
 }
 
 Tensor vdot_mps(const Tensor& self, const Tensor& other) {
@@ -140,71 +96,25 @@ static Tensor& addmv_out_mps_impl(const Tensor& self,
   TORCH_CHECK(result.is_mps());
   TORCH_CHECK(self.is_mps());
 
-  c10::MaybeOwned<Tensor> self_ = expand_size(self, {mat.size(0)});
-  auto betaval = beta_.toComplexDouble();
-
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* selfTensor_ = nil;
-    MPSGraphTensor* matMulVecTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  MPSStream* stream = at::mps::getCurrentMPSStream();
   if (result.numel() == 0) {
     return result;
   }
-  Tensor matMulVec = at::mm(mat, vec.unsqueeze(1)).squeeze(1);
 
-  @autoreleasepool {
-    std::string key = "addmv_out_mps_impl" + getTensorsStringKey({self, matMulVec}) + ":" +
-        std::to_string(beta_.toDouble()) + ":" + std::to_string(alpha_.toDouble());
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* matMulVecTensor = mpsGraphRankedPlaceHolder(mpsGraph, matMulVec);
-      MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-
-      // Intermediates for beta and alpha
-      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha_.toDouble()
-                                                        dataType:getMPSScalarType(mat.scalar_type())];
-
-      // Intermediates for multiplying by beta and alpha
-      MPSGraphTensor* productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:matMulVecTensor
-                                                                          secondaryTensor:alphaTensor
-                                                                                     name:@"MM/alpha*(mat@vec)"];
-      newCachedGraph->outputTensor_ = productTimesAlphaTensor;
-
-      if (betaval != 0.0) {
-        MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta_.toDouble()
-                                                         dataType:getMPSScalarType(self.scalar_type())];
-
-        MPSGraphTensor* selfTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:selfTensor
-                                                                        secondaryTensor:betaTensor
-                                                                                   name:@"MM/beta*input"];
-
-        MPSGraphTensor* outputTensor = [mpsGraph additionWithPrimaryTensor:productTimesAlphaTensor
-                                                           secondaryTensor:selfTimesBetaTensor
-                                                                      name:@"MM/beta*input + alpha*(mat@vec)"];
-
-        newCachedGraph->outputTensor_ = outputTensor;
-      }
-
-      newCachedGraph->selfTensor_ = selfTensor;
-      newCachedGraph->matMulVecTensor_ = matMulVecTensor;
-    });
-
-    Placeholder matMulVecPlaceholder = Placeholder(cachedGraph->matMulVecTensor_, matMulVec);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
-
-    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = [NSMutableDictionary dictionary];
-    feeds[matMulVecPlaceholder.getMPSGraphTensor()] = matMulVecPlaceholder.getMPSGraphTensorData();
-    if (betaval != 0.0) {
-      Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
-      feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
-    }
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  // result = beta*self + alpha*(mat @ vec). at::mm routes the matrix-vector
+  // product through the MPSGraph-free GEMM kernels (float/integer) or the complex
+  // decomposition; the alpha/beta epilogue is a couple of elementwise ops. For
+  // integer outputs alpha/beta truncate to the integer type (matching torch's
+  // integer addmv, e.g. alpha=0.6 -> 0), since a float scalar can't scale an int
+  // tensor in place.
+  c10::MaybeOwned<Tensor> self_ = expand_size(self, {mat.size(0)});
+  const bool is_int = c10::isIntegralType(result.scalar_type(), /*includeBool=*/false);
+  const Scalar a = is_int ? Scalar(alpha_.toLong()) : alpha_;
+  const Scalar b = is_int ? Scalar(beta_.toLong()) : beta_;
+  Tensor out = at::mm(mat, vec.unsqueeze(1)).reshape(result.sizes()).mul_(a);
+  if (beta_.toComplexDouble() != 0.0) {
+    out.add_(*self_, b);
   }
-
+  result.copy_(out);
   return result;
 }
 

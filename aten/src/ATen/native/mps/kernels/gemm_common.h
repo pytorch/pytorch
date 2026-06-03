@@ -26,9 +26,9 @@ enum class GemmEpilogue : int {
   AlphaBeta = 1,
 };
 
-// Dims/strides for the strided kernels (simd_gemm, m5_gemm). One constant
-// buffer (one setBytes). All strides are ELEMENT strides; each device pointer
-// is pre-offset to its tensor's first element by the host binding.
+// Dims/strides for the strided kernels (simd_gemm, m5_tensor_gemm, int_gemm).
+// One constant buffer (one setBytes). All strides are ELEMENT strides; each
+// device pointer is pre-offset to its tensor's first element by the host binding.
 struct GemmDimsStrided {
   int M, N, K;
   int lda, ldb, ldc;
@@ -37,12 +37,30 @@ struct GemmDimsStrided {
   int batch_a, batch_b, batch_c, batch_self; // per-batch element strides
 };
 
-// Dims for the tensor-unit kernels (m5_tensor), which assume packed storage
-// (lda == K, ldb == N, ldc == N) so only the extents and batch strides matter.
-struct GemmDimsPacked {
-  int M, N, K;
+// Dims for the GEMV kernels (gemv_t / gemv_nt). `n` is the output length (cols for
+// gemv_t, rows for gemv_nt); `ld` is the matrix row stride; `xs` the vector stride;
+// self_r/self_c the epilogue addend strides (the kernel indexes self at its output
+// position, so one of them is the broadcast step and the other is 0).
+struct GemvDims {
+  int n, K, ld, xs;
   int self_r, self_c;
-  int batch_a, batch_b, batch_c, batch_self;
+};
+
+// Dims for the split-K GEMM (deep-K, few-output-tile shapes). Inputs are packed
+// (lda == K, ldb == N, ldc == N); `kchunk` is the per-chunk K length, applied as
+// a runtime extent (the AOT build cannot template on the data-dependent K / G).
+struct SplitKDims {
+  int M, N, K, kchunk;
+};
+
+// Dims for the split-K reduction pass: `n` output elements, `planes` fp32 partials.
+struct SplitKReduceDims {
+  int n, planes;
+};
+
+// Dims for the 1x1-conv GEMM (very-thin-N). Packed inputs (lda == K, ldb == N).
+struct ConvDims {
+  int M, N, K;
 };
 
 } // namespace at_gemm

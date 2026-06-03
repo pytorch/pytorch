@@ -1373,7 +1373,9 @@ class TestMPS(TestCaseMPS):
             output_cpu = torch.baddbmm(M_cpu, batch1_cpu, batch2_cpu, beta=beta, alpha=alpha)
             output_mps = torch.baddbmm(M_mps, batch1_mps, batch2_mps, beta=beta, alpha=alpha)
 
-            self.assertEqual(output_cpu, output_mps)
+            # MPS fp32 matmul defaults to TF32-relaxed tensor-unit math (opt out with
+            # PYTORCH_MPS_PREFER_FP32_PRECISE), so use a TF32-appropriate tolerance.
+            self.assertEqual(output_cpu, output_mps, atol=2e-2, rtol=2e-2)
             self.assertEqual(output_cpu.size(), output_mps.size())
 
         helper(input_shape=(3, 5), batch1_shape=(10, 3, 4), batch2_shape=(10, 4, 5))
