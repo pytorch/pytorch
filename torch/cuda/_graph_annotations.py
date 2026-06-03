@@ -40,6 +40,7 @@ Usage during capture::
     remap_to_exec_graph(graph)
 """
 
+import importlib.metadata
 from collections import defaultdict
 from contextlib import contextmanager
 from logging import getLogger
@@ -93,19 +94,15 @@ def _probe_tools_id() -> bool:
     """
     if not hasattr(_cuda_runtime, "cudaGraphNodeGetToolsId"):
         # API is missing from cuda-bindings - likely version too old
-        try:
-            import importlib.metadata
-
-            cuda_bindings_version = importlib.metadata.version("cuda-bindings")
-        except Exception:
-            cuda_bindings_version = "unknown"
+        cuda_bindings_version = importlib.metadata.version("cuda-bindings")
 
         logger.warning(
             "cudaGraphNodeGetToolsId API not found in cuda-bindings. "
-            f"Current version: {cuda_bindings_version}, required: >= 13.3.0. "
+            "Current version: %s, required: >= 13.1.0. "
             "CUDA graph kernel annotations will be disabled. "
             "To enable annotations, upgrade cuda-bindings: "
-            "pip install --upgrade cuda-bindings"
+            "pip install --upgrade cuda-bindings",
+            cuda_bindings_version,
         )
         return False
     err, *_ = _cuda_runtime.cudaGraphNodeGetToolsId(
