@@ -1104,7 +1104,7 @@ def _context_parallel_buffers(
             # NOTE: assuming batch dim is 0
 
             if load_balance_indices is not None:
-                # TODO: we should expclitly ask users to unsqueeze the batch dim.
+                # TODO: we should explicitly ask users to unsqueeze the batch dim.
                 # But this is a BC breaking ask.
                 # However, what we have done today is also not very safe.
                 idx_batch_size = load_balance_indices.size(0)
@@ -1577,7 +1577,9 @@ def context_parallel(
     # (:class:`_HeadTailLoadBalancer`) is used to rearrange the buffers before
     # sharding. Otherwise, we don't do any load-balance rearrange by passing
     # `None` to `_context_parallel_shard()`.
+    old_enable_load_balance = _cp_options.enable_load_balance
     load_balancer = _create_default_load_balancer(seq_length, cp_world_size, device)
+    _cp_options.enable_load_balance = load_balancer is not None
     shards = _context_parallel_buffers(
         mesh,
         cast(list[torch.Tensor | BlockMask], buffers),
@@ -1592,13 +1594,16 @@ def context_parallel(
         buffer.copy_(shard)
 
     _enable_context_parallel_dispatcher_impl(seq_dim=2, mesh=mesh)
-    yield
-    _disable_context_parallel_dispatcher_impl()
+    try:
+        yield
+    finally:
+        _disable_context_parallel_dispatcher_impl()
+        _cp_options.enable_load_balance = old_enable_load_balance
 
-    for buffer, original_buffer in zip(buffers, original_buffers):
-        if original_buffer is not None:
-            buffer.resize_(original_buffer.shape)
-            buffer.copy_(original_buffer)
+        for buffer, original_buffer in zip(buffers, original_buffers, strict=True):
+            if original_buffer is not None:
+                buffer.resize_(original_buffer.shape)
+                buffer.copy_(original_buffer)
 
 
 @torch.no_grad()

@@ -443,6 +443,10 @@ Also see {ref}`saved-tensors-hooks-doc`.
 .. autofunction:: torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch
 ```
 
+```{eval-rst}
+.. autofunction:: torch.autograd.graph.set_override_stale_capture_stream
+```
+
 % This module needs to be documented. Adding here in the meantime
 
 % for tracking purposes

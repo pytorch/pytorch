@@ -1936,25 +1936,32 @@ along dimension :attr:`dim` according to the indices or number of sections speci
 by :attr:`indices_or_sections`. This function is based on NumPy's
 :func:`numpy.array_split`.
 
+.. function:: tensor_split(input, sections, dim=0) -> List of Tensors
+   :noindex:
+
+   Splits :attr:`input` into :attr:`sections` sections along dimension :attr:`dim`.
+   If :attr:`input` is divisible by :attr:`sections` along dimension :attr:`dim`, each
+   section will be of equal size, :code:`input.size(dim) / sections`. If :attr:`input`
+   is not divisible by :attr:`sections`, the sizes of the first
+   :code:`int(input.size(dim) % sections)` sections will have size
+   :code:`int(input.size(dim) / sections) + 1`, and the rest will have size
+   :code:`int(input.size(dim) / sections)`.
+
+   :attr:`sections` can also be a zero-dimensional long tensor.
+
+.. function:: tensor_split(input, indices, dim=0) -> List of Tensors
+   :noindex:
+
+   Splits :attr:`input` along dimension :attr:`dim` at each of the indices in
+   :attr:`indices`. For instance, :code:`indices=[2, 3]` and :code:`dim=0`
+   would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and
+   :code:`input[3:]`.
+
+   :attr:`indices` can be a list or tuple of ints, or a one-dimensional long
+   tensor on the CPU.
+
 Args:
     input (Tensor): the tensor to split
-    indices_or_sections (Tensor, int or list or tuple of ints):
-        If :attr:`indices_or_sections` is an integer ``n`` or a zero dimensional long tensor
-        with value ``n``, :attr:`input` is split into ``n`` sections along dimension :attr:`dim`.
-        If :attr:`input` is divisible by ``n`` along dimension :attr:`dim`, each
-        section will be of equal size, :code:`input.size(dim) / n`. If :attr:`input`
-        is not divisible by ``n``, the sizes of the first :code:`int(input.size(dim) % n)`
-        sections will have size :code:`int(input.size(dim) / n) + 1`, and the rest will
-        have size :code:`int(input.size(dim) / n)`.
-
-        If :attr:`indices_or_sections` is a list or tuple of ints, or a one-dimensional long
-        tensor, then :attr:`input` is split along dimension :attr:`dim` at each of the indices
-        in the list, tuple or tensor. For instance, :code:`indices_or_sections=[2, 3]` and :code:`dim=0`
-        would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
-
-        If :attr:`indices_or_sections` is a tensor, it must be a zero-dimensional or one-dimensional
-        long tensor on the CPU.
-
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
 
 Example::
@@ -8352,6 +8359,58 @@ Example::
 )
 
 add_docstr(
+    torch.nonzero_static,
+    r"""
+nonzero_static(input, *, size, fill_value=-1) -> Tensor
+
+Returns a 2-D tensor where each row is the index for a non-zero value.
+The returned Tensor has the same `torch.dtype` as `torch.nonzero()`.
+
+Args:
+    {input}
+
+Keyword args:
+    size (int): the size of non-zero elements expected to be included in the out
+        tensor. Pad the out tensor with `fill_value` if the `size` is larger
+        than total number of non-zero elements, truncate out tensor if `size`
+        is smaller. The size must be a non-negative integer.
+    fill_value (int, optional): the value to fill the output tensor with when `size` is larger
+        than the total number of non-zero elements. Default is `-1` to represent
+        invalid index.
+
+Example::
+
+    # Example 1: Padding
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 4
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0],
+            [  1,   1],
+            [  -1, -1]], dtype=torch.int64)
+
+    # Example 2: Truncating
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0]], dtype=torch.int64)
+
+    # Example 3: 0 size
+    >>> input_tensor = torch.tensor([10])
+    >>> static_size = 0
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(0, 1), dtype=torch.int64)
+
+    # Example 4: 0 rank input
+    >>> input_tensor = torch.tensor(10)
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(2, 0), dtype=torch.int64)
+""".format(**common_args),
+)
+
+add_docstr(
     torch.normal,
     r"""
 normal(mean, std, *, generator=None, out=None) -> Tensor
@@ -10579,7 +10638,7 @@ Keyword args:
         coalesced tensor.  If the :attr:`check_invariants` flag is
         False, no error will be raised if the prerequisites are not
         met and this will lead to silently incorrect results. To force
-        coalescion please use :meth:`coalesce` on the resulting
+        coalescing please use :meth:`coalesce` on the resulting
         Tensor.
         Default: None: except for trivial cases (e.g. nnz < 2) the
         resulting Tensor has is_coalesced set to ``False```.
@@ -11061,8 +11120,7 @@ always be real-valued, even if :attr:`input` is complex.
 
 .. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `?gesdd`
           (a divide-and-conquer algorithm) instead of `?gesvd` for speed. Analogously,
-          on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched` on CUDA 10.1.243
-          and later, and MAGMA's routine `gesdd` on earlier versions of CUDA.
+          on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched`.
 
 .. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
           be represented as a column-major matrix (i.e. Fortran-contiguous).

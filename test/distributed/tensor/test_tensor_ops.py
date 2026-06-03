@@ -21,11 +21,10 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    MI200_ARCH,
     parametrize,
     run_tests,
     serialTest,
-    skipIfRocmArch,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -59,6 +58,18 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         mat = distribute_tensor(tensor_to_detach, device_mesh, shard_spec)
         detached_mat = mat.detach()
         self.assertFalse(detached_mat is mat)
+
+    def test_detach_inplace_inference_mode(self):
+        # Under inference_mode, autograd does not intercept detach_, so the
+        # call falls through to DTensor's dispatcher. Ensure aten.detach_ has a
+        # registered sharding strategy and propagates the input spec.
+        device_mesh = self.build_device_mesh()
+        for spec in ([Shard(0)], [Replicate()]):
+            mat = distribute_tensor(torch.randn(12, 8), device_mesh, spec)
+            with torch.inference_mode():
+                out = torch.ops.aten.detach_(mat)
+            self.assertTrue(out is mat)
+            self.assertEqual(out.placements, tuple(spec))
 
     def test_clone(self):
         device_mesh = self.build_device_mesh()
@@ -626,7 +637,7 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
-    @skipIfRocmArch(MI200_ARCH)
+    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/175064")
     @serialTest()  # heavy combinatorial _test_op calls, serialize to avoid OOM
     def test_index(self):
         meshes = [

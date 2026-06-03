@@ -4,9 +4,21 @@ This module handles running and testing generated PyTorch programs.
 """
 
 import os
-import random
 import subprocess
 import sys
+
+
+def _build_subprocess_env(*, exclude_primary_device: bool = False) -> dict[str, str]:
+    """Build the subprocess environment, applying the active plugin's hook (if any)."""
+    from torchfuzz.codegen import get_device_info
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
+
+    select_runtime_env = get_device_info().select_runtime_env
+    if select_runtime_env is not None:
+        env = select_runtime_env(env, exclude_primary_device=exclude_primary_device)
+    return env
 
 
 class ProgramRunner:
@@ -28,25 +40,7 @@ class ProgramRunner:
         abs_path = os.path.abspath(program_path)
         print(f"Running: {abs_path}")
 
-        # Select a random CUDA device if available
-        cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
-        if cuda_visible_devices:
-            devices = [d.strip() for d in cuda_visible_devices.split(",") if d.strip()]
-        else:
-            # Default to all GPUs if not set
-            try:
-                import torch
-
-                num_gpus = torch.cuda.device_count()
-                devices = [str(i) for i in range(num_gpus)]
-            except ImportError:
-                devices = []
-        env = os.environ.copy()
-        env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
-        if devices:
-            selected_device = random.choice(devices)
-            env["CUDA_VISIBLE_DEVICES"] = selected_device
-            print(f"Selected CUDA_VISIBLE_DEVICES={selected_device}")
+        env = _build_subprocess_env(exclude_primary_device=True)
 
         try:
             result = subprocess.run(
@@ -72,60 +66,3 @@ class ProgramRunner:
             print("======================")
             print(f"Program exited with code: {e.returncode}")
             sys.exit(1)
-
-    def run_and_validate(self, program_path):
-        """
-        Run a program and return detailed results for validation.
-
-        Args:
-            program_path: Path to the Python program to run
-
-        Returns:
-            dict: Dictionary with 'success', 'stdout', 'stderr', 'returncode'
-        """
-        abs_path = os.path.abspath(program_path)
-
-        # Select a random CUDA device if available
-        cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
-        if cuda_visible_devices:
-            devices = [d.strip() for d in cuda_visible_devices.split(",") if d.strip()]
-        else:
-            try:
-                import torch
-
-                num_gpus = torch.cuda.device_count()
-                if num_gpus > 1:
-                    devices = [str(i) for i in range(1, num_gpus)]
-                else:
-                    devices = [str(i) for i in range(num_gpus)]
-            except ImportError:
-                devices = []
-        env = os.environ.copy()
-        env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
-        if devices:
-            selected_device = random.choice(devices)
-            env["CUDA_VISIBLE_DEVICES"] = selected_device
-            print(f"Selected CUDA_VISIBLE_DEVICES={selected_device}")
-
-        try:
-            result = subprocess.run(
-                [sys.executable, abs_path],
-                capture_output=True,
-                text=True,
-                check=True,
-                env=env,
-            )
-            return {
-                "success": True,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "returncode": result.returncode,
-            }
-
-        except subprocess.CalledProcessError as e:
-            return {
-                "success": False,
-                "stdout": e.stdout,
-                "stderr": e.stderr,
-                "returncode": e.returncode,
-            }
