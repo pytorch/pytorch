@@ -1296,6 +1296,12 @@ def current_blas_handle():
     return torch._C._cuda_getCurrentBlasHandle()
 
 
+def current_solver_handle():
+    r"""Return cusolverDnHandle_t pointer to current cuSOLVER handle"""
+    _lazy_init()
+    return torch._C._cuda_getCurrentSolverHandle()
+
+
 def set_sync_debug_mode(debug_mode: int | str) -> None:
     r"""Set the debug mode for cuda synchronizing operations.
 
@@ -1658,6 +1664,7 @@ def _get_rng_state_offset(device: int | str | torch.device = "cuda") -> int:
 
 # pyrefly: ignore [deprecated]
 from .memory import *  # noqa: F403
+from .memory import _use_uvm
 from .random import *  # noqa: F403
 
 
@@ -2027,6 +2034,7 @@ __all__ = [
     "cudaStatus",
     "cudart",
     "current_blas_handle",
+    "current_solver_handle",
     "current_device",
     "current_stream",
     "default_generators",

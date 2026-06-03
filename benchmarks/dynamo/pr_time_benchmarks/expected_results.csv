@@ -26,7 +26,7 @@ basic_modules_ListOfLinears_inductor,compile_time_instruction_count,15640000000,
 
 
 
-basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,17660000000,0.1
+basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,11320000000,0.1
 
 
 
@@ -86,7 +86,7 @@ basic_NestedModule_eager,compile_time_instruction_count,5866000000,0.1
 
 
 
-basic_InlineMod_eager,compile_time_instruction_count,8671000000,0.1
+basic_InlineMod_eager,compile_time_instruction_count,7863000000,0.1
 
 
 
