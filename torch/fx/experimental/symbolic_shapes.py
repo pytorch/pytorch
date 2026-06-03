@@ -7407,7 +7407,10 @@ class ShapeEnv:
             desc = "Could not guard on data-dependent expression"
             size_oblivious_result_msg = (
                 "consider using data-dependent friendly APIs such as "
-                "guard_or_false, guard_or_true and statically_known_true."
+                "guard_or_false, guard_or_true and statically_known_true. "
+                "If this was caused by Python `not` on a symbolic boolean, "
+                "use torch.sym_not() or an equivalent comparison instead; "
+                "Python `not` cannot be overloaded outside Dynamo bytecode tracing."
             )
 
         msg = (

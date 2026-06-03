@@ -1958,6 +1958,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cnts.frame_count, 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_symbool_python_not(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x):
+            c = x.item()
+            torch._check(not (c * 2 == 0))
+            return torch.ones(c * 2)
+
+        out = f(torch.tensor(3, dtype=torch.int64))
+        self.assertEqual(out.shape, (6,))
+        self.assertEqual(len(backend.graphs), 1)
+
+        targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertIn(torch.sym_not, targets)
+        self.assertIn(torch._check, targets)
+        self.assertNotIn(operator.not_, targets)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check_symbolic_shape_rel(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
