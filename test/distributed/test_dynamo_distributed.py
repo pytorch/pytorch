@@ -2603,7 +2603,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_compiled_all_gather_into_tensor_returns_none(self):
         def fn(output, input, w):
-            result = dist.all_gather_into_tensor(output, input, async_op=False)
+            result = dist.all_gather_single(output, input, async_op=False)
             assert result is None  # noqa: S101
             return output @ w
 
@@ -2616,7 +2616,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_compiled_reduce_scatter_tensor_returns_none(self):
         def fn(output, input, w):
-            result = dist.reduce_scatter_tensor(output, input, async_op=False)
+            result = dist.reduce_scatter_single(output, input, async_op=False)
             assert result is None  # noqa: S101
             return output @ w
 
@@ -2731,7 +2731,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             torch.randn(4, 4),
             "all_gather",
-            suggestion="torch.distributed._functional_collectives.all_gather_tensor",
+            suggestion="torch.distributed._functional_collectives.all_gather_single",
         )
 
     def test_nn_functional_reduce_scatter_unsupported(self):
@@ -2746,7 +2746,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
             fn,
             [torch.randn(4, 4), torch.randn(4, 4)],
             "reduce_scatter",
-            suggestion="torch.distributed._functional_collectives.reduce_scatter_tensor",
+            suggestion="torch.distributed._functional_collectives.reduce_scatter_single",
         )
 
     def test_nn_functional_all_to_all_single_unsupported(self):
