@@ -69,6 +69,10 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
         expected_recompiles = get_field(expected_csv, model, "recompiles")
         flaky = model in flaky_models
 
+        # Semantics: a model FAILs if *either* metric regresses (more graph
+        # breaks or more recompiles than expected), and is reported as IMPROVED
+        # if *either* metric drops while neither regresses. recompiles is only
+        # considered when the expected CSV carries the column (backward compat).
         if expected_graph_breaks is None:
             status = "MISSING:"
             improved.append(model)
@@ -99,6 +103,14 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
                 status = "IMPROVED:"
                 improved.append(model)
         else:
+            # Reachable only when the expected CSV has a recompiles column but
+            # the actual CSV does not (recompiles is None). Treat as PASS so old
+            # artifacts don't break CI, but warn so the missing data is visible.
+            if expected_recompiles is not None and recompiles is None:
+                print(
+                    f"WARNING: {model} is missing the 'recompiles' column in "
+                    "the actual results; skipping recompile comparison."
+                )
             status = "PASS_BUT_FLAKY" if flaky else "PASS"
             print(f"{model:34}  {status}")
             continue
