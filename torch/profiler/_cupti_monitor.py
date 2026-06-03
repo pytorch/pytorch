@@ -27,10 +27,6 @@ _PY_PROFILER = torch._C._profiler
 
 
 _LIBCUPTI_PATH_ENV = "TORCH_CUPTI_MONITOR_LIBCUPTI_PATH"
-_LIBPTHREAD_PATH = ctypes.util.find_library("pthread") or "libpthread.so.0"
-_LIBPTHREAD = ctypes.CDLL(_LIBPTHREAD_PATH)
-_LIBPTHREAD.pthread_self.argtypes = []
-_LIBPTHREAD.pthread_self.restype = ctypes.c_uint64
 
 _CUPTI_SUCCESS = 0
 _CUPTI_ERROR_MAX_LIMIT_REACHED = 12
@@ -40,19 +36,12 @@ _CUPTI_ACTIVITY_FLAG_FLUSH_FORCED = 1
 _DEFAULT_BUFFER_SIZE = 4 * 1024 * 1024
 _DEFAULT_FLUSH_PERIOD_S = 1.0
 
-_RECORD_FILE = "cupti_monitor_records.bin"
-_ANNOTATION_FILE = "cupti_monitor_annotations.bin"
 _META_FILE = "cupti_monitor_meta.bin"
 _RAW_BUFFER_FILE = "cupti_monitor_raw_buffers.bin"
 
-_CHUNK_MAGIC = b"CUPMREC1"
-_CHUNK_VERSION = 4
-_CHUNK_HEADER = struct.Struct("<8sIIQQQ")
 _RAW_CHUNK_MAGIC = b"CUPMRBUF"
 _RAW_CHUNK_VERSION = 2
 _RAW_CHUNK_HEADER = struct.Struct("<8sIIIIQQQ")
-_RECORD_STRUCT = struct.Struct("<IIIIIQQQQQIIII")
-_ANNOTATION_HEADER = struct.Struct("<QI")
 _META_MAGIC = b"CUPMMETA"
 _META_VERSION = 2
 _META_HEADER = struct.Struct("<8sII")
@@ -179,8 +168,7 @@ def _has_active_cuda_context() -> bool:
 
 
 def _current_thread_resource_tuple() -> tuple[int, int, int]:
-    pthread_self = int(_LIBPTHREAD.pthread_self())
-    opaque_tid = ctypes.c_int32(pthread_self & 0xFFFFFFFF).value
+    opaque_tid = ctypes.c_int32(threading.get_ident() & 0xFFFFFFFF).value
     return (os.getpid(), opaque_tid, threading.get_native_id())
 
 
@@ -203,15 +191,6 @@ class _CuptiError(RuntimeError):
 def _dtype_record(record_addr: int, dtype: np.dtype) -> np.void:
     buf = (ctypes.c_char * dtype.itemsize).from_address(record_addr)
     return np.frombuffer(buf, dtype=dtype, count=1)[0]
-
-
-def _normalize_annotation(annotation: Any) -> bytes:
-    if annotation is None:
-        return b""
-    try:
-        return json.dumps(annotation, sort_keys=True, separators=(",", ":")).encode()
-    except TypeError:
-        return str(annotation).encode()
 
 
 def _default_graph_annotation_resolver(
@@ -266,14 +245,12 @@ class CuptiMonitor:
         activities: Iterable[int] | None = None,
         buffer_size: int = _DEFAULT_BUFFER_SIZE,
         flush_period_s: float = _DEFAULT_FLUSH_PERIOD_S,
-        raw_buffer_dump: bool = False,
         annotation_resolver: Callable[[int, int, int], Any | None] | None = None,
     ) -> None:
         self.output_dir = Path(output_dir)
         self.activities = tuple(activities or _DEFAULT_ALWAYS_ON_ACTIVITIES)
         self.buffer_size = buffer_size
         self.flush_period_s = flush_period_s
-        self.raw_buffer_dump = raw_buffer_dump
         self.annotation_resolver = (
             annotation_resolver or _default_graph_annotation_resolver
         )
@@ -311,8 +288,6 @@ class CuptiMonitor:
         self._session_start_approx_ns = 0
         self._session_start_calibrated_unix_ns = 0
 
-        self._records_fp = None
-        self._annotations_fp = None
         self._raw_buffers_fp = None
 
         self._buffers_requested = 0
@@ -320,10 +295,7 @@ class CuptiMonitor:
         self._valid_bytes = 0
         self._max_outstanding = 0
         self._dropped_records = 0
-        self._chunk_count = 0
         self._raw_chunk_count = 0
-        self._annotation_ids: dict[bytes, int] = {}
-        self._next_annotation_id = 1
 
         req_type = ctypes.CFUNCTYPE(
             None,
@@ -681,10 +653,8 @@ class CuptiMonitor:
                 "max_outstanding_buffers": self._max_outstanding,
                 "valid_total_mb": self._valid_bytes / (1024 * 1024),
                 "dropped_records": self._dropped_records,
-                "chunks_written": self._chunk_count,
                 "raw_chunks_written": self._raw_chunk_count,
                 "output_dir": str(self.output_dir),
-                "raw_buffer_dump": self.raw_buffer_dump,
                 "trace_window_prepared": self._trace_window_prepared,
                 "trace_window_active": self._trace_window_active,
                 "trace_window_start_ns": self._trace_window_start_ns,
@@ -731,23 +701,9 @@ class CuptiMonitor:
         return int(last_id.value)
 
     def _open_outputs(self) -> None:
-        if not self.raw_buffer_dump:
-            self._records_fp = _open_binary_append(self.output_dir / _RECORD_FILE)
-            self._annotations_fp = _open_binary_append(
-                self.output_dir / _ANNOTATION_FILE
-            )
-        else:
-            self._raw_buffers_fp = _open_binary_append(
-                self.output_dir / _RAW_BUFFER_FILE
-            )
+        self._raw_buffers_fp = _open_binary_append(self.output_dir / _RAW_BUFFER_FILE)
 
     def _close_outputs(self) -> None:
-        if self._records_fp is not None:
-            self._records_fp.close()
-            self._records_fp = None
-        if self._annotations_fp is not None:
-            self._annotations_fp.close()
-            self._annotations_fp = None
         if self._raw_buffers_fp is not None:
             self._raw_buffers_fp.close()
             self._raw_buffers_fp = None
@@ -764,7 +720,7 @@ class CuptiMonitor:
             "session_start_calibrated_unix_ns": self._session_start_calibrated_unix_ns,
             "buffer_size": self.buffer_size,
             "flush_period_ns": int(self.flush_period_s * 1e9),
-            "raw_buffer_dump": self.raw_buffer_dump,
+            "raw_buffer_dump": True,
             "activities": list(self.activities),
             "libcupti_path": _find_cupti_library(),
         }
@@ -829,7 +785,7 @@ class CuptiMonitor:
     def _process_completed_buffer(
         self, ctx: int, stream_id: int, buffer_ptr: int, valid_size: int
     ) -> None:
-        if self.raw_buffer_dump and not self._trace_window_prepared:
+        if not self._trace_window_prepared:
             dropped = ctypes.c_size_t()
             rc = self._lib.cuptiActivityGetNumDroppedRecords(
                 ctypes.c_void_p(ctx), ctypes.c_uint32(stream_id), ctypes.byref(dropped)
@@ -842,9 +798,6 @@ class CuptiMonitor:
             return
 
         record_ptr = ctypes.c_void_p()
-        chunk_records: list[bytes] = []
-        min_ts = 0
-        max_ts = 0
         while True:
             rc = self._lib.cuptiActivityGetNextRecord(
                 ctypes.c_void_p(buffer_ptr),
@@ -855,14 +808,7 @@ class CuptiMonitor:
                 record_addr = record_ptr.value
                 if record_addr is None:
                     raise RuntimeError("CUPTI returned null activity record pointer")
-                record_bytes, start_ns, end_ns, trace_event = self._decode_record(
-                    record_addr
-                )
-                if record_bytes is not None:
-                    chunk_records.append(record_bytes)
-                    if start_ns:
-                        min_ts = start_ns if min_ts == 0 else min(min_ts, start_ns)
-                    max_ts = max(max_ts, end_ns)
+                trace_event = self._decode_record(record_addr)
                 if trace_event is not None:
                     with self._lock:
                         if self._trace_window_active:
@@ -880,9 +826,6 @@ class CuptiMonitor:
         )
         if rc == _CUPTI_SUCCESS:
             self._dropped_records += int(dropped.value)
-
-        if chunk_records:
-            self._write_chunk(chunk_records, min_ts, max_ts)
 
         with self._lock:
             self._free_buffers.append(buffer_ptr)
@@ -936,41 +879,11 @@ class CuptiMonitor:
 
         return retained_events
 
-    def _annotation_id_for_record(
-        self, graph_node_id: int, record_kind: int, correlation_id: int
-    ) -> int:
-        annotation = self.annotation_resolver(
-            graph_node_id, record_kind, correlation_id
-        )
-        if annotation is None:
-            return 0
-        key = _normalize_annotation(annotation)
-        if not key:
-            return 0
-        annotation_id = self._annotation_ids.get(key)
-        if annotation_id is not None:
-            return annotation_id
-        annotation_id = self._next_annotation_id
-        self._next_annotation_id += 1
-        self._annotation_ids[key] = annotation_id
-        if self._annotations_fp is None:
-            raise RuntimeError("annotations file is not open")
-        self._annotations_fp.write(_ANNOTATION_HEADER.pack(annotation_id, len(key)))
-        self._annotations_fp.write(key)
-        return annotation_id
-
-    def _decode_record(
-        self, record_addr: int
-    ) -> tuple[bytes | None, int, int, dict[str, Any] | None]:
+    def _decode_record(self, record_addr: int) -> dict[str, Any] | None:
         kind = int(ctypes.c_int.from_address(record_addr).value)
         if kind == _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL:
             record = _dtype_record(record_addr, _KERNEL_DTYPE)
             annotation = self.annotation_resolver(
-                int(record["graph_node_id"]),
-                _RECORD_KIND_KERNEL,
-                int(record["correlation_id"]),
-            )
-            annotation_id = self._annotation_id_for_record(
                 int(record["graph_node_id"]),
                 _RECORD_KIND_KERNEL,
                 int(record["correlation_id"]),
@@ -982,22 +895,6 @@ class CuptiMonitor:
             kernel_name = _demangle_symbol(kernel_name)
             start_ns = self._convert_time(int(record["start"]))
             end_ns = self._convert_time(int(record["end"]))
-            payload = _RECORD_STRUCT.pack(
-                _RECORD_KIND_KERNEL,
-                int(record["device_id"]),
-                int(record["context_id"]),
-                int(record["stream_id"]),
-                int(record["correlation_id"]),
-                annotation_id,
-                int(record["graph_node_id"]),
-                start_ns,
-                end_ns,
-                0,
-                0,
-                0,
-                int(record["graph_id"]),
-                0,
-            )
             trace_event = {
                 "kind": "kernel",
                 "device_id": int(record["device_id"]),
@@ -1008,11 +905,10 @@ class CuptiMonitor:
                 "graph_id": int(record["graph_id"]),
                 "start_ns": start_ns,
                 "end_ns": end_ns,
-                "annotation_id": annotation_id,
                 "annotation": annotation,
                 "name": kernel_name,
             }
-            return payload, start_ns, end_ns, trace_event
+            return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_MEMCPY:
             record = _dtype_record(record_addr, _MEMCPY_DTYPE)
@@ -1021,35 +917,8 @@ class CuptiMonitor:
                 _RECORD_KIND_MEMCPY,
                 int(record["correlation_id"]),
             )
-            annotation_id = self._annotation_id_for_record(
-                int(record["graph_node_id"]),
-                _RECORD_KIND_MEMCPY,
-                int(record["correlation_id"]),
-            )
-            aux = (
-                int(record["copy_kind"])
-                | (int(record["src_kind"]) << 8)
-                | (int(record["dst_kind"]) << 16)
-                | (int(record["flags_"]) << 24)
-            )
             start_ns = self._convert_time(int(record["start"]))
             end_ns = self._convert_time(int(record["end"]))
-            payload = _RECORD_STRUCT.pack(
-                _RECORD_KIND_MEMCPY,
-                int(record["device_id"]),
-                int(record["context_id"]),
-                int(record["stream_id"]),
-                int(record["correlation_id"]),
-                annotation_id,
-                int(record["graph_node_id"]),
-                start_ns,
-                end_ns,
-                int(record["bytes"]),
-                int(record["runtime_correlation_id"]),
-                aux,
-                0,
-                int(record["graph_id"]),
-            )
             trace_event = {
                 "kind": "gpu_memcpy",
                 "device_id": int(record["device_id"]),
@@ -1066,11 +935,10 @@ class CuptiMonitor:
                 "src_kind": int(record["src_kind"]),
                 "dst_kind": int(record["dst_kind"]),
                 "flags": int(record["flags_"]),
-                "annotation_id": annotation_id,
                 "annotation": annotation,
                 "name": "Memcpy",
             }
-            return payload, start_ns, end_ns, trace_event
+            return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_MEMSET:
             record = _dtype_record(record_addr, _MEMSET_DTYPE)
@@ -1079,31 +947,8 @@ class CuptiMonitor:
                 _RECORD_KIND_MEMSET,
                 int(record["correlation_id"]),
             )
-            annotation_id = self._annotation_id_for_record(
-                int(record["graph_node_id"]),
-                _RECORD_KIND_MEMSET,
-                int(record["correlation_id"]),
-            )
-            aux = int(record["value"])
-            aux2 = int(record["memory_kind"]) | (int(record["flags_"]) << 16)
             start_ns = self._convert_time(int(record["start"]))
             end_ns = self._convert_time(int(record["end"]))
-            payload = _RECORD_STRUCT.pack(
-                _RECORD_KIND_MEMSET,
-                int(record["device_id"]),
-                int(record["context_id"]),
-                int(record["stream_id"]),
-                int(record["correlation_id"]),
-                annotation_id,
-                int(record["graph_node_id"]),
-                start_ns,
-                end_ns,
-                int(record["bytes"]),
-                0,
-                aux,
-                aux2,
-                int(record["graph_id"]),
-            )
             trace_event = {
                 "kind": "gpu_memset",
                 "device_id": int(record["device_id"]),
@@ -1118,11 +963,10 @@ class CuptiMonitor:
                 "value": int(record["value"]),
                 "memory_kind": int(record["memory_kind"]),
                 "flags": int(record["flags_"]),
-                "annotation_id": annotation_id,
                 "annotation": annotation,
                 "name": "Memset",
             }
-            return payload, start_ns, end_ns, trace_event
+            return trace_event
 
         if kind in (_CUPTI_ACTIVITY_KIND_RUNTIME, _CUPTI_ACTIVITY_KIND_DRIVER):
             record = _dtype_record(record_addr, _API_DTYPE)
@@ -1141,7 +985,7 @@ class CuptiMonitor:
                 "return_value": int(record["return_value"]),
                 "name": f"cbid_{int(record['cbid'])}",
             }
-            return None, start_ns, end_ns, trace_event
+            return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION:
             record = _dtype_record(record_addr, _EXTERNAL_CORRELATION_DTYPE)
@@ -1152,7 +996,7 @@ class CuptiMonitor:
                 "correlation_id": int(record["correlation_id"]),
                 "name": "external_correlation",
             }
-            return None, 0, 0, trace_event
+            return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_OVERHEAD:
             record = _dtype_record(record_addr, _OVERHEAD_DTYPE)
@@ -1171,7 +1015,7 @@ class CuptiMonitor:
                     f"overhead_{int(record['overhead_kind'])}",
                 ),
             }
-            return None, start_ns, end_ns, trace_event
+            return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_CUDA_EVENT:
             record = _dtype_record(record_addr, _CUDA_EVENT_DTYPE)
@@ -1187,7 +1031,7 @@ class CuptiMonitor:
                 "cuda_event_sync_id": int(record["cuda_event_sync_id"]),
                 "name": "cuda_event",
             }
-            return None, event_ts, event_ts, trace_event
+            return trace_event
 
         if kind == _CUPTI_ACTIVITY_KIND_SYNCHRONIZATION:
             record = _dtype_record(record_addr, _SYNCHRONIZATION_DTYPE)
@@ -1206,25 +1050,9 @@ class CuptiMonitor:
                 "return_value": int(record["return_value"]),
                 "name": f"sync_{int(record['type'])}",
             }
-            return None, start_ns, end_ns, trace_event
+            return trace_event
 
-        return None, 0, 0, None
-
-    def _write_chunk(self, records: list[bytes], min_ts: int, max_ts: int) -> None:
-        if self._records_fp is None:
-            raise RuntimeError("records file is not open")
-        payload = b"".join(records)
-        header = _CHUNK_HEADER.pack(
-            _CHUNK_MAGIC,
-            _CHUNK_VERSION,
-            len(records),
-            len(payload),
-            min_ts,
-            max_ts,
-        )
-        self._records_fp.write(header)
-        self._records_fp.write(payload)
-        self._chunk_count += 1
+        return None
 
     def _write_raw_buffer(
         self, ctx: int, stream_id: int, buffer_ptr: int, valid_size: int
@@ -1293,7 +1121,6 @@ def start_collection(
     activities: Iterable[int] | None = None,
     buffer_size: int = _DEFAULT_BUFFER_SIZE,
     flush_period_s: float = _DEFAULT_FLUSH_PERIOD_S,
-    raw_buffer_dump: bool = False,
     annotation_resolver: Callable[[int, int, int], Any | None] | None = None,
 ) -> CuptiMonitor:
     global _monitor_singleton, _atexit_registered
@@ -1304,7 +1131,6 @@ def start_collection(
         activities=activities,
         buffer_size=buffer_size,
         flush_period_s=flush_period_s,
-        raw_buffer_dump=raw_buffer_dump,
         annotation_resolver=annotation_resolver,
     )
     monitor.start()
