@@ -1145,6 +1145,39 @@ class MetaConverter(Generic[_TensorT]):
             else:
                 return (t.size, t.stride, t.storage_offset)
 
+        def sym_sparse_sizes(
+            t: MetaTensorDesc[Any],
+            src: torch._guards.Source,
+            symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
+            | None = symbolic_context,
+        ) -> tuple[IntLikeType, ...]:
+            if shape_env is None:
+                return t.size
+
+            from torch._prims_common import make_contiguous_strides_for
+            from torch.fx.experimental.symbolic_shapes import is_symbolic
+
+            fake_mode = t.fake_mode
+            has_symbolic = any(is_symbolic(sz) for sz in t.size)
+            if fake_mode is not None and fake_mode.shape_env is shape_env:
+                return t.size
+            if symbolic_context is None and not (
+                fake_mode is not None and has_symbolic
+            ):
+                return t.size
+
+            sparse_tensor_with_synthetic_strides = dataclasses.replace(
+                t,
+                stride=make_contiguous_strides_for(t.size),
+                storage_offset=0,
+            )
+            sizes, _, _ = sym_sizes_strides_storage_offset(
+                sparse_tensor_with_synthetic_strides,
+                src,
+                symbolic_context,
+            )
+            return sizes
+
         def empty_create(
             inner_t: MetaTensorDesc[Any],
             inner_src: torch._guards.Source,
@@ -1478,17 +1511,34 @@ class MetaConverter(Generic[_TensorT]):
                 if t.is_sparse:
                     is_leaf = t.is_leaf
 
+                    sparse_size = sym_sparse_sizes(t, source, symbolic_context)
+                    if t.sparse_dim is None:
+                        raise AssertionError("t.sparse_dim must not be None")
+                    if t.dense_dim is None:
+                        raise AssertionError("t.dense_dim must not be None")
+
                     # The lambda function below is similar to
                     # `t.to(device='meta')` except the latter
                     # preserves nnz value
                     r = callback(
-                        lambda: torch.ops.aten._sparse_coo_tensor_with_dims(
+                        lambda: torch.ops.aten._sparse_coo_tensor_with_dims_and_tensors(
                             t.sparse_dim,
                             t.dense_dim,
-                            t.size,
+                            sparse_size,
+                            torch.empty(
+                                (t.sparse_dim, 0),
+                                dtype=torch.int64,
+                                device="meta",
+                            ),
+                            torch.empty(
+                                (0, *sparse_size[t.sparse_dim :]),
+                                dtype=t.dtype,
+                                device="meta",
+                            ),
                             dtype=t.dtype,
                             layout=torch.sparse_coo,
                             device="meta",
+                            is_coalesced=t.is_coalesced,
                         )
                     )
                     if self.copy_data:
