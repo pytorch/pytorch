@@ -29,6 +29,15 @@ from .exported_program import ExportedProgram
 log = logging.getLogger(__name__)
 
 
+_DRAFT_EXPORT_WARNING_COLOR = "\033[31m"
+_DRAFT_EXPORT_SUCCESS_COLOR = "\033[32m"
+_DRAFT_EXPORT_END_COLOR = "\033[0m"
+
+
+def _format_colored(text: str, color: str) -> str:
+    return f"{color}{text}{_DRAFT_EXPORT_END_COLOR}"
+
+
 class FailureType(IntEnum):
     MISSING_FAKE_KERNEL = 1
     DATA_DEPENDENT_ERROR = 2
@@ -178,29 +187,31 @@ class DraftExportReport:
         return f"DraftExportReport({self.failures})"
 
     def __str__(self) -> str:
-        WARNING_COLOR = "\033[93m"
-        GREEN_COLOR = "\033[92m"
-        END_COLOR = "\033[0m"
-
         if self.successful():
-            return f"""{GREEN_COLOR}
+            return _format_colored(
+                """
 ##############################################################################################
 Congratulations: No issues are found during export, and it was able to soundly produce a graph.
 You can now change back to torch.export.export()
 ##############################################################################################
-{END_COLOR}"""
+""",
+                _DRAFT_EXPORT_SUCCESS_COLOR,
+            )
 
-        error = f"""{WARNING_COLOR}
+        error = _format_colored(
+            f"""
 ###################################################################################################
 WARNING: {len(self.failures)} issue(s) found during export, and it was not able to soundly produce a graph.
 Please follow the instructions to fix the errors.
 ###################################################################################################
 
-"""
+""",
+            _DRAFT_EXPORT_WARNING_COLOR,
+        )
+        error += "\n"
 
         for i, failure in enumerate(self.failures):
             error += f"{i + 1}. {failure.print(self.str_to_filename)}\n"
-        error += END_COLOR
         return error
 
     def apply_suggested_fixes(self) -> None:
