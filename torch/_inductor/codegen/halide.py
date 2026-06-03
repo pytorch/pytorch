@@ -607,6 +607,16 @@ class HalideOverrides(OpOverrides):
         return var
 
     @classmethod
+    def value_expr(cls, expr, dtype):
+        index = V.kernel.prepare_indexing(expr)
+        var = V.kernel.genfunc(
+            V.kernel.index_to_str(index),
+            V.kernel.used_dims_from_index(index),
+            bounds=get_bounds_index_expr(expr),
+        )
+        return ops.to_dtype(var, dtype)
+
+    @classmethod
     def indirect_indexing(cls, index_var, size, check=True, wrap_neg=True):
         # TODO(jansel): Halide only supports 32-bit indexing, we should error on overflow
         index_var = ops.to_dtype(index_var, torch.int32)
