@@ -6,13 +6,11 @@ import gzip
 import json
 import math
 import time as _time
-from typing import cast, IO, TYPE_CHECKING
+from typing import cast, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
     import os
-
-import torch
 
 from . import _cupti_monitor as _mon
 
@@ -94,14 +92,6 @@ def _trimester_base_ns() -> int:
     return (int(_time.time()) // _TRIMONTH_SECONDS) * _TRIMONTH_SECONDS * 1_000_000_000
 
 
-def _ns_to_us(time_ns: int) -> str:
-    return f"{time_ns // 1000}.{time_ns % 1000:03d}"
-
-
-def _json_escape(s: str) -> str:
-    return json.dumps(s)
-
-
 def _as_int(value: object, default: int = 0) -> int:
     try:
         return int(cast(int | float | str, value))
@@ -126,16 +116,6 @@ def _export_tid(tid):
     if isinstance(tid, int):
         return _sanitize_tid(tid)
     return tid
-
-
-def _write_metadata_event(
-    f: IO[str], name: str, ts: str, pid, tid, arg_key: str, arg_value: str
-) -> None:
-    tid = _export_tid(tid)
-    f.write(
-        f'{{"ph":"M","name":"{name}","ts":{ts},'
-        f'"pid":{pid},"tid":{tid},"args":{{"{arg_key}":{arg_value}}}}},\n'
-    )
 
 
 def _metadata_event(
@@ -702,95 +682,4 @@ def merge_trace_window_into_chrome_trace(
 
     output_opener = gzip.open if output_path.endswith(".gz") else open
     with output_opener(output_path, "wt") as f:
-        json.dump(data, f, separators=(",", ":"))
-
-
-def export_trace_window_chrome_trace(
-    trace_window: dict[str, object],
-    path: str | os.PathLike[str],
-    *,
-    trace_name: str | None = None,
-) -> None:
-    base_ns = _trimester_base_ns()
-    metadata_events, trace_events = _trace_window_entries(trace_window, base_ns=base_ns)
-    if not trace_events:
-        raise RuntimeError("Trace window did not contain any exportable events")
-
-    min_ts = min(_as_float(event["ts"]) for event in trace_events if event["ph"] == "X")
-    max_end_ts = max(
-        _as_float(event["ts"]) + _as_float(event.get("dur", 0.0))
-        for event in trace_events
-        if event["ph"] == "X"
-    )
-
-    device_props = []
-    for i in range(torch.cuda.device_count()):
-        p = torch.cuda.get_device_properties(i)
-        device_props.append(
-            {
-                "id": i,
-                "name": p.name,
-                "totalGlobalMem": p.total_memory,
-                "computeMajor": p.major,
-                "computeMinor": p.minor,
-                "maxThreadsPerBlock": p.max_threads_per_block,  # pyrefly: ignore[missing-attribute]
-                "maxThreadsPerMultiprocessor": p.multi_processor_count,
-                "regsPerMultiprocessor": p.regs_per_multiprocessor,  # pyrefly: ignore[missing-attribute]
-                "warpSize": p.warp_size,
-            }
-        )
-
-    trace_events = (
-        metadata_events
-        + trace_events
-        + [
-            {
-                "ph": "X",
-                "cat": "Trace",
-                "name": "PyTorch Profiler (0)",
-                "pid": "Spans",
-                "tid": "PyTorch Profiler",
-                "ts": min_ts,
-                "dur": max(max_end_ts - min_ts, 0.0),
-                "args": {"Op count": 0},
-            },
-            _metadata_event(
-                "process_sort_index",
-                min_ts,
-                "Spans",
-                0,
-                "sort_index",
-                0x20000000,
-            ),
-            {
-                "ph": "i",
-                "s": "g",
-                "name": "Iteration Start: PyTorch Profiler",
-                "pid": "Traces",
-                "tid": "Trace PyTorch Profiler",
-                "ts": min_ts,
-            },
-            {
-                "ph": "i",
-                "s": "g",
-                "name": "Record Window End",
-                "pid": "",
-                "tid": "",
-                "ts": max_end_ts + 0.001,
-            },
-        ]
-    )
-
-    data = {
-        "schemaVersion": 1,
-        "deviceProperties": device_props,
-        "displayTimeUnit": "ms",
-        "baseTimeNanoseconds": base_ns,
-        "traceEvents": trace_events,
-        "traceName": trace_name or str(path),
-    }
-
-    path = str(path)
-    opener = gzip.open if path.endswith(".gz") else open
-    with opener(path, "wt") as f:
         json.dump(data, f, separators=(",", ":"))
