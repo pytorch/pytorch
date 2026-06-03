@@ -190,15 +190,6 @@ def isWrappedScalarType(typ: Type) -> bool:
     return False
 
 
-# TODO: dedupe with Type.is_generator_like
-def isGeneratorType(typ: Type) -> bool:
-    if isinstance(typ, BaseType):
-        return typ.name == BaseTy.Generator
-    elif isinstance(typ, (OptionalType)):
-        return isGeneratorType(typ.elem)
-    return False
-
-
 # This class caches a few derived properties computed from an Argument
 # and LazyIrProperties
 class LazyArgument:
@@ -223,7 +214,7 @@ class LazyArgument:
         self.orig_type = arg.type
         self.symint = symint
         self.is_optional = isinstance(arg.type, OptionalType)
-        self.is_generator = isGeneratorType(arg.type)
+        self.is_generator = arg.type.is_generator_like()
         self.lazy_type_ = process_ir_type(arg.type, properties, symint=symint)
         self.is_wrapped_scalar = isWrappedScalarType(arg.type)
         self.is_symint_or_list = symint and (
@@ -374,7 +365,7 @@ class LazyIrSchema:
                 if isinstance(curr_args, TensorOptionsArguments):
                     curr_args = curr_args.all()
                 for arg in curr_args:
-                    if isGeneratorType(arg.type):
+                    if arg.type.is_generator_like():
                         if self.generator_arg is not None:
                             raise AssertionError(
                                 "We expect there is only one generator arg"

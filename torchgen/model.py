@@ -2159,6 +2159,21 @@ class ListType(Type):
         return self
 
 
+# Parse a "type and alias annotation" string (e.g. "Tensor(a!)") into the bare
+# type string and its Annotation, if any. Shared by Argument.parse and
+# Return.parse.
+def parse_alias_annotation(type_and_annot: str) -> tuple[str, Annotation | None]:
+    match = re.match(r"Tensor\((.+)\)(.*)", type_and_annot)
+    if match is None:
+        return type_and_annot, None
+    # If you update this, make sure the __str__ still works too
+    if match.group(2) not in ["", "?", "[]"]:
+        raise AssertionError(
+            f"unrecognized alias analysis form with Tensor: {match.group(2)}"
+        )
+    return "Tensor" + match.group(2), Annotation.parse(match.group(1))
+
+
 @dataclass(frozen=True)
 class Argument:
     # NB: I didn't put kwarg_only as a boolean field here, unlike
@@ -2209,20 +2224,7 @@ class Argument:
             type_and_annot, name_and_default = arg.rsplit(" ", 1)
             name = name_and_default
             default = None
-        # TODO: deduplicate annotation matching with Return
-        match = re.match(r"Tensor\((.+)\)(.*)", type_and_annot)
-        annotation: Annotation | None
-        if match:
-            # If you update this, make sure the __str__ still works too
-            if match.group(2) not in ["", "?", "[]"]:
-                raise AssertionError(
-                    f"unrecognized alias analysis form with Tensor: {match.group(2)}"
-                )
-            type_s = "Tensor" + match.group(2)
-            annotation = Annotation.parse(match.group(1))
-        else:
-            type_s = type_and_annot
-            annotation = None
+        type_s, annotation = parse_alias_annotation(type_and_annot)
         type = Type.parse(type_s)
         r = Argument(
             name=name,
@@ -2271,19 +2273,7 @@ class Return:
         else:
             type_and_annot = arg
             name = None
-        match = re.match(r"Tensor\((.+)\)(.*)", type_and_annot)
-        annotation: Annotation | None
-        if match:
-            # If you update this, make sure the __str__ still works too
-            if match.group(2) not in ["", "?", "[]"]:
-                raise AssertionError(
-                    f"unrecognized alias analysis form with Tensor: {match.group(2)}"
-                )
-            type_s = "Tensor" + match.group(2)
-            annotation = Annotation.parse(match.group(1))
-        else:
-            type_s = type_and_annot
-            annotation = None
+        type_s, annotation = parse_alias_annotation(type_and_annot)
         type = Type.parse(type_s)
         r = Return(
             name=name,

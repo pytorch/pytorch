@@ -14,7 +14,6 @@ from torchgen.api.types import (
     BaseCType,
     Binding,
     ConstRefCType,
-    CppSignature,
     CppSignatureGroup,
     DispatcherSignature,
     Expr,
@@ -312,6 +311,30 @@ class RegisterDispatchKey:
             symint=self.symint,
         )
 
+    def gen_namespaced_target(
+        self,
+        cpp_sig_group: CppSignatureGroup,
+        sig: NativeSignature | DispatcherSignature,
+    ) -> str:
+        # Emit the NAMESPACED_DECLARATION / NAMESPACED_DEFINITION code shared by
+        # the unstructured and structured codegen paths. The definitions forward
+        # to the wrapper kernel named by sig.
+        if self.target is Target.NAMESPACED_DECLARATION:
+            return "".join(
+                f"TORCH_API {cpp_sig.decl()};\n"
+                for cpp_sig in cpp_sig_group.signatures(symint=self.symint)
+            )
+        if self.target is not Target.NAMESPACED_DEFINITION:
+            raise AssertionError(f"unexpected target {self.target}")
+        return "".join(
+            f"""
+{cpp_sig.defn()} {{
+return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+}}
+"""
+            for cpp_sig in cpp_sig_group.signatures(symint=self.symint)
+        )
+
     def gen_out_inplace_wrapper(
         self, f: NativeFunction, g: NativeFunctionsGroup | None
     ) -> str | None:
@@ -444,25 +467,11 @@ class RegisterDispatchKey:
                 f, method=False, fallback_binding=False
             )
 
-            # TODO: dedupe this with the structured codegen
-            if self.target is Target.NAMESPACED_DECLARATION:
-                result = ""
-                for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
-                    result += f"TORCH_API {cpp_sig.decl()};\n"
-                return result
-            elif self.target is Target.NAMESPACED_DEFINITION:
-
-                def generate_defn(cpp_sig: CppSignature) -> str:
-                    return f"""
-{cpp_sig.defn()} {{
-return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
-}}
-"""
-
-                result = ""
-                for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
-                    result += generate_defn(cpp_sig)
-                return result
+            if self.target in (
+                Target.NAMESPACED_DECLARATION,
+                Target.NAMESPACED_DEFINITION,
+            ):
+                return self.gen_namespaced_target(cpp_sig_group, sig)
 
             elif self.target is Target.ANONYMOUS_DEFINITION:
                 # short circuit for inplace_meta
@@ -804,25 +813,11 @@ resize_out(out, sizes, strides, options);
             symint=kern is not None and kern.supports_symint(),
         )
 
-        if self.target is Target.NAMESPACED_DECLARATION:
-            result = ""
-            for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
-                result += f"TORCH_API {cpp_sig.decl()};\n"
-            return result
-
-        elif self.target is Target.NAMESPACED_DEFINITION:
-
-            def generate_defn(cpp_sig: CppSignature) -> str:
-                return f"""
-{cpp_sig.defn()} {{
-return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
-}}
-"""
-
-            result = ""
-            for cpp_sig in cpp_sig_group.signatures(symint=self.symint):
-                result += generate_defn(cpp_sig)
-            return result
+        if self.target in (
+            Target.NAMESPACED_DECLARATION,
+            Target.NAMESPACED_DEFINITION,
+        ):
+            return self.gen_namespaced_target(cpp_sig_group, sig)
 
         elif self.target is Target.ANONYMOUS_DEFINITION:
             k = f.func.kind()
@@ -836,14 +831,17 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
             # Initialize the class corresponding to this structured
             # operator; feeding it the output argument(s) if it is known
             if self.backend_index.dispatch_key is DispatchKey.Meta:
-                class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
-                parent_class = f"at::meta::structured_{meta.name(self.g)}"
+                name_infix = "meta"
             elif (
                 self.backend_index.dispatch_key
                 is DispatchKey.CompositeExplicitAutogradNonFunctional
             ):
-                # TODO: dedup this branch
-                class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
+                name_infix = "default_backend"
+            else:
+                name_infix = None
+
+            if name_infix is not None:
+                class_name = f"structured_{meta.name(self.g)}_{name_infix}_{k.name}"
                 parent_class = f"at::meta::structured_{meta.name(self.g)}"
             else:
                 metadata = self.backend_index.get_kernel(self.g)
