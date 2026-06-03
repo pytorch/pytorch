@@ -1800,11 +1800,11 @@ def bincount(
     torch._check(new_size >= minlength)
 
     if weights is None:
-        return inputs.new_empty(new_size, dtype=torch.long)
+        return inputs.new_empty(new_size, dtype=torch.long)  # type: ignore[return]
     elif weights.dtype == torch.float32:
-        return inputs.new_empty(new_size, dtype=torch.float32)
+        return inputs.new_empty(new_size, dtype=torch.float32)  # type: ignore[return]
     else:
-        return inputs.new_empty(new_size, dtype=torch.float64)
+        return inputs.new_empty(new_size, dtype=torch.float64)  # type: ignore[return]
 
 
 @register_op_impl(torch.ops.aten._pack_padded_sequence.default)
