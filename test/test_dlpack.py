@@ -525,7 +525,6 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyOn(["xpu", "cuda"])
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3077")
     def test_no_copy(self, device):
         # No copy, since tensor lives in the same device.
         self._test_from_dlpack(device)

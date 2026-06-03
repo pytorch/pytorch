@@ -1677,6 +1677,22 @@ if __name__ == "__main__":
         restored_handle = module.get_xpu_work_stream(tensor, api_capsule)
         self.assertEqual(default_handle, restored_handle)
 
+    @parametrize("copy", [None, True, False])
+    def test_dlpack_conversion_with_device(self, copy):
+        if self.expandable_segments:
+            self.skipTest("Skipping DLPack test for expandable segments allocator.")
+        x = make_tensor((5,), dtype=torch.float32, device="xpu")
+
+        # Same-device exercises maybeCopyTensor's dlDeviceToTorchDevice path which requires
+        # the data pointer for XPU.
+        z = torch.from_dlpack(x, device=x.device, copy=copy)
+        self.assertEqual(z, x)
+        self.assertEqual(z.device, x.device)
+        if copy:
+            self.assertNotEqual(z.data_ptr(), x.data_ptr())
+        else:
+            self.assertEqual(z.data_ptr(), x.data_ptr())
+
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.xpu.is_current_stream_capturing())
         s = torch.xpu.Stream()
