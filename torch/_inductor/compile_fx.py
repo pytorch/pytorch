@@ -2667,6 +2667,79 @@ def run_pre_grad_passes(
     return model_
 
 
+_LSTM_OPS_TO_PRESERVE = (torch.ops.aten.lstm.input,)
+
+
+def _contains_lstm_op(model_: GraphModule) -> bool:
+    return any(
+        node.op == "call_function" and node.target in _LSTM_OPS_TO_PRESERVE
+        for node in model_.graph.nodes
+    )
+
+
+def _lstm_input_decomp_for_inductor(
+    input,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+    batch_first,
+):
+    if input.device.type == "cuda":
+        return NotImplemented
+
+    from torch._decomp.decompositions import lstm_impl
+
+    return lstm_impl(
+        input,
+        hx,
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        batch_first,
+    )
+
+
+_LSTM_CONDITIONAL_DECOMPOSITIONS = {
+    torch.ops.aten.lstm.input: _lstm_input_decomp_for_inductor,
+}
+
+
+def _add_conditional_lstm_decompositions(
+    decompositions: dict[OpOverload, Callable[..., Any]],
+) -> dict[OpOverload, Callable[..., Any]]:
+    decompositions = dict(decompositions)
+    decompositions.update(_LSTM_CONDITIONAL_DECOMPOSITIONS)
+    return decompositions
+
+
+def _select_decomp_table_with_conditional_lstm() -> dict[Any, Callable[..., Any]]:
+    return _add_conditional_lstm_decompositions(select_decomp_table())
+
+
+def _uses_conditional_lstm_decompositions(
+    decompositions: dict[Any, Callable[..., Any]],
+) -> bool:
+    return any(
+        decompositions.get(op) is decomp
+        for op, decomp in _LSTM_CONDITIONAL_DECOMPOSITIONS.items()
+    )
+
+
+@contextlib.contextmanager
+def _override_lstm_cia_ops():
+    from torch.export.exported_program import _override_composite_implicit_decomp
+
+    with _override_composite_implicit_decomp(_LSTM_CONDITIONAL_DECOMPOSITIONS):
+        yield
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -2687,12 +2760,20 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
+    use_conditional_lstm_decompositions = decompositions is None and _contains_lstm_op(
+        model_
+    )
+
     if decompositions is not None:
 
         def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
             return decompositions  # pyrefly: ignore[bad-return]
     else:
-        get_decomp_fn = select_decomp_table
+        get_decomp_fn = (
+            _select_decomp_table_with_conditional_lstm
+            if use_conditional_lstm_decompositions
+            else select_decomp_table
+        )
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
@@ -2894,6 +2975,9 @@ def _compile_fx_main(
         compiler_config_extra = create_compiler_config_extra(model_)
 
         decompositions = get_decomp_fn()
+        override_lstm_cia_ops = _contains_lstm_op(
+            model_
+        ) and _uses_conditional_lstm_decompositions(decompositions)
         inner_compile = functools.partial(inner_compile, get_decomp_fn=get_decomp_fn)
 
         def fw_compiler_base(
@@ -2972,9 +3056,14 @@ def _compile_fx_main(
             if isinstance(model_, GraphModule):
                 model_ = run_pre_grad_passes(model_, example_inputs_)
 
-            with functorch_config.patch(
-                unlift_effect_tokens=True,
-                selective_decompose=config.selective_decompose,
+            with (
+                functorch_config.patch(
+                    unlift_effect_tokens=True,
+                    selective_decompose=config.selective_decompose,
+                ),
+                _override_lstm_cia_ops()
+                if override_lstm_cia_ops
+                else contextlib.nullcontext(),
             ):
                 gm, graph_signature = aot_export_module(
                     model_,
@@ -3041,6 +3130,9 @@ def _compile_fx_main(
                 unlift_effect_tokens=True,
                 selective_decompose=config.selective_decompose,
             ),
+            _override_lstm_cia_ops()
+            if override_lstm_cia_ops
+            else contextlib.nullcontext(),
         ):
             try:
                 return dynamo_common.aot_autograd(

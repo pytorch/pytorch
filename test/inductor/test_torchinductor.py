@@ -9045,6 +9045,96 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=False,  # difference in rnn is too large between half and float inputs
         )
 
+    def test_exported_lstm_cuda_falls_back_to_aten(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA only test")
+
+        class LSTM(torch.nn.LSTM):
+            def _update_flat_weights(self):
+                return
+
+            @torch.compiler.disable
+            def forward(self, *args, **kwargs):
+                return super().forward(*args, **kwargs)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = LSTM(input_size=4, hidden_size=4, batch_first=True)
+
+            def forward(self, x):
+                out, _ = self.lstm(x)
+                return out + 1
+
+        x = torch.randn(2, 3, 4, device=self.device)
+        m = M().to(self.device).eval()
+
+        with torch.no_grad():
+            ep = torch.export.export(m, (x,), strict=False)
+            self.assertIn(
+                torch.ops.aten.lstm.input,
+                [node.target for node in ep.graph.nodes if node.op == "call_function"],
+            )
+
+            exported = ep.module()
+            expected = exported(x)
+            actual, code = run_and_get_code(torch.compile(exported), x)
+
+        self.assertEqual(actual, expected)
+
+        source = "\n".join(code)
+        self.assertIn("torch.ops.aten.lstm.input", source)
+        self.assertNotIn("torch.ops.aten._thnn_fused_lstm_cell", source)
+        self.assertNotIn("sigmoid", source)
+        self.assertNotIn("tanh", source)
+
+    def test_mixed_device_exported_lstm_decomposes_cpu_preserves_cuda(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA only test")
+        if not torch._C._has_mkldnn:
+            raise unittest.SkipTest("MKLDNN is not enabled")
+
+        class LSTM(torch.nn.LSTM):
+            def _update_flat_weights(self):
+                return
+
+            @torch.compiler.disable
+            def forward(self, *args, **kwargs):
+                return super().forward(*args, **kwargs)
+
+        device = self.device
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.cpu_lstm = LSTM(input_size=4, hidden_size=4, batch_first=True)
+                self.cuda_lstm = LSTM(input_size=4, hidden_size=4, batch_first=True).to(
+                    device
+                )
+
+            def forward(self, x_cpu, x_cuda):
+                cpu_out, _ = self.cpu_lstm(x_cpu)
+                cuda_out, _ = self.cuda_lstm(x_cuda)
+                return cpu_out + 1, cuda_out + 1
+
+        x_cpu = torch.randn(2, 3, 4)
+        x_cuda = torch.randn(2, 3, 4, device=self.device)
+        m = M().eval()
+
+        with torch.no_grad():
+            exported = torch.export.export(m, (x_cpu, x_cuda), strict=False).module()
+            expected = exported(x_cpu, x_cuda)
+            actual, code = run_and_get_code(torch.compile(exported), x_cpu, x_cuda)
+
+        self.assertEqual(actual, expected)
+
+        source = "\n".join(code)
+        self.assertIn("aten.mkldnn_rnn_layer", source)
+        self.assertIn("torch.ops.aten.lstm.input", source)
+        self.assertNotIn("torch.ops.aten._thnn_fused_lstm_cell", source)
+        self.assertNotIn("sigmoid", source)
+        self.assertNotIn("tanh", source)
+
     def test_upsample_nearest1d(self):
         def fn(a):
             return (
