@@ -6,7 +6,11 @@ import itertools
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
-from torch.distributed._local_tensor import LocalTensor, maybe_run_for_local_tensor
+from torch.distributed._local_tensor import (
+    LocalTensor,
+    maybe_disable_local_tensor_mode,
+    maybe_run_for_local_tensor,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor import (
@@ -116,7 +120,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         result = torch.ops.aten.uniform.default(dinput, 0.0, 1.0)
         self.assertEqual(result.placements, (Shard(0),))
 
-        if not self.is_local_tensor_enabled:
+        with maybe_disable_local_tensor_mode():
             out = distribute_tensor(torch.empty_like(input), device_mesh, [Shard(0)])
             out_result = torch.ops.aten.uniform.out(dinput, 0.0, 1.0, out=out)
             self.assertIs(out_result, out)
@@ -966,6 +970,7 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/185520")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_multiple_random_ops(self):
