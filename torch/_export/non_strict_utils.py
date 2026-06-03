@@ -423,6 +423,7 @@ def make_fake_inputs(
     prefer_deferred_runtime_asserts_over_guards=False,
     propagate_real_tensors: bool | None = None,
     copy_real_tensors: bool | None = None,
+    allow_real_tensor_prop_evaluate: bool = True,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -485,6 +486,7 @@ def make_fake_inputs(
                     co_fields=co_fields,
                     prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
                     trace_asserts=True,
+                    allow_real_tensor_prop_evaluate=allow_real_tensor_prop_evaluate,
                 ),
                 allow_non_fake_inputs=True,
                 export=True,

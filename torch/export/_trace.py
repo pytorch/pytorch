@@ -2187,12 +2187,8 @@ def _non_strict_export(
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,  # for shape env initialization
             propagate_real_tensors=True,
             copy_real_tensors=torch._functorch.config.fake_tensor_propagate_real_tensors,
+            allow_real_tensor_prop_evaluate=torch._functorch.config.fake_tensor_propagate_real_tensors,
         )
-        if (
-            fake_mode.shape_env is not None
-            and not torch._functorch.config.fake_tensor_propagate_real_tensors
-        ):
-            fake_mode.shape_env.allow_real_tensor_prop_evaluate = False
 
         fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
