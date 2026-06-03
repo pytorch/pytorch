@@ -31,7 +31,6 @@ from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.cpp_builder import is_msvc_cl
 from torch._inductor.test_case import run_tests, TestCase
-from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.overrides import BaseTorchFunctionMode
@@ -48,7 +47,6 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
 )
-from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -63,6 +61,15 @@ from torch.testing._internal.triton_utils import (
     requires_gpu_and_triton,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+try:
+    from torch.distributed.tensor import DeviceMesh, DTensor, Shard
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    HAS_DTENSOR = True
+except ImportError:
+    HAS_DTENSOR = False
 
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
@@ -4444,12 +4451,8 @@ class CompiledAutograd1(torch.nn.Module):
             loss.backward()
 
     @unittest.skipIf(
-        not torch.distributed.is_available(),
-        "FakePG relies on distributed build",
-    )
-    @unittest.skipIf(
-        sys.platform == "darwin",
-        "FakePG DTensor test is not supported on macOS",
+        not HAS_DTENSOR,
+        "DTensor/FakePG requires distributed build",
     )
     def test_dtensor_backward_symints_do_not_reuse_native_sharding_cache(self):
         def run_case():
