@@ -7,7 +7,6 @@ import json
 import os
 import queue
 import struct
-import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterable  # noqa: TC003
@@ -253,23 +252,10 @@ def _decode_c_string(ptr: int | None, default: str) -> str:
 
 
 def _demangle_symbol(name: str) -> str:
-    if not name.startswith("_Z"):
-        return name
     cached = _DEMANGLE_CACHE.get(name)
-    if cached is not None:
-        return cached
-    try:
-        proc = subprocess.run(
-            ["/bin/c++filt", "-n", name],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        demangled = proc.stdout.strip() or name
-    except Exception:
-        demangled = name
-    _DEMANGLE_CACHE[name] = demangled
-    return demangled
+    if cached is None:
+        cached = _DEMANGLE_CACHE[name] = torch._C._demangle(name)
+    return cached
 
 
 class CuptiMonitor:
@@ -668,7 +654,6 @@ class CuptiMonitor:
             self._trace_window_extra_activities = ()
             self._trace_window_start_ns = 0
             self._trace_window_user_annotations = {}
-        self.disable_activities(extra)
         return {
             "events": self._filter_trace_window_events(events, start_ns),
             "extra_activities": list(extra),
