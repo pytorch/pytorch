@@ -7,6 +7,22 @@ from torch._decomp.decompositions import _rnn_helper, gather_params, gru_cell, l
 from torch._higher_order_ops.while_loop import while_loop
 
 
+def _clone_tensors_that_alias(tensors):
+    # Flattened RNN weights can share storage. while_loop rejects aliased
+    # closure inputs, and these weights are read-only inside the loop.
+    cloned_tensors = []
+    seen_tensors = []
+    for tensor in tensors:
+        if tensor is not None and any(
+            torch._C._overlaps(tensor, seen_tensor) for seen_tensor in seen_tensors
+        ):
+            tensor = tensor.clone()
+        cloned_tensors.append(tensor)
+        if tensor is not None:
+            seen_tensors.append(tensor)
+    return tuple(cloned_tensors)
+
+
 def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
     """
     1 layer fn for while loop LSTM
@@ -34,6 +50,9 @@ def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
 
     precomputed_input = torch.nn.functional.linear(inp, ih_weight, ih_bias)
     precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
+    hh_weight, hh_bias, hr_weight = _clone_tensors_that_alias(
+        (hh_weight, hh_bias, hr_weight)
+    )
 
     # while loop rewrite
     step_output = torch.empty(
@@ -143,6 +162,7 @@ def one_layer_while_loop_gru(inp, hidden, params, has_biases, reverse=False):
 
     precomputed_input = torch.nn.functional.linear(inp, ih_weight, ih_bias)
     precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
+    hh_weight, hh_bias = _clone_tensors_that_alias((hh_weight, hh_bias))
     cur_hidden = hidden.unsqueeze(0)
 
     # while loop rewrite
@@ -162,7 +182,7 @@ def one_layer_while_loop_gru(inp, hidden, params, has_biases, reverse=False):
         torch._check_is_size(i)
         torch._check_is_size(i, max=precomputed_input.size(0) - 1)
         cur_hidden = gru_cell(
-            precomputed_input[i], cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias
+            precomputed_input[i], cur_hidden, None, None, hh_weight, hh_bias
         )
         out = out.clone()
         out[i] = cur_hidden.squeeze(0)
