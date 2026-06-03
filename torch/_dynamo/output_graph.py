@@ -38,8 +38,17 @@ import weakref
 from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field as dc_field
 from types import CodeType
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
-from typing_extensions import ParamSpec, TypeVar
+from typing import (
+    Any,
+    cast,
+    Literal,
+    NamedTuple,
+    Optional,
+    TYPE_CHECKING,
+    TypedDict,
+    Union,
+)
+from typing_extensions import NotRequired, ParamSpec, TypeVar
 
 import sympy
 
@@ -190,6 +199,43 @@ graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
 RootGuardManager = guards.RootGuardManager
+
+TensorMetadataDim = int | torch.SymInt | None
+TensorMetadataSequence = Sequence[TensorMetadataDim]
+OutputReturnKind = Literal["graph_out", "input", "constant"]
+
+
+class SizesStridesInfo(TypedDict):
+    size: TensorMetadataSequence
+    stride: TensorMetadataSequence
+    values_size: NotRequired[TensorMetadataSequence]
+    values_stride: NotRequired[TensorMetadataSequence]
+
+
+class CodeOptions(TypedDict):
+    co_argcount: int
+    co_posonlyargcount: int
+    co_kwonlyargcount: int
+    co_nlocals: int
+    co_stacksize: int
+    co_flags: int
+    co_code: bytes
+    co_consts: tuple[object, ...]
+    co_names: tuple[str, ...]
+    co_varnames: tuple[str, ...]
+    co_filename: str
+    co_name: str
+    co_qualname: NotRequired[str]
+    co_firstlineno: int
+    co_linetable: bytes
+    co_exceptiontable: NotRequired[bytes]
+    co_freevars: tuple[str, ...]
+    co_cellvars: tuple[str, ...]
+
+
+class OutputReturnInfo(NamedTuple):
+    kind: OutputReturnKind
+    value: object
 
 
 # Capture fn pointer at import time
@@ -403,7 +449,7 @@ class OutputGraphGuardsState:
     torch_function_mode_stack: list[torch.overrides.TorchFunctionMode]
     guard_on_key_order: set[Source]
     # Map from graph input's `Source` to sizes / strides metadata
-    input_source_to_sizes_strides: dict[Source, dict[str, Any]]
+    input_source_to_sizes_strides: dict[Source, SizesStridesInfo]
     dual_level: int
     functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
     current_device: torch.device | None
@@ -463,9 +509,13 @@ class StackLocalsMetadata:
     )  # order of locals codegen'd to the stack
     stack_null_idxes: list[int] = dc_field(default_factory=list)
     locals_null_keys: list[str] = dc_field(default_factory=list)
-    stack_ctx_args: list[tuple[int, tuple[Any, ...]]] = dc_field(default_factory=list)
+    stack_ctx_args: list[tuple[int, tuple[object, ...]]] = dc_field(
+        default_factory=list
+    )
     stack_ctx_idxes_orig: list[int] = dc_field(default_factory=list)
-    locals_ctx_args: list[tuple[str, tuple[Any, ...]]] = dc_field(default_factory=list)
+    locals_ctx_args: list[tuple[str, tuple[object, ...]]] = dc_field(
+        default_factory=list
+    )
 
 
 # TODO we should expand this to make it work for atribtrary in/out
@@ -481,7 +531,7 @@ class ExportMetaData:
     # 1) graph out
     # 2) user input
     # 3) constants
-    output_return_type: dict[int, tuple[str, Any]] = dc_field(default_factory=dict)
+    output_return_type: dict[int, OutputReturnInfo] = dc_field(default_factory=dict)
     # output spec of the traced function
     out_spec: torch.utils._pytree.TreeSpec | torch.utils._pytree.LeafSpec = (
         torch.utils._pytree._LEAF_SPEC
@@ -543,6 +593,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
         shape_env: ShapeEnv | None = None,
         export_metadata: ExportMetaData | None = None,
         tracked_fakes_id_to_source: dict[int, list[Source]] | None = None,
+        output_pycode: list[list[str] | None] | None = None,
     ) -> None:
         super().__init__(
             output_graph_guards_state.local_scope,
@@ -573,6 +624,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
         self.tracked_fakes_id_to_source: dict[int, list[Source]] = (
             tracked_fakes_id_to_source or {}
         )
+        self.output_pycode = output_pycode or []
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -600,7 +652,7 @@ class OutputGraph(OutputGraphCommon):
 
     def __init__(
         self,
-        code_options: dict[str, Any],
+        code_options: CodeOptions,
         compiler_fn: CompilerFn | None,
         root_tx: "InstructionTranslatorBase",
         export: bool,
@@ -705,6 +757,13 @@ class OutputGraph(OutputGraphCommon):
         self.dynamo_compile_id: CompileId | None = CompileContext.current_compile_id()
         self.init_ambient_guards()
 
+        # Wire ShapesSpec.assumptions BEFORE any input is processed. Each
+        # assumption is appended to `_shape_spec_pending_assumptions`;
+        if config._shapes_spec is not None:
+            from torch._dynamo.variables.builder import _wire_spec_assumptions
+
+            _wire_spec_assumptions(self.shape_env, config._shapes_spec)
+
         # Map each tensor id to a list of sources. This is necessary because
         # tensor ids cannot be recovered from tracked fakes (in general).
         # We use this map to interpret (i.e., check for violations of) constraints,
@@ -737,8 +796,9 @@ class OutputGraph(OutputGraphCommon):
         # Cache for inspect.signature results: function -> VariableTracker
         self.signature_cache: dict[Any, VariableTracker] = {}
         self.unique_var_id = itertools.count()
-        self.code_options: dict[str, Any] = dict(code_options)
+        self.code_options: CodeOptions = cast(CodeOptions, dict(code_options))
         self.output_instructions: list[Instruction] = []
+        self.output_pycode: list[list[str] | None] = []
         # used to track nodes that are added between calls of copy_graphstate
         # and restore_graphstate
         self.timestamp = 0
@@ -1610,7 +1670,7 @@ class OutputGraph(OutputGraphCommon):
                 proxy = tracer.create_proxy("get_attr", module_key, (), {})
                 set_example_value(proxy.node, fake_script_obj)
                 return torch._dynamo.variables.script_object.TorchScriptObjectVariable.create(
-                    proxy, fake_script_obj, **options
+                    proxy, fake_script_obj, tx=self.root_tx, **options
                 )
 
             # HACKY CODE REGION END
@@ -1886,6 +1946,14 @@ class OutputGraph(OutputGraphCommon):
         if self.root_tx is None:
             raise AssertionError("root_tx must not be None")
 
+        # Finalize shapes_spec wiring: errors if any spec assumption/derived
+        # check still has unbound IntVar dependencies (i.e. an IntVar
+        # appears in an expression but never as a bare-IntVar input slot).
+        if config._shapes_spec is not None:
+            from torch._dynamo.variables.builder import _finalize_spec_wiring
+
+            _finalize_spec_wiring(self.shape_env)
+
         if not config.nested_graph_breaks:
             # expect to only compile 1 frame
             if self.root_tx is not tx:
@@ -2048,16 +2116,18 @@ class OutputGraph(OutputGraphCommon):
             # no side effects, so no new cells created - no need to call side_effects.codegen_save_tempvars
             cell_cg = PyCodegen(self.root_tx)
             self.codegen_cells(tx, cell_cg)
+            instructions, pycode = self.compile_and_call_fx_graph(
+                tx, list(reversed(stack_values_flat)), root
+            )
             self.add_output_instructions(
                 [
                     # load in reverse since UNPACK_SEQUENCE will reverse
-                    *self.compile_and_call_fx_graph(
-                        tx, list(reversed(stack_values_flat)), root
-                    ),
+                    *instructions,
                     *cell_cg.get_instructions(),
                     *create_swap(2),
                     create_instruction("UNPACK_SEQUENCE", arg=len(stack_values_flat)),
-                ]
+                ],
+                pycode=pycode,
             )
             # function output will be moved to the correct places below
         else:
@@ -2119,25 +2189,23 @@ class OutputGraph(OutputGraphCommon):
                         variable: VariableTracker = value.variable
                         vt_to_graph_out_idx[variable] = value.index
 
+                    output_return_type = self.export_metadata.output_return_type
                     for idx, vt in enumerate(flat_returns.items):
                         if vt in vt_to_graph_out_idx:
-                            self.export_metadata.output_return_type[idx] = (
-                                "graph_out",
-                                vt_to_graph_out_idx[vt],
+                            output_return_type[idx] = OutputReturnInfo(
+                                "graph_out", vt_to_graph_out_idx[vt]
                             )
                         elif (
                             vt.source is not None
                             and (source := getattr(vt.source, "base", None))  # type: ignore[assignment]
                             and getattr(source, "is_input", False)
                         ):
-                            self.export_metadata.output_return_type[idx] = (
-                                "input",
-                                vt.source,
+                            output_return_type[idx] = OutputReturnInfo(
+                                "input", vt.source
                             )
                         elif vt.is_python_constant():
-                            self.export_metadata.output_return_type[idx] = (
-                                "constant",
-                                vt.as_python_constant(),
+                            output_return_type[idx] = OutputReturnInfo(
+                                "constant", vt.as_python_constant()
                             )
                         else:
                             raise AssertionError(
@@ -2161,10 +2229,12 @@ class OutputGraph(OutputGraphCommon):
                         )
 
             output = []
+            subgraph_pycode = None
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
-                output.extend(
-                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
+                instructions, subgraph_pycode = self.compile_and_call_fx_graph(
+                    tx, pass2.graph_output_vars(), root
                 )
+                output.extend(instructions)
 
                 if len(pass2.graph_outputs) != 0:
                     output.append(pass2.create_store(graph_output_var))
@@ -2175,7 +2245,10 @@ class OutputGraph(OutputGraphCommon):
                 # NB: Important to run compiler collective even when there is
                 # a graph break
                 self.run_compiler_collective()
-            self.add_output_instructions(output + pass2.get_instructions())
+            self.add_output_instructions(output, pycode=subgraph_pycode)
+            self.add_output_instructions(
+                pass2.get_instructions(), pycode=pass2.get_pycode()
+            )
 
         # store all stack and locals for each frame
         # current state of the stack:
@@ -2633,13 +2706,17 @@ class OutputGraph(OutputGraphCommon):
         tx: "InstructionTranslatorBase",
         rv: list[VariableTracker],
         root: FakeRootModule,
-    ) -> list[Instruction]:
+    ) -> tuple[list[Instruction], list[str] | None]:
         """
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
 
         Code is generated w.r.t. self.root_tx.
         tx is only used for preserving GraphModule metadata
+
+        Returns a tuple of (instructions, pycode) where pycode is a string
+        representation of the generated Python code if generate_pycode_prologue
+        is enabled, otherwise None.
         """
         with torch._guards.TracingContext.clear_frame():
             from .decorators import disable
@@ -2651,7 +2728,7 @@ class OutputGraph(OutputGraphCommon):
 
             self.run_compiler_collective()
             if count_calls(self.graph) == 0 and len(rv) == 0:
-                return []
+                return [], None
 
             name = unique_id("__compiled_fn", with_uuid=True)
 
@@ -2825,6 +2902,13 @@ class OutputGraph(OutputGraphCommon):
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
 
+            if not self.export:
+                # Run after every non-export backend compile, not only the
+                # registered backends covered by convert_frame weakref cleanup.
+                # Backends have already consumed the graph, so non-CPU Dynamo
+                # tracing constants no longer need to keep real tensors alive.
+                old_fake_mode.fake_tensor_converter.clear_non_cpu_constants()
+
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
 
@@ -2948,7 +3032,8 @@ class OutputGraph(OutputGraphCommon):
                 self.export_metadata.graph_input_idx_to_local_source[idx] = arg.source
 
             cg.make_call_generated_code(name)
-            return cg.get_instructions()
+
+            return cg.get_instructions(), cg.get_pycode()
 
     @property
     def placeholders(self) -> list[fx.Node]:
@@ -3035,7 +3120,9 @@ class OutputGraph(OutputGraphCommon):
             _step_logger()(logging.INFO, f"done compiler function {name}")
             if not callable(compiled_fn):
                 raise AssertionError("compiler_fn did not return callable")
-        except (TensorifyScalarRestartAnalysis, ShortenTraceback):
+        except (TensorifyScalarRestartAnalysis, ShortenTraceback, IndexError):
+            # Re-raise IndexError so dim out-of-range errors from tensor ops
+            # propagate to the user as IndexError, not BackendCompilerFailed.
             raise
         except exceptions_allowed_to_be_fallback as e:
             if self.has_user_defined_allowed_in_graph:
@@ -3289,12 +3376,20 @@ class OutputGraph(OutputGraphCommon):
                     self.remove_node(u)
                 self.remove_node(node)
 
-    def add_output_instructions(self, prefix: list[Instruction]) -> None:
+    def add_output_instructions(
+        self, prefix: list[Instruction], pycode: list[str] | None = None
+    ) -> None:
         """
         We call this on the creation of a new compiled subgraph that is inserted
         before user code.
+        An optional pycode argument can be passed to add python codegen along with
+        the bytecode. The generated python code should match the bytecode behavior
+        from the `prefix` argument.
         """
         self.output_instructions.extend(prefix)
+        if not isinstance(pycode, (list, type(None))):
+            raise AssertionError("pycode must be a list of python code or None")
+        self.output_pycode.append(pycode)
         self.should_exit = True
 
     def install_resume_function_global(
@@ -4106,7 +4201,10 @@ class SubgraphTracer(fx.Tracer):
             #
             # Also see NOTE: [Export inputs must be explicitly passed in]
             is_strict_export = self.is_export
-            is_non_strict_export = torch.compiler.is_compiling()
+            # Use is_exporting() (not is_compiling()) to detect non-strict
+            # export. is_compiling() is now also True during regular
+            # torch.compile sessions, but only export sets is_exporting().
+            is_non_strict_export = torch.compiler.is_exporting()
             if not is_strict_export and not is_non_strict_export:
                 if isinstance(example_value, torch.Tensor):
                     self._lift_basic_symbols(example_value, source)

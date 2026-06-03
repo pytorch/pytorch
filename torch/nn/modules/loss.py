@@ -8,6 +8,7 @@ from torch.nn import _reduction as _Reduction, functional as F
 
 from .distance import PairwiseDistance
 from .linear import Linear
+from .linear_cross_entropy_options import LinearCrossEntropyOptions
 from .module import Module
 
 
@@ -1416,6 +1417,17 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         out_features (tuple[int], optional): specifies dimensions
             :math:`(d_1, d_2, ..., d_K)` for K-dimensional loss.
             Default: ``()``.
+        bias (bool, optional): If ``True``, the internal :class:`Linear`
+            adds a learnable bias to the logits. Logical shape is
+            ``(C, *out_features)``; storage is flat
+            (``self.linear.bias.shape == (C * prod(out_features),)``)
+            for the same reason as ``self.linear.weight`` -- reshaping
+            happens in :meth:`forward` before passing through to
+            :func:`~torch.nn.functional.linear_cross_entropy` as
+            ``linear_bias``. Currently supported only on the reference
+            path (``options=None``); with a non-``None`` ``options``
+            the forward warns and falls back to the reference path.
+            Default: ``False``.
         device (:class:`torch.device`, optional): the desired device
             of linear weight.  Default: ``None``.
         dtype (:class:`torch.dtype`, optional): the desired dtype of
@@ -1445,6 +1457,27 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             Computer Vision
             <https://arxiv.org/abs/1512.00567>`__.
             Default: :math:`0.0`.
+        options (LinearCrossEntropyOptions, optional): Specify
+            chunking strategy options, see
+            :class:`~torch.nn.LinearCrossEntropyOptions`
+            for more details. To enable reference implementation of
+            linear_cross_entropy with chunking disabled, use
+            `options=None`. Note: passing a non-``None`` ``options``
+            makes the module incompatible with
+            :func:`torch.jit.script`; see the note below.
+
+    .. warning::
+        With non-``None`` ``options``, the chunked path consumes its
+        precomputed gradients in-place, so any second :meth:`backward`
+        call raises (even with ``retain_graph=True``). Use
+        ``LinearCrossEntropyOptions(allow_retain_graph=True)`` to allow
+        repeated backward (one extra gradient-sized allocation per call).
+
+    .. note::
+        ``options=None`` is scriptable; an ``options`` instance is not.
+        The chunked path does not support higher-order AD, forward-mode
+        AD, ``torch.func.grad`` / ``vmap(grad(...))``, or Inductor
+        lowering; see :func:`torch.nn.functional.linear_cross_entropy`.
 
     Shape:
         - Input: Shape :math:`(in_features)`, :math:`(N, in_features)`.
@@ -1483,6 +1516,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         >>> output.backward()
     """
 
+    # options is intentionally not in __constants__ (not scriptable).
     __constants__ = [
         "num_classes",
         "out_features",
@@ -1495,6 +1529,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
     reduction: str
     ignore_index: int | None
     label_smoothing: float
+    options: LinearCrossEntropyOptions | None
 
     def __init__(
         self,
@@ -1502,12 +1537,14 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         num_classes: int,
         *,
         out_features: tuple[int, ...] = (),
+        bias: bool = False,
         device=None,
         dtype=None,
         reduction: str = "mean",
         weight: Tensor | None = None,
         ignore_index: int | None = None,
         label_smoothing: float = 0.0,
+        options: LinearCrossEntropyOptions | None = None,
     ) -> None:
         if weight is not None and weight.shape != (num_classes,):
             raise RuntimeError(
@@ -1532,24 +1569,32 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         self.linear = Linear(
             in_features,
             math.prod(out_features, start=num_classes),
-            bias=False,
+            bias=bias,
             device=device,
             dtype=dtype,
         )
+        self.options = options
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
         linear_weight = self.linear.weight.reshape(
             (self.num_classes, *self.out_features, self.linear.in_features)
         )
-        return F.linear_cross_entropy(  # pyrefly: ignore [missing-attribute]
+        linear_bias = (
+            self.linear.bias.reshape((self.num_classes, *self.out_features))
+            if self.linear.bias is not None
+            else None
+        )
+        return F.linear_cross_entropy(
             input,
             linear_weight,
             target,
+            linear_bias=linear_bias,
             weight=self.weight,
             reduction=self.reduction,
             ignore_index=self.ignore_index,
             label_smoothing=self.label_smoothing,
+            options=self.options,
         )
 
     def extra_repr(self) -> str:
@@ -1557,9 +1602,11 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             f"in_features={self.linear.in_features},"
             f" num_classes={self.num_classes},"
             f" out_features={self.out_features},"
+            f" bias={self.linear.bias is not None},"
             f" reduction={self.reduction},"
             f" ignore_index={self.ignore_index},"
-            f" label_smoothing={self.label_smoothing}"
+            f" label_smoothing={self.label_smoothing},"
+            f" options={self.options}"
         )
 
 
@@ -1696,7 +1743,7 @@ class MarginRankingLoss(_Loss):
     inputs :math:`x1`, :math:`x2`, two 1D mini-batch or 0D `Tensors`,
     and a label 1D mini-batch or 0D `Tensor` :math:`y` (containing 1 or -1).
 
-    If :math:`y = 1` then it assumed the first input should be ranked higher
+    If :math:`y = 1` then it is assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for :math:`y = -1`.
 
     The loss function for each pair of samples in the mini-batch is:

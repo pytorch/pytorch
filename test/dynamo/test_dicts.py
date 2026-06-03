@@ -2041,7 +2041,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2066,7 +2066,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            """list(dict.keys(d2))""",
+            "___dict_contains",
             munge_exc(record.getMessage()),
         )
 
@@ -2303,7 +2303,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         # Test invalid usage
         self.assertRaises(TypeError, d.copy, 1)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_fromkeys(self):
         d = self.thetype.fromkeys(["a", "b"], 1)
@@ -2466,6 +2465,46 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, d.values, 1)
 
     @make_dynamo_test
+    def test_keys_contains(self):
+        d = self.thetype({"a": 1, "b": 2})
+        keys = d.keys()
+        self.assertTrue("a" in keys)
+        self.assertTrue("b" in keys)
+        self.assertFalse("c" in keys)
+
+        # Test Dict.keys contains
+        self.assertTrue("a" in dict.keys(d))
+        self.assertFalse("c" in dict.keys(d))
+        self.assertTrue("b" in self.thetype.keys(d))
+
+    @make_dynamo_test
+    def test_items_contains(self):
+        d = self.thetype({"a": 1, "b": 2})
+        items = d.items()
+        self.assertTrue(("a", 1) in items)
+        self.assertTrue(("b", 2) in items)
+        self.assertFalse(("a", 2) in items)
+        self.assertFalse(("c", 1) in items)
+
+        # Test Dict.items contains
+        self.assertTrue(("a", 1) in dict.items(d))
+        self.assertFalse(("c", 1) in dict.items(d))
+        self.assertTrue(("b", 2) in self.thetype.items(d))
+
+    @make_dynamo_test
+    def test_values_contains(self):
+        d = self.thetype({"a": 1, "b": 2})
+        values = d.values()
+        self.assertTrue(1 in values)
+        self.assertTrue(2 in values)
+        self.assertFalse(3 in values)
+
+        # Test Dict.values contains
+        self.assertTrue(1 in dict.values(d))
+        self.assertFalse(3 in dict.values(d))
+        self.assertTrue(2 in self.thetype.values(d))
+
+    @make_dynamo_test
     def test_type(self):
         d = self.thetype({"a": 1, "b": 2})
         self.assertIsInstance(d, self.thetype)
@@ -2593,9 +2632,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
-
-    def test_binop_or(self):
-        super().test_binop_or()
 
 
 class OrderedDictMethodsTests(DictMethodsTests):
@@ -2757,6 +2793,22 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         obj = MyClass()
         result = fn(obj)
         self.assertEqual(result, [1, 2, 3])
+
+    def test_dunder_dict_copy_does_not_alias_instance_dict(self):
+        class MyClass:
+            def __init__(self):
+                self.y = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.__dict__.copy()["x"] = 4
+            return "x" in obj.__dict__, dict(obj.__dict__.items())
+
+        obj = MyClass()
+        has_x, live_dict = fn(obj)
+        self.assertFalse(has_x)
+        self.assertEqual(live_dict, {"y": 1})
+        self.assertNotIn("x", obj.__dict__)
 
     def test_dunder_dict_comprehension_with_mutations(self):
         """Test dict comprehension over __dict__ with mutations (scheduler use case)"""
