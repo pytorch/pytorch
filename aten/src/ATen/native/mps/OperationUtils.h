@@ -87,7 +87,7 @@ inline bool offsetsFitIn(const Tensors&... tensors) {
   return (... && at::native::canUse32BitIndexMath(tensors, kMaxOffset));
 }
 
-inline const char* mtlIdxSuffix(bool use32) {
+inline std::string_view mtlIdxSuffix(bool use32) {
   return use32 ? "_u32" : "_u64";
 }
 
