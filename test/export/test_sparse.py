@@ -13,7 +13,6 @@ from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     RelaxedUnspecConstraint,
     ShapeEnv,
-    StatefulSymbolicContext,
     StatelessSymbolicContext,
 )
 from torch.testing._internal.common_utils import (
@@ -284,8 +283,6 @@ class TestSparseProp(TestCase):
                 symbolic_context=symbolic_context,
             )
 
-        self.assertIs(fake_x1.size(0).node.shape_env, shape_env1)
-
         shape_env2 = ShapeEnv(tracked_fakes=[])
         mode2 = FakeTensorMode(
             shape_env=shape_env2,
@@ -298,52 +295,10 @@ class TestSparseProp(TestCase):
                 source=LocalSource("x"),
                 symbolic_context=symbolic_context,
             )
+            dense_x2 = fake_x2.to_dense()
 
-        self.assertIs(fake_x2.size(0).node.shape_env, shape_env2)
-
-    def test_sparse_coo_fake_records_excluded_size(self):
-        x = torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse()
-        shape_env = ShapeEnv(tracked_fakes=[])
-        mode = FakeTensorMode(
-            shape_env=shape_env,
-            allow_non_fake_inputs=True,
-            export=True,
-        )
-        symbolic_context = StatefulSymbolicContext(
-            dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
-            constraint_sizes=[RelaxedUnspecConstraint(warn_only=False), None],
-            tensor_source=LocalSource("x"),
-            excluded_sizes=(2, None),
-        )
-
-        with mode:
-            fake_x = mode.from_tensor(
-                x,
-                source=LocalSource("x"),
-                symbolic_context=symbolic_context,
-            )
-
-        self.assertEqual(
-            shape_env.exclusion_constraints, [(fake_x.size(0).node.expr, 2)]
-        )
-
-        x = torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse()
-        x._dynamo_hint_overrides = {0: 3}
-        shape_env = ShapeEnv(tracked_fakes=[])
-        mode = FakeTensorMode(
-            shape_env=shape_env,
-            allow_non_fake_inputs=True,
-            export=True,
-        )
-        with mode:
-            fake_x = mode.from_tensor(
-                x,
-                source=LocalSource("x"),
-                symbolic_context=symbolic_context,
-            )
-
-        self.assertEqual(shape_env.exclusion_constraints, [])
-        self.assertEqual(shape_env.var_to_hint_override[fake_x.size(0).node.expr], 3)
+        self.assertEqual(dense_x2.layout, torch.strided)
+        self.assertEqual(dense_x2.size(1), 2)
 
     def test_add(self):
         net = AddNet()

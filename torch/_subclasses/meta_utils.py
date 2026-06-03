@@ -1145,7 +1145,7 @@ class MetaConverter(Generic[_TensorT]):
             else:
                 return (t.size, t.stride, t.storage_offset)
 
-        def sym_sizes(
+        def sym_sparse_sizes(
             t: MetaTensorDesc[Any],
             src: torch._guards.Source,
             symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
@@ -1154,145 +1154,29 @@ class MetaConverter(Generic[_TensorT]):
             if shape_env is None:
                 return t.size
 
-            from torch._dynamo.source import TensorProperty, TensorPropertySource
-            from torch.fx.experimental.symbolic_shapes import (
-                DimDynamic,
-                guarding_hint_or_throw,
-                has_guarding_hint,
-                is_symbolic,
-                StatelessSymbolicContext,
-            )
-
-            def create_sym_sizes(
-                tensor_size,
-                symbolic_context,
-                hint_overrides,
-            ) -> tuple[IntLikeType, ...]:
-                import sympy
-
-                size = shape_env._produce_dyn_sizes_from_int_tuple(
-                    tensor_size,
-                    src,
-                    symbolic_context,
-                    hint_overrides=hint_overrides,
-                )
-                excluded_sizes = getattr(symbolic_context, "excluded_sizes", None)
-                if (
-                    excluded_sizes
-                    and len(excluded_sizes) == len(tensor_size)
-                    and any(v is not None for v in excluded_sizes)
-                ):
-                    for i, ev in enumerate(excluded_sizes):
-                        if (
-                            ev is not None
-                            and isinstance(size[i], sympy.Symbol)
-                            and i not in hint_overrides
-                        ):
-                            shape_env._record_exclusion_constraint(size[i], ev)
-                sym_sizes = tuple(
-                    shape_env.create_symintnode(
-                        sym,
-                        hint=hint_overrides.get(i, hint),
-                        source=TensorPropertySource(src, TensorProperty.SIZE, i),
-                    )
-                    for i, (sym, hint) in enumerate(zip(size, tensor_size))
-                )
-                for i, sym in enumerate(sym_sizes):
-                    if isinstance(sym, torch.SymInt) and i in hint_overrides:
-                        shape_env.var_to_hint_override[sym.node.expr] = hint_overrides[
-                            i
-                        ]
-                return sym_sizes
-
-            def transfer_symbolic_sizes(
-                symbolic_context,
-            ) -> tuple[IntLikeType, ...]:
-                import sympy
-
-                def classify(s) -> DimDynamic:
-                    if not is_symbolic(s):
-                        return DimDynamic.STATIC
-                    if not has_guarding_hint(s):
-                        return DimDynamic.UNBACKED
-                    return DimDynamic.DUCK
-
-                def hint(s) -> int | None:
-                    if is_symbolic(s):
-                        if not has_guarding_hint(s):
-                            return None
-                        return guarding_hint_or_throw(s.node)  # type: ignore[union-attr]
-                    return s  # type: ignore[return-value]
-
-                if symbolic_context is None:
-                    symbolic_context = StatelessSymbolicContext(
-                        dynamic_sizes=[classify(sz) for sz in t.size]
-                    )
-                dynamic_sizes = symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
-                hint_overrides = dict(t.dynamo_hint_overrides)
-                for i, sz in enumerate(t.size):
-                    if dynamic_sizes[i] is DimDynamic.UNBACKED and is_symbolic(sz):
-                        foreign_env = sz.node.shape_env  # type: ignore[union-attr]
-                        if foreign_env is not None:
-                            opt_hint = foreign_env.var_to_hint_override.get(
-                                sz.node.expr  # type: ignore[union-attr]
-                            )
-                            if opt_hint is not None:
-                                hint_overrides[i] = opt_hint
-
-                ex_size = tuple(hint(sz) for sz in t.size)
-                has_unbacked = any(ds is DimDynamic.UNBACKED for ds in dynamic_sizes)
-                if not has_unbacked:
-                    return create_sym_sizes(ex_size, symbolic_context, hint_overrides)
-
-                old_to_new: dict[sympy.Expr, sympy.Expr] = {}
-                new_size_exprs: list[sympy.Expr] = []
-                for i, old_sz in enumerate(t.size):
-                    if is_symbolic(old_sz):
-                        old_expr = old_sz.node.expr  # type: ignore[union-attr]
-                        new_expr = old_expr.xreplace(old_to_new)
-                        if new_expr.free_symbols - set(old_to_new.values()):
-                            sym = shape_env.create_symbol(
-                                ex_size[i],  # type: ignore[arg-type]
-                                TensorPropertySource(src, TensorProperty.SIZE, i),
-                                dynamic_sizes[i],
-                                symbolic_context.constraint_sizes[i],  # type: ignore[attr-defined]
-                                symbolic_context=symbolic_context,
-                            )
-                            old_to_new[old_expr] = sym
-                            new_size_exprs.append(sym)
-                        else:
-                            new_size_exprs.append(new_expr)
-                    else:
-                        new_size_exprs.append(sympy.Integer(old_sz))
-
-                sym_sizes = tuple(
-                    shape_env.create_symintnode(
-                        sym,
-                        hint=ex_size[i],
-                        source=TensorPropertySource(src, TensorProperty.SIZE, i),
-                    )
-                    for i, sym in enumerate(new_size_exprs)
-                )
-                for i, sym in enumerate(sym_sizes):
-                    if isinstance(sym, torch.SymInt) and i in hint_overrides:
-                        shape_env.var_to_hint_override[sym.node.expr] = hint_overrides[
-                            i
-                        ]
-                return sym_sizes
+            from torch._prims_common import make_contiguous_strides_for
+            from torch.fx.experimental.symbolic_shapes import is_symbolic
 
             fake_mode = t.fake_mode
             has_symbolic = any(is_symbolic(sz) for sz in t.size)
             if fake_mode is not None and fake_mode.shape_env is shape_env:
                 return t.size
-            if fake_mode is not None and has_symbolic:
-                return transfer_symbolic_sizes(symbolic_context)
-            if symbolic_context is None:
+            if symbolic_context is None and not (
+                fake_mode is not None and has_symbolic
+            ):
                 return t.size
-            return create_sym_sizes(
-                t.size,
-                symbolic_context,
-                dict(t.dynamo_hint_overrides),
+
+            sparse_tensor_with_synthetic_strides = dataclasses.replace(
+                t,
+                stride=make_contiguous_strides_for(t.size),
+                storage_offset=0,
             )
+            sizes, _, _ = sym_sizes_strides_storage_offset(
+                sparse_tensor_with_synthetic_strides,
+                src,
+                symbolic_context,
+            )
+            return sizes
 
         def empty_create(
             inner_t: MetaTensorDesc[Any],
@@ -1627,7 +1511,7 @@ class MetaConverter(Generic[_TensorT]):
                 if t.is_sparse:
                     is_leaf = t.is_leaf
 
-                    sparse_size = sym_sizes(t, source, symbolic_context)
+                    sparse_size = sym_sparse_sizes(t, source, symbolic_context)
                     if t.sparse_dim is None:
                         raise AssertionError("t.sparse_dim must not be None")
                     if t.dense_dim is None:
@@ -2171,11 +2055,16 @@ class MetaConverter(Generic[_TensorT]):
                     s = t.storage
                     if s is None:
                         raise AssertionError("t.storage must not be None")
+                    from torch.fx.experimental.symbolic_shapes import (
+                        guard_or_false,
+                        sym_eq,
+                    )
+
                     if s.id not in self.storage_memo and (
                         r.is_nested
                         or (
-                            r.stride() == strides
-                            and r.storage_offset() == storage_offset
+                            guard_or_false(sym_eq(r.stride(), strides))
+                            and guard_or_false(r.storage_offset() == storage_offset)
                         )
                     ):
                         # You're normal and happy, install the fresh storage into the memo
