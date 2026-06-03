@@ -8008,6 +8008,17 @@ class TestConstantPadNd(TestCase):
         ])
         self.assertEqual(res, expected)
 
+    def test_constant_pad_nd_zero_sized(self):
+        a = torch.ones((0, 1))
+        res = F.pad(a, [1, 1, 0, 0])
+        self.assertEqual(res.shape, (0, 3))
+        self.assertEqual(res, torch.zeros((0, 3), dtype=a.dtype))
+
+        a = torch.ones(())
+        res = F.pad(a, [])
+        self.assertEqual(res.shape, ())
+        self.assertEqual(res, a.clone())
+
     def test_preserves_memory_format(self):
         nchw_tensor = torch.rand((1, 2, 5, 3))
         nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
