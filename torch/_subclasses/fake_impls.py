@@ -680,6 +680,14 @@ def meta_select(
         # index is data-dependent, we do not know which index we are accessing it could be index or index+size!
         # we assign a new data-dependent symbol for the storage offset.
         new_storage_offset = fake_mode.shape_env.create_unbacked_symint()
+        # The index's unbacked symbol is consumed into the opaque storage offset
+        # above and does not appear in the output, so it is not a pending binding
+        # site. Mark it ignorable so compute_unbacked_bindings does not flag it.
+        if isinstance(index, torch.SymInt):
+            from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+            for s in free_unbacked_symbols(index):
+                fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(s)
 
     del new_size[dim]
     del new_stride[dim]
