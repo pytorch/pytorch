@@ -1231,25 +1231,25 @@ class TestLinalg(TestCase):
         for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
             run_test_case(a_shape, b_shape)
 
-        def test_kron_non_contiguous(self, device):
-            A = torch.randn(3, 4, device=device)
-            B = torch.randn(4, 3, device=device)
+    def test_kron_non_contiguous(self, device):
+        A = torch.randn(3, 4, device=device)
+        B = torch.randn(4, 3, device=device)
 
-            B_non_contig = B.t()
-            self.assertFalse(B_non_contig.is_contiguous())
-            result1 = torch.kron(A, B_non_contig)
-            expected1 = torch.kron(A, B.contiguous())
-            self.assertEqual(result1, expected1)
+        B_non_contig = B.t()
+        self.assertFalse(B_non_contig.is_contiguous())
+        result1 = torch.kron(A, B_non_contig)
+        expected1 = torch.kron(A, B_non_contig.contiguous())
+        self.assertEqual(result1, expected1)
 
-            A_non_contig = A.t()
-            self.assertFalse(A_non_contig.is_contiguous())
-            result2 = torch.kron(A_non_contig, B)
-            expected2 = torch.kron(A.contiguous(), B)
-            self.assertEqual(result2, expected2)
+        A_non_contig = A.t()
+        self.assertFalse(A_non_contig.is_contiguous())
+        result2 = torch.kron(A_non_contig, B)
+        expected2 = torch.kron(A_non_contig.contiguous(), B)
+        self.assertEqual(result2, expected2)
 
-            result3 = torch.kron(A_non_contig, B_non_contig)
-            expected3 = torch.kron(A.contiguous(), B.contiguous())
-            self.assertEqual(result3, expected3)
+        result3 = torch.kron(A_non_contig, B_non_contig)
+        expected3 = torch.kron(A_non_contig.contiguous(), B_non_contig.contiguous())
+        self.assertEqual(result3, expected3)
 
     @dtypes(*floating_and_complex_types())
     def test_kron_empty(self, device, dtype):
