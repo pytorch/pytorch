@@ -48,7 +48,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfRocm,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -1410,7 +1410,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             expected_total_combination *= math.factorial(N)
             self.assertEqual(len(all_combinations), expected_total_combination)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/168197")
+    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/168197")
     def test_ordered_distribute_all_combination(self):
         """Exhaustively test all possible sharding combinations and verify correctness"""
         torch.manual_seed(21)
