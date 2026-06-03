@@ -549,8 +549,6 @@ def attention_23(
     # Reshape output back to 3D if input was 3D
     if input_shape_len == 3:
         # output: (batch_size, q_num_heads, q_sequence_length, v_head_size) -> (batch_size, q_sequence_length, hidden_size)
-        output = (
-            output.transpose(1, 2).contiguous().view(batch_size, q_sequence_length, -1)
-        )
+        output = output.transpose(1, 2).reshape(batch_size, q_sequence_length, -1)
 
     return output, present_key, present_value, qk_output
