@@ -119,6 +119,22 @@ class UnsupportedFakeTensorException(RuntimeError):
     reason: str
 
 
+class FakeTensorDeviceMismatchError(RuntimeError):
+    def __init__(
+        self,
+        func: OpOverload,
+        common_device: torch.device,
+        device: torch.device,
+    ) -> None:
+        self.func = func
+        self.common_device = common_device
+        self.device = device
+        super().__init__(
+            "Expected all tensors to be on the same device, but found "
+            f"at least two devices, {common_device} and {device}!"
+        )
+
+
 @dataclass
 class DynamicOutputShapeException(RuntimeError):
     func: OpOverload
@@ -1083,9 +1099,7 @@ class FakeTensor(Tensor):
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
-            raise RuntimeError(
-                f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
-            )
+            raise FakeTensorDeviceMismatchError(func, common_device, t.device)
 
         def merge_devices(t: object) -> None:
             for fake_tensor in _fake_tensor_leaves(t):
@@ -3480,12 +3494,27 @@ def _check_for_subclass(flat_args: Sequence[object]) -> bool:
 
 
 def _check_for_subclass_arg(x: object) -> bool:
-    return (
-        not isinstance(x, FakeTensor)
-        and isinstance(x, Tensor)
-        and type(x) is not Tensor
-        and type(x) is not torch.nn.Parameter
+    if isinstance(x, FakeTensor):
+        return False
+    if not isinstance(x, Tensor):
+        return False
+
+    x_type = type(x)
+    if x_type is Tensor:
+        return False
+
+    # Use the concrete type instead of isinstance because wrapper subclasses
+    # marked as Parameters (e.g. Parameter(TwoTensor(...))) still need subclass
+    # dispatch. Only metadata-only Parameter subclasses that inherit Tensor's
+    # disabled __torch_dispatch__ can follow the regular Parameter path.
+    is_metadata_only_parameter_subclass = (
+        issubclass(x_type, torch.nn.Parameter)
+        and x_type.__torch_dispatch__ is Tensor.__torch_dispatch__
     )
+    if is_metadata_only_parameter_subclass:
+        return False
+
+    return True
 
 
 _DISPATCH_META_HANDLERS = {
