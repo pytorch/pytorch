@@ -5979,6 +5979,118 @@ for dtype in (torch.int32, torch.int64):
             check_lowp=False,
         )
 
+    @skip_if_cpu
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_conv_backends": "TRITON",
+        }
+    )
+    @parametrize("dilation", (1, 2))
+    @parametrize("stride", (1, 2))
+    @parametrize("padding", (0, 1))
+    @parametrize("kernel", (1, 3))
+    @parametrize(
+        "channels_groups",
+        (
+            [3, 4, 1],
+            [4, 128, 1],
+            [4, 128, 4],
+            [128, 128, 1],
+        ),
+    )
+    @parametrize("nhwc", (False, True))
+    @with_tf32_off
+    def test_conv_transpose2d_forward_triton(
+        self,
+        channels_groups: list,
+        stride: int,
+        dilation: int,
+        padding: int,
+        kernel: int,
+        nhwc: bool,
+    ):
+        in_channels = channels_groups[0]
+        out_channels = channels_groups[1]
+        groups = channels_groups[2]
+
+        if is_dynamic_shape_enabled():
+            self.skipTest("Expected codegen failure under dynamic shapes")
+
+        if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
+            self.skipTest("Expected failure under subprocess compile mode")
+
+        def fn(x, weight):
+            return torch.ops.aten.convolution(
+                x,
+                weight,
+                None,
+                [stride, stride],
+                [padding, padding],
+                [dilation, dilation],
+                True,
+                [0, 0],
+                groups,
+            )
+
+        input_h = 8
+        input_w = 8
+
+        atol = 2e-4
+        rtol = 0.001
+
+        weight = torch.randn([in_channels, out_channels // groups, kernel, kernel])
+        x = torch.randn([2, in_channels, input_h, input_w])
+        if nhwc:
+            weight = weight.to(memory_format=torch.channels_last)
+            x = x.to(memory_format=torch.channels_last)
+        self.common(
+            fn,
+            (x, weight),
+            atol=atol,
+            rtol=rtol,
+            check_lowp=False,
+        )
+
+    @skip_if_cpu
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_conv_backends": "TRITON",
+        }
+    )
+    @with_tf32_off
+    def test_conv_transpose2d_output_padding_triton(self):
+        def fn(x, weight):
+            return torch.ops.aten.convolution(
+                x,
+                weight,
+                None,
+                [2, 2],
+                [1, 1],
+                [1, 1],
+                True,
+                [1, 1],
+                1,
+            )
+
+        x = torch.randn([2, 4, 8, 8])
+        weight = torch.randn([4, 4, 3, 3])
+        self.common(fn, (x, weight), check_lowp=False)
+
+    @skip_if_cpu
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_conv_backends": "TRITON",
+        }
+    )
+    def test_conv_transpose1d_triton_fallback(self):
+        """ConvTranspose1d should fall back to ATEN gracefully, not crash."""
+        m = torch.nn.ConvTranspose1d(4, 8, 3, stride=2, padding=1)
+        x = torch.randn(2, 4, 16)
+        self.common(m, (x,), check_lowp=False)
+
     @parametrize(
         "use_block_ptr",
         [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
