@@ -7910,9 +7910,14 @@ def meta_pixel_shuffle(self, upscale_factor):
         f"upscale_factor^2 overflows int64",
     )
     torch._check(
-        len(self.shape) > 2 and self.shape[-3] % upscale_factor_squared == 0,
+        len(self.shape) > 2,
+        lambda: f"pixel_shuffle expects input to have at least 3 dimensions, "
+        f"but got input with {len(self.shape)} dimension(s)",
+    )
+    torch._check(
+        self.shape[-3] % upscale_factor_squared == 0,
         lambda: f"pixel_shuffle expects input channel to be divisible by "
-        f"upscale_factor^2, but got input shape {self.shape} and "
+        f"upscale_factor^2, but got input.size(-3)={self.shape[-3]} and "
         f"upscale_factor={upscale_factor}",
     )
 
