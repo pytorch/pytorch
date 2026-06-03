@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
     from torch._dynamo.output_graph import OutputReturnInfo
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.export._trace import _DynamicShapesInput
     from torch.fx import Node
     from torch.fx.node import Argument, Target
 
@@ -1165,12 +1166,7 @@ def _dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
     *,
     constraints: list[Constraint] | None = None,
-    dynamic_shapes: dict[str, Any]
-    | tuple[Any]
-    | list[Any]
-    | ShapesSpec
-    | ParamsSpec
-    | None = None,
+    dynamic_shapes: _DynamicShapesInput = None,
 ) -> Callable[..., torch.fx.GraphModule]:
     """
     Improved dynamo graph capture using transformer approach with proper fake tensor handling.
@@ -1193,7 +1189,6 @@ def _dynamo_graph_capture_for_export(
     2. Need to attach guards
     """
 
-    _dynamic_shapes = dynamic_shapes
     _constraints = constraints
 
     def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
@@ -1205,9 +1200,6 @@ def _dynamo_graph_capture_for_export(
             orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
 
             constraints: list[Constraint] | None = _constraints
-            dynamic_shapes: (
-                dict[str, Any] | tuple[Any] | list[Any] | ShapesSpec | ParamsSpec | None
-            ) = _dynamic_shapes
 
             from . import reset  # type: ignore[attr-defined]
 
@@ -1230,28 +1222,23 @@ def _dynamo_graph_capture_for_export(
                 install_free_tensors=torch._dynamo.config.install_free_tensors_for_export,
             )
 
-            # If `dynamic_shapes` is a ShapesSpec/ParamsSpec, expose the
-            # (auto-wrapped, pre-flattened) ShapesSpec via
-            # `torch._dynamo.config._shapes_spec` for the variable builder,
-            # and skip the legacy `dynamic_shapes` path below.
+            # If `dynamic_shapes` is a ShapesSpec/ParamsSpec, auto-wrap
+            # ParamsSpec → ShapesSpec, flatten into the (args, kwargs) layout
+            # the tracer builds above, and expose it via
+            # `torch._dynamo.config._shapes_spec` for the variable builder.
+            shapes_spec_in_use = False
             shapes_spec_ctx = nullcontext()
             if isinstance(dynamic_shapes, (ShapesSpec, ParamsSpec)):
-                # Auto-wrap ParamsSpec → ShapesSpec so the translator only
-                # deals with the canonical container type.
+                shapes_spec_in_use = True
                 user_spec = (
                     ShapesSpec(dynamic_shapes)
                     if isinstance(dynamic_shapes, ParamsSpec)
                     else dynamic_shapes
                 )
-                # Re-key the user spec into the flat (args, kwargs) layout that
-                # the tracer builds above (ModuleToTrace(mod, in_spec)), then
-                # expose it via `torch._dynamo.config._shapes_spec` for the
-                # variable builder, and skip the legacy `dynamic_shapes` path.
                 flattened_spec = _flatten_shapes_spec(mod, args, kwargs, user_spec)
                 shapes_spec_ctx = torch._dynamo.config.patch(
                     _shapes_spec=flattened_spec
                 )
-                dynamic_shapes = None
 
             with (
                 get_metrics_context(),
@@ -1282,15 +1269,19 @@ def _dynamo_graph_capture_for_export(
                     graph.recompile()
                     fake_mode = None
 
-                _suggest_or_raise_constraint_violation(
-                    module_to_trace,
-                    orig_callable,
-                    fake_mode,
-                    out,
-                    args,
-                    kwargs,
-                    dynamic_shapes,
-                )
+                # ShapesSpec has its own export-time soundness check and uses
+                # unbacked SymInts, so the legacy guard-based violation
+                # detection / prettifier is not applicable on this path.
+                if not shapes_spec_in_use:
+                    _suggest_or_raise_constraint_violation(
+                        module_to_trace,
+                        orig_callable,
+                        fake_mode,
+                        out,
+                        args,
+                        kwargs,
+                        dynamic_shapes,  # type: ignore[arg-type]
+                    )
 
                 # Extract export metadata from the new location
                 export_metadata = out.graph_capture_output.output_graph.export_metadata

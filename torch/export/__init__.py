@@ -150,22 +150,18 @@ def export(
 
          Example::
 
-            from torch.fx.experimental.dynamic_spec import (
-                ParamsSpec,
-                ShapesSpec,
-                ShapeVar,
-                TensorSpec,
-            )
-
+            batch = ShapeVar("batch", min=2, max=128)
             ep = torch.export.export(
                 mod,
-                (torch.randn(8, 3),),
+                (torch.randn(8, 3), torch.randn(16, 3)),
                 dynamic_shapes=ShapesSpec(
                     params=ParamsSpec(
                         {
-                            "x": TensorSpec([ShapeVar("batch", min=1, max=128), None]),
+                            "x": TensorSpec([batch, 3]),
+                            "y": TensorSpec([batch * 2, 3]),  # derived expression
                         }
-                    )
+                    ),
+                    assumptions=[batch % 2 == 0],
                 ),
                 strict=True,
             )

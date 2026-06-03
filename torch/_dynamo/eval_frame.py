@@ -126,6 +126,7 @@ if TYPE_CHECKING:
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
     from torch._subclasses import fake_tensor
+    from torch.export._trace import _DynamicShapesInput
     from torch.fx.experimental.dynamic_spec import ParamsSpec
     from torch.fx.node import Argument, Node, Target
 
@@ -2202,7 +2203,7 @@ def export(
     pre_dispatch: bool = False,
     decomposition_table: dict[torch._ops.OpOverload, Callable[..., Any]] | None = None,
     tracing_mode: str = "symbolic",
-    dynamic_shapes: Any = None,
+    dynamic_shapes: _DynamicShapesInput = None,
     specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
