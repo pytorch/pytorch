@@ -8613,7 +8613,7 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     original_dep_nodes = V.graph.current_node.args[0]
     assert isinstance(original_dep_nodes, tuple)
 
-    dep_names = []
+    dep_names: list[str] = []
     for dep, orig_node in zip(additional_deps, original_dep_nodes, strict=True):
         dep_ir_nodes = [
             dep_leaf
@@ -8671,11 +8671,40 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     # b = control_deps(a, mm, ...)
     # c = control_deps(b, wait, ...)
     # if c == a, then you have a cycle.
-    for op in new_ops:
+    subgraph_ops = V.graph.operations[operation_len:]
+    for op in subgraph_ops:
         for dep_name in dep_names:
             op_name = op.operation_name
             assert op_name is not None
             V.graph.additional_buffer_deps[op_name].add(dep_name)
+
+    # Pass-through outputs are the same IR nodes as inputs, so downstream
+    # consumers see the original buffer and have no scheduling dependency on
+    # the subgraph ops (e.g. record_event, wait_event).  Declare the subgraph
+    # ops as mutating the pass-through buffers so the scheduler's mutation
+    # rename chain forces readers after the subgraph boundary.
+    input_ids = OrderedSet([id(a) for a in args])
+    for op in subgraph_ops:
+        if not isinstance(op, ir.OperationBuffer):
+            continue
+
+        def _add_passthrough_mutations(val):
+            if id(val) not in input_ids or not isinstance(val, IRNode):
+                return
+            val.realize()
+            op.mutation_outputs.append(  # pyrefly: ignore[missing-attribute]
+                ir.MutationOutput(
+                    ir.NoneLayout(device=val.get_device()),
+                    val,
+                    op,
+                )
+            )
+
+        if isinstance(output, (list, tuple)):
+            for v in output:
+                _add_passthrough_mutations(v)
+        else:
+            _add_passthrough_mutations(output)
 
     return output
 
