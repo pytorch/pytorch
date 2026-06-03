@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo as torchdynamo
+import torch._functorch._aot_autograd.graph_capture as graph_capture
 import torch.fx.traceback as fx_traceback
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
@@ -42,7 +43,10 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
-from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
+from torch._functorch.aot_autograd import (
+    aot_export_joint_with_descriptors,
+    aot_export_module,
+)
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.scan import scan
@@ -3189,6 +3193,113 @@ class GraphModule(torch.nn.Module):
             "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
+
+    def test_buffer_assignment_hook_cleanup_after_failed_export(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 20)
+                self.register_buffer("step", torch.tensor(0, dtype=torch.int64))
+                self.register_buffer("flag", torch.tensor(True, dtype=torch.bool))
+
+            def forward(self, x):
+                self.step += 1
+                x = self.linear(x)
+                if self.flag.item():
+                    x = x + 1
+                return x
+
+        model = M()
+        inputs = (torch.randn(1, 10),)
+
+        model(*inputs)
+        step_before_export = model.step.item()
+
+        with self.assertRaisesRegex(
+            torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+            "Could not guard on data-dependent expression",
+        ):
+            export(model, inputs, strict=False)
+
+        model(*inputs)
+        self.assertEqual(model.step.item(), step_before_export + 1)
+
+    def test_aot_export_buffer_assignment_hook_cleanup_after_failed_export(self):
+        class ExpectedFailure(RuntimeError):
+            pass
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("step", torch.tensor(0, dtype=torch.int64))
+
+            def forward(self, x):
+                self.step += 1
+                return (x + self.step.to(x.dtype),)
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, mod) -> None:
+                super().__init__()
+                self._export_root = mod
+
+            def forward(self, *args):
+                return self._export_root(*args)
+
+        real_register_buffer_assignment_hook = (
+            graph_capture.register_buffer_assignment_hook
+        )
+        hook_registered_on = None
+        hook_removed = False
+
+        class HookHandle:
+            def __init__(self, handle) -> None:
+                self.handle = handle
+
+            def remove(self):
+                nonlocal hook_removed
+                hook_removed = True
+                self.handle.remove()
+
+        def register_buffer_assignment_hook(mod, assigned_buffers):
+            nonlocal hook_registered_on
+            hook_registered_on = mod
+            return HookHandle(
+                real_register_buffer_assignment_hook(mod, assigned_buffers)
+            )
+
+        def fail_graph_capture(*args, **kwargs):
+            raise ExpectedFailure("failed inside aot_dispatch_base_graph")
+
+        root = M()
+        inputs = (torch.randn(2, 3),)
+
+        with (
+            patch.object(
+                graph_capture,
+                "register_buffer_assignment_hook",
+                register_buffer_assignment_hook,
+            ),
+            patch.object(
+                graph_capture,
+                "_create_graph_and_save_traced_inputs",
+                fail_graph_capture,
+            ),
+        ):
+            with self.assertRaisesRegex(
+                ExpectedFailure, "failed inside aot_dispatch_base_graph"
+            ):
+                aot_export_module(
+                    Wrapper(root),
+                    inputs,
+                    trace_joint=False,
+                    pre_dispatch=False,
+                )
+
+        self.assertIs(hook_registered_on, root)
+        self.assertTrue(hook_removed)
+
+        root(*inputs)
+        self.assertEqual(root.step.item(), 1)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_tensor_constant_idx(self):
