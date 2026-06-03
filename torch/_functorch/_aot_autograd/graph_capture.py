@@ -123,6 +123,16 @@ def _create_graph(
             _allow_token_discovery=True,
         )
 
+    # Save original FakeTensor devices before make_fx, which may mutate
+    # them via in-graph set_() (e.g. cross-device tensor.data = ...).
+    # After tracing, we restore them so the backend compiler sees the
+    # correct input devices on placeholder nodes.
+    original_fake_devices = {
+        i: arg.fake_device
+        for i, arg in enumerate(args)
+        if isinstance(arg, torch.Tensor) and hasattr(arg, "fake_device")
+    }
+
     with (
         enable_python_dispatcher(),
         ctx,
@@ -134,6 +144,22 @@ def _create_graph(
             pre_dispatch=aot_config.pre_dispatch,
             _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
         )(*args)
+
+        # Restore FakeTensor devices on both args and placeholder nodes
+        # that may have been mutated by in-graph set_().
+        if original_fake_devices:
+            for i, device in original_fake_devices.items():
+                if args[i].fake_device != device:  # pyrefly: ignore[missing-attribute]
+                    args[i].fake_device = device  # pyrefly: ignore[missing-attribute]
+            arg_idx = 0
+            for node in fx_g.graph.nodes:
+                if node.op != "placeholder":
+                    break
+                ev = node.meta.get("val", None)
+                if ev is not None and hasattr(ev, "fake_device"):
+                    if arg_idx in original_fake_devices:
+                        ev.fake_device = original_fake_devices[arg_idx]
+                    arg_idx += 1
 
         if args_descs is not None:
             flat_args_descs, _ = pytree.tree_flatten(args_descs)

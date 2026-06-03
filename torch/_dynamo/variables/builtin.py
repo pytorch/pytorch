@@ -3402,8 +3402,6 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
                     )
                 elif name == "data":
                     # [Note: set_data_on_scoped_tensor]
-                    # TODO(azahed98): The plan of record is to introduce a set_data op, entirely subsume the
-                    # operation into a call_function in the fx graph, and let aot_autograd handle it.
                     if obj.source is None:
                         unimplemented(
                             gb_type="Failed to mutate tensor data attribute",
@@ -3440,12 +3438,13 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
 
                     # Step 1 - disable grads
                     with dynamo_disable_grad(tx), torch.no_grad():
-                        # Step 2 - call `set_`
+                        # Step 2 - call shallow_copy_data_
+                        # (shallow_copy_from, matching eager .data = behavior)
                         out = wrap_fx_proxy(
                             tx,
                             tx.output.create_proxy(
                                 "call_function",
-                                torch.Tensor.set_,
+                                torch.ops.aten.shallow_copy_data_,
                                 *proxy_args_kwargs([obj, val], {}),
                             ),
                         )

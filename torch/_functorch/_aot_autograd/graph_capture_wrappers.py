@@ -753,7 +753,7 @@ def apply_in_graph_mutations(
         if mcs is None or mcs.mc_storage > applied_mcs.mc_storage:  # type: ignore[union-attr]
             with torch.no_grad():
                 # pyrefly: ignore [bad-argument-type, no-matching-overload]
-                inpt_old.set_(inpt_new)
+                torch.ops.aten.shallow_copy_data_(inpt_old, inpt_new)
 
     # Note [Ordering of resize_() and set_()]
     # Importantly: the common usage in FSDP is that we have a dummy parameter
