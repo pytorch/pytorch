@@ -98,6 +98,10 @@ class SymPyOps:
         return TypedExpr(value, dtype)
 
     @staticmethod
+    def value_expr(value: sympy.Expr | int, dtype: torch.dtype) -> TypedExpr:
+        return TypedExpr(value, dtype)
+
+    @staticmethod
     def to_dtype(
         value: TypedExpr,
         dtype: torch.dtype,
@@ -236,6 +240,9 @@ class IndexPropagation(DefaultHandler):
             val = dtype_to_type(dtype)(expr)
             return self._inner.constant(val, dtype)
         return self._inner.index_expr(expr, dtype)
+
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> IndexPropResult:
+        return self.wrap(self._inner.value_expr(expr, dtype))
 
     def unwrap(self, a: Any | IndexPropVar) -> Any:
         if isinstance(a, (list, tuple)):
