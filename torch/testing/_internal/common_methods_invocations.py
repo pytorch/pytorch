@@ -18497,9 +18497,11 @@ op_db: list[OpInfo] = [
                     dtypes=floating_types_and(torch.bfloat16, torch.float16),
                     aliases=('torch.special.gammainc',),
                     dtypesIfCUDA=floating_types(),
-                    # TODO: FIXME
                     supports_rhs_python_scalar=False,
-                    supports_autograd=False,
+                    supports_autograd=True,
+                    supports_gradgrad=False,
+                    supports_forward_ad=False,
+                    supports_fwgrad_bwgrad=False,
                     skips=(
                         # FIXME: incorrectly tries to pass a rhs scalar
                         DecorateInfo(unittest.expectedFailure, 'TestJit',
@@ -18538,7 +18540,10 @@ op_db: list[OpInfo] = [
                     dtypes=floating_types_and(torch.bfloat16, torch.float16),
                     aliases=('torch.special.gammaincc',),
                     dtypesIfCUDA=floating_types(),
-                    supports_autograd=False,
+                    supports_autograd=True,
+                    supports_gradgrad=False,
+                    supports_forward_ad=False,
+                    supports_fwgrad_bwgrad=False,
                     supports_rhs_python_scalar=False,
                     skips=(
                         # FIXME: incorrectly tries to pass a rhs scalar
