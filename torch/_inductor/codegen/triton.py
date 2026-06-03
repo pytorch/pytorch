@@ -5070,6 +5070,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=shape,
         )
 
+    def emit_split_via_reshape(
+        self,
+        value: CSEVariable,
+        reshape_shape: Sequence[sympy.Expr | int | str],
+        part_names: Sequence[str],
+    ) -> None:
+        reshaped = self._reshape_expr(value, reshape_shape)
+        self.compute.writeline(f"{', '.join(part_names)} = tl.split({reshaped})")
+
     def emit_broadcast_via_reshape(
         self,
         value: CSEVariable,
@@ -5085,6 +5094,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         value (one element per group) to full or half resolution.
         """
         reshaped = self._reshape_expr(value, pre_broadcast_shape)
+        broadcast_dtype = dtype
+        if dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        ):
+            reshaped = f"{reshaped}.to(tl.float32)"
+            broadcast_dtype = torch.float32
         broadcasted = (
             f"tl.broadcast_to({reshaped}, {triton_shape_str(broadcast_shape)})"
         )
@@ -5092,7 +5110,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return self.cse.generate(
             self.compute,
             line,
-            dtype=dtype,
+            dtype=broadcast_dtype,
             shape=out_shape,
         )
 
