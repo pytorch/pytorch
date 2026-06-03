@@ -21,11 +21,13 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyCPU,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
-    skipMPS,
     skipXLA,
     skipXPUIf,
+    tol,
+    toleranceOverride,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -2024,109 +2026,6 @@ class TestIndexing(TestCase):
             self.assertEqual(x0, y0, atol=0, rtol=0)
 
     @onlyNativeDeviceTypes
-    @skipMPS  # https://github.com/pytorch/pytorch/issues/161029
-    @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_index_add_large_index_vectorized_path(self, device, dtype):
-        # Tests that exercise both the VecSize=4 (vectorized) and VecSize=1
-        # (scalar) paths in the indexFuncLargeIndex CUDA kernel.
-        # VecSize=4 activates when: IndexIsMajor=true, sliceSize % 4 == 0,
-        # and both dst/src have stride-1 on their innermost dimension.
-        # numIndex must be > 16 to hit the LargeIndex kernel at all.
-        #
-        # Strategy: for each shape that hits the vectorized path, also run
-        # the same operation with sliceSize+1 (which forces the scalar path)
-        # and compare both against a CPU float reference.  We use UNIQUE
-        # indices to avoid non-deterministic atomic accumulation ordering.
-        num_idx = 64
-        num_dest = 100
-
-        def _run_and_check(dst_shape, dim, num_idx, num_dest_dim, tag):
-            dst = torch.zeros(dst_shape, dtype=dtype, device=device)
-            src_shape = list(dst_shape)
-            src_shape[dim] = num_idx
-            src = torch.randn(src_shape, dtype=dtype, device=device)
-            index = torch.randperm(num_dest_dim, device=device)[:num_idx]
-
-            # Reference: run the same op on CPU in float
-            dst_ref = dst.detach().cpu().float()
-            src_ref = src.detach().cpu().float()
-            idx_cpu = index.cpu()
-            dst_ref.index_add_(dim, idx_cpu, src_ref)
-
-            dst.index_add_(dim, index, src)
-
-            atol, rtol = (
-                (1e-2, 1e-2) if dtype in (torch.bfloat16, torch.half) else (1e-5, 1e-5)
-            )
-            self.assertEqual(
-                dst.cpu().float(),
-                dst_ref,
-                atol=atol,
-                rtol=rtol,
-                msg=f"Failed for {tag}, shape={dst_shape}, dim={dim}",
-            )
-
-        # --- VecSize=4 path: contiguous, dim=0, sliceSize divisible by 4 ---
-        for slice_size in [32, 128, 256]:
-            _run_and_check(
-                (num_dest, slice_size),
-                0,
-                num_idx,
-                num_dest,
-                f"vec4 sliceSize={slice_size}",
-            )
-
-        # --- VecSize=1 path: sliceSize NOT divisible by 4 ---
-        for slice_size in [3, 17, 33]:
-            _run_and_check(
-                (num_dest, slice_size),
-                0,
-                num_idx,
-                num_dest,
-                f"scalar sliceSize={slice_size}",
-            )
-
-        # --- VecSize=1 path: non-contiguous (stride != 1 on inner dim) ---
-        dst_base = torch.zeros(num_dest, 256, dtype=dtype, device=device)
-        src_base = torch.randn(num_idx, 256, dtype=dtype, device=device)
-        dst = dst_base[:, ::2]  # shape [100, 128], stride [256, 2]
-        src = src_base[:, ::2]
-        index = torch.randperm(num_dest, device=device)[:num_idx]
-
-        dst_ref = dst.detach().cpu().float().contiguous()
-        src_ref = src.detach().cpu().float().contiguous()
-        dst_ref.index_add_(0, index.cpu(), src_ref)
-        dst.index_add_(0, index, src)
-        atol, rtol = (
-            (1e-2, 1e-2) if dtype in (torch.bfloat16, torch.half) else (1e-5, 1e-5)
-        )
-        self.assertEqual(
-            dst.cpu().float(),
-            dst_ref,
-            atol=atol,
-            rtol=rtol,
-            msg="Failed for non-contiguous (stride-2)",
-        )
-
-        # --- VecSize=1 path: IndexIsMajor=false (dim=1 on row-major tensor) ---
-        _run_and_check(
-            (32, num_dest),
-            1,
-            num_idx,
-            num_dest,
-            "IndexIsMajor=false dim=1",
-        )
-
-        # --- VecSize=4 path: 3-D contiguous, dim=0, sliceSize divisible by 4 ---
-        _run_and_check(
-            (100, 8, 16),
-            0,
-            num_idx,
-            100,
-            "3D vec4 sliceSize=128",
-        )
-
-    @onlyNativeDeviceTypes
     @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
     def test_index_add_deterministic(self, device: torch.device) -> None:
         for dim in range(3):
@@ -2145,6 +2044,142 @@ class TestIndexing(TestCase):
                 for _ in range(3):
                     y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
+
+    @serialTest()
+    @onlyCUDA
+    @toleranceOverride(
+        {
+            torch.float32: tol(atol=1e-5, rtol=1e-3),
+            torch.float64: tol(atol=1e-5, rtol=1e-3),
+            torch.half: tol(atol=5e-2, rtol=5e-2),
+            torch.bfloat16: tol(atol=0.5, rtol=0.5),
+        }
+    )
+    @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
+    def test_index_add_fast_path(self, device, dtype):
+        # Coverage for the index_add_ TMA fast path: one eligible case + five
+        # fallback predicates per shape, asserted against a CPU reference.
+        # Shapes keep n/m <= 1 so atomicAdd-order noise on bf16/half stays
+        # within tolerance; (4096, 1024, 1024) crosses the TMA chunk_elems
+        # boundary (D > one chunk).
+        def check(out, dim, idx, src, alpha=1.0):
+            expected = (
+                out.cpu().clone().index_add_(dim, idx.cpu(), src.cpu(), alpha=alpha)
+            )
+            out.index_add_(dim, idx, src, alpha=alpha)
+            self.assertEqual(out.cpu(), expected)
+
+        for m, n, D in [(1024, 512, 128), (4096, 3072, 128), (4096, 1024, 1024)]:
+            torch.cuda.empty_cache()
+            for idx_dtype in (torch.int32, torch.int64):
+                src = make_tensor((n, D), device=device, dtype=dtype)
+                idx = torch.randint(m, (n,), device=device, dtype=idx_dtype)
+
+                # 1) Eligible -> fast path.
+                check(torch.zeros(m, D, device=device, dtype=dtype), 0, idx, src)
+                # 2) alpha != 1 -> fallback.
+                check(
+                    torch.zeros(m, D, device=device, dtype=dtype),
+                    0,
+                    idx,
+                    src,
+                    alpha=2.5,
+                )
+                # 3) Discontiguous src -> fallback.
+                src_strided = torch.empty(n, 2 * D, device=device, dtype=dtype)[
+                    :, ::2
+                ].copy_(src)
+                check(
+                    torch.zeros(m, D, device=device, dtype=dtype), 0, idx, src_strided
+                )
+                # 4) Misaligned self (one-element pointer offset) -> fallback.
+                self_mis = (
+                    torch.empty(m * D + 1, device=device, dtype=dtype)[1:]
+                    .view(m, D)
+                    .zero_()
+                )
+                check(self_mis, 0, idx, src)
+                # 5) dim != 0 -> fallback.
+                check(
+                    torch.zeros(D, m, device=device, dtype=dtype),
+                    1,
+                    idx,
+                    make_tensor((D, n), device=device, dtype=dtype),
+                )
+                # 6) Sliced inner dim (not is_contiguous) -> fallback.
+                sl = slice(64, 192)
+                check(
+                    torch.zeros(m, 256, device=device, dtype=dtype)[:, sl],
+                    0,
+                    idx,
+                    make_tensor((n, 256), device=device, dtype=dtype)[:, sl],
+                )
+
+        # 7) Empty index is a no-op.
+        out = torch.randn(8, 128, device=device, dtype=dtype)
+        expected = out.clone()
+        out.index_add_(
+            0,
+            torch.empty(0, device=device, dtype=torch.int64),
+            torch.empty(0, 128, device=device, dtype=dtype),
+        )
+        self.assertEqual(out, expected)
+
+    @serialTest()
+    @onlyCUDA
+    @toleranceOverride(
+        {
+            # Tolerances follow test_index_add_fast_path: this shape does
+            # ~n/m atomic adds per row (~670 here with m=13), and bf16's
+            # 7-bit mantissa accumulates noise quickly under non-
+            # deterministic atomicAdd ordering. fp32 stays tight.
+            torch.float32: tol(atol=1e-4, rtol=1e-3),
+            torch.bfloat16: tol(atol=20.0, rtol=0.5),
+        }
+    )
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_index_add_smem_stage_alignment_regression(self, device, dtype):
+        # Regression for SEV S664741: the original D104669063 was reverted
+        # when this delegation surfaced a latent scatter_add TMA smem
+        # stage-alignment bug -- chunk_bytes < 128 (or not a multiple of
+        # 128) plus multi-iter-per-CTA (M_src > grid_x cap of sm*64) wrote
+        # stage 1 of the 2-stage pipeline buffer at a non-128-aligned smem
+        # offset, faulting in cp.async.bulk. Fixed in PR #184554 by
+        # rounding the stage stride to 128 bytes. This test pins the
+        # prod shape (small D + high M_src) at the index_add layer so a
+        # future refactor of the delegation re-exposing the same shape
+        # class is caught here, not in prod.
+        sm = torch.cuda.get_device_properties(0).multi_processor_count
+        # D=8 fp32 -> chunk_bytes=32 (< 128). M_src > sm*64 forces every
+        # CTA into >= 2 iterations -> stage 1 used. Prod fault was at
+        # sm*64=8448 (H100); sm*64 + 256 exposes the regime on any GPU.
+        m, n, D = 13, sm * 64 + 256, 8
+        src = make_tensor((n, D), device=device, dtype=dtype)
+        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
+        out = torch.zeros(m, D, device=device, dtype=dtype)
+        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
+        out.index_add_(0, idx, src)
+        self.assertEqual(out.cpu(), expected)
+
+    @serialTest()
+    @onlyCUDA
+    @dtypes(torch.complex64, torch.complex128, torch.bool)
+    def test_index_add_excluded_dtypes(self, device, dtype):
+        # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the
+        # fast-path delegation in index_add_cuda_impl excludes these dtypes
+        # and lets them fall through to indexFunc{Small,Large}Index. Regression
+        # test that an eligible-shape (dim=0, alpha=1, contiguous, aligned)
+        # call still produces correct results for these dtypes.
+        m, n, D = 1024, 512, 128
+        if dtype == torch.bool:
+            src = torch.randint(0, 2, (n, D), device=device, dtype=dtype)
+        else:
+            src = make_tensor((n, D), device=device, dtype=dtype)
+        out = torch.zeros(m, D, device=device, dtype=dtype)
+        idx = torch.randint(m, (n,), device=device, dtype=torch.int64)
+        expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
+        out.index_add_(0, idx, src)
+        self.assertEqual(out.cpu(), expected)
 
     @onlyNativeDeviceTypes
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")

@@ -2,8 +2,10 @@
 # flake8: noqa: E731
 
 import contextlib
+import re
 import unittest
 import unittest.mock as mock
+import warnings
 
 from parameterized import parameterized_class
 
@@ -115,6 +117,72 @@ class TestInvokeSubgraph(TestCase):
         res = aot_fn(x)
 
         self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_duplicate_backward_variants_warn_and_trace(self):
+        @nested_compile_region
+        def block(x):
+            return torch.sin(x) * 2.0
+
+        class Model(torch.nn.Module):
+            def forward(self, x, tail):
+                y0 = block(x)
+                y1 = block(y0)
+                z = torch.cat([y1, tail], dim=1)
+                return z.square().sum()
+
+        torch._dynamo.reset()
+        backend = AotEagerAndRecordGraphs()
+        with mock.patch("torch._logging.trace_structured") as trace_structured_mock:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                compiled = torch.compile(
+                    Model(),
+                    backend=backend,
+                    fullgraph=True,
+                )
+                x = torch.randn(4, 3, 5, requires_grad=True)
+                tail = torch.randn(4, 7, 5, requires_grad=True)
+                compiled(x, tail).backward()
+
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        self.assertTrue(
+            any(
+                "invoke_subgraph traced multiple backward graphs"
+                in str(warning.message)
+                for warning in caught
+            )
+        )
+
+        duplicate_payloads = []
+        for call in trace_structured_mock.call_args_list:
+            args, kwargs = call
+            if not args or args[0] != "artifact":
+                continue
+            metadata_fn = kwargs.get("metadata_fn")
+            if metadata_fn is None and len(args) > 1:
+                metadata_fn = args[1]
+            if metadata_fn is None:
+                continue
+            metadata = metadata_fn()
+            if metadata.get("name") != "invoke_subgraph_backward_duplicate":
+                continue
+            payload_fn = kwargs["payload_fn"]
+            duplicate_payloads.append(payload_fn())
+
+        self.assertEqual(len(duplicate_payloads), 1)
+        payload = duplicate_payloads[0]
+        self.assertEqual(payload["new_variant_suffix"], 1)
+        self.assertEqual(payload["num_variants_for_identifier"], 2)
+        self.assertEqual(
+            payload["new_variant"]["backward_identifier"],
+            payload["backward_identifier"],
+        )
+        tangent = payload["new_variant"]["tangents"][0]
+        self.assertIsInstance(tangent["backward_input_name"], str)
+        self.assertEqual(tangent["shape"], [4, 3, 5])
+        self.assertEqual(tangent["stride"], [15, 5, 1])
 
     def test_make_fx_without_shape_env(self):
         """Test that make_fx with invoke_subgraph works without a ShapeEnv.
@@ -240,7 +308,9 @@ class TestInvokeSubgraphCompile(TestCase):
         for node in invoke_subgraph_nodes:
             stack_trace = node.meta["stack_trace"]
             if not TEST_WITH_CROSSREF:
-                self.assertTrue(stack_trace.endswith("return mod(x, y) + mod(x, y)\n"))
+                # Strip caret lines (e.g. "  ~~~^^^^") that 3.13+ appends
+                clean = re.sub(r"\n[ ~^]*[~^][ ~^]*(?=\n|\Z)", "", stack_trace)
+                self.assertTrue(clean.endswith("return mod(x, y) + mod(x, y)\n"))
 
     def test_gen_schema(self):
         class Mod(torch.nn.Module):
@@ -4195,6 +4265,105 @@ class GraphModule(torch.nn.Module):
         ep = torch.export.export(M(), (x, y), strict=self.strict)
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_nested_lifted_tensor_constants(self):
+        # When the region captured by nested_compile_region closes over an
+        # inline tensor constant and is replayed multiple times, export
+        # promotes the subgraph to ``repeated_subgraph0``. After decomposing
+        # the ExportedProgram, the inner tensor constant surfaces in the
+        # top-level graph signature as a persistent buffer named like
+        # ``repeated_subgraph0._tensor_constant0``, even though the tensor
+        # actually lives inside the subgraph submodule rather than in the
+        # top-level ``state_dict`` or ``constants``. Verify that export,
+        # decomposition, verification, ``named_buffers``, and direct
+        # invocation (``ep(x)`` via ``_graph_module_flat_inputs``) all handle
+        # that shape.
+        @nested_compile_region
+        def block(x):
+            w = torch.tensor([1.0, 2.0, 3.0, 4.0])
+            return x * w + 1.0
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = block(x)
+                x = block(x)
+                return x
+
+        x = torch.randn(4)
+
+        ep = torch.export.export(M(), (x,), strict=self.strict)
+
+        # _graph_module_flat_inputs resolves all buffer inputs including
+        # subgraph-owned lifted constants; call it directly to verify no
+        # KeyError is raised and the flat inputs are well-formed.
+        flat_inputs = ep._graph_module_flat_inputs((x,), {})
+        self.assertIsInstance(flat_inputs, tuple)
+        # x must be the last element; preceding entries are the constants/buffers
+        self.assertIs(flat_inputs[-1], x)
+
+        ep = ep.run_decompositions({})
+
+        # After decomposition the lifted constant moves from the CONSTANT_TENSOR
+        # path to a persistent buffer in the graph signature backed by the
+        # subgraph submodule's state. Call _graph_module_flat_inputs again
+        # to exercise the new gm_state_dict fallback branch in that method.
+        flat_inputs_post = ep._graph_module_flat_inputs((x,), {})
+        self.assertIsInstance(flat_inputs_post, tuple)
+        self.assertIs(flat_inputs_post[-1], x)
+
+        # The inner tensor constant should be exposed as a subgraph-scoped
+        # buffer in the top-level graph signature.
+        buffer_names = list(ep.graph_signature.buffers)
+        self.assertTrue(
+            any(
+                name.startswith("repeated_subgraph") and "._tensor_constant" in name
+                for name in buffer_names
+            ),
+            f"Expected repeated_subgraph*._tensor_constant* buffer; got {buffer_names}",
+        )
+        # Use the first buffer that actually matches the expected naming pattern
+        # so the subsequent assertions are meaningful rather than checking an
+        # arbitrary first element.
+        nested_buf = next(
+            name
+            for name in buffer_names
+            if name.startswith("repeated_subgraph") and "._tensor_constant" in name
+        )
+        self.assertNotIn(nested_buf, ep.state_dict)
+        self.assertNotIn(nested_buf, ep.constants)
+
+        # named_buffers must resolve the constant through the subgraph's
+        # submodule state rather than raising KeyError. After decomposition
+        # the buffer is a FakeTensor, so just check the metadata.
+        resolved = dict(ep.named_buffers())
+        self.assertIn(nested_buf, resolved)
+        self.assertEqual(resolved[nested_buf].shape, torch.Size([4]))
+        self.assertEqual(resolved[nested_buf].dtype, torch.float32)
+
+        # Verification must pass despite the buffer not being in state_dict.
+        from torch._export.verifier import _verify_exported_program_signature
+
+        _verify_exported_program_signature(ep)
+
+    def test_invoke_subgraph_placeholder_forwards_kwargs(self):
+        # Under non-strict export (``torch.compiler.is_compiling()`` True but
+        # not Dynamo) the placeholder goes through a small wrapper that must
+        # forward both *args and **kwargs. Regression test for a path that
+        # silently dropped kwargs.
+        @nested_compile_region
+        def gn(x, y, *, scale=1.0):
+            return x * y * scale
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return gn(x, y, scale=2.0)
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+
+        ep = torch.export.export(M(), (x, y), strict=self.strict)
+        self.assertEqual(ep.module()(x, y), M()(x, y))
 
 
 class NegativeTesting(TestCase):

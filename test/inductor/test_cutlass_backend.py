@@ -13,6 +13,33 @@ from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
 
+import torch
+
+
+_CUTLASS_DIR_ENV_VAR = "TORCHINDUCTOR_CUTLASS_DIR"
+
+
+def _maybe_set_cutlass_dir_env_from_checkout() -> None:
+    # Set this before importing torch._inductor.config below. This matters when
+    # running source-checkout tests against an installed torch package.
+    if _CUTLASS_DIR_ENV_VAR in os.environ:
+        return
+
+    default_cutlass_dir = (
+        Path(torch.__file__).resolve().parent.parent / "third_party" / "cutlass"
+    )
+    if (default_cutlass_dir / "python").is_dir():
+        return
+
+    checkout_cutlass_dir = (
+        Path(__file__).resolve().parents[2] / "third_party" / "cutlass"
+    )
+    if (checkout_cutlass_dir / "python").is_dir():
+        os.environ[_CUTLASS_DIR_ENV_VAR] = str(checkout_cutlass_dir)
+
+
+_maybe_set_cutlass_dir_env_from_checkout()
+
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cutlass.serialization import (
     get_cutlass_operation_serializer,
@@ -29,7 +56,6 @@ try:
 except ImportError:
     from .test_aot_inductor_utils import AOTIRunnerUtil
 
-import torch
 import torch._inductor.codecache
 import torch.version
 from torch._dynamo import config as dynamo_config
@@ -37,7 +63,11 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codecache import XPUCodeCache
 from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
-from torch._inductor.codegen.cutlass.utils import _gen_ops_cached, get_max_alignment
+from torch._inductor.codegen.cutlass.utils import (
+    _gen_ops_cached,
+    get_max_alignment,
+    try_import_cutlass,
+)
 from torch._inductor.exc import InductorError
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
@@ -48,6 +78,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     SM100OrLater,
+    SM120OrLater,
     SM80OrLater,
     SM90OrLater,
 )
@@ -88,6 +119,10 @@ def _get_path_without_sccache() -> str:
     path_envs = os.environ.get("PATH", "").split(":")
     path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
     return ":".join(path_envs)
+
+
+def _get_cutlass_dir() -> str:
+    return config.xpu.cutlass_dir if GPU_TYPE == "xpu" else config.cutlass.cutlass_dir
 
 
 def _check_if_instances_equal(op1, op2) -> bool:
@@ -274,8 +309,6 @@ class TestCutlassBackend(TestCase):
     @skipXPUIf(not Xe2_Or_Later, "")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_import_cutlass(self):
-        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
-
         self.assertTrue(try_import_cutlass())
 
         import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
@@ -283,8 +316,6 @@ class TestCutlassBackend(TestCase):
 
     @skipXPUIf(not Xe2_Or_Later, "")
     def test_cutlass_key(self):
-        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
-
         self.assertTrue(try_import_cutlass())
         from torch._inductor.codecache import cutlass_key
 
@@ -303,8 +334,22 @@ class TestCutlassBackend(TestCase):
 
         M, N, K = 4096, 2048, 25728
 
-        a = torch.randn(M, K).to(GPU_TYPE).half()
-        b = torch.randn(N, K).to(GPU_TYPE).half().t()
+        cutlass_dir = _get_cutlass_dir()
+        self.assertTrue(
+            try_import_cutlass(),
+            "CUTLASS backend is required by this test but could not be imported. "
+            f"Set {_CUTLASS_DIR_ENV_VAR} to a valid CUTLASS checkout; "
+            f"current cutlass_dir={cutlass_dir!r}.",
+        )
+
+        # Scale inputs by 1/sqrt(K) to avoid large accumulation differences
+        # between CUTLASS and ATen in half precision.
+        a = random_matrix_with_scaled_reduction_dim(
+            M, K, dtype=torch.float16, device=GPU_TYPE, reduction_dim=-1
+        )
+        b = random_matrix_with_scaled_reduction_dim(
+            N, K, dtype=torch.float16, device=GPU_TYPE, reduction_dim=-1
+        ).t()
 
         with config.patch(
             {
@@ -324,7 +369,7 @@ class TestCutlassBackend(TestCase):
                 atol = None
                 rtol = None
 
-            torch.testing.assert_close(Y_compiled, Y, atol=atol, rtol=rtol)
+            self.assertEqual(Y_compiled, Y, atol=atol, rtol=rtol)
 
     @skipXPUIf(not Xe2_Or_Later, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
@@ -374,8 +419,12 @@ class TestCutlassBackend(TestCase):
                 Y_compiled = torch.compile(torch.addmm)(x, a, b, alpha=alpha, beta=beta)
                 Y = torch.addmm(x, a, b, alpha=alpha, beta=beta)
                 if GPU_TYPE == "xpu":
-                    atol = 1e-3
-                    rtol = 1e-3
+                    if dtype == torch.bfloat16:
+                        atol = 5e-3
+                        rtol = 5e-3
+                    else:
+                        atol = 1e-3
+                        rtol = 1e-3
                 else:
                     # use default
                     atol = None
@@ -757,8 +806,12 @@ class TestCutlassBackend(TestCase):
             inputs = [
                 (
                     torch.randn(x_shape(M, N)).to(GPU_TYPE).to(dtype),
-                    torch.randn(M, K).to(GPU_TYPE).to(dtype),
-                    torch.randn(N, K).to(GPU_TYPE).to(dtype).t(),
+                    random_matrix_with_scaled_reduction_dim(
+                        M, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                    ),
+                    random_matrix_with_scaled_reduction_dim(
+                        N, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                    ).t(),
                 )
                 for (M, N, K) in shapes
             ]
@@ -785,7 +838,9 @@ class TestCutlassBackend(TestCase):
                 ),
                 dynamo_config.patch({"error_on_recompile": dynamic}),
             ):
-                expected = [model(*input) for input in inputs]
+                expected = [
+                    model(*[t.float() for t in input]).to(dtype) for input in inputs
+                ]
                 if use_aoti:
                     actual = AOTIRunnerUtil.run_multiple(
                         model, inputs, dynamic_shapes=dynamic_shapes
@@ -794,22 +849,7 @@ class TestCutlassBackend(TestCase):
                     compiled_model = torch.compile(model, dynamic=dynamic)
                     actual = [compiled_model(*input) for input in inputs]
 
-                assert_close_kwargs = {}
-                if dynamic and SM90OrLater:
-                    # SM90+ CUTLASS addmm currently differs from eager by a small
-                    # output-precision quantum on this test across multiple
-                    # parametrizations. Keep the relaxation scoped to this test
-                    # and stay tighter for float16 than bfloat16.
-                    assert_close_kwargs = {
-                        "rtol": 1.6e-2 if dtype == torch.bfloat16 else 1e-3,
-                        "atol": 1e-2 if dtype == torch.bfloat16 else 2e-3,
-                    }
-                else:
-                    assert_close_kwargs = {
-                        "rtol": 2e-3,
-                        "atol": 1e-3,
-                    }
-                torch.testing.assert_close(actual, expected, **assert_close_kwargs)
+                torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -847,8 +887,12 @@ class TestCutlassBackend(TestCase):
         try:
             M, K, N = 256, 3520, 2048
             bias = torch.randn(N, device=GPU_TYPE, dtype=torch.bfloat16)
-            x = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
-            w = torch.randn(K, N, device=GPU_TYPE, dtype=torch.bfloat16)
+            x = random_matrix_with_scaled_reduction_dim(
+                M, K, dtype=torch.bfloat16, device=GPU_TYPE, reduction_dim=-1
+            )
+            w = random_matrix_with_scaled_reduction_dim(
+                K, N, dtype=torch.bfloat16, device=GPU_TYPE, reduction_dim=-2
+            )
 
             with config.patch(
                 {
@@ -857,7 +901,9 @@ class TestCutlassBackend(TestCase):
                     "cutlass.cutlass_max_profiling_configs": 2,
                 }
             ):
-                expected = torch.addmm(bias, x, w)
+                expected = torch.addmm(bias.float(), x.float(), w.float()).to(
+                    torch.bfloat16
+                )
                 actual = torch.compile(torch.addmm)(bias, x, w)
                 torch.testing.assert_close(actual, expected)
 
@@ -906,19 +952,21 @@ class TestCutlassBackend(TestCase):
         inputs = []
         for B, M, N, K in shapes:
             if use_expand:
-                # Create A using unsqueeze and expand
                 A = (
-                    torch.randn(M, K)
-                    .to(GPU_TYPE)
-                    .to(dtype)
+                    random_matrix_with_scaled_reduction_dim(
+                        M, K, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                    )
                     .unsqueeze(0)
                     .expand(B, -1, -1)
                 )
             else:
-                # Original method
-                A = torch.randn(B, M, K).to(GPU_TYPE).to(dtype)
+                A = random_matrix_with_scaled_reduction_dim(
+                    M, K, B, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+                )
 
-            B_tensor = torch.randn(B, N, K).to(GPU_TYPE).to(dtype).permute(0, 2, 1)
+            B_tensor = random_matrix_with_scaled_reduction_dim(
+                N, K, B, dtype=dtype, device=GPU_TYPE, reduction_dim=-1
+            ).permute(0, 2, 1)
             inputs.append((A, B_tensor))
         dynamic_shapes = (
             {
@@ -1282,6 +1330,14 @@ class TestCutlassBackend(TestCase):
 
             x = torch.randn(M, K).to(GPU_TYPE).half()
             w = torch.randn(N, K).to(GPU_TYPE).half().t()
+
+            if SM120OrLater:
+                with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
+                    AOTIRunnerUtil.run(
+                        model,
+                        (x, w),
+                    )
+                return
 
             actual = AOTIRunnerUtil.run(
                 model,

@@ -1,5 +1,6 @@
 """Functional interface."""
 
+import dataclasses
 import importlib
 import math
 import warnings
@@ -36,6 +37,7 @@ ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
 
 if TYPE_CHECKING:
+    from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
     from torch.types import _dtype as DType
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
@@ -3662,6 +3664,7 @@ def linear_cross_entropy(
     reduction: str = "mean",
     ignore_index: int | None = None,
     label_smoothing: float = 0.0,
+    options: "LinearCrossEntropyOptions | None" = None,
 ) -> Tensor:
     r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
 
@@ -3709,6 +3712,37 @@ def linear_cross_entropy(
             Architecture for Computer Vision
             <https://arxiv.org/abs/1512.00567>`__.
             Default: :math:`0.0`.
+        options (LinearCrossEntropyOptions, optional): Specify
+            chunking strategy options, see
+            :class:`~torch.nn.LinearCrossEntropyOptions`
+            for more details. Enabling chunking will decrease the
+            memory usage.  To enable reference implementation of
+            ``linear_cross_entropy``, use `options=None`. Default:
+            ``None``. See the autograd / compile note below for
+            which higher-level APIs (``torch.compile``,
+            ``torch.func.grad``, ``torch.func.vmap(grad(...))``,
+            higher-order or forward-mode AD) only work on the
+            ``options=None`` reference path.
+
+    .. note::
+        **Limitations of the chunked path** (``options`` not ``None``).
+        The chunked op precomputes gradients inside forward and consumes
+        them via in-place backward mutation, which puts it outside the
+        standard autograd contract:
+
+        - Higher-order AD (``create_graph=True``, ``hessian``) is
+          unsupported.
+        - Forward-mode AD (``jvp``, ``jacfwd``) is unsupported.
+        - ``torch.func.grad`` / ``vmap(grad(...))`` does not work, but
+          plain ``output.backward()`` does.
+        - ``torch.compile`` falls back to eager at the chunked op;
+          ``allow_retain_graph=True`` is forced internally to keep
+          double-backward correct (with a warning).
+        - ``torch.jit.trace`` falls back to the reference path with a
+          warning.
+        - :class:`LinearCrossEntropyOptions` is not TorchScript-scriptable.
+
+        The reference path (``options=None``) supports all of the above.
 
     Shape:
         - Input: :math:`(in_features)` or :math:`(N, in\_features)`.
@@ -3750,6 +3784,7 @@ def linear_cross_entropy(
             reduction=reduction,
             ignore_index=ignore_index,
             label_smoothing=label_smoothing,
+            options=options,
         )
     if input.dim() < 1 or input.dim() > 2:
         raise RuntimeError(
@@ -3785,11 +3820,92 @@ def linear_cross_entropy(
         )
     ignore_index = ignore_index if ignore_index is not None else -100
 
+    # K-dim loss falls back: the chunked op softmaxes over the full
+    # linear_weight.shape[0], not per-position over num_classes.
+    if options is not None and (
+        out_features
+        or reduction not in {"mean", "sum"}
+        or label_smoothing != 0.0
+        or target.dtype != torch.int64
+        or torch.jit.is_tracing()
+    ):
+        warnings.warn(
+            "linear_cross_entropy: ``options`` ignored; chunked path needs "
+            "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
+            " == int64, out_features == (), and not under torch.jit.trace."
+            f" Got reduction={reduction!r}, label_smoothing={label_smoothing}, "
+            f"target.dtype={target.dtype}, out_features={tuple(out_features)}, "
+            f"tracing={torch.jit.is_tracing()}.",
+            stacklevel=2,
+        )
+
+    if (
+        options is not None
+        and reduction in {"mean", "sum"}
+        and label_smoothing == 0.0
+        and target.dtype == torch.int64
+        and not out_features
+        and not torch.jit.is_tracing()
+    ):
+        if input.dim() == 2:
+            num_batches = input.shape[0]
+            has_batches = True
+        else:
+            num_batches = 1
+            has_batches = False
+            input = input.unsqueeze(0)
+            target = target.unsqueeze(0)
+
+        options = options._adjust(
+            num_batches=num_batches,
+            in_features=in_features,
+            num_classes=num_classes,
+            dtype=input.dtype,
+            device=input.device,
+        )
+
+        # Force allow_retain_graph=True under torch.compile: the default
+        # second-backward guard uses a Python ``ctx._gi = None`` mutation
+        # that Dynamo doesn't preserve, breaking double-backward.
+        if not options.allow_retain_graph and torch.compiler.is_compiling():
+            warnings.warn(
+                "linear_cross_entropy: forcing allow_retain_graph=True under "
+                "torch.compile (adds one gradient-sized allocation/call). "
+                "Construct options with allow_retain_graph=True to silence.",
+                stacklevel=2,
+            )
+            options = dataclasses.replace(options, allow_retain_graph=True)
+
+        # Local import avoids a circular init via torch.library.custom_op.
+        from torch.nn.modules.linear_cross_entropy import (
+            _linear_cross_entropy_batch_chunked,
+        )
+
+        result = _linear_cross_entropy_batch_chunked(
+            input,
+            linear_weight,
+            target,
+            weight,
+            reduction,
+            ignore_index,
+            label_smoothing,
+            options.batch_chunk_size,
+            options.acc_policy,
+            options.acc_dtype,
+            options.allow_retain_graph,
+            input.requires_grad and torch.is_grad_enabled(),
+            linear_weight.requires_grad and torch.is_grad_enabled(),
+        )[0]
+
+        if not has_batches:
+            result = result.squeeze(0)
+        return result
+
     if out_features:
-        # reshape linear_weight to 2D required by linear
         linear_weight = linear_weight.reshape(
             (math.prod(out_features, start=num_classes), in_features)
         )
+
     logits = linear(input, linear_weight)
     # recover logits shape that corresponds to the shape of specified
     # linear_weight:
@@ -4815,8 +4931,9 @@ def interpolate(  # noqa: F811
             for out-of-boundary values, making this operation *independent* of input size
             when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
-            Default: ``None``. When ``None`` and :attr:`mode` is one of the linear modes,
-            it is treated as ``False``.
+            Default: ``None``. ``None`` leaves :attr:`align_corners` unset for modes
+            that do not use it. For modes that use :attr:`align_corners`, ``None``
+            is treated as ``False``.
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
             interpolation calculation. If `recompute_scale_factor` is ``True``, then
             `scale_factor` must be passed in and `scale_factor` is used to compute the
@@ -4857,11 +4974,11 @@ def interpolate(  # noqa: F811
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
-            interpolate,
+            interpolate,  # pyrefly: ignore [bad-argument-type]
             (input,),
             input,
             size=size,
-            scale_factor=scale_factor,
+            scale_factor=scale_factor,  # pyrefly: ignore [bad-argument-type]
             mode=mode,
             align_corners=align_corners,
             recompute_scale_factor=recompute_scale_factor,
@@ -6840,9 +6957,7 @@ def multi_head_attention_forward(
         if not torch.jit.is_scripting():
             del v
 
-        attn_output = (
-            attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
-        )
+        attn_output = attn_output.transpose(0, 1).reshape(tgt_len * bsz, embed_dim)
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
         attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
 
@@ -6877,14 +6992,12 @@ def multi_head_attention_forward(
             q, k, v, attn_mask, dropout_p, is_causal
         )
         # Free q, k, v and their backing projection storage before the
-        # .contiguous() call below allocates.  In self-attention the three
-        # tensors are views of a single packed projection, so releasing all
-        # references here lets the allocator reclaim that memory immediately.
+        # reshape() below allocates.  In self-attention the three tensors are
+        # views of a single packed projection, so releasing all references
+        # here lets the allocator reclaim that memory immediately.
         if not torch.jit.is_scripting():
             del q, k, v
-        attn_output = (
-            attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
-        )
+        attn_output = attn_output.permute(2, 0, 1, 3).reshape(bsz * tgt_len, embed_dim)
 
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
         attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
@@ -6940,6 +7053,30 @@ def grouped_mm(
     return torch._grouped_mm(mat_a, mat_b, offs=offs, bias=bias, out_dtype=out_dtype)
 
 
+def _expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
+    if v is None:
+        return []
+    elif not isinstance(v, list):
+        return [v]
+    else:
+        return v
+
+
+def _list_or_empty(l: list[_Any] | None) -> list[_Any]:
+    """Convert None to a list for native_functions list arguments.
+
+    native_functions cannot pass std::optional<ArrayRef<T>>, but can pass an
+    empty vector, so None arguments for lists must be converted explicitly.
+    """
+    return l if l else []
+
+
+def _enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
+    if not isinstance(l, list):
+        l = [l]
+    return [li.value for li in l]
+
+
 def scaled_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -6974,47 +7111,22 @@ def scaled_mm(
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
-    def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
-        if v is None:
-            return []
-        elif not isinstance(v, (list)):
-            return [
-                v,
-            ]
-        else:
-            return v
-
-    scale_a = expand_single_value(scale_a)
-    scale_recipe_a = expand_single_value(scale_recipe_a)
-    scale_b = expand_single_value(scale_b)
-    scale_recipe_b = expand_single_value(scale_recipe_b)
-    swizzle_a = expand_single_value(swizzle_a)
-    swizzle_b = expand_single_value(swizzle_b)
-
-    # native_functions has restrictions on what can be defined
-    # & passed through - std::optional<ArrayRef<Tensor>> for instance
-    # *cannot* be passed, but an empty vector (list) can.
-    # So, we need to convert None arguments for lists in python
-    # explicitly into empty lists.
-    def list_or_empty(l: list[_Any] | None) -> list[_Any]:
-        return l if l else []
-
-    def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
-        if not isinstance(l, list):
-            l = [
-                l,
-            ]
-        return [li.value for li in l]
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
 
     out = torch._scaled_mm_v2(
         mat_a,
         mat_b,
         scale_a,
-        enum_list_as_int_list(scale_recipe_a),
-        enum_list_as_int_list(list_or_empty(swizzle_a)),
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
         scale_b,
-        enum_list_as_int_list(scale_recipe_b),
-        enum_list_as_int_list(list_or_empty(swizzle_b)),
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
         bias,
         output_dtype,
         contraction_dim,
@@ -7060,47 +7172,22 @@ def scaled_grouped_mm(
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
-    def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
-        if v is None:
-            return []
-        elif not isinstance(v, (list)):
-            return [
-                v,
-            ]
-        else:
-            return v
-
-    scale_a = expand_single_value(scale_a)
-    scale_recipe_a = expand_single_value(scale_recipe_a)
-    scale_b = expand_single_value(scale_b)
-    scale_recipe_b = expand_single_value(scale_recipe_b)
-    swizzle_a = expand_single_value(swizzle_a)
-    swizzle_b = expand_single_value(swizzle_b)
-
-    # native_functions has restrictions on what can be defined
-    # & passed through - std::optional<ArrayRef<Tensor>> for instance
-    # *cannot* be passed, but an empty vector (list) can.
-    # So, we need to convert None arguments for lists in python
-    # explicitly into empty lists.
-    def list_or_empty(l: list[_Any] | None) -> list[_Any]:
-        return l if l else []
-
-    def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
-        if not isinstance(l, list):
-            l = [
-                l,
-            ]
-        return [li.value for li in l]
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
 
     out = torch._scaled_grouped_mm_v2(
         mat_a,
         mat_b,
         scale_a,
-        enum_list_as_int_list(scale_recipe_a),
-        enum_list_as_int_list(list_or_empty(swizzle_a)),
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
         scale_b,
-        enum_list_as_int_list(scale_recipe_b),
-        enum_list_as_int_list(list_or_empty(swizzle_b)),
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
         offs,
         bias,
         output_dtype,

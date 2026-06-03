@@ -2789,6 +2789,24 @@ class TestTensorCreation(TestCase):
         self.assertEqual(t[-1].item(), 2)
         del t
 
+        # On ROCm, launches with gridDim.x * blockDim.x >= 2^32 are not
+        # supported and either return hipErrorInvalidConfiguration or fail
+        # silently. Exercise the just-over case (~16 GB at int32) and a
+        # far-above case (~33 GB) when memory permits. arange computes
+        # int64 values then casts down, so for int32 the trailing
+        # 2^32 - 2, 2^32 - 1, 2^32 wrap to -2, -1, 0.
+        if TEST_WITH_ROCM:
+            for bigint in (2 ** 32 + 1, 2 ** 33 + 1):
+                free, _ = torch.cuda.mem_get_info(device)
+                if free < bigint * 4 + (3 << 30):
+                    continue
+                t = torch.arange(bigint, dtype=torch.int32, device=device)
+                self.assertEqual(t.numel(), bigint)
+                self.assertEqual(
+                    t[-3:].cpu(), torch.tensor([-2, -1, 0], dtype=torch.int32)
+                )
+                del t
+
     @expectedFailureMeta  # RuntimeError: The tensor has a non-zero number of elements
     @onlyNativeDeviceTypes
     def test_tensor_ctor_device_inference(self, device):

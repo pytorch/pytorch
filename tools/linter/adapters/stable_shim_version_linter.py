@@ -20,37 +20,15 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.linter.adapters._stable_shim_utils import (
+    get_current_version,
     LintMessage,
     LintSeverity,
+    MULTILINE_MATCHERS,
     PreprocessorTracker,
 )
-from tools.setup_helpers.gen_version_header import parse_version
 
 
 LINTER_CODE = "STABLE_SHIM_VERSION"
-
-
-def get_current_version() -> tuple[int, int]:
-    """
-    Get the current PyTorch version from version.txt.
-    This uses the same logic as tools/setup_helpers/gen_version_header.py
-    which is used to generate torch/headeronly/version.h from version.h.in.
-
-    Returns (major, minor) tuple or None if not found.
-    """
-    repo_root = Path(__file__).resolve().parents[3]
-    version_file = repo_root / "version.txt"
-
-    if not version_file.exists():
-        raise RuntimeError(
-            "Could not find version.txt. This linter requires version.txt to run"
-        )
-
-    with open(version_file) as f:
-        version = f.read().strip()
-        major, minor, patch = parse_version(version)
-
-    return (major, minor)
 
 
 def get_added_lines(filename: str) -> set[int]:
@@ -161,8 +139,8 @@ def check_file(filename: str) -> list[LintMessage]:
 
     # Get current version
     current_version = get_current_version()
-    major, minor = current_version
-    expected_version_macro = f"TORCH_VERSION_{major}_{minor}_0"
+    major, minor, patch = current_version
+    expected_version_macro = f"TORCH_VERSION_{major}_{minor}_{patch}"
     expected_version_check = f"#if TORCH_FEATURE_VERSION >= {expected_version_macro}"
 
     # Get lines that are uncommitted or added in the most recent commit
@@ -172,7 +150,7 @@ def check_file(filename: str) -> list[LintMessage]:
         lines = f.readlines()
 
     # Use PreprocessorTracker to handle preprocessor directives
-    tracker = PreprocessorTracker()
+    tracker = PreprocessorTracker(MULTILINE_MATCHERS)
 
     # Track extern "C" blocks separately
     inside_extern_c = False
@@ -180,13 +158,6 @@ def check_file(filename: str) -> list[LintMessage]:
     # Patterns for extern "C" blocks
     extern_c_pattern = re.compile(r'extern\s+"C"\s*{')
     extern_c_end_pattern = re.compile(r'}\s*//\s*extern\s+"C"')
-
-    # Function declaration patterns - looking for AOTI_TORCH_EXPORT or typedef
-    function_decl_patterns = [
-        re.compile(r"^\s*AOTI_TORCH_EXPORT\s+\w+"),  # AOTI_TORCH_EXPORT functions
-        re.compile(r"^\s*typedef\s+.*\(\*\w+\)"),  # typedef function pointers
-        re.compile(r"^\s*using\s+\w+\s*="),  # using declarations
-    ]
 
     for line_num, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -211,17 +182,13 @@ def check_file(filename: str) -> list[LintMessage]:
 
         # Check for function declarations
         if inside_extern_c:
-            is_function_decl = any(
-                pattern.match(stripped) for pattern in function_decl_patterns
-            )
-
-            if is_function_decl:
+            for identifier_version in tracker.identifiers_used():
                 # Check if this is a newly added line
                 is_new_line = line_num in added_lines
 
                 # Get current version state from tracker
-                inside_version_block = tracker.is_in_version_block()
-                tracker_version = tracker.get_version_of_block()
+                inside_version_block = identifier_version.version is not None
+                tracker_version = identifier_version.version
                 version_of_block_macro = (
                     f"TORCH_VERSION_{tracker_version[0]}_{tracker_version[1]}_0"
                     if tracker_version
