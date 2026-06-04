@@ -4,7 +4,6 @@ import math
 import sys
 import warnings
 from typing import Any, cast, TYPE_CHECKING
-from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
@@ -343,39 +342,44 @@ def reduce_scatter_single_autograd(
     return res
 
 
-@deprecated(
-    "`torch.distributed._functional_collectives.all_gather_tensor` is deprecated. "
-    "Please use `torch.distributed._functional_collectives.all_gather_single` instead.",
-    category=FutureWarning,
-)
+# The deprecated *_tensor aliases warn only outside compile: the
+# typing_extensions @deprecated wrapper lives in a Dynamo-skipped module, and a
+# raw warnings.warn is an untraceable builtin, either of which breaks
+# fullgraph=True tracing of these still-supported entry points. Guarding on
+# is_compiling() keeps the eager-time deprecation while letting Dynamo trace
+# straight through to the _single implementation.
 def all_gather_tensor(
     self: torch.Tensor,
     gather_dim: int,
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.all_gather_tensor` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.all_gather_single` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
     return all_gather_single(self, gather_dim, group, tag)
 
 
-@deprecated(
-    "`torch.distributed._functional_collectives.all_gather_tensor_autograd` is deprecated. "
-    "Please use `torch.distributed._functional_collectives.all_gather_single_autograd` instead.",
-    category=FutureWarning,
-)
 def all_gather_tensor_autograd(
     self: torch.Tensor,
     gather_dim: int,
     group: RANK_TYPES,
     tag: str = "",
 ):
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.all_gather_tensor_autograd` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.all_gather_single_autograd` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
     return all_gather_single_autograd(self, gather_dim, group, tag)
 
 
-@deprecated(
-    "`torch.distributed._functional_collectives.reduce_scatter_tensor` is deprecated. "
-    "Please use `torch.distributed._functional_collectives.reduce_scatter_single` instead.",
-    category=FutureWarning,
-)
 def reduce_scatter_tensor(
     self: torch.Tensor,
     reduceOp: str,
@@ -383,14 +387,16 @@ def reduce_scatter_tensor(
     group: RANK_TYPES,
     tag: str = "",
 ):
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.reduce_scatter_tensor` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.reduce_scatter_single` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
     return reduce_scatter_single(self, reduceOp, scatter_dim, group, tag)
 
 
-@deprecated(
-    "`torch.distributed._functional_collectives.reduce_scatter_tensor_autograd` is deprecated. "
-    "Please use `torch.distributed._functional_collectives.reduce_scatter_single_autograd` instead.",
-    category=FutureWarning,
-)
 def reduce_scatter_tensor_autograd(
     self: torch.Tensor,
     reduceOp: str,
@@ -398,6 +404,13 @@ def reduce_scatter_tensor_autograd(
     group: RANK_TYPES,
     tag: str = "",
 ):
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.reduce_scatter_tensor_autograd` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.reduce_scatter_single_autograd` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
     return reduce_scatter_single_autograd(self, reduceOp, scatter_dim, group, tag)
 
 
