@@ -196,7 +196,7 @@ at::Tensor& all_gather_into_tensor_out(
   auto contig_input = input.contiguous();
   c10d::AllgatherOptions opts;
 
-  auto work = group->all_gather_single(output, contig_input, opts);
+  auto work = group->_allgather_base(output, contig_input, opts);
   c10d::register_work(output, work);
   return output;
 }
@@ -374,7 +374,7 @@ at::Tensor all_to_all_single(
       output_split_sizes.begin(), output_split_sizes.end(), int64_t(0));
   auto output = contig_input.new_empty(output_sizes);
 
-  auto work = group->all_to_all_single(
+  auto work = group->alltoall_base(
       output,
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<at::Tensor&>(contig_input),
@@ -1109,7 +1109,7 @@ at::Tensor shard_dim_alltoall(
   std::vector<int64_t> in_split_sizes;
   c10d::AllToAllOptions opts;
 
-  auto work = group->all_to_all_single(
+  auto work = group->alltoall_base(
       recv_tensor, tensor_for_comm, out_split_sizes, in_split_sizes, opts);
 
   // TODO: it's tricky to get the current async behavior work for shard dim
