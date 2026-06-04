@@ -1238,7 +1238,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         # Use functional collectives which return AsyncCollectiveTensor
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
-            result = _functional_collectives.all_gather_tensor(
+            result = _functional_collectives.all_gather_single(
                 tensor, gather_dim=0, group=dist.group.WORLD
             )
 
