@@ -111,6 +111,7 @@ class StaticallyLaunchedTritonKernel:
         # pyrefly: ignore [missing-attribute]
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: int | None = None  # Loaded by load_kernel(on the parent process)
+        self.module: int | None = None  # Owns the HIP/CUDA module loaded for function
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas
@@ -141,12 +142,28 @@ class StaticallyLaunchedTritonKernel:
 
         assert hasattr(self, "cubin_path")
         assert self.cubin_path is not None
-        (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
-            self.cubin_path, self.name, self.shared, device
+        (self.module, self.function, self.n_regs, self.n_spills) = (
+            self.C_impl._load_kernel(self.cubin_path, self.name, self.shared, device)
         )
         # Don't need the cubin path anymore now that we've loaded
         self.cubin_path = None
         self.cubin_raw = None
+
+    def close(self) -> None:
+        mod = self.module
+        if mod is None:
+            return
+        # Clear Python-visible handles first so repeated cleanup is harmless even if
+        # the driver reports an error while unloading.
+        self.module = None
+        self.function = None
+        self.C_impl._unload_kernel(mod)
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @staticmethod
     @functools.lru_cache
@@ -224,6 +241,7 @@ class StaticallyLaunchedTritonKernel:
         # Remove objects that are no longer valid for pickling
         state = self.__dict__.copy()
         state["function"] = None
+        state["module"] = None
         # Cubin paths aren't consistent across processes, so we clear
         # and reload them.
         state["cubin_path"] = None
@@ -336,6 +354,26 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         # pyrefly: ignore [missing-attribute]
         self.cubin_raw = kernel.asm.get("zebin", None)
         super().__init__(kernel)
+
+    def load_kernel(self, device: int) -> None:
+        if self.function is not None:
+            return
+
+        assert hasattr(self, "cubin_path")
+        assert self.cubin_path is not None
+        # The XPU static launcher returns a PyCapsule for the loaded SYCL kernel,
+        # not a separate module/function pair like the CUDA/HIP launcher.
+        (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
+            self.cubin_path, self.name, self.shared, device
+        )
+        self.module = None
+        self.cubin_path = None
+        self.cubin_raw = None
+
+    def close(self) -> None:
+        self.module = None
+        # Drop the PyCapsule reference so its destructor can release sycl::kernel.
+        self.function = None
 
 
 def statically_launched_kernel_by_device(

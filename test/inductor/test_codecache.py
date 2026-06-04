@@ -345,6 +345,34 @@ class TestPyCodeCache(TestCase):
         stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
         self.assertEqual(stack_frames, None)
 
+    def test_load_by_key_path_can_defer_sys_modules_registration(self):
+        """
+        Benchmark-only modules should not need a global ``sys.modules`` entry,
+        but a later normal runtime load must still be able to publish the same
+        cached module there.
+        """
+        module_name = None
+        try:
+            PyCodeCache.cache_clear()
+            key, path = PyCodeCache.write("value = 1\n")
+
+            module = PyCodeCache.load_by_key_path(
+                key,
+                path,
+                set_sys_modules=False,
+            )
+            module_name = module.__name__
+            self.assertNotIn(module_name, sys.modules)
+
+            registered_module = PyCodeCache.load_by_key_path(key, path)
+            self.assertIs(registered_module, module)
+            self.assertIn(module_name, sys.modules)
+            self.assertIs(sys.modules[module_name], module)
+        finally:
+            if module_name is not None:
+                sys.modules.pop(module_name, None)
+            PyCodeCache.cache_clear()
+
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_editable_cached_wrapper(self):
         with tempfile.TemporaryDirectory() as tmpdir:

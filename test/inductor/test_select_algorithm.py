@@ -716,6 +716,66 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
 
+class TestSelectAlgorithmCleanup(TestCase):
+    def test_benchmark_only_clears_matching_precompile_cache_entry(self):
+        """
+        Autotune cleanup should release only the closure for the active site.
+        Clearing the whole precompile cache regresses compile-time reuse for
+        unrelated autotune sites.
+        """
+        cache = select_algorithm.AlgorithmSelectorCache()
+        cache.precompile_cache = {"keep": dict, "drop": dict}
+
+        with patch.object(cache, "make_benchmark_fn", return_value=lambda _choices: {}):
+            cache.benchmark([], [], unittest.mock.Mock(), None, precompile_key="drop")
+
+        self.assertIn("keep", cache.precompile_cache)
+        self.assertNotIn("drop", cache.precompile_cache)
+
+    def test_release_benchmark_artifacts_closes_and_clears_state(self):
+        """
+        Benchmark-only autotuners own temporary launchers and compile results.
+        Cleanup must close their module owners and clear the references that
+        otherwise keep Triton ``CompiledKernel`` objects alive.
+        """
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        closed = []
+
+        class FakeKernel:
+            def __init__(self, name):
+                self.name = name
+
+            def close(self):
+                closed.append(self.name)
+
+        class FakeCompileResult:
+            def __init__(self, name):
+                self.kernel = FakeKernel(name)
+
+        def fake_launcher():
+            return None
+
+        launcher_kernel = FakeKernel("launcher")
+        fake_launcher.__self__ = launcher_kernel  # type: ignore[attr-defined]
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.launchers = [fake_launcher]
+        autotuner.compile_results = [FakeCompileResult("compile_result")]
+        autotuner.benchmark_failure_reasons = {fake_launcher: "failed"}
+        autotuner._cached_launcher = fake_launcher
+        autotuner._debug_call = object()
+
+        autotuner.release_benchmark_artifacts()
+
+        self.assertEqual(closed, ["launcher", "compile_result"])
+        self.assertEqual(autotuner.launchers, [])
+        self.assertEqual(autotuner.compile_results, [])
+        self.assertEqual(autotuner.benchmark_failure_reasons, {})
+        self.assertIsNone(autotuner._cached_launcher)
+        self.assertIsNone(autotuner._debug_call)
+
+
 class TestExternKernelCaller(TestCase):
     @requires_gpu()
     @patches

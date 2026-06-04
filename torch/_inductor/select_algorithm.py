@@ -2807,7 +2807,7 @@ class TritonTemplate(KernelTemplate):
 
         assert code is not None and extra is not None
 
-        mod = PyCodeCache.load(code, extra)
+        mod = PyCodeCache.load(code, extra, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
         prologue_supported_inputs = kernel.prologue_supported_inputs.copy()
@@ -3606,6 +3606,27 @@ def create_precompile_key(
     )
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class PrecompileFunction:
+    """Callable precompile wrapper that carries its cache key for scoped cleanup."""
+
+    fn: Callable[[], dict[ChoiceCaller, float]]
+    precompile_key: str | None = None
+
+    def __call__(self) -> dict[ChoiceCaller, float]:
+        return self.fn()
+
+
+def _benchmark_request_for_choice(choice: ChoiceCaller) -> Any | None:
+    bmreq = getattr(choice, "_bmreq", None)
+    if bmreq is not None:
+        return bmreq
+    try:
+        return vars(choice).get("bmreq")
+    except TypeError:
+        return None
+
+
 # Args to FeedbackFunctions
 # timings: mapping from choices to the benchmark time
 # name: name of the op
@@ -3792,7 +3813,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # no guarantee that the first lowering for a given key will also be the
         # first to benchmark it. share a single precompilation function for all lowerings
         # of a particular key
-        self.precompile_cache: dict[str, Callable[[], dict[ChoiceCaller, float]]] = {}
+        self.precompile_cache: dict[str, PrecompileFunction] = {}
         # cache for prescreening results to ensure deterministic candidate selection
         self.prescreening_cache: dict[str, OrderedSet[str]] = {}
         # list of callbacks that are called after benchmarking
@@ -4118,6 +4139,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns,
         hint_override: int | None = None,
         is_collective=False,
+        precompile_key: str | None = None,
     ):
         counters["inductor"]["select_algorithm_autotune"] += 1
         # TODO(nmacchioni): remove this layer of abstraction
@@ -4132,7 +4154,32 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
         # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
-        return benchmark_fn(choices)
+        try:
+            return benchmark_fn(choices)
+        finally:
+            # Safety net for failures before individual BenchmarkRequest cleanup
+            # can run; request-level cleanup remains the authoritative owner cleanup.
+            evict_paths = OrderedSet(
+                [
+                    path
+                    for choice in choices
+                    for bmreq in (_benchmark_request_for_choice(choice),)
+                    for path in (getattr(bmreq, "module_path", None),)
+                    if path is not None
+                ]
+            )
+            if evict_paths:
+                for path in evict_paths:
+                    PyCodeCache.modules_no_attr.pop(path, None)
+                    PyCodeCache.linemaps.pop(path, None)
+                PyCodeCache.modules[:] = [
+                    module
+                    for module in PyCodeCache.modules
+                    if getattr(module, "__file__", None) not in evict_paths
+                ]
+
+            if precompile_key is not None:
+                self.precompile_cache.pop(precompile_key, None)
 
     def autotune(
         self,
@@ -4143,6 +4190,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices,
         hint_override: int | None = None,
         is_collective=False,
+        precompile_key: str | None = None,
     ):
         log.debug("Starting autotuning")
 
@@ -4159,6 +4207,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_gen_fns,
                 hint_override=hint_override,
                 is_collective=is_collective,
+                precompile_key=precompile_key,
             )
             if config.max_autotune_report_choices_stats:
                 _log_autotune_choices_stats(
@@ -4208,6 +4257,8 @@ class AlgorithmSelectorCache(PersistentCache):
             NoValidChoicesError: When all choices fail to compile or benchmark, or when all
                 timing results are non-finite.
         """
+        precompile_key = getattr(precompile_fn, "precompile_key", None)
+
         if log.isEnabledFor(logging.DEBUG) and not use_pipelined_autotuning():
             # Log shape information for debugging timeout issues
             sizevars = V.graph.sizevars
@@ -4325,6 +4376,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 choices,
                 hint_override=hint_override,
                 is_collective=is_collective,
+                precompile_key=precompile_key,
             )
 
         timings = self.lookup(
@@ -4610,9 +4662,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     precompile_times[choice] = elapsed_times[future]
             return precompile_times
 
-        self.precompile_cache[precompile_key] = wait_on_futures
+        precompile_fn = PrecompileFunction(wait_on_futures, precompile_key)
+        self.precompile_cache[precompile_key] = precompile_fn
 
-        return wait_on_futures
+        return precompile_fn
 
     @classmethod
     def get_inputs(
@@ -4791,18 +4844,26 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
-        result = choice.benchmark(*inputs, out=output)
-        device_type = next(
-            (tensor.device.type for tensor in inputs if is_gpu(tensor.device.type)),
-            "cuda",
-        )
-        device_interface = get_interface_for_device(device_type)
-        if device_interface.is_available():
-            device_interface.synchronize()  # shake out any CUDA errors
+        try:
+            result = choice.benchmark(*inputs, out=output)
+            device_type = next(
+                (tensor.device.type for tensor in inputs if is_gpu(tensor.device.type)),
+                "cuda",
+            )
+            device_interface = get_interface_for_device(device_type)
+            if device_interface.is_available():
+                device_interface.synchronize()  # shake out any CUDA errors
 
-        if VERIFY and autotune_args.expected is not None:
-            autotune_args.verify(**VERIFY)
-        return result
+            if VERIFY and autotune_args.expected is not None:
+                autotune_args.verify(**VERIFY)
+            return result
+        finally:
+            bmreq = _benchmark_request_for_choice(choice)
+            cleanup_run_fn = getattr(bmreq, "cleanup_run_fn", None)
+            if cleanup_run_fn is not None:
+                # In-process autotuning owns the loaded benchmark module, so clean it
+                # immediately after each choice. The outer benchmark cleanup is a fallback.
+                cleanup_run_fn()
 
     @classmethod
     def _run_collective_benchmark(
