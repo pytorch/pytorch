@@ -170,7 +170,7 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
     outputs.push_back(allocate_all_gather_output(tensor, group_size));
   }
 
-  auto work = group->allgather_into_tensor_coalesced(outputs, inputs);
+  auto work = group->all_gather_single_coalesced(outputs, inputs);
   for (const auto& tensor : outputs) {
     c10d::register_work(tensor, work);
   }
@@ -254,7 +254,7 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
     outputs.push_back(allocate_reduce_scatter_output(tensor, group_size));
   }
 
-  auto work = group->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
+  auto work = group->reduce_scatter_single_coalesced(outputs, inputs, opts);
   for (const auto& tensor : outputs) {
     c10d::register_work(tensor, work);
   }
@@ -271,7 +271,7 @@ static std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
   c10d::ReduceScatterOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
-  auto work = group->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
+  auto work = group->reduce_scatter_single_coalesced(outputs, inputs, opts);
   for (const auto& tensor : outputs) {
     c10d::register_work(tensor, work);
   }
