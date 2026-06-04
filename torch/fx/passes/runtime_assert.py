@@ -1,6 +1,5 @@
 import functools
 import logging
-import operator
 import sys
 from collections.abc import Callable
 from typing import Any, Optional, TYPE_CHECKING
@@ -97,11 +96,7 @@ def insert_deferred_runtime_asserts(
     from torch.fx.experimental.symbolic_shapes import (
         _get_placeholder_expr,
         _has_uninterpretable_sympy_function,
-        CallMethodKey,
-        ConvertIntKey,
-        DivideByKey,
         free_symbols,
-        InnerTensorKey,
         resolve_unbacked_bindings,
         RuntimeAssert,
     )
@@ -210,6 +205,8 @@ def insert_deferred_runtime_asserts(
     def _sympy_interp(
         expr_to_proxy: dict[sympy.Expr, fx.Proxy], expr: sympy.Expr
     ) -> fx.Proxy:
+        # Lower a sympy expression into the graph and return the resulting
+        # Proxy (use .node to get the FX node representing ``expr``).
         # sympy_interp() with hash consing
         from sympy import Integer, Number, Symbol
         from sympy.logic.boolalg import BooleanAtom
@@ -412,23 +409,17 @@ def insert_deferred_runtime_asserts(
                     for i, s in enumerate(t.size()):
                         match_symbol(
                             s,
-                            lambda: graph.call_function(
-                                torch.ops.aten.sym_size.int, (node, i)
-                            ),
+                            lambda: graph.create_size_node(node, i),
                         )
                     if not is_sparse_any(t):
                         for i, s in enumerate(t.stride()):
                             match_symbol(
                                 s,
-                                lambda: graph.call_function(
-                                    torch.ops.aten.sym_stride.int, (node, i)
-                                ),
+                                lambda: graph.create_stride_node(node, i),
                             )
                         match_symbol(
                             t.storage_offset(),
-                            lambda: graph.call_function(
-                                torch.ops.aten.sym_storage_offset.default, (node,)
-                            ),
+                            lambda: graph.create_storage_offset_node(node),
                         )
 
             # Handle asserts that aren't associated with any symbol.  This
@@ -554,79 +545,9 @@ def insert_deferred_runtime_asserts(
 
                     # TODO: some CSE when generating these nodes can probably
                     # help reduce graph size and improve compile time
-                    def go(node: fx.Node, keypath: tuple[object, ...]) -> fx.Node:
-                        if keypath == ():
-                            return node
-                        if (
-                            len(keypath) >= 2
-                            and isinstance(keypath[0], CallMethodKey)
-                            and isinstance(keypath[1], pytree.SequenceKey)
-                        ):
-                            if keypath[0].name == "size":
-                                return go(
-                                    graph.call_function(
-                                        torch.ops.aten.sym_size.int,
-                                        (node, keypath[1].idx),
-                                    ),
-                                    keypath[2:],
-                                )
-                            if keypath[0].name == "stride":
-                                return go(
-                                    graph.call_function(
-                                        torch.ops.aten.sym_stride.int,
-                                        (node, keypath[1].idx),
-                                    ),
-                                    keypath[2:],
-                                )
-
-                            return go(
-                                graph.call_method(
-                                    keypath[0].name, (node, keypath[1].idx)
-                                ),
-                                keypath[2:],
-                            )
-                        elif isinstance(keypath[0], CallMethodKey):
-                            if keypath[0].name == "storage_offset":
-                                return go(
-                                    graph.call_function(
-                                        torch.ops.aten.sym_storage_offset.default,
-                                        (node,),
-                                    ),
-                                    keypath[1:],
-                                )
-
-                            return go(
-                                graph.call_method(keypath[0].name, (node,)), keypath[1:]
-                            )
-                        elif isinstance(keypath[0], pytree.SequenceKey):
-                            return go(
-                                graph.call_function(
-                                    operator.getitem, (node, keypath[0].idx)
-                                ),
-                                keypath[1:],
-                            )
-                        elif isinstance(keypath[0], ConvertIntKey):
-                            return go(
-                                graph.call_function(torch.sym_ite, (node, 1, 0)),
-                                keypath[1:],
-                            )
-                        elif isinstance(keypath[0], DivideByKey):
-                            # TODO: need to assert divisibility
-                            return go(
-                                graph.call_function(
-                                    operator.floordiv, (node, keypath[0].divisor)
-                                ),
-                                keypath[1:],
-                            )
-                        elif isinstance(keypath[0], InnerTensorKey):
-                            return go(
-                                graph.call_function(
-                                    getattr, (node, keypath[0].inner_name)
-                                ),
-                                keypath[1:],
-                            )
-                        else:
-                            raise AssertionError(f"unrecognized keypath {keypath}")
+                    def _lower_symint_divisor(d: torch.SymInt) -> fx.Node | int:
+                        p = _sympy_interp(expr_to_proxy, d.node.expr)
+                        return p.node if isinstance(p, fx.Proxy) else p
 
                     if s not in expr_to_proxy:
                         with _set_node_metadata_hook(
@@ -641,7 +562,12 @@ def insert_deferred_runtime_asserts(
                             ),
                         ):
                             expr_to_proxy[s] = fx.Proxy(
-                                go(node, keypath), tracer=tracer
+                                graph._resolve_unbacked_binding(
+                                    node,
+                                    tuple(keypath),
+                                    lower_symint=_lower_symint_divisor,
+                                ),
+                                tracer=tracer,
                             )
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
 
