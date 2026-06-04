@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
-    skipIfXpu,
     xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
@@ -87,7 +86,79 @@ def _fix_fp8_dtype_for_rocm(
     return dtype
 
 
+def _prepare_blockwise_scale(
+    inverse_scale: torch.Tensor,
+    block_outer: int,
+    block_inner: int,
+    transposed: bool,
+) -> torch.Tensor:
+    # The cuBLAS blockwise kernels expect outer-dim-major scales for 1x128 blocks
+    # and shape (round_up(K/128, 4), {M,N}/128) for 128x128 blocks (inner dim
+    # padded to a multiple of 4 before the transpose). `transposed` indicates
+    # whether the corresponding data tensor was transposed (e.g. weight passed
+    # as w.t()): if so we apply one additional transpose to keep the scale
+    # aligned with the data layout.
+    if (block_outer, block_inner) == (1, 128):
+        out = inverse_scale.t().contiguous().t()
+        return out.t() if transposed else out
+    pad_amount = (-inverse_scale.shape[-1]) % 4
+    if pad_amount:
+        inverse_scale = torch.nn.functional.pad(
+            inverse_scale, (0, pad_amount), "constant", 0
+        )
+    return inverse_scale.t()
+
+
 class TestFP8Types(TestCase):
+    @onlyCUDA
+    @skipIfRocm
+    @config.patch({"force_disable_caches": True})
+    def test_float8_e4m3fn_uint8_decode_codegen(self, device):
+        import torch._inductor.codegen.triton as triton_codegen
+        import torch._inductor.codegen.triton_utils as triton_utils
+        from torch._inductor.graph import GraphLowering
+
+        def force_uint8_storage(dtype, arg_name=None):
+            return dtype == torch.float8_e4m3fn and (
+                arg_name is None or arg_name.startswith("in_ptr")
+            )
+
+        def fn(t):
+            return t.float()
+
+        bits = torch.arange(256, device=device, dtype=torch.uint8)
+        t = bits.view(torch.float8_e4m3fn)
+        expected = fn(t)
+        source_codes = []
+
+        def save_output_code(code):
+            source_codes.append(code)
+
+        with (
+            mock.patch.object(
+                triton_utils,
+                "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
+                force_uint8_storage,
+            ),
+            mock.patch.object(
+                triton_codegen,
+                "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
+                force_uint8_storage,
+            ),
+            mock.patch.object(GraphLowering, "save_output_code", save_output_code),
+        ):
+            torch._dynamo.reset()
+            actual = torch.compile(fn, fullgraph=True)(t)
+
+        self.assertEqual(actual.view(torch.uint32), expected.view(torch.uint32))
+        self.assertEqual(torch.signbit(actual), torch.signbit(expected))
+
+        self.assertTrue(source_codes)
+        code = "\n".join(source_codes)
+        self.assertIn("'in_ptr0': '*u8'", code)
+        self.assertIn("triton_helpers.fp8e4m3fn_to_float32", code)
+        self.assertNotIn("'in_ptr0': '*fp8e4nv'", code)
+
     @skipCUDAIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     def test_xblock_for_small_numel(self, float8_dtype: torch.dtype, device: str):
@@ -228,9 +299,6 @@ class TestFP8Types(TestCase):
         self.assertEqual(actual.dtype, dst_dtype)
         torch.testing.assert_close(actual.float(), expected.float(), rtol=0, atol=0)
 
-    @skipIfXpu(
-        msg="Conversions between float8_e5m2 and float8_e4m3fn is not supported, torch-xpu-ops: 2888"
-    )
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_bad_cast(self, device):
         def fp8_cast(x, dtype):
@@ -239,7 +307,7 @@ class TestFP8Types(TestCase):
         compiled_fp8_cast = torch.compile(fp8_cast, backend="inductor", dynamic=True)
         x_shape = (16, 16, 16)
 
-        if "cuda" in device:
+        if "cuda" in device or "xpu" in device:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.BackendCompilerFailed,
                 "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
@@ -566,13 +634,15 @@ class TestFP8Lowering(TestCase):
         x_fp8, x_inverse_scale = _quantize_tensorwise(x, dtype_float8)
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
-            y = torch._scaled_mm(
+            y = torch.nn.functional.scaled_mm(
                 x_fp8,
                 w_t_fp8,
                 x_inverse_scale,
+                ScalingType.TensorWise,
                 w_inverse_scale,
-                bias,
-                out_dtype=dtype,
+                ScalingType.TensorWise,
+                bias=bias,
+                output_dtype=dtype,
                 use_fast_accum=use_fast_accum,
             )
             return y
@@ -606,9 +676,7 @@ class TestFP8Lowering(TestCase):
             else:
                 self.assertEqual(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu", "cpu"])
-    def test_scaled_mm_preserves_strides(self, device):
+    def _test_scaled_mm_preserves_strides_impl(self, device):
         """Test that scaled_mm preserves stride ordering through a custom pass."""
 
         GPU_TYPE = device
@@ -622,12 +690,14 @@ class TestFP8Lowering(TestCase):
             dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, GPU_TYPE)
             a_fp8 = a.to(dtype_float8).contiguous()  # row-major
             b_fp8 = b.t().contiguous().t().to(dtype_float8)  # column-major
-            return torch._scaled_mm(
+            return torch.nn.functional.scaled_mm(
                 a_fp8,
                 b_fp8,
                 scale_a,
+                ScalingType.TensorWise,
                 scale_b,
-                out_dtype=torch.bfloat16,
+                ScalingType.TensorWise,
+                output_dtype=torch.bfloat16,
                 use_fast_accum=use_fast_accum,
             )
 
@@ -641,7 +711,7 @@ class TestFP8Lowering(TestCase):
                 for node in g.nodes:
                     if (
                         node.op == "call_function"
-                        and node.target == torch.ops.aten._scaled_mm.default
+                        and node.target == torch.ops.aten._scaled_mm_v2.default
                     ):
                         # Insert clone operations before scaled_mm
                         with g.inserting_before(node):
@@ -649,12 +719,12 @@ class TestFP8Lowering(TestCase):
 
                             # Clone the inputs to potentially change stride ordering
                             a_cloned = g.call_function(
-                                torch.ops.aten.clone,
+                                torch.ops.aten.clone.default,
                                 (a_fp8,),
                                 {"memory_format": torch.contiguous_format},
                             )
                             b_cloned = g.call_function(
-                                torch.ops.aten.clone,
+                                torch.ops.aten.clone.default,
                                 (b_fp8,),
                                 {"memory_format": torch.contiguous_format},
                             )
@@ -679,7 +749,13 @@ class TestFP8Lowering(TestCase):
 
         from torch._inductor import config
 
-        with config.patch(post_grad_custom_post_pass=stride_pass):
+        with config.patch(
+            {
+                "post_grad_custom_post_pass": stride_pass,
+                # Force cache miss so our post-grad pass actually runs
+                "force_disable_caches": True,
+            }
+        ):
             f_compiled = torch.compile(f, dynamic=False)
             result = f_compiled(a, b, scale_a, scale_b)
 
@@ -695,6 +771,19 @@ class TestFP8Lowering(TestCase):
             self.assertIn("scaled_mm", wrapper.lower())
             # The clones should be visible in the generated code
             self.assertIn("clone", wrapper.lower())
+
+    # TODO: collapse this back into one test once fixed on CUDA and XPU.
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_mm_preserves_strides_cpu_actual(self):
+        self._test_scaled_mm_preserves_strides_impl("cpu")
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    # TODO (eellison): fails with:
+    # "RuntimeError: mat2 must be col_major, got stride (64, 1)".
+    @unittest.expectedFailure
+    @onlyOn(["cuda", "xpu"])
+    def test_scaled_mm_preserves_strides(self, device):
+        self._test_scaled_mm_preserves_strides_impl(device)
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -733,13 +822,15 @@ class TestFP8Lowering(TestCase):
         x_fp8, x_inverse_scale = _quantize_tensorwise(x, dtype_float8)
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
-            y = torch._scaled_mm(
+            y = torch.nn.functional.scaled_mm(
                 x_fp8,
                 w_t_fp8,
                 x_inverse_scale,
+                ScalingType.TensorWise,
                 w_inverse_scale,
-                bias,
-                out_dtype=dtype,
+                ScalingType.TensorWise,
+                bias=bias,
+                output_dtype=dtype,
                 use_fast_accum=use_fast_accum,
             )
             return y
@@ -825,13 +916,15 @@ class TestFP8Lowering(TestCase):
         x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype_float8)
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
-            y = torch._scaled_mm(
+            y = torch.nn.functional.scaled_mm(
                 x_fp8,
                 w_t_fp8,
                 x_inverse_scale,
+                ScalingType.RowWise,
                 w_inverse_scale,
-                bias,
-                out_dtype=dtype,
+                ScalingType.RowWise,
+                bias=bias,
+                output_dtype=dtype,
                 use_fast_accum=use_fast_accum,
             )
             return y
@@ -892,13 +985,15 @@ class TestFP8Lowering(TestCase):
         x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype_float8)
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
-            y = torch._scaled_mm(
+            y = torch.nn.functional.scaled_mm(
                 x_fp8,
                 w_t_fp8,
                 x_inverse_scale,
+                ScalingType.RowWise,
                 w_inverse_scale,
-                bias,
-                out_dtype=dtype,
+                ScalingType.RowWise,
+                bias=bias,
+                output_dtype=dtype,
                 use_fast_accum=use_fast_accum,
             )
             return y
@@ -984,30 +1079,39 @@ class TestFP8Lowering(TestCase):
             w, dtype_float8, block_outer=bn, block_inner=bk
         )
         w_t_fp8 = w_fp8.t()
-        if (bn, bk) == (1, 128):
-            w_inverse_scale = (
-                w_inverse_scale.t().contiguous().t().t()
-            )  # 1x128 blocks need scales to be outer-dim-major
-        else:
-            w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+        w_inverse_scale = _prepare_blockwise_scale(
+            w_inverse_scale, bn, bk, transposed=True
+        )
 
         # quantize input x
         x_fp8, x_inverse_scale = _quantize_blockwise(
             x, dtype_float8, block_outer=am, block_inner=ak
         )
-        if (am, ak) == (1, 128):
-            x_inverse_scale = (
-                x_inverse_scale.t().contiguous().t()
-            )  # 1x128 blocks need scales to be outer-dim-major
+        x_inverse_scale = _prepare_blockwise_scale(
+            x_inverse_scale, am, ak, transposed=False
+        )
+
+        recipe_x = (
+            ScalingType.BlockWise1x128
+            if (am, ak) == (1, 128)
+            else ScalingType.BlockWise128x128
+        )
+        recipe_w = (
+            ScalingType.BlockWise1x128
+            if (bn, bk) == (1, 128)
+            else ScalingType.BlockWise128x128
+        )
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
-            y = torch._scaled_mm(
+            y = torch.nn.functional.scaled_mm(
                 x_fp8,
                 w_t_fp8,
                 x_inverse_scale,
+                recipe_x,
                 w_inverse_scale,
-                bias,
-                out_dtype=dtype,
+                recipe_w,
+                bias=bias,
+                output_dtype=dtype,
                 use_fast_accum=use_fast_accum,
             )
             return y
@@ -1106,13 +1210,15 @@ class TestFP8Lowering(TestCase):
         x_fp8, x_inverse_scale = _quantize_tensorwise(x, dtype_float8)
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
-            y = torch._scaled_mm(
+            y = torch.nn.functional.scaled_mm(
                 x_fp8,
                 w_t_fp8,
                 x_inverse_scale,
+                ScalingType.TensorWise,
                 w_inverse_scale,
-                bias,
-                out_dtype=dtype,
+                ScalingType.TensorWise,
+                bias=bias,
+                output_dtype=dtype,
                 use_fast_accum=use_fast_accum,
             )
             return y
@@ -1417,13 +1523,15 @@ class TestFP8Lowering(TestCase):
         x_fp8, x_inverse_scale = _quantize_rowwise(x, dtype_float8)
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
-            y = torch._scaled_mm(
+            y = torch.nn.functional.scaled_mm(
                 x_fp8,
                 w_t_fp8,
                 x_inverse_scale,
+                ScalingType.RowWise,
                 w_inverse_scale,
-                bias,
-                out_dtype=dtype,
+                ScalingType.RowWise,
+                bias=bias,
+                output_dtype=dtype,
                 use_fast_accum=use_fast_accum,
             )
             return y
