@@ -56,7 +56,7 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import SM100OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -91,7 +91,9 @@ if TYPE_CHECKING:
     from torch.autograd.profiler_util import FunctionEvent
 
 
-TEST_CUPTI_PYTHON = _check_module_exists("cupti")
+# cupti-python is pip-installable on ROCm hosts too, but CUPTI itself is a no-op
+# there, so gate the monitor tests off ROCm as well.
+TEST_CUPTI_PYTHON = _check_module_exists("cupti") and not TEST_WITH_ROCM
 
 
 def get_profiler_activities(device_type):
@@ -413,6 +415,9 @@ with profile(activities=[ProfilerActivity.CUDA]):
         self.assertGreater(len(p.events()), 0)
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @unittest.skipUnless(
+        SM100OrLater, "hardware event sampling requires GB200+ (sm_100)"
+    )
     def test_cupti_monitor_enable_hes_early_guard(self):
         import subprocess
 
