@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/NamedTensorUtils.h>
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 #include <ATen/native/xnnpack/Engine.h>
 #endif
@@ -41,9 +40,7 @@ Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
     auto input = self.contiguous(memory_format);
     channel_shuffle_kernel(kCPU, output, input, groups);
   }
-  return namedinference::propagate_names_if_nonempty(
-      output,
-      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
+  return output;
 }
 
 Tensor channel_shuffle(const Tensor& self, int64_t groups) {
@@ -67,14 +64,21 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
 #endif
 
   auto output = self.numel() == 0 ? self.alias() : at::native_channel_shuffle(self, groups);
-  return namedinference::propagate_names_if_nonempty(
-      output,
-      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
+  return output;
 }
 
 Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
+  TORCH_CHECK(self.dim() > 2,
+              "channel_shuffle expects input with > 2 dims, but got input with sizes ",
+              self.sizes());
   int64_t b = self.size(0);
   int64_t c = self.size(1);
+  TORCH_CHECK(groups > 0,
+              "Number of groups to divide channels in must be positive.",
+              " Value of groups:", groups);
+  TORCH_CHECK((c % groups) == 0,
+              "Number of channels must be divisible by groups. Got ",
+              c, " channels and ", groups, " groups.");
   int64_t oc = c / groups;
 
   auto input_reshaped = self.view({b, groups, oc, -1});
@@ -94,9 +98,7 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
       input_reshaped.permute({0 /* b */, 2 /* oc */, 1 /* groups */, 3})
       .contiguous()
       .reshape(self.sizes());
-  return namedinference::propagate_names_if_nonempty(
-      output_tensor,
-      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
+  return output_tensor;
 }
 
 DEFINE_DISPATCH(channel_shuffle_kernel);

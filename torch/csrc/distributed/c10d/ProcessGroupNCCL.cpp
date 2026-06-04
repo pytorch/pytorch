@@ -34,6 +34,7 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/torch.h>
 #include <optional>
 
@@ -222,7 +223,7 @@ std::string getExceptionMsgFromExceptionPtr(
   }
 }
 
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 70201
 // Indicates that we're in the watchdog's event-query phase. This allows ROCm
 // workaround behavior to be applied only to watchdog-side queries, while
 // preserving existing behavior for user/main-thread `WorkNCCL::isCompleted()`
@@ -241,9 +242,9 @@ struct RocmWatchdogEventQueryContextGuard {
  private:
   bool previous_;
 };
-#endif // USE_ROCM
+#endif // defined(USE_ROCM) && ROCM_VERSION < 70201
 
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 70201
 // Watchdog-side cudaEventQuery workaround for HIP runtimes without the
 // capture-mode fix.
 // TODO: Remove once all supported runtimes include
@@ -279,7 +280,7 @@ bool queryEventWithRocmWatchdogCaptureWorkaround(
 
   return false;
 }
-#endif // USE_ROCM
+#endif // defined(USE_ROCM) && ROCM_VERSION < 70201
 
 inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
   // parentheses avoid some compiler warnings
@@ -704,7 +705,7 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
     return false;
   }
   // Checking the work's corresponding CUDA event's status
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 70201
   if (!queryEventWithRocmWatchdogCaptureWorkaround(ncclStartEvent_)) {
 #else
   if (!ncclStartEvent_->query()) {
@@ -721,7 +722,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // hang if another thread is holding the CUDA global context lock. For
   // example, when doing a `cudaDeviceSynchronize` or even
   // `cudaStreamSynchronize`.
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 70201
   if (!queryEventWithRocmWatchdogCaptureWorkaround(ncclEndEvent_)) {
 #else
   if (!ncclEndEvent_->query()) {
@@ -880,7 +881,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
           timeout == kNoTimeout ? std::nullopt : std::make_optional(timeout));
       // Explicitly abort ncclComms here before throwing this timed out
       // exception to users.
-      // If throwing timed out excepiton without aborting nccl communicators
+      // If throwing timed out exception without aborting nccl communicators
       // here, it was observed that CUDA GPU will have 100% utilization and
       // can not run new events successfully.
       if (timedOut) {
@@ -972,6 +973,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // other threads and cause segfaults.
   const auto ncclVersion = getNcclVersion();
   this->setGroupUid(options_->group_name);
+  this->setUsePgForSymmMemRendezvous(options_->use_pg_for_symm_mem_rendezvous);
   this->localDeviceCount_ = static_cast<int>(at::cuda::getNumGPUs());
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
@@ -1636,6 +1638,24 @@ void ProcessGroupNCCL::shutdown() {
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
+
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
+  // comms -- a successor PG may have already re-registered under the same
+  // group_uid (e.g. restart-after-error), and unconditionally clearing
+  // would silently wipe the successor's entry.
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& [_, ncclComm] : devNCCLCommMap_) {
+      if (!ncclComm || ncclComm->isAborted()) {
+        continue;
+      }
+      c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
+      c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
+          getGroupUid());
+    }
+  }
+#endif
 
   // `shutdown()` or `abort` already called. Skip the favor of disposing
   // communicators.
@@ -2366,7 +2386,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       // Skip if work has encountered an error.
 
       bool timedout = false;
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 70201
       // On ROCm, watchdog event queries may be intentionally skipped during
       // active graph capture to avoid HIP runtime capture invalidation.
       // In that window, timeout checks can report false positives for
@@ -2398,6 +2418,11 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
             work.seq_,
             " PG status: last enqueued work: ",
             pg_->pgStatus_->lastEnqueuedSeq,
+            ", last started work: ",
+            pg_->pgStatus_->lastStartedSeq,
+            " (",
+            pg_->pgStatus_->lastStartedWorkName,
+            ")",
             ", last completed work: ",
             pg_->pgStatus_->lastCompletedSeq);
 
@@ -2443,7 +2468,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       // allow watchdog to do an event query on a side thread
       at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
       at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 70201
       // Mark this thread/scope as watchdog event-query context so the ROCm
       // workaround applies only here (not to main-thread wait()/isCompleted()).
       RocmWatchdogEventQueryContextGuard watchdog_event_query_context_guard;
@@ -3324,6 +3349,18 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
       ncclCommMemPoolMap.emplace(ncclComm, MemPoolSet{});
     }
+
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    // Publish the host ncclComm so NCCLSymmetricMemory can find it by
+    // group name, avoiding dynamic_cast back to ProcessGroupNCCL.
+    // Other producers (e.g. torchcomms' TorchCommNCCLX) populate the same
+    // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
+    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    // (excludes ROCm) since the registry has no other consumer there.
+    // Unregistered in ~ProcessGroupNCCL.
+    c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
+        getGroupUid(), ncclComm->getNcclComm());
+#endif
   }
 
   it = devNCCLCommMap_.find(deviceKey);
@@ -5702,18 +5739,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   std::vector<at::Tensor> outputs;
 
   if (getRank() == opts.rootRank) {
-    if (outputTensors.size() != 1) {
-      std::stringstream ss;
-      ss << "requires a single-element output list containing a list with "
-         << getSize() << " tensors.";
-      invalidArgument(ss.str());
-    } else if (outputTensors[0].size() != static_cast<size_t>(getSize())) {
-      std::stringstream ss;
-      ss << "Incorrect output list size " << outputTensors[0].size()
-         << ". Output list size should be " << getSize()
-         << ", same as size of the process group.";
-      invalidArgument(ss.str());
-    }
+    assertGatherOutputTensorList(invalidArgument, outputTensors, getSize());
 
     const auto& options = inputTensor.options();
     const auto& sizes = inputTensor.sizes();
@@ -5721,9 +5747,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
     outputs = outputTensors[0];
   } else {
     // if not in the root rank, initialize outputs as empty list
-    if (!outputTensors.empty()) {
-      invalidArgument("requires empty output on non-root");
-    }
+    assertEmptyOutputTensorList(invalidArgument, outputTensors);
     outputs = {};
     // append a empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function
@@ -5790,18 +5814,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   std::vector<at::Tensor> inputs;
 
   if (getRank() == opts.rootRank) {
-    if (inputTensors.size() != 1) {
-      std::stringstream ss;
-      ss << "requires a single-element input list containing a list with "
-         << getSize() << " tensors.";
-      invalidArgument(ss.str());
-    } else if (inputTensors[0].size() != static_cast<size_t>(getSize())) {
-      std::stringstream ss;
-      ss << "Incorrect input list size " << inputTensors[0].size()
-         << ". Input list size should be " << getSize()
-         << ", same as size of the process group.";
-      invalidArgument(ss.str());
-    }
+    assertScatterInputTensorList(invalidArgument, inputTensors, getSize());
 
     const auto& options = outputTensor.options();
     const auto& sizes = outputTensor.sizes();
@@ -5810,9 +5823,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   } else {
     // if not in the root rank, initialize inputTensors as empty place holder
     // with an empty list
-    if (!inputTensors.empty()) {
-      invalidArgument("requires empty input on non-root");
-    }
+    assertEmptyInputTensorList(invalidArgument, inputTensors);
     inputs = {};
     // append a empty tensor to the list, we don't use it but the
     // `collective` template function requires it to invoke its function

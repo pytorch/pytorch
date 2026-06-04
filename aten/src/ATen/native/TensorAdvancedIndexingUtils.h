@@ -85,6 +85,7 @@ inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
         shapes_as_str(indices));
   }
   // add missing null Tensors so that it matches self.dim()
+  indices.reserve(self.dim());
   while (indices.size() < (size_t)self.dim()) {
     indices.emplace_back();
   }

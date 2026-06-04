@@ -80,8 +80,7 @@ inline PyObject* wrap(const at::Scalar& scalar) {
 
 inline PyObject* wrap(at::QScheme qscheme) {
   auto* thp_qscheme = torch::utils::getTHPQScheme(qscheme);
-  Py_INCREF(thp_qscheme);
-  return thp_qscheme;
+  return Py_NewRef(thp_qscheme);
 }
 
 inline PyObject* wrap(at::TensorList tl) {

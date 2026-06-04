@@ -48,20 +48,44 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-  wheel-py3_11-cpu-build:
+
+  wheel-build:
+    name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desired_python: "3.11"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_11-cpu"
+            pytorch_extra_install_requirements: ""
+          - desired_python: "3.12"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_12-cpu"
+            pytorch_extra_install_requirements: ""
+          - desired_python: "3.13"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_13-cpu"
+            pytorch_extra_install_requirements: ""
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.11"
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
     steps:
       - name: Populate binary env
         shell: cmd
@@ -114,26 +138,47 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: wheel-py3_11-cpu
+          name: ${{ matrix.build_name }}
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  wheel-py3_11-cpu-test:  # Testing
+
+  wheel-test:
+    name: ${{ matrix.build_name }}-test
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - wheel-py3_11-cpu-build
-      - get-label-type
+    needs: [get-label-type, wheel-build]
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desired_python: "3.11"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_11-cpu"
+            runs_on: "windows-11-arm64-preview"
+          - desired_python: "3.12"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_12-cpu"
+            runs_on: "windows-11-arm64-preview"
+          - desired_python: "3.13"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_13-cpu"
+            runs_on: "windows-11-arm64-preview"
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.11"
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
     steps:
       - name: Populate binary env
         shell: cmd
@@ -165,7 +210,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: wheel-py3_11-cpu
+          name: ${{ matrix.build_name }}
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Populate binary env
         shell: bash
@@ -175,327 +220,53 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.ci/pytorch/binary_windows_test.sh"
-  wheel-py3_11-cpu-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+
+  wheel-upload:
+    name: ${{ matrix.build_name }}-upload
+    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: wheel-py3_11-cpu-test
+    needs: wheel-test
+    uses: ./.github/workflows/_binary-upload.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desired_python: "3.11"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_11-cpu"
+          - desired_python: "3.12"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_12-cpu"
+          - desired_python: "3.13"
+            desired_cuda: "cpu"
+            gpu_arch_version: ""
+            gpu_arch_type: "cpu"
+            build_name: "wheel-py3_13-cpu"
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DESIRED_PYTHON: "3.11"
-      build_name: wheel-py3_11-cpu
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      DOCKER_IMAGE: "manylinux2_28-builder"
+      DOCKER_IMAGE_TAG_PREFIX: "cpu"
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      build_name: ${{ matrix.build_name }}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-    uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_12-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
-    runs-on: "windows-11-arm64-preview"
-    timeout-minutes: 360
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}
-      PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.12"
-    steps:
-      - name: Populate binary env
-        shell: cmd
-        run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Bootstrap folders
-        shell: cmd
-        run: |
-          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
-      - name: Enable long paths
-        shell: cmd
-        run: |
-          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
-          git config --system core.longpaths true
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Bootstrap Python
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap APL
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
-      - name: Bootstrap Rust
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
-      - name: Bootstrap sccache
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_sccache.bat"
-      - name: Bootstrap Libuv
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_libuv.bat"
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_12-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  wheel-py3_12-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - wheel-py3_12-cpu-build
-      - get-label-type
-    runs-on: "windows-11-arm64-preview"
-    timeout-minutes: 360
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}
-      PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.12"
-    steps:
-      - name: Populate binary env
-        shell: cmd
-        run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Enable long paths
-        shell: cmd
-        run: |
-          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
-          git config --system core.longpaths true
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Bootstrap APL
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
-      - name: Bootstrap Python
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Rust
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
-      - uses: actions/download-artifact@v4.1.7
-        name: Download Build Artifacts
-        with:
-          name: wheel-py3_12-cpu
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/binary_windows_test.sh"
-  wheel-py3_12-cpu-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: wheel-py3_12-cpu-test
-    with:
-      PYTORCH_ROOT: ${{ github.workspace }}
-      PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DESIRED_PYTHON: "3.12"
-      build_name: wheel-py3_12-cpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-    uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_13-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: get-label-type
-    runs-on: "windows-11-arm64-preview"
-    timeout-minutes: 360
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}
-      PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.13"
-    steps:
-      - name: Populate binary env
-        shell: cmd
-        run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Bootstrap folders
-        shell: cmd
-        run: |
-          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
-      - name: Enable long paths
-        shell: cmd
-        run: |
-          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
-          git config --system core.longpaths true
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Bootstrap Python
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap APL
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
-      - name: Bootstrap Rust
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
-      - name: Bootstrap sccache
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_sccache.bat"
-      - name: Bootstrap Libuv
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_libuv.bat"
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
-      - name: Build PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: wheel-py3_13-cpu
-          retention-days: 14
-          if-no-files-found: error
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  wheel-py3_13-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - wheel-py3_13-cpu-build
-      - get-label-type
-    runs-on: "windows-11-arm64-preview"
-    timeout-minutes: 360
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}
-      PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.13"
-    steps:
-      - name: Populate binary env
-        shell: cmd
-        run: |
-          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
-          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
-          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
-      - name: Enable long paths
-        shell: cmd
-        run: |
-          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
-          git config --system core.longpaths true
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Bootstrap APL
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
-      - name: Bootstrap Python
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
-      - name: Bootstrap Rust
-        shell: cmd
-        run: |
-          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
-      - uses: actions/download-artifact@v4.1.7
-        name: Download Build Artifacts
-        with:
-          name: wheel-py3_13-cpu
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/binary_windows_test.sh"
-  wheel-py3_13-cpu-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: wheel-py3_13-cpu-test
-    with:
-      PYTORCH_ROOT: ${{ github.workspace }}
-      PACKAGE_TYPE: wheel
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DESIRED_PYTHON: "3.13"
-      build_name: wheel-py3_13-cpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-    uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-shared-with-deps-release-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - wheel-py3_11-cpu-build
+      - wheel-build
       - get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     timeout-minutes: 60

@@ -5,6 +5,9 @@
 {% endif %}
     from flash_attn.cute.interface import _flash_attn_fwd
     from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
+    {% if MASK_MOD_PACKED_INTERVALS is not none %}
+    import flash_attn.cute.utils as utils
+    {% endif %}
 
     # Transpose tensors for _flash_attn_fwd compatibility (B,H,M,D) -> (B,M,H,D)
     q_transposed = Q.transpose(1, 2)
@@ -23,7 +26,10 @@
             h="h_idx",
             m="q_idx",
             n="kv_idx",
-            out="tSrS_ssa"
+            out="tSrS_ssa",
+            vector_load_vec_size=SCORE_MOD_VEC_SIZE,
+            vector_load_index="kv_idx",
+            vector_load_dim=-1
         ) | indent_except_first(2) }}
         return tSrS_ssa
     {{ set_cute_hash("score_mod", "score") }}
@@ -44,6 +50,19 @@
     @cute.jit
     def mask_mod(b_idx, h_idx, q_idx, kv_idx, seqlen_info, aux_tensors):
         {{unpack_buffers("aux_tensors", indent_width=8)}}
+        {% if MASK_MOD_PACKED_INTERVALS is not none %}
+        {% set tensor_buffers = add_tensor_inputs(MASK_MOD_OTHER_BUFFERS) %}
+        {% if tensor_buffers %}
+        {# Packed interval expressions are rendered against mask_mod aux buffers only. #}
+        aux_tensors = [{{ tensor_buffers | join(", ") }}]
+        {% endif %}
+        mask_mod_packed = cute.make_rmem_tensor(1, dtype=cutlass.Uint32)
+        mask_mod_packed[0] = cutlass.Uint32(0)
+        {% for interval in MASK_MOD_PACKED_INTERVALS %}
+        mask_mod_packed[0] = mask_mod_packed[0] | {{ interval.keep_mask_expr() }}
+        {% endfor %}
+        return mask_mod_packed.load()
+        {% else %}
         {{ modification(
         subgraph_number=mask_subgraph_idx,
         output_name="mask_mod_output",
@@ -51,9 +70,28 @@
         h="h_idx",
         m="q_idx",
         n="kv_idx",
+        vector_load_vec_size=MASK_MOD_VEC_SIZE,
+        vector_load_index="kv_idx",
+        vector_load_dim=-1,
         ) | indent_except_first(2) }}
+        {% if MASK_MOD_VEC_SIZE %}
+        mask_mod_packed = cute.make_rmem_tensor(1, dtype=cutlass.Uint32)
+        mask_mod_packed[0] = cutlass.Uint32(0)
+        for mask_lane_idx in cutlass.range_constexpr({{ MASK_MOD_VEC_SIZE }}):
+            mask_mod_packed[0] = (
+                mask_mod_packed[0] | (cutlass.Uint32(1) << mask_lane_idx)
+                if cutlass.Boolean(mask_mod_output[mask_lane_idx])
+                else mask_mod_packed[0]
+            )
+        return mask_mod_packed.load()
+        {% else %}
         return mask_mod_output
+        {% endif %}
+        {% endif %}
     {{ set_cute_hash("mask_mod", "mask") }}
+    {% if MASK_MOD_VEC_SIZE %}
+    mask_mod.__vec_size__ = {{ MASK_MOD_VEC_SIZE }}
+    {% endif %}
     block_sparse_tensors = BlockSparseTensorsTorch(KV_NUM_BLKS, KV_IDX, FULL_KV_NUM_BLKS, FULL_KV_IDX, block_size=({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}))
     {% else %}
     block_sparse_tensors = None

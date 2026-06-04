@@ -61,11 +61,9 @@ def _propagate_use_strided_shard_flag(
         if any(isinstance(p, _StridedShard) for p in spec.placements):
             val = spec.use_strided_shard_as_shard_order
             if _use_strided is not None and _use_strided != val:
-                raise ValueError(
-                    "Conflicting use_strided_shard_as_shard_order across "
-                    f"input specs: got both {_use_strided} and {val}"
-                )
-            _use_strided = val
+                _use_strided = True
+            else:
+                _use_strided = val
 
     if _use_strided is None:
         return
@@ -406,7 +404,28 @@ class ShardingPropagator:
             aten._unsafe_view.default: 1,
             aten.select_backward.default: 1,
             aten.slice_backward.default: 1,
+            # upsample backward ops: input_size (arg 2) is the full [N,C,...] shape
+            aten.upsample_nearest1d_backward.default: 2,
+            aten.upsample_nearest2d_backward.default: 2,
+            aten.upsample_nearest3d_backward.default: 2,
+            aten._upsample_nearest_exact1d_backward.default: 2,
+            aten._upsample_nearest_exact2d_backward.default: 2,
+            aten._upsample_nearest_exact3d_backward.default: 2,
+            aten._upsample_bilinear2d_aa_backward.default: 2,
+            aten._upsample_bicubic2d_aa_backward.default: 2,
+            aten._upsample_lanczos2d_aa_backward.default: 2,
+            aten.upsample_bicubic2d_backward.default: 2,
+            aten.upsample_bilinear2d_backward.default: 2,
+            aten.upsample_linear1d_backward.default: 2,
+            aten.upsample_trilinear3d_backward.default: 2,
         }
+        # ops with individual scalar shape args that need local adjustment
+        # maps op -> callable(input_specs, schema) -> adjusted schema
+        # populated by op modules (e.g. _math_ops.py) at registration time
+        self.op_to_scalar_shape_adjuster: dict[
+            OpOverload,
+            Callable[[list[DTensorSpec], OpSchema], OpSchema],
+        ] = {}
         # squeeze ops that need dim arg rewritten to only globally-singleton dims
         self.squeeze_op_to_dims_variant: dict[OpOverload, OpOverload] = {
             aten.squeeze.default: aten.squeeze.dims,
@@ -514,9 +533,18 @@ class ShardingPropagator:
         # NOTE: Use _fake_mode_lock to serialize access when running in
         # multi-threaded tests (lock must be set to threading.Lock()).
         # This is a nullcontext by default.
+        # NOTE: disable_proxy_modes_tracing() prevents make_fx from tracing
+        # into shard propagation. This op runs purely to derive output
+        # metadata (global shape/stride/dtype); it is not part of the real
+        # (local) computation. Without disabling the proxy tracer, the
+        # gen_fake_args() factory calls and op_schema.op(...) get recorded
+        # into the enclosing graph as dead code -- global-shape "shadow" nodes
+        # on empty_strided placeholders that no real output consumes.
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+
         with ShardingPropagator._fake_mode_lock:
             fake_mode = detect_fake_mode() or FakeTensorMode()
-            with fake_mode:
+            with fake_mode, disable_proxy_modes_tracing():
                 fake_args = op_schema.gen_fake_args()
                 fake_kwargs = op_schema.gen_fake_kwargs()
                 fake_out = op_schema.op(*fake_args, **fake_kwargs)
@@ -811,13 +839,12 @@ class ShardingPropagator:
                     )
                     suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
 
-                # shape and stride args need to be modified for
-                # view ops and new factory ops, potentially
+                # Rewrite shape/stride args from global to local when sharded.
+                # Covers view ops, new factory ops, and upsample backward ops
+                # whose shape args refer to global tensor dimensions.
                 if op_schema.op in self.op_to_shape_and_stride_idx:
                     if not isinstance(output_strategy.output_spec, DTensorSpec):
                         raise AssertionError
-                    # It happens when the output has the same shape as the input
-                    # and the input placements are not all Replicate().
                     if any(
                         isinstance(p, Shard | _StridedShard)
                         for p in output_strategy.output_spec.placements
@@ -828,6 +855,19 @@ class ShardingPropagator:
                         suggestion_schema = self._adjust_shape_and_stride_args(
                             out_tensor_meta, schema, output_strategy.output_spec
                         )
+                        needs_redistribute = True
+                        use_val_from_redistribute_schema = True
+
+                # adjust individual scalar shape args (e.g. N, C, HxW in group_norm)
+                if op_schema.op in self.op_to_scalar_shape_adjuster:
+                    if any(
+                        isinstance(p, Shard | _StridedShard)
+                        for spec in expected_input_specs
+                        for p in spec.placements
+                    ):
+                        schema = suggestion_schema or op_schema
+                        adjuster = self.op_to_scalar_shape_adjuster[op_schema.op]
+                        suggestion_schema = adjuster(expected_input_specs, schema)
                         needs_redistribute = True
                         use_val_from_redistribute_schema = True
 
@@ -1016,8 +1056,7 @@ class ShardingPropagator:
             stride_idx = None
 
         expected_input_schema = list(schema.args_schema)
-        # adjust shape to be the same as that of the _local_tensor
-        # of the DTensor input arg at index 0, which is inferred
+        # rewrite args[shape_idx] from the global output shape to the local output shape
         local_shape, _ = compute_local_shape_and_global_offset(
             out_tensor_meta.shape, spec.mesh, spec.placements, skip_offset=True
         )

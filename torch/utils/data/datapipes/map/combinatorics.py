@@ -45,7 +45,7 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
         [7, 8, 1, 5, 3, 4, 2, 0, 9, 6]
 
     Note:
-        Even thought this ``shuffle`` operation takes a ``MapDataPipe`` as the input, it would return an
+        Even though this ``shuffle`` operation takes a ``MapDataPipe`` as the input, it would return an
         ``IterDataPipe`` rather than a ``MapDataPipe``, because ``MapDataPipe`` should be non-sensitive to
         the order of data order for the sake of random reads, but ``IterDataPipe`` depends on the order
         of data during data-processing.

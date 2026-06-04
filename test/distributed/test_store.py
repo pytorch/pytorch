@@ -57,22 +57,6 @@ torch.backends.cuda.matmul.allow_tf32 = False
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
-def gpus_for_rank(world_size):
-    """Multigpu tests are designed to simulate the multi nodes with multi
-    GPUs on each node. Nccl backend requires equal #GPUs in each process.
-    On a single node, all visible GPUs are evenly
-    divided to subsets, each process only uses a subset.
-    """
-    visible_devices = list(range(torch.accelerator.device_count()))
-    gpus_per_process = torch.accelerator.device_count() // world_size
-    gpus_for_rank = []
-    for rank in range(world_size):
-        gpus_for_rank.append(
-            visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
-        )
-    return gpus_for_rank
-
-
 class StoreTestBase:
     def _create_store(self, i):
         raise RuntimeError("not implemented")
@@ -396,8 +380,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
-            store1 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
-            store2 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
+            store1 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)
+            store2 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)
             self.assertEqual(store1.libuvBackend, self._use_libuv)
             self.assertEqual(store2.libuvBackend, self._use_libuv)
 
@@ -411,10 +395,10 @@ class TCPStoreTest(TestCase, StoreTestBase):
         # object is not destroyed before the second object is created.
         store1 = dist.TCPStore(
             addr, port, 1, True, multi_tenant=True, use_libuv=self._use_libuv
-        )  # type: ignore[call-arg] # noqa: F841
+        )  # type: ignore[call-arg]
         store2 = dist.TCPStore(
             addr, port, 1, True, multi_tenant=True, use_libuv=self._use_libuv
-        )  # type: ignore[call-arg] # noqa: F841
+        )  # type: ignore[call-arg]
         self.assertEqual(store1.libuvBackend, self._use_libuv)
         self.assertEqual(store2.libuvBackend, self._use_libuv)
 
@@ -1108,7 +1092,7 @@ class TimeoutTest(TestCase):
                 else:
                     my_store.wait(["foo"], datetime.timedelta(seconds=10))
                 rank_res[rank] = True
-            except BaseException as e:  # noqa: B036,E261
+            except BaseException as e:  # noqa: E261
                 rank_res[rank] = e
             time.sleep(1)
 

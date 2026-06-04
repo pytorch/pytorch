@@ -232,7 +232,7 @@ struct C10_API DeviceGuardImplInterface {
    * Return true if this stream is currently recording work for graph capture.
    */
   virtual bool isStreamCapturing(const Stream& /*stream*/) const {
-    TORCH_CHECK(false, "Backend doesn't support stream capture query.");
+    return false;
   }
 
   /**

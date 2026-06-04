@@ -412,8 +412,19 @@ class TestPublicBindings(TestCase):
 
         errors = []
         for mod, exc in failures:
-            if mod in private_allowlist or (
-                mod.startswith("torch._native.ops.") and "triton" in mod
+            # Prefixes for modules whose top-level imports pull in optional
+            # runtime deps (cutlass, cuda-python, triton) that aren't
+            # available in CPU-only CI. Registrations are no-ops when the
+            # runtime is missing, so it's safe to skip them here.
+            cuda_dep_prefixes = (
+                "torch._native.ops.scatter_add.",
+                "torch._native.ops.topk.",
+                "torch._vendor.quack",
+            )
+            if (
+                mod in private_allowlist
+                or (mod.startswith("torch._native.ops.") and "triton" in mod)
+                or mod.startswith(cuda_dep_prefixes)
             ):
                 if self._is_mod_public(mod):
                     raise AssertionError(

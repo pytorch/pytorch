@@ -1861,7 +1861,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         self.zero_point_dtype = zero_point_dtype
         self.preserve_zero = preserve_zero
         self.zero_point_domain = zero_point_domain
-        # populatd during forward
+        # populated during forward
         self.block_size = None
         self.original_dtype = None
 
