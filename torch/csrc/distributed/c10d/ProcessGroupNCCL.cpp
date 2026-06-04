@@ -34,6 +34,7 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/torch.h>
 #include <optional>
 
@@ -1637,6 +1638,24 @@ void ProcessGroupNCCL::shutdown() {
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
+
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
+  // comms -- a successor PG may have already re-registered under the same
+  // group_uid (e.g. restart-after-error), and unconditionally clearing
+  // would silently wipe the successor's entry.
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& [_, ncclComm] : devNCCLCommMap_) {
+      if (!ncclComm || ncclComm->isAborted()) {
+        continue;
+      }
+      c10::Device device(at::kCUDA, ncclComm->getDeviceIndex());
+      c10d::symmetric_memory::NCCLDevCommManager::get(device).unregister_comm(
+          getGroupUid());
+    }
+  }
+#endif
 
   // `shutdown()` or `abort` already called. Skip the favor of disposing
   // communicators.
@@ -3330,6 +3349,18 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
       ncclCommMemPoolMap.emplace(ncclComm, MemPoolSet{});
     }
+
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    // Publish the host ncclComm so NCCLSymmetricMemory can find it by
+    // group name, avoiding dynamic_cast back to ProcessGroupNCCL.
+    // Other producers (e.g. torchcomms' TorchCommNCCLX) populate the same
+    // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
+    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    // (excludes ROCm) since the registry has no other consumer there.
+    // Unregistered in ~ProcessGroupNCCL.
+    c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
+        getGroupUid(), ncclComm->getNcclComm());
+#endif
   }
 
   it = devNCCLCommMap_.find(deviceKey);

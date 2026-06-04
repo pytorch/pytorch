@@ -1995,5 +1995,109 @@ class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
         symm_mem_hdl.barrier()
 
 
+@requires_cuda
+@skipIf(TEST_WITH_ROCM, "NCCL symmetric memory is not supported on ROCm")
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
+class ExternalNcclCommRegistrationTest(TestCase):
+    """Tests for the external NCCL comm registration API
+    (``symm_mem._register_external_nccl_comm`` and the ``_NcclCommRegistration``
+    handle), exercised against a *real* ``ncclComm_t``.
+
+    The comm is created in-process via NCCL's ``ncclCommInitAll`` (single
+    rank, single GPU) through ctypes, so no live multi-rank job is needed.
+    These run the real C++ registry path: register the real pointer into the
+    per-device ``NCCLDevCommManager`` and unregister via the handle.
+    """
+
+    def _make_real_comm(self, device_index: int = 0) -> int:
+        """Create a real 1-rank ncclComm on ``device_index`` and return its
+        pointer as an int. The comm is destroyed at test teardown."""
+        import ctypes
+
+        # The registration entry point only exists in NCCL builds with
+        # symm-mem device support; skip otherwise.
+        try:
+            from torch._C._distributed_c10d import (  # noqa: F401
+                _register_external_nccl_comm,
+            )
+        except ImportError:
+            self.skipTest("PyTorch built without NCCL symmetric-memory device support")
+
+        try:
+            nccl = ctypes.CDLL("libnccl.so.2")
+        except OSError as e:
+            self.skipTest(f"libnccl.so.2 not loadable: {e}")
+
+        nccl.ncclCommInitAll.restype = ctypes.c_int
+        nccl.ncclCommInitAll.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        nccl.ncclCommDestroy.restype = ctypes.c_int
+        nccl.ncclCommDestroy.argtypes = [ctypes.c_void_p]
+
+        torch.cuda.set_device(device_index)
+        comm = ctypes.c_void_p()
+        devs = (ctypes.c_int * 1)(device_index)
+        ret = nccl.ncclCommInitAll(ctypes.byref(comm), 1, devs)
+        if ret != 0 or not comm.value:
+            self.skipTest(f"ncclCommInitAll failed (ret={ret})")
+        # Destroy the comm after the test (LIFO; runs after the test body has
+        # already unregistered it).
+        self.addCleanup(nccl.ncclCommDestroy, ctypes.c_void_p(comm.value))
+        return comm.value
+
+    def test_register_unregister_real_comm(self) -> None:
+        comm_ptr = self._make_real_comm()
+        reg = symm_mem._register_external_nccl_comm(
+            "ext_nccl_reg_basic", comm_ptr, "cuda:0"
+        )
+        self.assertIsInstance(reg, symm_mem._NcclCommRegistration)
+        self.assertTrue(reg._active)
+        self.assertEqual(reg._group_name, "ext_nccl_reg_basic")
+        self.assertEqual(reg._device, torch.device("cuda:0"))
+
+        reg.unregister()
+        self.assertFalse(reg._active)
+        reg.unregister()  # idempotent: second call is a no-op, must not raise
+
+    def test_register_holds_and_drops_comm_ref(self) -> None:
+        # When a source comm object is passed, the handle keeps a strong ref
+        # to it (so a stray `del comm` can't dangle the registered pointer)
+        # and releases it on unregister.
+        comm_ptr = self._make_real_comm()
+        sentinel = object()
+        reg = symm_mem._register_external_nccl_comm(
+            "ext_nccl_reg_ref", comm_ptr, "cuda:0", comm=sentinel
+        )
+        self.assertIs(reg._comm, sentinel)
+        reg.unregister()
+        self.assertIsNone(reg._comm)
+
+    def test_context_manager_real_comm(self) -> None:
+        comm_ptr = self._make_real_comm()
+        reg = symm_mem._register_external_nccl_comm(
+            "ext_nccl_reg_cm", comm_ptr, "cuda:0"
+        )
+        with reg as entered:
+            self.assertIs(entered, reg)
+            self.assertTrue(reg._active)
+        # __exit__ unregisters.
+        self.assertFalse(reg._active)
+
+    def test_register_null_pointer_raises(self) -> None:
+        # The registration helper rejects a null comm pointer before touching
+        # the registry (C++ TORCH_CHECK).
+        try:
+            from torch._C._distributed_c10d import (  # noqa: F401
+                _register_external_nccl_comm,
+            )
+        except ImportError:
+            self.skipTest("PyTorch built without NCCL symmetric-memory device support")
+        with self.assertRaises(RuntimeError):
+            symm_mem._register_external_nccl_comm("ext_nccl_reg_null", 0, "cuda:0")
+
+
 if __name__ == "__main__":
     run_tests()
