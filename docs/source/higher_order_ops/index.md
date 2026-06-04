@@ -54,7 +54,6 @@ Control flow operators solve these problems by representing control flow as expl
 :maxdepth: 1
 
 cond
-switch
 while_loop
 scan
 associative_scan
@@ -66,7 +65,6 @@ map
 | Operator | Use Case | Example |
 |----------|----------|---------|
 | [cond](cond.md) | If `pred` is True, returns `true_fn(*operands)`, otherwise returns `false_fn(*operands)`. | `cond(pred, true_fn, false_fn, operands)` |
-| [switch](switch.md) | N-way branching: returns `branches[index](*operands)` with `index` clamped into `[0, len(branches)-1]`. | `switch(index, branches, operands)` |
 | [while_loop](while_loop.md) | While `cond_fn(*operands)` is True, executes `body_fn(*operands)`, which returns the operands for the next iteration. | `while_loop(cond_fn, body_fn, operands)` |
 | [scan](scan.md) | Applies cumulative operations to `xs` with carried state | `scan(combine_fn, init, xs)` |
 | [associative_scan](associative_scan.md) | Similar to `scan`, but requiring an associative `combine_fn` to allow for more optimizations. | `associative_scan(add, xs, dim=0)` |
