@@ -65,19 +65,18 @@ inline bool simd_shuffle(bool data, uint16_t lane) {
 
 // Inclusive (and derived exclusive) SIMD scan for scalar acc_t ops, expressed
 // through the op's operator(). Shared by LogCumSumExp/CumProd/CumSum.
-#define DEFINE_SIMD_SCAN()                                \
-  acc_t simd_scan(acc_t x) {                              \
-    for (int i = 1; i <= 16; i *= 2) {                    \
-      acc_t other = simd_shuffle_and_fill_up(x, init, i); \
-      x = (*this)(x, other);                              \
-    }                                                     \
-    return x;                                             \
-  }                                                       \
-                                                          \
-  acc_t simd_exclusive_scan(acc_t x) {                    \
-    x = simd_scan(x);                                     \
-    return simd_shuffle_and_fill_up(x, init, 1);          \
+template <typename Op, typename acc_t>
+inline acc_t simd_scan(Op op, acc_t x) {
+  for (int i = 1; i <= 16; i *= 2) {
+    x = op(x, simd_shuffle_and_fill_up(x, Op::init, i));
   }
+  return x;
+}
+
+template <typename Op, typename acc_t>
+inline acc_t simd_exclusive_scan(Op op, acc_t x) {
+  return simd_shuffle_and_fill_up(simd_scan(op, x), Op::init, 1);
+}
 
 template <typename T, typename acc_t = accum_t<T>>
 struct LogCumSumExpOp {
@@ -88,8 +87,6 @@ struct LogCumSumExpOp {
   acc_t operator()(acc_t a, acc_t b) {
     return LogAddExp{}(a, b);
   }
-
-  DEFINE_SIMD_SCAN()
 };
 
 template <typename T, ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
@@ -108,8 +105,6 @@ struct CumProdOp {
   acc_t operator()(acc_t a, acc_t b) {
     return c10::metal::mul(a, b);
   }
-
-  DEFINE_SIMD_SCAN()
 };
 
 template <typename T, typename acc_t = accum_t<T>>
@@ -119,8 +114,6 @@ struct CumSumOp {
   acc_t operator()(acc_t a, acc_t b) {
     return a + b;
   }
-
-  DEFINE_SIMD_SCAN()
 };
 
 // Pair structure to hold value and index for cummin/cummax operations
@@ -137,6 +130,35 @@ inline ValueIndexPair<T, acc_t> make_pair(acc_t v, int64_t i) {
   result.value = v;
   result.index = i;
   return result;
+}
+
+template <typename T, typename acc_t>
+inline ValueIndexPair<T, acc_t> simd_shuffle_and_fill_up(
+    ValueIndexPair<T, acc_t> data,
+    ValueIndexPair<T, acc_t> filling,
+    uint16_t delta) {
+  return make_pair<T, acc_t>(
+      simd_shuffle_and_fill_up(data.value, filling.value, delta),
+      simd_shuffle_and_fill_up(data.index, filling.index, delta));
+}
+
+// Value/index SIMD scan shared by cummin and cummax; the op supplies get_init()
+// and operator(). Mirrors the scalar overloads above (which the pair shuffle
+// overload lets these reuse).
+template <typename Op, typename T, typename acc_t>
+inline ValueIndexPair<T, acc_t> simd_scan(Op op, ValueIndexPair<T, acc_t> x) {
+  ValueIndexPair<T, acc_t> init = op.get_init();
+  for (int i = 1; i <= 16; i *= 2) {
+    x = op(x, simd_shuffle_and_fill_up(x, init, i));
+  }
+  return x;
+}
+
+template <typename Op, typename T, typename acc_t>
+inline ValueIndexPair<T, acc_t> simd_exclusive_scan(
+    Op op,
+    ValueIndexPair<T, acc_t> x) {
+  return simd_shuffle_and_fill_up(simd_scan(op, x), op.get_init(), 1);
 }
 
 template <typename T, typename acc_t = accum_t<T>>
@@ -167,36 +189,6 @@ struct CumMinOp {
       return (a.index >= b.index) ? a : b;
     }
   }
-
-  // For SIMD operations, we need to handle pairs differently
-  pair_t simd_scan(pair_t val) {
-    // For pairs, we need to implement scan manually since SIMD doesn't support
-    // pairs directly
-    pair_t init_val = get_init();
-    for (int i = 1; i <= 16; i *= 2) {
-      pair_t shuffled = make_pair<T, acc_t>(
-          simd_shuffle_and_fill_up(val.value, init_val.value, i),
-          simd_shuffle_and_fill_up(val.index, init_val.index, i));
-      val = operator()(val, shuffled);
-    }
-    return val;
-  }
-
-  pair_t simd_exclusive_scan(pair_t val) {
-    val = simd_scan(val);
-    pair_t init_val = get_init();
-    return simd_shuffle_and_fill_up_pair(val, init_val, 1);
-  }
-
- private:
-  pair_t simd_shuffle_and_fill_up_pair(
-      pair_t data,
-      pair_t filling,
-      uint16_t delta) {
-    return make_pair<T, acc_t>(
-        simd_shuffle_and_fill_up(data.value, filling.value, delta),
-        simd_shuffle_and_fill_up(data.index, filling.index, delta));
-  }
 };
 
 template <typename T, typename acc_t = accum_t<T>>
@@ -226,36 +218,6 @@ struct CumMaxOp {
     } else {
       return (a.index >= b.index) ? a : b;
     }
-  }
-
-  // For SIMD operations, we need to handle pairs differently
-  pair_t simd_scan(pair_t val) {
-    // For pairs, we need to implement scan manually since SIMD doesn't support
-    // pairs directly
-    pair_t init_val = get_init();
-    for (int i = 1; i <= 16; i *= 2) {
-      pair_t shuffled = make_pair<T, acc_t>(
-          simd_shuffle_and_fill_up(val.value, init_val.value, i),
-          simd_shuffle_and_fill_up(val.index, init_val.index, i));
-      val = operator()(val, shuffled);
-    }
-    return val;
-  }
-
-  pair_t simd_exclusive_scan(pair_t val) {
-    val = simd_scan(val);
-    pair_t init_val = get_init();
-    return simd_shuffle_and_fill_up_pair(val, init_val, 1);
-  }
-
- private:
-  pair_t simd_shuffle_and_fill_up_pair(
-      pair_t data,
-      pair_t filling,
-      uint16_t delta) {
-    return make_pair<T, acc_t>(
-        simd_shuffle_and_fill_up(data.value, filling.value, delta),
-        simd_shuffle_and_fill_up(data.index, filling.index, delta));
   }
 };
 
@@ -315,14 +277,14 @@ inline acc_t threadgroup_reduce(
     uint simd_group_id) {
   Op op;
   uint simd_groups = lsize_x / simd_size;
-  acc_t simd_total = simd_shuffle(op.simd_scan(val), simd_size - 1);
+  acc_t simd_total = simd_shuffle(simd_scan(op, val), simd_size - 1);
   if (simd_lane_id == 0) {
     smem[simd_group_id] = simd_total;
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
   if (simd_group_id == 0) {
     acc_t v = (simd_lane_id < simd_groups) ? smem[simd_lane_id] : Op::init;
-    acc_t total = simd_shuffle(op.simd_scan(v), simd_size - 1);
+    acc_t total = simd_shuffle(simd_scan(op, v), simd_size - 1);
     if (simd_lane_id == 0) {
       smem[0] = total;
     }
@@ -394,14 +356,14 @@ inline void block_scan_impl(
     for (int i = 1; i < N_READS; i++) {
       values[i] = op(values[i], values[i - 1]);
     }
-    acc_t prev_thread = op.simd_exclusive_scan(values[N_READS - 1]);
+    acc_t prev_thread = simd_exclusive_scan(op, values[N_READS - 1]);
     if (simd_lane_id == simd_size - 1) {
       simdgroup_sums[simd_group_id] = op(prev_thread, values[N_READS - 1]);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (simd_group_id == 0) {
       simdgroup_sums[simd_lane_id] =
-          op.simd_exclusive_scan(simdgroup_sums[simd_lane_id]);
+          simd_exclusive_scan(op, simdgroup_sums[simd_lane_id]);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     for (int i = 0; i < N_READS; i++) {
@@ -536,7 +498,7 @@ kernel void scan_outer_dim(
 
     // Perform the scan
     for (int i = 0; i < n_scans; i++) {
-      values[i] = op.simd_scan(values[i]);
+      values[i] = simd_scan(op, values[i]);
       values[i] = op(values[i], prefix[i]);
       prefix[i] = simd_shuffle(values[i], simd_size - 1);
     }
@@ -633,7 +595,7 @@ kernel void scan_innermost_transposed(
     }
     simdgroup_barrier(mem_flags::mem_threadgroup);
     for (int i = 0; i < n_scans; i++) {
-      values[i] = op.simd_scan(values[i]);
+      values[i] = simd_scan(op, values[i]);
       values[i] = op(values[i], prefix[i]);
       prefix[i] = simd_shuffle(values[i], simd_size - 1);
     }
@@ -702,7 +664,7 @@ kernel void scan_with_indices_innermost_dim(
     }
 
     // Compute exclusive scan of thread sums
-    pair_t prev_thread = op.simd_exclusive_scan(values[N_READS - 1]);
+    pair_t prev_thread = simd_exclusive_scan(op, values[N_READS - 1]);
 
     // Write simdgroup_sums to SM
     if (simd_lane_id == simd_size - 1) {
@@ -713,7 +675,7 @@ kernel void scan_with_indices_innermost_dim(
     // Compute exclusive scan of simdgroup_sums
     if (simd_group_id == 0) {
       pair_t prev_simdgroup =
-          op.simd_exclusive_scan(simdgroup_sums[simd_lane_id]);
+          simd_exclusive_scan(op, simdgroup_sums[simd_lane_id]);
       simdgroup_sums[simd_lane_id] = prev_simdgroup;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -815,7 +777,7 @@ kernel void scan_with_indices_outer_dim(
 
     // Perform the scan
     for (int i = 0; i < n_scans; i++) {
-      values[i] = op.simd_scan(values[i]);
+      values[i] = simd_scan(op, values[i]);
       values[i] = op(values[i], prefix[i]);
       prefix[i] = make_pair<T, acc_t>(
           simd_shuffle(values[i].value, simd_size - 1),
@@ -1039,7 +1001,7 @@ kernel void scan_contig_decoupled(
     values[i] = op(values[i], values[i - 1]);
   }
   const uint simd_groups = lsize / simd_size;
-  acc_t prev_thread = op.simd_exclusive_scan(values[N_READS - 1]);
+  acc_t prev_thread = simd_exclusive_scan(op, values[N_READS - 1]);
   if (simd_lane_id == simd_size - 1) {
     simdgroup_sums[simd_group_id] = op(prev_thread, values[N_READS - 1]);
   }
@@ -1047,7 +1009,7 @@ kernel void scan_contig_decoupled(
   if (simd_group_id == 0) {
     acc_t v =
         (simd_lane_id < simd_groups) ? simdgroup_sums[simd_lane_id] : Op::init;
-    simdgroup_sums[simd_lane_id] = op.simd_exclusive_scan(v);
+    simdgroup_sums[simd_lane_id] = simd_exclusive_scan(op, v);
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
   const acc_t simd_prefix = simdgroup_sums[simd_group_id];
@@ -1132,7 +1094,7 @@ inline void scan_vec_tile_inclusive(
   acc_t prev_thread[VEC];
   for (int c = 0; c < VEC; c++) {
     const acc_t last = vals[(N_READS - 1) * VEC + c];
-    prev_thread[c] = op.simd_exclusive_scan(last);
+    prev_thread[c] = simd_exclusive_scan(op, last);
     if (simd_lane_id == simd_size - 1) {
       simdgroup_sums[simd_group_id * VEC + c] = op(prev_thread[c], last);
     }
@@ -1143,7 +1105,7 @@ inline void scan_vec_tile_inclusive(
       acc_t v = (simd_lane_id < simd_groups)
           ? simdgroup_sums[simd_lane_id * VEC + c]
           : Op::init;
-      simdgroup_sums[simd_lane_id * VEC + c] = op.simd_exclusive_scan(v);
+      simdgroup_sums[simd_lane_id * VEC + c] = simd_exclusive_scan(op, v);
     }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1560,7 +1522,7 @@ kernel void scan_strided_block_reduce(
     simdgroup_barrier(mem_flags::mem_threadgroup);
 
     for (int i = 0; i < n_scans; i++) {
-      acc_t s = op.simd_scan(values[i]);
+      acc_t s = simd_scan(op, values[i]);
       partial[i] = op(partial[i], simd_shuffle(s, simd_size - 1));
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1673,7 +1635,7 @@ kernel void scan_strided_block_carry(
     simdgroup_barrier(mem_flags::mem_threadgroup);
 
     for (int i = 0; i < n_scans; i++) {
-      values[i] = op.simd_scan(values[i]);
+      values[i] = simd_scan(op, values[i]);
       values[i] = op(values[i], prefix[i]);
       prefix[i] = simd_shuffle(values[i], simd_size - 1);
     }
