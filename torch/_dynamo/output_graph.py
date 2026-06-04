@@ -352,8 +352,17 @@ class RandomCall:
 
 
 def _resolve_random_call_arg(arg: object, random_values: list[Any]) -> object:
+    # RandomValueSource references the result of an earlier runtime RNG call.
     if isinstance(arg, RandomValueSource):
         return random_values[arg.random_call_index]
+    if isinstance(arg, GetItemSource):
+        base = _resolve_random_call_arg(arg.base, random_values)
+        index = arg.unpack_slice() if arg.index_is_slice else arg.index
+        return cast(Any, base)[index]
+    if isinstance(arg, tuple):
+        return tuple(_resolve_random_call_arg(x, random_values) for x in arg)
+    if isinstance(arg, list):
+        return [_resolve_random_call_arg(x, random_values) for x in arg]
     return arg
 
 
@@ -2967,6 +2976,13 @@ class OutputGraph(OutputGraphCommon):
                 if not isinstance(compiled_fn, _LazyGraphModule):
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
+
+            if not self.export:
+                # Run after every non-export backend compile, not only the
+                # registered backends covered by convert_frame weakref cleanup.
+                # Backends have already consumed the graph, so non-CPU Dynamo
+                # tracing constants no longer need to keep real tensors alive.
+                old_fake_mode.fake_tensor_converter.clear_non_cpu_constants()
 
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)

@@ -244,6 +244,14 @@ class RandomValueSource(Source):
         return f"random_value_{_esc_str(self.random_call_index)}"
 
 
+def is_random_value_source(source: Source) -> bool:
+    while isinstance(source, ChainedSource):
+        if isinstance(source, RandomValueSource):
+            return True
+        source = source.base
+    return isinstance(source, RandomValueSource)
+
+
 @dataclass_with_cached_hash(frozen=True)
 class GlobalSource(Source):
     global_name: str

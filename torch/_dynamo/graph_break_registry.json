@@ -656,6 +656,16 @@
       ]
     }
   ],
+  "GB4675": [
+    {
+      "Gb_type": "random.Random.getstate() dynamic state inspection",
+      "Context": "inspect dynamic random.Random state",
+      "Explanation": "Dynamo cannot replay this random.Random.getstate() access from inside the compiled graph.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9741": [
     {
       "Gb_type": "skip frame due to being in functorh mode",
@@ -1301,6 +1311,12 @@
   "GB0094": [
     {
       "Gb_type": "SEND with bad type",
+      "Context": "TOS type: {typestr(receiver)}",
+      "Explanation": "Attempted to SEND with unsupported type {typestr(receiver)}.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "SEND with bad type",
       "Context": "TOS type: {typestr(tos)}",
       "Explanation": "Attempted to SEND with unsupported type {typestr(tos)}.",
       "Hints": []
@@ -1569,6 +1585,16 @@
       "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo cannot reconstruct the function.",
       "Hints": [
         "Define the function at module scope instead of inside another function"
+      ]
+    }
+  ],
+  "GB1752": [
+    {
+      "Gb_type": "Missing tp_iteritem",
+      "Context": "_tp_iteritem on {self.python_type_name()}",
+      "Explanation": "Dynamo does not support virtual iteration on {self.python_type_name()}. Add tp_iteritem_impl to this VariableTracker subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -5295,6 +5321,16 @@
       "Gb_type": "repr() on non-constant dict view",
       "Context": "repr() on {type(self).__name__} with non-constant backing dict",
       "Explanation": "Dynamo could not safely evaluate repr() for this dict view because its backing dict could not be materialized as a Python constant.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3513": [
+    {
+      "Gb_type": "random.Random method with dynamic random argument",
+      "Context": "random.Random method with dynamic random.Random-derived argument",
+      "Explanation": "Dynamo cannot replay random.Random object state when an in-frame RNG receives an argument produced dynamically from another random.Random object.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

@@ -143,13 +143,13 @@ from ..source import (
     is_from_nonlocal_source,
     is_from_optimizer_source,
     is_from_unspecialized_nn_module_source,
+    is_random_value_source,
     ListGetItemSource,
     LocalSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
-    RandomValueSource,
     SkipGuardSource,
     Source,
     SubclassAttrListSource,
@@ -268,7 +268,6 @@ from .misc import (
     RandomVariable,
     SavedTensorBox,
     StringFormatVariable,
-    TorchVersionVariable,
     TypingVariable,
     WeakRefVariable,
 )
@@ -966,7 +965,6 @@ class VariableBuilder:
                     **self.install_guards(GuardBuilder.CLOSURE_MATCH),
                 ),
             ),
-            (torch.__version__, lambda self, value: TorchVersionVariable()),
         ]
 
         # pyrefly: ignore [implicit-any]
@@ -3180,7 +3178,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
 
-        if isinstance(self.get_source(), RandomValueSource):
+        if is_random_value_source(self.get_source()):
             raise AssertionError(
                 "RandomValueSource is not supported for symint wrapping"
             )
@@ -3272,7 +3270,7 @@ class VariableBuilder:
 
         # TODO: Switch RandomValueSource over to use this, this is more
         # accurate
-        if isinstance(self.get_source(), RandomValueSource):
+        if is_random_value_source(self.get_source()):
             raise AssertionError(
                 "RandomValueSource is not supported for symfloat wrapping"
             )
@@ -3375,7 +3373,7 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
 
         wrapped_value = torch.tensor(value)
-        if not isinstance(self.get_source(), RandomValueSource):
+        if not is_random_value_source(self.get_source()):
             install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
         options = {"source": self.get_source()}
