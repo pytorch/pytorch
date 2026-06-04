@@ -202,7 +202,7 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
             dtype=torch.float32,
         )
         split_sizes = [10 for _ in range(self.world_size)]
-        pg.all_to_all_single(
+        pg.alltoall_base(
             out, inp, split_sizes, split_sizes, timeout=timedelta(seconds=30)
         ).wait()
 
