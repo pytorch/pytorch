@@ -16540,13 +16540,22 @@ class TestSelectiveActivationCheckpoint(TestCase):
                 "Model.layers.1_my_op.default_2",
             }
 
+            fwd_decisions: list = []
+            fwd_idx = [0]
+
             def policy_fn(ctx, op, *args, **kwargs):
+                if ctx.is_recompute:
+                    decision = fwd_decisions[fwd_idx[0]]
+                    fwd_idx[0] += 1
+                    return decision
                 out = ctx.op_output
+                decision = CheckpointPolicy.PREFER_RECOMPUTE
                 if isinstance(out, torch.Tensor):
                     name = naming.names.get(out)
                     if name in save_names:
-                        return CheckpointPolicy.MUST_SAVE
-                return CheckpointPolicy.PREFER_RECOMPUTE
+                        decision = CheckpointPolicy.MUST_SAVE
+                fwd_decisions.append(decision)
+                return decision
 
             x = torch.randn(4, requires_grad=True)
             context_fn = functools.partial(
