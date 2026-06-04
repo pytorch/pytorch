@@ -11,7 +11,9 @@
 #include <ATen/ops/combinations_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/full.h>
+#include <ATen/ops/index.h>
 #include <ATen/ops/meshgrid.h>
+#include <ATen/ops/nonzero.h>
 #include <ATen/ops/stack.h>
 #endif
 
