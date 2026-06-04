@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
@@ -12,7 +11,7 @@ import os
 import sys
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
@@ -24,6 +23,10 @@ import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._functorch._aot_autograd.descriptors import (
+    SavedForBackwardsAOTOutput,
+    SavedForBackwardsNoVcCheckAOTOutput,
+)
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
@@ -47,12 +50,15 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_unbacked_symbols,
     resolve_unbacked_bindings,
+    SymTypes,
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
     Identity,
+    Max,
+    Min,
     Mod,
     ModularIndexing,
 )
@@ -84,7 +90,9 @@ from .utils import (
     decode_device,
     is_dynamic,
     is_gpu,
+    is_nvidia_sm100_or_later,
     is_pointwise_use,
+    is_triton_fp8_dtype_supported,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
@@ -97,6 +105,7 @@ from .virtualized import ops, V
 
 
 if TYPE_CHECKING:
+    from .ir import BaseConstant
     from .ops_handler import ReductionType
 
 
@@ -131,6 +140,10 @@ foreach_ops = OrderedSet[torch._ops.OpOverload](
 inplace_foreach_ops = OrderedSet[torch._ops.OpOverload]()
 inplaceable_foreach_ops: dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
+_SAVED_FOR_BACKWARDS_OUTPUT_DESC_TYPES = (
+    SavedForBackwardsAOTOutput,
+    SavedForBackwardsNoVcCheckAOTOutput,
+)
 
 
 def cur_node_has_non_foreach_users() -> bool:
@@ -202,21 +215,14 @@ def assert_nyi(cond: bool, msg: str) -> None:
         raise NotImplementedError(f"inductor does not support {msg}")
 
 
-def add_needs_realized_inputs(
-    fn: Collection[torch._ops.OpOverload | torch._ops.OpOverloadPacket]
-    | torch._ops.OpOverload
-    | torch._ops.OpOverloadPacket,
-) -> list[Any] | None:
+def add_needs_realized_inputs(fn):
     if isinstance(fn, (list, set, tuple, OrderedSet)):  # noqa: set_linter
-        # pyrefly: ignore [bad-argument-type]
         return [add_needs_realized_inputs(x) for x in fn]
-    if isinstance(fn, torch._ops.OpOverload):
-        needs_realized_inputs.add(fn)
-    elif isinstance(fn, torch._ops.OpOverloadPacket):
+    needs_realized_inputs.add(fn)
+    if isinstance(fn, torch._ops.OpOverloadPacket):
         needs_realized_inputs.update(
             getattr(fn, overload) for overload in fn.overloads()
         )
-    return None
 
 
 def add_layout_constraint(
@@ -573,7 +579,11 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
+def promote_constants(
+    inputs: Sequence[_T],
+    override_return_dtype: torch.dtype | None = None,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
+) -> Sequence[_T | BaseView | BaseConstant]:
     assert override_return_dtype is None or type_promotion_kind is None, (
         "only one of override_return_dtype or type_promotion_kind may be given"
     )
@@ -666,25 +676,57 @@ def _add_with_alpha_fma(a, b, alpha):
     )
 
 
+def _has_saved_lowp_output_use(node: torch.fx.Node | None) -> bool:
+    if node is None:
+        return False
+
+    has_non_output_user = False
+    for user in node.users:
+        if user.op != "output":
+            has_non_output_user = True
+            break
+
+    if not has_non_output_user:
+        return False
+
+    for user in node.users:
+        if user.op != "output":
+            continue
+
+        descs = user.meta.get("desc")
+        if descs is None:
+            continue
+
+        output_values = pytree.tree_leaves(user.args[0])
+        for output_value, desc in zip(output_values, descs):
+            if output_value is node and isinstance(
+                desc, _SAVED_FOR_BACKWARDS_OUTPUT_DESC_TYPES
+            ):
+                return True
+
+    return False
+
+
 def make_pointwise(
-    fn,
-    override_return_dtype=None,
-    override_device=None,
-    override_fn_when_input_bool=None,
-    allow_alpha=False,
-    use_fma_for_alpha=False,
-    triton_fallback=None,
-):
+    fn: Callable[..., Any],
+    override_return_dtype: torch.dtype | None = None,
+    override_device: torch.device | None = None,
+    override_fn_when_input_bool: Callable[..., Any] | None = None,
+    allow_alpha: bool = False,
+    use_fma_for_alpha: bool = False,
+    triton_fallback: Callable[..., _T] | None = None,
+) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
 
-    def inner(*inputs: TensorBox, alpha=None):
+    def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
         ):
             assert not allow_alpha  # not implemented
             return triton_fallback(*inputs)
 
+        # pyrefly: ignore [bad-assignment]
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
@@ -719,13 +761,23 @@ def make_pointwise(
         # a pointwise node that would have been run in eager. intermediary pointwise nodes
         # during decompositions are not annotated.
         low_pr_fp = (torch.bfloat16, torch.float16)
-        emulate_precision_casts = (
-            V.graph is not None
-            and getattr(V.graph, "current_node", None) is not None
-            and V.graph.current_node.meta is not None
-            and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
+        current_node = (
+            getattr(V.graph, "current_node", None) if V.graph is not None else None
         )
-        emulate_output_cast = emulate_precision_casts and dtype in low_pr_fp
+        emulate_precision_casts = (
+            current_node is not None
+            and current_node.meta is not None
+            and current_node.meta.get("low_precision_pointwise_barrier", False)
+        )
+        truncate_saved_output = (
+            config.emulate_precision_casts_on_saved_tensors
+            and not emulate_precision_casts
+            and dtype in low_pr_fp
+            and _has_saved_lowp_output_use(current_node)
+        )
+        emulate_output_cast = (
+            emulate_precision_casts or truncate_saved_output
+        ) and dtype in low_pr_fp
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
@@ -752,6 +804,7 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
+                # pyrefly: ignore [missing-attribute]
                 if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
@@ -771,8 +824,15 @@ def make_pointwise(
     return inner
 
 
-def make_foreach_pointwise(pw_fn, allow_alpha=False, scalar_kwarg="alpha"):
-    def inner(*inputs: list[list[TensorBox]], alpha=1, value=1):
+foreach_node_t = TypeVar("foreach_node_t", bound=IRNode)
+
+
+def make_foreach_pointwise(
+    pw_fn: Callable[..., foreach_node_t],
+    allow_alpha: bool = False,
+    scalar_kwarg: str = "alpha",
+) -> Callable[..., list[foreach_node_t]]:
+    def inner(*inputs: list[list[TensorBox]], alpha=1, value=1) -> list[foreach_node_t]:
         # For ops like addcmul/addcdiv, the scalar `value` arrives as a
         # positional arg (not keyword) due to the ATen schema. Extract it
         # from the end of inputs if present.
@@ -816,7 +876,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False, scalar_kwarg="alpha"):
 
         groups = group_foreach_args(zip(*broadcast_inputs))
 
-        def apply_fn(args):
+        def apply_fn(args) -> foreach_node_t:
             if allow_alpha:
                 return pw_fn(*args, **{scalar_kwarg: scalar_val})
             else:
@@ -827,7 +887,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False, scalar_kwarg="alpha"):
     return inner
 
 
-def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
+def foreach_group_loop(
+    groups: Mapping[tuple[Any, bool], list[tuple[int, Any]]],
+    num_outputs: int,
+    apply_fn: Callable[..., foreach_node_t],
+    realize_outputs: bool,
+) -> list[foreach_node_t]:
     """
     Common loop over grouped foreach arguments.
 
@@ -837,7 +902,7 @@ def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
         apply_fn: Function to apply to each set of args, returns the output
         realize_outputs: Whether to realize outputs for foreach fusion
     """
-    outputs = [None] * num_outputs
+    outputs: list[foreach_node_t | None] = [None] * num_outputs
     for (device, use_foreach), group in groups.items():
         operation_list: list[str] = []
         for output_ind, args in group:
@@ -856,7 +921,8 @@ def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
             V.graph.register_operation_list(operation_list)
 
     assert all(x is not None for x in outputs)
-    return outputs
+
+    return cast(list[foreach_node_t], outputs)
 
 
 def to_dtype(
@@ -969,7 +1035,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
-        return fallback_handler(aten.view.dtype)(x, dtype)
+        x_cont = ir.ExternKernel.require_contiguous_strides(x)
+        return fallback_handler(aten.view.dtype)(x_cont, dtype)
     else:
         return TensorBox(DtypeView.create(x, dtype))
 
@@ -1390,6 +1457,47 @@ def permute(x, dims):
 
 # Note: logic in this function need to be always synchronized with
 # slice_forward in fake implementation.
+def _register_unbacked_slice_size_bindings(dim, start, end, step, size):
+    """Register DynamicSliceSize for any unbacked size bindings on the current FX node.
+
+    Unbacked symbols may have been allocated at trace time of the slice
+    that inductor must define so the assertion
+    new_unbacked_defs >= renamed_unbacked_bindings passes in run_node.
+
+    Returns (sym_size, sym_storage) parsed from the bindings, or (None, None).
+    """
+    from torch.fx.experimental.symbolic_shapes import (
+        CallMethodKey,
+        resolve_unbacked_bindings,
+    )
+
+    # current_node may be None when slice_ is called from template rendering
+    # (e.g. cpp_template_kernel.slice_nd) rather than FX graph lowering.
+    current_node = V.graph.current_node
+    node_unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env,
+        current_node.meta.get("unbacked_bindings", {})
+        if current_node is not None
+        else {},
+    )
+    sym_size, sym_storage = None, None
+    if node_unbacked_bindings:
+        assert len(node_unbacked_bindings) <= 2, node_unbacked_bindings
+        for sym, keypath in node_unbacked_bindings.items():
+            if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
+                sym_size = sym
+            elif keypath == (CallMethodKey("storage_offset"),):
+                sym_storage = sym
+        if sym_size is not None:
+            b_size = ir.DynamicSliceSize(sym_size, start, end, step, size)
+            b_size.name = V.graph.register_buffer(b_size)
+            V.graph.register_operation(b_size)
+        # NOTE: storage_offset registration is not handled here — it is only
+        # needed in the ambiguous (unbacked start/end) path, where it is
+        # handled via DynamicSelectStorageOffset after this helper returns.
+    return sym_size, sym_storage
+
+
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     """
@@ -1397,11 +1505,6 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     if the indices are unbacked and appropriate semantics aren't known.
     If they are known (indices are static/backed/unbacked with info), a SliceView is created.
     """
-
-    from torch.fx.experimental.symbolic_shapes import (
-        CallMethodKey,
-        resolve_unbacked_bindings,
-    )
 
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
@@ -1416,6 +1519,12 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             and V.graph.sizevars.statically_known_leq(size, end)
             and step == 1
         ):
+            _, sym_storage = _register_unbacked_slice_size_bindings(
+                dim, start, end, step, size
+            )
+            assert sym_storage is None, (
+                "Unexpected storage_offset unbacked binding for no-op slice"
+            )
             return x
     except TypeError:
         pass
@@ -1438,10 +1547,10 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             return 0
         elif fn(sympy.Ge(index, 0)):
             # If index >= 0, the resolved index is at most min(index, size).
-            return sympy.Min(index, size)
+            return Min(index, size)
         elif fn(sympy.Lt(index, 0)):
             # If index < 0, wrap and clamp: the resolved index is at least 0.
-            return sympy.Max(index + size, 0)
+            return Max(index + size, 0)
         return None
 
     start_index, end_index = None, None
@@ -1465,71 +1574,25 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
             ambiguous_slice = False
 
     if not ambiguous_slice:
-        # Even though the bounds are resolvable now, the FX node may have
-        # allocated unbacked symbols for the slice output size because dynamo
-        # couldn't prove the bounds at trace time (constraints may have been
-        # learned after tracing the slice). We still need to define those
-        # symbols so the assertion new_unbacked_defs >= renamed_unbacked_bindings
-        # passes. Register a DynamicSliceSize operation to define the size symbol.
-        # Note: storage_offset bindings should not appear here because
-        # a resolved start_index means the offset is computable directly
-        # (base_offset + start * stride), so dynamo wouldn't allocate an
-        # unbacked symbol for it.
-        # Note: current_node may be None when slice_ is called from template
-        # rendering (e.g. cpp_template_kernel.slice_nd) rather than FX graph
-        # lowering, so we handle that.
-        current_node = V.graph.current_node
-        node_unbacked_bindings = resolve_unbacked_bindings(
-            V.graph.sizevars.shape_env,
-            current_node.meta.get("unbacked_bindings", {})
-            if current_node is not None
-            else {},
+        _, sym_storage = _register_unbacked_slice_size_bindings(
+            dim, start, end, step, size
         )
-        if node_unbacked_bindings:
-            for sym, keypath in node_unbacked_bindings.items():
-                if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
-                    b_size = ir.DynamicSliceSize(sym, start, end, step, size)
-                    b_size.name = V.graph.register_buffer(b_size)
-                    V.graph.register_operation(b_size)
-                elif keypath == (CallMethodKey("storage_offset"),):
-                    # Not handled yet — would require materializing the
-                    # tensor layout. Unlikely to be hit because a resolved
-                    # start_index means the offset is computable directly.
-                    raise AssertionError(
-                        "Unexpected storage_offset unbacked binding when both "
-                        "start and end indices are resolved"
-                    )
+        assert sym_storage is None, (
+            "Unexpected storage_offset unbacked binding when both "
+            "start and end indices are resolved"
+        )
 
         return TensorBox(
             ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
         )  # go to SliceView/ReinterpretView
 
-    # unbacked territory: create DynamicSlice ExternKernel
-    # clamp is True, unbacked start / end
+    # unbacked territory: unbacked start / end
     assert clamp
-    unbacked_bindings = resolve_unbacked_bindings(
-        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
-    )
-    assert unbacked_bindings is not None
-    assert len(unbacked_bindings) <= 2, unbacked_bindings
-    sym_size, sym_storage = None, None
-    for sym, keypath in unbacked_bindings.items():
-        if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
-            sym_size = sym
-        elif keypath == (CallMethodKey("storage_offset"),):
-            sym_storage = sym
-
     assert start_index is None or end_index is None
-    b_size = ir.DynamicSliceSize(
-        sym_size,
-        start,
-        end,
-        step,
-        x.get_size()[dim],
+    sym_size, sym_storage = _register_unbacked_slice_size_bindings(
+        dim, start, end, step, x.get_size()[dim]
     )
-    b_size.name = V.graph.register_buffer(b_size)
-    V.graph.register_operation(b_size)
-    new_size = sym_size
+    assert sym_size is not None
 
     if x.maybe_get_layout() is None:
         # realize tensor before accessing layout
@@ -1554,13 +1617,29 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
 
     new_sizes = list(x.get_size())
     new_strides = list(x.get_stride())
-    new_sizes[dim] = new_size
+    new_sizes[dim] = sym_size
     new_strides[dim] *= step
-    return as_strided(x, new_sizes, new_strides, new_storage_offset)
+    return as_strided(
+        x,
+        new_sizes,
+        new_strides,
+        new_storage_offset,
+        storage_offset_relative_to_input_storage=False,
+    )
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
-def as_strided(x, size, stride, storage_offset=None):
+def as_strided(
+    x,
+    size,
+    stride,
+    storage_offset=None,
+    *,
+    storage_offset_relative_to_input_storage=True,
+):
+    explicit_storage_offset = (
+        storage_offset is not None and storage_offset_relative_to_input_storage
+    )
     new_device = None
     new_dtype = None
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
@@ -1573,17 +1652,30 @@ def as_strided(x, size, stride, storage_offset=None):
         # to have a cross-device view today.
         new_device = x.get_device()
         new_dtype = x.dtype
+        if storage_offset is None and x.maybe_get_layout() is not None:
+            storage_offset = x.get_layout().offset
         x = x.data.unwrap_view()
     x.realize()
     if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
     storage, old_layout = ir.as_storage_and_layout(x)
+    storage_offset = (
+        convert_symint_to_expr(storage_offset) if storage_offset is not None else 0
+    )
+    storage_data = storage.data if isinstance(storage, ir.StorageBox) else storage
+    if explicit_storage_offset and isinstance(storage_data, ir.InputBuffer):
+        # Runtime graph input pointers already include the input tensor's
+        # storage_offset(), but explicit as_strided offsets are storage-relative.
+        storage_offset = sympy.expand(
+            storage_offset
+            - V.graph.graph_input_storage_offsets.get(storage_data.get_name(), 0)
+        )
     new_layout = ir.FixedLayout(
         new_device if new_device else old_layout.device,
         new_dtype if new_dtype else old_layout.dtype,
         [sympy.expand(s) for s in size],
         [sympy.expand(s) for s in stride],
-        sympy.expand(storage_offset or 0),
+        sympy.expand(storage_offset),
     )
     return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
@@ -2080,6 +2172,21 @@ def cat(inputs, dim=0):
     if len(inputs) == 1:
         return clone(inputs[0])
 
+    # ATen's cat skips 1-D empty tensors (cat_should_skip_tensor) during
+    # dimension validation and concatenation. Replicate that here.
+    def _cat_should_skip(t):
+        size = t.get_size()
+        return len(size) == 1 and V.graph.sizevars.statically_known_equals(size[0], 0)
+
+    skip_mask = [_cat_should_skip(t) for t in inputs]
+    if any(skip_mask):
+        valid_inputs = [t for t, skip in zip(inputs, skip_mask) if not skip]
+        if not valid_inputs:
+            return clone(inputs[0])
+        if len(valid_inputs) == 1:
+            return clone(valid_inputs[0])
+        inputs = valid_inputs
+
     dim = _validate_dim(inputs[0], dim, 0)
     dtype = get_promoted_dtype(
         *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -2159,17 +2266,14 @@ def cat(inputs, dim=0):
 
         return count
 
-    # as of inputs increase, possibility for register spilling also increases
-    # past a certain threshold of inputs we only fuse if the if the input kernels
-    # are simple
-    # not sure if we want to expose to users via config since logic may change in future
-    MAX_COMPLEX_POINTWISE_CAT = 8
+    # as inputs increase, possibility for register spilling also increases.
+    # Past a certain threshold we only fuse if the input kernels are simple.
     MAX_SIMPLE_OP_COUNT = 2
 
     def additional_pointwise_ops(op: torch._ops.OpOverload):
         return op in (aten.cat.default, aten.constant_pad_nd.default)
 
-    if len(inputs) <= MAX_COMPLEX_POINTWISE_CAT or (
+    if len(inputs) <= config.max_complex_pointwise_cat_inputs or (
         (len(inputs) <= config.max_pointwise_cat_inputs)
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
@@ -2201,6 +2305,9 @@ def cat(inputs, dim=0):
                 input_nodes = [fx_args]
             else:
                 return False
+
+            if any(skip_mask):
+                input_nodes = [n for n, skip in zip(input_nodes, skip_mask) if not skip]
 
             def is_unrealized_pointwise(x):
                 if isinstance(x, (TensorBox, ir.StorageBox)):
@@ -2330,7 +2437,13 @@ def select(x, dim, idx):
 
             del new_size[dim]
             del new_stride[dim]
-            return as_strided(x, new_size, new_stride, new_storage_offset)
+            return as_strided(
+                x,
+                new_size,
+                new_stride,
+                new_storage_offset,
+                storage_offset_relative_to_input_storage=False,
+            )
         else:
             # no need to clamp, this function handles negative indexing itself
             slice_result = slice_(x, dim, actual_index, actual_index + 1, clamp=False)
@@ -2365,7 +2478,13 @@ def select(x, dim, idx):
 
     del new_size[dim]
     del new_stride[dim]
-    return as_strided(x, new_size, new_stride, new_storage_offset)
+    return as_strided(
+        x,
+        new_size,
+        new_stride,
+        new_storage_offset,
+        storage_offset_relative_to_input_storage=False,
+    )
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
@@ -2376,8 +2495,23 @@ def split(x, sizes, dim=0):
     # If sizes is an integer (or a SymInt), we turn it into a list of sizes
     # by computing what the actual size of each chunk should be.
     if not isinstance(sizes, (list, tuple)):
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_lt(sizes, 0):
+            raise RuntimeError(
+                f"split expects split_size be non-negative, but got split_size={sizes}"
+            )
+
         x_size = x.get_size()[dim]
-        chunks = V.graph.sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
+        if sizevars.statically_known_equals(x_size, 0):
+            return [slice_(x, dim, 0, 0, clamp=False)]
+
+        if sizevars.statically_known_equals(sizes, 0):
+            raise RuntimeError(
+                "split_size can only be 0 if dimension size is 0, "
+                f"but got dimension size of {x_size}"
+            )
+
+        chunks = sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
         sizes_ = [sizes] * chunks
         # The last chunk might have a smaller size than the rest.
         sizes_[-1] = x_size - (chunks - 1) * sizes
@@ -2514,6 +2648,9 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
     if t.is_sparse:
         return True
 
+    if not is_triton_fp8_dtype_supported(t.dtype, t.device):
+        return True
+
     if t.dtype == torch.float8_e8m0fnu:
         if not node:
             return True
@@ -2528,6 +2665,7 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
                 aten.cat.default,
                 aten.clone.default,
                 aten._scaled_mm.default,
+                aten._scaled_mm_v2.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
         )
@@ -2754,6 +2892,7 @@ make_fallback(aten.randint)
 make_fallback(aten.rand_like, override_decomp=True)
 make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
+make_fallback(aten.rrelu_with_noise_functional)
 
 # TODO: mlazos reevaluate if we want to codegen something different
 make_fallback(torch.ops.streams.record_event.default)
@@ -2910,8 +3049,8 @@ def inductor_randint(
         return ops.randint64(
             seed_loader([]),
             ops.index_expr(random_pos(index), torch.int32),
-            ops.index_expr(low, torch.int64),
-            ops.index_expr(high, torch.int64),
+            ops.value_expr(low, torch.int64),
+            ops.value_expr(high, torch.int64),
         )
 
     return Pointwise.create(
@@ -2923,23 +3062,36 @@ def inductor_randint(
 
 
 def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
-    # Calculate the maximum offset for the boundaries tensor
-    # For a strided tensor, this is sum((size[i] - 1) * stride[i]) + stride[-1]
-    # This ensures the mask check in bucketize_binary_search works correctly
-    # for both contiguous and non-contiguous tensors.
     size = tb.get_size()
     stride = tb.get_stride()
-    max_offset = sum((s - 1) * st for s, st in zip(size, stride)) + stride[-1]
     return (
         tb.get_name(),
         size[-1],
-        max_offset,
+        tb.get_layout().storage_size(),
         stride[-1],
     )
 
 
+def _realize_bucketize_lookup_tensor(tb: TensorBox) -> TensorBox:
+    # ops.bucketize needs a named strided tensor.  realize_input() also replays
+    # affine views over newly-realized inputs as ReinterpretViews when possible.
+    return TensorBox(ir.ExternKernel.realize_input(tb))
+
+
 def _sorter_helper(tb: TensorBox) -> tuple[str, sympy.Expr]:
     return tb.get_name(), tb.get_stride()[-1]
+
+
+def _bucketize_indices(
+    tb: TensorBox, index: Sequence[sympy.Expr], index_dtype: torch.dtype
+) -> Any:
+    strides = tb.get_stride()
+    flattened_index = tb.get_layout().offset + sum(
+        (s * i for s, i in zip(strides[:-1], index[:-1])), sympy.S.Zero
+    )
+    if not index and isinstance(flattened_index, sympy.Integer):
+        return int(flattened_index)
+    return ops.index_expr(flattened_index, index_dtype)
 
 
 @register_lowering(aten.searchsorted.Tensor, type_promotion_kind=None)
@@ -2978,14 +3130,12 @@ def searchsorted(
     index_dtype = torch.int32 if out_int32 else torch.int64
     values_loader = self.make_loader()
 
-    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we need to
-    # realize it into global memory; or in other words, we can't guarantee that
-    # sorted_sequence.get_name() (used below) will exist unless we call
-    # sorted_sequence.realize().
-    sorted_sequence.realize()
+    # The entire sorted_sequence tensor needs to be used by ops.bucketize, so we
+    # need a named strided tensor for codegen below.
+    sorted_sequence = _realize_bucketize_lookup_tensor(sorted_sequence)
 
     if sorter is not None:
-        sorter.realize()
+        sorter = _realize_bucketize_lookup_tensor(sorter)
 
     if len(sorted_sequence.get_size()) == 1:
 
@@ -2994,11 +3144,15 @@ def searchsorted(
             return ops.bucketize(
                 val,
                 _boundaries_helper(sorted_sequence),
-                0,
+                _bucketize_indices(sorted_sequence, (), index_dtype),
                 index_dtype,
                 right,
                 sorter=None if sorter is None else _sorter_helper(sorter),
-                sorter_indices=None if sorter is None else 0,
+                sorter_indices=(
+                    None
+                    if sorter is None
+                    else _bucketize_indices(sorter, (), index_dtype)
+                ),
             )
 
     else:
@@ -3009,13 +3163,7 @@ def searchsorted(
             # Get index to the beginning of the sorted sequence within a flattened
             # version of the array.
             def get_flattened_index(tb: TensorBox):
-                strides = tb.get_stride()
-                return ops.index_expr(
-                    functools.reduce(
-                        operator.add, (s * i for s, i in zip(strides[:-1], idx[:-1]))
-                    ),
-                    index_dtype,
-                )
+                return _bucketize_indices(tb, idx, index_dtype)
 
             return ops.bucketize(
                 val,
@@ -3061,10 +3209,8 @@ def bucketize(
         )
 
     # The entire boundaries tensor needs to be used by ops.bucketize, so we
-    # need to realize it into global memory; or in other words, we can't
-    # guarantee that boundaries.get_name() (used below) will exist unless
-    # we call boundaries.realize().
-    boundaries.realize()
+    # need a named strided tensor for codegen below.
+    boundaries = _realize_bucketize_lookup_tensor(boundaries)
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -3075,7 +3221,7 @@ def bucketize(
         indices = ops.bucketize(
             val,
             _boundaries_helper(boundaries),
-            0,
+            _bucketize_indices(boundaries, (), index_dtype),
             index_dtype,
             right,
         )
@@ -3169,9 +3315,14 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
 
 
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
+    def get_fake_val(fx_arg):
+        if isinstance(fx_arg, torch.fx.Node):
+            return fx_arg.meta.get("val")
+        return fx_arg
+
     def apply_constraint(arg, fx_arg):
+        fake_val = get_fake_val(fx_arg)
         if _is_tensor_irnode(arg):
-            fake_val = fx_arg.meta.get("val")
             if not isinstance(fake_val, torch.Tensor):
                 return arg
             stride_order = ir.get_stride_order(
@@ -3179,7 +3330,15 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
-            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg}
+            if not isinstance(fake_val, dict):
+                return arg
+            return {key: apply_constraint(arg[key], fake_val[key]) for key in arg}
+        if isinstance(arg, (tuple, list)):
+            if not isinstance(fake_val, (tuple, list)):
+                return arg
+            return type(arg)(
+                apply_constraint(a, fx_a) for a, fx_a in zip(arg, fake_val)
+            )
         return arg
 
     args = tuple(
@@ -3189,10 +3348,18 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     return args, kwargs
 
 
+def constrain_to_fx_strides_if_fallback_random(fx_node, *args, **kwargs):
+    if not config.fallback_random:
+        return args, kwargs
+    return constrain_to_fx_strides(fx_node, *args, **kwargs)
+
+
 # native_dropout uses empty_like(input) internally, so bernoulli_ consumes
 # RNG values in the input's stride order. Constrain input strides to match
 # the FX graph (i.e. eager) so the dropout mask is identical.
-add_layout_constraint(aten.native_dropout.default, constrain_to_fx_strides)
+add_layout_constraint(
+    aten.native_dropout.default, constrain_to_fx_strides_if_fallback_random
+)
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
@@ -3338,8 +3505,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
+            size = x.get_size()
+            if len(size) == 0:
+                return False
             return V.graph.sizevars.guard_or_false(
-                sympy.Eq(Mod(x.get_size()[-1], ALIGNMENT), 0)
+                sympy.Eq(Mod(size[-1], ALIGNMENT), 0)
             )
 
         if isinstance(arg.data, ir.BaseView):
@@ -3409,7 +3579,6 @@ make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten._grouped_mm, require_dense)
 
 # Need templated kernel. Probably impossible to write efficiently
-make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 make_fallback(aten.miopen_rnn, require_dense)
@@ -3446,6 +3615,7 @@ make_fallback(aten._pdist_backward, require_contiguous)
 
 # Sorting / Sorting-like
 make_fallback(aten.nanmedian)
+make_fallback(aten.multinomial.default, warn=False)
 make_fallback(aten.randperm)
 # see: https://github.com/pytorch/pytorch/pull/121354
 make_fallback(aten.resize_)
@@ -3480,6 +3650,13 @@ make_fallback(aten._fft_r2c)  # needs complex as well
 
 # Data dependent (are these necessary?)
 make_fallback(aten.nonzero.default)
+# Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
+# native implementations)
+make_fallback(aten.bincount.default, warn=False)
+make_fallback(aten._unique2.default, warn=False)
+make_fallback(aten.unique_dim.default, warn=False)
+make_fallback(aten.unique_consecutive.default, warn=False)
+make_fallback(aten.unique_dim_consecutive.default, warn=False)
 
 # Misc
 make_fallback(aten.gcd.default, warn=False)
@@ -3488,6 +3665,12 @@ make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
 make_fallback(torch._prims.rng_prims.run_dtensor_rng_op)
+
+# AMP / GradScaler ops: both the in-place (_amp_update_scale_) and functional
+# (_amp_update_scale) variants need explicit fallbacks.  Inductor uses the
+# functional form when the input tensor is a computed (non-leaf) value.
+make_fallback(aten._amp_update_scale_.default, warn=False)
+make_fallback(aten._amp_update_scale.default, warn=False)
 
 
 # Implemented / Half implemented
@@ -3506,9 +3689,6 @@ make_fallback(aten._efficientzerotensor)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
-
-# Needs dimname support
-make_fallback(aten.zeros.names)
 
 # 6) Pattern-matched
 make_fallback(
@@ -3598,7 +3778,9 @@ def copy(self, src, non_blocking=False):
 
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=None):
-    # TODO(jansel): memory format
+    # Don't materialize the layout here based on memory_format,
+    # as we want to give the scheduler opportunity to perform layout optimization.
+    # Let the downstream op handle the input stride as needed.
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
@@ -3790,6 +3972,9 @@ def _unwrap(x):
 
 @register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
+    # Match eager/meta scalar_tensor behavior; NJT handles scalar broadcasting.
+    if layout == torch.jagged:
+        layout = torch.strided
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
@@ -3961,14 +4146,12 @@ def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(
         *size,
-        names=None,
         dtype=None,
         device=None,
         layout=None,
         pin_memory=False,
         memory_format=None,
     ):
-        assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
@@ -3995,14 +4178,12 @@ def tensor_constructor(fill_value):
 @register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
-    names=None,
     dtype=None,
     layout=None,
     device=None,
     pin_memory=None,
     memory_format=None,
 ):
-    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
@@ -4161,7 +4342,7 @@ def gather(x, dim, index, sparse_grad=False):
 
     def fn(idx):
         idx = list(idx)
-        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim])
+        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim], wrap_neg=False)
         if len(idx) == 0:
             idx = [gather_idx]
         else:
@@ -4197,9 +4378,9 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     def fn(idx):
         assert len(idx) == len(new_size), f"{idx} != {new_size}"
         var_index = indices_loader(idx[:indices_ndim])
-        weight_idx = [ops.indirect_indexing(var_index, weight_size[0])] + [
-            *idx[indices_ndim:]
-        ]
+        weight_idx = [
+            ops.indirect_indexing(var_index, weight_size[0], wrap_neg=False)
+        ] + [*idx[indices_ndim:]]
         return weight_loader(weight_idx)
 
     return Pointwise.create(
@@ -5013,6 +5194,7 @@ def inplace_constant_pad_nd(
         padded_size,
         layout.stride,
         layout.offset,
+        storage_offset_relative_to_input_storage=False,
     )
 
     sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad, clamp=False)
@@ -6256,10 +6438,10 @@ def _avg_poolnd(
             divide_factors = []
             for i in range(dim):
                 hstart = bh[i] * stride[i] - padding[i]
-                hend = sympy.Min(hstart + kernel_size[i], h[i] + padding[i])
+                hend = Min(hstart + kernel_size[i], h[i] + padding[i])
                 if not count_include_pad:
-                    hstart = sympy.Max(hstart, 0)
-                    hend = sympy.Min(hend, h[i])
+                    hstart = Max(hstart, 0)
+                    hend = Min(hend, h[i])
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             return functools.reduce(ops.mul, divide_factors)
@@ -6691,10 +6873,21 @@ def _make_reduction_inner(
 
     # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
     should_compute_logical_index = False
+    supports_logical_index_argreduce = is_triton(x) or (
+        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    )
     if (
-        reduction_type in ("argmax", "argmin")
+        reduction_type
+        in (
+            "argmax",
+            "argmin",
+            "argmax_value",
+            "argmin_value",
+            "argmax_with_value",
+            "argmin_with_value",
+        )
         and len(reduced_sizes) > 1
-        and is_triton(x)
+        and supports_logical_index_argreduce
     ):
         if isinstance(x.data, PermuteView):
             should_compute_logical_index = True
@@ -6719,7 +6912,7 @@ def _make_reduction_inner(
             new_index[idx] = var
         value = inner_loader(new_index)
 
-        # For argmax/argmin, return tuple with logical linear index if needed
+        # For argmax/argmin reductions, return tuple with logical linear index if needed
         if should_compute_logical_index:
             rindex = [sympy.expand(i) for i in reduction_index]
 
@@ -6751,8 +6944,10 @@ def _make_reduction_inner(
     )
 
 
-def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
-    def inner(x, axis=None, keepdims=False, *, dtype=None):
+def make_reduction(
+    reduction_type: ReductionType, override_return_dtype=None
+) -> Callable[..., TensorBox]:
+    def inner(x, axis=None, keepdims=False, *, dtype=None) -> TensorBox:
         # For argmax/argmin on boolean tensors, cast to int32 first to ensure
         # correct comparison in Triton. See https://github.com/pytorch/pytorch/issues/174069
         # Only apply on Triton backend; MPS handles bool comparisons natively.
@@ -6777,6 +6972,25 @@ def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
         ):  # Only realize if reduction isn't unrolled
             result.realize()
         return result
+
+    return inner
+
+
+def make_arg_with_value_reduction(
+    reduction_type: ReductionType,
+) -> Callable[..., Sequence[TensorBox]]:
+    def inner(x, axis=None, keepdims=False) -> Sequence[TensorBox]:
+        kwargs = _make_reduction_inner(
+            x,
+            axis=axis,
+            keepdims=keepdims,
+            dtype=None,
+            override_return_dtype=x.get_dtype(),
+            reduction_type=reduction_type,
+        )
+        return ir.ArgReduction.create(
+            reduction_type=reduction_type, input_node=x, **kwargs
+        )
 
     return inner
 
@@ -6827,7 +7041,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
     denom = sympy_product(size[i] for i in axis)
     if correction:
-        denom = sympy.Max(denom - correction, 0)
+        denom = Max(denom - correction, 0)
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
@@ -6838,9 +7052,13 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     return x_var, x_mean
 
 
-def use_two_step_variance(x, axis, keepdim):
-    # two-step algorithm can get better performance in small reductions size
-    # while it can accumulate more numerical error than Welford algorithm.
+def use_two_step_variance(x, axis, keepdim, input_dtype):
+    # The two-step algorithm can be faster for non-split reductions because
+    # Welford does more work per element. Preserve the old tiny-reduction
+    # two-step path, keep Welford for the rest of the small reductions where
+    # the speedup is limited and training gradients are more sensitive to the
+    # different accumulation order, and keep Welford for larger or split
+    # reductions where avoiding another full pass over the data is profitable.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
@@ -6849,17 +7067,39 @@ def use_two_step_variance(x, axis, keepdim):
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
     device = x.get_device()
-    if not (device and device.type == "cpu"):
-        threshold = config.unroll_reductions_threshold
-    else:
+    check_for_split = False
+    min_numel = 0
+    is_cuda_two_step_dtype = input_dtype in (torch.bfloat16, torch.float16)
+    if device and device.type == "cpu":
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-    return (
-        isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) <= threshold
-        and sympy_product(ranges) != 1
+    elif device and device.type == "cuda" and is_triton(x) and is_cuda_two_step_dtype:
+        min_numel = config.triton.use_two_step_variance_min_numel
+        threshold = config.triton.use_two_step_variance_threshold
+        check_for_split = True
+    else:
+        threshold = config.unroll_reductions_threshold
+
+    if not isinstance(reduction_numel, sympy.Integer):
+        return False
+
+    reduction_numel = int(reduction_numel)
+    if reduction_numel > threshold or sympy_product(ranges) == 1:
+        return False
+
+    if min_numel and config.unroll_reductions_threshold < reduction_numel < min_numel:
+        return False
+
+    if not check_for_split:
+        return True
+
+    _, split = ir.Reduction.num_splits(
+        reduction_numel=reduction_numel,
+        reduction_type="sum",
+        **kwargs,
     )
+    return V.graph.sizevars.statically_known_leq(split, 1)
 
 
 def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
@@ -6920,7 +7160,9 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
         var_mean_sum_(**kwargs)
         if (
             config.mtia.disable_welford_reduction
-            or use_two_step_variance(x, axis=axis, keepdim=keepdim)
+            or use_two_step_variance(
+                x, axis=axis, keepdim=keepdim, input_dtype=out_dtype
+            )
         )
         else var_mean_welford_(**kwargs)
     )
@@ -7348,6 +7590,27 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
+def _current_node_uses_all_tuple_outputs(indices: tuple[int, ...]) -> bool:
+    current_node = V.graph.current_node
+    if current_node is None:
+        return True
+
+    used_indices: OrderedSet[int] = OrderedSet()
+    for user in current_node.users:
+        if (
+            user.op == "call_function"
+            and user.target is operator.getitem
+            and len(user.args) >= 2
+            and isinstance(user.args[1], int)
+        ):
+            if len(user.users) > 0:
+                used_indices.add(user.args[1])
+        else:
+            return True
+
+    return all(index in used_indices for index in indices)
+
+
 @register_lowering(aten.any)
 def reduce_any(x, dim=None, keepdim=False):
     x = to_dtype(x, torch.bool)
@@ -7357,6 +7620,13 @@ def reduce_any(x, dim=None, keepdim=False):
 @register_lowering(aten.max, type_promotion_kind=None)
 def reduce_max(x, dim=None, keepdim=False):
     if dim is not None:
+        if is_triton(x) and x.get_dtype() != torch.bool:
+            if _current_node_uses_all_tuple_outputs((0, 1)):
+                return reduce_argmax_with_value(x, axis=dim, keepdims=keepdim)
+            return (
+                reduce_argmax_value(x, axis=dim, keepdims=keepdim),
+                reduce_argmax(x, axis=dim, keepdims=keepdim),
+            )
         return (
             reduce_amax(x, axis=dim, keepdims=keepdim),
             reduce_argmax(x, axis=dim, keepdims=keepdim),
@@ -7368,6 +7638,13 @@ def reduce_max(x, dim=None, keepdim=False):
 @register_lowering(aten.min, type_promotion_kind=None)
 def reduce_min(x, dim=None, keepdim=False):
     if dim is not None:
+        if is_triton(x) and x.get_dtype() != torch.bool:
+            if _current_node_uses_all_tuple_outputs((0, 1)):
+                return reduce_argmin_with_value(x, axis=dim, keepdims=keepdim)
+            return (
+                reduce_argmin_value(x, axis=dim, keepdims=keepdim),
+                reduce_argmin(x, axis=dim, keepdims=keepdim),
+            )
         return (
             reduce_amin(x, axis=dim, keepdims=keepdim),
             reduce_argmin(x, axis=dim, keepdims=keepdim),
@@ -7385,6 +7662,10 @@ reduce_argmax = register_lowering(aten.argmax)(
 reduce_argmin = register_lowering(aten.argmin)(
     make_reduction("argmin", override_return_dtype=torch.int64)
 )
+reduce_argmax_value = make_reduction("argmax_value")
+reduce_argmin_value = make_reduction("argmin_value")
+reduce_argmax_with_value = make_arg_with_value_reduction("argmax_with_value")
+reduce_argmin_with_value = make_arg_with_value_reduction("argmin_with_value")
 
 add = register_pointwise(
     aten.add,
@@ -7415,7 +7696,9 @@ def sort_stable(x, *, stable=None, dim=-1, descending=False):
         idx_dtype = torch.int32
     else:
         idx_dtype = torch.int16
-    if not V.graph.sizevars.statically_known_lt(dim_size, torch.iinfo(idx_dtype).max):
+    if not V.graph.sizevars.guard_or_false(
+        sympy.Lt(dim_size, torch.iinfo(idx_dtype).max)
+    ):
         return sort_fallback(x, stable=stable, dim=dim, descending=descending)
 
     indices = iota(
@@ -7700,7 +7983,6 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     device = self.get_device()
     use_fma = (
         dtype.is_floating_point
-        and not torch.version.hip
         and device is not None
         and device.type in ["cuda", "xpu"]
     )
@@ -7880,7 +8162,21 @@ reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
-register_pointwise(aten.signbit, override_return_dtype=torch.bool)
+
+
+@register_lowering(aten.signbit)
+def signbit(x):
+    if x.get_dtype() in (
+        torch.bool,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+    ):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("signbit")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
 
 register_lowering(aten._neg_view)(neg)
 
@@ -7961,8 +8257,8 @@ register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
 register_foreach_pointwise(aten._foreach_mul.Tensor, mul)
 foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
-register_foreach_pointwise(aten._foreach_sub.List, sub)
-register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
+register_foreach_pointwise(aten._foreach_sub.List, sub, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_sub.Scalar, sub, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
@@ -8108,8 +8404,31 @@ def sym_numel(a):
     return a.get_numel()
 
 
+def _unwrap_symbolic_magic_arg(x):
+    if isinstance(x, SymTypes):
+        return x.node.expr
+    if isinstance(x, (int, float, bool)):
+        return sympy.sympify(x)
+    return x
+
+
 for method, func in magic_methods.items():
-    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
+
+    @register_lowering(method_to_operator(method))
+    def wrapped(*args, _func=func, **kwargs):
+        node = V.graph.current_node
+        meta_val = node.meta.get("val") if node is not None else None
+        if isinstance(meta_val, SymTypes):
+            return meta_val.node.expr
+        if any(
+            isinstance(x, (SymTypes, sympy.Basic))
+            for x in itertools.chain(args, kwargs.values())
+        ):
+            return _func(
+                *(_unwrap_symbolic_magic_arg(x) for x in args),
+                **{k: _unwrap_symbolic_magic_arg(v) for k, v in kwargs.items()},
+            )
+        return _func(*args, **kwargs)
 
 
 @register_lowering(torch.sym_sum)
@@ -8350,14 +8669,25 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     2. Execute the target operation normally
     3. Track the dependencies for the scheduler
     """
-    # Realize all additional dependencies
-    dep_names = []
-    for dep in additional_deps:
-        if not isinstance(dep, IRNode):
-            continue
+    # Pair lowered deps with their original FX nodes so we can handle void ops
+    # (e.g. record_event) that lower to None but still create operations that
+    # subsequent control_deps nodes (e.g. wait_event) must be ordered after.
+    original_dep_nodes = V.graph.current_node.args[0]
+    assert isinstance(original_dep_nodes, tuple)
 
-        dep.realize()
-        dep_names.append(dep.get_name())
+    dep_names = []
+    for dep, orig_node in zip(additional_deps, original_dep_nodes, strict=True):
+        dep_ir_nodes = [
+            dep_leaf
+            for dep_leaf in pytree.tree_leaves(dep)
+            if isinstance(dep_leaf, IRNode)
+        ]
+        for dep_ir_node in dep_ir_nodes:
+            dep_ir_node.realize()
+            dep_names.append(dep_ir_node.get_name())
+        if isinstance(orig_node, torch.fx.Node):
+            found = V.graph._void_ctrl_dep_op_names.get(orig_node, [])
+            dep_names.extend(found)
 
     original_args = V.graph.current_node.args
     arg_offset = 2  # first two args (additional_deps, subgraph)
@@ -8371,6 +8701,31 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
 
     assert additional_deps
 
+    new_ops = V.graph.operations[operation_len:]
+
+    # Store buffer names of void ops (e.g. record_event has NoneLayout) so that
+    # subsequent control_deps nodes (e.g. wait_event) can depend on them even
+    # though void ops don't produce a usable tensor value.  We detect void ops
+    # by NoneLayout rather than checking `output is None`, because the overall
+    # control_deps output may be a passthrough tuple (not None) even when the
+    # subgraph contains a void op.
+    #
+    # Skip ops that are not themselves named buffers (op.name is None).  This
+    # excludes multi-output kernels like UserDefinedTritonKernel, whose buffer
+    # identity lives on their MutationOutput children rather than the op: the
+    # op is registered only as an Operation, and Buffer.get_name() asserts on
+    # the missing self.name.  Downstream ordering for those ops is already
+    # captured through the named MutationOutput buffers they produce.
+    void_names = [
+        op.get_name()
+        for op in new_ops
+        if isinstance(op, ir.Buffer)
+        and op.name is not None
+        and isinstance(op.layout, ir.NoneLayout)
+    ]
+    if void_names:
+        V.graph._void_ctrl_dep_op_names[V.graph.current_node] = void_names
+
     # some operators, like wait_tensor, just return their input,
     # so its more robust to add dep to the operation itself,
     # otherwise you can have a cycle of
@@ -8378,7 +8733,7 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     # b = control_deps(a, mm, ...)
     # c = control_deps(b, wait, ...)
     # if c == a, then you have a cycle.
-    for op in V.graph.operations[operation_len:]:
+    for op in new_ops:
         for dep_name in dep_names:
             op_name = op.operation_name
             assert op_name is not None
@@ -8417,26 +8772,41 @@ def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(
-    combine_fn: ir.Subgraph, xs, additional_inputs: tuple[torch.Tensor]
-):
+def associative_scan(combine_fn: ir.Subgraph, xs, additional_inputs: tuple[Any, ...]):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
-    if len(additional_inputs) > 0:
+    num_scan_inputs = 2 * len(xs)
+    placeholders = [
+        node for node in combine_fn.graph_module.graph.nodes if node.op == "placeholder"
+    ]
+    additional_placeholders = placeholders[num_scan_inputs:]
+    if len(additional_placeholders) != len(additional_inputs):
+        raise RuntimeError("Unable to generate code for associative_scan op")
+
+    # Dynamic shapes can lift symbols from the scan element metadata into the
+    # combine graph even when the combine function does not read them.
+    unsupported_inputs = []
+    for arg, placeholder in zip(additional_inputs, additional_placeholders):
+        if not isinstance(arg, (int, sympy.Basic)) or placeholder.users:
+            unsupported_inputs.append(arg)
+    if unsupported_inputs:
         raise RuntimeError(
-            "Unable to generate code for associative_scan op, because there are lifted arguments"
+            "Unable to generate code for associative_scan op, because there are "
+            "unsupported lifted arguments"
         )
 
     subgraph_inputs = [
         InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
         for x in itertools.chain(xs, xs)
     ]
-    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)  # type: ignore[var-annotated]
+    subgraph_inputs.extend(additional_inputs)
+    lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
 
     def wrapped_combine_fn(lhs, rhs):
         return lowered_combine_fn(
             *pytree.tree_leaves(lhs),
             *pytree.tree_leaves(rhs),
+            *additional_inputs,
         )
 
     kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
@@ -8575,58 +8945,33 @@ register_symm_mem_lowerings()
 @register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
 def prepare_softmax_online(x, dim):
     """
-    Lowering inductor_prims.prepare_softmax_online to compute max/sum in one pass if no split is needed.
+    Lowering inductor_prims.prepare_softmax_online to compute max/sum with
+    online softmax reductions when profitable.
     """
     kwargs = _make_reduction_inner(
         x, axis=dim, keepdims=True, dtype=None, override_return_dtype=None
     )
 
-    reduction_ranges = kwargs["reduction_ranges"]
-    rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
-    hint, num_split = ir.Reduction.num_splits(
-        **kwargs,
-        reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
-        reduction_numel=rnumel,
-    )
+    rnumel = V.graph.sizevars.simplify(sympy_product(kwargs["reduction_ranges"]))
 
-    if num_split == 1 and V.graph.sizevars.statically_known_geq(
+    if V.graph.sizevars.statically_known_geq(
         rnumel, config.unroll_reductions_threshold
     ):
         max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
-            input_node=x, num_output=2, reduction_hint=hint, **kwargs
+            input_node=x, num_output=2, **kwargs
         )
         return max_tensor, sum_tensor
     else:
-        # Note: [Split online_softmax_reduce]
-        # We don't split reduction for online_softmax_reduce for now.
-        # On one hand, supporting split reduction makes things complex since
-        # the split out reuctions requires 2 inputs rather than one.
-        # On the other hand, during training the online_softmax_reduce should
-        # usually don't requires a split due to large batch size
-        # (more specifically batch size times sequence length).
-        # We should support split reduction if we find legit use cases to
-        # motivate the work.
-        #
-        # TODO: does inference need split online_softmax_reduce?
-
-        log.debug(
-            "Online softmax is disabled on the fly since Inductor decides to split the reduction."
-        )
         amax = reduce_amax(x, dim, keepdims=True)
         exp = lowerings[aten.exp](sub(x, amax))
         xsum = sum_(exp, dim, keepdims=True)
         return amax, xsum
 
 
-def _is_sm100_or_later():
-    """Check if we're on SM100+ hardware (Blackwell)."""
-    return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0)
-
-
 @register_lowering(inductor_prims.cvt_e8m0_rceil, type_promotion_kind=None)
 def cvt_e8m0_rceil_lowering(inp):
     """
-    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on SM100+.
+    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on NVIDIA SM100+.
 
     The PTX instruction takes 2 float32 and outputs 2 e8m0 packed in uint16.
     Currently we pass 0.0 as the second input and only use the low byte result.
@@ -8634,9 +8979,9 @@ def cvt_e8m0_rceil_lowering(inp):
     # TODO: Optimize to process pairs (pack=2) by creating a custom Pointwise
     # that loads adjacent elements, applies PTX to both, and uses a follow-up
     # kernel to extract the packed uint16 results as uint8.
-    if not _is_sm100_or_later():
+    if not is_nvidia_sm100_or_later():
         raise NotImplementedError(
-            "cvt_e8m0_rceil requires SM100+ (Blackwell) for PTX instruction support"
+            "cvt_e8m0_rceil requires NVIDIA SM100+ (Blackwell) for PTX instruction support"
         )
 
     dtype = inp.get_dtype()
@@ -8710,12 +9055,10 @@ from . import quantized_lowerings
 quantized_lowerings.register_quantized_ops()
 quantized_lowerings.register_woq_mm_ops()
 
-from . import mkldnn_lowerings
-
-
-mkldnn_lowerings.register_onednn_fusion_ops()
-
-from . import jagged_lowerings
+from . import (
+    jagged_lowerings,
+    mkldnn_lowerings,  # noqa: F401  # registers oneDNN fusion ops on import
+)
 
 
 jagged_lowerings.register_jagged_ops()

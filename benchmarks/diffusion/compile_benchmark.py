@@ -107,8 +107,8 @@ def wan_benchmark(mode, backend="inductor"):
     prompt = (
         "An astronaut hatching from an egg, on the surface of the moon, the darkness and depth of space realised in "
         "the background. High quality, ultrarealistic detail and breath-taking movie-like camera shot."
-    )  # noqa: B950
-    negative_prompt = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"  # noqa: B950
+    )
+    negative_prompt = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
 
     block_types = (diffusers.models.transformers.transformer_wan.WanTransformerBlock,)
     compile_model(pipe.transformer, mode, block_types, backend)
@@ -139,7 +139,7 @@ def ltx_benchmark(mode, backend="inductor"):
     height = 512 - (512 % pipe.vae_spatial_compression_ratio)
     width = 704 - (704 % pipe.vae_spatial_compression_ratio)
 
-    prompt = "The video depicts a winding mountain road covered in snow, with a single vehicle traveling along it. The road is flanked by steep, rocky cliffs and sparse vegetation. The landscape is characterized by rugged terrain and a river visible in the distance. The scene captures the solitude and beauty of a winter drive through a mountainous region."  # noqa: B950
+    prompt = "The video depicts a winding mountain road covered in snow, with a single vehicle traveling along it. The road is flanked by steep, rocky cliffs and sparse vegetation. The landscape is characterized by rugged terrain and a river visible in the distance. The scene captures the solitude and beauty of a winter drive through a mountainous region."
     negative_prompt = "worst quality, inconsistent motion, blurry, jittery, distorted"
 
     block_types = (

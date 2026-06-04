@@ -37,7 +37,7 @@ class Vectorized<float> {
   static constexpr size_type size() {
     return 8;
   }
-  Vectorized() {}
+  Vectorized() = default;
 
   C10_ALWAYS_INLINE Vectorized(vfloat32 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}

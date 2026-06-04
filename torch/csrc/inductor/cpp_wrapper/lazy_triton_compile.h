@@ -1,7 +1,9 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
+#include <torch/csrc/inductor/aoti_include/kernel_compile_result.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/cpp_wrapper/common.h>
 #if defined(USE_XPU)
@@ -9,22 +11,6 @@
 #else
 #include <torch/csrc/inductor/cpp_wrapper/device_internal/cuda.h>
 #endif
-
-struct LazyKernelCompileResult {
-  std::string cubin_path;
-  std::string mangled_name;
-  int num_warps;
-  int shared_mem;
-  int xblock;
-  int yblock;
-  int zblock;
-  int r0block;
-  int rsplit;
-  int rsplit_size;
-  int config_index;
-  int global_scratch;
-  int profile_scratch;
-};
 
 static PyObject* (*_THPVariable_Wrap)(const at::TensorBase&) = nullptr;
 static int32_t (*_THPUtils_unpackInt)(PyObject*) = nullptr;
@@ -96,7 +82,19 @@ static inline int getOptionalIntAttr(
     int sentinel = -1) {
   RAIIPyObject val = PyObject_GetAttrString(obj, attr);
   AOTI_TORCH_CHECK(val, "Failed to get attribute");
-  return (val.get() != Py_None) ? _THPUtils_unpackInt(val) : sentinel;
+  return (!Py_IsNone(val.get())) ? _THPUtils_unpackInt(val) : sentinel;
+}
+
+static inline std::vector<int> getIntListAttr(PyObject* obj, const char* attr) {
+  RAIIPyObject val = PyObject_GetAttrString(obj, attr);
+  AOTI_TORCH_CHECK(val && PyList_Check(val.get()), "Expected list attribute");
+  Py_ssize_t size = PyList_Size(val);
+  std::vector<int> result;
+  result.reserve(size);
+  for (Py_ssize_t i = 0; i < size; i++) {
+    result.push_back(_THPUtils_unpackInt(PyList_GetItem(val, i)));
+  }
+  return result;
 }
 
 static inline LazyKernelCompileResult extractCompileResult(PyObject* result) {
@@ -105,10 +103,10 @@ static inline LazyKernelCompileResult extractCompileResult(PyObject* result) {
   compile_result.mangled_name = getStringAttr(result, "mangled_name");
   compile_result.num_warps = getIntAttr(result, "num_warps");
   compile_result.shared_mem = getIntAttr(result, "shared_mem");
-  compile_result.xblock = getIntAttr(result, "xblock");
-  compile_result.yblock = getIntAttr(result, "yblock");
-  compile_result.zblock = getIntAttr(result, "zblock");
-  compile_result.r0block = getIntAttr(result, "r0block");
+  compile_result.xblocks = getIntListAttr(result, "xblocks");
+  compile_result.yblocks = getIntListAttr(result, "yblocks");
+  compile_result.zblocks = getIntListAttr(result, "zblocks");
+  compile_result.r0blocks = getIntListAttr(result, "r0blocks");
   compile_result.rsplit = getIntAttr(result, "rsplit");
   compile_result.rsplit_size = getIntAttr(result, "rsplit_size");
   compile_result.config_index = getOptionalIntAttr(result, "config_index");
@@ -133,8 +131,7 @@ static inline PyObject* convertArgToPython(const T& arg) {
     return _THPVariable_Wrap(*tensor_ptr);
   } else if constexpr (std::is_same_v<DecayedT, bool>) {
     PyObject* py_arg = arg ? Py_True : Py_False;
-    Py_INCREF(py_arg);
-    return py_arg;
+    return Py_NewRef(py_arg);
   } else if constexpr (std::is_integral_v<DecayedT>) {
     return PyLong_FromLongLong(static_cast<long long>(arg));
   } else if constexpr (std::is_floating_point_v<DecayedT>) {

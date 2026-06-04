@@ -103,16 +103,18 @@ class TestFusionRegionDetection(InductorTestCase):
             "Ops before and after mm should not be in the same fusion region",
         )
 
-    def test_collapse_and_expand_fusion_regions(self):
-        """Test collapse creates call_module nodes and expand restores graph."""
+    def test_estimate_fused_node_costs(self):
+        """Test that fused costs correctly exclude internal I/O."""
         from torch._inductor.fx_passes.fusion_regions import (
             build_fusion_regions,
-            collapse_fusion_regions,
-            expand_fusion_regions,
+            estimate_fused_node_costs,
         )
 
         def model(a, b):
-            x = (a + 1) * 2  # region 1
+            # region 1: 3-node chain, middle node has only internal I/O
+            x = a + 1  # reads a (ext), writes to neg (int)
+            x = -x  # reads add (int), writes to mul (int) -> cost=0
+            x = x * 2  # reads neg (int), writes to mm (ext)
             x = torch.mm(x, a)  # mm boundary
             x = (x - 1) / 2  # region 2
             y = (b + 3) * 4  # region 3 (independent)
@@ -124,25 +126,29 @@ class TestFusionRegionDetection(InductorTestCase):
             traced = make_fx(model)(a, b)
 
         region_of = build_fusion_regions(traced)
-        new_region_of = collapse_fusion_regions(traced, region_of)
+        fused_costs = estimate_fused_node_costs(region_of)
 
-        # Should have 3 fusion regions
-        self.assertEqual(len(new_region_of), 3)
-        call_modules = list(traced.graph.find_nodes(op="call_module"))
-        self.assertEqual(len(call_modules), 3)
+        # All region nodes should have a fused cost entry
+        for node in region_of:
+            self.assertIn(node, fused_costs)
 
-        # Verify metas and bytes on each region
-        tensor_bytes = 64 * 64 * 4  # 64x64 float32
-        for module_node in call_modules:
-            self.assertIn("val", module_node.meta)
-            region = new_region_of[module_node]
-            # Each region has 1 input + 1 output = 2 tensors
-            self.assertEqual(region.total_bytes, 2 * tensor_bytes)
-            self.assertGreater(region.cost_ms, 0)
-
-        # Expand back
-        expand_fusion_regions(traced, new_region_of)
+        # Graph should NOT be mutated (no call_module nodes)
         self.assertEqual(len(list(traced.graph.find_nodes(op="call_module"))), 0)
+
+        # Nodes with only internal I/O should have cost 0
+        zero_cost_nodes = [n for n, c in fused_costs.items() if c == 0.0]
+        nonzero_cost_nodes = [n for n, c in fused_costs.items() if c > 0.0]
+        self.assertGreater(len(zero_cost_nodes), 0, "Should have internal-only nodes")
+        self.assertGreater(len(nonzero_cost_nodes), 0, "Should have external I/O nodes")
+
+        # Total fused cost should be less than sum of individual roofline estimates
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            estimate_roofline_runtime_ms,
+        )
+
+        individual_total = sum(estimate_roofline_runtime_ms(n) for n in region_of)
+        fused_total = sum(fused_costs.values())
+        self.assertLessEqual(fused_total, individual_total)
 
     def test_is_fusible_node(self):
         """Test is_fusible_node correctly classifies ops."""
@@ -173,88 +179,79 @@ class TestFusionRegionDetection(InductorTestCase):
         self.assertIsNotNone(qr_node)
         self.assertFalse(is_fusible_node(qr_node))
 
-    def test_collapse_expand_preserves_correctness(self):
-        """Test that collapse and expand preserve numerical correctness.
-
-        Run the module before collapse, after collapse, and after expand,
-        verifying all produce the same results. Also verify the graph string
-        is identical before and after the round-trip.
-        """
+    def test_fused_costs_does_not_mutate_graph(self):
+        """estimate_fused_node_costs must not mutate the graph."""
         from torch._inductor.fx_passes.fusion_regions import (
             build_fusion_regions,
-            collapse_fusion_regions,
-            expand_fusion_regions,
+            estimate_fused_node_costs,
         )
 
         def model(a, b):
-            # Group 1: before mm
             x = a + 1
             x = x * 2
-
-            # mm boundary
             x = torch.mm(x, a)
-
-            # Group 2: after mm
             x = x - 1
             x = x / 2
-
-            # Group 3: separate chain with multi-output
             y = b + 3
             z = y * 4
-
             return x, y, z
 
-        # Use real tensors for numerical correctness check
-        torch.manual_seed(42)
-        a = torch.randn(64, 64, device=self.device)
-        b = torch.randn(64, 64, device=self.device)
-
-        # Get expected results from eager execution
-        expected = model(a, b)
-
-        # Trace with FakeTensorMode, then run with real tensors
         with FakeTensorMode():
-            a_fake = torch.ones(64, 64, device=self.device)
-            b_fake = torch.ones(64, 64, device=self.device)
-            traced = make_fx(model)(a_fake, b_fake)
+            a = torch.ones(64, 64, device=self.device)
+            b = torch.ones(64, 64, device=self.device)
+            traced = make_fx(model)(a, b)
 
-        # Capture graph string before any transformation
         graph_str_before = traced.print_readable(print_output=False)
 
-        # Run traced module before any transformation
-        result_before = traced(a, b)
-        for i, (exp, res) in enumerate(zip(expected, result_before)):
-            self.assertEqual(exp, res, f"Output {i} mismatch before collapse")
-
-        # Build and collapse fusion regions
         region_of = build_fusion_regions(traced)
-        new_region_of = collapse_fusion_regions(traced, region_of)
+        estimate_fused_node_costs(region_of)
 
-        # Run traced module after collapse (with call_module nodes)
-        traced.recompile()
-        result_after_collapse = traced(a, b)
-        for i, (exp, res) in enumerate(zip(expected, result_after_collapse)):
-            self.assertEqual(exp, res, f"Output {i} mismatch after collapse")
-
-        # Expand (inline) the fusion regions back
-        expand_fusion_regions(traced, new_region_of)
-
-        # Run traced module after expand
-        traced.recompile()
-        result_after_expand = traced(a, b)
-        for i, (exp, res) in enumerate(zip(expected, result_after_expand)):
-            self.assertEqual(exp, res, f"Output {i} mismatch after expand")
-
-        # Verify graph string is identical after round-trip
-        # Note: Multi-output regions may add getitem nodes, so we run DCE first
-        traced.graph.eliminate_dead_code()
-        traced.recompile()
         graph_str_after = traced.print_readable(print_output=False)
         self.assertEqual(
             graph_str_before,
             graph_str_after,
-            "Graph string should be identical after collapse/expand round-trip",
+            "Graph must not be mutated by estimate_fused_node_costs",
         )
+
+    def test_fused_costs_handles_forced_bad_region(self):
+        """estimate_fused_node_costs works for any region_of mapping."""
+        from torch._inductor.fx_passes.fusion_regions import estimate_fused_node_costs
+
+        with FakeTensorMode():
+            t = torch.randn(64, 64, device=self.device)
+
+            def fn(x):
+                a = x.neg()
+                b = a.relu()
+                mm_out = torch.mm(b, x)
+                v = mm_out.view(64, 64)
+                c = v.neg()
+                d = c.abs()
+                return b + d
+
+            traced = make_fx(fn)(t)
+
+        fusible_nodes = [
+            n
+            for n in traced.graph.nodes
+            if n.op == "call_function"
+            and n.target
+            in (
+                aten.neg.default,
+                aten.relu.default,
+                aten.abs.default,
+            )
+        ]
+
+        self.assertGreaterEqual(len(fusible_nodes), 4)
+        from torch.utils._ordered_set import OrderedSet
+
+        bad_group = OrderedSet(fusible_nodes)
+        region_of = dict.fromkeys(fusible_nodes, bad_group)
+
+        costs = estimate_fused_node_costs(region_of)
+        self.assertEqual(len(costs), len(fusible_nodes))
+        self.assertTrue(all(c >= 0.0 for c in costs.values()))
 
 
 if __name__ == "__main__":

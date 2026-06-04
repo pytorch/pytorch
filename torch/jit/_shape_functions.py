@@ -1330,7 +1330,7 @@ def cross_entropy_loss(
 Currently deferring the enabling of this, as part of the propoasal to suspend
 adding ops.
 There are currently cases in the test case where this is being called
-in the SSA opinfo tests with with unexpected values (eg list of two ints, see the first
+in the SSA opinfo tests with unexpected values (eg list of two ints, see the first
 opinfo test). The behavior of index is significantly dependent on the inputs.
 
 This could be an error with how we are matching up shape functions, or that this

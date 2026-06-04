@@ -13,7 +13,12 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 import torch
-from torchfuzz.codegen import convert_graph_to_python_code, create_program_file
+from torchfuzz.codegen import (
+    convert_graph_to_python_code,
+    create_program_file,
+    get_template_names,
+    initialize_codegen,
+)
 from torchfuzz.ops_fuzzer import fuzz_operation_graph, fuzz_spec
 from torchfuzz.runner import ProgramRunner
 from torchfuzz.visualize_graph import visualize_operation_graph
@@ -236,8 +241,14 @@ def fuzz_and_execute(
         sys.exit(1)
 
 
-if __name__ == "__main__":
+def main():
     import argparse
+
+    # Initialize the device plugin once up front so argparse choices reflect the
+    # active plugin's templates.
+    initialize_codegen()
+    template_names = get_template_names()
+    default_template = "default" if "default" in template_names else template_names[0]
 
     try:
         from multi_process_fuzzer import run_multi_process_fuzzer, run_until_failure
@@ -262,9 +273,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--template",
-        choices=["default", "dtensor", "dtensor_placements", "unbacked", "streams"],
-        default="default",
-        help="Template to use for code generation (default: default)",
+        choices=template_names,
+        default=default_template,
+        help=(
+            "Template to use for code generation "
+            f"(default: {default_template}; from active TORCHFUZZ_DEVICE_MODULE plugin)"
+        ),
     )
     parser.add_argument(
         "--supported-ops",
@@ -320,7 +334,6 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=getattr(logging, args.log_level), format="%(levelname)s: %(message)s"
     )
-    logger = logging.getLogger(__name__)
 
     # Determine execution mode
     if args.seed is not None or args.single:
@@ -412,3 +425,7 @@ if __name__ == "__main__":
             "  python fuzzer.py --start 0 --count 1000       # Run multi-process fuzzing"
         )
         print("  python fuzzer.py --start 100 --count 50 -p 8  # Use 8 processes")
+
+
+if __name__ == "__main__":
+    main()

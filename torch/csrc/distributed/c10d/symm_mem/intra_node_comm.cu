@@ -2,8 +2,7 @@
 
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 
-namespace c10d {
-namespace intra_node_comm {
+namespace c10d::intra_node_comm {
 
 static constexpr size_t kOneShotThreshBytes = 256 * 1024;
 static constexpr size_t kTwoShotThreshBytes = 10 * 1024 * 1024;
@@ -46,7 +45,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
       at::TensorOptions().dtype(input.dtype()).device(input.device()));
 
   symmMemTensor.copy_(input);
-  op.call(symmMemTensor, "sum", "", input);
+  op.call(symmMemTensor, "sum", groupName_, input);
   return input;
 }
 
@@ -65,7 +64,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
       at::TensorOptions().dtype(input.dtype()).device(input.device()));
 
   symmMemTensor.copy_(input);
-  op.call(symmMemTensor, "sum", "");
+  op.call(symmMemTensor, "sum", groupName_);
   input.copy_(symmMemTensor);
   return input;
 }
@@ -120,5 +119,4 @@ int64_t getIntraNodeCommUsageCounter() {
   return usageCounter;
 }
 
-} // namespace intra_node_comm
-} // namespace c10d
+} // namespace c10d::intra_node_comm
