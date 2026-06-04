@@ -62,13 +62,62 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: arc,lf
 
+  wait-for-image-jammy-cuda13-py3-gcc11:
+    name: wait-for-docker-image (jammy-cuda13.0-py3-gcc11)
+    uses: ./.github/workflows/_wait-for-docker-image.yml
+    needs: get-label-type
+    with:
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+
+  wait-for-image-jammy-rocm-py3:
+    name: wait-for-docker-image (jammy-rocm-py3)
+    uses: ./.github/workflows/_wait-for-docker-image.yml
+    needs: get-label-type
+    with:
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+
+  wait-for-image-jammy-cuda13-py3-gcc11-inductor-benchmarks:
+    name: wait-for-docker-image (jammy-cuda13.0-py3-gcc11-inductor-benchmarks)
+    uses: ./.github/workflows/_wait-for-docker-image.yml
+    needs: get-label-type
+    with:
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+
+  wait-for-image-jammy-py3-gcc11-inductor-benchmarks:
+    name: wait-for-docker-image (jammy-py3-gcc11-inductor-benchmarks)
+    uses: ./.github/workflows/_wait-for-docker-image.yml
+    needs: get-label-type
+    with:
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+
+  wait-for-image-jammy-py3_10-clang18:
+    name: wait-for-docker-image (jammy-py3.10-clang18)
+    uses: ./.github/workflows/_wait-for-docker-image.yml
+    needs: get-label-type
+    with:
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang18
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+
+  wait-for-image-jammy-aarch64-py3_10-gcc13:
+    name: wait-for-docker-image (jammy-aarch64-py3.10-gcc13)
+    uses: ./.github/workflows/_wait-for-docker-image.yml
+    needs: get-label-type
+    with:
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+
   libtorch-linux-jammy-cuda13_0-py3_10-gcc11-debug-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' libtorch-linux-jammy-cuda13.0-py3.10-gcc11-debug ') }}
+    if: ${{ !cancelled() && needs.get-label-type.result == 'success' && (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' libtorch-linux-jammy-cuda13.0-py3.10-gcc11-debug ')) }}
     name: libtorch-linux-jammy-cuda13.0-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
+      - wait-for-image-jammy-cuda13-py3-gcc11
     with:
       build-environment: libtorch-linux-jammy-cuda13.0-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
@@ -87,12 +136,13 @@ jobs:
     secrets: inherit
 
   linux-jammy-cuda13_0-py3_10-gcc11-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-py3.10-gcc11 ') || contains(needs.job-filter.outputs.jobs, ' cross-compile-linux-test-cuda13 ') }}
+    if: ${{ !cancelled() && needs.get-label-type.result == 'success' && (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-py3.10-gcc11 ') || contains(needs.job-filter.outputs.jobs, ' cross-compile-linux-test-cuda13 ')) }}
     name: linux-jammy-cuda13.0-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
+      - wait-for-image-jammy-cuda13-py3-gcc11
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11
@@ -167,12 +217,13 @@ jobs:
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
   linux-jammy-cuda13_0-py3_10-gcc11-no-ops-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-py3.10-gcc11-no-ops ') }}
+    if: ${{ !cancelled() && needs.get-label-type.result == 'success' && (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-py3.10-gcc11-no-ops ')) }}
     name: linux-jammy-cuda13.0-py3.10-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
+      - wait-for-image-jammy-cuda13-py3-gcc11
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-no-ops
@@ -282,11 +333,13 @@ jobs:
     secrets: inherit
 
   linux-jammy-rocm-py3_10-build:
+    if: ${{ !cancelled() && needs.get-label-type.result == 'success' }}
     name: linux-jammy-rocm-py3.10-mi355
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
+      - wait-for-image-jammy-rocm-py3
     with:
       # Only set the prefix when use-arc is set to true, they go together
       runner_prefix: ""
@@ -331,12 +384,13 @@ jobs:
     secrets: inherit
 
   inductor-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' inductor-build ') }}
+    if: ${{ !cancelled() && needs.get-label-type.result == 'success' && (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' inductor-build ')) }}
     name: inductor-build
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
+      - wait-for-image-jammy-cuda13-py3-gcc11-inductor-benchmarks
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm80
@@ -350,12 +404,13 @@ jobs:
     secrets: inherit
 
   verify-cachebench-cpu-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' verify-cachebench-cpu-build ') || contains(needs.job-filter.outputs.jobs, ' verify-cachebench-cpu-test ') }}
+    if: ${{ !cancelled() && needs.get-label-type.result == 'success' && (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' verify-cachebench-cpu-build ') || contains(needs.job-filter.outputs.jobs, ' verify-cachebench-cpu-test ')) }}
     name: verify-cachebench-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
+      - wait-for-image-jammy-py3-gcc11-inductor-benchmarks
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-gcc11
@@ -424,12 +479,13 @@ jobs:
     secrets: inherit
 
   linux-jammy-py3_10-gcc11-full-debug-build-only:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11-full-debug-build-only ') }}
+    if: ${{ !cancelled() && needs.get-label-type.result == 'success' && (needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11-full-debug-build-only ')) }}
     name: linux-jammy-py3.10-gcc11-full-debug-build-only
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type
       - job-filter
+      - wait-for-image-jammy-py3_10-clang18
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.r7i.2xlarge
@@ -442,9 +498,12 @@ jobs:
     secrets: inherit
 
   linux-jammy-aarch64-py3_10-gcc13-build:
+    if: ${{ !cancelled() && needs.get-label-type.result == 'success' }}
     name: linux-jammy-aarch64-py3.10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - wait-for-image-jammy-aarch64-py3_10-gcc13
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-aarch64-py3.10

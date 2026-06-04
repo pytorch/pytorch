@@ -1,0 +1,101 @@
+name: Wait for CI docker image to be available in ECR
+
+on:
+  workflow_call:
+    inputs:
+      docker-image-name:
+        required: true
+        type: string
+        description: |
+          Short image name, e.g. "ci-image:pytorch-linux-jammy-py3.10-clang18".
+          Same value passed to _linux-build.yml's docker-image-name input.
+      ci-docker-hash:
+        required: true
+        type: string
+        description: Git tree hash of .ci/docker, from _runner-determinator.
+      timeout-minutes:
+        required: false
+        type: number
+        default: 120
+      poll-interval-seconds:
+        required: false
+        type: number
+        default: 60
+
+    outputs:
+      docker-image:
+        description: Fully qualified ECR image reference, ready to pull.
+        value: ${{ jobs.wait.outputs.docker-image }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  wait:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    outputs:
+      docker-image: ${{ steps.compose.outputs.docker-image }}
+    env:
+      DOCKER_REGISTRY: 308535385114.dkr.ecr.us-east-1.amazonaws.com
+      REPO_NAME: pytorch
+    steps:
+      - name: Compose full image reference
+        id: compose
+        shell: bash
+        env:
+          NAME: ${{ inputs.docker-image-name }}
+          HASH: ${{ inputs.ci-docker-hash }}
+        run: |
+          if [[ "${NAME}" == *:* ]]; then
+            base=${NAME%%:*}
+            prefix=${NAME#*:}
+            tag="${prefix}-${HASH}"
+          else
+            base=${NAME}
+            tag=${HASH}
+          fi
+          image="${DOCKER_REGISTRY}/${REPO_NAME}/${base}:${tag}"
+          echo "docker-image=${image}" >> "$GITHUB_OUTPUT"
+          echo "Resolved image: ${image}"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+          role-session-name: gha-wait-for-docker-image
+          role-skip-session-tagging: true
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+        with:
+          registries: 308535385114
+          aws-region: us-east-1
+
+      - name: Poll for image manifest
+        shell: bash
+        env:
+          DOCKER_IMAGE: ${{ steps.compose.outputs.docker-image }}
+          POLL_INTERVAL: ${{ inputs.poll-interval-seconds }}
+        run: |
+          set -u
+          attempt=0
+          while true; do
+            attempt=$((attempt + 1))
+            err=$(docker manifest inspect "${DOCKER_IMAGE}" 2>&1 >/dev/null) && rc=0 || rc=$?
+            if [[ "${rc}" -eq 0 ]]; then
+              echo "Image available after ${attempt} attempt(s): ${DOCKER_IMAGE}"
+              exit 0
+            fi
+            # Surface stderr every 5th attempt so silent auth/permission failures
+            # (vs. "image not yet built") are visible in the log.
+            if (( attempt % 5 == 1 )); then
+              echo "Attempt ${attempt}: not available (rc=${rc}); docker stderr: ${err}"
+            else
+              echo "Attempt ${attempt}: image not yet available; sleeping ${POLL_INTERVAL}s"
+            fi
+            sleep "${POLL_INTERVAL}"
+          done
