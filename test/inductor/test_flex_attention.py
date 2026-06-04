@@ -23,6 +23,7 @@ import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import config, metrics
 from torch._inductor.exc import InductorError
+from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -4395,6 +4396,75 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             kernel_options={"BLOCK_M": 16},
         )
         FileCheck().check("BLOCK_M : tl.constexpr = 16").run(code[0])
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    @skip_on_rocm
+    def test_float32_backward_default_uses_large_tile_for_long_sequences(self, device):
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 64),
+            device=device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        def get_code(kernel_options, block_mask=None):
+            source_codes = []
+
+            def save_output_code(code):
+                source_codes.append(code)
+
+            with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
+                torch._dynamo.reset()
+                for tensor in (q, k, v):
+                    tensor.grad = None
+                out = torch.compile(flex_attention, fullgraph=True)(
+                    q, k, v, block_mask=block_mask, kernel_options=kernel_options
+                )
+                out.sum().backward()
+            return "\n".join(source_codes)
+
+        with temp_float32_matmul_precision("highest"):
+            source = get_code({"BACKEND": "TRITON"})
+        FileCheck().check("BLOCK_M1 : tl.constexpr = 64").check(
+            "BLOCK_N1 : tl.constexpr = 64"
+        ).check("BLOCK_M2 : tl.constexpr = 64").check(
+            "BLOCK_N2 : tl.constexpr = 64"
+        ).run(source)
+
+        with temp_float32_matmul_precision("highest"):
+            source = get_code(
+                {
+                    "BACKEND": "TRITON",
+                    "bwd_BLOCK_M1": 16,
+                    "bwd_BLOCK_N1": 16,
+                    "bwd_BLOCK_M2": 16,
+                    "bwd_BLOCK_N2": 16,
+                }
+            )
+        FileCheck().check("BLOCK_M1 : tl.constexpr = 16").check(
+            "BLOCK_N1 : tl.constexpr = 16"
+        ).check("BLOCK_M2 : tl.constexpr = 16").check(
+            "BLOCK_N2 : tl.constexpr = 16"
+        ).run(source)
+
+        block_mask = create_block_mask(
+            noop_mask, None, None, 128, 128, BLOCK_SIZE=32, device=device
+        )
+        with temp_float32_matmul_precision("highest"):
+            source = get_code(
+                {"BACKEND": "TRITON", "fwd_BLOCK_M": 32, "fwd_BLOCK_N": 32},
+                block_mask=block_mask,
+            )
+        FileCheck().check("BLOCK_M1 : tl.constexpr = 16").check(
+            "BLOCK_N1 : tl.constexpr = 16"
+        ).check("BLOCK_M2 : tl.constexpr = 16").check(
+            "BLOCK_N2 : tl.constexpr = 16"
+        ).run(source)
 
     @supported_platform
     @skip_on_cpu
