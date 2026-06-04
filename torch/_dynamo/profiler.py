@@ -14,14 +14,125 @@ by tracking both captured and total operations, timing, and graph statistics.
 
 from __future__ import annotations
 
+import cProfile
 import dataclasses
+import functools
+import logging
 import os
-from typing import Any
-from typing_extensions import Self
+import pstats
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec, Self
 
 import torch
+from torch._guards import CompileContext
+from torch._utils_internal import maybe_upload_prof_stats_to_manifold
 
+from . import config
 from .utils import print_once
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+log = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
+
+def _callable_name(func: Callable[..., Any]) -> str:
+    if isinstance(func, functools.partial):
+        return _callable_name(func.func)
+    return getattr(func, "__name__", type(func).__name__)
+
+
+def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:
+    if config.cprofile:
+        return cprofile_wrapper(func)
+    return func
+
+
+def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
+    func_name = _callable_name(func)
+
+    @functools.wraps(func)
+    def profile_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        trace_id = CompileContext.current_trace_id()
+        if not trace_id:
+            raise AssertionError("Trace id is None")
+        profile_path = Path(
+            os.path.join(
+                tempfile.gettempdir(),
+                f"{func_name}_{str(trace_id).replace('/', '_')}.profile",
+            )
+        )
+        prof = cProfile.Profile()
+        try:
+            start_ts = time.time()
+            # runcall calls prof.enable() and prof.disable(), so do NOT call
+            # enable outside. This leads to issues like
+            # ValueError: Another profiling tool is already active
+            # pyrefly: ignore [bad-argument-type]
+            retval = prof.runcall(func, *args, **kwargs)
+            profile_latency = time.time() - start_ts
+        except ValueError:
+            log.exception("failed to enable cProfile")
+            profile_latency = 0
+            retval = func(*args, **kwargs)
+        log.warning(
+            "### Cprofile for %s trace id [%s] took %.3f seconds ###",
+            func_name,
+            trace_id,
+            profile_latency,
+        )
+        ps = pstats.Stats(prof)
+        try:
+            prof.dump_stats(profile_path)
+        except OSError:
+            log.exception("Cannot write to %s", profile_path)
+        log.warning("Raw profile at %s", profile_path)
+        svg_path = profile_path.with_suffix(".svg")
+        try:
+            with subprocess.Popen(
+                [
+                    "gprof2dot",
+                    "-f",
+                    "pstats",
+                    "--node-label=total-time-percentage",
+                    "--node-label=self-time-percentage",
+                    "--node-label=total-time",
+                    str(profile_path),
+                ],
+                stdout=subprocess.PIPE,
+            ) as gprof2dot_process:
+                subprocess.check_call(
+                    ["dot", "-Tsvg", "-o", str(svg_path)],
+                    stdin=gprof2dot_process.stdout,
+                )
+                log.warning("Generated SVG from profile at %s", svg_path)
+        except FileNotFoundError:
+            log.warning(
+                "Failed to generate SVG from profile -- dumping stats instead."
+                "Try installing gprof2dot and dot for a better visualization"
+            )
+            ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
+            ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
+
+        if manifold_link := maybe_upload_prof_stats_to_manifold(
+            str(profile_path)
+        ):  # fb-only
+            torch._logging.trace_structured(
+                "link",
+                lambda: {"name": "cprofile_manifold_url", "url": manifold_link},
+            )
+        return retval
+
+    return profile_wrapper
 
 
 @dataclasses.dataclass
