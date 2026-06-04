@@ -49,7 +49,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    skipMeta, get_all_device_types
+    skipMeta, get_all_device_types, onlyAccelerator
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -1868,156 +1868,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
-    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
-    @set_default_dtype(torch.double)
-    def test_spectral_norm(self):
-        input = torch.randn(3, 5)
-        m = nn.Linear(5, 7)
-        m = torch.nn.utils.spectral_norm(m)
-
-        self.assertEqual(m.weight_u.size(), torch.Size([m.weight.size(0)]))
-        # weight_orig should be trainable
-        self.assertTrue(hasattr(m, 'weight_orig'))
-        self.assertTrue('weight_orig' in m._parameters)
-        # weight_u should be just a reused buffer
-        self.assertTrue(hasattr(m, 'weight_u'))
-        self.assertTrue('weight_u' in m._buffers)
-        self.assertTrue('weight_v' in m._buffers)
-        # weight should be a plain attribute, not counted as a buffer or a param
-        self.assertFalse('weight' in m._buffers)
-        self.assertFalse('weight' in m._parameters)
-        # it should also be sharing storage as `weight_orig`
-        self.assertEqual(m.weight_orig.storage(), m.weight.storage())
-        self.assertEqual(m.weight_orig.size(), m.weight.size())
-        self.assertEqual(m.weight_orig.stride(), m.weight.stride())
-
-        m = torch.nn.utils.remove_spectral_norm(m)
-        self.assertFalse(hasattr(m, 'weight_orig'))
-        self.assertFalse(hasattr(m, 'weight_u'))
-        # weight should be converted back as a parameter
-        self.assertTrue(hasattr(m, 'weight'))
-        self.assertTrue('weight' in m._parameters)
-
-        with self.assertRaisesRegex(RuntimeError, 'register two spectral_norm hooks'):
-            m = torch.nn.utils.spectral_norm(m)
-            m = torch.nn.utils.spectral_norm(m)
-
-        # test correctness in training/eval modes and cpu/multi-gpu settings
-        for apply_dp in (True, False):
-            if apply_dp:
-                if not TEST_MULTIGPU:
-                    continue
-                device = torch.device('cuda:0')
-
-                def maybe_wrap(m):
-                    return torch.nn.DataParallel(m, [0, 1])
-            else:
-                device = torch.device('cpu')
-
-                def maybe_wrap(m):
-                    return m
-
-            for requires_grad in (True, False):
-                m = nn.Linear(3, 4).to(device)
-                m.weight.requires_grad_(requires_grad)
-                m = torch.nn.utils.spectral_norm(m)
-                wrapped_m = maybe_wrap(m)
-                self.assertTrue(hasattr(m, 'weight_u'))
-                u0 = m.weight_u.clone()
-                v0 = m.weight_v.clone()
-
-                # TEST TRAINING BEHAVIOR
-
-                # assert that u and v are updated
-                input = torch.randn(2, 3, device=device)
-                out = wrapped_m(input)
-                self.assertNotEqual(u0, m.weight_u)
-                self.assertNotEqual(v0, m.weight_v)
-
-                # assert that backprop reaches weight_orig
-                # can't use gradcheck because the function changes as we
-                # activate through it in training mode
-                if requires_grad:
-                    torch.autograd.grad(out.sum(), m.weight_orig)
-
-                # test backward works with multiple forwards
-                # it uses training mode so we need to reset `u` and `v` vectors
-                # to same value at beginning for finite difference test to pass
-                saved_u = m.weight_u.clone()
-                saved_v = m.weight_v.clone()
-
-                def fn(input):
-                    m.weight_u.data.copy_(saved_u)
-                    m.weight_v.data.copy_(saved_v)
-                    out0 = wrapped_m(input)
-                    out1 = wrapped_m(input)
-                    return out0 + out1
-
-                gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
-
-                # test removing
-                pre_remove_out = wrapped_m(input)
-                m = torch.nn.utils.remove_spectral_norm(m)
-                self.assertEqual(wrapped_m(input), pre_remove_out)
-
-                m = torch.nn.utils.spectral_norm(m)
-                for _ in range(3):
-                    pre_remove_out = wrapped_m(input)
-                m = torch.nn.utils.remove_spectral_norm(m)
-                self.assertEqual(wrapped_m(input), pre_remove_out)
-
-                # TEST EVAL BEHAVIOR
-
-                m = torch.nn.utils.spectral_norm(m)
-                wrapped_m(input)
-                last_train_out = wrapped_m(input)
-                last_train_u = m.weight_u.clone()
-                last_train_v = m.weight_v.clone()
-                wrapped_m.zero_grad()
-                wrapped_m.eval()
-
-                eval_out0 = wrapped_m(input)
-                # assert eval gives same result as last training iteration
-                self.assertEqual(eval_out0, last_train_out)
-                # assert doing more iteration in eval don't change things
-                self.assertEqual(eval_out0, wrapped_m(input))
-                self.assertEqual(last_train_u, m.weight_u)
-                self.assertEqual(last_train_v, m.weight_v)
-
-                # FIXME: the code below is flaky when executed with DataParallel
-                # see https://github.com/pytorch/pytorch/issues/13818
-                if apply_dp:
-                    continue
-
-                # test backward works with multiple forwards in mixed training
-                # and eval modes
-                # it uses training mode so we need to reset `u` and `v` vectors
-                # to same value at beginning for finite difference test to pass
-                saved_u = m.weight_u.clone()
-                saved_v = m.weight_v.clone()
-
-                def fn(input):
-                    m.weight_u.data.copy_(saved_u)
-                    m.weight_v.data.copy_(saved_v)
-                    wrapped_m.train()
-                    out0 = wrapped_m(input)
-                    wrapped_m.eval()
-                    out1 = wrapped_m(input)
-                    wrapped_m.train()
-                    out2 = wrapped_m(input)
-                    wrapped_m.eval()
-                    out3 = wrapped_m(input)
-                    return out0 + out1 + out2 + out3
-
-                gradcheck(fn, (input.clone().requires_grad_(),))
-
-                # assert that backprop reaches weight_orig in eval
-                if requires_grad:
-                    def fn(weight):
-                        return wrapped_m(input)
-
-                    gradcheck(fn, (m.weight_orig,))
-
     @skipIfNoLapack
     def test_spectral_norm_load_state_dict(self):
         inp = torch.randn(2, 3)
@@ -2604,31 +2454,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected_loss = torch.tensor(0.25)
         self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
 
-    def test_mse_loss_mixed_dtype_grad(self):
-        devices = ['cpu'] + (['cuda'] if TEST_CUDA else [])
-        for device in devices:
-            for reduction in ['mean', 'sum', 'none']:
-                x = torch.tensor([1.0, 2.0], dtype=torch.float32, requires_grad=True, device=device)
-                y = torch.tensor([1.5, 2.5], dtype=torch.float64, requires_grad=True, device=device)
-                loss = F.mse_loss(x, y, reduction=reduction)
-                if reduction == 'mean':
-                    expected_loss = torch.tensor(0.25, dtype=torch.float64, device=device)
-                    expected_grad_x = torch.tensor([-0.5, -0.5], dtype=torch.float32, device=device)
-                    expected_grad_y = torch.tensor([0.5, 0.5], dtype=torch.float64, device=device)
-                elif reduction == 'sum':
-                    expected_loss = torch.tensor(0.5, dtype=torch.float64, device=device)
-                    expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
-                    expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
-                else:  # 'none'
-                    expected_loss = torch.tensor([0.25, 0.25], dtype=torch.float64, device=device)
-                    expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
-                    expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
-                self.assertEqual(loss, expected_loss, atol=1e-6, rtol=0)
-                grad = torch.ones_like(loss) if reduction == 'none' else None
-                loss.backward(grad)
-                self.assertEqual(x.grad, expected_grad_x, atol=1e-6, rtol=0)
-                self.assertEqual(y.grad, expected_grad_y, atol=1e-6, rtol=0)
-
     def test_weighted_l1_loss_with_weights(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
         targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
@@ -2726,14 +2551,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             target_lengths = target_lengths.to(dtype=torch.float)
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_CTCLoss_lengthchecks_cuda(self):
-        for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
-            for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
-                targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device='cuda')
-                log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
-                with self.assertRaises(RuntimeError):
-                    torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
     def test_CTCLoss_lengthchecks_cpu(self):
         for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
@@ -2742,93 +2559,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
                 with self.assertRaises(RuntimeError):
                     torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
-
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_CTCLoss_long_targets(self):
-        input_length = 4000
-        vocab_size = 3
-        batch_size = 4
-        target_length = 1200
-
-        log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.double).log_softmax(2).requires_grad_()
-        targets = torch.randint(low=1, high=vocab_size - 1, size=(batch_size, target_length), dtype=torch.long)
-        input_lengths = batch_size * [input_length]
-        target_lengths = batch_size * [target_length]
-
-        res_cpu = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
-                                               reduction='sum', zero_infinity=True)
-        grad_out = torch.randn_like(res_cpu)
-        grad_cpu, = torch.autograd.grad(res_cpu, log_probs, grad_out)
-
-        with torch.backends.cudnn.flags(enabled=False):
-            res_gpu = torch.nn.functional.ctc_loss(log_probs.cuda(), targets.cuda(), input_lengths, target_lengths,
-                                                   reduction='sum', zero_infinity=True)
-            grad_gpu, = torch.autograd.grad(res_gpu, log_probs, grad_out.cuda())
-        self.assertEqual(res_cpu, res_gpu, atol=1e-4, rtol=0)
-        self.assertEqual(grad_cpu, grad_gpu, atol=1e-4, rtol=0)
-
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_CTCLoss_critical_target_len(self):
-        # cudnn has an unexpected problem with target length 256, see issue #53505
-        N = 1
-        S = 256
-        C = 10
-        T = 500
-        target = torch.randint(low=1, high=C, size=(S,), dtype=torch.int)
-        input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.int)
-        target_lengths = torch.tensor(S, dtype=torch.int)
-        inp = torch.randn(T, N, C, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
-        with cudnn.flags(enabled=True):
-            res_gpu = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
-        res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
-        self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
-
-    def test_CTCLoss_zero_lengths(self):
-        devices = ['cpu']
-        devices += ['cuda'] if TEST_CUDA else []
-        N = 3
-        S = 2
-        C = 200
-        T = 1
-        target = torch.randint(low=1, high=C, size=(N, S), dtype=torch.int)
-        input_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
-        target_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
-        for device in devices:
-            inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
-            res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
-            self.assertTrue((res == 0).all().item())
-            res.sum().backward()
-            self.assertTrue((inp.grad == 0).all().item())
-        target_lengths = torch.full(size=(N,), fill_value=1, dtype=torch.int)
-        for device in devices:
-            inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
-            res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
-            self.assertTrue((res == torch.inf).all().item())
-            res.sum().backward()
-            self.assertTrue((inp.grad == 0).all().item())
-
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_CTCLoss_zero_infinity(self):
-        target_lengths = [60, 25, 20]
-        input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int, device='cuda')
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
-        res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
-                                           reduction='sum', zero_infinity=True)
-        with torch.backends.cudnn.flags(enabled=False):
-            res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths,
-                                                reduction='sum', zero_infinity=True)
-        res_cpu = torch.nn.functional.ctc_loss(log_probs.cpu(), targets.cpu(), input_lengths, target_lengths,
-                                               reduction='sum', zero_infinity=True)
-
-        self.assertEqual(res2, res, atol=1e-4, rtol=0)
-        self.assertEqual(res_cpu, res.cpu(), atol=1e-4, rtol=0)
-        g1, = torch.autograd.grad(res, log_probs)
-        g2, = torch.autograd.grad(res2, log_probs)
-        g3, = torch.autograd.grad(res_cpu, log_probs)
-        self.assertEqual(g2, g3, atol=1e-4, rtol=0)
-        self.assertEqual(g1, g2, atol=1e-4, rtol=0)
-        self.assertTrue((g1 == g1).all().item())  # check that we don't have NaN
 
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
@@ -15399,6 +15129,254 @@ if __name__ == '__main__':
             self.assertEqual(l.bias.data.dtype, torch.float32)
             self.assertEqual(l.bias.data.device.type, dev_type)
 
+    @skipMPS
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
+    @set_default_dtype(torch.double)
+    def test_spectral_norm(self, device):
+        input = torch.randn(3, 5)
+        m = nn.Linear(5, 7)
+        m = torch.nn.utils.spectral_norm(m)
+
+        self.assertEqual(m.weight_u.size(), torch.Size([m.weight.size(0)]))
+        # weight_orig should be trainable
+        self.assertTrue(hasattr(m, 'weight_orig'))
+        self.assertTrue('weight_orig' in m._parameters)
+        # weight_u should be just a reused buffer
+        self.assertTrue(hasattr(m, 'weight_u'))
+        self.assertTrue('weight_u' in m._buffers)
+        self.assertTrue('weight_v' in m._buffers)
+        # weight should be a plain attribute, not counted as a buffer or a param
+        self.assertFalse('weight' in m._buffers)
+        self.assertFalse('weight' in m._parameters)
+        # it should also be sharing storage as `weight_orig`
+        self.assertEqual(m.weight_orig.storage(), m.weight.storage())
+        self.assertEqual(m.weight_orig.size(), m.weight.size())
+        self.assertEqual(m.weight_orig.stride(), m.weight.stride())
+
+        m = torch.nn.utils.remove_spectral_norm(m)
+        self.assertFalse(hasattr(m, 'weight_orig'))
+        self.assertFalse(hasattr(m, 'weight_u'))
+        # weight should be converted back as a parameter
+        self.assertTrue(hasattr(m, 'weight'))
+        self.assertTrue('weight' in m._parameters)
+
+        with self.assertRaisesRegex(RuntimeError, 'register two spectral_norm hooks'):
+            m = torch.nn.utils.spectral_norm(m)
+            m = torch.nn.utils.spectral_norm(m)
+
+        # test correctness in training/eval modes
+        for requires_grad in (True, False):
+            m = nn.Linear(3, 4).to(device)
+            m.weight.requires_grad_(requires_grad)
+            m = torch.nn.utils.spectral_norm(m)
+            self.assertTrue(hasattr(m, 'weight_u'))
+            u0 = m.weight_u.clone()
+            v0 = m.weight_v.clone()
+
+            # TEST TRAINING BEHAVIOR
+
+            # assert that u and v are updated
+            input = torch.randn(2, 3, device=device)
+            out = m(input)
+            self.assertNotEqual(u0, m.weight_u)
+            self.assertNotEqual(v0, m.weight_v)
+
+            # assert that backprop reaches weight_orig
+            # can't use gradcheck because the function changes as we
+            # activate through it in training mode
+            if requires_grad:
+                torch.autograd.grad(out.sum(), m.weight_orig)
+
+            # test backward works with multiple forwards
+            # it uses training mode so we need to reset `u` and `v` vectors
+            # to same value at beginning for finite difference test to pass
+            saved_u = m.weight_u.clone()
+            saved_v = m.weight_v.clone()
+
+            def fn(input):
+                m.weight_u.data.copy_(saved_u)
+                m.weight_v.data.copy_(saved_v)
+                out0 = m(input)
+                out1 = m(input)
+                return out0 + out1
+
+            gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
+
+            # test removing
+            pre_remove_out = m(input)
+            m = torch.nn.utils.remove_spectral_norm(m)
+            self.assertEqual(m(input), pre_remove_out)
+
+            m = torch.nn.utils.spectral_norm(m)
+            for _ in range(3):
+                pre_remove_out = m(input)
+            m = torch.nn.utils.remove_spectral_norm(m)
+            self.assertEqual(m(input), pre_remove_out)
+
+            # TEST EVAL BEHAVIOR
+
+            m = torch.nn.utils.spectral_norm(m)
+            m(input)
+            last_train_out = m(input)
+            last_train_u = m.weight_u.clone()
+            last_train_v = m.weight_v.clone()
+            m.zero_grad()
+            m.eval()
+
+            eval_out0 = m(input)
+            # assert eval gives same result as last training iteration
+            self.assertEqual(eval_out0, last_train_out)
+            # assert doing more iteration in eval don't change things
+            self.assertEqual(eval_out0, m(input))
+            self.assertEqual(last_train_u, m.weight_u)
+            self.assertEqual(last_train_v, m.weight_v)
+
+            # test backward works with multiple forwards in mixed training and eval modes
+            saved_u = m.weight_u.clone()
+            saved_v = m.weight_v.clone()
+
+            def fn(input):
+                m.weight_u.data.copy_(saved_u)
+                m.weight_v.data.copy_(saved_v)
+                m.train()
+                out0 = m(input)
+                m.eval()
+                out1 = m(input)
+                m.train()
+                out2 = m(input)
+                m.eval()
+                out3 = m(input)
+                return out0 + out1 + out2 + out3
+
+            gradcheck(fn, (input.clone().requires_grad_(),))
+
+            # assert that backprop reaches weight_orig in eval
+            if requires_grad:
+                def fn(weight):
+                    return m(input)
+
+                gradcheck(fn, (m.weight_orig,))
+
+    @skipMPS
+    def test_mse_loss_mixed_dtype_grad(self, device):
+        for reduction in ['mean', 'sum', 'none']:
+            x = torch.tensor([1.0, 2.0], dtype=torch.float32, requires_grad=True, device=device)
+            y = torch.tensor([1.5, 2.5], dtype=torch.float64, requires_grad=True, device=device)
+            loss = F.mse_loss(x, y, reduction=reduction)
+            if reduction == 'mean':
+                expected_loss = torch.tensor(0.25, dtype=torch.float64, device=device)
+                expected_grad_x = torch.tensor([-0.5, -0.5], dtype=torch.float32, device=device)
+                expected_grad_y = torch.tensor([0.5, 0.5], dtype=torch.float64, device=device)
+            elif reduction == 'sum':
+                expected_loss = torch.tensor(0.5, dtype=torch.float64, device=device)
+                expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
+                expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
+            else:  # 'none'
+                expected_loss = torch.tensor([0.25, 0.25], dtype=torch.float64, device=device)
+                expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
+                expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
+            self.assertEqual(loss, expected_loss, atol=1e-6, rtol=0)
+            grad = torch.ones_like(loss) if reduction == 'none' else None
+            loss.backward(grad)
+            self.assertEqual(x.grad, expected_grad_x, atol=1e-6, rtol=0)
+            self.assertEqual(y.grad, expected_grad_y, atol=1e-6, rtol=0)
+
+    @skipMPS
+    @onlyAccelerator
+    def test_CTCLoss_lengthchecks(self, device):
+        for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
+            for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
+                targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device=device)
+                log_probs = torch.randn(50, 3, 15, dtype=torch.float, device=device).log_softmax(2)
+                with self.assertRaises(RuntimeError):
+                    torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+    @skipMPS
+    @onlyAccelerator
+    def test_CTCLoss_long_targets(self, device):
+        input_length = 4000
+        vocab_size = 3
+        batch_size = 4
+        target_length = 1200
+
+        log_probs = torch.randn(input_length, batch_size, vocab_size, dtype=torch.double).log_softmax(2).requires_grad_()
+        targets = torch.randint(low=1, high=vocab_size - 1, size=(batch_size, target_length), dtype=torch.long)
+        input_lengths = batch_size * [input_length]
+        target_lengths = batch_size * [target_length]
+
+        res_cpu = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                                               reduction='sum', zero_infinity=True)
+        grad_out = torch.randn_like(res_cpu)
+        grad_cpu, = torch.autograd.grad(res_cpu, log_probs, grad_out)
+
+        with torch.backends.cudnn.flags(enabled=False):
+            res_device = torch.nn.functional.ctc_loss(log_probs.to(device), targets.to(device), input_lengths, target_lengths,
+                                                      reduction='sum', zero_infinity=True)
+            grad_device, = torch.autograd.grad(res_device, log_probs, grad_out.to(device))
+        self.assertEqual(res_cpu, res_device, atol=1e-4, rtol=0)
+        self.assertEqual(grad_cpu, grad_device, atol=1e-4, rtol=0)
+
+    @skipMPS
+    @onlyAccelerator
+    def test_CTCLoss_critical_target_len(self, device):
+        # cudnn has an unexpected problem with target length 256, see issue #53505
+        N = 1
+        S = 256
+        C = 10
+        T = 500
+        target = torch.randint(low=1, high=C, size=(S,), dtype=torch.int)
+        input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.int)
+        target_lengths = torch.tensor(S, dtype=torch.int)
+        inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+        with cudnn.flags(enabled=True):
+            res_gpu = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+        res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
+        self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
+
+    @skipMPS
+    def test_CTCLoss_zero_lengths(self, device):
+        N = 3
+        S = 2
+        C = 200
+        T = 1
+        target = torch.randint(low=1, high=C, size=(N, S), dtype=torch.int)
+        input_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
+        target_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
+        inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+        res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+        self.assertTrue((res == 0).all().item())
+        res.sum().backward()
+        self.assertTrue((inp.grad == 0).all().item())
+        target_lengths = torch.full(size=(N,), fill_value=1, dtype=torch.int)
+        inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+        res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+        self.assertTrue((res == torch.inf).all().item())
+        res.sum().backward()
+        self.assertTrue((inp.grad == 0).all().item())
+
+    @skipMPS
+    @onlyAccelerator
+    def test_CTCLoss_zero_infinity(self, device):
+        target_lengths = [60, 25, 20]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int, device=device)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+        res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                                           reduction='sum', zero_infinity=True)
+        with torch.backends.cudnn.flags(enabled=False):
+            res2 = torch.nn.functional.ctc_loss(log_probs, targets.to(device).long(), input_lengths, target_lengths,
+                                                reduction='sum', zero_infinity=True)
+        res_cpu = torch.nn.functional.ctc_loss(log_probs.cpu(), targets.cpu(), input_lengths, target_lengths,
+                                               reduction='sum', zero_infinity=True)
+
+        self.assertEqual(res2, res, atol=1e-4, rtol=0)
+        self.assertEqual(res_cpu, res.cpu(), atol=1e-4, rtol=0)
+        g1, = torch.autograd.grad(res, log_probs)
+        g2, = torch.autograd.grad(res2, log_probs)
+        g3, = torch.autograd.grad(res_cpu, log_probs)
+        self.assertEqual(g2, g3, atol=1e-4, rtol=0)
+        self.assertEqual(g1, g2, atol=1e-4, rtol=0)
+        self.assertTrue((g1 == g1).all().item())  # check that we don't have NaN
 
 
 class TestFunctionalPickle(TestCase):
