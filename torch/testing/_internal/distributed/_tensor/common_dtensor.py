@@ -20,8 +20,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import (
-    all_gather_single_autograd,
-    reduce_scatter_single_autograd,
+    all_gather_tensor_autograd,
+    reduce_scatter_tensor_autograd,
 )
 from torch.distributed._local_tensor import (
     LocalIntNode,
@@ -312,7 +312,7 @@ class ExpertParallel(ParallelStyle):
         self, mod: nn.Module, inputs: tuple, device_mesh: DeviceMesh
     ) -> tuple[torch.Tensor]:
         (x,) = inputs
-        x_gathered = all_gather_single_autograd(
+        x_gathered = all_gather_tensor_autograd(
             x,
             gather_dim=0,
             group=device_mesh.get_group(),
@@ -323,7 +323,7 @@ class ExpertParallel(ParallelStyle):
     def _token_combine(
         self, mod: nn.Module, output: torch.Tensor, device_mesh: DeviceMesh
     ) -> torch.Tensor:
-        result = reduce_scatter_single_autograd(
+        result = reduce_scatter_tensor_autograd(
             output,
             "sum",
             scatter_dim=0,
@@ -381,11 +381,11 @@ class ExpertParallelWithTP(ParallelStyle):
 
         def ep_dispatch(mod, inputs):
             (x,) = inputs
-            x = all_gather_single_autograd(x, gather_dim=0, group=ep_mesh.get_group())
+            x = all_gather_tensor_autograd(x, gather_dim=0, group=ep_mesh.get_group())
             return (torch.ops._c10d_functional.wait_tensor(x),)
 
         def ep_combine(mod, inputs, output):
-            out = reduce_scatter_single_autograd(
+            out = reduce_scatter_tensor_autograd(
                 output, "sum", scatter_dim=0, group=ep_mesh.get_group()
             )
             return torch.ops._c10d_functional.wait_tensor(out)

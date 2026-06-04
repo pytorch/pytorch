@@ -398,7 +398,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
             cls._cur_coll_on_pgs = {}
             cls._terminate.clear()
 
-    def all_to_all_single(
+    def alltoall_base(
         self,
         output_buffer: torch.Tensor,
         input_buffer: torch.Tensor,
@@ -441,7 +441,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def all_gather_single(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+    def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
         tensor_list = list(torch.chunk(output_tensor, self._world_size))
         return self.allgather([tensor_list], [input_tensor], opts)
 
@@ -469,17 +469,17 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def reduce_scatter_single(
+    def _reduce_scatter_base(
         self, output_tensor, input_tensor, opts=ReduceScatterOptions()
     ):
         tensor_list = list(torch.chunk(input_tensor, self._world_size))
         return self.reduce_scatter([output_tensor], [tensor_list], opts)
 
-    def reduce_scatter_single_coalesced(
+    def reduce_scatter_tensor_coalesced(
         self, output_tensors, input_tensors, opts=ReduceScatterOptions()
     ):
         works = [
-            self.reduce_scatter_single(output_tensor, input_tensor, opts)
+            self._reduce_scatter_base(output_tensor, input_tensor, opts)
             for output_tensor, input_tensor in zip(
                 output_tensors, input_tensors, strict=True
             )
@@ -488,12 +488,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
             work.wait()
         return works[-1]
 
-    def all_gather_single_coalesced(
+    def allgather_into_tensor_coalesced(
         self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()
     ):
         res = None
         for o_t, i_t in zip(output_tensor_list, input_tensor_list, strict=True):
-            res = self.all_gather_single(o_t, i_t)
+            res = self._allgather_base(o_t, i_t)
         return res
 
     def __init__(self, rank, world_size):
