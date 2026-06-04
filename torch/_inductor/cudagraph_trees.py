@@ -2274,7 +2274,10 @@ class CUDAGraphTreeManager:
             # If we are in the middle of executing cuda graphs, then we need to checkpoint memory state.
             # Both Recording and Warmup will be reflected in the allocator and dont need changes
             if self.path_state == ExecutionState.EXECUTION:
-                self.apply_checkpoint_execution_state_in_allocator()
+                if self.can_start_new_generation():
+                    self.try_end_curr_execution(dealloc_live_outputs=True)
+                elif self.current_node is not None:
+                    self.apply_checkpoint_execution_state_in_allocator()
 
             with graph_capture_lock:
                 return self.run_eager(new_inputs, function_id)
@@ -2321,9 +2324,21 @@ class CUDAGraphTreeManager:
             # now that we know the new function can't be run as a child of the
             # current node, if it is a root, try to end the current execution.
             # as noted above, we want to do this lazily to avoid having to
-            # check all existing outputs
+            # check all existing outputs. Starting a new path can overwrite the
+            # current path's live cached outputs, so poison them before
+            # replaying or re-recording the root. Normal replay of the same
+            # root should keep cached outputs intact, but same-root re-record
+            # must poison them first.
             if self.current_node is not None and function_id in self.roots:
-                self.try_end_curr_execution()
+                dealloc_live_outputs = True
+                if (
+                    self.current_node.parent is None
+                    and self.current_node.wrapped_function.id == function_id
+                ):
+                    status, _ = self.current_node.check_invariants(list(new_inputs))
+                    dealloc_live_outputs = status != CheckInvariantStatus.SUCCESS
+
+                self.try_end_curr_execution(dealloc_live_outputs=dealloc_live_outputs)
 
                 # run again to hit the root matching case which must succeed
                 if self.current_node is None:
@@ -2363,7 +2378,7 @@ class CUDAGraphTreeManager:
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1
 
-            self.try_end_curr_execution()
+            self.try_end_curr_execution(dealloc_live_outputs=True)
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
@@ -2587,11 +2602,14 @@ class CUDAGraphTreeManager:
 
         self.check_warn_on_unable_to_start_executing(function_id)
 
-    def try_end_curr_execution(self) -> None:
+    def try_end_curr_execution(self, *, dealloc_live_outputs: bool = False) -> None:
         """
         Check if the current executing node can be terminated, either because all outputs of the
         previously executed node are dead or because it was executed in a different generation.
         Will set current_node to None if successful.
+
+        dealloc_live_outputs is only needed when leaving execution to warm up or record a new
+        graph. Ordinary replay can keep cached output Tensor objects for the next invocation.
         """
 
         assert not self.in_recording
@@ -2599,6 +2617,9 @@ class CUDAGraphTreeManager:
             return
 
         if self.can_start_new_generation():
+            if dealloc_live_outputs and not self.current_node.all_outputs_are_dead():
+                self.apply_checkpoint_execution_state_in_allocator()
+                self.dealloc_current_path_weakrefs()
             self.clear_current_path_state_and_set_to_none()
             return
 
@@ -2680,9 +2701,19 @@ class CUDAGraphTreeManager:
         )
 
     def dealloc_current_path_weakrefs(self) -> None:
+        """Poison and deallocate live weakrefs on the current CUDAGraph path."""
         assert self.current_node is not None
-        # TODO: we could also allow the these weak refs to continue to be allocated,
+        # TODO: we could also allow these weak refs to continue to be allocated,
         # but that adds some complications.
+        live_storage_refs = list(self.current_node.path_live_weakrefs())
+        if not live_storage_refs:
+            return
+
+        if isinstance(self.current_node, CUDAGraphNode):
+            # Cached replay outputs are the Tensor objects returned to users.
+            # Drop them before poisoning stale outputs so future replays rebuild
+            # fresh Tensor objects.
+            self.current_node.remove_path_cached_tensors()
 
         stor_dealloc_info: dict[int, tuple[str | None, bool]] = {}
         for node in self.current_node._path_from_root:
@@ -2728,7 +2759,7 @@ class CUDAGraphTreeManager:
                 )
 
         deleted = OrderedSet[Any]()
-        for storage_ref in self.current_node.path_live_weakrefs():
+        for storage_ref in live_storage_refs:
             _storage_deref = storage_ref()
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
@@ -2739,7 +2770,14 @@ class CUDAGraphTreeManager:
                 msg = self.format_dealloc_msg(
                     stack_trace, is_grad_output=is_grad_output
                 )
-                torch._C._free_And_Remove_DeleterFn(_storage_deref)
+                if torch._C._has_Standard_Deleter(_storage_deref):
+                    torch._C._free_And_Remove_DeleterFn(_storage_deref)
+                else:
+                    # Replayed outputs are reconstructed from raw data pointers
+                    # and have non-owning storages.
+                    torch._C._cuda_cudaCachingAllocator_raw_delete(
+                        storage_ref.data_ptr()
+                    )
 
                 if self.disable_invalidate_aliases:
                     continue

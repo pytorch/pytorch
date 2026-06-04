@@ -2453,6 +2453,101 @@ if HAS_CUDA_AND_TRITON:
 
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
 
+        def test_error_on_dealloc_use_after_recording_and_execution(self):
+            def run(loop_count):
+                torch._dynamo.reset()
+                cfn = torch.compile(torch.sin, mode="reduce-overhead")
+                cfn2 = torch.compile(torch.cos, mode="reduce-overhead")
+                for _ in range(loop_count):
+                    x = cfn2(torch.randn(5, device="cuda"))
+
+                with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                    y = cfn(x)
+                    _ = y.cpu()
+
+                del x
+
+            for loop_count in (2, 3):
+                run(loop_count)
+
+        def test_error_on_dealloc_use_after_cached_output(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            stale = None
+            for _ in range(3):
+                stale = foo(torch.rand([4], device="cuda"))
+
+            self.assertIsNotNone(stale)
+            node = self.curr_node()
+            self.assertIs(stale, node.cached_tensor_outputs[0])
+
+            new = foo(torch.rand([4], device="cuda"))
+            self.assertIs(stale, new)
+            self.assertIs(new, self.curr_node().cached_tensor_outputs[0])
+            _ = new.cpu()
+
+            with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                cfn = torch.compile(torch.sin, mode="reduce-overhead")
+                cfn(stale)
+
+            del stale, new
+
+        def test_error_on_dealloc_use_after_cached_root_switch(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            @torch.compile(mode="reduce-overhead")
+            def bar(x):
+                return x + 2
+
+            def run_to_cached_replay(fn):
+                for _ in range(3):
+                    out = fn(torch.rand([4], device="cuda"))
+                del out
+
+            run_to_cached_replay(foo)
+            run_to_cached_replay(bar)
+
+            stale = foo(torch.rand([4], device="cuda"))
+            self.assertIs(stale, self.curr_node().cached_tensor_outputs[0])
+
+            new = bar(torch.rand([4], device="cuda"))
+            self.assertIs(new, self.curr_node().cached_tensor_outputs[0])
+
+            with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                stale.cpu()
+
+            del stale, new
+
+        @torch._dynamo.config.patch("error_on_recompile", True)
+        def test_error_on_dealloc_use_after_cached_same_root_rerecord(self):
+            def foo(x, p):
+                return x * p
+
+            with torch.device("cuda"):
+                foo_compiled = torch.compile(foo, mode="reduce-overhead")
+                p1 = torch.nn.Parameter(torch.rand([4]), requires_grad=False)
+                p2 = torch.nn.Parameter(torch.rand([4]), requires_grad=False)
+
+                stale = None
+                for _ in range(3):
+                    stale = foo_compiled(torch.ones([4]), p1)
+
+                self.assertIsNotNone(stale)
+                self.assertIs(stale, self.curr_node().cached_tensor_outputs[0])
+
+                new = foo_compiled(torch.ones([4]), p2)
+
+                with self.assertRaisesRegex(RuntimeError, "overwritten"):
+                    stale.cpu()
+
+                _ = new.cpu()
+
+                del stale, new
+
         def test_grad_accumulation_dealloc_error_message(self):
             model = torch.nn.Linear(10, 1, device="cuda")
             compiled_model = torch.compile(
