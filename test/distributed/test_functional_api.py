@@ -355,7 +355,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         tensors = [torch.ones([4], device=device), torch.ones([4], device=device) + 1]
         mesh = dt.DeviceMesh(device, torch.arange(4))
 
-        res = ft_c.all_gather_single_coalesced(tensors, mesh)
+        res = ft_c.all_gather_into_tensor_coalesced(tensors, mesh)
         self.assertEqual(2, len(res))
         self.assertEqual(torch.ones([4 * dist.get_world_size()], device=device), res[0])
         self.assertEqual(
@@ -398,7 +398,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         ]
         mesh = dt.DeviceMesh(device, torch.arange(4))
 
-        res = ft_c.reduce_scatter_single_coalesced(tensors, "sum", [0, 0], mesh)
+        res = ft_c.reduce_scatter_tensor_coalesced(tensors, "sum", [0, 0], mesh)
         self.assertEqual(2, len(res))
         self.assertEqual(torch.tensor([4], device=device), res[0])
         self.assertEqual(torch.tensor([8], device=device), res[1])
@@ -562,7 +562,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         ]
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
 
-        res = ft_c.all_gather_single_coalesced(tensors, mesh)
+        res = ft_c.all_gather_into_tensor_coalesced(tensors, mesh)
         self.assertEqual(2, len(res))
         self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])

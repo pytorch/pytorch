@@ -223,7 +223,9 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             torch.full((3, 3), fill_value=float(rank), device=device),
             torch.full((2, 2), fill_value=float(rank), device=device),
         ]
-        outputs = fcols.all_gather_single_coalesced(input_tensors, group=group_name)
+        outputs = fcols.all_gather_into_tensor_coalesced(
+            input_tensors, group=group_name
+        )
 
         # Verify output shapes
         for output, input_tensor in zip(outputs, input_tensors):
@@ -248,7 +250,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         ]
         scatter_dims = [0, 0]
 
-        outputs = fcols.reduce_scatter_single_coalesced(
+        outputs = fcols.reduce_scatter_tensor_coalesced(
             input_tensors, "sum", scatter_dims, group=group_name
         )
 
@@ -453,7 +455,9 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             torch.randn(3, 3, requires_grad=True, device=device),
             torch.randn(2, 2, requires_grad=True, device=device),
         ]
-        outputs = fcols.all_gather_single_coalesced(input_tensors, group=group_name)
+        outputs = fcols.all_gather_into_tensor_coalesced(
+            input_tensors, group=group_name
+        )
 
         # Backward with ones
         loss = sum(output.sum() for output in outputs)
@@ -482,7 +486,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         ]
         scatter_dims = [0, 0]
 
-        outputs = fcols.reduce_scatter_single_coalesced(
+        outputs = fcols.reduce_scatter_tensor_coalesced(
             input_tensors, "sum", scatter_dims, group=group_name
         )
 
