@@ -646,13 +646,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
         raise NotImplementedError
 
-    def has_unpack_var_sequence(self, tx: Any) -> bool:
-        try:
-            self.unpack_var_sequence(tx)
-            return True
-        except NotImplementedError:
-            return False
-
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
@@ -1201,6 +1194,31 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             explanation=(
                 f"Dynamo does not support next() on {self.python_type_name()}."
                 " Add tp_iternext_impl to this VariableTracker subclass."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def tp_iteritem_impl(
+        self, tx: InstructionTranslatorBase, index: VariableTracker
+    ) -> tuple[VariableTracker, VariableTracker]:
+        """
+        Implements the 3.15 _tp_iteritem slot used by the virtual-iterator
+        FOR_ITER/SEND fast paths.
+
+        Mirrors CPython's slot signature: takes (self, index) and returns
+        (next_value, next_index).  Exhaustion is signaled by raising
+        StopIteration via raise_observed_exception, matching how the rest
+        of Dynamo signals iterator end.
+
+        ref: https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Include/object.h#L312-L313
+        """
+        unimplemented(
+            gb_type="Missing tp_iteritem",
+            context=f"_tp_iteritem on {self.python_type_name()}",
+            explanation=(
+                f"Dynamo does not support virtual iteration on "
+                f"{self.python_type_name()}."
+                " Add tp_iteritem_impl to this VariableTracker subclass."
             ),
             hints=[*graph_break_hints.SUPPORTABLE],
         )

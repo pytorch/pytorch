@@ -669,8 +669,6 @@ class SetVariable(VariableTracker):
 
         https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L2097
         CPython uses PyAnySet_Check: only accepts set/frozenset (not dict views).
-        We also accept SetVariable subclasses (e.g. OrderedSetVariable) which
-        are not literal set/frozenset but have compatible set_items.
         """
         if not isinstance(other, SetVariable):
             try:
