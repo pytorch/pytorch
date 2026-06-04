@@ -375,12 +375,12 @@ class TestKernelBenchmark(TestCase):
         out = f(*inputs)
 
         compiled_module = self.get_compiled_module()
-        # torch.mm + x1 becomes an extern addmm kernel, so we measure the nbytes
-        # for the pointwise kernel adding that result to x2:
-        # num_gb = addmm_out + size_slice_c + size_out
-        # num_gb = (1000 * 1000 + 1000 * 1000 + 1000 * 1000) * 2 / 1e9
-        #        = 0.006
-        num_gb = "0.006"
+        # torch.mm becomes an extern kernel, so we measure the nbytes
+        # for the pointwise add kernel:
+        # num_gb = x0 + 2 * size_slice_c + size_out
+        # num_gb = (1000 * 1000 + 2 * 1000 * 1000 + 1000 * 1000) * 2/ 1e9
+        #        = 0.008
+        num_gb = "0.008"
         self.check_bandwidth(compiled_module, num_gb)
 
     def test_mm_slice_add_bandwidth_computation_2(self):
