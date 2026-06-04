@@ -533,7 +533,7 @@ def _add_nv_gemm_choices_impl(
     max_configs = config.nvgemm_max_profiling_configs or max(
         len(non_efc_kernels), len(efc_kernels)
     )
-    if variant == GemmVariant.GEMM and mm_inputs is not None:
+    if variant in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM) and mm_inputs is not None:
         heuristics = get_nvgemm_heuristics()
         non_efc_kernels = heuristics.filter_kernels(
             non_efc_kernels, mm_inputs, max_configs, accumulator_type
