@@ -2517,7 +2517,14 @@ class TritonTemplate(KernelTemplate):
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
         self.grid = grid
         self.template = self._template_from_string(source)
-        assert name not in self.all_templates, "duplicate template name"
+        # A module that registers templates can be initialized more than once in
+        # a single process (e.g. a double-import path). Tolerate re-registration
+        # under an existing name as long as the template source matches, but
+        # reject a genuine name collision between different templates.
+        existing = self.all_templates.get(name)
+        assert existing is None or existing.src_hash == self.src_hash, (
+            "duplicate template name"
+        )
         TritonTemplate.all_templates[name] = self
         self.debug = debug
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
@@ -3046,7 +3053,14 @@ class ExternKernelChoice:
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
-        assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
+        # A module that registers an extern kernel can be initialized more than
+        # once in a single process (e.g. a double-import path). Tolerate
+        # re-registration under an existing name as long as it wraps the same
+        # callable, but reject a genuine name collision between different kernels.
+        existing = getattr(extern_kernels, name, None)
+        assert existing is None or existing is kernel, (
+            f"duplicate extern kernel: {name}"
+        )
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
