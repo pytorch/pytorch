@@ -1972,6 +1972,17 @@ class TestMetaKernelConv(TestCase):
 
 class TestMetaKernelRegistrations(TestCase):
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_aminmax_out_dtype_mismatch(self):
+        inp = torch.rand(10, 10, device="meta")
+        out_min = torch.empty(10, dtype=torch.float64, device="meta")
+        out_max = torch.empty(10, dtype=torch.float64, device="meta")
+
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
+            torch.ops.aten.aminmax.out(
+                inp, dim=-1, keepdim=False, min=out_min, max=out_max
+            )
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_make_dep_token(self):
         cpu_result = torch.ops.aten._make_dep_token(device=torch.device("cpu"))
         meta_result = torch.ops.aten._make_dep_token(device=torch.device("meta"))
