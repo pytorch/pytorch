@@ -764,6 +764,7 @@ class TestIndexConstOverflowInt32(InductorTestCase):
         bad = sympy.Integer(-(2**31) - 1) + x0
         self.assertTrue(self._check([good, bad]))
 
+
 class TestEvaluateMinMax(InductorTestCase):
     def test_evaluate_min_multiple(self):
         """min(u0, k*u0) resolves via GCD: gcd(u0, k*u0)=u0.
