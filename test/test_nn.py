@@ -10085,6 +10085,22 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 3, 10, 10, 10, 10, device=device)
             torch.ops.aten.reflection_pad3d(inp, (2, 2, 2, 2, 2, 2))
 
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
+            inp = torch.randn(1, 1, 3, 3, 3, device=device)
+            torch.ops.aten.reflection_pad3d(inp, (1,))
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6, but got: 0'):
+            inp = torch.randn(1, 1, 3, 3, 3, device=device)
+            torch.ops.aten.reflection_pad3d(inp, ())
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6, but got: 5'):
+            inp = torch.randn(1, 1, 3, 3, 3, device=device)
+            torch.ops.aten.reflection_pad3d(inp, (1, 1, 1, 1, 1))
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6, but got: 7'):
+            inp = torch.randn(1, 1, 3, 3, 3, device=device)
+            torch.ops.aten.reflection_pad3d(inp, (1, 1, 1, 1, 1, 1, 1))
+
     @onlyCUDA   # Test if CPU and GPU results match
     def test_ReflectionPad2d_large(self, device):
         shapes = ([2, 65736, 6, 6], [65736, 2, 6, 6])
