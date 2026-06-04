@@ -3000,6 +3000,44 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(m(*args), ep.module()(*args))
 
+    def test_cond_dedup_symint_inputs(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+
+                def true_fn(x):
+                    return x + a
+
+                def false_fn(x):
+                    return x + b
+
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        inp = (torch.ones(3, 3), torch.ones(3, 3), torch.ones(3, 3))
+        ep = export(
+            M(),
+            inp,
+            dynamic_shapes={
+                "x": {0: Dim("d")},
+                "y": {0: Dim("d")},
+                "z": {0: Dim("d")},
+            },
+        )
+
+        cond_node = next(
+            node
+            for node in ep.graph_module.graph.nodes
+            if node.target == torch.ops.higher_order.cond
+        )
+        self.assertEqual(len(cond_node.args[3]), 2)
+        for subgraph_name in ("true_graph_0", "false_graph_0"):
+            subgraph = getattr(ep.graph_module, subgraph_name)
+            placeholders = [n for n in subgraph.graph.nodes if n.op == "placeholder"]
+            self.assertEqual(len(placeholders), 2)
+
+        self.assertEqual(M()(*inp), ep.module()(*inp))
+
     def test_cond_branches_return_same_int(self):
         class M(torch.nn.Module):
             def forward(self, x):
