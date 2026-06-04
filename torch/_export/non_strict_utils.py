@@ -71,6 +71,13 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+_TRACEABLE_TENSOR_NUMPY_DTYPES = (
+    torch.float16,
+    torch.float32,
+    torch.float64,
+)
+
+
 class _KeyPath:
     """
     Wraps `KeyPath` to aid `isinstance` checks.
@@ -1065,6 +1072,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 args = ()
                 if func in (
                     torch.distributed.all_reduce,
+                    torch.distributed.reduce_scatter_single,
                     torch.distributed.reduce_scatter_tensor,
                     torch.distributed._reduce_scatter_base,
                 ):
@@ -1087,9 +1095,10 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             and isinstance(args[0], torch.Tensor)
             and all(k == "force" for k in kwargs)
             and isinstance(kwargs.get("force", False), bool)
+            and args[0].dtype in _TRACEABLE_TENSOR_NUMPY_DTYPES
         ):
-            # Redirect Tensor.numpy to a traceable tensor view, following Dynamo.
-            # This avoids calling TensorBase.numpy on proxy/fake tensor subclasses.
+            # Redirect Tensor.numpy to a traceable tensor view, following Dynamo.  Keep
+            # this narrow because downstream ndarray operations execute as Tensor ops.
             def run():
                 t = args[0]
                 if t.layout != torch.strided:
