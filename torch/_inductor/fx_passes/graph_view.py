@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import itertools
+import logging
 import re
 from typing import Any, TYPE_CHECKING
 
 import torch.fx as fx  # noqa: TC001
+from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+log = logging.getLogger(__name__)
 
 
 def _get_module_stack(node: fx.Node) -> list[tuple[str, type[Any]]]:
@@ -92,19 +96,186 @@ class GraphView:
 
 def _clean_stack_name(stack_name: str) -> str:
     """
-    Clean up FX node's nn_module_stack metadata string to match the module name hierarchies
+    Clean up FX node's nn_module_stack metadata string to a dot-separated path.
 
-    Example:
+    L['self'] is replaced with L as a fixed anchor for the root of the network.
+
+    Examples:
         Input: "L['self']._modules['layers']['0']._modules['attention']"
-        Output: "layers.0.attention"
+        Output: "L.layers.0.attention"
+
+        Input: "L['self'].networks.1.conv"
+        Output: "L.networks.1.conv"
     """
     cleaned = re.sub(r"^L\['self'\]\.?", "", stack_name)
     parts = re.findall(r"\['([^']+)'\]", cleaned)
-    return ".".join(parts) if parts else cleaned
+    suffix = ".".join(parts) if parts else cleaned
+    return f"L.{suffix}" if suffix else "L"
 
 
 def _is_root(stack: str) -> bool:
     return stack == ""
+
+
+def _strip_instance_suffix(name: str) -> str:
+    """Strip the _N uniqueness suffix added by FX to node names (e.g. convolution_1 -> convolution)."""
+    return re.sub(r"_\d+$", "", name)
+
+
+def _outermost_prefix(stack: Any) -> str:
+    """Return the cleaned outermost (block-level) module path from an nn_module_stack."""
+    return _clean_stack_name(next(iter(stack.values()))[0])
+
+
+def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
+    """
+    Return a human-readable FQN annotation for a fused kernel.
+
+    Uses V.graph.fx_fqn_map — built once during lowering in graph.py:run_node —
+    to map FX node names to FQN strings, e.g.
+    "convolution_1" -> "L.networks.1.conv.convolution".
+
+    Two-pass hybrid algorithm:
+
+    Pass 1 — anchor prefixes via origin_node:
+        For each snode, origin_node is the direct FX node whose run_node
+        call created the IR buffer.  It is never transitively accumulated,
+        so it gives an unambiguous block identity.  Look it up in fqn_map
+        to get the anchor FQN, then read its nn_module_stack outermost
+        entry to get the block-level prefix (e.g. "L.networks.3").
+
+    Pass 2 — collect FQNs from origins with prefix filter:
+        Walk all origins across every snode.  origins is transitively
+        accumulated (cascading history from upstream blocks), but each
+        entry is looked up in fqn_map and filtered by the anchor prefix.
+        This correctly captures inline ops (relu, add) that share the
+        same block but were inlined into a parent buffer and never became
+        their own snodes, while excluding cascaded history from upstream
+        blocks.
+    """
+    fqn_map: dict[str, str] = getattr(V.graph, "fx_fqn_map", {})
+    log.debug(
+        "[fqn_trace] get_fused_kernel_module_fqn entry: fqn_map size=%d snodes=%d",
+        len(fqn_map),
+        len(scheduler_nodes),
+    )
+
+    # Pass 1: derive block anchor prefixes from each snode's origin_node.
+    # origin_node is direct (not accumulated), giving clean block identity.
+    # Fallback: when origin_node is absent or a placeholder (not in fqn_map),
+    # walk origins to find the first non-placeholder op in fqn_map.
+    anchor_prefixes: OrderedSet[str] = OrderedSet()
+    for snode in scheduler_nodes:
+        if snode.node is None:
+            continue
+        buf_name = getattr(snode.node, "name", None)
+        origin = snode.node.get_origin_node()
+        origin_name = origin.name if origin is not None else None
+        anchor_fqn = fqn_map.get(origin_name) if origin_name else None
+        log.debug(
+            "[fqn_trace] pass1 snode=%s buf_name=%s origin_node=%s op=%s in_fqn_map=%s",
+            snode, buf_name, origin_name,
+            origin.op if origin is not None else "None",
+            anchor_fqn is not None,
+        )
+
+        if anchor_fqn:
+            stack = origin.meta.get("nn_module_stack")
+            prefix = _outermost_prefix(stack) if stack else None
+            log.debug(
+                "[fqn_trace] pass1 snode=%s buf_name=%s origin_node=%s op=%s "
+                "anchor_fqn=%s outermost_prefix=%s",
+                snode, buf_name, origin_name, origin.op, anchor_fqn, prefix,
+            )
+            if prefix:
+                anchor_prefixes.add(prefix)
+            continue
+
+        # origin_node absent or not in fqn_map.
+        # For placeholders: scan FX consumers (users) — they identify which
+        # block uses this parameter, not the upstream producers in origins.
+        # For None origin_node: fall back to scanning origins.
+        if origin is not None and origin.op == "placeholder":
+            fallback_source = origin.users
+            fallback_kind = "user"
+        else:
+            fallback_source = snode.node.origins
+            fallback_kind = "origin"
+        log.debug(
+            "[fqn_trace] pass1 snode=%s buf_name=%s origin_node=%s op=%s "
+            "not in fqn_map — scanning %ss for fallback anchor",
+            snode, buf_name, origin_name,
+            origin.op if origin is not None else "None",
+            fallback_kind,
+        )
+        for fx_node in fallback_source:
+            fallback_fqn = fqn_map.get(fx_node.name)
+            if fallback_fqn:
+                stack = fx_node.meta.get("nn_module_stack")
+                prefix = _outermost_prefix(stack) if stack else None
+                log.debug(
+                    "[fqn_trace] pass1 snode=%s buf_name=%s fallback_%s=%s op=%s "
+                    "fallback_fqn=%s outermost_prefix=%s",
+                    snode, buf_name, fallback_kind, fx_node.name, fx_node.op,
+                    fallback_fqn, prefix,
+                )
+                if prefix:
+                    anchor_prefixes.add(prefix)
+                break
+        else:
+            log.debug(
+                "[fqn_trace] pass1 snode=%s buf_name=%s no anchor found in %ss",
+                snode, buf_name, fallback_kind,
+            )
+
+    log.debug("[fqn_trace] pass1 complete: anchor_prefixes=%s", list(anchor_prefixes))
+
+    if not anchor_prefixes:
+        log.debug("[fqn_trace] get_fused_kernel_module_fqn: result=None (no anchors)")
+        return None
+
+    # Pass 2: walk all origins across every snode (the transitively accumulated
+    # set), look each up in fqn_map, and include only those whose FQN prefix
+    # matches an anchor.  This captures inline ops (e.g. relu, add inlined into
+    # a parent buffer) while rejecting cascaded history from upstream blocks.
+    extern_fqns: set[str] = getattr(V.graph, "fx_extern_fqns", set())
+    module_names: OrderedSet[str] = OrderedSet()
+    for snode in scheduler_nodes:
+        if snode.node is None:
+            continue
+        buf_name = getattr(snode.node, "name", None)
+        for fx_node in snode.node.origins:
+            fqn = fqn_map.get(fx_node.name)
+            if not fqn:
+                log.debug(
+                    "[fqn_trace] pass2 snode=%s buf_name=%s fx_node=%s op=%s "
+                    "skipped (not in fqn_map)",
+                    snode, buf_name, fx_node.name, fx_node.op,
+                )
+                continue
+            if fqn in extern_fqns:
+                log.debug(
+                    "[fqn_trace] pass2 snode=%s buf_name=%s fx_node=%s "
+                    "fqn=%s skipped (claimed by extern kernel)",
+                    snode, buf_name, fx_node.name, fqn,
+                )
+                continue
+            if not any(fqn == p or fqn.startswith(p + ".") for p in anchor_prefixes):
+                log.debug(
+                    "[fqn_trace] pass2 snode=%s buf_name=%s fx_node=%s "
+                    "fqn=%s excluded (prefix not in anchors=%s)",
+                    snode, buf_name, fx_node.name, fqn, list(anchor_prefixes),
+                )
+                continue
+            log.debug(
+                "[fqn_trace] pass2 snode=%s buf_name=%s fx_node=%s fqn=%s included",
+                snode, buf_name, fx_node.name, fqn,
+            )
+            module_names.add(fqn)
+
+    result = " + ".join(module_names) if module_names else None
+    log.debug("[fqn_trace] get_fused_kernel_module_fqn: result=%s", result)
+    return result
 
 
 def make_graph_view(
