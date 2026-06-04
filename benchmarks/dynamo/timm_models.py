@@ -24,15 +24,19 @@ if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
     torch._inductor.config.fx_graph_cache = True
 
 
-def pip_install(package):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+def pip_install(package, *, no_deps=False):
+    command = [sys.executable, "-m", "pip", "install"]
+    if no_deps:
+        command.append("--no-deps")
+    command.append(package)
+    subprocess.check_call(command)
 
 
 try:
     importlib.import_module("timm")
 except ModuleNotFoundError:
     print("Installing PyTorch Image Models...")
-    pip_install("git+https://github.com/rwightman/pytorch-image-models")
+    pip_install("git+https://github.com/rwightman/pytorch-image-models", no_deps=True)
 finally:
     from timm import __version__ as timmversion
     from timm.data import resolve_data_config
