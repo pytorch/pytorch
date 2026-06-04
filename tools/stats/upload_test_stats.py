@@ -166,6 +166,18 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> list[dict[str,
         return flattened
 
 
+def _relative_to_test_reports(path: Path, unzipped_dir: Path) -> Path:
+    # Some jobs place reports under test/test-reports, others directly under test-reports
+    for base in [unzipped_dir / "test" / "test-reports", unzipped_dir / "test-reports"]:
+        try:
+            return path.relative_to(base)
+        except ValueError:
+            pass
+    raise ValueError(
+        f"{str(path)!r} is not under test/test-reports or test-reports in {str(unzipped_dir)!r}"
+    )
+
+
 def backfill_test_jsons_while_running(
     workflow_run_id: int, workflow_run_attempt: int
 ) -> None:
@@ -201,9 +213,7 @@ def backfill_test_jsons_while_running(
         for unzipped_dir in unzipped_xml_dirs:
             for xml in unzipped_dir.glob("**/*.xml"):
                 corresponding_json = str(
-                    xml.with_suffix(".json").relative_to(
-                        unzipped_dir / "test" / "test-reports"
-                    )
+                    _relative_to_test_reports(xml.with_suffix(".json"), unzipped_dir)
                 )
                 if corresponding_json in all_existing_jsons:
                     print(f"Skipping upload for existing test json for {xml}")
@@ -219,7 +229,7 @@ def backfill_test_jsons_while_running(
                 )
                 json_file = xml.with_suffix(".json")
                 s3_key = (
-                    json_file.relative_to(unzipped_dir / "test" / "test-reports")
+                    _relative_to_test_reports(json_file, unzipped_dir)
                     .as_posix()
                     .replace("/", "_")
                 )
