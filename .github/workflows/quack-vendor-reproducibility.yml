@@ -1,7 +1,7 @@
 # Reproducibility guard for the vendored quack subset (torch/_vendor/quack).
 #
 # Runs tools/vendoring/quack/vendor.sh --check against the SHA pinned in
-# torch/_vendor/quack/__init__.py: it re-renders the subset into a tempdir and
+# tools/vendoring/quack/vendor.sh: it re-renders the subset into a tempdir and
 # diffs it against the committed tree, failing on any drift. This catches
 # hand-edits to vendored files that bypass the patch set (such edits work
 # locally but are silently clobbered on the next re-vendor). Fix drift by
@@ -12,8 +12,8 @@
 #   tools/vendoring/quack/vendor.sh --check                 # clones the pinned SHA
 #   tools/vendoring/quack/vendor.sh --check --src /path/to/quack  # or reuse a local checkout
 #
-# The pinned SHA is the __upstream_sha__ constant in
-# torch/_vendor/quack/__init__.py; vendor.sh reads it (no SHA is passed here).
+# The pinned SHA is the PINNED_SHA constant in tools/vendoring/quack/vendor.sh;
+# no SHA is passed on the command line.
 #
 # A pytest entry wraps the same check for local use (skips unless opted in):
 #
