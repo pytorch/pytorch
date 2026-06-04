@@ -287,6 +287,25 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     return None
 
 
+def invalidate_unbacked_memos(t: object) -> None:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(t, FakeTensor):
+        t.invalidate_unbacked_memos()
+    elif is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            invalidate_unbacked_memos(getattr(t, attr))
+    elif isinstance(t, FunctionalTensor):
+        invalidate_unbacked_memos(t.elem)
+    elif isinstance(t, Tensor) and torch._is_functional_tensor(t):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
+        invalidate_unbacked_memos(unwrapped)
+    elif isinstance(t, Tensor) and is_functorch_wrapped_tensor(t):
+        invalidate_unbacked_memos(torch._C._functorch.get_unwrapped(t))
+
+
 @functools.cache
 def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
     return torch._C._SchemaInfo(func._schema)
@@ -796,6 +815,12 @@ class FakeTensor(Tensor):
     @fake_device.setter
     def fake_device(self, device: torch.device) -> None:
         self._fake_device = self._normalize_fake_device(device)
+
+    def invalidate_unbacked_memos(self) -> None:
+        self.nonzero_memo = None
+        self.item_memo = None
+        self.unique_memo = None
+        self.unique_consecutive_memo = None
 
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast

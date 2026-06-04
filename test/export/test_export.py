@@ -15228,6 +15228,36 @@ def forward(self, x, y):
     return (add_1,)""",
         )
 
+    def test_run_decompositions_nonzero_memo_retrace(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mask = torch.zeros([4497], dtype=torch.bool)
+                self.mask[0:21] = True
+
+            def forward(self, x, y):
+                return x[:, self.mask], y[:, self.mask]
+
+        mod = Model()
+        inputs = (torch.rand([1, 4497, 2]), torch.rand([1, 4497, 2]))
+        ep = export(mod, inputs, strict=False)
+
+        self.assertEqual(
+            sum(
+                1
+                for node in ep.graph.nodes
+                if node.target == torch.ops.aten.index.Tensor
+                and node.meta.get("unbacked_bindings")
+            ),
+            2,
+        )
+
+        ep = ep.run_decompositions(default_decompositions())
+        self.assertEqual(
+            ep.module()(*copy.deepcopy(inputs)),
+            mod(*copy.deepcopy(inputs)),
+        )
+
     def test_nested_dynamic_shapes_spec(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
