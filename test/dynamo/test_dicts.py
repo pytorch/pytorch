@@ -757,6 +757,69 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dict_update_no_args(self):
+        def fn(x):
+            d = {"a": x}
+            result = d.update()
+            return d["a"], result is None, len(d)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_from_mapping_like(self):
+        class MappingLike:
+            def __init__(self, x):
+                self.d = {"a": x, "b": x + 1}
+
+            def keys(self):
+                return self.d.keys()
+
+            def __getitem__(self, key):
+                return self.d[key]
+
+        def fn(x):
+            d = {"a": x - 1}
+            result = d.update(MappingLike(x))
+            return d["a"], d["b"], result is None
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_from_mapping_proxy(self):
+        def fn(x):
+            source = {"a": x, "b": x + 1}
+            d = {"a": x - 1}
+            d.update(types.MappingProxyType(source))
+            return d["a"], d["b"]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_update_rejects_bad_sequence_element_length(self):
+        def fn():
+            try:
+                {}.update([(1, 2, 3)])
+            except ValueError as exc:
+                return "length 3; 2 is required" in str(exc)
+            return False
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
+    def test_dict_update_rejects_too_many_args(self):
+        def fn():
+            try:
+                {}.update({}, {})
+            except TypeError:
+                return True
+            return False
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(), opt_fn())
+
     def test_dict_subclass_initialization_in_graph(self):
         for super_class in (
             OrderedDict,
