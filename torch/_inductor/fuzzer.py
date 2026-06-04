@@ -600,7 +600,7 @@ class ConfigFuzzer:
             test_model_fn_factory: Function that returns a test model, which runs and returns True if successful, or
               the outputs if they should be compared with eager
             seed: Randomness seed.
-            default: Default values for the config. Inductor has preset based on know failures.
+            default: Default values for the config. Inductor has preset based on known failures.
             sm: How type value samples are generated, default TOGGLE.
             test_timeout: max time a test can take.
         """
@@ -623,7 +623,7 @@ class ConfigFuzzer:
     def __repr__(self) -> str:
         return (
             f"ConfigFuzzer(config_module={self.config_module}, "
-            f"test_model_fn_factor={self.test_model_fn_factory}, seed={self.seed}, default={self.default})"
+            f"test_model_fn_factory={self.test_model_fn_factory}, seed={self.seed}, default={self.default})"
         )
 
     def _set_config(self, field_name: str, value: Any) -> None:

@@ -695,7 +695,7 @@ def register_onednn_fusion_ops():
             ):
                 # For int8-mixed-bf16 quantization and inplace add,
                 # there is case when accum dtype is float32 but output dtype is bfloat16.
-                # Since the accum will be inplaced changed with post op sum,
+                # Since the accum will be changed in-place with post op sum,
                 # we will do accum dtype conversion here.
                 accum = to_dtype(accum, output_dtype)
             return TensorBox.create(
@@ -1118,7 +1118,7 @@ def register_onednn_fusion_ops():
                     if x2.get_dtype() != output_dtype:
                         # For int8-mixed-bf16 quantization and inplace add,
                         # there is case when accum dtype is float32 but output dtype is bfloat16.
-                        # Since the accum will be inplaced changed with post op sum,
+                        # Since the accum will be changed in-place with post op sum,
                         # we will do accum dtype conversion here.
                         x2 = to_dtype(x2, output_dtype)
                 else:

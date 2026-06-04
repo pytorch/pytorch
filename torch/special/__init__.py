@@ -309,7 +309,7 @@ logit(input, eps=None, *, out=None) -> Tensor
 
 Returns a new tensor with the logit of the elements of :attr:`input`.
 :attr:`input` is clamped to [eps, 1 - eps] when eps is not None.
-When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yields NaN.
+When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will yield NaN.
 
 .. math::
     \begin{align}

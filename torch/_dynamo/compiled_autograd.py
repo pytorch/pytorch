@@ -993,7 +993,7 @@ class AutogradCompilerInstance:
     # Eager autograd backward implements scalars as 0-dim tensors, see DivBackward0::other_.
     # When compiled autograd traces those nodes, it lifts the scalar tensors, resulting in a graph
     # with some cpu 0-dim tensor inputs. To prevent the entire graph from skipping cudagraph, we move the
-    # scalars tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
+    # scalar tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
     def move_graph_nodes_to_cuda(self, graph: torch.fx.Graph) -> list[int]:
         to_move: dict[int, torch.fx.Node] = {}
         has_cuda_inputs = False
