@@ -25,6 +25,7 @@ import torch.fx as fx
 from torch import Tensor
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
+from torch._dynamo.profiler import cprofile_wrapper
 from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_context
 from torch._guards import (
     compile_context,
@@ -2850,9 +2851,15 @@ class _AutogradBackwardCompiler:
             # See Note: [Backward graph lazy lowering]
             if self.bw_compiler is None:
                 raise AssertionError("bw_compiler must not be None")
-            self.compiled_bw = self.bw_compiler(
-                copy.deepcopy(bw_module), placeholder_list
-            )
+            bw_compiler = self.bw_compiler
+
+            def compile_backward() -> Callable[..., Any]:
+                return bw_compiler(copy.deepcopy(bw_module), placeholder_list)
+
+            if dynamo_config.cprofile and CompileContext.current_trace_id() is not None:
+                compile_backward = cprofile_wrapper(compile_backward)
+
+            self.compiled_bw = compile_backward()
             # Maybe save cache entry
             if self.try_save_cache_entry is not None:
                 self.try_save_cache_entry(

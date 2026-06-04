@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+import os
+import tempfile
 import threading
 from unittest.mock import patch
 
@@ -14,6 +16,49 @@ from torch.testing._internal.common_utils import TemporaryFileName
 
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
+    def test_cprofile_profiles_lazy_backward_compile(self):
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        class DummyPopen:
+            stdout = None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+        def compiler(gm, _example_inputs):
+            return make_boxed_func(gm.forward)
+
+        backend = aot_autograd(fw_compiler=compiler, bw_compiler=compiler)
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(tempfile, "tempdir", tmpdir),
+            patch("torch._dynamo.profiler.subprocess.Popen", return_value=DummyPopen()),
+            patch("torch._dynamo.profiler.subprocess.check_call"),
+            torch._dynamo.config.patch(cprofile=True),
+        ):
+
+            @torch.compile(backend=backend)
+            def fn(x):
+                return (x.sin() * x).sum()
+
+            y = fn(torch.randn(3, requires_grad=True))
+            profiles_before = set(os.listdir(tmpdir))
+
+            y.backward()
+
+            new_profiles = sorted(
+                name
+                for name in set(os.listdir(tmpdir)) - profiles_before
+                if name.endswith(".profile")
+            )
+            self.assertEqual(len(new_profiles), 1)
+            self.assertTrue(new_profiles[0].startswith("compile_backward_"))
+
     def test_dynamo_timed_profiling_isolated(self):
         # dynamo_timed functions should appear in profile traces.
         def inner_fn(x):
