@@ -89,6 +89,9 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
     } else if (key == "graph_capture_record_stream_reuse") {
       i = parseGraphCaptureRecordStreamReuse(tokenizer, i);
       used_native_specific_option = true;
+    } else if (key == "cross_stream_reclaim") {
+      i = parseCrossStreamReclaim(tokenizer, i);
+      used_native_specific_option = true;
     } else if (key == "per_process_memory_fraction") {
       i = parsePerProcessMemoryFraction(tokenizer, i);
       used_native_specific_option = true;
@@ -135,6 +138,14 @@ size_t CUDAAllocatorConfig::parseGraphCaptureRecordStreamReuse(
     size_t i) {
   tokenizer.checkToken(++i, ":");
   m_graph_capture_record_stream_reuse = tokenizer.toBool(++i);
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parseCrossStreamReclaim(
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  m_cross_stream_reclaim = tokenizer.toBool(++i);
   return i;
 }
 

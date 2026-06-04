@@ -1754,7 +1754,12 @@ class DeviceCachingAllocator {
         // Search pool
         get_free_block(params)
         // Trigger callbacks and retry search
-        || (trigger_free_memory_callbacks(params) && get_free_block(params));
+        || (trigger_free_memory_callbacks(params) && get_free_block(params))
+        // Reclaim an idle segment from another stream before cudaMalloc; skip
+        // under expandable_segments, where no block is reclaimable.
+        ||
+        (CUDAAllocatorConfig::cross_stream_reclaim() &&
+         !is_expandable_segments_active && get_free_block_cross_stream(params));
 
     // Can't reuse an existing block; try to get a new one.
     if (!block_found) {
@@ -3704,6 +3709,17 @@ class DeviceCachingAllocator {
     }
   }
 
+  // Reject oversized reuse: no >=max_split_size block for a smaller request,
+  // and bounded rounding for large ones.
+  static bool acceptable_block_size(size_t request_size, size_t block_size) {
+    const auto max_split = AcceleratorAllocatorConfig::max_split_size();
+    if (request_size < max_split) {
+      return block_size < max_split;
+    }
+    return block_size < request_size +
+        AcceleratorAllocatorConfig::max_non_split_rounding_size();
+  }
+
   bool get_free_block(AllocParams& p) {
     BlockPool& pool = *p.pool;
 
@@ -3750,17 +3766,45 @@ class DeviceCachingAllocator {
       }
     }
 
-    // Do not return an oversized block for a large request
-    if ((p.size() < AcceleratorAllocatorConfig::max_split_size()) &&
-        ((*it)->size >= AcceleratorAllocatorConfig::max_split_size()))
-      return false;
-    // Allow oversized block size to be rounded up but within a limit
-    if ((p.size() >= AcceleratorAllocatorConfig::max_split_size()) &&
-        ((*it)->size >=
-         p.size() + AcceleratorAllocatorConfig::max_non_split_rounding_size()))
+    if (!acceptable_block_size(p.size(), (*it)->size))
       return false;
     p.block = *it;
     pool.erase_from_blocks(p.block);
+    return true;
+  }
+
+  // Reclaim a whole idle segment from another stream, order the new stream
+  // after the donor's prior work, and re-key it. Only whole, non-expandable
+  // segments are eligible, so each segment stays single-stream.
+  bool get_free_block_cross_stream(AllocParams& p) {
+    BlockPool& pool = *p.pool;
+    // Graph pools and capture have their own per-stream assumptions.
+    if (pool.owner_PrivatePool || is_capture_context()) {
+      return false;
+    }
+
+    const size_t size = p.size();
+    Block* best = nullptr;
+    // No cross-stream sorted lookup; linear best-fit scan (slow path only).
+    // Skip splittable fits so a small request can't migrate a large segment.
+    for (Block* b : pool.blocks) {
+      if (b->stream == p.stream() || b->expandable_segment_ || b->is_split() ||
+          b->size < size || !acceptable_block_size(size, b->size) ||
+          should_split(b, size, p.is_expandable_segments_active)) {
+        continue;
+      }
+      if (!best || b->size < best->size) {
+        best = b;
+      }
+    }
+    if (!best) {
+      return false;
+    }
+
+    insert_cross_stream_dependency(best->stream, p.stream(), best->device);
+    pool.erase_from_blocks(best);
+    best->stream = p.stream();
+    p.block = best;
     return true;
   }
 
@@ -4279,6 +4323,19 @@ class DeviceCachingAllocator {
     // Leak the event pool to avoid shutdown issues.
     static auto* event_pool = new EventPool();
     return event_pool->get(idx);
+  }
+
+  // Make `consumer` wait for `producer`'s currently-queued work, so memory
+  // freed on `producer` is safe to reuse on `consumer`. The event can be
+  // recycled at once: cudaStreamWaitEvent snapshots its state now.
+  void insert_cross_stream_dependency(
+      cudaStream_t producer,
+      cudaStream_t consumer,
+      c10::DeviceIndex device) {
+    c10::cuda::CUDAGuard device_guard(device);
+    EventPool::Event event = create_event_internal(device);
+    C10_CUDA_CHECK(cudaEventRecord(*event, producer));
+    C10_CUDA_CHECK(cudaStreamWaitEvent(consumer, *event));
   }
 
   void synchronize_and_free_events(
