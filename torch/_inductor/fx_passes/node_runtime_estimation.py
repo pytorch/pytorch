@@ -12,6 +12,7 @@ from typing import Any
 
 import torch
 import torch.fx as fx
+from torch._inductor import config
 from torch._inductor.fx_passes.bucketing import (
     _resolve_group_name,
     _schedulable_wait_node,
@@ -167,12 +168,9 @@ def _benchmark_collective_with_cuda_events_impl(
         (args, kwargs),
     )
 
-    # Convert SymInt args to concrete ints; fall back to 4096 for unbacked (hintless) SymInts.
-    _SYMINT_NO_HINT_FALLBACK = 4096
-
     args, kwargs = torch.utils._pytree.tree_map_only(
         torch.SymInt,
-        lambda s: get_hint(s) or _SYMINT_NO_HINT_FALLBACK,
+        lambda s: get_hint(s) or config.unbacked_symint_fallback,
         (args, kwargs),
     )
 

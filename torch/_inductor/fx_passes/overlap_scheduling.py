@@ -303,12 +303,9 @@ def benchmark_node_with_cache_key(
             (args, kwargs),
         )
 
-        # Convert SymInt args to concrete ints; fall back to 4096 for unbacked (hintless) SymInts.
-        _SYMINT_NO_HINT_FALLBACK = 4096
-
         args, kwargs = torch.utils._pytree.tree_map_only(
             torch.SymInt,
-            lambda s: get_hint(s) or _SYMINT_NO_HINT_FALLBACK,
+            lambda s: get_hint(s) or config.unbacked_symint_fallback,
             (args, kwargs),
         )
 
