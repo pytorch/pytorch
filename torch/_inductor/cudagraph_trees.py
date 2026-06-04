@@ -314,22 +314,30 @@ class TreeManagerContainer:
             return self.tree_manager
 
 
-local = threading.local()
+def _initialize_tls(local: threading.local) -> None:
+    # one tree manager per device
+    local.tree_manager_containers = {}
+    local.tree_manager_locks = defaultdict(threading.Lock)
 
-# one tree manager per device
-local.tree_manager_containers = {}
-local.tree_manager_locks = defaultdict(threading.Lock)
+    # We need to register this as an object that will be copied over as TLS when new
+    # threads are created in autograd
+    torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
+    torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
+
+
+local = threading.local()
+_initialize_tls(local)
+
+
+# CUDA graph capture and private-pool warmup are process-wide CUDA states.  Keep
+# them serialized across Python threads so a synchronize or allocator-pool switch
+# in one thread does not invalidate another thread's capture.
+graph_capture_lock = threading.Lock()
 
 
 # only incremented by user call of mark_step_begin
 class MarkStepBox:
     mark_step_counter = 0
-
-
-# We need to register this as an object that will be copied over as TLS when new
-# threads are created in autograd
-torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
-torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
 
 
 def mark_step_begin() -> None:
@@ -366,9 +374,10 @@ def reset_cudagraph_trees() -> None:
 def get_obj(local: Any, attr_name: str) -> Any:
     if hasattr(local, attr_name):
         return getattr(local, attr_name)
-    else:
-        assert torch._C._is_key_in_tls(attr_name)
-        return torch._C._get_obj_in_tls(attr_name)
+    if not torch._C._is_key_in_tls(attr_name):
+        _initialize_tls(local)
+        return getattr(local, attr_name)
+    return torch._C._get_obj_in_tls(attr_name)
 
 
 def get_container(device_index: int) -> TreeManagerContainer:
@@ -2076,7 +2085,7 @@ class CUDAGraphTreeManager:
         # will not be reused; separate recordings would have use the same memory pool, but not
         # the same memory.
 
-        with torch.cuda.device(device_index):
+        with graph_capture_lock, torch.cuda.device(device_index):
             torch.cuda.synchronize()
             self.stream = torch.cuda.Stream()
             self.stream.wait_stream(torch.cuda.current_stream())
@@ -2270,7 +2279,8 @@ class CUDAGraphTreeManager:
                 elif self.current_node is not None:
                     self.apply_checkpoint_execution_state_in_allocator()
 
-            return self.run_eager(new_inputs, function_id)
+            with graph_capture_lock:
+                return self.run_eager(new_inputs, function_id)
 
         assert not isinstance(self.current_node, CUDAWarmupNode)
         child_nodes = (
@@ -2316,14 +2326,19 @@ class CUDAGraphTreeManager:
             # as noted above, we want to do this lazily to avoid having to
             # check all existing outputs. Starting a new path can overwrite the
             # current path's live cached outputs, so poison them before
-            # replaying the root. Normal replay of the same root should keep
-            # cached outputs intact.
+            # replaying or re-recording the root. Normal replay of the same
+            # root should keep cached outputs intact, but same-root re-record
+            # must poison them first.
             if self.current_node is not None and function_id in self.roots:
-                same_root_replay = (
+                dealloc_live_outputs = True
+                if (
                     self.current_node.parent is None
                     and self.current_node.wrapped_function.id == function_id
-                )
-                self.try_end_curr_execution(dealloc_live_outputs=not same_root_replay)
+                ):
+                    status, _ = self.current_node.check_invariants(list(new_inputs))
+                    dealloc_live_outputs = status != CheckInvariantStatus.SUCCESS
+
+                self.try_end_curr_execution(dealloc_live_outputs=dealloc_live_outputs)
 
                 # run again to hit the root matching case which must succeed
                 if self.current_node is None:
@@ -2368,7 +2383,8 @@ class CUDAGraphTreeManager:
                 self.apply_checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
-        return self.record_function(new_inputs, function_id)
+        with graph_capture_lock:
+            return self.record_function(new_inputs, function_id)
 
     def shutdown(self) -> None:
         """
@@ -2685,6 +2701,7 @@ class CUDAGraphTreeManager:
         )
 
     def dealloc_current_path_weakrefs(self) -> None:
+        """Poison and deallocate live weakrefs on the current CUDAGraph path."""
         assert self.current_node is not None
         # TODO: we could also allow these weak refs to continue to be allocated,
         # but that adds some complications.
@@ -2701,7 +2718,15 @@ class CUDAGraphTreeManager:
         stor_dealloc_info: dict[int, tuple[str | None, bool]] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
-            assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            # tensor_weakrefs and stack_traces are paired below with zip(),
+            # matching the defensive handling for outputs_weakrefs and
+            # stack_traces.
+            if len(node.tensor_weakrefs) != len(node.stack_traces):
+                log.warning(
+                    "tensor_weakrefs length (%d) != stack_traces length (%d)",
+                    len(node.tensor_weakrefs),
+                    len(node.stack_traces),
+                )
             is_grad_output = (
                 self.id_to_mode[node.wrapped_function.id] == CompilationMode.BACKWARD
             )
