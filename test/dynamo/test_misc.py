@@ -3701,6 +3701,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(cnts.frame_count, 1, msg=f"{op=} {t1_np=} {t2_np=}")
             torch._dynamo.reset()
 
+    def test_numpy_operator_with_default_device_context(self):
+        def fn(input_image):
+            rounded = np.round(input_image)
+            return rounded * 64.0, 64.0 * rounded, None
+
+        x = np.ones((2, 3, 4), dtype=np.uint8)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        # CPU is sufficient to exercise DeviceContext/TorchFunctionMode handling.
+        with torch.device("cpu"):
+            result = opt_fn(x)
+
+        expected = fn(x)
+        self.assertEqual(type(result[0]), np.ndarray)
+        self.assertEqual(type(result[1]), np.ndarray)
+        self.assertEqual(result, expected)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
             a = x.numpy()
