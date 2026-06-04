@@ -56,7 +56,9 @@ jobs:
     needs: download-docker-builds-artifacts
     strategy:
       fail-fast: false
-      matrix:        runner: [linux.rocm.mi350.docker-cache]
+      matrix:
+        runner: [linux.rocm.mi350.docker-cache]
+
         docker-image: [
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}"
