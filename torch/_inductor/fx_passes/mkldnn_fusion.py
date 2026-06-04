@@ -847,7 +847,7 @@ if torch._C._has_mkldnn:
             counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"] += (
                 len(match.nodes)
             )
-            # Make sure the other is not an alias or mutation(fx side doesn't has such info).
+            # Make sure the other is not an alias or mutation (fx side doesn't have such info).
             other.realize()
             if not _can_be_inplace(other) or other.data.shape != list(
                 match.nodes[0].meta["val"].size()
@@ -1262,7 +1262,7 @@ if torch._C._has_mkldnn:
             return all(arg.op == "get_attr" for arg in weight.args[0])
 
         linear_node = match.output_node()
-        # mkldnn linear only supports beta=1or0 and alpha=1
+        # mkldnn linear only supports beta=1 or 0 and alpha=1
         if linear_node.target is aten.addmm.default:
             alpha = linear_node.kwargs.get("alpha", 1.0)
             beta = linear_node.kwargs.get("beta", 1.0)

@@ -208,7 +208,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     has_full_blocks = full_kv_num_blocks is not None
     kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
     if not has_full_blocks:
-        # Create a plackeholder full block list in case it is empty
+        # Create a placeholder full block list in case it is empty
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
