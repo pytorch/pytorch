@@ -1473,7 +1473,7 @@ class FlatParamHandle:
             )
             dist.all_gather(tensor_list, sharded_flat_param, group=pg)
         else:
-            dist.all_gather_into_tensor(
+            dist.all_gather_single(
                 padded_unsharded_flat_param,
                 sharded_flat_param,
                 pg,
@@ -1596,9 +1596,7 @@ class FlatParamHandle:
             device=self.device,
             dtype=sharded_grad.dtype,
         )
-        dist.all_gather_into_tensor(
-            padded_unsharded_grad, sharded_grad, self.process_group
-        )
+        dist.all_gather_single(padded_unsharded_grad, sharded_grad, self.process_group)
         unsharded_size = self.flat_param._unpadded_unsharded_size
         flat_param.grad = padded_unsharded_grad[: unsharded_size.numel()].view(
             unsharded_size
