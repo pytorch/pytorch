@@ -5748,6 +5748,8 @@ def _make_inlined(
         from torch._dynamo.variables.functions import UserFunctionVariable
 
         with _force_inline():
-            return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+            return tx.inline_user_function_return(
+                UserFunctionVariable(f), list(args), dict(kwargs),
+            )
 
     return inline_call
