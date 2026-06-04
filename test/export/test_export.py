@@ -48,6 +48,7 @@ from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
+from torch._library.opaque_object import _OPAQUE_TYPES_BY_NAME
 from torch._subclasses import FakeTensorMode
 from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._trace import (
@@ -79,8 +80,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfCrossRef,
     skipIfRocm,
+    skipIfTorchDynamo,
     skipIfXpu,
-    TEST_TRANSFORMERS,
     TEST_WITH_CROSSREF,
     TestCase as TorchTestCase,
 )
@@ -438,6 +439,45 @@ graph():
         }
         ep = export(MyModel(), inps, dynamic_shapes=spec)
 
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_view_unify_cross_symbols(self):
+        """
+        Cross-symbol view triggers `Eq(s, 1)` specialization in
+        `_view_unbacked_meta` because `is_contiguous_or_false` returns False
+        on the non-contiguous slice from `cat → split`, and the recursive
+        non-size-oblivious branch uses `eval_eager` to specialize.
+
+        - With `unify_view_symbols_bso_meta=False` (default): export
+          fails with ConstraintViolationError ("specialized value of 1").
+        - With `unify_view_symbols_bso_meta=True`: `_view_unbacked_meta`
+          discovers the cross-symbol equality automatically, unifies the
+          symbols, and export succeeds without specialization.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, getattr_1, values_1):
+                wide = torch.cat([values_1] * 9, dim=1)
+                a, _ = torch.split(wide, [33536, 3328], dim=1)
+                x = a.view(getattr_1.size(0), -1, 256)
+                return x.sum() + getattr_1.sum()
+
+        getattr_1 = torch.randn(1, 8)
+        values_1 = torch.randn(1, 4096)
+        B = Dim("B", min=0, max=1024)
+        ds = {"getattr_1": {0: B}, "values_1": {0: B}}
+
+        # Without the flag → must FAIL with ConstraintViolationError.
+        with torch.fx.experimental._config.patch(unify_view_symbols_bso_meta=False):
+            with self.assertRaises(
+                torch._dynamo.exc.UserError,
+            ):
+                export(M(), (getattr_1, values_1), dynamic_shapes=ds, strict=False)
+
+        # With the flag → must SUCCEED.
+        with torch.fx.experimental._config.patch(unify_view_symbols_bso_meta=True):
+            ep = export(M(), (getattr_1, values_1), dynamic_shapes=ds, strict=False)
+            self.assertIsNotNone(ep)
+
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
@@ -611,6 +651,136 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
+    @skipIfCrossRef  # CrossRefMode interferes with functorch ops
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_gradient_tracking_tensors(self) -> None:
+        class JVP(torch.nn.Module):
+            def foo(self, x, r, t) -> torch.Tensor:
+                return x - 0.1 * r + 0.1 * t
+
+            def forward(self, x, y, r, t, z, o) -> tuple[torch.Tensor, torch.Tensor]:
+                return torch.func.jvp(
+                    self.foo,
+                    (x, r, t),
+                    (y, z, o),
+                )
+
+        inp = (
+            torch.rand(2, 4),
+            torch.rand(2, 4),
+            torch.rand(2, 1),
+            torch.rand(2, 1),
+            torch.zeros(2, 1),
+            torch.ones(2, 1),
+        )
+
+        output_before = JVP()(*inp)
+        ep = torch.export.export(JVP(), inp)
+        unf = torch.export.unflatten(ep)
+        output_after = unf(*inp)
+        self.assertTrue(torch.allclose(output_after[0], output_before[0]))
+        self.assertTrue(torch.allclose(output_after[1], output_before[1]))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_jvp_export_complex_dtype(self) -> None:
+        class ComplexJVP(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, v: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                def fn(x: torch.Tensor) -> torch.Tensor:
+                    return x * x
+
+                return torch.func.jvp(fn, (x,), (v,))
+
+        inp = (
+            torch.randn(3, 3, dtype=torch.complex64),
+            torch.randn(3, 3, dtype=torch.complex64),
+        )
+
+        output_before = ComplexJVP()(*inp)
+        ep = torch.export.export(ComplexJVP(), inp)
+        unf = torch.export.unflatten(ep)
+        output_after = unf(*inp)
+        self.assertTrue(torch.allclose(output_after[0], output_before[0]))
+        self.assertTrue(torch.allclose(output_after[1], output_before[1]))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_jvp_export_inplace_ops(self) -> None:
+        class InplaceJVP(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, v: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                def fn(x: torch.Tensor) -> torch.Tensor:
+                    y = x.clone()
+                    y.mul_(2.0)
+                    y.add_(1.0)
+                    return y
+
+                return torch.func.jvp(fn, (x,), (v,))
+
+        inp = (torch.randn(4, 4), torch.randn(4, 4))
+
+        output_before = InplaceJVP()(*inp)
+        ep = torch.export.export(InplaceJVP(), inp)
+        unf = torch.export.unflatten(ep)
+        output_after = unf(*inp)
+        self.assertTrue(torch.allclose(output_after[0], output_before[0]))
+        self.assertTrue(torch.allclose(output_after[1], output_before[1]))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_jvp_export_nested(self) -> None:
+        class NestedJVP(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, v: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                def outer_fn(x: torch.Tensor) -> torch.Tensor:
+                    def inner_fn(x: torch.Tensor) -> torch.Tensor:
+                        return torch.sin(x)
+
+                    primal, tangent = torch.func.jvp(inner_fn, (x,), (x,))
+                    return primal + tangent
+
+                return torch.func.jvp(outer_fn, (x,), (v,))
+
+        inp = (torch.randn(3, 3), torch.randn(3, 3))
+
+        output_before = NestedJVP()(*inp)
+        ep = torch.export.export(NestedJVP(), inp)
+        unf = torch.export.unflatten(ep)
+        output_after = unf(*inp)
+        self.assertTrue(torch.allclose(output_after[0], output_before[0]))
+        self.assertTrue(torch.allclose(output_after[1], output_before[1]))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_jvp_export_multiple_outputs(self) -> None:
+        class MultiOutputJVP(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, v: torch.Tensor
+            ) -> tuple[
+                tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]
+            ]:
+                def fn(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+                    return torch.sin(x), torch.cos(x)
+
+                return torch.func.jvp(fn, (x,), (v,))
+
+        inp = (torch.randn(4, 4), torch.randn(4, 4))
+
+        output_before = MultiOutputJVP()(*inp)
+        ep = torch.export.export(MultiOutputJVP(), inp)
+        unf = torch.export.unflatten(ep)
+        output_after = unf(*inp)
+        # Check primals
+        self.assertTrue(torch.allclose(output_after[0][0], output_before[0][0]))
+        self.assertTrue(torch.allclose(output_after[0][1], output_before[0][1]))
+        # Check tangents
+        self.assertTrue(torch.allclose(output_after[1][0], output_before[1][0]))
+        self.assertTrue(torch.allclose(output_after[1][1], output_before[1][1]))
+
     @testing.expectedFailureStrictV2
     @skipIfCrossRef
     def test_custom_tag_metadata_re_export(self):
@@ -684,8 +854,6 @@ class TestExport(TestCase):
                 self.assertTrue("custom" in node.meta)
                 self.assertTrue(node.meta["custom"] != {})
 
-    @testing.expectedFailureSerDer  # can't serialize functorch ops
-    @testing.expectedFailureSerDerNonStrict  # can't serialize functorch ops
     def test_vmap_to_assert(self):
         class VmapToAssert(torch.nn.Module):
             def forward(self, x, y):
@@ -1111,7 +1279,7 @@ def forward(self, x):
     detach_21 = torch.ops.aten.detach.default(view_3);  view_3 = None
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
+    flex_attention = torch.ops.higher_order.flex_attention(detach_19, detach_20, detach_21, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, None, None, None, None, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  detach_19 = detach_20 = detach_21 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  getitem_1 = None
     getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None
@@ -1366,6 +1534,56 @@ graph():
             self.assertEqual(eager_out_bigru, ep_out_bigru)
             ep_out_bigru_dynamic = ep_bigru.module()(x_, h0_bi)
             self.assertEqual(ep_out_bigru_dynamic, model_bigru(x_, h0_bi))
+
+    def test_dynamic_lstm_with_aliased_flat_weights(self):
+        from torch.export._patches import register_lstm_while_loop_decomposition
+
+        def share_flat_weight_storage(lstm):
+            flat_weight_names = lstm._flat_weights_names
+            old_weights = [getattr(lstm, name).detach() for name in flat_weight_names]
+            flat = torch.nn.Parameter(
+                torch.empty(
+                    sum(weight.numel() for weight in old_weights),
+                    device=old_weights[0].device,
+                    dtype=old_weights[0].dtype,
+                )
+            )
+            offset = 0
+            with torch.no_grad():
+                for name, old_weight in zip(flat_weight_names, old_weights):
+                    view = flat[offset : offset + old_weight.numel()].view_as(
+                        old_weight
+                    )
+                    view.copy_(old_weight)
+                    setattr(lstm, name, torch.nn.Parameter(view))
+                    offset += old_weight.numel()
+            lstm._init_flat_weights()
+
+        class BiLSTM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(4, 3, batch_first=True, bidirectional=True)
+                share_flat_weight_storage(self.lstm)
+
+            def forward(self, x):
+                out, _ = self.lstm(x)
+                return out
+
+        with torch.backends.mkldnn.flags(enabled=False):
+            model = BiLSTM()
+            storages = {
+                getattr(model.lstm, name).untyped_storage().data_ptr()
+                for name in model.lstm._flat_weights_names
+            }
+            self.assertEqual(len(storages), 1)
+
+            x = torch.randn(2, 5, 4)
+            dynamic_shapes = {"x": {1: Dim.DYNAMIC}}
+            with register_lstm_while_loop_decomposition():
+                ep = export(model, (x,), dynamic_shapes=dynamic_shapes)
+
+            x_dynamic = torch.randn(2, 7, 4)
+            self.assertEqual(ep.module()(x_dynamic), model(x_dynamic))
 
     @testing.expectedFailureStrictV2
     def test_no_tensor_computation(self):
@@ -3617,8 +3835,6 @@ graph():
         res = ep.module()(ref_x)
         self.assertEqual(res, ref_out)
 
-    @testing.expectedFailureSerDer  # can't serialize functorch ops
-    @testing.expectedFailureSerDerNonStrict  # can't serialize functorch ops
     @testing.expectedFailureCppRuntime
     def test_vmap(self):
         class Vmap(torch.nn.Module):
@@ -13896,6 +14112,12 @@ graph():
                 return x + f.int_1 + f.int_2
 
         torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        self.addCleanup(
+            lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
+                torch._C._unregister_opaque_type(name),
+                _OPAQUE_TYPES_BY_NAME.pop(name, None),
+            )
+        )
         ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
 
         inp = torch.ones(2, 2)
@@ -15332,6 +15554,39 @@ def forward(self, x, y):
         torch.export.export(
             FooModel(), (Foo(torch.ones(4, 4), torch.ones(4, 4)),), strict=False
         )
+
+    def test_custom_pytree_run_decompositions(self):
+        class MyContainer:
+            def __init__(self, t1, t2):
+                self.t1 = t1
+                self.t2 = t2
+
+        torch.utils._pytree.register_pytree_node(
+            MyContainer,
+            lambda mc: ([mc.t1, mc.t2], None),
+            lambda vals, _: MyContainer(vals[0], vals[1]),
+            flatten_with_keys_fn=lambda mc: (
+                [
+                    (torch.utils._pytree.MappingKey("t1"), mc.t1),
+                    (torch.utils._pytree.MappingKey("t2"), mc.t2),
+                ],
+                None,
+            ),
+            serialized_type_name=f"{MyContainer.__module__}.{MyContainer.__qualname__}",
+        )
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, mc):
+                return self.linear(mc.t1) + self.linear(mc.t2) + torch.tensor(1.0)
+
+        m = M()
+        mc = MyContainer(torch.randn(4, 4), torch.randn(4, 4))
+        ep = torch.export.export(m, (mc,), strict=False)
+        ep.run_decompositions()
 
     def test_allow_explicit_guards_as_runtime_asserts(self):
         # check that explicit guards are treated as runtime assertions
@@ -17289,7 +17544,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 y = torch.empty(2 * 2)
-                torch.distributed.all_gather_into_tensor(y, x)
+                torch.distributed.all_gather_single(y, x)
                 return y
 
         with self.distributed_env(world_size=2):
@@ -17322,7 +17577,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 y = torch.empty(2)
-                torch.distributed.reduce_scatter_tensor(y, x)
+                torch.distributed.reduce_scatter_single(y, x)
                 return y
 
         with self.distributed_env(world_size=2):
@@ -17877,30 +18132,35 @@ add: USER_INPUT_MUTATION target='x'
 add_2: USER_OUTPUT""",
         )
 
-    @unittest.skipIf(not TEST_TRANSFORMERS, "No transformers")
     def test_hf_logging_logger(self):
-        import transformers
+        # Replicate the HF transformers logging pattern (stdlib logging.Logger
+        # with a monkey-patched warning_once) without importing transformers,
+        # whose import can hang in CI on HF Hub I/O.
+        @functools.lru_cache(None)
+        def warning_once(self, *args, **kwargs):
+            self.warning(*args, **kwargs)
 
-        logger = transformers.utils.logging.get_logger(__name__)
+        with patch.object(logging.Logger, "warning_once", warning_once, create=True):
+            logger = logging.getLogger(__name__)
 
-        class M(torch.nn.Module):
-            def forward(self, x):
-                logger.warning_once("start")
-                x1 = x + x
-                x2 = x1 * x1
-                x3 = x2 + x2
-                return (x1, x3)
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    logger.warning_once("start")
+                    x1 = x + x
+                    x2 = x1 * x1
+                    x3 = x2 + x2
+                    return (x1, x3)
 
-        gm = export(M(), (torch.randn(3, 3),)).graph_module
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
+            gm = export(M(), (torch.randn(3, 3),)).graph_module
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
 def forward(self, x):
     add = torch.ops.aten.add.Tensor(x, x);  x = None
     mul = torch.ops.aten.mul.Tensor(add, add)
     add_1 = torch.ops.aten.add.Tensor(mul, mul);  mul = None
     return (add, add_1)""",
-        )
+            )
 
     def test_warning(self):
         class M(torch.nn.Module):
@@ -18261,45 +18521,45 @@ def forward(self, x):
         The C++ Functionalize fallback kernel now handles nested list arguments
         (Tensor[][]) by recursively unwrapping/wrapping functional tensors.
         """
-        lib = torch.library.Library("test_tll", "DEF")
-        lib.define(
-            "merge_op(Tensor[][] nested, Tensor[] flat, int[] weights)"
-            " -> (Tensor[], Tensor)",
-            tags=[torch.Tag.pt2_compliant_tag],
-        )
+        with torch.library._scoped_library("test_tll", "DEF") as lib:
+            lib.define(
+                "merge_op(Tensor[][] nested, Tensor[] flat, int[] weights)"
+                " -> (Tensor[], Tensor)",
+                tags=[torch.Tag.pt2_compliant_tag],
+            )
 
-        @torch.library.impl("test_tll::merge_op", "cpu", lib=lib)
-        def merge_op_cpu(nested, flat, weights):
-            out = [nested[i][0] + flat[i] for i in range(len(flat))]
-            combined = torch.cat([f.unsqueeze(0) for f in flat], dim=0).sum(dim=0)
-            return out, combined
+            @torch.library.impl("test_tll::merge_op", "cpu", lib=lib)
+            def merge_op_cpu(nested, flat, weights):
+                out = [nested[i][0] + flat[i] for i in range(len(flat))]
+                combined = torch.cat([f.unsqueeze(0) for f in flat], dim=0).sum(dim=0)
+                return out, combined
 
-        @torch.library.register_fake("test_tll::merge_op")
-        def merge_op_fake(nested, flat, weights):
-            out = [torch.empty_like(flat[i]) for i in range(len(flat))]
-            combined = torch.empty_like(flat[0])
-            return out, combined
+            @torch.library.register_fake("test_tll::merge_op")
+            def merge_op_fake(nested, flat, weights):
+                out = [torch.empty_like(flat[i]) for i in range(len(flat))]
+                combined = torch.empty_like(flat[0])
+                return out, combined
 
-        class M(torch.nn.Module):
-            def forward(self, a, b, c, d):
-                return torch.ops.test_tll.merge_op([[a, b], [c, d]], [a, c], [1, 2])
+            class M(torch.nn.Module):
+                def forward(self, a, b, c, d):
+                    return torch.ops.test_tll.merge_op([[a, b], [c, d]], [a, c], [1, 2])
 
-        m = M()
-        a, b, c, d = (torch.randn(3, 4) for _ in range(4))
-        ep = export(m, (a, b, c, d))
-        ep2 = ep.run_decompositions({})
-        eager_out = m(a, b, c, d)
-        decomp_out = ep2.module()(a, b, c, d)
-        self.assertEqual(len(eager_out[0]), len(decomp_out[0]))
-        for e, d_ in zip(eager_out[0], decomp_out[0]):
-            self.assertEqual(e, d_)
-        self.assertEqual(eager_out[1], decomp_out[1])
-        del lib
+            m = M()
+            a, b, c, d = (torch.randn(3, 4) for _ in range(4))
+            ep = export(m, (a, b, c, d))
+            ep2 = ep.run_decompositions({})
+            eager_out = m(a, b, c, d)
+            decomp_out = ep2.module()(a, b, c, d)
+            self.assertEqual(len(eager_out[0]), len(decomp_out[0]))
+            for e, d_ in zip(eager_out[0], decomp_out[0]):
+                self.assertEqual(e, d_)
+            self.assertEqual(eager_out[1], decomp_out[1])
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
     def setUp(self):
+        super().setUp()
         load_torchbind_test_lib()
 
     def test_lift_custom_obj(self):

@@ -25,20 +25,25 @@ from torch._inductor.comms import (
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.fx_passes.bucketing import (
+    _trace as bucketing_trace,
+    all_gather_merge_fn_to_trace_custom_ops,
     is_all_gather_into_tensor,
     is_all_reduce_tensor,
     is_all_to_all_tensor,
     is_reduce_scatter_tensor,
+    reduce_scatter_merge_fn_to_trace_custom_ops,
 )
 from torch._inductor.scheduler import (
-    _get_mm_like_fn,
+    _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     get_estimate_runtime_cache,
     get_estimate_runtime_cache_key_from_snode,
 )
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
+from torch._subclasses import FakeTensorMode
 from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
@@ -58,6 +63,100 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+class TestBucketingTrace(torch._dynamo.test_case.TestCase):
+    def _make_hinted_unbacked_chunked_fake_inputs(self, *, hint=None):
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        with fake_mode:
+            u = fake_mode.shape_env.create_unbacked_symint()
+            if hint is not None:
+                torch._dynamo.override_optimization_hint(u, hint)
+            return torch.empty(u // 2, 4), torch.empty(u // 2, 4)
+
+    def test_trace_ignores_ambient_pending_unbacked_symbols(self):
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        x = fake_mode.from_tensor(torch.randn(2, 2), static_shapes=True)
+        ambient = fake_mode.shape_env.create_unbacked_symint().node.expr
+        self.assertIn(ambient, fake_mode.shape_env.pending_fresh_unbacked_symbols)
+
+        gm = bucketing_trace(lambda x: x + 1, (x,))
+
+        self.assertIn(ambient, fake_mode.shape_env.pending_fresh_unbacked_symbols)
+        FileCheck().check("aten.add").run(gm.code)
+
+    def test_all_gather_bucket_trace_accepts_hinted_unbacked_chunk_numel(self):
+        x, y = self._make_hinted_unbacked_chunked_fake_inputs(hint=8)
+
+        gm = bucketing_trace(
+            lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                torch.float32,
+                [torch.float32, torch.float32],
+                0,
+            ),
+            (x, y),
+        )
+
+        FileCheck().check("sym_numel").check("_pre_bucket_all_gather").run(gm.code)
+        symbolic_shapes = [
+            str(node.meta["val"].shape)
+            for node in gm.graph.nodes
+            if "val" in node.meta and isinstance(node.meta["val"], torch.Tensor)
+        ]
+        self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
+        self.assertTrue(any("16*((u0//2))" in shape for shape in symbolic_shapes))
+
+    def test_all_gather_bucket_trace_requires_unbacked_chunk_hint(self):
+        x, y = self._make_hinted_unbacked_chunked_fake_inputs()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Collective bucketing requires hinted symbolic sizes",
+        ):
+            bucketing_trace(
+                lambda a, b: all_gather_merge_fn_to_trace_custom_ops(
+                    [a, b],
+                    "0",
+                    2,
+                    torch.float32,
+                    [torch.float32, torch.float32],
+                    0,
+                ),
+                (x, y),
+            )
+
+    def test_reduce_scatter_bucket_trace_preserves_hinted_unbacked_chunk_shapes(self):
+        x, y = self._make_hinted_unbacked_chunked_fake_inputs(hint=8)
+
+        gm = bucketing_trace(
+            lambda a, b: reduce_scatter_merge_fn_to_trace_custom_ops(
+                [a, b],
+                "0",
+                2,
+                "sum",
+                torch.float32,
+                torch.device("cuda"),
+            ),
+            (x, y),
+        )
+
+        FileCheck().check("sym_numel").check("_pre_bucket_reduce_scatter").run(gm.code)
+        symbolic_shapes = [
+            str(node.meta["val"].shape)
+            for node in gm.graph.nodes
+            if "val" in node.meta and isinstance(node.meta["val"], torch.Tensor)
+        ]
+        self.assertTrue(any("u0" in shape for shape in symbolic_shapes))
+        self.assertTrue(any("(u0//4)" in shape for shape in symbolic_shapes))
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -722,7 +821,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             torch.library._scoped_library("custom_ns", "FRAGMENT") as lib,
         ):
             lib.define(
-                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"  # noqa: B950
+                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"
             )
             lib.impl("alltoall_autograd", alltoall_autograd, "Autograd")
             lib.impl("alltoall_autograd", alltoall_autograd, "Meta")
@@ -1008,7 +1107,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather(self):
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 out,
                 inp,
                 pg,
@@ -1068,7 +1167,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # Duplicated most of the structure from test_dynamo_rewrite_dist_all_gather
         # except uses kwargs to ensure rewrite has matching arg names
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 output_tensor=out,
                 input_tensor=inp,
                 group=pg,
@@ -1100,7 +1199,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_reduce_scatter(self):
         def func(inp, out, *, pg):
-            torch.distributed.reduce_scatter_tensor(
+            torch.distributed.reduce_scatter_single(
                 out,
                 inp,
                 group=pg,
@@ -1286,7 +1385,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         def func(inp, out, *, pg):
             # user explicitly set the attribute `async_op` to False,
             # there should be no graph break
-            torch.distributed.reduce_scatter_tensor(out, inp, group=pg, async_op=False)
+            torch.distributed.reduce_scatter_single(out, inp, group=pg, async_op=False)
 
         local_size = [4, 4]
         # single-proc test
@@ -1310,7 +1409,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_graphbreaks_unsupported_async_op(self):
         def func(inp, out, *, pg):
-            work = torch.distributed.reduce_scatter_tensor(
+            work = torch.distributed.reduce_scatter_single(
                 out, inp, group=pg, async_op=True
             )
             work.wait()
@@ -1853,6 +1952,45 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_dedup_reduce_scatter(self):
+        def func(rs_0, rs_1, tag, ranks, group_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_0, "avg", group_size, group_name
+            )
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_1, "avg", group_size, group_name
+            )
+            rs_0_out = torch.ops._c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops._c10d_functional.wait_tensor(rs_1_out)
+            return rs_0_out + rs_1_out
+
+        rs_0 = torch.ones(4, 128, device="cuda")
+        rs_1 = torch.ones(4, 128, device="cuda")
+        inputs = [rs_0, rs_1]
+
+        with torch._inductor.config.patch(
+            {
+                "dedup_reduce_scatters": True,
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+
+        FileCheck().check_count(
+            "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+            count=1,
+            exactly=True,
+        ).run(code)
+
+        out = compiled(*inputs, **self.get_world_trs())
+        correct = func(*inputs, **self.get_world_trs())
+        self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
     @parametrize(
         "bucket_mode", ["all"]
@@ -2074,7 +2212,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             if torch._inductor.config.runtime_estimations_mms_benchmark:
                 cache = get_estimate_runtime_cache()
                 for snode in snodes:
-                    if _get_mm_like_fn(snode) is None:
+                    if _get_benchmarkable_extern_fn(snode) is None:
                         continue
                     cache_key = get_estimate_runtime_cache_key_from_snode(snode)
                     if cache.lookup(cache_key) is None:
@@ -2320,6 +2458,188 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self.assertEqual(saved_values, [wt1])
 
     @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_different_node_order(self):
+        # Reproduces the cross-rank sync bug: when ranks have topologically
+        # identical graphs but different node creation orders (from different
+        # dict iteration orders in Dynamo tracing), the old name-based hash in
+        # has_same_nodes returns False → sync skipped → divergent min-cut.
+        #
+        # Both ranks have the same topology:
+        #   p1 → all_gather → wait → relu → output[0]
+        #   p2 → neg → output[1]
+        # But the computation nodes are created in different orders across
+        # ranks, producing different graph.nodes iteration orders.
+        import hashlib
+
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        test_graph = torch.fx.Graph()
+        p1 = test_graph.placeholder("primals_1")
+        p1.meta["val"] = torch.randn(10, 8)
+        p2 = test_graph.placeholder("primals_2")
+        p2.meta["val"] = torch.randn(10, 8)
+
+        if self.rank == 0:
+            # Rank 0: deep path created first during tracing
+            ag = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (p1,),
+            )
+            wt = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.wait_tensor.default,
+                (ag,),
+            )
+            wt.meta["val"] = torch.randn(10, 8)
+            relu_node = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+            relu_node.meta["val"] = torch.randn(10, 8)
+            neg_node = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (p2,)
+            )
+            neg_node.meta["val"] = torch.randn(10, 8)
+        else:
+            # Rank 1: shallow path created first during tracing
+            neg_node = test_graph.create_node(
+                "call_function", torch.ops.aten.neg.default, (p2,)
+            )
+            neg_node.meta["val"] = torch.randn(10, 8)
+            ag = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (p1,),
+            )
+            wt = test_graph.create_node(
+                "call_function",
+                torch.ops._c10d_functional.wait_tensor.default,
+                (ag,),
+            )
+            wt.meta["val"] = torch.randn(10, 8)
+            relu_node = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (wt,)
+            )
+            relu_node.meta["val"] = torch.randn(10, 8)
+
+        test_graph.output((relu_node, neg_node))
+
+        # Verify the bug condition: the old name-based hash diverges because
+        # graph.nodes iteration order differs across ranks.
+        node_str = "/".join(x.name for x in test_graph.nodes)
+        local_hash = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
+
+        self._init_process_group()
+
+        all_hashes = [None, None]
+        torch.distributed.all_gather_object(all_hashes, local_hash)
+        self.assertNotEqual(all_hashes[0], all_hashes[1])
+
+        # Simulate divergent min-cut: rank 0 saves relu, rank 1 saves neg
+        if self.rank == 0:
+            saved_values = [relu_node]
+        else:
+            saved_values = [neg_node]
+
+        # With the canonical naming fix, sync succeeds despite different
+        # node orderings. Both ranks agree on the same saved node.
+        result = _sync_decision_cross_ranks(test_graph, saved_values)
+        self.assertEqual(len(result), 1)
+
+        # All ranks should agree on the result
+        result_targets = [None, None]
+        torch.distributed.all_gather_object(result_targets, str(result[0].target))
+        self.assertEqual(result_targets[0], result_targets[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_invalid_node_error(self):
+        # Reproduces the "Node X was invalid, but is output" assertion error.
+        #
+        # When two ranks have isomorphic graphs with matching node names and
+        # iteration order (so has_same_nodes returns True), but the same name
+        # maps to structurally different nodes across ranks, the old name-based
+        # sync communicates the wrong saved values. Using these wrong values
+        # for backward graph extraction triggers the assertion.
+        #
+        # Setup: both ranks create two relu nodes in the same order, but
+        # wire them to different placeholders:
+        #   Rank 0: relu="relu(p1)", relu_1="relu(p2)"
+        #   Rank 1: relu="relu(p2)", relu_1="relu(p1)"
+        # The backward computation needs relu(p1). On rank 0 that's "relu",
+        # on rank 1 that's "relu_1". Name-based sync broadcasts "relu" →
+        # rank 1 gets relu(p2) instead → backward extraction fails.
+        from torch._functorch._aot_autograd.descriptors import PlainAOTOutput
+        from torch._functorch.partitioners import (
+            _extract_graph_with_inputs_outputs,
+            _sync_decision_cross_ranks,
+        )
+
+        test_graph = torch.fx.Graph()
+        p1 = test_graph.placeholder("primals_1")
+        p1.meta["val"] = torch.randn(10, 8)
+        p2 = test_graph.placeholder("primals_2")
+        p2.meta["val"] = torch.randn(10, 8)
+        t1 = test_graph.placeholder("tangents_1")
+        t1.meta["val"] = torch.randn(10, 8)
+
+        # Both ranks create relu nodes in the same order → same auto-names.
+        # But the wiring to placeholders differs across ranks.
+        if self.rank == 0:
+            relu_a = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p1,)
+            )
+            relu_b = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p2,)
+            )
+        else:
+            relu_a = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p2,)
+            )
+            relu_b = test_graph.create_node(
+                "call_function", torch.ops.aten.relu.default, (p1,)
+            )
+        relu_a.meta["val"] = torch.randn(10, 8)
+        relu_b.meta["val"] = torch.randn(10, 8)
+
+        # Collective (required for has_collectives to return True)
+        ag = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (relu_a,),
+        )
+        wt = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.wait_tensor.default,
+            (ag,),
+        )
+        wt.meta["val"] = torch.randn(10, 8)
+
+        # Backward: grad depends on relu(p1) specifically.
+        # On rank 0 that's relu_a, on rank 1 that's relu_b.
+        relu_p1 = relu_a if self.rank == 0 else relu_b
+        grad = test_graph.create_node(
+            "call_function", torch.ops.aten.mul.Tensor, (t1, relu_p1)
+        )
+        grad.meta["val"] = torch.randn(10, 8)
+
+        test_graph.output((wt, relu_b, grad))
+
+        self._init_process_group()
+
+        # Each rank correctly identifies relu(p1) as the node to save.
+        saved_values = [relu_p1]
+        result = _sync_decision_cross_ranks(test_graph, saved_values)
+
+        # Extract backward subgraph using the synced saved values.
+        # Without the fix: wrong node → "Node mul was invalid, but is output"
+        bwd_inputs = [t1] + result
+        bwd_outputs = [grad]
+        bwd_descs = [PlainAOTOutput(idx=0)]
+        _extract_graph_with_inputs_outputs(
+            test_graph, bwd_inputs, bwd_outputs, bwd_descs
+        )
+
+    @skip_if_lt_x_gpu(2)
     def test_align_runtime_estimations_across_all_distributed_ranks(self):
         from torch._inductor.ir import ExternKernel
         from torch._inductor.scheduler import (
@@ -2362,14 +2682,10 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             [mock_node_1, mock_node_2, mock_node_3]
         )
 
-        # only MM related nodes should be aligned
+        # all nodes should be aligned across ranks (median)
         self.assertEqual(mock_node_1.override_estimated_runtime, 0.1)
-        self.assertEqual(
-            mock_node_2.override_estimated_runtime, 0.3 if self.rank == 0 else 0.4
-        )
-        self.assertEqual(
-            mock_node_3.override_estimated_runtime, 0.5 if self.rank == 0 else 0.6
-        )
+        self.assertEqual(mock_node_2.override_estimated_runtime, 0.3)
+        self.assertEqual(mock_node_3.override_estimated_runtime, 0.5)
 
     @skip_if_lt_x_gpu(2)
     def test_all_gather_comm_analysis(self):
@@ -3187,6 +3503,329 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             torch.allclose(eager_out, compiled_out, rtol=1e-3, atol=1e-3),
             "Mismatch between eager and compiled output.",
         )
+
+
+class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
+    """Unit tests for Node-typed group_name handling in bucketing.
+
+    In compile-on-one-rank graphs, collective ops receive
+    their group_name as an FX Node reference rather than a string literal.
+    These tests verify the resolution helpers work correctly.
+    """
+
+    def _make_graph_with_pg_node(self, group_name_str: str):
+        class MockPG:
+            def __init__(self, name: str):
+                self.group_name = name
+
+        graph = torch.fx.Graph()
+        pg_node = graph.placeholder("group_name")
+        pg_node.meta["val"] = MockPG(group_name_str)
+        input_node = graph.placeholder("input")
+        input_node.meta["val"] = torch.empty(4, dtype=torch.float32)
+        return graph, pg_node, input_node
+
+    def test_resolve_group_name_string(self):
+        from torch._inductor.fx_passes.bucketing import _resolve_group_name
+
+        self.assertEqual(_resolve_group_name("pg0"), "pg0")
+
+    def test_resolve_group_name_node(self):
+        from torch._inductor.fx_passes.bucketing import _resolve_group_name
+
+        graph, pg_node, _ = self._make_graph_with_pg_node("pg0")
+        self.assertEqual(_resolve_group_name(pg_node), "pg0")
+
+    def test_ag_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _ag_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        ag_node = graph.call_function(
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            args=(input_node, 2, pg_node),
+        )
+        ag_node.meta["val"] = torch.empty(8, dtype=torch.float32)
+        self.assertEqual(_ag_group_key(ag_node), ("pg0", torch.float32))
+
+    def test_rs_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _rs_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        rs_node = graph.call_function(
+            torch.ops._c10d_functional.reduce_scatter_tensor.default,
+            args=(input_node, "sum", 2, pg_node),
+        )
+        rs_node.meta["val"] = torch.empty(2, dtype=torch.float32)
+        self.assertEqual(_rs_group_key(rs_node), ("pg0", "sum", torch.float32))
+
+    def test_ar_group_key_with_node_group_name(self):
+        from torch._inductor.fx_passes.bucketing import _ar_group_key
+
+        graph, pg_node, input_node = self._make_graph_with_pg_node("pg0")
+        ar_node = graph.call_function(
+            torch.ops._c10d_functional.all_reduce.default,
+            args=(input_node, "sum", pg_node),
+        )
+        ar_node.meta["val"] = torch.empty(4, dtype=torch.float32)
+        self.assertEqual(_ar_group_key(ar_node), ("pg0", "sum", torch.float32))
+
+
+def _build_graph_with_duplicate_rs(
+    n_duplicates: int,
+) -> torch.fx.GraphModule:
+    fake_mode = torch._subclasses.FakeTensorMode()
+    graph = torch.fx.Graph()
+
+    placeholders = []
+    for i in range(n_duplicates):
+        ph = graph.placeholder(f"input_{i}")
+        ph.meta["val"] = fake_mode.from_tensor(torch.randn(10, 128))
+        placeholders.append(ph)
+
+    rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+    wait_target = torch.ops._c10d_functional.wait_tensor.default
+    add_target = torch.ops.aten.add.Tensor
+
+    waits = []
+    for ph in placeholders:
+        rs = graph.call_function(rs_target, args=(ph, "avg", 2, "0"))
+        rs.meta["val"] = fake_mode.from_tensor(torch.randn(5, 128))
+        wait = graph.call_function(wait_target, args=(rs,))
+        wait.meta["val"] = fake_mode.from_tensor(torch.randn(5, 128))
+        waits.append(wait)
+
+    result = waits[0]
+    for wait in waits[1:]:
+        add_node = graph.call_function(add_target, args=(result, wait))
+        add_node.meta["val"] = fake_mode.from_tensor(torch.randn(5, 128))
+        result = add_node
+
+    graph.output(result)
+
+    return torch.fx.GraphModule(torch.nn.Module(), graph)
+
+
+class TestDedupReduceScatter(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        if not c10d.is_initialized():
+            store = c10d.HashStore()
+            c10d.init_process_group(backend="fake", store=store, rank=0, world_size=2)
+
+    def tearDown(self):
+        super().tearDown()
+        if c10d.is_initialized():
+            c10d.destroy_process_group()
+
+    def _count_ops(self, gm, target):
+        return sum(
+            1 for n in gm.graph.nodes if n.op == "call_function" and n.target is target
+        )
+
+    def test_two_duplicate_rs(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        gm = _build_graph_with_duplicate_rs(2)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+        self.assertEqual(self._count_ops(gm, wait_target), 2)
+        self.assertEqual(self._count_ops(gm, add_target), 1)
+
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 1)
+        self.assertEqual(self._count_ops(gm, wait_target), 1)
+        self.assertEqual(self._count_ops(gm, add_target), 1)
+
+        # 2 placeholders + 3 call_function (add, rs, wait) + 1 output
+        self.assertEqual(len(list(gm.graph.nodes)), 6)
+
+        fn_nodes = [n for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertIs(fn_nodes[0].target, add_target)
+        self.assertIs(fn_nodes[1].target, rs_target)
+        self.assertIs(fn_nodes[2].target, wait_target)
+
+        # The add operates on pre-scatter inputs (10, 128), not
+        # post-scatter outputs (5, 128).
+        self.assertEqual(fn_nodes[0].meta["val"].shape, (10, 128))
+        self.assertEqual(fn_nodes[1].meta["val"].shape, (5, 128))
+        self.assertEqual(fn_nodes[2].meta["val"].shape, (5, 128))
+
+    def test_four_duplicate_rs(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        gm = _build_graph_with_duplicate_rs(4)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        self.assertEqual(self._count_ops(gm, rs_target), 4)
+        self.assertEqual(self._count_ops(gm, wait_target), 4)
+        self.assertEqual(self._count_ops(gm, add_target), 3)
+
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 1)
+        self.assertEqual(self._count_ops(gm, wait_target), 1)
+        self.assertEqual(self._count_ops(gm, add_target), 3)
+
+        fn_nodes = [n for n in gm.graph.nodes if n.op == "call_function"]
+        for n in fn_nodes[:3]:
+            self.assertIs(n.target, add_target)
+        self.assertIs(fn_nodes[3].target, rs_target)
+        self.assertIs(fn_nodes[4].target, wait_target)
+
+    def test_no_fusion_different_rs_args(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128)
+        ph_b = graph.placeholder("input_b")
+        ph_b.meta["val"] = torch.randn(10, 128)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        rs_a = graph.call_function(rs_target, args=(ph_a, "avg", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128)
+        wait_a = graph.call_function(wait_target, args=(rs_a,))
+        wait_a.meta["val"] = torch.randn(5, 128)
+
+        # Different group name "1" vs "0" above — can't fuse across groups
+        rs_b = graph.call_function(rs_target, args=(ph_b, "avg", 2, "1"))
+        rs_b.meta["val"] = torch.randn(5, 128)
+        wait_b = graph.call_function(wait_target, args=(rs_b,))
+        wait_b.meta["val"] = torch.randn(5, 128)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+        graph.output(add_node)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+
+    def test_no_fusion_nonlinear_reduce_op(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128)
+        ph_b = graph.placeholder("input_b")
+        ph_b.meta["val"] = torch.randn(10, 128)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        # "max" is non-linear — RS(a) + RS(b) != RS(a + b) for max
+        rs_a = graph.call_function(rs_target, args=(ph_a, "max", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128)
+        wait_a = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_a,)
+        )
+        wait_a.meta["val"] = torch.randn(5, 128)
+
+        rs_b = graph.call_function(rs_target, args=(ph_b, "max", 2, "0"))
+        rs_b.meta["val"] = torch.randn(5, 128)
+        wait_b = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_b,)
+        )
+        wait_b.meta["val"] = torch.randn(5, 128)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+        graph.output(add_node)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+
+    def test_no_fusion_wait_has_other_users(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128)
+        ph_b = graph.placeholder("input_b")
+        ph_b.meta["val"] = torch.randn(10, 128)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        wait_target = torch.ops._c10d_functional.wait_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+        neg_target = torch.ops.aten.neg.default
+
+        rs_a = graph.call_function(rs_target, args=(ph_a, "avg", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128)
+        wait_a = graph.call_function(wait_target, args=(rs_a,))
+        wait_a.meta["val"] = torch.randn(5, 128)
+
+        rs_b = graph.call_function(rs_target, args=(ph_b, "avg", 2, "0"))
+        rs_b.meta["val"] = torch.randn(5, 128)
+        wait_b = graph.call_function(wait_target, args=(rs_b,))
+        wait_b.meta["val"] = torch.randn(5, 128)
+
+        # wait_b has 2 users (neg + add) — can't fuse since the RS result is needed independently
+        other_use = graph.call_function(neg_target, args=(wait_b,))
+        other_use.meta["val"] = torch.randn(5, 128)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+
+        graph.output((add_node, other_use))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
+
+    def test_no_fusion_different_dtypes(self):
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        graph = torch.fx.Graph()
+
+        ph_a = graph.placeholder("input_a")
+        ph_a.meta["val"] = torch.randn(10, 128, dtype=torch.float32)
+        ph_b = graph.placeholder("input_b")
+        # Different dtype: bf16 vs f32
+        ph_b.meta["val"] = torch.randn(10, 128, dtype=torch.bfloat16)
+
+        rs_target = torch.ops._c10d_functional.reduce_scatter_tensor.default
+        add_target = torch.ops.aten.add.Tensor
+
+        rs_a = graph.call_function(rs_target, args=(ph_a, "avg", 2, "0"))
+        rs_a.meta["val"] = torch.randn(5, 128, dtype=torch.float32)
+        wait_a = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_a,)
+        )
+        wait_a.meta["val"] = torch.randn(5, 128, dtype=torch.float32)
+
+        rs_b = graph.call_function(rs_target, args=(ph_b, "avg", 2, "0"))
+        rs_b.meta["val"] = torch.randn(5, 128, dtype=torch.bfloat16)
+        wait_b = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, args=(rs_b,)
+        )
+        wait_b.meta["val"] = torch.randn(5, 128, dtype=torch.bfloat16)
+
+        add_node = graph.call_function(add_target, args=(wait_a, wait_b))
+        add_node.meta["val"] = torch.randn(5, 128)
+        graph.output(add_node)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        dedup_fsdp_reduce_scatter(gm)
+
+        self.assertEqual(self._count_ops(gm, rs_target), 2)
 
 
 if __name__ == "__main__":

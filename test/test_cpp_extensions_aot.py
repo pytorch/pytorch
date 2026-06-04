@@ -280,6 +280,21 @@ class TestPybindTypeCasters(common.TestCase):
             with self.subTest(msg=f"check {[f.__name__ for f in funcs]}"):
                 self.check_union(funcs)
 
+    def test_pybind_layout_types(self):
+        layouts = [
+            torch.strided,
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+            torch._mkldnn,
+            torch.jagged,
+        ]
+        for layout in layouts:
+            with self.subTest(msg=f"check {layout}"):
+                self.assertEqual(cpp_extension.roundtrip_layout(layout), layout)
+
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMAIATensor(common.TestCase):

@@ -428,7 +428,7 @@ class TestValidateCombination(TestCase):
                 "P(max),R->P(max)",
                 "P(min),R->P(min)",
                 # NOTE: these two rules are NOT valid in general for torch.add since it accepts alpha=a, which if negative
-                # flips the the partial output from max to min or vice versa.
+                # flips the partial output from max to min or vice versa.
                 # However, this test is simpler than the end to end validator and ignores alpha, and the rules have to
                 # be listed as valid since without alpha they DO produce correct results and the test asserts any rule
                 # NOT listed here produces incorrect results.

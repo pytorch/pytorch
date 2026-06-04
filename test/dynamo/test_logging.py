@@ -375,7 +375,7 @@ torch._dynamo.exc.TorchRuntimeError: RuntimeError when making fake tensor call
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
-    output = output.add(torch.ones(10, 10))""",  # noqa: B950
+    output = output.add(torch.ones(10, 10))""",
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
@@ -1153,7 +1153,7 @@ print("arf")
         fn_opt = torch.compile(fn, backend="eager")
         fn_opt(torch.randn(10, 20), torch.randn(20, 30))
 
-        msg0 = munge_exc(records[0].getMessage())
+        msg0 = munge_exc(records[0].getMessage(), strip_carets=False)
         self.assertExpectedInline(
             msg0,
             """\
@@ -1275,7 +1275,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
 +- __SHAPE_GUARD__: L['z'].size()[0] == L['y'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
 +- __SHAPE_GUARD__: ((2*L['y'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
-+- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))""",  # noqa: B950
++- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))""",
         )
 
     @make_logging_test(guards=True)
@@ -1291,7 +1291,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             munge_shape_guards(record.getMessage()),
             """\
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # #:# in #
-+- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))""",  # noqa: B950
++- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))""",
         )
 
     @make_logging_test(guards=True)
@@ -1310,7 +1310,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             munge_shape_guards(record.getMessage()),
             """\
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
-+- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
++- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",
         )
 
     @make_logging_test(guards=True)
@@ -1324,7 +1324,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         record = self.getRecord(records, "TREE_GUARD_MANAGER")
         self.assertExpectedInline(
             munge_global_state_json(record.getMessage()),
-            """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",  # noqa: B950
+            """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",
         )
 
     @make_logging_test(cudagraph_static_inputs=True)
@@ -1505,6 +1505,42 @@ TorchDynamo attempted to trace the following frames: [
 ]""",
         )
 
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_skip_reason_logging(self, records):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with torch._dynamo.config.patch(disable=True):
+            torch.compile(fn, backend="eager")(x)
+
+        skip_records = [r for r in records if "skipping:" in r.getMessage()]
+        self.assertGreater(len(skip_records), 0)
+        msg = skip_records[0].getMessage()
+        self.assertIn("Dynamo tracing is disabled", msg)
+        self.assertIn("fn", msg)
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_skip_reason_logging_dispatch_mode(self, records):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class SkipMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **kwargs)
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with SkipMode():
+            torch.compile(fn, backend="eager")(x)
+
+        skip_records = [r for r in records if "skipping:" in r.getMessage()]
+        self.assertGreater(len(skip_records), 0)
+        msg = skip_records[0].getMessage()
+        self.assertIn("non-infra torch dispatch mode present", msg)
+        self.assertIn("fn", msg)
+
 
 # non single record tests
 exclusions = {
@@ -1552,6 +1588,7 @@ exclusions = {
     "loop_tiling",
     "auto_chunker",
     "autotuning",
+    "incremental",
     "graph_region_expansion",
     "hierarchical_compile",
     "compute_dependencies",

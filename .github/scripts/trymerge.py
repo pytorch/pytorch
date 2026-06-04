@@ -665,7 +665,10 @@ def can_skip_internal_checks(pr: GitHubPR, comment_id: int | None = None) -> boo
     comment = pr.get_comment_by_id(comment_id)
     if comment.editor_login is not None:
         return False
-    return comment.author_login == "facebook-github-bot"
+    if comment.author_login == "facebook-github-bot":
+        return True
+    # facebook-github-tools is a GitHub App; identify by its app URL.
+    return comment.author_url == "https://github.com/apps/facebook-github-tools"
 
 
 def _revlist_to_prs(
@@ -1196,13 +1199,18 @@ class GitHubPR:
                 filter_ghstack=True, ghstack_deps=pr_dependencies
             )
             if pr.pr_num != self.pr_num and not skip_all_rule_checks:
-                # Raises exception if matching rule is not found
-                find_matching_merge_rule(
-                    pr,
-                    repo,
-                    skip_mandatory_checks=skip_mandatory_checks,
-                    skip_internal_checks=can_skip_internal_checks(self, comment_id),
-                )
+                try:
+                    find_matching_merge_rule(
+                        pr,
+                        repo,
+                        skip_mandatory_checks=skip_mandatory_checks,
+                        skip_internal_checks=can_skip_internal_checks(self, comment_id),
+                    )
+                except MergeRuleFailedError as ex:
+                    raise type(ex)(
+                        f"Merge rule check failed for stacked PR #{pr.pr_num}:\n\n{ex}",
+                        ex.rule,
+                    ) from ex
             repo.cherry_pick(rev)
             repo.amend_commit_message(commit_msg)
             pr_dependencies.append(pr)
@@ -1455,6 +1463,23 @@ def read_merge_rules(repo: GitRepo | None, org: str, project: str) -> list[Merge
         return [MergeRule(**x) for x in rc]
 
 
+def _find_non_matching_files(patterns: list[str], files: list[str]) -> list[str]:
+    """Return files that do not match the given patterns.
+
+    Patterns prefixed with '-' are exclusions: a file matches the rule if it
+    matches at least one positive pattern AND does not match any negative one.
+    """
+    positive = [p for p in patterns if not p.startswith("-")]
+    negative = [p[1:] for p in patterns if p.startswith("-")]
+    patterns_re = patterns_to_regex(positive)
+    exclude_re = patterns_to_regex(negative) if negative else None
+    return [
+        f
+        for f in files
+        if not patterns_re.match(f) or (exclude_re is not None and exclude_re.match(f))
+    ]
+
+
 def find_matching_merge_rule(
     pr: GitHubPR,
     repo: GitRepo | None = None,
@@ -1515,13 +1540,7 @@ def find_matching_merge_rule(
     reject_reason_score = 0
     for rule in rules:
         rule_name = rule.name
-        patterns_re = patterns_to_regex(rule.patterns)
-        non_matching_files = []
-
-        # Does this rule apply to all the files?
-        for fname in changed_files:
-            if not patterns_re.match(fname):
-                non_matching_files.append(fname)
+        non_matching_files = _find_non_matching_files(rule.patterns, changed_files)
         if len(non_matching_files) > 0:
             num_matching_files = len(changed_files) - len(non_matching_files)
             if num_matching_files > reject_reason_score:
@@ -1881,10 +1900,14 @@ def is_invalid_cancel(
     ):
         return False
 
-    # If a job is cancelled and not listed as a failure by Dr.CI, it's an
-    # invalid signal and can be ignored
+    # If a job is cancelled and not listed as a failure or unclassified failure
+    # by Dr.CI, it's an invalid signal and can be ignored. UNKNOWN covers jobs
+    # whose workflow did not run on the merge base, so Dr.CI has no signal to
+    # tell whether the failure is pre-existing -- those should still block merge.
     return all(
-        name != failure["name"] for failure in drci_classifications.get("FAILED", [])
+        name != failure["name"]
+        for failure in drci_classifications.get("FAILED", [])
+        + drci_classifications.get("UNKNOWN", [])
     )
 
 

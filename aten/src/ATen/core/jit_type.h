@@ -371,7 +371,7 @@ inline ShapeSymbol merge_primitive(
 // dims, partially known and fully known shapes are all supported.
 struct TORCH_API SymbolicShape {
   // Unranked shape constructor.
-  SymbolicShape() : dims_(std::nullopt) {}
+  SymbolicShape() = default;
 
   // Known rank but unknown dimensions.
   SymbolicShape(std::optional<size_t> rank) : dims_(std::nullopt) {
@@ -1951,12 +1951,6 @@ struct getTypePtr_<std::string> final {
 };
 template <>
 struct getTypePtr_<std::string_view> final {
-  static decltype(auto) call() {
-    return StringType::get();
-  }
-};
-template <>
-struct getTypePtr_<at::Dimname> final {
   static decltype(auto) call() {
     return StringType::get();
   }

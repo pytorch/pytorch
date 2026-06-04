@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import contextvars
 import copy
 import hashlib
 import itertools
@@ -15,9 +16,11 @@ from typing import Any, cast, TYPE_CHECKING
 
 if TYPE_CHECKING:
     import os
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable, Generator, Iterator
     from typing import Self
 
+    from ._symbolic_trace import Tracer
+    from .experimental.symbolic_shapes import ShapeEnv
     from .node import Node
 
 import torch
@@ -110,11 +113,34 @@ class _EvalCacheLoader:
 _loader = _EvalCacheLoader()
 
 
+_share_torchbind_and_process_group = contextvars.ContextVar(
+    "_share_torchbind_and_process_group", default=False
+)
+
+
+@contextlib.contextmanager
+def _share_torchbind_and_process_group_on_deepcopy() -> Iterator[None]:
+    """Inside this context, ``GraphModule.__deepcopy__`` smuggles torchbind
+    objects without ``__getstate__``/``__setstate__`` (e.g. ProcessGroup)
+    through deepcopy as shared references instead of crashing.
+    """
+    token = _share_torchbind_and_process_group.set(True)
+    try:
+        yield
+    finally:
+        _share_torchbind_and_process_group.reset(token)
+
+
 def _exec_with_source(
     src: str, globals: dict[str, Any], co_fields: dict[str, Any] | None = None
 ) -> None:
     key = _loader.cache(src, globals, co_fields)
-    exec(compile(src, key, "exec"), globals)
+    # dont_inherit=True prevents this module's `from __future__ import
+    # annotations` from leaking into the generated code, which would turn
+    # type annotations into strings and break downstream consumers like
+    # TorchScript that expect real type objects.
+    # TODO: Fix TorchScript BC to avoid breakages like these
+    exec(compile(src, key, "exec", dont_inherit=True), globals)
 
 
 def _forward_from_src(
@@ -602,7 +628,7 @@ class GraphModule(torch.nn.Module):
         # Locally defined Tracers are not pickleable. This is needed because torch.package will
         # serialize a GraphModule without retaining the Graph, and needs to use the correct Tracer
         # to re-create the Graph during deserialization.
-        self._tracer_cls = None
+        self._tracer_cls: type[Tracer] | None = None
         if (
             self.graph._tracer_cls
             and "<locals>" not in self.graph._tracer_cls.__qualname__
@@ -621,7 +647,7 @@ class GraphModule(torch.nn.Module):
         self._erase_node_hooks: list[Callable[[Node], object]] = []
         # Used to remove hooks from deepcopied graph modules within a context manager.
         self._deepcopy_hooks: list[Callable[[GraphModule], object]] = []
-        self.shape_env = None  # optional not always set even when dynamic shapes exist.
+        self.shape_env: ShapeEnv | None = None
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -970,7 +996,7 @@ class {module_name}(torch.nn.Module):
 
         self._recompile_submodules()
 
-        def call_wrapped(self, *args: Any, **kwargs: Any) -> Any:
+        def call_wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
             return self._wrapped_call(self, *args, **kwargs)
 
         cls.__call__ = call_wrapped  # type: ignore[method-assign]
@@ -1040,6 +1066,20 @@ class {module_name}(torch.nn.Module):
     def __deepcopy__(self, memo: dict[int, Any]) -> GraphModule:
         res = type(self).__new__(type(self))
         memo[id(self)] = res
+        # Opt-in: smuggle non-pickleable torchbind / ProcessGroup objects
+        # through deepcopy as shared references.
+        if _share_torchbind_and_process_group.get():
+            import torch.distributed as _dist
+
+            _PG = _dist.ProcessGroup if _dist.is_available() else ()
+            for v in self.__dict__.values():
+                if isinstance(v, torch.ScriptObject) and not (
+                    v._has_method("__getstate__")  # type: ignore[attr-defined]
+                    and v._has_method("__setstate__")  # type: ignore[attr-defined]
+                ):
+                    memo.setdefault(id(v), v)
+                elif isinstance(v, _PG):
+                    memo.setdefault(id(v), v)
         fake_mod = _CodeOnlyModule(copy.deepcopy(self.__dict__, memo))
         self._deepcopy_init()(res, fake_mod, fake_mod.__dict__["_graph"])
         # hooks are lost during `GraphModule.__init__`, so we need to copy over

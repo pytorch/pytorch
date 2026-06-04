@@ -120,6 +120,8 @@ def set_debug_level_from_env() -> None: ...
 class ReduceOp:
     # pyrefly: ignore  # unknown-name
     def __init__(self, op: RedOpType) -> None: ...
+    @property
+    def factor(self) -> float | Tensor: ...
 
     # pyrefly: ignore  # unknown-name
     SUM: RedOpType = ...
@@ -321,6 +323,7 @@ class Backend:
         def _timeout(self, val: timedelta) -> None: ...
         global_ranks_in_group: list[int]
         group_name: GroupName
+        use_pg_for_symm_mem_rendezvous: bool
 
     def __init__(
         self,
@@ -382,6 +385,7 @@ class ProcessGroup:
         opts: Backend.Options | None = None,
         group_name: GroupName | None = None,
         group_desc: str | None = None,
+        device_types: list[torch.device] | None = None,
     ) -> ProcessGroup | None: ...
     def merge_remote_group(
         self,
@@ -612,6 +616,16 @@ class ProcessGroup:
     @bound_device_id.setter
     def bound_device_id(self, device: torch.device | None) -> None: ...
     @property
+    def use_pg_for_symm_mem_rendezvous(self) -> bool:
+        """When True, symmetric memory rendezvous exchanges metadata via this
+        PG's NCCL allgather instead of TCPStore, which gets overloaded at large
+        rank counts. This will lazily create the NCCL communicator if it doesn't
+        already exist. If this PG is only used for symmetric memory (no regular
+        collectives), consider calling ``abort()`` after rendezvous to release
+        the communicator."""
+    @use_pg_for_symm_mem_rendezvous.setter
+    def use_pg_for_symm_mem_rendezvous(self, value: bool) -> None: ...
+    @property
     def group_name(self) -> GroupName: ...
     @property
     def group_desc(self) -> str: ...
@@ -625,6 +639,15 @@ class FakeWork(Work):
     def __init__(self) -> None: ...
     def wait(self, timeout: timedelta = ...) -> bool: ...
     def getFuture(self) -> Future: ...
+
+class NCCLXStub(Backend):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: ProcessGroupNCCL.Options = ...,
+    ) -> None: ...
 
 class PythonCallbackWork(Work):
     def __init__(self, callback: Callable[[timedelta], bool]) -> None: ...
@@ -749,7 +772,7 @@ def _verify_params_across_processes(
     params: list[Tensor],
     logger: Logger | None,
 ): ...
-def _make_nccl_premul_sum(factor: float | list[Tensor]) -> ReduceOp: ...
+def _make_nccl_premul_sum(factor: float | Tensor) -> ReduceOp: ...
 def _register_process_group(
     group_name: GroupName,
     process_group: ProcessGroup,
@@ -771,6 +794,10 @@ def _nvshmemx_cumodule_init(module: int) -> None: ...
 
 # Check if NVSHMEM is available on current system.
 def _is_nvshmem_available() -> bool: ...
+def _register_external_nccl_comm(
+    group_name: str, comm_ptr: int, device: torch.device
+) -> None: ...
+def _unregister_external_nccl_comm(group_name: str, device: torch.device) -> None: ...
 
 class _SymmetricMemory:
     @staticmethod

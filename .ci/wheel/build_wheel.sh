@@ -189,17 +189,8 @@ _PYTHON_HOST_PLATFORM=${mac_version} ARCHFLAGS="-arch arm64" python -m build --w
 
 echo "Finished -m build --wheel --no-isolation at $(date)"
 
-if [[ $package_type != 'libtorch' ]]; then
-    echo "delocating wheel dependencies"
-    retry pip install https://github.com/matthew-brett/delocate/archive/refs/tags/0.10.4.zip
-    echo "found the following wheels:"
-    find $whl_tmp_dir -name "*.whl"
-    echo "running delocate"
-    find $whl_tmp_dir -name "*.whl" | xargs -I {} delocate-wheel -v {}
-    find $whl_tmp_dir -name "*.whl"
-    find $whl_tmp_dir -name "*.whl" | xargs -I {} delocate-listdeps {}
-    echo "Finished delocating wheels at $(date)"
-fi
+# Wheel delocation runs as a separate workflow step; see
+# .ci/wheel/delocate_wheels.sh.
 
 echo "The wheel is in $(find $whl_tmp_dir -name '*.whl')"
 
