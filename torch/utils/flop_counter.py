@@ -958,16 +958,18 @@ class FlopCounterMode:
     def __exit__(self, *args):
         if self.mode is None:
             raise AssertionError("Internal error: FlopCounter.__exit__ called but mode is None")
-        b = self.mode.__exit__(*args)
-        self.mode = None  # break cycles
-        self.mod_tracker.__exit__()
-        if self._data_dependent_flop_mode_token is None:
-            raise AssertionError(
-                "Internal error: FlopCounter.__exit__ called but "
-                "data-dependent mode token is None"
-            )
-        _data_dependent_flop_mode.reset(self._data_dependent_flop_mode_token)
-        self._data_dependent_flop_mode_token = None
+        try:
+            b = self.mode.__exit__(*args)
+            self.mod_tracker.__exit__()
+        finally:
+            self.mode = None  # break cycles
+            if self._data_dependent_flop_mode_token is None:
+                raise AssertionError(
+                    "Internal error: FlopCounter.__exit__ called but "
+                    "data-dependent mode token is None"
+                )
+            _data_dependent_flop_mode.reset(self._data_dependent_flop_mode_token)
+            self._data_dependent_flop_mode_token = None
         if self.display:
             print(self.get_table(self.depth))
         return b
