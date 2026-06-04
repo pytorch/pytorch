@@ -50,6 +50,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_unbacked_symbols,
     resolve_unbacked_bindings,
+    SymTypes,
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
@@ -1496,62 +1497,6 @@ def _register_unbacked_slice_size_bindings(dim, start, end, step, size):
     return sym_size, sym_storage
 
 
-def _slice_size_from_meta(dim, start, end, step, size):
-    current_node = V.graph.current_node
-    if current_node is None:
-        return None
-
-    val = current_node.meta.get("val")
-    assert val is not None
-
-    candidate = convert_symint_to_expr(val.size()[dim])
-    if not has_free_unbacked_symbols(candidate):
-        return None
-
-    input_symbols = OrderedSet()
-    for expr in (start, end, step, size):
-        input_symbols.update(free_unbacked_symbols(expr))
-
-    if isinstance(candidate, sympy.Symbol) and candidate not in input_symbols:
-        b_size = ir.DynamicSliceSize(candidate, start, end, step, size)
-        b_size.name = V.graph.register_buffer(b_size)
-        V.graph.register_operation(b_size)
-
-    return candidate
-
-
-def _compute_slice_index(index, size, default=None):
-    if index is None:
-        return default
-
-    guard = V.graph.sizevars.guard_or_false
-    index = sympy.expand(index)
-    size = sympy.expand(size)
-    if guard(sympy.And(sympy.Ge(index, 0), sympy.Le(index, size))):
-        return index
-    elif guard(sympy.And(sympy.Lt(index, 0), sympy.Ge(index, -size))):
-        return index + size
-    elif guard(sympy.Gt(index, size)):
-        return size
-    elif guard(sympy.Lt(index, -size)):
-        return 0
-    elif guard(sympy.Ge(index, 0)):
-        # If index >= 0, the resolved index is at most min(index, size).
-        return Min(index, size)
-    elif guard(sympy.Lt(index, 0)):
-        # If index < 0, wrap and clamp: the resolved index is at least 0.
-        return Max(index + size, 0)
-    return None
-
-
-def _clamp_slice_end_to_start(end, start):
-    if V.graph.sizevars.statically_known_geq(end, start):
-        return end
-    if V.graph.sizevars.statically_known_leq(end, start):
-        return start
-    return Max(end, start)
-
-
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     """
@@ -1583,6 +1528,30 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     except TypeError:
         pass
 
+    # try to avoid dynamic (unbacked) slice
+    def compute_slice_index(index, size, default=None):
+        if index is None:
+            return default
+
+        fn = lambda x: V.graph.sizevars.guard_or_false(x)  # noqa: E731
+        index = sympy.expand(index)
+        size = sympy.expand(size)
+        if fn(sympy.And(sympy.Ge(index, 0), sympy.Le(index, size))):
+            return index
+        elif fn(sympy.And(sympy.Lt(index, 0), sympy.Ge(index, -size))):
+            return index + size
+        elif fn(sympy.Gt(index, size)):
+            return size
+        elif fn(sympy.Lt(index, -size)):
+            return 0
+        elif fn(sympy.Ge(index, 0)):
+            # If index >= 0, the resolved index is at most min(index, size).
+            return Min(index, size)
+        elif fn(sympy.Lt(index, 0)):
+            # If index < 0, wrap and clamp: the resolved index is at least 0.
+            return Max(index + size, 0)
+        return None
+
     start_index, end_index = None, None
     # ambiguous_slice=False means we know what semantics this slice call follows,
     # and don't need to generate an extern kernel to represent the output size.
@@ -1590,7 +1559,7 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     # (meant to follow standard indexing semantics: 0 <= index < size)
     ambiguous_slice = clamp
     if ambiguous_slice:
-        start_index = _compute_slice_index(start, size, 0)
+        start_index = compute_slice_index(start, size, 0)
         # Special case: if end is maxsize (unbounded), use size directly
         # This matches the logic in fake_impls.py
         if end is not None and V.graph.sizevars.statically_known_equals(
@@ -1598,7 +1567,7 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
         ):
             end_index = size
         else:
-            end_index = _compute_slice_index(end, size, size)
+            end_index = compute_slice_index(end, size, size)
         if start_index is not None and end_index is not None:
             start, end = start_index, end_index
             ambiguous_slice = False
@@ -1622,30 +1591,22 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
     sym_size, sym_storage = _register_unbacked_slice_size_bindings(
         dim, start, end, step, x.get_size()[dim]
     )
-    if sym_size is None:
-        sym_size = _slice_size_from_meta(dim, start, end, step, x.get_size()[dim])
     assert sym_size is not None
 
     if x.maybe_get_layout() is None:
         # realize tensor before accessing layout
         x.realize()
-    stride = x.maybe_get_stride()
 
     if start_index is not None:
         # we shouldn't have allocated storage offset symbol if start index was determinable
         assert sym_storage is None
-        if stride is None:
-            return TensorBox(
-                ir.SliceView.create_with_size(x.data, dim, start_index, sym_size, step)
-            )
-        new_storage_offset = x.get_layout().offset + start_index * stride[dim]
+        new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
     else:
-        assert stride is not None
         b_storage = ir.DynamicSelectStorageOffset(
             sym_storage,
             start,
             x.get_layout().offset,
-            stride[dim],
+            x.get_stride()[dim],
             x.get_size()[dim],
             clamp=True,
         )
@@ -1654,7 +1615,7 @@ def slice_(x, dim=0, start=0, end=sys.maxsize, step=1, clamp=True):
         new_storage_offset = sym_storage
 
     new_sizes = list(x.get_size())
-    new_strides = list(stride)
+    new_strides = list(x.get_stride())
     new_sizes[dim] = sym_size
     new_strides[dim] *= step
     return as_strided(
@@ -2703,6 +2664,7 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
                 aten.cat.default,
                 aten.clone.default,
                 aten._scaled_mm.default,
+                aten._scaled_mm_v2.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
         )
@@ -2960,7 +2922,7 @@ def randn(*args, **kwargs):
 
 @register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
 def inductor_force_stride_order(input_tensor, stride):
-    stride_order = ir.get_stride_order(stride)
+    stride_order = ir.get_stride_order(stride, V.graph.sizevars.shape_env)
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
@@ -3935,25 +3897,13 @@ def select_scatter(x, src, dim: int, index: int):
 
 @register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
-    """Lower slice_scatter when bounds are resolved."""
     src = to_dtype(src, x.get_dtype())
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
 
-    start_index = _compute_slice_index(start, dim_size, 0)
-    if end is not None and V.graph.sizevars.statically_known_equals(end, sys.maxsize):
-        end_index = dim_size
-    else:
-        end_index = _compute_slice_index(end, dim_size, dim_size)
-
-    if start_index is None or end_index is None:
-        return fallback_handler(aten.slice_scatter.default)(
-            x, src, dim, start, end, step
-        )
-
-    start = start_index
-    end = _clamp_slice_end_to_start(end_index, start)
+    # pyrefly: ignore [bad-argument-type]
+    start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
     src_size[dim] = FloorDiv(end - start + (step - 1), step)
@@ -7106,9 +7056,13 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     return x_var, x_mean
 
 
-def use_two_step_variance(x, axis, keepdim):
-    # two-step algorithm can get better performance in small reductions size
-    # while it can accumulate more numerical error than Welford algorithm.
+def use_two_step_variance(x, axis, keepdim, input_dtype):
+    # The two-step algorithm can be faster for non-split reductions because
+    # Welford does more work per element. Preserve the old tiny-reduction
+    # two-step path, keep Welford for the rest of the small reductions where
+    # the speedup is limited and training gradients are more sensitive to the
+    # different accumulation order, and keep Welford for larger or split
+    # reductions where avoiding another full pass over the data is profitable.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
@@ -7117,17 +7071,39 @@ def use_two_step_variance(x, axis, keepdim):
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
     device = x.get_device()
-    if not (device and device.type == "cpu"):
-        threshold = config.unroll_reductions_threshold
-    else:
+    check_for_split = False
+    min_numel = 0
+    is_cuda_two_step_dtype = input_dtype in (torch.bfloat16, torch.float16)
+    if device and device.type == "cpu":
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-    return (
-        isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) <= threshold
-        and sympy_product(ranges) != 1
+    elif device and device.type == "cuda" and is_triton(x) and is_cuda_two_step_dtype:
+        min_numel = config.triton.use_two_step_variance_min_numel
+        threshold = config.triton.use_two_step_variance_threshold
+        check_for_split = True
+    else:
+        threshold = config.unroll_reductions_threshold
+
+    if not isinstance(reduction_numel, sympy.Integer):
+        return False
+
+    reduction_numel = int(reduction_numel)
+    if reduction_numel > threshold or sympy_product(ranges) == 1:
+        return False
+
+    if min_numel and config.unroll_reductions_threshold < reduction_numel < min_numel:
+        return False
+
+    if not check_for_split:
+        return True
+
+    _, split = ir.Reduction.num_splits(
+        reduction_numel=reduction_numel,
+        reduction_type="sum",
+        **kwargs,
     )
+    return V.graph.sizevars.statically_known_leq(split, 1)
 
 
 def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
@@ -7189,7 +7165,16 @@ def var_mean_aten_welford_order_(x, axis, *, correction, keepdim, return_mean):
     if not isinstance(reduction_numel, sympy.Integer):
         return None
     reduction_numel = int(reduction_numel)
-    if reduction_numel < 128 or reduction_numel % 64 != 0:
+    # This path models ATen's CUDA warp reduction order by explicitly
+    # unrolling the reduced dimension into pointwise IR. Keep this correctness
+    # path bounded by a fixed cap so config changes cannot accidentally generate
+    # very large expressions or disable the reported 384-wide repro.
+    max_exact_order_unroll_numel = 1024
+    if (
+        reduction_numel < 128
+        or reduction_numel >= max_exact_order_unroll_numel
+        or reduction_numel % 64 != 0
+    ):
         return None
 
     loader = kwargs["inner_fn"]
@@ -7302,7 +7287,9 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
             not use_aten_welford_order
             and (
                 config.mtia.disable_welford_reduction
-                or use_two_step_variance(x, axis=axis, keepdim=keepdim)
+                or use_two_step_variance(
+                    x, axis=axis, keepdim=keepdim, input_dtype=out_dtype
+                )
             )
         )
         else (
@@ -8534,8 +8521,31 @@ def sym_numel(a):
     return a.get_numel()
 
 
+def _unwrap_symbolic_magic_arg(x):
+    if isinstance(x, SymTypes):
+        return x.node.expr
+    if isinstance(x, (int, float, bool)):
+        return sympy.sympify(x)
+    return x
+
+
 for method, func in magic_methods.items():
-    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
+
+    @register_lowering(method_to_operator(method))
+    def wrapped(*args, _func=func, **kwargs):
+        node = V.graph.current_node
+        meta_val = node.meta.get("val") if node is not None else None
+        if isinstance(meta_val, SymTypes):
+            return meta_val.node.expr
+        if any(
+            isinstance(x, (SymTypes, sympy.Basic))
+            for x in itertools.chain(args, kwargs.values())
+        ):
+            return _func(
+                *(_unwrap_symbolic_magic_arg(x) for x in args),
+                **{k: _unwrap_symbolic_magic_arg(v) for k, v in kwargs.items()},
+            )
+        return _func(*args, **kwargs)
 
 
 @register_lowering(torch.sym_sum)
