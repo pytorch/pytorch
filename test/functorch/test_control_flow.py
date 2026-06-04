@@ -1884,9 +1884,7 @@ def forward(self, pred_1, x_1):
                 self.assertEqual(result, result_exp)
                 if not reverse:
                     result_exp_PT = op_pt(x, rnd_scan_dim)
-                    res_list = list(result)
-                    res_list[1] = res_list[1].movedim(0, rnd_scan_dim)
-                    self.assertEqual(res_list[1], result_exp_PT)
+                    self.assertEqual(result[1], result_exp_PT)
 
                 if autograd:
                     self.check_autograd(result, result_exp, (init, x))
@@ -2198,7 +2196,6 @@ def forward(self, pred_1, x_1):
                 dim=1,
                 reverse=reverse,
             )
-            o1 = pytree.tree_map(lambda t: t.movedim(0, 1), o1)
             o2 = scan(
                 get_scan_combine_fn("add", False),
                 init2,
@@ -2217,7 +2214,6 @@ def forward(self, pred_1, x_1):
             dim=1,
             reverse=reverse,
         )[1]
-        xs = pytree.tree_map(lambda t: t.movedim(0, 1), xs)
         expected_result = _fake_scan(
             get_scan_combine_fn("add", False),
             init=init2,
@@ -2679,8 +2675,6 @@ def forward(self, pred_1, x_1):
         self.assertEqual(result, result_exp)
         if not reverse:
             result_exp_PT = op_pt(x, dim)
-            result = list(result)
-            result[1] = pytree.tree_map(lambda t: torch.movedim(t, 0, dim), result[1])
             self.assertEqual(result[1], result_exp_PT)
 
         if autograd:
@@ -2947,9 +2941,8 @@ class GraphModule(torch.nn.Module):
             dim=dim,
             reverse=False,
         )
-        result_cmp = [result[0], torch.movedim(result[1], 0, dim)]
-        self.assertEqual(result_cmp[0], expected_result_state)
-        self.assertEqual(result_cmp[1], expected_result_out)
+        self.assertEqual(result[0], expected_result_state)
+        self.assertEqual(result[1], expected_result_out)
 
         if autograd:
             result_flat = pytree.tree_leaves(result)
@@ -3129,7 +3122,7 @@ class GraphModule(torch.nn.Module):
                     return [t.clone() for t in hs_list], input.clone()
 
                 _, all_outputs_scan = scan(step, initial, input_sequence, dim=1)
-                return all_outputs_scan.transpose(0, 1)
+                return all_outputs_scan
 
         class RNNScanTensor(nn.Module):
             def __init__(self):
@@ -3157,7 +3150,7 @@ class GraphModule(torch.nn.Module):
 
                 hs_stacked = torch.stack(initial, dim=1)
                 _, all_outputs_scan = scan(step, hs_stacked, input_sequence, dim=1)
-                return all_outputs_scan.transpose(0, 1)
+                return all_outputs_scan
 
         def run_test_and_get_grads_loss(model, initial_hs, inputs):
             for param in model.parameters():
@@ -3482,7 +3475,7 @@ class GraphModule(torch.nn.Module):
                 f_2,
                 h_2,
                 o1[1],
-                dim=0,
+                dim=1,
                 reverse=reverse,
             )
             return o2
@@ -7577,7 +7570,7 @@ def forward(self, x_1):
     false_graph_0 = self.false_graph_0
     _tensor_constant0 = self._tensor_constant0
     _tensor_constant1 = self._tensor_constant1
-    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1, _tensor_constant0, sym_size_int_1, sym_size_int, _tensor_constant1));  eq = true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = sym_size_int_1 = sym_size_int = _tensor_constant1 = None
+    cond = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, (x_1, sym_size_int_1, sym_size_int, _tensor_constant0, _tensor_constant1));  eq = true_graph_0 = false_graph_0 = x_1 = sym_size_int_1 = sym_size_int = _tensor_constant0 = _tensor_constant1 = None
     getitem = cond[0];  cond = None
     return getitem""",
         )
@@ -7585,7 +7578,16 @@ def forward(self, x_1):
             gm.true_graph_0.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    sym_size_int_4 = torch.ops.aten.sym_size.int(arg0_1, 0)
+    sym_size_int_5 = torch.ops.aten.sym_size.int(arg0_1, 1)
+    add = torch.ops.aten.add.Tensor(arg0_1, arg3_1);  arg0_1 = arg3_1 = None
+    eq_2 = sym_size_int_5 == 3;  sym_size_int_5 = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(s96, 3) on node 'eq_2'");  eq_2 = _assert_scalar_default = None
+    eq_3 = sym_size_int_4 == 2;  sym_size_int_4 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(eq_3, "Runtime assertion failed for expression Eq(s75, 2) on node 'eq_3'");  eq_3 = _assert_scalar_default_1 = None
+    eq = arg1_1 == 3;  arg1_1 = None
+    _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s12, 3) on node 'eq'");  _assert_scalar = None
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s85, 2) on node 'eq_1'");  eq = _assert_scalar_1 = None
     return (add,)""",
         )
 
@@ -9456,7 +9458,15 @@ class GraphModule(torch.nn.Module):
 
     class false_graph_0(torch.nn.Module):
         def forward(self, x: "f32[s68, 3]", sym_size_int_4: "Sym(s17)", sym_size_int_5: "Sym(s68)", z: "f32[s68, 3]"):
-            mul: "f32[s68, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_5);  z = sym_size_int_5 = None
+            sym_size_int_2: "Sym(s68)" = torch.ops.aten.sym_size.int(x, 0)
+
+            mul: "f32[s68, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_5);  z = None
+            eq_1: "Sym(True)" = sym_size_int_2 == sym_size_int_5;  sym_size_int_2 = None
+            _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq_1, "Runtime assertion failed for expression Eq(s77, s68) on node 'eq_1'");  eq_1 = _assert_scalar_default = None
+
+            eq: "Sym(True)" = sym_size_int_5 == sym_size_int_5;  sym_size_int_5 = None
+
+            _assert_scalar = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s85, s27) on node 'eq'");  eq = _assert_scalar = None
 
             add: "f32[s68, 3]" = torch.ops.aten.add.Tensor(x, mul);  x = mul = None
             return (add,)
@@ -9644,7 +9654,17 @@ class GraphModule(torch.nn.Module):
             l_x__1 = l_x_
             s94_1 = s94
 
-            add: "f32[s17, s94]" = l_x__1 + s17_true_branch;  l_x__1 = s17_true_branch = None
+            add: "f32[s17, s94]" = l_x__1 + s17_true_branch;  l_x__1 = None
+            sym_sum: "Sym(s17 - 2)" = torch.sym_sum([-2, s17_true_branch]);  s17_true_branch = None
+            mul: "Sym(s94*(s17 - 2))" = s94_1 * sym_sum;  s94_1 = None
+            ge: "Sym(s94*(s17 - 2) >= 2)" = mul >= 2;  mul = None
+            _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression s94*(s17 - 2) >= 2 on node 'ge'");  ge = _assert_scalar_default = None
+            eq: "Sym(Eq(s17 - 2, 1))" = sym_sum == 1
+            sym_not: "Sym(Ne(s17 - 2, 1))" = torch.sym_not(eq);  eq = None
+            _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(sym_not, "Runtime assertion failed for expression Ne(s17 - 2, 1) on node 'sym_not'");  sym_not = _assert_scalar_default_1 = None
+            eq_1: "Sym(Eq(s17 - 2, 0))" = sym_sum == 0;  sym_sum = None
+            sym_not_1: "Sym(Ne(s17 - 2, 0))" = torch.sym_not(eq_1);  eq_1 = None
+            _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(sym_not_1, "Runtime assertion failed for expression Ne(s17 - 2, 0) on node 'sym_not_1'");  sym_not_1 = _assert_scalar_default_2 = None
             getitem: "f32[s17 - 2, s94]" = add[slice(2, None, None)];  add = None
             clone: "f32[s17 - 2, s94]" = getitem.clone();  getitem = None
             return (clone,)

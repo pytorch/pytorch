@@ -3939,6 +3939,7 @@ class ShapeEnv:
 
         self.guards: list[ShapeGuard] = []
         self.axioms: dict[sympy.Expr, sympy.Expr] = {}
+        self._branch_shape_env_snapshots: list[dict[str, Any]] = []
 
         # A set of ids that have already been allocated. This is used
         # for when we allocate symbol ids using the hash of the source
@@ -4276,6 +4277,7 @@ class ShapeEnv:
             # Cached state for optimization_hint unbacked canonicalization
             "_equality_graph",
             "_unbacked_replacements",
+            "_branch_shape_env_snapshots",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -4696,6 +4698,68 @@ class ShapeEnv:
         self.simplify.cache_clear()
         self._simplify_floor_div.cache_clear()
 
+    @record_shapeenv_event()
+    def _isolate_branch_shape_env_enter(self) -> None:
+        existing_symbols = set(self.var_to_range)
+        snapshot = {
+            "existing_symbols": existing_symbols,
+            "guards": list(self.guards),
+            "axioms": dict(self.axioms),
+            "var_to_range": dict(self.var_to_range),
+            "var_to_range_sloc": copy.deepcopy(self.var_to_range_sloc),
+            "replacements": dict(self.replacements),
+            "replacements_slocs": dict(self.replacements_slocs),
+            "divisible": set(self.divisible),
+            "deferred_runtime_asserts": {
+                k: list(v) for k, v in self.deferred_runtime_asserts.items()
+            },
+            "num_deferred_runtime_asserts": self.num_deferred_runtime_asserts,
+            "symbol_guard_counter": copy.copy(self.symbol_guard_counter),
+            "size_like": set(self.size_like),
+            "translation_validation_enabled": self._translation_validation_enabled,
+        }
+        self._branch_shape_env_snapshots.append(snapshot)
+        self._translation_validation_enabled = False
+
+    @record_shapeenv_event()
+    def _isolate_branch_shape_env_exit(self) -> None:
+        snapshot = self._branch_shape_env_snapshots.pop()
+        existing_symbols = snapshot["existing_symbols"]
+        saved_var_to_range = snapshot["var_to_range"]
+        saved_var_to_range_sloc = snapshot["var_to_range_sloc"]
+
+        new_symbols = set(self.var_to_range) - existing_symbols
+        new_var_to_range = {symbol: self.var_to_range[symbol] for symbol in new_symbols}
+        new_var_to_range_sloc = {
+            symbol: self.var_to_range_sloc[symbol]
+            for symbol in new_symbols
+            if symbol in self.var_to_range_sloc
+        }
+        new_size_like = self.size_like - existing_symbols
+
+        self.guards = snapshot["guards"]
+        self.axioms = snapshot["axioms"]
+        self.var_to_range = saved_var_to_range
+        self.var_to_range.update(new_var_to_range)
+        self.var_to_range_sloc = saved_var_to_range_sloc
+        self.var_to_range_sloc.update(new_var_to_range_sloc)
+        self.replacements = snapshot["replacements"]
+        self.replacements_slocs = snapshot["replacements_slocs"]
+        self.divisible = snapshot["divisible"]
+        self.deferred_runtime_asserts = snapshot["deferred_runtime_asserts"]
+        self.num_deferred_runtime_asserts = snapshot["num_deferred_runtime_asserts"]
+        self.symbol_guard_counter = snapshot["symbol_guard_counter"]
+        self.size_like = snapshot["size_like"] | new_size_like
+        self._translation_validation_enabled = snapshot[
+            "translation_validation_enabled"
+        ]
+        for symbol in new_symbols:
+            self._add_z3var(symbol, int)
+        self.fake_tensor_cache.clear()
+        self._replacements_version_counter += 1
+        self._update_version_counter()
+        self._clear_branch_isolation_caches()
+
     @contextmanager
     def isolate_branch_shape_env(self) -> Generator[None, None, None]:
         """
@@ -4707,52 +4771,11 @@ class ShapeEnv:
         while restoring guard-like state for symbols that already belonged to
         the parent graph.
         """
-        existing_symbols = set(self.var_to_range)
-        saved_guards = list(self.guards)
-        saved_axioms = dict(self.axioms)
-        saved_var_to_range = dict(self.var_to_range)
-        saved_var_to_range_sloc = copy.deepcopy(self.var_to_range_sloc)
-        saved_replacements = dict(self.replacements)
-        saved_replacements_slocs = dict(self.replacements_slocs)
-        saved_divisible = set(self.divisible)
-        saved_deferred_runtime_asserts = {
-            k: list(v) for k, v in self.deferred_runtime_asserts.items()
-        }
-        saved_num_deferred_runtime_asserts = self.num_deferred_runtime_asserts
-        saved_symbol_guard_counter = copy.copy(self.symbol_guard_counter)
-        saved_size_like = set(self.size_like)
-
+        self._isolate_branch_shape_env_enter()
         try:
             yield
         finally:
-            new_symbols = set(self.var_to_range) - existing_symbols
-            new_var_to_range = {
-                symbol: self.var_to_range[symbol] for symbol in new_symbols
-            }
-            new_var_to_range_sloc = {
-                symbol: self.var_to_range_sloc[symbol]
-                for symbol in new_symbols
-                if symbol in self.var_to_range_sloc
-            }
-            new_size_like = self.size_like - existing_symbols
-
-            self.guards = saved_guards
-            self.axioms = saved_axioms
-            self.var_to_range = saved_var_to_range
-            self.var_to_range.update(new_var_to_range)
-            self.var_to_range_sloc = saved_var_to_range_sloc
-            self.var_to_range_sloc.update(new_var_to_range_sloc)
-            self.replacements = saved_replacements
-            self.replacements_slocs = saved_replacements_slocs
-            self.divisible = saved_divisible
-            self.deferred_runtime_asserts = saved_deferred_runtime_asserts
-            self.num_deferred_runtime_asserts = saved_num_deferred_runtime_asserts
-            self.symbol_guard_counter = saved_symbol_guard_counter
-            self.size_like = saved_size_like | new_size_like
-            self.fake_tensor_cache.clear()
-            self._replacements_version_counter += 1
-            self._update_version_counter()
-            self._clear_branch_isolation_caches()
+            self._isolate_branch_shape_env_exit()
 
     @contextmanager
     def error_on_new_guards(self) -> Generator[None, None, None]:

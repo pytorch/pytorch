@@ -3859,12 +3859,12 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     a_1 = a
     b_1 = b
     l_x__1 = l_x_
-    sym_size_int = torch.ops.aten.sym_size.int(l_x__1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(l_x__1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(l_x__1, 0)
+    sym_size_int_3 = torch.ops.aten.sym_size.int(l_x__1, 1)
     add = l_x__1 + l_x__1;  l_x__1 = None
-    eq = sym_size_int_1 == 4;  sym_size_int_1 = None
+    eq = sym_size_int_3 == 4;  sym_size_int_3 = None
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s27, 4) on node 'eq'");  eq = _assert_scalar_default = None
-    eq_1 = sym_size_int == 6;  sym_size_int = None
+    eq_1 = sym_size_int_2 == 6;  sym_size_int_2 = None
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(eq_1, "Runtime assertion failed for expression Eq(s77, 6) on node 'eq_1'");  eq_1 = _assert_scalar_default_1 = None
     cos = a_1.cos();  a_1 = None
     add_1 = add + cos;  add = cos = None
@@ -3882,12 +3882,12 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     a_1 = a
     b_1 = b
     l_x__1 = l_x_
-    sym_size_int = torch.ops.aten.sym_size.int(l_x__1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(l_x__1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(l_x__1, 0)
+    sym_size_int_3 = torch.ops.aten.sym_size.int(l_x__1, 1)
     mul = l_x__1 * l_x__1;  l_x__1 = None
-    eq = sym_size_int_1 == 4;  sym_size_int_1 = None
+    eq = sym_size_int_3 == 4;  sym_size_int_3 = None
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(s27, 4) on node 'eq'");  eq = _assert_scalar_default = None
-    eq_1 = sym_size_int == 6;  sym_size_int = None
+    eq_1 = sym_size_int_2 == 6;  sym_size_int_2 = None
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(eq_1, "Runtime assertion failed for expression Eq(s77, 6) on node 'eq_1'");  eq_1 = _assert_scalar_default_1 = None
     sin = a_1.sin();  a_1 = None
     add = mul + sin;  mul = sin = None
