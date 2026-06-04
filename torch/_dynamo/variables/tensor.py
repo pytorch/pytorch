@@ -1906,7 +1906,7 @@ class TensorVariable(VariableTracker):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         return None
-    
+
     def method_as_strided_(
         self,
         tx: "InstructionTranslatorBase",
