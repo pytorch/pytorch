@@ -898,7 +898,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     input[i * out_size : (i + 1) * out_size] = float(self.rank + i + 1)
                 output = torch.empty(out_size)
 
-                work = dist.reduce_scatter_tensor(output, input, op=op, async_op=True)
+                work = dist.reduce_scatter_single(output, input, op=op, async_op=True)
                 work.wait()
 
                 r = self.rank

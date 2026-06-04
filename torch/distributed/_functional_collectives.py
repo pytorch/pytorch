@@ -1845,11 +1845,13 @@ from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecate
     _reduce_scatter_base as legacy_reduce_scatter_base,
     all_gather as legacy_all_gather,
     all_gather_into_tensor as legacy_allgather,
+    all_gather_single as legacy_allgather_single,
     all_reduce as legacy_allreduce,
     all_to_all_single as legacy_all_to_all_single,
     batch_isend_irecv as legacy_batch_p2p_ops,
     irecv as legacy_irecv,
     isend as legacy_isend,
+    reduce_scatter_single as legacy_reducescatter_single,
     reduce_scatter_tensor as legacy_reducescatter,
 )
 
@@ -1922,7 +1924,9 @@ def _remapped_batch_p2p_ops(*args, **kwargs):
 # Functions in this set should accept the same args/kwargs 1:1 as their mapping.
 traceable_collective_remaps = {
     legacy_allgather: _remapped_allgather,
+    legacy_allgather_single: _remapped_allgather,
     legacy_reducescatter: _remapped_reducescatter,
+    legacy_reducescatter_single: _remapped_reducescatter,
     legacy_allreduce: _remapped_allreduce,
     legacy_all_to_all_single: _remapped_all_to_all_single,
     legacy_all_gather: _remapped_all_gather,

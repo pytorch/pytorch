@@ -795,8 +795,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.all_reduce(x)
         c10d.reduce(x, dst=0)
         c10d.broadcast(x, src=0)
-        c10d.all_gather_into_tensor(y, x)
-        c10d.reduce_scatter_tensor(x, y)
+        c10d.all_gather_single(y, x)
+        c10d.reduce_scatter_single(x, y)
         c10d.barrier()
 
         # Wait a bit for remote processes to touch my device
@@ -4550,7 +4550,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 group=process_group, device=device, async_ops=async_ops
             ) as cm:
                 for input_t, output_t in zip(input_tensors, output_tensors):
-                    torch.distributed.all_gather_into_tensor(output_t, input_t)
+                    torch.distributed.all_gather_single(output_t, input_t)
 
             self.assertEqual(len(cm.works), 1 if async_ops else 0)
             cm.wait()
@@ -4580,7 +4580,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 t = torch.ones(60, device=device) * (self.rank + 1)
                 torch.distributed.all_reduce(t)
                 output = torch.zeros(60 * self.world_size, device=device)
-                torch.distributed.all_gather_into_tensor(output, t)
+                torch.distributed.all_gather_single(output, t)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/115859")
     @requires_nccl()
@@ -4971,7 +4971,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             self.rank
         )
         input_tensors = torch.reshape(input_tensors, (self.world_size, 2))
-        dist.reduce_scatter_tensor(output_tensor, input_tensors)
+        dist.reduce_scatter_single(output_tensor, input_tensors)
         self.assertEqual(output_tensor, input_tensors[self.rank] * self.world_size)
 
     @requires_nccl()
@@ -4988,7 +4988,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         input_tensors = [torch.ones(2, 2).to(self.rank) for _ in range(self.world_size)]
         with dist._coalescing_manager():
             for i in range(self.world_size):
-                dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
+                dist.reduce_scatter_single(output_tensors[i], input_tensors[i])
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
 
     @requires_nccl()
@@ -5094,7 +5094,7 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
         device = "cuda"
         tensor = torch.ones(10, 10, device=torch.device(device))
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
-        dist.all_gather_into_tensor(output_tensor, tensor)
+        dist.all_gather_single(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
 
     @requires_nccl()
@@ -5116,7 +5116,7 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
         output_tensor = torch.zeros(10, 16, device=torch.device(device)).to(
             float8_dtype
         )
-        dist.all_gather_into_tensor(output_tensor, tensor)
+        dist.all_gather_single(output_tensor, tensor)
         self.assertEqual(output_tensor.view(torch.float32), tensor.view(torch.float32))
 
 
@@ -5706,7 +5706,7 @@ class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
 
         with self.subTest("reduce_scatter_tensor"):
             output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
-            dist.reduce_scatter_tensor(
+            dist.reduce_scatter_single(
                 output=output_tensor,
                 input=input_tensor,
                 op=dist.ReduceOp.AVG,
@@ -5716,7 +5716,7 @@ class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
         with self.subTest("reduce_scatter_tensor_coalesced"):
             output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
             with dist._coalescing_manager():
-                dist.reduce_scatter_tensor(
+                dist.reduce_scatter_single(
                     output=output_tensor,
                     input=input_tensor,
                     op=dist.ReduceOp.AVG,
@@ -6911,7 +6911,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         with dist._coalescing_manager():
             for i in range(self.world_size):
-                dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
+                dist.reduce_scatter_single(output_tensors[i], input_tensors[i])
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
 
         torch.cuda.synchronize(device=self.rank)
