@@ -53,6 +53,10 @@
 #include <thread>
 #include <unordered_map>
 
+namespace at::native {
+void* getCurrentCUDASolverDnHandleLazy();
+}
+
 using namespace torch;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -372,6 +376,9 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   Py_ssize_t num_tensors = PyTuple_GET_SIZE(tensors_o);
 
   c10::SmallVector<at::Tensor> tensors;
+  if (num_tensors > 0) {
+    tensors.reserve(static_cast<size_t>(num_tensors));
+  }
   for (const auto i : c10::irange(num_tensors)) {
     PyObject* _tensor = PyTuple_GET_ITEM(tensors_o, i);
     TORCH_CHECK(
@@ -383,6 +390,10 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   }
 
   c10::SmallVector<at::Scalar> extra_args;
+  const Py_ssize_t num_extra_args = kwargs_o ? PyDict_Size(kwargs_o) : 0;
+  if (num_extra_args > 0) {
+    extra_args.reserve(static_cast<size_t>(num_extra_args));
+  }
   PyObject* key = nullptr;
   PyObject* value = nullptr;
   Py_ssize_t pos = 0;
@@ -594,6 +605,14 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
     }
     return dict;
   };
+  const auto statArrayMapToDict = [&](const auto& stat_array_map) {
+    py::dict dict;
+    for (const auto& [mempool_id, stat_array] : stat_array_map) {
+      dict[py::make_tuple(mempool_id.first, mempool_id.second)] =
+          statArrayToDict(stat_array);
+    }
+    return dict;
+  };
 
   const DeviceStats stats =
       c10::cuda::CUDACachingAllocator::getDeviceStats(device_index);
@@ -612,6 +631,8 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   result["inactive_split"] = statArrayToDict(stats.inactive_split);
   result["allocated_bytes"] = statArrayToDict(stats.allocated_bytes);
   result["reserved_bytes"] = statArrayToDict(stats.reserved_bytes);
+  result["reserved_bytes_by_private_pools"] =
+      statArrayMapToDict(stats.reserved_bytes_by_private_pools);
   result["active_bytes"] = statArrayToDict(stats.active_bytes);
   result["inactive_split_bytes"] = statArrayToDict(stats.inactive_split_bytes);
   result["requested_bytes"] = statArrayToDict(stats.requested_bytes);
@@ -714,7 +735,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   c10::cuda::MempoolId_t mempool_id = {0, 0};
   bool include_traces = true;
 
-  if (arg && arg != Py_None) {
+  if (arg && !Py_IsNone(arg)) {
     TORCH_CHECK(PyTuple_Check(arg), "Expected tuple or None");
     Py_ssize_t size = PyTuple_Size(arg);
 
@@ -739,7 +760,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
           PyBool_Check(traces.get()), "include_traces must be a boolean");
       mempool_id = c10::cuda::MempoolId_t(
           THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
-      include_traces = (traces.get() == Py_True);
+      include_traces = (Py_IsTrue(traces.get()));
     } else {
       TORCH_CHECK(false, "Expected tuple of size 2 or 3");
     }
@@ -920,6 +941,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str roundup_power2_divisions_s = "roundup_power2_divisions";
   py::str graph_capture_record_stream_reuse_s =
       "graph_capture_record_stream_reuse";
+  py::str max_round_threshold_s = "max_round_threshold";
+  py::str max_cached_size_s = "max_cached_size";
 
   allocator_settings[last_allocator_settings_s] =
       snapshot.config_metadata.last_allocator_settings;
@@ -937,6 +960,10 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       snapshot.config_metadata.pinned_use_host_register;
   allocator_settings[graph_capture_record_stream_reuse_s] =
       snapshot.config_metadata.graph_capture_record_stream_reuse;
+  allocator_settings[max_round_threshold_s] =
+      int64_t(snapshot.config_metadata.max_round_threshold);
+  allocator_settings[max_cached_size_s] =
+      int64_t(snapshot.config_metadata.max_cached_size);
   unsigned int roundup_key = 1;
   py::dict roundup_settings;
   for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {
@@ -1603,6 +1630,15 @@ PyObject* THCPModule_getCurrentBlasHandle_wrap(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_getCurrentSolverHandle_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  void* handle = at::native::getCurrentCUDASolverDnHandleLazy();
+  return PyLong_FromVoidPtr(handle);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THCPModule_clearBlasWorkspaces_wrap(
     PyObject* self,
     PyObject* noargs) {
@@ -2115,6 +2151,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_getCurrentBlasHandle",
      THCPModule_getCurrentBlasHandle_wrap,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_getCurrentSolverHandle",
+     THCPModule_getCurrentSolverHandle_wrap,
      METH_NOARGS,
      nullptr},
     {"_cuda_clearCublasWorkspaces",

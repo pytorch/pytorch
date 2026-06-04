@@ -94,6 +94,9 @@ python fuzzer.py --seed 42 --template dtensor
 
 # Unbacked template: data-dependent operations (nonzero, unique, etc.)
 python fuzzer.py --seed 42 --template unbacked
+
+# Use a third-party device plugin (see "Device Plugins" below)
+TORCHFUZZ_DEVICE_MODULE=torchfuzz_xpu python fuzzer.py --seed 42 --template default
 ```
 
 ### Debug Mode
@@ -110,7 +113,7 @@ python fuzzer.py --seed 42 --log-level DEBUG --max-depth 5
 |--------|-------------|---------|
 | `--seed INT` | Random seed for reproducible tests | `--seed 42` |
 | `--max-depth INT` | Maximum operation graph depth (1-20) | `--max-depth 5` |
-| `--template NAME` | Template to use (default, dtensor, unbacked) | `--template unbacked` |
+| `--template NAME` | Template name from the active device plugin (use `--help` to see available choices for the active plugin) | `--template unbacked` |
 | `--log-level LEVEL` | Logging verbosity (DEBUG, INFO, WARNING, ERROR) | `--log-level DEBUG` |
 
 ### Multi-Process Fuzzing
@@ -154,11 +157,12 @@ Notes:
 | `fuzzer.py` | Main CLI orchestrator, coordinates fuzzing workflow |
 | `tensor_fuzzer.py` | Generates random tensor/scalar specifications |
 | `ops_fuzzer.py` | Builds operation graphs via recursive decomposition |
-| `codegen.py` | Converts operation graphs to executable Python code |
+| `codegen.py` | Code-generation core, plugin registry, and `FuzzTemplate` / `DeviceInfo` base classes |
+| `cuda/` | Reference device plugin (CUDA). Provides `FuzzTemplate` subclasses, `Check` subclasses, and runtime device hooks via the plugin protocol exposed by `codegen.py` |
 | `runner.py` | Executes generated programs and reports results |
 | `multi_process_fuzzer.py` | Parallel fuzzing across multiple processes |
 | `visualize_graph.py` | Creates visual diagrams of operation graphs |
-| `checks.py` | Defines validation strategies (eager vs compiled) |
+| `checks.py` | `Check` ABC; concrete checks live in device plugins |
 | `operators/` | Modular operator implementations |
 
 ### Operator System
@@ -209,9 +213,79 @@ class Operator(ABC):
 - `arg` - Function arguments
 - `constant` - Constant scalar values
 
+## Device Plugins
+
+TorchFuzz separates device-agnostic code-generation infrastructure from device-specific behaviour using a small plugin protocol. The default plugin is `torchfuzz.cuda`, which is loaded automatically when `TORCHFUZZ_DEVICE_MODULE` is unset; pointing `TORCHFUZZ_DEVICE_MODULE` at any importable module that implements the protocol switches the fuzzer to that device without modifying core source.
+
+### Selecting a plugin
+
+```bash
+TORCHFUZZ_DEVICE_MODULE=torchfuzz_xpu python fuzzer.py --seed 42 --template default
+```
+
+The value of `TORCHFUZZ_DEVICE_MODULE` is fed straight into `importlib.import_module(...)`.
+
+### Plugin contract
+
+A plugin module must define two module-level functions:
+
+```python
+from torchfuzz.codegen import DeviceInfo, FuzzTemplate
+
+def register_codegen() -> dict[str, type[FuzzTemplate]]:
+    """Map template short-name (used by --template) to FuzzTemplate subclass."""
+
+def get_device_info() -> DeviceInfo:
+    """Return device metadata used by the core."""
+```
+
+Where `DeviceInfo` is a dataclass declared in `torchfuzz.codegen`:
+
+```python
+@dataclass
+class DeviceInfo:
+    device_name: str                                                   # e.g. "cuda", "xpu", "mtia"
+    select_runtime_env: Callable[[dict[str, str]], dict[str, str]] | None = None
+```
+
+* `device_name` is emitted into tensor descriptor comments (`device=<name>`).
+* `select_runtime_env(env)` is called by `runner.py` to mutate the subprocess environment when launching generated programs (e.g. CUDA picks a random visible device and narrows `CUDA_VISIBLE_DEVICES` to it). Returning `None` here means "run with the unmodified environment".
+
+### Worked example skeleton
+
+```python
+# torchfuzz_xpu/__init__.py
+from torchfuzz.codegen import DeviceInfo, FuzzTemplate
+
+class MyDefaultTemplate(FuzzTemplate):
+    def imports_codegen(self): return ["import torch"]
+    def flags_codegen(self):   return ["torch.set_default_device('xpu')"]
+    # ... override args_codegen / codegen_constant / etc. as needed
+
+def register_codegen() -> dict[str, type[FuzzTemplate]]:
+    return {"default": MyDefaultTemplate}
+
+def get_device_info() -> DeviceInfo:
+    return DeviceInfo(device_name="xpu", select_runtime_env=None)
+```
+
+For a fully worked example, including how `FuzzTemplate` hook overrides interact with `convert_graph_to_python_code`, see `torchfuzz/cuda/_codegen.py` and the documentation comments at the top of `torchfuzz/cuda/__init__.py`.
+
+### Where each kind of customization belongs
+
+| Customization | Where to put it |
+|---|---|
+| New templates | Plugin's `_codegen.py` + register in `register_codegen` |
+| New checks | Plugin's `_checks.py` (no separate registration; templates own their checks) |
+| Per-device runtime behaviour | `DeviceInfo.select_runtime_env` |
+| Per-device emitted device string in tensor descriptors | `DeviceInfo.device_name` |
+| Per-template behaviour previously expressed via `if template == "…":` checks | `FuzzTemplate` hook overrides (`treat_constant_as_global`, `wrap_body`, `return_codegen`, `args_codegen`, `codegen_constant`) |
+
+The CUDA plugin at `torchfuzz/cuda/` is the canonical reference; consult its module docstring for the full hook table and the rationale behind each override.
+
 ## Templates
 
-Templates define specialized fuzzing strategies with custom operator sets, checks, and argument generation.
+The templates below are provided by the default CUDA plugin (`torchfuzz/cuda`).
 
 ### Default Template
 
@@ -222,6 +296,8 @@ Templates define specialized fuzzing strategies with custom operator sets, check
 **Check**: Compares eager vs compiled outputs with numerical tolerance (5% relative + 1.0 absolute difference)
 
 **Use Case**: General PyTorch compilation testing
+
+**Implemented in**: `torchfuzz/cuda/_codegen.py`
 
 ```bash
 python fuzzer.py --seed 42 --template default
@@ -242,8 +318,31 @@ python fuzzer.py --seed 42 --template default
 
 **Use Case**: Testing torch.compile with distributed tensors
 
+**Implemented in**: `torchfuzz/cuda/_codegen.py`
+
 ```bash
 python fuzzer.py --seed 42 --template dtensor
+```
+
+### DTensor Placements Template
+
+**Focus**: DTensor with randomized placement strategies
+
+**Operators**: Same as DTensor
+
+**Check**: Validates compilation correctness
+
+**Special Features**:
+- Randomizes placements across `Replicate`, `Shard(d)`, and `Partial`
+- Lifts constants out of the traced function via `treat_constant_as_global`
+- Materializes args and constants with `dist_tensor.{ones,randn,full}`
+
+**Use Case**: Stress-testing DTensor sharding propagation
+
+**Implemented in**: `torchfuzz/cuda/_codegen.py`
+
+```bash
+python fuzzer.py --seed 42 --template dtensor_placements
 ```
 
 ### Unbacked Template
@@ -261,8 +360,31 @@ python fuzzer.py --seed 42 --template dtensor
 
 **Use Case**: Testing dynamic shape handling and unbacked SymInt scenarios
 
+**Implemented in**: `torchfuzz/cuda/_codegen.py`
+
 ```bash
 python fuzzer.py --seed 42 --template unbacked
+```
+
+### Streams Template
+
+**Focus**: CUDA stream parallelism / wait-stream / event-based sync
+
+**Operators**: Same set as Default
+
+**Check**: Eager vs compiled including a backward pass
+
+**Special Features**:
+- Wraps non-leaf operations in 2-3 random `torch.cuda.Stream()` contexts via the `wrap_body` hook
+- Inserts cross-stream synchronization (`wait_stream` or `Event` record + `wait_event`)
+- Sets `requires_grad_(True)` on float args to exercise backward through stream-wrapped ops
+
+**Use Case**: Exercising Inductor's stream handling
+
+**Implemented in**: `torchfuzz/cuda/_codegen.py`
+
+```bash
+python fuzzer.py --seed 42 --template streams
 ```
 
 ## Multi-Process Fuzzing
@@ -324,7 +446,7 @@ Ignored failures are tracked separately and don't count as failures in the summa
 
 ## Custom Checks
 
-Checks define how generated programs are validated. Create custom checks by subclassing `Check`:
+Checks define how generated programs are validated. The `Check` ABC lives in core (`torchfuzz/checks.py`); concrete checks live in device plugins. Define your check inside your device plugin (`my_plugin/_checks.py`) and import it from your `FuzzTemplate.__init__`. Checks are not separately registered — templates own their checks.
 
 ```python
 from torchfuzz.checks import Check
@@ -342,9 +464,15 @@ class MyCustomCheck(Check):
 
 ### Built-in Checks
 
+These live in `torchfuzz/cuda/_checks.py` and are used by the CUDA plugin's templates.
+
 #### EagerVsFullGraphDynamicCompileCheck
 
 Validates that eager and compiled execution both succeed (no output comparison).
+
+#### EagerVsFullGraphDynamicCompileWithBackwardCheck
+
+Validates that eager and compiled execution both succeed and that a backward pass runs cleanly through both.
 
 #### EagerVsFullGraphDynamicCompileWithNumericsCheck
 
@@ -380,6 +508,18 @@ print(f"Root node: {operation_graph.root_node_id}")
 print(f"Topological order: {operation_graph.get_topological_order()}")
 print(f"Leaf nodes: {operation_graph.get_leaf_nodes()}")
 ```
+
+### Plugin Lifecycle
+
+```python
+from torchfuzz.codegen import initialize_codegen, get_template_names, make_template
+
+initialize_codegen()                   # picks up TORCHFUZZ_DEVICE_MODULE or defaults to torchfuzz.cuda
+print(get_template_names())            # e.g. ['default', 'dtensor', ...]
+tpl = make_template("default")
+```
+
+Callers using `fuzz_and_execute` / `convert_graph_to_python_code` do not need to call `initialize_codegen` themselves — the core does it lazily.
 
 ## Adding New Operations
 
@@ -436,9 +576,10 @@ class OperatorRegistry:
 
 ### Step 3: Add to Template (Optional)
 
-If you want the operator in specific templates, add its torch_op_name to the template's `supported_ops` list in `codegen.py`:
+If you want the operator in specific templates of the CUDA plugin, edit `torchfuzz/cuda/_codegen.py` and add `torch.my_op` to the relevant template's `supported_ops` list. For a non-CUDA plugin, edit the equivalent file in that plugin.
 
 ```python
+# torchfuzz/cuda/_codegen.py
 class DefaultFuzzTemplate(FuzzTemplate):
     def __init__(self):
         super().__init__(
@@ -446,7 +587,7 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 # ... existing ops ...
                 "torch.my_op",
             ],
-            check=EagerVsFullGraphDynamicCompileWithNumericsCheck(),
+            check=EagerVsFullGraphDynamicCompileCheck(),
         )
 ```
 

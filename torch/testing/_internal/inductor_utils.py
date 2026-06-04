@@ -10,7 +10,7 @@ import unittest
 from subprocess import CalledProcessError
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch._inductor.config as config
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.codegen.common import (
@@ -393,9 +393,20 @@ class MockGraphHandler(GraphLowering):
         self.constants = {}
         self.scheduler = None
 
-    def get_dtype(self, buffer_name: str) -> torch.dtype:  # noqa: ARG002
+    def try_get_buffer(self, buffer_name: str):
+        return self.name_to_buffer.get(buffer_name)
+
+    def get_buffer(self, buffer_name: str):
+        return self.name_to_buffer[buffer_name]
+
+    def get_dtype(self, buffer_name: str) -> torch.dtype:
         """Return default dtype for any buffer (for testing)."""
         return torch.float32
+
+
+def has_cpp_wrapper_for_device(device: str) -> bool:
+    init_backend_registration()
+    return get_wrapper_codegen_for_device(device, cpp_wrapper=True) is not None
 
 
 @contextlib.contextmanager

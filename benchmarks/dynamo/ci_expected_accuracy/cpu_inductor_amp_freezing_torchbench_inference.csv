@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,fail_accuracy,47
 
 
 
-detectron2_fcos_r_50_fpn,fail_accuracy,25
+detectron2_fcos_r_50_fpn,pass,25
 
 
 

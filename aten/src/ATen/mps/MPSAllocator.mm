@@ -544,6 +544,43 @@ std::pair<const void*, uint32_t> MPSHeapAllocatorImpl::getSharedBufferPtr(const 
   return {buffer_block->cpu_ptr, buffer_block->retainCount()};
 }
 
+namespace {
+// Deleter for the CPU-device DataPtr produced by getHostAliasStorage.
+// The context is a heap-allocated c10::Storage holding a refcount on the
+// source MPS storage; destroying it releases that refcount, which in turn
+// lets the MPSAllocator recycle the underlying MTLBuffer.
+void hostAliasDeleter(void* ctx) {
+  delete static_cast<c10::Storage*>(ctx);
+}
+} // namespace
+
+c10::Storage MPSHeapAllocatorImpl::getHostAliasStorage(const c10::Storage& mps_storage) {
+  TORCH_CHECK_VALUE(mps_storage.device().type() == c10::DeviceType::MPS,
+                    "getHostAliasStorage: expected an MPS storage, got device=",
+                    mps_storage.device());
+
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  BufferBlock* buffer_block = get_allocated_buffer_block(mps_storage.data());
+  TORCH_CHECK(buffer_block, "getHostAliasStorage: storage was not allocated by the MPSAllocator");
+  TORCH_CHECK(buffer_block->heap->pool->usage & UsageFlags::SHARED,
+              "getHostAliasStorage: storage is not backed by a shared (unified) MTLBuffer");
+
+  if (!buffer_block->cpu_ptr) {
+    buffer_block->cpu_ptr = [buffer_block->buffer contents];
+  }
+
+  // Retain the source MPS storage through the DataPtr's context so the
+  // MTLBuffer cannot be recycled while the host alias is in use.
+  auto* ctx = new c10::Storage(mps_storage);
+  c10::DataPtr data_ptr(buffer_block->cpu_ptr, ctx, &hostAliasDeleter, c10::Device(c10::DeviceType::CPU));
+
+  return c10::Storage(c10::Storage::use_byte_size_t(),
+                      mps_storage.nbytes(),
+                      std::move(data_ptr),
+                      /*allocator=*/nullptr,
+                      /*resizable=*/false);
+}
+
 bool MPSHeapAllocatorImpl::recordEvents(c10::ArrayRef<const void*> buffers) {
   bool recordedEvent = false;
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
@@ -739,6 +776,9 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
   std::pair<const void*, uint32_t> getSharedBufferPtr(const void* ptr) const override {
     return _getAllocImpl().getSharedBufferPtr(ptr);
+  }
+  c10::Storage getHostAliasStorage(const c10::Storage& mps_storage) const override {
+    return _getAllocImpl().getHostAliasStorage(mps_storage);
   }
   bool isSharedBuffer(const void* ptr) const override {
     return _getAllocImpl().isSharedBuffer(ptr);
