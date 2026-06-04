@@ -988,6 +988,8 @@ class Operation:
 
 @ir_dataclass
 class Loops(IRNode):
+    """Base class for pointwise and reduction loop-body IR nodes."""
+
     device: torch.device
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
@@ -1071,7 +1073,15 @@ class Loops(IRNode):
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         if threshold is None:
             threshold = 0
-        threshold = max(threshold, config.realize_opcount_threshold)
+        realize_opcount_threshold = config.realize_opcount_threshold
+        if realize_opcount_threshold is None:
+            if is_cpu(self):
+                realize_opcount_threshold = config.realize_cpu_opcount_threshold
+            else:
+                realize_opcount_threshold = config._realize_opcount_threshold_default
+        else:
+            assert isinstance(realize_opcount_threshold, int)
+        threshold = max(threshold, realize_opcount_threshold)
         return self.inner_fn_opcount().num_ops > threshold
 
     def inner_fn_free_symbols(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
@@ -3477,6 +3487,13 @@ class PermuteView(BaseView):
         )
         size = self.data.get_size()
         return [size[i] for i in self.dims]
+
+    def get_stride(self) -> Sequence[Expr]:
+        assert OrderedSet(self._map_neg_dims(self.dims)) == OrderedSet(
+            range(len(self.dims))
+        )
+        stride = self.data.get_stride()
+        return [stride[i] for i in self.dims]
 
     def make_reindexer(
         self,
@@ -6626,6 +6643,22 @@ class ExternKernel(InputsKernel):
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
+
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        read_writes = super().get_read_writes()
+
+        def add_ir_read(value: Any) -> None:
+            if isinstance(value, IRNode):
+                name = value.maybe_get_name()
+                if name is not None:
+                    read_writes.reads.add(dependencies.StarDep(name))
+
+        pytree.tree_map_(
+            add_ir_read,
+            (self.constant_args, self.kwargs),
+            is_leaf=lambda value: isinstance(value, IRNode),
+        )
+        return read_writes
 
     def collect_arg_kwarg_properties(self) -> None:
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
@@ -9972,8 +10005,18 @@ class StorageBox(MutableBox):
         )
 
     def has_exceeded_max_reads(self) -> bool:
+        realize_acc_reads_threshold = config.realize_acc_reads_threshold
+        if realize_acc_reads_threshold is None:
+            if is_cpu(self.data):
+                realize_acc_reads_threshold = config.realize_cpu_acc_reads_threshold
+            else:
+                realize_acc_reads_threshold = (
+                    config._realize_acc_reads_threshold_default
+                )
+        else:
+            assert isinstance(realize_acc_reads_threshold, int)
         return isinstance(self.data, Pointwise) and (
-            self.num_reads() > config.realize_acc_reads_threshold
+            self.num_reads() > realize_acc_reads_threshold
             or self.has_large_inner_fn()
             or (
                 config.realize_acc_reads_size_threshold is not None
@@ -9999,6 +10042,7 @@ class StorageBox(MutableBox):
                     "log1p",
                     "log2",
                     "sigmoid",
+                    "tanh",
                 ]
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True
