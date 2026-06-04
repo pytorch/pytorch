@@ -9,7 +9,6 @@
     { include: ["<ATen/core/Dict_inl.h>", private, "<ATen/core/Dict.h>", public] },
     { include: ["<ATen/core/ivalue_inl.h>", private, "<ATen/core/ivalue.h>", public] },
     { include: ["<ATen/core/DimVector.h>", public, "<ATen/DimVector.h>", public] },
-    { include: ["<ATen/core/Dimname.h>", public, "<ATen/Dimname.h>", public] },
 
     { symbol: ["at::Tensor", private, "<ATen/core/Tensor.h>", public] },
 
