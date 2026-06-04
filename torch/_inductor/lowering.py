@@ -50,6 +50,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_unbacked_symbols,
     resolve_unbacked_bindings,
+    SymTypes,
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
@@ -1034,7 +1035,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
-        return fallback_handler(aten.view.dtype)(x, dtype)
+        x_cont = ir.ExternKernel.require_contiguous_strides(x)
+        return fallback_handler(aten.view.dtype)(x_cont, dtype)
     else:
         return TensorBox(DtypeView.create(x, dtype))
 
@@ -2663,6 +2665,7 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
                 aten.cat.default,
                 aten.clone.default,
                 aten._scaled_mm.default,
+                aten._scaled_mm_v2.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
         )
@@ -2920,7 +2923,7 @@ def randn(*args, **kwargs):
 
 @register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
 def inductor_force_stride_order(input_tensor, stride):
-    stride_order = ir.get_stride_order(stride)
+    stride_order = ir.get_stride_order(stride, V.graph.sizevars.shape_env)
     return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
 
 
@@ -3778,7 +3781,9 @@ def copy(self, src, non_blocking=False):
 
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=None):
-    # TODO(jansel): memory format
+    # Don't materialize the layout here based on memory_format,
+    # as we want to give the scheduler opportunity to perform layout optimization.
+    # Let the downstream op handle the input stride as needed.
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
@@ -7054,9 +7059,13 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     return x_var, x_mean
 
 
-def use_two_step_variance(x, axis, keepdim):
-    # two-step algorithm can get better performance in small reductions size
-    # while it can accumulate more numerical error than Welford algorithm.
+def use_two_step_variance(x, axis, keepdim, input_dtype):
+    # The two-step algorithm can be faster for non-split reductions because
+    # Welford does more work per element. Preserve the old tiny-reduction
+    # two-step path, keep Welford for the rest of the small reductions where
+    # the speedup is limited and training gradients are more sensitive to the
+    # different accumulation order, and keep Welford for larger or split
+    # reductions where avoiding another full pass over the data is profitable.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
@@ -7065,17 +7074,39 @@ def use_two_step_variance(x, axis, keepdim):
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
     device = x.get_device()
-    if not (device and device.type == "cpu"):
-        threshold = config.unroll_reductions_threshold
-    else:
+    check_for_split = False
+    min_numel = 0
+    is_cuda_two_step_dtype = input_dtype in (torch.bfloat16, torch.float16)
+    if device and device.type == "cpu":
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-    return (
-        isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) <= threshold
-        and sympy_product(ranges) != 1
+    elif device and device.type == "cuda" and is_triton(x) and is_cuda_two_step_dtype:
+        min_numel = config.triton.use_two_step_variance_min_numel
+        threshold = config.triton.use_two_step_variance_threshold
+        check_for_split = True
+    else:
+        threshold = config.unroll_reductions_threshold
+
+    if not isinstance(reduction_numel, sympy.Integer):
+        return False
+
+    reduction_numel = int(reduction_numel)
+    if reduction_numel > threshold or sympy_product(ranges) == 1:
+        return False
+
+    if min_numel and config.unroll_reductions_threshold < reduction_numel < min_numel:
+        return False
+
+    if not check_for_split:
+        return True
+
+    _, split = ir.Reduction.num_splits(
+        reduction_numel=reduction_numel,
+        reduction_type="sum",
+        **kwargs,
     )
+    return V.graph.sizevars.statically_known_leq(split, 1)
 
 
 def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
@@ -7136,7 +7167,9 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
         var_mean_sum_(**kwargs)
         if (
             config.mtia.disable_welford_reduction
-            or use_two_step_variance(x, axis=axis, keepdim=keepdim)
+            or use_two_step_variance(
+                x, axis=axis, keepdim=keepdim, input_dtype=out_dtype
+            )
         )
         else var_mean_welford_(**kwargs)
     )
@@ -8364,8 +8397,31 @@ def sym_numel(a):
     return a.get_numel()
 
 
+def _unwrap_symbolic_magic_arg(x):
+    if isinstance(x, SymTypes):
+        return x.node.expr
+    if isinstance(x, (int, float, bool)):
+        return sympy.sympify(x)
+    return x
+
+
 for method, func in magic_methods.items():
-    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
+
+    @register_lowering(method_to_operator(method))
+    def wrapped(*args, _func=func, **kwargs):
+        node = V.graph.current_node
+        meta_val = node.meta.get("val") if node is not None else None
+        if isinstance(meta_val, SymTypes):
+            return meta_val.node.expr
+        if any(
+            isinstance(x, (SymTypes, sympy.Basic))
+            for x in itertools.chain(args, kwargs.values())
+        ):
+            return _func(
+                *(_unwrap_symbolic_magic_arg(x) for x in args),
+                **{k: _unwrap_symbolic_magic_arg(v) for k, v in kwargs.items()},
+            )
+        return _func(*args, **kwargs)
 
 
 @register_lowering(torch.sym_sum)
