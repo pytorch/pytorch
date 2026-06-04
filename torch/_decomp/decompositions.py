@@ -206,9 +206,14 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
 
 @register_decomposition(aten.hardtanh_backward)
 @out_wrapper("grad_input")
+@pw_cast_for_opmath
 def hardtanh_backward(
     grad_output: Tensor, self: Tensor, min_val: float, max_val: float
 ):
+    # Compare in opmath (compute) dtype to match the eager kernel, which casts
+    # self to opmath_t before comparing against the float bounds. Comparing in
+    # the low-precision input dtype would round the bound and misclassify
+    # boundary values (e.g. bf16(0.7) == 0.69921875 vs max_val=0.7).
     return torch.where((self <= min_val) | (self >= max_val), 0.0, grad_output)
 
 
@@ -1290,8 +1295,6 @@ def native_dropout(input: Tensor, p: float, train: bool | None):
 @register_decomposition(aten._softmax)
 @out_wrapper()
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
     # eager softmax returns a contiguous tensor. Ensure that decomp also returns
     # a contiguous tensor.
     x = x.contiguous()
@@ -1304,22 +1307,37 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if guard_or_false(x.numel() == 0):
-        unnormalized = torch.exp(x)
-    else:
-        x_max = torch.amax(x, dim, keepdim=True)
-        unnormalized = torch.exp(x - x_max)
+    x_max = _softmax_unbacked_safe_amax(x, dim)
+    unnormalized = torch.exp(x - x_max)
     result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
     if not half_to_float:
         result = result.to(result_dtype)
     return result
 
 
+def _softmax_unbacked_safe_amax(x: Tensor, dim: int) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if x.ndim == 0:
+        return torch.amax(x, dim, keepdim=True)
+
+    canonical_dim = utils.canonicalize_dim(x.ndim, dim)
+    if guard_or_false(x.shape[canonical_dim] > 0):
+        return torch.amax(x, dim, keepdim=True)
+
+    # Plain amax has no identity, so it cannot reduce over an empty dim.
+    # With unbacked sizes this becomes a deferred runtime assert, but eager
+    # softmax handles empty inputs. Pad a single -inf, the identity for max:
+    # it never wins for non-empty input and makes empty input well-defined.
+    pad_shape = list(x.shape)
+    pad_shape[canonical_dim] = 1
+    x = torch.cat((x, x.new_full(pad_shape, float("-inf"))), dim=dim)
+    return torch.amax(x, dim, keepdim=True)
+
+
 @register_decomposition(aten._log_softmax)
 @out_wrapper(exact_dtype=True)
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
     # eager log_softmax returns a contiguous tensor. Ensure that decomp also
     # returns a contiguous tensor.
     x = x.contiguous()
@@ -1332,11 +1350,8 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if guard_or_false(x.numel() == 0):
-        shifted = x
-    else:
-        x_max = torch.amax(x, dim, keepdim=True)
-        shifted = x - x_max
+    x_max = _softmax_unbacked_safe_amax(x, dim)
+    shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     result = shifted - shifted_logsumexp
     if not half_to_float:
@@ -3295,6 +3310,8 @@ def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 def _index_copy(
     x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike, *, inplace: bool
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     dim = utils.canonicalize_dims(x.ndim, dim)
     torch._check(
         x.device == index.device and x.device == tensor.device,
@@ -3308,6 +3325,45 @@ def _index_copy(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
+    num_indices = index.numel()
+    if tensor.ndim == 0:
+        torch._check(
+            num_indices == 1,
+            lambda: (
+                "index_copy_(): When source is scalar, index should have "
+                f"one element (got {num_indices})"
+            ),
+        )
+    elif x.ndim != 0:
+        torch._check(
+            tensor.ndim == x.ndim,
+            lambda: (
+                "index_copy_(): When source and destination are not scalars, "
+                "their dimensionality must match. Source dimensionality "
+                f"({tensor.ndim}), destination dimensionality ({x.ndim})"
+            ),
+        )
+
+    x_sliced_shape = x.shape[:dim] + x.shape[dim + 1 :] if x.ndim > 0 else ()
+    tensor_sliced_shape = (
+        tensor.shape[:dim] + tensor.shape[dim + 1 :] if tensor.ndim > 0 else ()
+    )
+    torch._check(
+        sym_eq(x_sliced_shape, tensor_sliced_shape),
+        lambda: (
+            "index_copy_(): Source/destination tensor must have same slice shapes. "
+            f"Destination slice shape: {x_sliced_shape} at dimension {dim} "
+            f"and source slice shape: {tensor_sliced_shape} at dimension 0."
+        ),
+    )
+    if tensor.ndim != 0:
+        torch._check(
+            num_indices == tensor.size(dim),
+            lambda: (
+                f"index_copy_(): Number of indices ({num_indices}) should be "
+                f"equal to source.size(dim) ({tensor.size(dim)})"
+            ),
+        )
     # Treat scalars as elements of \R^1
     zero_dim = x.ndim == 0
     x1 = x.unsqueeze(0) if zero_dim else x
@@ -4384,6 +4440,8 @@ def _upsample_linear(
     align_corners: bool,
     scales: list[float | None],
 ) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import statically_known_false
+
     # get dimensions of original image
     n_channels = input.shape[1]
     inp_sizes = input.shape[2:]
@@ -4425,7 +4483,7 @@ def _upsample_linear(
     if (
         input.device.type == "cpu"
         and n_dims == 2
-        and output_size[0] + output_size[1] <= 128
+        and not statically_known_false(output_size[0] + output_size[1] <= 128)
     ):
         # Match the native CPU small-output bilinear upsample accumulation
         # order for equality-sensitive consumers like unique_consecutive.
