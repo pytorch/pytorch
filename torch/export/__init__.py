@@ -4,12 +4,12 @@ import warnings
 import zipfile
 from collections.abc import Callable, Mapping
 from typing import Any
+from typing_extensions import deprecated
 
 import torch
 import torch.utils._pytree as pytree
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.types import FileLike
-from typing_extensions import deprecated
 
 
 __all__ = [
