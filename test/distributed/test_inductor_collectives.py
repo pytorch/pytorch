@@ -34,7 +34,7 @@ from torch._inductor.fx_passes.bucketing import (
     reduce_scatter_merge_fn_to_trace_custom_ops,
 )
 from torch._inductor.scheduler import (
-    _get_mm_like_fn,
+    _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
     get_estimate_runtime_cache,
     get_estimate_runtime_cache_key_from_snode,
@@ -1107,7 +1107,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather(self):
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 out,
                 inp,
                 pg,
@@ -1167,7 +1167,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # Duplicated most of the structure from test_dynamo_rewrite_dist_all_gather
         # except uses kwargs to ensure rewrite has matching arg names
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 output_tensor=out,
                 input_tensor=inp,
                 group=pg,
@@ -1199,7 +1199,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_reduce_scatter(self):
         def func(inp, out, *, pg):
-            torch.distributed.reduce_scatter_tensor(
+            torch.distributed.reduce_scatter_single(
                 out,
                 inp,
                 group=pg,
@@ -1385,7 +1385,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         def func(inp, out, *, pg):
             # user explicitly set the attribute `async_op` to False,
             # there should be no graph break
-            torch.distributed.reduce_scatter_tensor(out, inp, group=pg, async_op=False)
+            torch.distributed.reduce_scatter_single(out, inp, group=pg, async_op=False)
 
         local_size = [4, 4]
         # single-proc test
@@ -1409,7 +1409,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_graphbreaks_unsupported_async_op(self):
         def func(inp, out, *, pg):
-            work = torch.distributed.reduce_scatter_tensor(
+            work = torch.distributed.reduce_scatter_single(
                 out, inp, group=pg, async_op=True
             )
             work.wait()
@@ -2212,7 +2212,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             if torch._inductor.config.runtime_estimations_mms_benchmark:
                 cache = get_estimate_runtime_cache()
                 for snode in snodes:
-                    if _get_mm_like_fn(snode) is None:
+                    if _get_benchmarkable_extern_fn(snode) is None:
                         continue
                     cache_key = get_estimate_runtime_cache_key_from_snode(snode)
                     if cache.lookup(cache_key) is None:
