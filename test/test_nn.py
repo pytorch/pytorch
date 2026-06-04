@@ -15410,15 +15410,17 @@ if __name__ == '__main__':
         g = torch.rand(N, device=device, dtype=dtype)
 
         # fp64 reference on CPU (gold standard for the half-precision path).
-        inp64 = inp.detach().double().cpu().requires_grad_(True)
-        lw64 = lw.detach().double().cpu().requires_grad_(True)
-        lb64 = lb.detach().double().cpu().requires_grad_(True) if bias else None
+        # ``.cpu()`` before ``.double()``: MPS has no fp64, so the upcast
+        # must happen on CPU.
+        inp64 = inp.detach().cpu().double().requires_grad_(True)
+        lw64 = lw.detach().cpu().double().requires_grad_(True)
+        lb64 = lb.detach().cpu().double().requires_grad_(True) if bias else None
         ref = nn.functional.cross_entropy(
             nn.functional.linear(inp64, lw64, lb64), target.cpu(),
-            weight=cw.double().cpu(), reduction="none", ignore_index=1,
+            weight=cw.cpu().double(), reduction="none", ignore_index=1,
         )
         params64 = [inp64, lw64] + ([lb64] if bias else [])
-        grads64 = torch.autograd.grad((ref * g.double().cpu()).sum(), params64)
+        grads64 = torch.autograd.grad((ref * g.cpu().double()).sum(), params64)
 
         options = nn.LinearCrossEntropyOptions(
             batch_chunk_size=4, acc_dtype=torch.float32,
@@ -15431,7 +15433,7 @@ if __name__ == '__main__':
         grads = torch.autograd.grad((out * g).sum(), params)
 
         def rel_err(actual, expected64):
-            actual = actual.detach().double().cpu()
+            actual = actual.detach().cpu().double()
             return (
                 (actual - expected64).norm() / expected64.norm().clamp_min(1e-12)
             ).item()
