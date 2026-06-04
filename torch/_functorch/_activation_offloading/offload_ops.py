@@ -38,6 +38,64 @@ def _get_or_create_transfer_stream(device: torch.device) -> torch.Stream:
     return _transfer_streams[device]
 
 
+# --- Pinned memory pool (avoids per-offload cudaHostAlloc overhead) ---
+# Keyed by (nbytes, dtype) to prevent cross-dtype reuse.
+_pinned_pool: dict[tuple[int, torch.dtype], list[torch.Tensor]] = {}
+_pool_depth: int = 0
+
+
+def _pool_alloc(nbytes: int, dtype: torch.dtype) -> torch.Tensor:
+    """Get a pinned CPU buffer from the pool (if enabled), or allocate fresh."""
+    if _pool_depth > 0:
+        key = (nbytes, dtype)
+        bucket = _pinned_pool.get(key)
+        if bucket:
+            return bucket.pop()
+    numel = nbytes // torch._utils._element_size(dtype)
+    return torch.empty(numel, dtype=dtype, device="cpu", pin_memory=True)
+
+
+def _pool_free(buf: torch.Tensor) -> None:
+    """Return a pinned buffer to the pool for reuse (no-op if pool disabled)."""
+    if _pool_depth <= 0:
+        return
+    nbytes = buf.nelement() * buf.element_size()
+    key = (nbytes, buf.dtype)
+    _pinned_pool.setdefault(key, []).append(buf)
+
+
+def _pool_clear() -> None:
+    """Free all cached pinned buffers."""
+    _pinned_pool.clear()
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def pinned_memory_pool():
+    """Context manager that enables pinned memory pooling for offload ops.
+
+    Without this context manager, ``ao.offload`` allocates a fresh pinned
+    buffer every call and ``ao.wait_tensor`` does not cache freed buffers.
+    Inside the context, buffers are reused across calls, avoiding the
+    ~3 ms per-tensor ``cudaHostAlloc`` overhead.  Nestable::
+
+        with pinned_memory_pool():
+            for step in range(num_steps):
+                train_step()  # ao.offload/reload reuse pooled buffers
+        # pinned buffers freed here
+    """
+    global _pool_depth
+    _pool_depth += 1
+    try:
+        yield
+    finally:
+        _pool_depth -= 1
+        if _pool_depth == 0:
+            _pool_clear()
+
+
 # --- Wait registry: maps data_ptr() -> (completion_event, device) ---
 # Created by ao.offload / ao.reload, consumed (popped) by ao.wait_tensor.
 # Not thread-safe — graph execution is single-threaded Python.
@@ -85,7 +143,8 @@ def offload(tensor: torch.Tensor) -> torch.Tensor:
     transfer_stream.wait_stream(current_stream)
 
     torch.accelerator.set_stream(transfer_stream)
-    result = torch.empty_like(tensor, device="cpu", pin_memory=True)
+    nbytes = tensor.nelement() * tensor.element_size()
+    result = _pool_alloc(nbytes, tensor.dtype).view(tensor.shape)
     completion_event = _register_wait(result, device)
     result.copy_(tensor, non_blocking=True)
     transfer_stream.record_event(completion_event)
@@ -96,7 +155,9 @@ def offload(tensor: torch.Tensor) -> torch.Tensor:
 
 @offload.register_fake
 def _(tensor: torch.Tensor) -> torch.Tensor:
-    return torch.empty_like(tensor, device="cpu")
+    return torch.empty(
+        tensor.shape, dtype=tensor.dtype, device="cpu", pin_memory=False
+    )
 
 
 @custom_op("ao::reload", mutates_args=())
@@ -179,9 +240,13 @@ def _ao_wait_tensor(
 
     current_stream.wait_event(completion_event)
     if keepalive is not None:
-        storage = keepalive.untyped_storage()
-        if storage.size() > 0:
-            storage.resize_(0)
+        if keepalive.is_pinned():
+            # Return CPU pinned buffer to pool for reuse
+            _pool_free(keepalive.view(-1))
+        else:
+            storage = keepalive.untyped_storage()
+            if storage.size() > 0:
+                storage.resize_(0)
     return tensor
 
 
