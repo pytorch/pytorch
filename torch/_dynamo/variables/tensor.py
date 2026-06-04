@@ -677,7 +677,11 @@ class TensorVariable(VariableTracker):
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
-        if self.source is not None and name != "as_strided_" and hasattr(torch.ops.aten, name):
+        if (
+            self.source is not None
+            and name != "as_strided_"
+            and hasattr(torch.ops.aten, name)
+        ):
             fn = getattr(torch.ops.aten, name)
             if (
                 hasattr(fn, "overloads")
