@@ -1265,6 +1265,14 @@ class TruncToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
+        if number.is_integer is True:
+            return number
+        if isinstance(number, IntTrueDiv):
+            base, divisor = number.args
+            if divisor == 1:
+                return base
+            if divisor == -1:
+                return -base
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.trunc(float(number)))
 

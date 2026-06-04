@@ -639,6 +639,11 @@ class TestPySymInt(TestCase):
             """Eq(TruncToInt(OpaqueUnaryFn_sqrt(ToFloat(s97))), 2)""",
         )
 
+        a1 = create_symint(shape_env, 7)
+        r = math.trunc(a1 / 1)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertEqual(r.node.expr, a1.node.expr)
+
     def test_sym_ceil(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
