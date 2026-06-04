@@ -510,6 +510,27 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
 
+        # node.meta["custom"] is populated by fx_traceback.annotate(...) and is
+        # stripped by GraphModule.__reduce__, so per-node memory_budget values
+        # set via annotate({"memory_budget": ...}) would be invisible to the
+        # cache key. Extract them explicitly so that changing per-region budgets
+        # correctly invalidates the cache. Recurse into nested GraphModules
+        # (e.g. invoke_subgraph / SAC HOP bodies) and fold the owning module's
+        # qualified name into the key so per-module node indices stay distinct.
+        self.custom_memory_budget_per_node: list[tuple[str, int, float]] = []
+        for module_name, module in gm.named_modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for i, node in enumerate(module.graph.nodes):
+                custom = node.meta.get("custom")
+                if not isinstance(custom, dict):
+                    continue
+                budget = custom.get("memory_budget")
+                if isinstance(budget, (int, float)):
+                    self.custom_memory_budget_per_node.append(
+                        (module_name, i, float(budget))
+                    )
+
         # Note: We use the live config module, not self.autograd_config (the
         # saved config), because activation_memory_budget_runtime_estimator and
         # activation_memory_budget_solver are excluded from save_config (in
