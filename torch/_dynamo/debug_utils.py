@@ -211,8 +211,8 @@ class NNModuleToString:
             # module should be a core torch.nn.Module, so all parameters
             # should be on the same device.
             example_param = next(module.parameters(), None)
-            if example_param is not None and example_param.is_cuda:
-                module_str = f"{module_str}.cuda()"
+            if example_param is not None and example_param.device.type != "cpu":
+                module_str = f'{module_str}.to("{example_param.device}")'
             model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():
@@ -222,7 +222,11 @@ class NNModuleToString:
             if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
                 from torch._tensor_str import PRINT_OPTS
 
-                assert PRINT_OPTS.threshold >= MAX_CONSTANT_NUMEL_INLINE
+                if PRINT_OPTS.threshold < MAX_CONSTANT_NUMEL_INLINE:
+                    raise AssertionError(
+                        f"PRINT_OPTS.threshold ({PRINT_OPTS.threshold}) must be >= "
+                        f"MAX_CONSTANT_NUMEL_INLINE ({MAX_CONSTANT_NUMEL_INLINE})"
+                    )
                 tensor_str = repr(buffer)
             elif torch.is_floating_point(buffer):
                 tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
@@ -230,8 +234,8 @@ class NNModuleToString:
                 tensor_str = (
                     f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
                 )
-            if buffer.is_cuda:
-                tensor_str = f"{tensor_str}.cuda()"
+            if buffer.device.type != "cpu":
+                tensor_str = f'{tensor_str}.to("{buffer.device}")'
             model_str += (
                 f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
             )
@@ -240,8 +244,8 @@ class NNModuleToString:
             if param is None:
                 continue
             maybe_device = ""
-            if param.is_cuda:
-                maybe_device = ', device="cuda"'
+            if param.device.type != "cpu":
+                maybe_device = f', device="{param.device}"'
             tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
             model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
 
@@ -293,15 +297,22 @@ def generate_env_vars_string(*, stable_output: bool = False) -> str:
 
     allow_list = ["TORCH", "DYNAMO", "INDUCTOR", "TRITON"]
     skip_list = ["TRITON_LIBDEVICE_PATH", "TRITON_PTXAS_PATH", "TRITON_LIBCUDA_PATH"]
+    repro_env_vars = ["TORCHDYNAMO_REPRO_AFTER", "TORCHDYNAMO_REPRO_LEVEL"]
 
     def filter(key: str) -> bool:
-        return any(string in key for string in allow_list) and key not in skip_list
+        return (
+            any(string in key for string in allow_list)
+            and key not in skip_list
+            and key not in repro_env_vars
+        )
 
     config_lines = [
         f"""os.environ['{key}'] = '{value.replace("'", '"')}'"""
         for key, value in os.environ.items()
         if filter(key)
     ]
+    # Repro scripts should not recursively generate more repro scripts when run.
+    config_lines.extend(f"os.environ.pop('{key}', None)" for key in repro_env_vars)
     config_string = "\n".join(config_lines)
     return normalize_path_separator(f"""\
 import os
@@ -461,7 +472,10 @@ def cast_dtype_args_to_fp64(model: torch.fx.GraphModule) -> torch.fx.GraphModule
             node.op == "call_function"
             and node.target is torch.ops.prims.convert_element_type.default
         ):
-            assert len(node.args) == 2
+            if len(node.args) != 2:
+                raise AssertionError(
+                    f"Expected node to have 2 args, got {len(node.args)}"
+                )
             if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
                 node.args = (node.args[0], torch.float64)
         if node.op == "call_function":
@@ -668,13 +682,21 @@ class InputReader:
                 t = t.clone(memory_format=torch.preserve_format)
             with torch.no_grad():
                 t.set_(storage, storage_offset, shape, stride)
-        assert torch._subclasses.meta_utils.safe_is_leaf(t) == is_leaf
+        if torch._subclasses.meta_utils.safe_is_leaf(t) != is_leaf:
+            raise AssertionError(
+                f"Tensor leaf status mismatch: safe_is_leaf(t) = "
+                f"{torch._subclasses.meta_utils.safe_is_leaf(t)}, expected {is_leaf}"
+            )
         torch._utils.set_tensor_metadata(t, metadata)
         self.args.append(t)
         return t  # for BC
 
-    def symint(self, val: Any) -> Any:
+    def symint(self, val: Any, *, expr: str | None = None) -> Any:
         self.args.append(val)
+        if expr is not None:
+            if not hasattr(self, "symint_exprs"):
+                self.symint_exprs: dict[int, str] = {}
+            self.symint_exprs[len(self.args) - 1] = expr
         return val  # for BC
 
     def const(self, name: str) -> None:
@@ -683,8 +705,9 @@ class InputReader:
     def unsupported(self, name: str) -> None:
         self.args.append(None)
 
-    def generator(self, device_type: str, device_index: int) -> torch._C.Generator:
-        gen = torch.cuda.default_generators[device_index].clone_state()
+    def generator(self, device_type: str, device_index: int) -> Any:
+        device = torch.device(device_type, device_index)
+        gen = torch.Generator(device=device)
         self.args.append(gen)
         return gen
 
@@ -752,7 +775,10 @@ class InputWriter:
         maybe_device = ""
         device = untyped_storage.device
         if device.type == "meta":
-            assert device_hint is not None
+            if device_hint is None:
+                raise AssertionError(
+                    "device_hint must be provided when storage device is 'meta'"
+                )
             device = device_hint  # type: ignore[assignment]
         if _device_or_default(None) != device:
             maybe_device = f", device={device!r}"
@@ -826,8 +852,11 @@ class InputWriter:
     # TODO: this doesn't actually symint atm
     def symint(self, name: str, val: Any) -> None:
         if isinstance(val, torch.SymInt):
-            val = val.node.hint
-        self._lines.append(f"reader.symint({val!r})  # {name}")
+            expr_str = str(val.node.expr)
+            hint = val.node.hint
+            self._lines.append(f"reader.symint({hint!r}, expr={expr_str!r})  # {name}")
+        else:
+            self._lines.append(f"reader.symint({val!r})  # {name}")
 
     def generator(self, name: str, arg: torch._C.Generator) -> None:
         device = arg.device

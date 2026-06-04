@@ -17,6 +17,7 @@
     can_device_access_peer
     check_error
     current_blas_handle
+    current_solver_handle
     current_device
     current_stream
     cudart
@@ -177,6 +178,30 @@
 .. autoclass:: torch.cuda.use_mem_pool
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.cuda.nccl
+```
+
+```{eval-rst}
+.. autofunction:: version
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.profiler
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    profile
+    start
+    stop
+```
+
+```{eval-rst}
+.. currentmodule:: torch.cuda
+```
+
 ## NVIDIA Tools Extension (NVTX)
 
 ```{eval-rst}
@@ -188,6 +213,8 @@
     nvtx.range_push
     nvtx.range_pop
     nvtx.range
+    nvtx.range_end
+    nvtx.range_start
 ```
 
 ## Jiterator (beta)
@@ -313,14 +340,6 @@ See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.nvtx
-```
-
-```{eval-rst}
-.. autofunction:: range_start
-```
-
-```{eval-rst}
-.. autofunction:: range_end
 ```
 
 ```{eval-rst}

@@ -207,7 +207,6 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch._lobpcg",
             "torch._logging",
             "torch._meta_registrations",
-            "torch._namedtensor_internals",
             "torch._numpy",
             "torch._sources",
             "torch._subclasses",
@@ -340,6 +339,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     "is not a python module, please check and correct it.",
                 )
 
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/114831")
     @unittest.skip(
         "This test keeps getting broken and our disable infra is not handling well. see #120627"
     )
@@ -496,7 +496,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             )
 
     def test_almost_impossible_missing_name(self):
-        class weird:  # noqa: UP004
+        class weird:
             def __getattribute__(self, name):
                 if name == "__name__":
                     raise AttributeError("test")

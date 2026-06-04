@@ -23,6 +23,7 @@ from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import FixedLayout
 from torch._inductor.kernel_inputs import KernelInputs
+from torch._inductor.runtime.triton_compat import Config as TritonConfig
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
     ExternalTritonTemplateKernel,
@@ -39,12 +40,15 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
-    skipIfRocm,
     skipIfRocmArch,
+    skipIfXpu,
+    TEST_WITH_ROCM,
+    TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    IS_H100,
     requires_gpu,
     requires_triton,
 )
@@ -77,6 +81,41 @@ def patches(fn):
         return fn(*args, **kwargs)
 
     return wrapped
+
+
+class TestAlgorithmSelectorChoiceTypes(TestCase):
+    def _extern_kernel_caller(self, name):
+        choice = ExternKernelChoice.lookup(name)
+        if choice is None:
+            self.fail(f"missing extern kernel choice: {name}")
+        return choice.bind(input_nodes=[], layout=None)
+
+    def test_pick_deterministic_choice_prefers_extern_kernel_caller(self):
+        first_choice = select_algorithm.ChoiceCaller("not_extern", [], None, "")
+        extern_choice = self._extern_kernel_caller("mm")
+
+        picked = select_algorithm.AlgorithmSelectorCache().pick_deterministic_choice(
+            [first_choice, extern_choice]
+        )
+
+        self.assertIs(picked, extern_choice)
+
+    def test_classify_kernel_operation_uses_extern_kernel_caller_name(self):
+        cases = (
+            ("mm", "mm"),
+            ("addmm", "mm"),
+            ("convolution", "conv"),
+        )
+        for choice_name, expected in cases:
+            with self.subTest(choice_name=choice_name):
+                extern_choice = self._extern_kernel_caller(choice_name)
+
+                self.assertEqual(
+                    select_algorithm._classify_kernel_operation(
+                        "unclassified_name", [extern_choice], []
+                    ),
+                    expected,
+                )
 
 
 class TestSelectAlgorithm(TestCase):
@@ -275,6 +314,7 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184490")
     @patches
     def test_mm_plus_mm(self):
         @torch.compile
@@ -347,6 +387,7 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @unittest.skipIf(IS_H100, "Fails on H100, see #143412")
     @expectedFailureDynamicWrapper
     @patches
     def test_convolution1(self):
@@ -373,7 +414,68 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
+    @patches
+    @torch._inductor.config.patch(max_autotune_conv_backends="ATEN,TRITON")
+    def test_non_1x1_convolution_caps_template_warps(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x + 1,
+                w,
+                b,
+                stride=(2, 3),
+                padding=(4, 5),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+            )
+
+        class EightWarpConvChoice(InductorChoices):
+            def get_conv_configs(self, device_type: str | None = "cuda"):
+                def configs(*args, **kwargs):
+                    yield TritonConfig(
+                        {"BLOCK_M": 1024, "BLOCK_N": 16, "BLOCK_K": 16},
+                        num_stages=1,
+                        num_warps=8,
+                    )
+
+                return configs
+
+        recorded_conv_choices: list[tuple[bool, int]] = []
+        maybe_append_choice = TritonTemplate.maybe_append_choice
+
+        def record_conv_choice(template, choices, **kwargs):
+            if template.name == "convolution2d":
+                recorded_conv_choices.append((kwargs["UNROLL"], kwargs["num_warps"]))
+            return maybe_append_choice(template, choices, **kwargs)
+
+        x = torch.randn(2, 33, 34, 41, device=GPU_TYPE)
+        w = torch.randn(34, 33, 3, 3, device=GPU_TYPE)
+        b = torch.randn(34, device=GPU_TYPE)
+
+        with (
+            V.set_choices_handler(EightWarpConvChoice()),
+            patch.object(TritonTemplate, "maybe_append_choice", record_conv_choice),
+        ):
+            result_compile = foo(x, w, b)
+        result_eager = aten.convolution(
+            x + 1,
+            w,
+            b,
+            stride=(2, 3),
+            padding=(4, 5),
+            dilation=(1, 1),
+            transposed=False,
+            output_padding=(0, 0),
+            groups=1,
+        )
+
+        torch.testing.assert_close(result_compile, result_eager)
+        self.assertEqual(recorded_conv_choices, [(False, 4)])
+        if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
     @patches
     def test_mm_dropout(self):
         @torch.compile
@@ -382,7 +484,12 @@ class TestSelectAlgorithm(TestCase):
             rnd = torch.ops.prims.inductor_random.default(mm_4.shape, seed, "rand")
             return mm_4 * rnd
 
-        if GPU_TYPE == "xpu":
+        # Triton MFMA matmul on AMD GPUs and Intel XPUs produces
+        # ~1 ULP fp16 rounding differences vs the aten reference used by the
+        # autotuner's internal VERIFY path. Max abs diff 0.0625 (= 2^-4),
+        # max rel diff 2^-10 (fp16 mantissa LSB). Benign; expand tolerance
+        # to match the existing XPU pattern.
+        if GPU_TYPE == "xpu" or torch.version.hip:
             patcher = patch.object(
                 select_algorithm, "VERIFY", dict(atol=1e-3, rtol=1e-3)
             )
@@ -607,6 +714,66 @@ class TestSelectAlgorithm(TestCase):
         )
         caller_str = str(caller)
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
+
+
+class TestSelectAlgorithmCleanup(TestCase):
+    def test_benchmark_only_clears_matching_precompile_cache_entry(self):
+        """
+        Autotune cleanup should release only the closure for the active site.
+        Clearing the whole precompile cache regresses compile-time reuse for
+        unrelated autotune sites.
+        """
+        cache = select_algorithm.AlgorithmSelectorCache()
+        cache.precompile_cache = {"keep": dict, "drop": dict}
+
+        with patch.object(cache, "make_benchmark_fn", return_value=lambda _choices: {}):
+            cache.benchmark([], [], unittest.mock.Mock(), None, precompile_key="drop")
+
+        self.assertIn("keep", cache.precompile_cache)
+        self.assertNotIn("drop", cache.precompile_cache)
+
+    def test_release_benchmark_artifacts_closes_and_clears_state(self):
+        """
+        Benchmark-only autotuners own temporary launchers and compile results.
+        Cleanup must close their module owners and clear the references that
+        otherwise keep Triton ``CompiledKernel`` objects alive.
+        """
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        closed = []
+
+        class FakeKernel:
+            def __init__(self, name):
+                self.name = name
+
+            def close(self):
+                closed.append(self.name)
+
+        class FakeCompileResult:
+            def __init__(self, name):
+                self.kernel = FakeKernel(name)
+
+        def fake_launcher():
+            return None
+
+        launcher_kernel = FakeKernel("launcher")
+        fake_launcher.__self__ = launcher_kernel  # type: ignore[attr-defined]
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.launchers = [fake_launcher]
+        autotuner.compile_results = [FakeCompileResult("compile_result")]
+        autotuner.benchmark_failure_reasons = {fake_launcher: "failed"}
+        autotuner._cached_launcher = fake_launcher
+        autotuner._debug_call = object()
+
+        autotuner.release_benchmark_artifacts()
+
+        self.assertEqual(closed, ["launcher", "compile_result"])
+        self.assertEqual(autotuner.launchers, [])
+        self.assertEqual(autotuner.compile_results, [])
+        self.assertEqual(autotuner.benchmark_failure_reasons, {})
+        self.assertIsNone(autotuner._cached_launcher)
+        self.assertIsNone(autotuner._debug_call)
 
 
 class TestExternKernelCaller(TestCase):
@@ -887,7 +1054,97 @@ class TestDtypeViewAutotuning(TestCase):
         self.assertEqual(captured_results["example_shape"], (m, k))
 
 
+class TestGetInputsStorageSizeCheck(TestCase):
+    def test_get_inputs_realloc_with_undersized_base(self):
+        """
+        Regression test: get_inputs compared storage size in bytes against
+        needed size in elements.  For multi-byte dtypes the byte count
+        exceeds the element count, so the check could miss cases where
+        reallocation is required and torch.as_strided would crash.
+
+        We mock benchmark_example_value to return a bf16 tensor whose
+        storage is too small (in elements) for the IR node's padded
+        strides, then call get_inputs with a mocked V.graph context.
+        Without the fix the as_strided inside get_inputs raises
+        RuntimeError; with the fix the reallocation branch fires.
+        """
+        from torch._inductor import ir
+
+        device = torch.device("cpu")
+        dtype = torch.bfloat16
+        # Padded strides [100, 8, 1] with size [4, 5, 8] need 340
+        # elements.  We give the base tensor only 200 elements (400
+        # bytes), so 200 < 340 <= 400.
+        node_size = [4, 5, 8]
+        padded_strides = [100, 8, 1]
+        base_elements = 200
+
+        mock_graph = unittest.mock.MagicMock()
+        mock_graph.sizevars.optimization_hints_with_override = (
+            lambda exprs, hint_override=None: tuple(int(e) for e in exprs)
+        )
+        mock_graph.sizevars.optimization_hint_with_override = (
+            lambda expr, hint_override=None: int(expr)
+        )
+        mock_graph.sizevars.optimization_hint = (
+            lambda expr, fallback=None: int(expr) if expr is not None else fallback
+        )
+        mock_graph.buffer_layout_constraints = {}
+        mock_graph.get_allocation_size = lambda node: node.get_size()
+
+        with V.set_graph_handler(mock_graph):
+            layout = ir.FixedLayout(
+                device=device,
+                dtype=dtype,
+                size=node_size,
+                stride=padded_strides,
+            )
+            buf = ir.Buffer(name="test_padded_buf", layout=layout)
+            out_layout = ir.FixedLayout(
+                device=device,
+                dtype=dtype,
+                size=node_size,
+                stride=padded_strides,
+            )
+
+            def undersized_example(node, hint_override=None):
+                if isinstance(node, ir.Layout):
+                    sizes = tuple(int(s) for s in node.size)
+                    strides = tuple(int(s) for s in node.stride)
+                    needed = torch._prims_common.compute_required_storage_length(
+                        sizes, strides, 0
+                    )
+                    t = torch.randn(needed, device=device, dtype=dtype)
+                    return t.as_strided(sizes, strides, 0)
+                return torch.randn(base_elements, device=device, dtype=dtype)
+
+            with unittest.mock.patch.object(
+                select_algorithm.AlgorithmSelectorCache,
+                "benchmark_example_value",
+                staticmethod(undersized_example),
+            ):
+                autotune_args = select_algorithm.AlgorithmSelectorCache.get_inputs(
+                    choices=[],
+                    input_nodes=[buf],
+                    layout=out_layout,
+                    input_gen_fns=None,
+                )
+
+            extern_inputs = autotune_args.extern.input_tensors
+            self.assertEqual(len(extern_inputs), 1)
+            self.assertEqual(extern_inputs[0].shape, torch.Size(node_size))
+
+
 class TestTemplateRender(TestCase):
+    @staticmethod
+    def _template_kernel_has_atomic_add(code):
+        template_kernels = code.split("@triton.jit\n")
+        return any(
+            kernel.startswith("def triton_tem")
+            and "tl.atomic_add" in kernel.split("'''", 1)[0]
+            for kernel in template_kernels
+        )
+
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
@@ -985,6 +1242,9 @@ class TestTemplateRender(TestCase):
                 kernels[0]
             )
 
+    @unittest.skipIf(
+        TEST_WITH_ROCM or TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959"
+    )
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
@@ -1149,6 +1409,65 @@ class TestTemplateRender(TestCase):
             self.assertIn("triton_helpers.maximum", code)
             # Verify prologue fusion: sigmoid fused via hook
             self.assertIn("tl.sigmoid", code)
+
+    @inductor_config.patch(
+        {
+            "epilogue_fusion_first": True,
+            "epilogue_fusion_with_atomic_add": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    @requires_gpu()
+    @requires_triton()
+    @patches
+    def test_template_atomic_add_epilogue_fusion(self):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(a, b, index, out):
+            mm = torch.matmul(a, b)
+            return out.index_add_(0, index, mm)
+
+        a = torch.randn(64, 64, device=GPU_TYPE)
+        b = torch.randn(64, 64, device=GPU_TYPE)
+        index = torch.arange(64, device=GPU_TYPE) // 2
+        out = torch.randn(32, 64, device=GPU_TYPE)
+
+        expected = fn(a, b, index, out.clone())
+        opt_fn = torch.compile(fn, mode="max-autotune-no-cudagraphs")
+        actual, (code,) = run_and_get_code(opt_fn, a, b, index, out.clone())
+
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+        self.assertTrue(self._template_kernel_has_atomic_add(code))
+
+    @inductor_config.patch(
+        {
+            "epilogue_fusion_first": True,
+            "epilogue_fusion_with_atomic_add": False,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    @requires_gpu()
+    @requires_triton()
+    @patches
+    def test_template_atomic_add_epilogue_fusion_disabled(self):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(a, b, index, out):
+            mm = torch.matmul(a, b)
+            return out.index_add_(0, index, mm)
+
+        a = torch.randn(64, 64, device=GPU_TYPE)
+        b = torch.randn(64, 64, device=GPU_TYPE)
+        index = torch.arange(64, device=GPU_TYPE) // 2
+        out = torch.randn(32, 64, device=GPU_TYPE)
+
+        expected = fn(a, b, index, out.clone())
+        opt_fn = torch.compile(fn, mode="max-autotune-no-cudagraphs")
+        actual, (code,) = run_and_get_code(opt_fn, a, b, index, out.clone())
+
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+        self.assertIn("tl.atomic_add", code)
+        self.assertFalse(self._template_kernel_has_atomic_add(code))
 
 
 if __name__ == "__main__":

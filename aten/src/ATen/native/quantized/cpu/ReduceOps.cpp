@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
-#include <ATen/NamedTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
@@ -110,7 +110,7 @@ static Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim, bool keepdim) {
           qnnpack_operator,
           batch_size,
           inH * inW,
-          (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
+          reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()) /* input data */,
           inC,
           (uint8_t*)output.data_ptr<c10::quint8>() /* output data */,
           outC);

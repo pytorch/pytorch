@@ -303,7 +303,7 @@ def main() -> None:
         if not isinstance(workflows, Iterable):
             raise Exception(  # noqa: TRY002
                 f"How is workflows not iterable? {workflows}"
-            )  # noqa: TRY002
+            )
         for workflow in workflows:
             workflow.generate_workflow_file(workflow_template=template)
 

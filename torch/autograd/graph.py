@@ -45,7 +45,9 @@ __all__ = [
     "GradientEdge",
     "get_gradient_edge",
     "increment_version",
+    "region_activation_memory_budget",
     "set_warn_on_accumulate_grad_stream_mismatch",
+    "set_override_stale_capture_stream",
 ]
 
 
@@ -427,7 +429,7 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
 
     Args:
         error_message (str): When saved tensors default hooks are used when they
-                             have been are disabled, a RuntimeError with this
+                             have been disabled, a RuntimeError with this
                              error message gets raised.
 
     Example::
@@ -454,11 +456,106 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
             torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)
 
 
+def region_activation_memory_budget(
+    budget: float,
+) -> contextlib.AbstractContextManager[None]:
+    r"""Context-manager that sets the activation memory budget for the region of
+    a compiled forward traced under it.
+
+    .. warning::
+        This is a prototype feature and is subject to change.
+
+    Under :func:`torch.compile`, the min-cut partitioner chooses which
+    activations to save versus recompute in the backward pass to stay under a
+    memory budget. ``budget`` is a ratio in ``[0, 1]``: ``0.0`` corresponds to
+    the activation memory from applying activation checkpointing to the full
+    region, and ``1.0`` corresponds to the activation memory from the default
+    runtime-optimized strategy. So ``0.4`` would result in a strategy that saves
+    40% of the activations compared to the default strategy. It solves a 0-1
+    knapsack to find the minimum recompute necessary to stay below the budget.
+    This overrides the global ``torch._functorch.config.activation_memory_budget``
+    for the annotated region.
+
+    .. note::
+        Today the partitioner only supports a single budget per compiled graph,
+        so the annotation must cover every forward op in the graph (a partial
+        annotation is rejected rather than silently applied graph-wide), and all
+        annotated nodes must agree on the budget. To use different budgets for
+        different parts of a model, separate them with a graph break (e.g.
+        ``torch._dynamo.graph_break()``) so each part becomes its own graph.
+
+    This only has an effect under :func:`torch.compile`; using it outside of a
+    compiled region raises a ``RuntimeError``.
+
+    Args:
+        budget (float): Activation memory budget ratio in ``[0, 1]``.
+
+    Example::
+
+        >>> # xdoctest: +SKIP
+        >>> with torch.autograd.graph.region_activation_memory_budget(0.0):
+        ...     x = layer(x)  # recompute this region's activations in backward
+    """
+    import torch.fx.traceback as fx_traceback
+
+    if isinstance(budget, bool) or not isinstance(budget, (int, float)):
+        raise TypeError(
+            f"torch.autograd.graph.region_activation_memory_budget: expects a "
+            f"float, got {type(budget).__name__}"
+        )
+    if not 0.0 <= budget <= 1.0:
+        raise ValueError(
+            f"torch.autograd.graph.region_activation_memory_budget: must be in "
+            f"[0, 1], got {budget}"
+        )
+    # The budget only takes effect when read back by the partitioner during
+    # compilation. Dynamo folds torch.compiler.is_compiling() to True while
+    # tracing this (inlined) call, so this guard only fires in eager mode.
+    if not torch.compiler.is_compiling():
+        raise RuntimeError(
+            "torch.autograd.graph.region_activation_memory_budget can only be "
+            "used inside a torch.compile region; it has no effect in eager mode."
+        )
+    return fx_traceback.annotate(
+        {fx_traceback.MEMORY_BUDGET_ANNOTATION_KEY: float(budget)}
+    )
+
+
 def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
     """Whether to warn when the AccumulateGrad node's stream does not match the stream
     of the node that produced the incoming gradient.
     """
     return torch._C._set_warn_on_accumulate_grad_stream_mismatch(enabled)
+
+
+def set_override_stale_capture_stream(enabled: bool) -> None:
+    """Control behavior when autograd detects a stale non-capturing stream during
+    CUDA graph capture.
+
+    During CUDA graph capture, autograd nodes may reference a stale stream
+    that is not part of the capture. With the flag disabled (the
+    process-initial state), autograd raises a ``RuntimeError`` when the stale
+    stream is the default stream (stream 0), because this case always
+    invalidates the capture: ``cudaStreamWaitEvent`` on the default stream
+    pulls a non-capturing stream into the graph. For non-default stale streams
+    the stream reference is left unchanged; the capture will succeed if the
+    user has joined the stream into the capture (e.g. via
+    ``capture_stream.wait_stream(stale_stream)``) and will otherwise fail with
+    a CUDA runtime error.
+
+    When ``enabled=True``, any stale non-capturing stream (default or
+    non-default) is automatically overridden with the producer's capturing
+    stream, allowing the capture to proceed. This is a process-global setting
+    and is not thread-local.
+
+    Args:
+        enabled (bool): If ``True``, override stale non-capturing streams with
+            the producer's capturing stream during CUDA graph capture. If
+            ``False`` (the process-initial state), raise an error only when the
+            stale stream is the default stream (stream 0); other stale streams
+            are left unchanged.
+    """
+    return torch._C._set_override_stale_capture_stream(enabled)
 
 
 class _MultiHandle(RemovableHandle):

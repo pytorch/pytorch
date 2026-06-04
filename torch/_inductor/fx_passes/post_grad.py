@@ -5,7 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
@@ -15,8 +15,10 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
-from torch._inductor import comms
-from torch._inductor.custom_graph_pass import CustomInferenceAwareGraphPass
+from torch._inductor.custom_graph_pass import (
+    CustomInferenceAwareGraphPass,
+    get_custom_graph_passes,
+)
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
@@ -25,7 +27,6 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
-from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
@@ -59,6 +60,7 @@ from ..utils import (
 )
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
+from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
@@ -111,6 +113,34 @@ def _remove_profiler_ops(graph: torch.fx.Graph) -> None:
         graph.erase_node(node)
 
 
+def _is_nondeterministic_seeded_node(node: torch.fx.Node) -> bool:
+    return (
+        node.op == "call_function"
+        and isinstance(node.target, torch._ops.OpOverload)
+        and torch.Tag.nondeterministic_seeded in node.target.tags
+    )
+
+
+def _chain_random_ops_for_ordering(graph: torch.fx.Graph) -> None:
+    """Chain nondeterministic_seeded ops with control_deps to preserve program order.
+
+    When fallback_random=True, random ops use the global CUDA RNG and must
+    execute in their original program order.
+    """
+    if not config.fallback_random:
+        return
+
+    random_nodes = [n for n in graph.nodes if _is_nondeterministic_seeded_node(n)]
+    if len(random_nodes) < 2:
+        return
+
+    additional_deps_map: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = {}
+    for i in range(1, len(random_nodes)):
+        additional_deps_map[random_nodes[i]] = OrderedSet([random_nodes[i - 1]])
+
+    preserve_node_ordering(graph, additional_deps_map)
+
+
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
@@ -123,9 +153,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         subsystem="post_grad_passes",
     )
 
-    if not torch._dynamo.config.skip_fsdp_hooks:
-        remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
-
     if config.dce:
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
@@ -135,9 +162,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             reorder_for_locality
         )
 
-    fake_tensor_updater = FakeTensorUpdater(gm.graph)
+    fake_tensor_updater = FakeTensorUpdater(gm)
 
-    if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
+    for post_grad_custom_pre_pass in get_custom_graph_passes(
+        config.post_grad_custom_pre_pass
+    ):
         if isinstance(post_grad_custom_pre_pass, CustomInferenceAwareGraphPass):
             post_grad_custom_pre_pass = functools.partial(
                 post_grad_custom_pre_pass, is_inference=is_inference
@@ -221,13 +250,20 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
         )
 
-    if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
+    for post_grad_custom_post_pass in get_custom_graph_passes(
+        config.post_grad_custom_post_pass
+    ):
         if isinstance(post_grad_custom_post_pass, CustomInferenceAwareGraphPass):
             post_grad_custom_post_pass = functools.partial(
                 post_grad_custom_post_pass, is_inference=is_inference
             )
         GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
             post_grad_custom_post_pass
+        )
+
+    if config.fallback_random:
+        GraphTransformObserver(gm, "chain_random_ops_ordering").apply_graph_pass(
+            _chain_random_ops_for_ordering
         )
 
     GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
@@ -256,6 +292,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     collectives_bucketing: bool = False
 
+    if config.dedup_reduce_scatters:
+        from torch._inductor.fx_passes.fsdp import dedup_fsdp_reduce_scatter
+
+        GraphTransformObserver(gm, "dedup_reduce_scatters").apply_gm_pass(
+            dedup_fsdp_reduce_scatter
+        )
+
     if config.bucket_reduce_scatters_fx != "none":
         from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
@@ -267,7 +310,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
             lambda graph: p(
-                graph.owning_module,
+                graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
                 config.bucket_reduce_scatters_bucket_mode,  # type: ignore[arg-type]
             )
@@ -279,7 +322,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         GraphTransformObserver(gm, "bucket_all_reduce").apply_graph_pass(
             lambda graph: bucket_all_reduce(
-                graph.owning_module,
+                graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_all_reduces_fx_bucket_size_determinator,
                 config.bucket_all_reduces_fx,  # type: ignore[arg-type]
             )
@@ -299,7 +342,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
             lambda graph: p(
-                graph.owning_module,
+                graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 config.bucket_all_gathers_fx_bucket_size_determinator,
                 config.bucket_all_gathers_bucket_mode,  # type: ignore[arg-type]
             )
@@ -346,22 +389,18 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
         overlap_deps = config.aten_distributed_optimizations.insert_overlap_deps
-        fusion_regions = config.aten_distributed_optimizations.enable_fusion_regions
 
-        # by default, insert overlap deps and enable fusion regions within inductor
+        # by default, insert overlap deps within inductor
         with config.patch(
             {
                 "aten_distributed_optimizations.insert_overlap_deps": (
                     True if overlap_deps is None else overlap_deps
                 ),
-                "aten_distributed_optimizations.enable_fusion_regions": (
-                    True if fusion_regions is None else fusion_regions
-                ),
             }
         ):
             GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
                 lambda graph: schedule_overlap_bucketing_from_inductor_configs(
-                    graph.owning_module,
+                    graph.owning_module,  # pyrefly: ignore[bad-argument-type]
                 )
             )
 
@@ -385,10 +424,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
     )
-    if not torch._dynamo.config.skip_fsdp_hooks:
-        GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
-            comms.reinplace_fsdp_all_gather
-        )
     GraphTransformObserver(gm, "decompose_scan_to_while_loop").apply_gm_pass(
         decompose_scan_to_while_loop
     )
@@ -840,7 +875,12 @@ def reorder_for_locality(graph: torch.fx.Graph):
 
 
 def register_lowering_pattern(
-    pattern, extra_check=_return_true, pass_number=1
+    pattern,
+    extra_check=_return_true,
+    pass_number=1,
+    *,
+    output_metadata_ignores_input_storage: bool = False,
+    output_metadata_is_input: int | str | None = None,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Register an aten to inductor IR replacement pattern
@@ -850,6 +890,8 @@ def register_lowering_pattern(
         extra_check,
         # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[pass_number],
+        output_metadata_ignores_input_storage=output_metadata_ignores_input_storage,
+        output_metadata_is_input=output_metadata_is_input,
     )
 
 
@@ -1040,6 +1082,8 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
     return (
         val1 is not None
         and val2 is not None
+        and isinstance(val1, torch.Tensor)
+        and isinstance(val2, torch.Tensor)
         and statically_known_true(sym_eq(val1.size(), val2.size()))
         and val1.layout == val2.layout
         and val1.dtype == val2.dtype
@@ -1276,6 +1320,62 @@ def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph
             pass_fn(child_mod.graph)
 
 
+def apply_pass_to_control_deps_subgraphs(
+    pass_fn: Callable[[fx.Graph], None], graph: fx.Graph
+):
+    """Recursively apply a pass function to subgraphs referenced by control_deps."""
+    gm = graph.owning_module
+    if gm is None:
+        return
+
+    for node in graph.find_nodes(op="call_function", target=control_deps):
+        if len(node.args) < 2:
+            continue
+        subgraph_attr = node.args[1]
+        if (
+            not isinstance(subgraph_attr, torch.fx.Node)
+            or subgraph_attr.op != "get_attr"
+            or not isinstance(subgraph_attr.target, str)
+        ):
+            continue
+        subgraph = getattr(gm, subgraph_attr.target, None)
+        if isinstance(subgraph, torch.fx.GraphModule):
+            pass_fn(subgraph.graph)
+
+
+def _get_single_replacement_node(
+    replacement_nodes: Sequence[torch.fx.Node], target: torch.fx.node.Target
+) -> torch.fx.Node:
+    nodes = [
+        node
+        for node in replacement_nodes
+        if node.op == "call_function" and node.target is target
+    ]
+    if len(nodes) != 1:
+        raise AssertionError(f"Expected exactly one replacement node for {target}")
+    return nodes[0]
+
+
+def _propagate_triton_eager_input_vals(
+    replacement_nodes: Sequence[torch.fx.Node],
+    hop_node: torch.fx.Node,
+) -> None:
+    eager_input_vals = hop_node.meta.get("eager_input_vals")
+    if eager_input_vals is None:
+        return
+
+    _, eager_kwargs = eager_input_vals
+    mutation_eager_kwargs = {
+        key: value for key, value in eager_kwargs.items() if key != "tensors_to_clone"
+    }
+    # The dense decomposition introduces clones plus the mutation HOP, but only
+    # the mutation HOP should receive the eager-mode tensor metadata.
+    mutation_node = _get_single_replacement_node(
+        replacement_nodes, torch.ops.higher_order.triton_kernel_wrapper_mutation
+    )
+    mutation_node.meta["eager_input_vals"] = ((), mutation_eager_kwargs)
+
+
 def decompose_triton_kernel_wrapper_functional(graph):
     """Decomposes triton_kernel_wrapper_functional nodes into clones and the underlying
     mutation node.
@@ -1299,6 +1399,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
             triton_kernel_wrapper_functional_dense,
         )
 
+        hop_node = match.nodes[0]
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
         # NB: we combine (args, kwargs) into flat args for replacing.
@@ -1309,7 +1410,10 @@ def decompose_triton_kernel_wrapper_functional(graph):
             return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
 
         # pyrefly: ignore [bad-argument-type]
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+        replacement_nodes = match.replace_by_example(
+            decomp, flat_args, run_functional_passes=False
+        )
+        _propagate_triton_eager_input_vals(replacement_nodes, hop_node)
 
     graph_pass.apply(graph)
 
@@ -1328,6 +1432,8 @@ def decompose_auto_functionalized(graph):
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
+    apply_pass_to_control_deps_subgraphs(decompose_auto_functionalized, graph)
+
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
@@ -1338,9 +1444,9 @@ def decompose_auto_functionalized(graph):
     def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
-        only_clone_these_tensors = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
-        )
+        only_clone_these_tensors = match.nodes[0].meta.get("only_clone_these_tensors")
+        if only_clone_these_tensors is not None:
+            only_clone_these_tensors = tuple(only_clone_these_tensors)
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
@@ -1366,9 +1472,9 @@ def decompose_auto_functionalized(graph):
             auto_functionalized_v2_dense,
         )
 
-        only_clone_these_bases = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
-        )
+        only_clone_these_bases = match.nodes[0].meta.get("only_clone_these_tensors")
+        if only_clone_these_bases is not None:
+            only_clone_these_bases = tuple(only_clone_these_bases)
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
@@ -1476,6 +1582,7 @@ def decompose_auto_functionalized(graph):
     ),
     pass_number=2,
     extra_check=is_valid_splitwithsizes_cat,
+    output_metadata_is_input="input_",
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
@@ -1530,6 +1637,7 @@ def is_valid_cat_splitwithsizes(match):
     ),
     pass_number=2,
     extra_check=is_valid_cat_splitwithsizes,
+    output_metadata_is_input="input_",
 )
 def cat_splitwithsizes_replace(match, input_):
     return input_
@@ -1580,7 +1688,19 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         torch.bfloat16,
         torch.float16,
     ):
-        return
+        # Narrowing-cast unfuse (PR #183680) is XPU-only: it preserves
+        # precision on XPU pointwise but regresses accuracy on ROCm
+        # (basic_gnn_edgecnn training+amp fails on gfx950 otherwise).
+        if inp.meta["val"].device.type != "xpu":
+            return
+        if not (
+            inp.op == "call_function"
+            and inp.target is torch.ops.prims.convert_element_type.default
+            and inp.args[0].meta["val"].dtype.is_floating_point
+            and torch.finfo(inp.args[0].meta["val"].dtype).bits
+            > torch.finfo(inp.meta["val"].dtype).bits
+        ):
+            return
 
     def repl(inp, x1, x2, alpha, beta):
         mm_result = x1 @ x2
@@ -1704,7 +1824,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     ]:
         return False
     # Inductor falls back to aten.index_put_.
-    # index_put_ will will call nonzero() and perform a H2D sync if
+    # index_put_ will call nonzero() and perform a H2D sync if
     # any of its indices are bool/byte tensors
     # However, it will short-circuit this H2D sync and run mask_fill_
     # if the value we are putting is a cpu scalar.
@@ -1879,6 +1999,12 @@ class ConstructorMoverPass:
             if node.kwargs.get("device") != torch.device("cpu"):
                 continue
 
+            if (
+                torch._inductor.config.fallback_random
+                and torch.Tag.nondeterministic_seeded in node.target.tags
+            ):
+                continue
+
             constructors.append(node)
 
         # not handling multiple target devices initially
@@ -1994,7 +2120,7 @@ class ConstructorMoverPass:
                     cannot_move_to_gpu.update(dependencies)
                     break
 
-                # this node was used on a op which takes in multiple devices and output a gpu
+                # this node was used on an op which takes in multiple devices and output a gpu
                 # tensor. we can convert its cpu input to gpu without making further changes
                 if self.allow_cpu_device(user) and self.is_on_target_device(user):
                     del cpu_indeg[user]

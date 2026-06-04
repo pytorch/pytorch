@@ -63,6 +63,7 @@ ALLOW_LIST = [
     ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
+    ("inductor::accumulate_grad_", datetime.date(9999, 1, 1)),
     ("onednn::qconv2d_pointwise", datetime.date(2026, 5, 1)),
     ("prim::is_ort", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
@@ -142,6 +143,16 @@ ALLOW_LIST = [
     ("c10d::.*", datetime.date(9999, 1, 1)),
     # Previously MPS_only did not support backward
     ("aten::_fused_rms_norm", datetime.date(2025, 12, 30)),
+    # Named tensor removal: all dimname/named overloads and ops permanently removed
+    ("aten::rename", datetime.date(9999, 1, 1), None, True),
+    ("aten::refine_names", datetime.date(9999, 1, 1), None, True),
+    ("aten::align_to", datetime.date(9999, 1, 1), None, True),
+    ("aten::align_as", datetime.date(9999, 1, 1), None, True),
+    ("aten::align_tensors", datetime.date(9999, 1, 1), None, True),
+    ("aten::.*\\..*[Dd]imname", datetime.date(9999, 1, 1), None, True),
+    ("aten::.*\\..*names", datetime.date(9999, 1, 1), None, True),
+    ("aten::flatten\\.named_out_dim", datetime.date(9999, 1, 1), None, True),
+    ("aten::flatten\\.using_names", datetime.date(9999, 1, 1), None, True),
 ]
 
 ALLOW_LIST_COMPILED = [
@@ -250,7 +261,7 @@ def is_core_aten_op(schema) -> bool:
         #
         # If the core ATen op has been removed, we cannot be sure whether it
         # was previously a core ATen op or not via checking tags this way.
-        # Conservatively assume that you are ARE a core ATen op in this case.
+        # Conservatively assume that you ARE a core ATen op in this case.
         # This means that deleting a core ATen op will still be caught.
         # But if you're deleting an operator that is not a core ATen op
         # and add it to the allow_list, you would need to additionally specify

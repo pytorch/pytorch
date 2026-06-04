@@ -16,6 +16,7 @@
 #include <c10/util/irange.h>
 #include <c10/macros/Macros.h>
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <utility>
 
@@ -92,7 +93,7 @@ constexpr int MIOPEN_DIM_MAX = 5;
 namespace at::native {
 
 
-static bool conv_benchmark_empty_cache = true;
+static constinit std::atomic<bool> conv_benchmark_empty_cache{true};
 
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
 template <typename T>
@@ -473,6 +474,12 @@ struct ConvParams {
                            (stride[0] == stride[1] || at::symint::size<T>(input, 2) == 1) && // square or 1d
                            at::symint::size<T>(input, 1) >= 32); // min 32 channels supported)
       if (kernel_cond) {
+        auto depthwise_kernel = at::globalContext().cudnnDepthwiseKernel();
+        if (depthwise_kernel == at::CuDNNDepthwiseKernel::NATIVE) {
+          return false;
+        } else if (depthwise_kernel == at::CuDNNDepthwiseKernel::CUDNN) {
+          return true;
+        }
         return check_cudnn_depthwise_workload_with_filter<T>(input, stride[1], weight);
       }
       return false;
@@ -696,6 +703,10 @@ static void check_shape_forward(const at::Tensor& input,
   if (!transposed) {
     std::vector<T> input_shape;
     std::vector<T> kernel_shape;
+    if (k > 2) {
+      input_shape.reserve(k - 2);
+      kernel_shape.reserve(k - 2);
+    }
     bool kernel_size_correct = true;
 
     if constexpr (std::is_same_v<T, c10::SymInt>) {
@@ -1814,8 +1825,10 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
   }
 
   // Compute ggO = conv(ggI, w) + conv(i, ggW) + ggb
+  const bool input_nonempty =
+      TORCH_GUARD_OR_TRUE(input.sym_numel().sym_ne(0));
   Tensor ggO;
-  if (input.numel() != 0) {
+  if (input_nonempty) {
     if (ggI.defined()) {
       if (weight.is_cuda()) {
         weight = weight.contiguous();
@@ -1873,7 +1886,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
 
     Tensor gWt;
     // Compute conv
-    if (input.numel() != 0) {
+    if (input_nonempty) {
       if (groups == 1) {
 
         if (gOt.is_cuda()) {
@@ -1927,7 +1940,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
   // Compute gI = convT(gO, ggW) if !transposed
   //         gI = conv(gO, ggw)  if transposed
   Tensor gI;
-  if (input.numel() != 0) {
+  if (input_nonempty) {
     if (ggW.defined()) {
       ConvParams<int64_t> gi_conv_params(params);
       gi_conv_params.transposed = !params.transposed;
@@ -2325,11 +2338,11 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 }
 
 void _cudnn_set_conv_benchmark_empty_cache(bool enable) {
-  conv_benchmark_empty_cache = enable;
+  conv_benchmark_empty_cache.store(enable, std::memory_order_relaxed);
 }
 
 bool _cudnn_get_conv_benchmark_empty_cache() {
-  return conv_benchmark_empty_cache;
+  return conv_benchmark_empty_cache.load(std::memory_order_relaxed);
 }
 
 
