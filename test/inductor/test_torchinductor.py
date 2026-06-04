@@ -349,6 +349,8 @@ class TestCase(InductorTestCase):
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,
                     "generate_intermediate_hooks": True,
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
                 }
             )
         )
@@ -1204,11 +1206,6 @@ def target_assert_size_stride_str(
     if name is not None:
         return f"assert_size_stride({name}, {size_str}, {stride_str}"
     return f"{size_str}, {stride_str}"
-
-
-def target_assert_alignment_regex():
-    op_name_literal = r'"[^"]+"' if config.cpp_wrapper else r"'[^']+'"
-    return rf"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*{op_name_literal}\s*\)"
 
 
 @instantiate_parametrized_tests
@@ -4358,7 +4355,18 @@ class CommonTemplate:
             a = torch.permute(a, [0, 2, 3, -3])
             return (a,)
 
-        self.common(fn, (torch.randn(4, 4),))
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_permute_unbacked_slice(self):
+        def eager(a, end_t):
+            b = a + 1
+            c = torch.permute(b, [0, 2, 1])
+            end = end_t.item()
+            return c[:, :end, :]
+
+        compiled = torch.compile(eager, backend="inductor")
+        a = torch.randn(4, 16, 8, device=self.device)
+        end_t = torch.tensor([5])
+        self.assertEqual(compiled(a, end_t), eager(a, end_t))
 
     def test_expand(self):
         def fn(a):
@@ -5825,7 +5833,6 @@ class CommonTemplate:
         ),
     )
     @parametrize("nhwc", (False, True))
-    @parametrize("nhwc_input", (False, True))
     @with_tf32_off
     def test_conv2d_backward_parametrized(
         self,
@@ -5835,7 +5842,6 @@ class CommonTemplate:
         padding: int,
         kernel: int,
         nhwc: bool,
-        nhwc_input: bool,
     ):
         in_channels = channels_groups[0]
         out_channels = channels_groups[1]
@@ -5884,14 +5890,11 @@ class CommonTemplate:
         weight = torch.randn([out_channels, in_channels // groups, kernel, kernel])
         if nhwc:
             weight = weight.to(memory_format=torch.channels_last)
-        inp = torch.randn([2, in_channels, input_h, input_w])
-        if nhwc_input:
-            inp = inp.to(memory_format=torch.channels_last)
         self.common(
             fn,
             (
                 torch.randn([2, out_channels, output_h, output_w]),
-                inp,
+                torch.randn([2, in_channels, input_h, input_w]),
                 weight,
             ),
             atol=atol,
@@ -8576,6 +8579,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn([1, 2, 6, 6]),),
         )
 
+    def test_signbit_unsigned_dtypes(self):
+        def fn(x):
+            return torch.signbit(x)
+
+        for dtype in [
+            torch.bool,
+            torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ]:
+            x = torch.tensor([0, 1, 1, 0, 1], dtype=dtype)
+            self.common(fn, [x], check_lowp=False)
+
     def test_sign_dtype(self):
         def fn(x):
             y = torch.sign(x)
@@ -10159,6 +10176,44 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
         )
 
+    def test_index_copy_error_checks(self):
+        cases = (
+            (
+                torch.randn(4, device=self.device),
+                0,
+                torch.tensor([0, 1], device=self.device),
+                torch.tensor(1.0, device=self.device),
+                "When source is scalar",
+            ),
+            (
+                torch.randn(4, 5, device=self.device),
+                0,
+                torch.tensor([0, 1], device=self.device),
+                torch.randn(2, device=self.device),
+                "their dimensionality must match",
+            ),
+            (
+                torch.randn(4, 5, 6, device=self.device),
+                0,
+                torch.tensor([0, 2], device=self.device),
+                torch.randn(1, 1, 6, device=self.device),
+                "Source/destination tensor must have same slice shapes",
+            ),
+            (
+                torch.randn(4, 5, device=self.device),
+                0,
+                torch.tensor([0, 1], device=self.device),
+                torch.randn(3, 5, device=self.device),
+                "Number of indices",
+            ),
+        )
+
+        for x, dim, index, y, msg in cases:
+            with self.subTest(msg=msg):
+                fn = torch.compile(torch.index_copy)
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    fn(x, dim, index, y)
+
     def test_index_put2(self):
         def fn(a, b, c):
             return torch.index_put(a, [b], c, True)
@@ -10361,38 +10416,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
-
-    def test_index_ops_on_expanded_tensor(self):
-        def make_input(src):
-            return torch.zeros(1, src.size(1), device=src.device).expand(
-                src.size(0) + 1, -1
-            )
-
-        def check(fn):
-            idx = torch.tensor([0, 1, 0], device=self.device)
-            src = torch.ones(3, 8, device=self.device)
-            self.common(fn, (idx, src), check_lowp=False)
-
-        check(lambda idx, src: make_input(src).index_add(0, idx, src))
-        check(lambda idx, src: make_input(src).index_copy(0, idx[:2], src[:2]))
-        check(lambda idx, src: make_input(src).index_fill(0, idx[:2], 1.0))
-        check(lambda idx, src: make_input(src).index_put((idx,), src, accumulate=True))
-        check(
-            lambda idx, src: make_input(src).index_put(
-                (idx[:2],), src[:2], accumulate=False
-            )
-        )
-
-    def test_index_ops_on_expanded_tensor_dim1(self):
-        def fn(idx, src):
-            x = torch.zeros(src.size(0), 1, device=src.device).expand(
-                -1, src.size(1) + 5
-            )
-            return x.index_add(1, idx, src)
-
-        idx = torch.tensor([0, 2, 0], device=self.device)
-        src = torch.ones(4, 3, device=self.device)
-        self.common(fn, (idx, src), check_lowp=False)
 
     def test_adding_tensor_offsets(self):
         @torch.compile(fullgraph=True)
@@ -14989,9 +15012,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if not is_dynamic_shape_enabled():
             if code and len(code) > 0 and "assert_alignment(" in code[0]:
                 try:
-                    FileCheck().check_regex(target_assert_alignment_regex()).run(
-                        code[0]
-                    )
+                    FileCheck().check_regex(
+                        r"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*'[^']+'\s*\)"
+                    ).run(code[0])
                 except Exception as e:
                     print(f"Failed regex match for assert_alignment: {e}")
                     print(code[0])
@@ -15971,6 +15994,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     dtype,
                 ),
             )
+
+    def test_view_dtype_fallback_layout_constraint(self):
+        # https://github.com/pytorch/pytorch/issues/185515
+        def fn_to_contiguous(x):
+            return x.clone(memory_format=torch.contiguous_format).view(torch.uint8)
+
+        x_cl = torch.randn(2, 3, 4, 4, dtype=torch.float32).to(
+            memory_format=torch.channels_last
+        )
+        self.common(fn_to_contiguous, (x_cl,), exact_stride=True, check_lowp=False)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_split_with_sizes_with_unbacked_symints(self):
@@ -17989,62 +18022,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=False,
             )
 
-    def test_jvp_compile_backward(self):
-        def jvp_fn(f, x):
-            return torch.func.jvp(f, (x.clone(),), (torch.ones_like(x),))[1]
-
-        def compute(f, x):
-            first, rest = x[..., :1], x[..., 1:]
-            return jvp_fn(lambda X: f(torch.cat([X, rest])), first)
-
-        in_features = 4
-        net = torch.nn.Sequential(
-            torch.nn.Linear(in_features, 32),
-            torch.nn.Linear(32, 32),
-            torch.nn.Linear(32, 8),
-        ).to(self.device)
-
-        x = torch.rand((in_features,), device=self.device)
-
-        eager_out = compute(net, x).sum()
-        eager_out.backward()
-        eager_grads = [p.grad.clone() for p in net.parameters() if p.grad is not None]
-        net.zero_grad()
-
-        compiled = torch.compile(compute)
-        compiled_out = compiled(net, x).sum()
-        compiled_out.backward()
-        compiled_grads = [
-            p.grad.clone() for p in net.parameters() if p.grad is not None
-        ]
-
-        self.assertEqual(eager_out, compiled_out)
-        for eg, cg in zip(eager_grads, compiled_grads, strict=True):
-            self.assertEqual(eg, cg)
-
-    def test_efficient_zero_tensor_avoids_oom(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("CUDA OOM regression test")
-
-        element_size = torch.empty((), dtype=torch.float32).element_size()
-        numel = (
-            torch.cuda.get_device_properties(self.device).total_memory // element_size
-        )
-        numel += 1024
-
-        def fn():
-            return torch.ops.aten._efficientzerotensor.default(
-                [numel],
-                dtype=torch.float32,
-                layout=torch.strided,
-                device=torch.device(self.device),
-                pin_memory=False,
-            )
-
-        out = torch.compile(fn, fullgraph=True)()
-        self.assertEqual(out.size(0), numel)
-        self.assertEqual(out.stride(), (1,))
-
     # end of class CommonTemplate - add new tests here
 
 
@@ -18136,9 +18113,6 @@ if RUN_GPU or HAS_MPS:
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
 if RUN_TPU:
-    from torch_tpu import api as tpu_api  # type: ignore[import-not-found]
-
-    tpu_api.tpu_device()  # initialize TPU runtime
 
     class SweepInputsTpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "tpu")

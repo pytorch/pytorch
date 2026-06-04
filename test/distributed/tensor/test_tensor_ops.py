@@ -676,6 +676,53 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
                 self.assertEqual(output_dt.placements, [Replicate()])
                 self.assertEqual(output_dt.to_local(), global_output)
 
+        # case 2 shard on a non-scatter dim: input/index/src and output all
+        # sharded on dim 0, scatter performed along dim 1. This must run as a
+        # purely local op with no communication.
+        shard_dim, scatter_dim = 0, 1
+        rows = self.world_size * 2
+        global_input = torch.zeros(rows, 5, dtype=torch.int64)
+        # deterministic index so every spawned rank builds the same tensor
+        global_index = torch.arange(rows * 3).reshape(rows, 3) % 5
+        srcs = [torch.arange(1, rows * 3 + 1).reshape((rows, 3)), 4]
+        for global_src in srcs:
+            global_output = torch.scatter(
+                global_input, scatter_dim, global_index, global_src
+            )
+            input_dt = distribute_tensor(
+                global_input.clone(), device_mesh, [Shard(shard_dim)]
+            )
+            index_dt = distribute_tensor(global_index, device_mesh, [Shard(shard_dim)])
+            if isinstance(global_src, torch.Tensor):
+                src_dt = distribute_tensor(global_src, device_mesh, [Shard(shard_dim)])
+            else:
+                src_dt = global_src
+            with comm_mode:
+                output_dt = torch.scatter(input_dt, scatter_dim, index_dt, src_dt)
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(output_dt.placements, [Shard(shard_dim)])
+            self.assertEqual(output_dt.full_tensor(), global_output)
+
+        # case 3 src larger than index on the shard dim: sharding src to match
+        # index would misalign boundaries, so the sharded strategy must not be
+        # offered and the op falls back to replicate. Result must stay correct.
+        global_input = torch.zeros(rows, 5, dtype=torch.int64)
+        global_index = torch.arange(rows * 3).reshape(rows, 3) % 5
+        global_src = torch.arange(1, (rows + 2) * 3 + 1).reshape((rows + 2, 3))
+        global_output = torch.scatter(
+            global_input, scatter_dim, global_index, global_src
+        )
+        input_dt = distribute_tensor(
+            global_input.clone(), device_mesh, [Shard(shard_dim)]
+        )
+        index_dt = distribute_tensor(global_index, device_mesh, [Shard(shard_dim)])
+        src_dt = distribute_tensor(global_src, device_mesh, [Replicate()])
+        output_dt = torch.scatter(input_dt, scatter_dim, index_dt, src_dt)
+        # the sharded strategy is not offered, so the op falls back to replicate
+        self.assertEqual(output_dt.placements, [Replicate()])
+        self.assertEqual(output_dt.full_tensor(), global_output)
+
     def test_gather(self):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
