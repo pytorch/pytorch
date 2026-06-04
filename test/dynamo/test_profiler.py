@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import threading
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -67,6 +68,121 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             any("(dynamo_timed)" in name for name in event_names),
             f"Expected dynamo_timed events in profiler: {event_names}",
+        )
+
+    def test_profiler_with_stack_skips_compile_python_tracing(self):
+        torch._dynamo.reset()
+
+        def fn(x):
+            return torch.sin(x) * 2
+
+        x = torch.randn(4, 4)
+        opt_fn = torch.compile(fn, backend="inductor")
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            with_stack=True,
+        ) as prof:
+            opt_fn(x)
+
+        event_names = [e.name for e in prof.events()]
+        self.assertTrue(
+            any("Torch-Compiled Region" in name for name in event_names),
+            f"Expected compiled-region event in profiler: {event_names}",
+        )
+        self.assertFalse(
+            any("torch/_dynamo/symbolic_convert.py" in name for name in event_names),
+            f"Profiler captured compiler Python frames: {event_names}",
+        )
+        self.assertFalse(
+            any("torch/_dynamo/trace_rules.py" in name for name in event_names),
+            f"Profiler captured compiler Python frames: {event_names}",
+        )
+
+    def test_profiler_with_stack_skips_compile_fx_backward_python_tracing(self):
+        from torch._inductor.compile_fx import (
+            compile_fx_backward,
+            create_compiler_config_extra,
+        )
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        gm = torch.fx.symbolic_trace(Mod())
+        x = torch.randn(4, 4)
+        compiler_config_extra = create_compiler_config_extra(gm)
+        inner_compile_calls = []
+
+        def inner_compile(*args, **kwargs):
+            inner_compile_calls.append(kwargs)
+            return lambda *runtime_args: runtime_args
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            with_stack=True,
+        ) as prof:
+            compile_fx_backward(
+                gm,
+                [x],
+                compiler_config_extra,
+                inner_compile=inner_compile,
+            )
+
+        event_names = [e.name for e in prof.events()]
+        compile_fx_events = [
+            name for name in event_names if "torch/_inductor/compile_fx.py" in name
+        ]
+
+        self.assertEqual(len(inner_compile_calls), 1)
+        self.assertTrue(inner_compile_calls[0]["is_backward"])
+        self.assertTrue(
+            any("compile_fx_backward" in name for name in compile_fx_events)
+        )
+        self.assertTrue(
+            all("compile_fx_backward" in name for name in compile_fx_events),
+            f"Profiler captured compiler Python frames: {event_names}",
+        )
+        self.assertFalse(
+            any("inner_compile" in name for name in event_names),
+            f"Profiler captured compiler Python frames: {event_names}",
+        )
+
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "profile_all_threads fails in debug builds, see https://github.com/pytorch/pytorch/pull/150059",
+    )
+    def test_disable_profiler_python_tracing_profile_all_threads(self):
+        from torch._dynamo.convert_frame import _disable_profiler_python_tracing
+
+        def suppressed_profile_all_threads_marker():
+            return 1
+
+        def visible_profile_all_threads_marker():
+            return 2
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            with_stack=True,
+            experimental_config=torch._C._profiler._ExperimentalConfig(
+                profile_all_threads=True
+            ),
+        ) as prof:
+            with _disable_profiler_python_tracing():
+                with _disable_profiler_python_tracing():
+                    suppressed_profile_all_threads_marker()
+            visible_profile_all_threads_marker()
+
+        event_names = [e.name for e in prof.events()]
+        self.assertFalse(
+            any(
+                "suppressed_profile_all_threads_marker" in name for name in event_names
+            ),
+            f"Profiler captured compiler Python frames: {event_names}",
+        )
+        self.assertTrue(
+            any("visible_profile_all_threads_marker" in name for name in event_names),
+            f"Profiler did not resume Python tracing: {event_names}",
         )
 
     def test_record_functions_thread_local(self):
