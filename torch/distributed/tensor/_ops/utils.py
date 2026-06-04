@@ -570,17 +570,27 @@ def expand_to_full_mesh_op_strategy(
                 blocking_inplace_input_placements = self_spec.placements
             continue
 
-        # For out= variant ops, output placement must match the "out" kwarg's placement
-        if (
-            op_schema.is_out_variant_op()
-            and "out" in op_schema.kwargs_schema
-            and isinstance(op_schema.kwargs_schema["out"], OpStrategy)
-        ):
-            out_kwarg_spec = op_schema.kwargs_schema["out"].strategies[0].output_spec
-            # spec_list[0] is the output spec for this strategy combination
-            if spec_list[0] is not None:
-                if spec_list[0].placements != out_kwarg_spec.placements:
+        # For out= variant ops, output placement must match each out kwarg's
+        # placement. Kwargs are intentionally not redistributed in dispatch.
+        if op_schema.is_out_variant_op():
+            out_arg_idx = 0
+            mismatched_out_arg = False
+            for argument in op_schema.op._schema.arguments:
+                if not argument.is_out:
                     continue
+                out_arg = op_schema.kwargs_schema.get(argument.name)
+                if isinstance(out_arg, OpStrategy):
+                    output_spec = spec_list[out_arg_idx]
+                    out_arg_spec = out_arg.strategies[0].output_spec
+                    if (
+                        output_spec is None
+                        or output_spec.placements != out_arg_spec.placements
+                    ):
+                        mismatched_out_arg = True
+                        break
+                out_arg_idx += 1
+            if mismatched_out_arg:
+                continue
 
         output_specs: tuple[DTensorSpec | None, ...] | DTensorSpec | None
         if input_index == 0:

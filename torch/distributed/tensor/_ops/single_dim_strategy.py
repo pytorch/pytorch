@@ -499,6 +499,131 @@ class _PreparedSingleDimStrategy:
         )
 
 
+def _has_default_value(arg: Any) -> bool:
+    """Return whether a schema argument can be omitted at runtime.
+
+    Foreach schemas sometimes omit trailing scalar args that exist on the scalar
+    op only because they have defaults.
+    """
+    has_default_value = getattr(arg, "has_default_value", None)
+    if callable(has_default_value):
+        return bool(has_default_value())
+    return getattr(arg, "default_value", None) is not None
+
+
+def _normalize_schema_type(arg: Any, *, list_to_element: bool = False) -> str:
+    """Normalize schema type strings for direct and foreach element matching.
+
+    In foreach matching, a `List[Tensor]` argument represents one per-element
+    `Tensor` argument to the scalar strategy function.
+    """
+    type_str = str(arg.type)
+    if list_to_element and type_str.startswith("List[") and type_str.endswith("]"):
+        return type_str.removeprefix("List[").removesuffix("]")
+    return type_str
+
+
+def _schema_args_match(
+    base_args: Sequence[Any],
+    candidate_args: Sequence[Any],
+    *,
+    candidate_lists_are_elements: bool = False,
+    allow_base_trailing_defaults: bool = False,
+) -> bool:
+    """Return whether candidate args can safely reuse the base op strategy.
+
+    This is intentionally schema-based so auto-registration does not rely only
+    on overload names.
+    """
+    if len(candidate_args) > len(base_args):
+        return False
+
+    for base_arg, candidate_arg in zip(base_args, candidate_args):
+        if _normalize_schema_type(base_arg) != _normalize_schema_type(
+            candidate_arg, list_to_element=candidate_lists_are_elements
+        ):
+            return False
+        if base_arg.kwarg_only != candidate_arg.kwarg_only:
+            return False
+
+    if len(candidate_args) == len(base_args):
+        return True
+
+    if not allow_base_trailing_defaults:
+        return False
+
+    return all(_has_default_value(arg) for arg in base_args[len(candidate_args) :])
+
+
+def _op_namespace_and_base_name(op: OpOverload) -> tuple[str, str]:
+    """Split an overload into namespace and overload-agnostic base op name."""
+    namespace, op_name = op.name().split("::", 1)
+    return namespace, op_name.split(".", 1)[0]
+
+
+def _get_overload_packet(namespace: str, op_name: str) -> Any | None:
+    """Look up torch.ops.<namespace>.<op_name> without raising on misses."""
+    namespace_packet = getattr(torch.ops, namespace, None)
+    if namespace_packet is None:
+        return None
+    try:
+        return getattr(namespace_packet, op_name)
+    except AttributeError:
+        return None
+
+
+def _get_packet_overload(packet: Any, overload_name: str) -> OpOverload | None:
+    """Look up one overload from an overload packet without raising on misses."""
+    if overload_name not in packet.overloads():
+        return None
+    return cast(OpOverload, getattr(packet, overload_name))
+
+
+def _resolve_foreach_elementwise_overload(foreach_op: OpOverload) -> OpOverload | None:
+    """Map an elementwise foreach overload to the scalar op for one element.
+
+    Single-dim strategy functions reason about one Tensor at a time; foreach
+    expansion calls the scalar strategy once for each list element.
+    """
+    namespace, foreach_base_name = _op_namespace_and_base_name(foreach_op)
+    if namespace != "aten":
+        return None
+    if foreach_base_name.startswith("_foreach_"):
+        base_op_name = foreach_base_name.removeprefix("_foreach_")
+    elif foreach_base_name.startswith("_amp_foreach_"):
+        base_op_name = foreach_base_name.removeprefix("_amp_foreach_")
+    else:
+        return None
+
+    base_op_name = base_op_name.removesuffix("_")
+    base_packet = _get_overload_packet(namespace, base_op_name)
+    if base_packet is None:
+        return None
+
+    foreach_args = foreach_op._schema.arguments
+    matches: list[tuple[int, OpOverload]] = []
+    for overload_name in base_packet.overloads():
+        if "out" in overload_name:
+            continue
+        candidate = _get_packet_overload(base_packet, overload_name)
+        if candidate is None or candidate._schema.is_mutable:
+            continue
+        if _schema_args_match(
+            candidate._schema.arguments,
+            foreach_args,
+            candidate_lists_are_elements=True,
+            allow_base_trailing_defaults=True,
+        ):
+            # Prefer exact schema matches over matches that rely on defaulted
+            # trailing args, e.g. add.Tensor over add.Scalar when possible.
+            score = len(candidate._schema.arguments) - len(foreach_args)
+            matches.append((score, candidate))
+
+    if not matches:
+        return None
+    return min(matches, key=lambda item: item[0])[1]
+
+
 def _expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
@@ -576,10 +701,6 @@ def _expand_single_dim_strategy_to_mesh(
         index: int,
     ) -> tuple[OpSchema, TensorMeta | None]:
         """Translate foreach/fused op to per-element version of schema."""
-        op_parts = str(op_schema.op).split(".")
-        op_name = op_parts[-2]
-        foreach_variant = op_parts[-1]
-
         # select per-element inputs, outputs
         target_args, target_kwargs = tree_map_only(
             TupleStrategy,
@@ -592,47 +713,10 @@ def _expand_single_dim_strategy_to_mesh(
             output_tensor_meta[index] if output_tensor_meta is not None else None
         )
 
-        # Strip the prefix to get the base op name and find the per-element op.
-        # Fused ops (e.g. _fused_adam) have no per-element ATen equivalent,
-        # so we keep the original op unchanged.
-        if op_name.startswith("_foreach_"):
-            base_op_name = op_name.replace("_foreach_", "", 1)
-        elif op_name.startswith("_amp_foreach_"):
-            base_op_name = op_name.replace("_amp_foreach_", "", 1)
-        else:
-            # Fused ops or unknown: keep original op, no translation
+        target_op = _resolve_foreach_elementwise_overload(op_schema.op)
+        if target_op is None:
+            # Fused ops or unknown foreach-like ops: keep original op, no translation.
             target_op = op_schema.op
-            op_schema = OpSchema(
-                target_op,  # type: ignore[arg-type]
-                args_schema=tuple(target_args),
-                kwargs_schema=op_schema.kwargs_schema,
-            )
-            return op_schema, target_output_meta
-
-        # Strip trailing underscore for inplace ops
-        base_op_name = base_op_name.removesuffix("_")
-
-        # figure out target op variant
-        variant_map = {
-            "List": "Tensor",
-            "ScalarList": "Scalar",
-            "Scalar": "Scalar",
-            "Tensor": "Tensor",
-            "default": "default",
-        }
-        target_variant = (
-            "default"
-            if len(target_args) == 1
-            else variant_map.get(foreach_variant, "default")
-        )
-
-        # this seems a bit messy
-        base_op = getattr(torch.ops.aten, base_op_name)
-        target_op = (
-            getattr(base_op, target_variant)
-            if target_variant in base_op.overloads()
-            else base_op.default
-        )
 
         op_schema = OpSchema(
             target_op,  # type: ignore[arg-type]
