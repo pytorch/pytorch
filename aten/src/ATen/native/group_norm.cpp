@@ -258,9 +258,9 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_multiple_grads(
   Tensor dgamma;
   if (grad_input_mask[1]) {
     if (dparam_output_defined) {
-        dgamma = at::empty({C}, dparam_options);
+      dgamma = at::empty({C}, dparam_options);
     } else {
-        dgamma = at::zeros({C}, dparam_options);
+      dgamma = at::zeros({C}, dparam_options);
     }
   }
 
