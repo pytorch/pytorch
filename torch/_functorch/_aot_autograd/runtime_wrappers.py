@@ -483,6 +483,23 @@ class _FirstInvocationContext:
         return nullcontext()
 
 
+def _preserve_input_version_counters(
+    args: Sequence[Any], input_indices: Sequence[int]
+) -> AbstractContextManager[None]:
+    if not input_indices:
+        return nullcontext()
+
+    tensors: list[torch.Tensor] = []
+    for idx in input_indices:
+        arg = args[idx]
+        if isinstance(arg, torch.Tensor) and not arg.is_inference():
+            tensors.append(arg)
+
+    if not tensors:
+        return nullcontext()
+    return torch.autograd._unsafe_preserve_version_counter(tuple(tensors))
+
+
 # Note [RuntimeWrapper codegen specification methods]
 # The run() method on _RuntimeCompiledFnInvoker and the capture_orig_inputs(),
 # increment_mutation_versions(), and finalize() methods on _RuntimeForwardEpilogue
@@ -496,6 +513,7 @@ class _FirstInvocationContext:
 class _RuntimeCompiledFnInvoker:
     compiled_fn: Callable[..., Any]
     indices_of_inps_to_detach: list[int]
+    preserve_input_mutation_indices: tuple[int, ...]
     trace_joint: bool
     disable_amp: bool
     first_invocation_ctx: _FirstInvocationContext = field(
@@ -547,12 +565,15 @@ class _RuntimeCompiledFnInvoker:
                 if grad_enabled:
                     torch._C._set_grad_enabled(False)
                 on_before_call()
-                return call_func_at_runtime_with_args(
-                    self.compiled_fn,
-                    args,
-                    disable_amp=self.disable_amp,
-                    steal_args=True,
-                )
+                with _preserve_input_version_counters(
+                    args, self.preserve_input_mutation_indices
+                ):
+                    return call_func_at_runtime_with_args(
+                        self.compiled_fn,
+                        args,
+                        disable_amp=self.disable_amp,
+                        steal_args=True,
+                    )
             finally:
                 if grad_enabled:
                     torch._C._set_grad_enabled(True)
@@ -797,6 +818,7 @@ def _codegen_compiled_fn_invocation(
     rw_globals: dict[str, object],
     trace_joint: bool,
     indices_of_inps_to_detach: list[int],
+    preserve_input_mutation_indices: tuple[int, ...],
     disable_amp: bool,
 ) -> None:
     rw_lines.append("    with _first_ctx_():")
@@ -839,14 +861,28 @@ def _codegen_compiled_fn_invocation(
             "            if grad_enabled: torch._C._set_grad_enabled(False)"
         )
         rw_lines.append("            _on_before_call_()")
+        call_indent_level = 3
+        call_indent = "    " * call_indent_level
+        if preserve_input_mutation_indices:
+            # Inference calls execute the graph directly. The autograd path
+            # restores counters inside _codegen_compiled_forward before saving.
+            rw_globals["_preserve_vc_"] = _preserve_input_version_counters
+            rw_globals["_preserve_vc_idxs_"] = preserve_input_mutation_indices
+            rw_lines.append("            with _preserve_vc_(args, _preserve_vc_idxs_):")
+            call_indent_level += 1
+            call_indent = "    " * call_indent_level
         if disable_amp:
             rw_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-            rw_lines.append("            with _DisableAutocast_():")
-            rw_lines.append("                all_outs = _compiled_fn_(args)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=4)
+            rw_lines.append(f"{call_indent}with _DisableAutocast_():")
+            rw_lines.append(f"{call_indent}    all_outs = _compiled_fn_(args)")
+            _codegen_normalize_as_list(
+                rw_lines, "all_outs", indent_level=call_indent_level + 1
+            )
         else:
-            rw_lines.append("            all_outs = _compiled_fn_(args)")
-            _codegen_normalize_as_list(rw_lines, "all_outs", indent_level=3)
+            rw_lines.append(f"{call_indent}all_outs = _compiled_fn_(args)")
+            _codegen_normalize_as_list(
+                rw_lines, "all_outs", indent_level=call_indent_level
+            )
         rw_lines.append("        finally:")
         rw_lines.append("            if grad_enabled: torch._C._set_grad_enabled(True)")
     rw_lines.append("    del args")
@@ -908,6 +944,9 @@ def _create_runtime_wrapper(
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
         indices_of_inps_to_detach=indices_of_inps_to_detach,
+        preserve_input_mutation_indices=tuple(
+            runtime_metadata.mutated_graph_handled_indices_hidden_from_autograd
+        ),
         trace_joint=trace_joint,
         disable_amp=disable_amp,
     )
@@ -1104,7 +1143,12 @@ def _create_runtime_wrapper(
         rw_lines, rw_globals, keep_input_mutations, runtime_metadata
     )
     _codegen_compiled_fn_invocation(
-        rw_lines, rw_globals, trace_joint, indices_of_inps_to_detach, disable_amp
+        rw_lines,
+        rw_globals,
+        trace_joint,
+        indices_of_inps_to_detach,
+        tuple(runtime_metadata.mutated_graph_handled_indices_hidden_from_autograd),
+        disable_amp,
     )
     _codegen_epilogue(
         rw_lines,
@@ -3180,14 +3224,28 @@ def _codegen_compiled_forward(
     if num_rng > 0:
         lines.append("    args = _rng_add_(ctx, args)")
 
+    call_indent_level = 1
+    call_indent = "    " * call_indent_level
+    preserve_input_mutation_indices = tuple(
+        fw_metadata.mutated_graph_handled_indices_hidden_from_autograd
+    )
+    if preserve_input_mutation_indices:
+        # Restore hidden mutation counters before ctx.save_for_backward snapshots
+        # expected versions for backward.
+        code_globals["_preserve_vc_"] = _preserve_input_version_counters
+        code_globals["_preserve_vc_idxs_"] = preserve_input_mutation_indices
+        lines.append("    with _preserve_vc_(args, _preserve_vc_idxs_):")
+        call_indent_level += 1
+        call_indent = "    " * call_indent_level
+
     if disable_amp:
         code_globals["_DisableAutocast_"] = torch._C._DisableAutocast
-        lines.append("    with _DisableAutocast_():")
-        lines.append("        fw_outs = _compiled_fw_(list(args))")
-        _codegen_normalize_as_list(lines, "fw_outs", indent_level=2)
+        lines.append(f"{call_indent}with _DisableAutocast_():")
+        lines.append(f"{call_indent}    fw_outs = _compiled_fw_(list(args))")
+        _codegen_normalize_as_list(lines, "fw_outs", indent_level=call_indent_level + 1)
     else:
-        lines.append("    fw_outs = _compiled_fw_(list(args))")
-        _codegen_normalize_as_list(lines, "fw_outs", indent_level=1)
+        lines.append(f"{call_indent}fw_outs = _compiled_fw_(list(args))")
+        _codegen_normalize_as_list(lines, "fw_outs", indent_level=call_indent_level)
 
     lines.append("    _save_(ctx, fw_outs)")
     lines.append("    return _finalize_(ctx, fw_outs)")
