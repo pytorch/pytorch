@@ -41,10 +41,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     skipIfTorchDynamo,
-    TEST_CUDA,
-    TEST_MPS,
-    TEST_PRIVATEUSE1,
-    TEST_XPU,
+    TEST_ACCELERATOR,
     TestCase,
     xfailIfTorchDynamo,
 )
@@ -1021,7 +1018,7 @@ class TestIndexingDevice(TestCase):
     @skipIfTorchDynamo(
         "This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472"
     )
-    @serialTest(TEST_CUDA or TEST_XPU or TEST_MPS or TEST_PRIVATEUSE1)
+    @serialTest(TEST_ACCELERATOR)
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
