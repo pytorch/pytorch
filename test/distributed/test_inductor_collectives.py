@@ -515,7 +515,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             def forward(self, x, world_size, tag, ranks, group_size):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
-                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                res = _functional_collectives.all_gather_single(y, 0, ranks, tag)
                 out = torch.cat(torch.chunk(res, world_size, dim=0), dim=last_dim)
                 return out
 
@@ -554,7 +554,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
                 y = y.transpose_(0, last_dim).contiguous()
-                _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                _functional_collectives.all_gather_single(y, 0, ranks, tag)
                 out = y.transpose_(0, last_dim).contiguous()
                 return out
 
@@ -1073,7 +1073,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor(self):
         def func(inp):
-            ar = _functional_collectives.all_gather_tensor(inp, 0, "0")
+            ar = _functional_collectives.all_gather_single(inp, 0, "0")
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
@@ -1090,7 +1090,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_all_gather_tensor_pg(self):
         def func(inp, *, pg):
-            ar = _functional_collectives.all_gather_tensor(inp, 0, pg)
+            ar = _functional_collectives.all_gather_single(inp, 0, pg)
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
@@ -1107,7 +1107,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_all_gather(self):
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 out,
                 inp,
                 pg,
@@ -1167,7 +1167,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # Duplicated most of the structure from test_dynamo_rewrite_dist_all_gather
         # except uses kwargs to ensure rewrite has matching arg names
         def func(inp, out, *, pg):
-            torch.distributed.all_gather_into_tensor(
+            torch.distributed.all_gather_single(
                 output_tensor=out,
                 input_tensor=inp,
                 group=pg,
@@ -1199,7 +1199,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_rewrite_dist_reduce_scatter(self):
         def func(inp, out, *, pg):
-            torch.distributed.reduce_scatter_tensor(
+            torch.distributed.reduce_scatter_single(
                 out,
                 inp,
                 group=pg,
@@ -1385,7 +1385,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         def func(inp, out, *, pg):
             # user explicitly set the attribute `async_op` to False,
             # there should be no graph break
-            torch.distributed.reduce_scatter_tensor(out, inp, group=pg, async_op=False)
+            torch.distributed.reduce_scatter_single(out, inp, group=pg, async_op=False)
 
         local_size = [4, 4]
         # single-proc test
@@ -1409,7 +1409,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_graphbreaks_unsupported_async_op(self):
         def func(inp, out, *, pg):
-            work = torch.distributed.reduce_scatter_tensor(
+            work = torch.distributed.reduce_scatter_single(
                 out, inp, group=pg, async_op=True
             )
             work.wait()
@@ -1458,7 +1458,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     def test_dynamo_trace_reduce_scatter_tensor(self):
         def func(inp):
-            ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, "0")
+            ar = _functional_collectives.reduce_scatter_single(inp, "sum", 0, "0")
             return ar
 
         inputs = torch.ones(4, 4, device=self.device)
