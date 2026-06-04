@@ -656,6 +656,86 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
+    def test_prologue_fusion_uses_template_aliasing_hook(self):
+        def make_prologue_and_template(hook_blocks: bool):
+            prologue_node = Mock()
+            template_node = Mock()
+            template = Mock()
+
+            prologue_node.get_name.return_value = "prologue"
+            template_node.get_name.return_value = "template"
+            prologue_node.is_template.return_value = False
+            template_node.is_template.return_value = True
+            prologue_node.is_reduction.return_value = False
+            prologue_node.ancestors = OrderedSet()
+            template_node.ancestors = OrderedSet(["prologue"])
+            prologue_node.get_operation_names.return_value = OrderedSet(["prologue"])
+            template_node.get_operation_names.return_value = OrderedSet(["template"])
+            prologue_node.get_buffer_names.return_value = OrderedSet(["x"])
+            template_node.get_buffer_names.return_value = OrderedSet(["out"])
+            prologue_node.get_device.return_value = torch.device("cpu")
+            template_node.get_device.return_value = torch.device("cpu")
+            prologue_node.has_aliasing_or_mutation.return_value = False
+            template_node.has_aliasing_or_mutation.return_value = True
+
+            input_node = Mock()
+            input_node.get_name.return_value = "x"
+            template.inputs = [input_node]
+            template.allow_prologue_fusion = True
+            template.get_allowed_prologue_inps.return_value = OrderedSet(["x"])
+            template.has_aliasing_or_mutation_for_prologue_fusion.return_value = (
+                hook_blocks
+            )
+            template_node.get_template_node.return_value = template
+            template_node.get_template_node_or_throw.return_value = template
+
+            user = Mock()
+            user.node = template_node
+            output = Mock()
+            output.users = [user]
+            prologue_node.outputs = [output]
+            prologue_node.get_nodes.return_value = [prologue_node]
+
+            return prologue_node, template_node, template
+
+        def can_fuse_prologue(hook_blocks: bool) -> bool:
+            scheduler = Scheduler.__new__(Scheduler)
+            scheduler.mutation_renames = {}
+            scheduler._has_multi_stream_nodes = Mock(return_value=False)
+            scheduler._nested_index_equivalent_dep_names = Mock(
+                return_value=OrderedSet()
+            )
+            scheduler._score_fusion_memory_for_can_fuse = Mock(return_value=1_000_000)
+            scheduler.check_prologue_fusion_heuristics_fusable = Mock(return_value=True)
+            scheduler.can_fuse_vertical = Mock(return_value=True)
+            backend = Mock()
+            backend.can_fuse_vertical.return_value = True
+            backend.can_fuse_horizontal.return_value = True
+            scheduler.get_backend = Mock(return_value=backend)
+
+            choices = Mock()
+            choices.can_fuse.return_value = True
+            choices.can_fuse_vertical.return_value = True
+            choices.can_fuse_horizontal.return_value = True
+
+            graph = Mock()
+            graph.no_fuse_buffer_names = OrderedSet()
+
+            prologue_node, template_node, template = make_prologue_and_template(
+                hook_blocks
+            )
+            with V.set_graph_handler(graph), V.set_choices_handler(choices):
+                result = Scheduler._can_fuse(scheduler, prologue_node, template_node)
+
+            template.has_aliasing_or_mutation_for_prologue_fusion.assert_called_once_with(
+                template_node
+            )
+            template_node.has_aliasing_or_mutation.assert_not_called()
+            return result
+
+        self.assertTrue(can_fuse_prologue(hook_blocks=False))
+        self.assertFalse(can_fuse_prologue(hook_blocks=True))
+
     @xfailIfNoAcceleratorTriton
     @onlyCUDA
     def test_index_add_fusion_prevented(self):
