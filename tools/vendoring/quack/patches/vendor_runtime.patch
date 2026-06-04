@@ -1,0 +1,40 @@
+--- a/_compile_worker.py
++++ b/_compile_worker.py
+@@ -13,7 +13,7 @@
+ import threading
+ import time
+ 
+-import quack.cache
++from . import cache
+ from quack._compile_payload import deserialize_worker_value
+ from quack.cache import CompileOnlyFakeTensorMode
+ 
+@@ -85,7 +85,7 @@
+ # This is an intentional internal exception to the rule documented in
+ # ``quack/cache/__init__.py`` ("only :func:`compile_only_mode` mutates the
+ # depth"). External callers should still use ``compile_only_mode()``.
+-quack.cache._COMPILE_ONLY_DEPTH.set(quack.cache._COMPILE_ONLY_DEPTH.get() + 1)
++cache._COMPILE_ONLY_DEPTH.set(cache._COMPILE_ONLY_DEPTH.get() + 1)
+ 
+ def _recv(stream):
+     """Read a length-prefixed pickled message. Returns None on EOF."""
+--- a/autotuner.py
++++ b/autotuner.py
+@@ -31,7 +31,7 @@
+ from ._compile_payload import make_epilogue_source_marker, serialize_worker_value
+ 
+ 
+-PACKAGE_NAME = "quack"
++PACKAGE_NAME = "torch_vendor_quack"
+ VERSION = __version__
+ 
+ 
+@@ -462,7 +462,7 @@
+         workers = []
+         for _ in range(max_workers):
+             p = subprocess.Popen(
+-                [sys.executable, "-m", "quack._compile_worker"],
++                [sys.executable, "-m", "torch._vendor.quack._compile_worker"],
+                 stdin=subprocess.PIPE,
+                 stdout=subprocess.PIPE,
+                 stderr=subprocess.DEVNULL if not verbose else None,

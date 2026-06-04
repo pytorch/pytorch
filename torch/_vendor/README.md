@@ -15,18 +15,22 @@ Instructions to update:
 
 ## `quack`
 
-This is a subset of the full quack library, currently vendoring the following operators:
+This is a subset of the full quack library, currently vendoring the following implementation paths:
 
 - RMSNorm
+- Lower-level GEMM epilogue implementation dependencies used by PyTorch-owned adapters
 
 Note: There are a couple of patchsets applied to make the library vendorable - at a high level:
 - Change exports from absolute `quack.module` to relative `.module`
-- Remove `@custom_op` and `@register_fake` decorators as we don't want to register custom ops here.
+- Rename cache directories / worker module paths so this copy is independent of any external `quack` package
+- Remove custom-op registration from RMSNorm; PyTorch owns the public operator adapters
 
 Source: https://github.com/Dao-AILab/quack
 
-Vendored version: `0.4.0`
-Vendored SHA: `6bceaad2dba3b979b898824b146b1bb2816fc483`
+The vendored version and upstream SHA are recorded in
+`torch/_vendor/quack/__init__.py` (the `Upstream SHA` line and `__version__`),
+which `vendor.sh` writes on each run. That file is the single source of truth;
+do not duplicate the pin here.
 
 Instructions to update:
 

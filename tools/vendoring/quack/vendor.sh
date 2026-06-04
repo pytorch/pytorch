@@ -2,8 +2,9 @@
 # Vendor a subset of the quack library into torch/_vendor/quack.
 #
 # Usage:
-#   tools/vendoring/quack/vendor.sh <sha>                    # clone upstream
-#   tools/vendoring/quack/vendor.sh <sha> <local-checkout>   # use existing clone
+#   tools/vendoring/quack/vendor.sh <sha>                     # clone upstream
+#   tools/vendoring/quack/vendor.sh <sha> <local-checkout>    # use existing clone
+#   tools/vendoring/quack/vendor.sh --check <sha> [checkout]  # re-render + diff, no writes
 #
 # Pipeline:
 #   1. fetch upstream at <sha>
@@ -13,6 +14,10 @@
 #   4. rewrite `quack.*` imports to package-relative
 #   5. verify copyright/license notices still match upstream
 #   6. write a fresh __init__.py recording the SHA and upstream version
+#
+# With --check the subset is rendered into a tempdir and diffed against the
+# committed tree instead of overwriting it; a nonzero exit means a vendored file
+# drifted from what the patches produce (e.g. a hand-edit that bypassed them).
 #
 # If a patch fails, upstream has drifted — inspect the .rej and re-roll.
 # If notice verification fails, a patch moved or removed an attribution
@@ -26,29 +31,77 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
 DEST="$REPO_ROOT/torch/_vendor/quack"
 PATCHES_DIR="$SCRIPT_DIR/patches"
 
-# Modules that rmsnorm depends on (transitively). Everything else upstream
-# ships — gemm, softmax, cross-entropy, etc. — is deliberately excluded.
-FILES=(
-    cache_utils.py
-    compile_utils.py
-    copy_utils.py
+# Temp dirs (cloned upstream, --check render) are removed together on exit via a
+# single trap; helpers append here rather than each installing their own trap.
+CLEANUP_DIRS=()
+UPSTREAM_DIR=""
+cleanup() {
+    local d
+    for d in ${CLEANUP_DIRS[@]+"${CLEANUP_DIRS[@]}"}; do
+        rm -rf "$d"
+    done
+}
+trap cleanup EXIT
+
+# Modules that rmsnorm and the selected GEMM epilogue implementation paths depend
+# on transitively. Everything else upstream ships — softmax, cross-entropy, topk,
+# etc. — is deliberately excluded.
+PYTORCH_ONLY_FILES=(
     cute_dsl_elf_fix.py
     cute_dsl_mlir_threading.py
+)
+
+FILES=(
+    _compile_payload.py
+    _compile_worker.py
+    activation.py
+    autotuner.py
+    bench/__init__.py
+    bench/bench_utils.py
+    blockscaled_gemm_utils.py
+    cache/__init__.py
+    cache/compile_only.py
+    cache/jit.py
+    compile_utils.py
+    copy_utils.py
     cute_dsl_utils.py
+    epi_composable.py
+    epi_ops.py
+    epi_utils.py
+    fast_math.py
+    gemm_act.py
+    gemm_base.py
+    gemm_blockscaled_interface.py
+    gemm_config.py
+    gemm_default_epi.py
+    gemm_sm100.py
+    gemm_sm120.py
+    gemm_sm80.py
+    gemm_sm90.py
+    gemm_tvm_ffi_utils.py
     layout_utils.py
+    mx_utils.py
+    pipeline.py
     reduce.py
     reduction_base.py
     rmsnorm.py
+    rmsnorm_config.py
     rounding.py
+    sm100_utils.py
+    sm80_utils.py
+    sm90_utils.py
+    tile_scheduler.py
     utils.py
+    varlen_utils.py
 )
 
 die()   { echo "vendor_quack: $*" >&2; exit 1; }
-usage() { echo "usage: $0 <sha> [local-quack-checkout]" >&2; exit 2; }
+usage() { echo "usage: $0 [--check] <sha> [local-quack-checkout]" >&2; exit 2; }
 
-# Echo the path to a quack checkout at $sha. If $local is given, validate
-# it's at the requested SHA; otherwise clone into a tmpdir and register a
-# cleanup trap on the caller's shell.
+# Set UPSTREAM_DIR to a quack checkout at $sha. With a local checkout, validate
+# it is at the requested SHA. Otherwise fetch exactly $sha into a tempdir
+# (registered for cleanup). A plain clone only gets branch tips, so the commit
+# is fetched by id — the pinned SHA may not be a branch HEAD upstream.
 fetch_upstream() {
     local sha=$1 local_checkout=${2:-}
 
@@ -57,17 +110,16 @@ fetch_upstream() {
         head=$(git -C "$local_checkout" rev-parse HEAD)
         [[ "$head" == "$sha"* || "$sha" == "$head"* ]] \
             || die "$local_checkout is at $head, not $sha"
-        echo "$local_checkout"
+        UPSTREAM_DIR="$local_checkout"
         return
     fi
 
-    local tmp
-    tmp=$(mktemp -d -t quack-vendor-XXXXXX)
-    # shellcheck disable=SC2064  # expand $tmp now, not at trap time
-    trap "rm -rf '$tmp'" EXIT
-    git clone --quiet "$UPSTREAM_URL" "$tmp"
-    git -C "$tmp" checkout --quiet "$sha"
-    echo "$tmp"
+    UPSTREAM_DIR=$(mktemp -d -t quack-vendor-XXXXXX)
+    CLEANUP_DIRS+=("$UPSTREAM_DIR")
+    git -C "$UPSTREAM_DIR" init --quiet
+    git -C "$UPSTREAM_DIR" remote add origin "$UPSTREAM_URL"
+    git -C "$UPSTREAM_DIR" fetch --quiet --depth 1 origin "$sha"
+    git -C "$UPSTREAM_DIR" checkout --quiet FETCH_HEAD
 }
 
 extract_version() {
@@ -80,11 +132,19 @@ extract_version() {
 copy_pristine() {
     local upstream=$1
     for f in "${FILES[@]}"; do
+        mkdir -p "$DEST/$(dirname "$f")"
         cp "$upstream/quack/$f" "$DEST/$f"
     done
     # Apache-2.0 attribution: quack is redistributed under its upstream
     # license, which must accompany the vendored source.
     cp "$upstream/LICENSE" "$DEST/LICENSE"
+}
+
+copy_pytorch_only() {
+    local f
+    for f in "${PYTORCH_ONLY_FILES[@]}"; do
+        git -C "$REPO_ROOT" show "HEAD:torch/_vendor/quack/$f" > "$DEST/$f"
+    done
 }
 
 apply_patches() {
@@ -107,8 +167,24 @@ rewrite_imports() {
 
             # import quack.X as X         -> from . import X   (drop redundant alias)
             s|^([ \t]*)import quack\.([[:alnum:]_]+) as \2[ \t]*$|\1from . import \2|
+
+            # import quack.X as Y         -> from . import X as Y
+            s|^([ \t]*)import quack\.([[:alnum:]_]+) as ([[:alnum:]_]+)[ \t]*$|\1from . import \2 as \3|
+
+            # import quack.X.Y as Z       -> from .X import Y as Z
+            s|^([ \t]*)import quack\.([[:alnum:]_]+)\.([[:alnum:]_]+) as ([[:alnum:]_]+)[ \t]*$|\1from .\2 import \3 as \4|
         ' "$DEST/$f"
     done
+
+    # The generic rewrite runs relative to torch._vendor.quack, but files inside
+    # nested packages need imports relative to their own package.
+    sed -i -E '
+        s|from \.cache\.jit import |from .jit import |
+        s|from \.cache\.compile_only import |from .compile_only import |
+    ' "$DEST/cache/__init__.py"
+    sed -i -E '
+        s|from \. import cache as _state|import torch._vendor.quack.cache as _state|
+    ' "$DEST/cache/compile_only.py"
 }
 
 # Guard against patches or import rewrites accidentally dropping or
@@ -144,10 +220,11 @@ write_init() {
 
 Upstream SHA: $sha (quack $version)
 
-Only the modules required by torch._native.ops.norm.rmsnorm_impl are vendored.
-Imports are rewritten to be package-relative so this copy is independent of any
-\`\`quack\`\` top-level package that may be installed via pip. Custom op namespaces
-are renamed from \`\`quack::\`\` to \`\`torch_vendor_quack::\`\` for the same reason.
+Only the modules required by torch._native.ops.norm.rmsnorm_impl and selected
+GEMM epilogue implementation paths are vendored. Imports are rewritten to be
+package-relative so this copy is independent of any \`\`quack\`\` top-level
+package that may be installed via pip. Custom op namespaces are renamed from
+\`\`quack::\`\` to \`\`torch_vendor_quack::\`\` for the same reason.
 """
 __version__ = "$version"
 
@@ -171,23 +248,54 @@ __all__ = [
 EOF
 }
 
-main() {
-    [[ $# -eq 1 || $# -eq 2 ]] || usage
-    local sha=$1 local_checkout=${2:-} upstream version
-
-    upstream=$(fetch_upstream "$sha" "$local_checkout")
-    version=$(extract_version "$upstream/quack/__init__.py")
-
+# Render the vendored subset into $DEST, wiping any previous contents first.
+render() {
+    local upstream=$1 sha=$2 version=$3
     mkdir -p "$DEST"
-    rm -f "$DEST"/*.py "$DEST/LICENSE"
-
+    find "$DEST" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
     copy_pristine "$upstream"
+    copy_pytorch_only
     apply_patches
     rewrite_imports
     verify_notices "$upstream"
     write_init "$sha" "$version"
+}
 
-    echo "Vendored quack @ $sha (quack $version) into torch/_vendor/quack"
+# Diff a freshly rendered $DEST against the committed tree; nonzero on drift.
+assert_matches() {
+    local committed=$1 drift
+    if drift=$(diff -r --exclude=__pycache__ "$committed" "$DEST"); then
+        echo "OK: re-vendoring reproduces $committed"
+        return
+    fi
+    echo "vendor_quack: re-vendoring does not match $committed:" >&2
+    echo "$drift" >&2
+    die "edit tools/vendoring/quack/patches, not the vendored files"
+}
+
+main() {
+    local check_only=0
+    if [[ "${1:-}" == "--check" ]]; then
+        check_only=1
+        shift
+    fi
+    [[ $# -eq 1 || $# -eq 2 ]] || usage
+    local sha=$1 local_checkout=${2:-} version
+
+    fetch_upstream "$sha" "$local_checkout"
+    version=$(extract_version "$UPSTREAM_DIR/quack/__init__.py")
+
+    if [[ $check_only -eq 0 ]]; then
+        render "$UPSTREAM_DIR" "$sha" "$version"
+        echo "Vendored quack @ $sha (quack $version) into $DEST"
+        return
+    fi
+
+    local committed=$DEST
+    DEST=$(mktemp -d -t quack-vendor-check-XXXXXX)
+    CLEANUP_DIRS+=("$DEST")
+    render "$UPSTREAM_DIR" "$sha" "$version"
+    assert_matches "$committed"
 }
 
 main "$@"

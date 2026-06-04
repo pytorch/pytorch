@@ -1,0 +1,47 @@
+--- a/cache/jit.py
++++ b/cache/jit.py
+@@ -33,7 +33,7 @@
+ # `quack.cache` (the package itself) holds the mutable runtime flags as a
+ # single source of truth; reads happen via attribute access on `_state` so we
+ # always see the live value, not a snapshot taken at module import.
+-import quack.cache as _state  # noqa: E402  (intentional partial-import; see __init__.py)
++import torch._vendor.quack.cache as _state  # noqa: E402  (intentional partial-import; see __init__.py)
+ 
+ 
+ EXPORT_FUNC_NAME = "func"
+@@ -49,7 +49,7 @@
+     if _state.CACHE_DIR is not None:
+         cache_dir = Path(_state.CACHE_DIR)
+     else:
+-        cache_dir = Path(tempfile.gettempdir()) / getuser() / "quack_cache"
++        cache_dir = Path(tempfile.gettempdir()) / getuser() / "torch_vendor_quack_cache"
+     cache_dir.mkdir(parents=True, exist_ok=True)
+     return cache_dir
+ 
+@@ -75,7 +75,7 @@
+     # Hash the entire `quack` package, not just `quack/cache/`. Resolving via
+     # the top-level package import keeps the fingerprint stable regardless of
+     # where inside the package this file lives.
+-    import quack as _quack
++    import torch._vendor.quack as _quack
+ 
+     _hash_source_dir(h, Path(_quack.__file__).resolve().parent)
+     for extra_dir in _state.EXTRA_SOURCE_DIRS:
+@@ -253,7 +253,7 @@
+                         function_name=EXPORT_FUNC_NAME,
+                     )
+                 except Exception as e:
+-                    print(f"quack cache: export failed for key {sha}: {e}")
++                    print(f"torch._vendor.quack cache: export failed for key {sha}: {e}")
+                 cache[cache_key] = compiled_fn
+                 return _noop_kernel if compile_only else compiled_fn
+         except RuntimeError as e:
+@@ -261,7 +261,7 @@
+             # Fall back to in-process compile, no disk write. Better to do
+             # the work twice than to fail the test.
+             print(
+-                f"quack cache: lock timeout for key {sha}: {e}; "
++                f"torch._vendor.quack cache: lock timeout for key {sha}: {e}; "
+                 f"falling back to in-process compile without disk cache"
+             )
+             misses += 1

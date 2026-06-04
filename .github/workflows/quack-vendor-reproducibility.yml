@@ -1,0 +1,54 @@
+# Reproducibility guard for the vendored quack subset (torch/_vendor/quack).
+#
+# Runs tools/vendoring/quack/vendor.sh --check against the SHA pinned in
+# torch/_vendor/quack/__init__.py: it re-renders the subset into a tempdir and
+# diffs it against the committed tree, failing on any drift. This catches
+# hand-edits to vendored files that bypass the patch set (such edits work
+# locally but are silently clobbered on the next re-vendor). Fix drift by
+# editing tools/vendoring/quack/patches, not the vendored files.
+#
+# Run it yourself (needs only git + patch + bash; no torch / CUTLASS / GPU):
+#
+#   sha=$(sed -n 's/.*Upstream SHA:[[:space:]]*\([0-9a-f]\{7,40\}\).*/\1/p' torch/_vendor/quack/__init__.py)
+#   tools/vendoring/quack/vendor.sh --check "$sha"                 # clones the pinned SHA
+#   tools/vendoring/quack/vendor.sh --check "$sha" /path/to/quack  # or reuse a local checkout
+#
+# A pytest entry wraps the same check for local use (skips unless opted in):
+#
+#   QUACK_VENDOR_ALLOW_CLONE=1 pytest test/python_native/test_quack_vendor.py -k test_vendor_script
+
+name: Vendored quack reproducibility
+
+on:
+  pull_request:
+    paths:
+      - torch/_vendor/quack/**
+      - tools/vendoring/quack/**
+      - test/python_native/test_quack_vendor.py
+      - .github/workflows/quack-vendor-reproducibility.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    if: github.repository_owner == 'pytorch'
+    name: re-vendor and diff
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pytorch
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Re-vendor and assert no drift
+        run: |
+          sha=$(sed -n 's/.*Upstream SHA:[[:space:]]*\([0-9a-f]\{7,40\}\).*/\1/p' \
+                torch/_vendor/quack/__init__.py)
+          [ -n "$sha" ] || { echo "could not parse pinned Upstream SHA"; exit 1; }
+          tools/vendoring/quack/vendor.sh --check "$sha"
