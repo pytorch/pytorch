@@ -1108,6 +1108,17 @@ class DictViewVariable(VariableTracker):
         s.call_method(tx, "difference_update", [other_], {})
         return s
 
+    def nb_and_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L6105-L6188 (_PyDictView_Intersect)
+        s = VariableTracker.build(tx, set).call_function(tx, [self], {})
+        s.call_method(tx, "intersection_update", [other], {})
+        return s
+
 
 class DictKeysVariable(DictViewVariable):
     # PyDictKeys_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6365
@@ -1216,9 +1227,11 @@ class DictValuesVariable(DictViewVariable):
 
     # dict.values() do not implement tp_as_number
     nb_or_impl = None  # type: ignore[bad-override]
-    nb_inplace_or = None
+    nb_inplace_or_impl = None  # type: ignore[bad-override]
     nb_subtract_impl = None  # type: ignore[bad-override]
     nb_inplace_subtract_impl = None  # type: ignore[bad-override]
+    nb_and_impl = None  # type: ignore[bad-override]
+    nb_inplace_and_impl = None  # type: ignore[bad-override]
 
     def is_hashable(self) -> bool:
         return True
