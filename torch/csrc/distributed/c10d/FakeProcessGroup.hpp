@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <iterator>
+
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -45,6 +48,41 @@ class FakeProcessGroup : public Backend {
 
   c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+  }
+
+  bool supportsSplitting() const override {
+    return true;
+  }
+
+  // Create a sub-group from a subset of the parent's ranks. The fake backend
+  // performs no real communication, so unlike NCCL there is no split collective
+  // to join: ranks outside the subgroup simply return nullptr (signalling
+  // non-membership), and members return a fresh FakeProcessGroup whose rank is
+  // their position within the sorted subgroup.
+  c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& /* store */,
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Backend::Options>& opts) override {
+    auto it = std::find(ranks.begin(), ranks.end(), rank_);
+    if (it == ranks.end()) {
+      return nullptr;
+    }
+    auto groupRank = static_cast<int>(std::distance(ranks.begin(), it));
+    auto fakeOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
+    if (!fakeOpts) {
+      fakeOpts = c10::make_intrusive<Options>();
+    }
+    return c10::make_intrusive<FakeProcessGroup>(
+        groupRank, static_cast<int>(ranks.size()), std::move(fakeOpts));
+  }
+
+  // The fake backend has nothing to synchronize, so sequence numbers are a
+  // no-op. They are overridden (rather than left to throw) because split_group
+  // unconditionally seeds a sequence number on the resulting backend.
+  void setSequenceNumberForGroup() override {}
+
+  uint64_t getSequenceNumberForGroup() override {
+    return 0;
   }
 
   c10::intrusive_ptr<Work> broadcast(
@@ -365,7 +403,9 @@ class FakeProcessGroup : public Backend {
 
   // Private constructor used by official APIs
   FakeProcessGroup(int rank, int size, c10::intrusive_ptr<Options> options)
-      : Backend(rank, size), options_(std::move(options)) {
+      : Backend(rank, size),
+        options_(
+            options ? std::move(options) : c10::make_intrusive<Options>()) {
     TORCH_CHECK(
         rank >= 0 && rank < size,
         "Cannot init process group where rank (",
