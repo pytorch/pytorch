@@ -1,12 +1,10 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa: B950
-# flake8: noqa: E731
 import contextlib
 import copy
 import functools
 import math
 import re
-import unittest  # noqa: F811
+import unittest
 from importlib import import_module
 
 import torch
@@ -15,6 +13,7 @@ import torch._dynamo.test_case
 import torch._functorch.config
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.checkpoint
 from functorch.compile import (
     default_partition,
@@ -2380,6 +2379,251 @@ sum_1: aten.sum.default -> PREFER_RECOMPUTE
 cos: aten.cos.default -> PREFER_RECOMPUTE""",
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_region_activation_memory_budget_reduces_act_mem(self):
+        N, NUM_LAYERS = 1000, 4
+
+        class Model(torch.nn.Module):
+            def __init__(self, budget=None):
+                super().__init__()
+                self.budget = budget
+                self.linears = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+
+            def forward(self, x):
+                if self.budget is not None:
+                    with torch.autograd.graph.region_activation_memory_budget(
+                        self.budget
+                    ):
+                        for linear in self.linears:
+                            x = linear(x).relu()
+                        return x.sum()
+                else:
+                    for linear in self.linears:
+                        x = linear(x).relu()
+                    return x.sum()
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            act_mem = (
+                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
+            )
+            out.backward()
+            return act_mem
+
+        x = torch.randn(N, N, device="cuda")
+
+        torch._dynamo.reset()
+        compiled = torch.compile(Model().cuda(), backend="aot_eager")
+        self.assertGreater(get_act_mem(lambda: compiled(x)), 0)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(Model(budget=0.0).cuda(), backend="aot_eager")
+        self.assertEqual(get_act_mem(lambda: compiled(x)), 0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_region_activation_memory_budget_per_region(self):
+        """Different graphs (separated by a graph break) can have different
+        memory budgets."""
+        N, NUM_LAYERS = 1000, 2
+
+        class Model(torch.nn.Module):
+            def __init__(self, budget_a, budget_b):
+                super().__init__()
+                self.budget_a = budget_a
+                self.budget_b = budget_b
+                self.linears_a = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+                self.linears_b = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+
+            def forward(self, x):
+                with torch.autograd.graph.region_activation_memory_budget(
+                    self.budget_a
+                ):
+                    for linear in self.linears_a:
+                        x = linear(x).relu()
+                torch._dynamo.graph_break()
+                with torch.autograd.graph.region_activation_memory_budget(
+                    self.budget_b
+                ):
+                    for linear in self.linears_b:
+                        x = linear(x).relu()
+                    return x.sum()
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            act_mem = (
+                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
+            )
+            out.backward()
+            return act_mem
+
+        x = torch.randn(N, N, device="cuda")
+
+        torch._dynamo.reset()
+        both_save = torch.compile(Model(1.0, 1.0).cuda(), backend="aot_eager")
+        mem_both_save = get_act_mem(lambda: both_save(x))
+
+        torch._dynamo.reset()
+        a_recomp = torch.compile(Model(0.0, 1.0).cuda(), backend="aot_eager")
+        mem_a_recomp = get_act_mem(lambda: a_recomp(x))
+
+        torch._dynamo.reset()
+        b_recomp = torch.compile(Model(1.0, 0.0).cuda(), backend="aot_eager")
+        mem_b_recomp = get_act_mem(lambda: b_recomp(x))
+
+        torch._dynamo.reset()
+        both_recomp = torch.compile(Model(0.0, 0.0).cuda(), backend="aot_eager")
+        mem_both_recomp = get_act_mem(lambda: both_recomp(x))
+
+        # Both save > either one recomputing > both recomputing
+        self.assertGreater(mem_both_save, mem_a_recomp)
+        self.assertGreater(mem_both_save, mem_b_recomp)
+        self.assertGreater(mem_a_recomp, mem_both_recomp)
+        self.assertGreater(mem_b_recomp, mem_both_recomp)
+
+    def test_region_activation_memory_budget_validation(self):
+        region_activation_memory_budget = (
+            torch.autograd.graph.region_activation_memory_budget
+        )
+        with self.assertRaisesRegex(TypeError, "expects a float"):
+            region_activation_memory_budget(True)
+        with self.assertRaisesRegex(TypeError, "expects a float"):
+            region_activation_memory_budget("0.5")
+        with self.assertRaisesRegex(ValueError, r"\[0, 1\]"):
+            region_activation_memory_budget(2.0)
+        with self.assertRaisesRegex(ValueError, r"\[0, 1\]"):
+            region_activation_memory_budget(-0.1)
+
+    def test_region_activation_memory_budget_eager_raises(self):
+        """Using the context manager outside a torch.compile region is an error."""
+        with self.assertRaisesRegex(RuntimeError, "inside a torch.compile region"):
+            with torch.autograd.graph.region_activation_memory_budget(0.5):
+                pass
+
+    def test_region_activation_memory_budget_conflict_raises(self):
+        """Two different budgets in one graph (no graph break) is an error: the
+        partitioner applies a single budget per graph."""
+
+        def fn(x, y):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                a = (torch.mm(x, y) + 1).relu()
+            with torch.autograd.graph.region_activation_memory_budget(0.8):
+                return (torch.mm(a, y) + 1).relu()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
+            cfn(x, y).sum().backward()
+
+    def test_region_activation_memory_budget_partial_annotation_raises(self):
+        """Annotating only part of a graph is rejected: the budget is applied
+        graph-wide, so it must cover the entire forward."""
+
+        def fn(x, y):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                a = (torch.mm(x, y) + 1).relu()
+            # This op is outside the region -> partial annotation.
+            return (a * 2).relu()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "must cover the entire forward"):
+            cfn(x, y).sum().backward()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_region_activation_memory_budget_covers_invoke_subgraph(self):
+        """A budget covering a forward that contains an invoke_subgraph
+        (nested_compile_region) applies inside the HOP body too: the budget
+        propagates into the body so the whole forward is consistently covered."""
+        from torch.compiler import nested_compile_region
+
+        N, NUM_LAYERS = 1000, 4
+
+        def build(budget):
+            linears = torch.nn.ModuleList(
+                [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+            ).cuda()
+
+            @nested_compile_region
+            def region(x):
+                for lin in linears:
+                    x = lin(x).relu()
+                return x
+
+            def fn(x):
+                # Wrap the entire forward (HOP call + reduction); the budget must
+                # consistently cover the HOP body too.
+                if budget is None:
+                    return region(x).sum()
+                with torch.autograd.graph.region_activation_memory_budget(budget):
+                    return region(x).sum()
+
+            return fn
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            act_mem = (
+                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
+            )
+            out.backward()
+            return act_mem
+
+        x = torch.randn(N, N, device="cuda")
+
+        torch._dynamo.reset()
+        baseline = torch.compile(build(None), backend="aot_eager", fullgraph=True)
+        self.assertGreater(get_act_mem(lambda: baseline(x)), 0)
+
+        torch._dynamo.reset()
+        recompute = torch.compile(build(0.0), backend="aot_eager", fullgraph=True)
+        self.assertEqual(get_act_mem(lambda: recompute(x)), 0)
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_region_activation_memory_budget_distinct_per_invoke_subgraph_raises(self):
+        """Different budgets in two invoke_subgraph regions of a single graph are
+        rejected: the agreement check recurses into nested subgraphs, so the
+        outermost graph sees both budgets. Use a graph break for different
+        budgets."""
+        from torch.compiler import nested_compile_region
+
+        wa = torch.randn(8, 8, requires_grad=True)
+        wb = torch.randn(8, 8, requires_grad=True)
+
+        @nested_compile_region
+        def region_a(x):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                return (x @ wa).relu()
+
+        @nested_compile_region
+        def region_b(x):
+            with torch.autograd.graph.region_activation_memory_budget(0.8):
+                return (x @ wb).relu()
+
+        def fn(x):
+            return region_b(region_a(x)).sum()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
+            cfn(x).backward()
+
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
@@ -2817,10 +3061,106 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return (detach_6,)""",
         )
 
+    def test_chunked_loss_remat(self):
+        """Chunked loss pattern: multiple backward regions from chunk_loss.backward()
+        calls, but only the final x.backward() region needs remat. The pass should
+        skip the chunk backwards and only rematerialize for the final one."""
+        dim = 32
+        chunksz = 4
 
-devices = ["cuda", "hpu"]
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = nn.Linear(dim, dim, bias=False)
+                self.l2 = nn.Linear(dim, dim, bias=False)
+
+            def _fn(self, x):
+                return self.l2(F.gelu(self.l1(x), approximate="tanh"))
+
+            def forward(self, x):
+                return checkpoint(self._fn, x, use_reentrant=False)
+
+        class ChunkedLoss(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = Block()
+                self.head = nn.Linear(dim, dim, bias=False)
+
+            def forward(self, x, y):
+                x = self.block(x)
+                x_detached = x.detach().requires_grad_()
+                total = 0
+                for start in range(0, x_detached.shape[0], chunksz):
+                    end = start + chunksz
+                    chunk_loss = (
+                        F.mse_loss(
+                            self.head(x_detached[start:end]),
+                            y[start:end],
+                            reduction="sum",
+                        )
+                        / x_detached.shape[0]
+                    )
+                    chunk_loss.backward()
+                    total = total + chunk_loss.detach()
+                x.backward(x_detached.grad)
+                return total
+
+        model = ChunkedLoss()
+        x = torch.randn(12, dim)
+        y = torch.randn(12, dim)
+
+        result_with, gm_with = self._compile_and_capture(model, True, (x, y))
+        result_without, gm_without = self._compile_and_capture(model, False, (x, y))
+
+        torch.testing.assert_close(result_with, result_without)
+
+        # Without remat, gelu appears once (forward only).
+        # With remat, gelu is duplicated into the backward region.
+        gelu_without = self.count_op(gm_without, torch.ops.aten.gelu.default)
+        gelu_with = self.count_op(gm_with, torch.ops.aten.gelu.default)
+        self.assertEqual(gelu_without, 1)
+        self.assertEqual(gelu_with, 2, "gelu should be recomputed in backward")
+
+    def test_two_backward_regions_needing_remat_errors(self):
+        """Two independent backward calls that both need recompute should error."""
+        dim = 32
+
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = nn.Linear(dim, dim, bias=False)
+                self.l2 = nn.Linear(dim, dim, bias=False)
+
+            def _fn(self, x):
+                return self.l2(F.gelu(self.l1(x), approximate="tanh"))
+
+            def forward(self, x):
+                return checkpoint(self._fn, x, use_reentrant=False)
+
+        class TwoBackwards(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block1 = Block()
+                self.block2 = Block()
+
+            def forward(self, x):
+                y = self.block1(x)
+                z = self.block2(y)
+                z.sum().backward(retain_graph=True)
+                y.sum().backward()
+                return z.detach()
+
+        x = torch.randn(8, dim, requires_grad=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "require recomputation",
+        ):
+            self._compile_and_capture(TwoBackwards(), True, (x,))
+
+
 instantiate_device_type_tests(
-    ActivationCheckpointingViaTagsTests, globals(), only_for=devices
+    ActivationCheckpointingViaTagsTests, globals(), except_for="cpu"
 )
 
 
@@ -2881,6 +3221,18 @@ class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCa
             ):
                 torch.autograd.grad(loss, (x,))
 
+    def test_patch_engine_backward_requires_non_strict_tracing(self):
+        x = torch.randn(2, 4, requires_grad=True)
+        loss = torch.sin(x).sum()
+
+        with torch.compiler._patch_engine_backward():
+            with self.assertRaisesRegex(
+                AssertionError,
+                "_patch_engine_backward\\(\\) must be used under "
+                "_non_strict_tracing_context\\(\\)",
+            ):
+                loss.backward()
+
     def test_patch_autograd_grad_does_not_leak_backward_tag(self):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.fx.traceback import preserve_node_meta
@@ -2896,6 +3248,37 @@ class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCa
         with (
             torch.compiler._non_strict_tracing_context(),
             torch.compiler._patch_autograd_grad(),
+            preserve_node_meta(),
+        ):
+            gm = make_fx(fn)(x)
+
+        backward_nodes = [
+            node for node in gm.graph.nodes if node.meta.get("autograd_backward", False)
+        ]
+        self.assertTrue(backward_nodes)
+
+        neg_nodes = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.neg.default
+        )
+        self.assertEqual(len(neg_nodes), 1)
+        self.assertNotIn("autograd_backward", neg_nodes[0].meta)
+        self.assertEqual(neg_nodes[0].meta.get("custom", {}), {"ac_region_id": 0})
+
+    def test_patch_engine_backward_does_not_leak_backward_tag(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.traceback import preserve_node_meta
+
+        x = torch.randn(2, 4, requires_grad=True)
+
+        def fn(x):
+            with torch.fx.traceback.annotate({"ac_region_id": 0}):
+                y = torch.sin(x)
+                y.sum().backward()
+                return torch.neg(y)
+
+        with (
+            torch.compiler._non_strict_tracing_context(),
+            torch.compiler._patch_engine_backward(),
             preserve_node_meta(),
         ):
             gm = make_fx(fn)(x)

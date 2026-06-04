@@ -119,6 +119,22 @@ class UnsupportedFakeTensorException(RuntimeError):
     reason: str
 
 
+class FakeTensorDeviceMismatchError(RuntimeError):
+    def __init__(
+        self,
+        func: OpOverload,
+        common_device: torch.device,
+        device: torch.device,
+    ) -> None:
+        self.func = func
+        self.common_device = common_device
+        self.device = device
+        super().__init__(
+            "Expected all tensors to be on the same device, but found "
+            f"at least two devices, {common_device} and {device}!"
+        )
+
+
 @dataclass
 class DynamicOutputShapeException(RuntimeError):
     func: OpOverload
@@ -369,6 +385,27 @@ class FakeTensorConverter:
 
         del self.constant_storage_mapping[weak_st]
 
+    def clear_non_cpu_constants(self) -> None:
+        """Clear non-CPU constants while keeping cheap CPU constants for folding."""
+        for weak_st, weak_tensor_refs in list(self.constant_storage_mapping.items()):
+            live_tensor_refs: list[ReferenceType[FakeTensor]] = []
+            constant: Tensor | None = None
+            for weak_tensor_ref in weak_tensor_refs:
+                ten = weak_tensor_ref()
+                if ten is None or ten.constant is None:
+                    continue
+
+                live_tensor_refs.append(weak_tensor_ref)
+                if constant is None:
+                    constant = ten.constant
+
+            if constant is None:
+                del self.constant_storage_mapping[weak_st]
+            elif constant.device.type == "cpu":
+                self.constant_storage_mapping[weak_st] = live_tensor_refs
+            else:
+                self.invalidate_constant_aliases(constant)
+
     def _get_memo(self, t: Tensor) -> FakeTensor | None:
         tid = self.meta_converter.describer.lookup_tensor.get(t)
         if tid is None:
@@ -458,6 +495,25 @@ class FakeTensorConverter:
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
+
+        # Propagate grad_dtype here rather than in meta_converter because
+        # meta tensors don't carry autograd metadata.
+        # Unwrap FunctionalTensor because accessing is_leaf/grad_fn on a
+        # FunctionalTensor view whose base was mutated (e.g. via set_())
+        # triggers lazy view replay through __torch_dispatch__, which
+        # errors without an active FunctionalTensorMode.
+        inner_t = (
+            torch._from_functional_tensor(t.elem)
+            if isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor)
+            else t
+        )
+        if (
+            inner_t.requires_grad
+            and inner_t.is_leaf
+            and inner_t.grad_dtype != inner_t.dtype
+            and out.is_leaf
+        ):
+            out.grad_dtype = inner_t.grad_dtype
 
         from torch._dynamo.source import RandomValueSource
 
@@ -756,18 +812,6 @@ class FakeTensor(Tensor):
     # that have dispatch keys which are higher than the "meta" key:
     # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
 
-    # We don't support named tensors; graph break
-    @property
-    # pyrefly: ignore [bad-override]
-    def names(self) -> list[str]:
-        raise UnsupportedFakeTensorException(
-            "torch.compile doesn't support named tensors"
-        )
-
-    @names.setter
-    def names(self, _: list[str]) -> None:
-        raise NotImplementedError
-
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
         """Normalize device by initializing GPU context and setting device index."""
@@ -1050,9 +1094,7 @@ class FakeTensor(Tensor):
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
-            raise RuntimeError(
-                f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
-            )
+            raise FakeTensorDeviceMismatchError(func, common_device, t.device)
 
         for arg in flat_args:
             merge_devices(arg)
@@ -1375,7 +1417,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # [in_kernel_invocation]
         # when FakeTensor is invoked in user code, .device should return
-        # the fake_device of the tensor so that code such as as `if x.is_cuda`
+        # the fake_device of the tensor so that code such as `if x.is_cuda`
         # or torch.zeros([10, 10], device=x.device) continues to execute as if
         # the FakeTensor were real. However, within kernel execution, we return
         # the `Meta` device because all computation within the kernels should
@@ -1779,7 +1821,7 @@ class FakeTensorMode(TorchDispatchMode):
         from torch._higher_order_ops.auto_functionalize import (
             FunctionalCallableWithEpilogue,
         )
-        from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
+        from torch._higher_order_ops.utils import SubgraphCallableWrapper
 
         if isinstance(args, (list, tuple, dict)):
             result.append(type(args))
@@ -1816,12 +1858,8 @@ class FakeTensorMode(TorchDispatchMode):
                 result.append(type(arg))
                 result.append(id(arg))
                 id_hashed_objects.append(arg)
-            elif isinstance(arg, FunctionalizeCtxWrapper):
-                # Special case for AOT Dispatcher first pass, where the fake
-                # tensor is called on the functional wrapper of the subgraph.
+            elif isinstance(arg, SubgraphCallableWrapper):
                 result.append(hash(arg))
-                # functional wrapper is destroyed after fake tensor prop. We
-                # need to put the finalizer on the subgraph.
                 id_hashed_objects.append(arg.subgraph)
             elif isinstance(arg, FunctionalCallableWithEpilogue):
                 result.append(type(arg))
@@ -2916,11 +2954,14 @@ class FakeTensorMode(TorchDispatchMode):
         def maybe_run_unsafe_fallback(
             error: RuntimeError | None = None,
         ) -> FakeTensor | None:
-            # We infer the meta of a custom ops that return None to just
-            # return None. custom ops are not allowed to mutate metadata
-            # of their inputs, so this is safe.
+            # We infer the meta of custom ops that return None to just
+            # return None, and Tag.out ops to return their out= args.
+            # Custom ops are not allowed to mutate metadata of their
+            # inputs, so this is safe.
             if torch._library.utils.can_generate_trivial_fake_impl(func):
-                return None
+                return torch._library.utils.generate_trivial_fake_impl(
+                    func, *args, **kwargs
+                )
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not self.can_run_unsafe_fallback(func):
                 raise UnsupportedOperatorException(func)
@@ -3417,12 +3458,27 @@ def _check_for_subclass(flat_args: Sequence[object]) -> bool:
 
 
 def _check_for_subclass_arg(x: object) -> bool:
-    return (
-        not isinstance(x, FakeTensor)
-        and isinstance(x, Tensor)
-        and type(x) is not Tensor
-        and type(x) is not torch.nn.Parameter
+    if isinstance(x, FakeTensor):
+        return False
+    if not isinstance(x, Tensor):
+        return False
+
+    x_type = type(x)
+    if x_type is Tensor:
+        return False
+
+    # Use the concrete type instead of isinstance because wrapper subclasses
+    # marked as Parameters (e.g. Parameter(TwoTensor(...))) still need subclass
+    # dispatch. Only metadata-only Parameter subclasses that inherit Tensor's
+    # disabled __torch_dispatch__ can follow the regular Parameter path.
+    is_metadata_only_parameter_subclass = (
+        issubclass(x_type, torch.nn.Parameter)
+        and x_type.__torch_dispatch__ is Tensor.__torch_dispatch__
     )
+    if is_metadata_only_parameter_subclass:
+        return False
+
+    return True
 
 
 _DISPATCH_META_HANDLERS = {

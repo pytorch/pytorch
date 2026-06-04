@@ -602,13 +602,41 @@ class DTensor(torch.Tensor):
             will depend on if the `DTensor` requires_grad or not.
         """
         if not torch.is_grad_enabled():
-            return self._local_tensor
+            result = self._local_tensor
+        else:
+            if grad_placements is not None and not isinstance(grad_placements, tuple):
+                grad_placements = tuple(grad_placements)
+            result = _ToTorchTensor.apply(
+                self, grad_placements
+            )  # pyre-ignore[16]: autograd func
 
-        if grad_placements is not None and not isinstance(grad_placements, tuple):
-            grad_placements = tuple(grad_placements)
-        return _ToTorchTensor.apply(
-            self, grad_placements
-        )  # pyre-ignore[16]: autograd func
+        # Preserve nn.Parameter-ness: if self is an nn.Parameter (i.e. has the
+        # _is_param flag, which is how Parameter is represented for custom
+        # tensor subclasses like DTensor), make the returned local tensor also
+        # satisfy isinstance(result, nn.Parameter). See gh-166156.
+        #
+        # BC: this branch only runs when self has `_is_param` set, i.e. self
+        # is already a Parameter(DTensor). All raw-DTensor call sites are
+        # byte-for-byte unchanged, including the historical identity guarantee
+        # `to_local() is self._local_tensor` in the no-grad path. The only
+        # observable change is the targeted bug fix: Parameter(DTensor) inputs
+        # no longer return a plain Tensor.
+        #
+        # We probe `_is_param` via getattr rather than isinstance(self,
+        # nn.Parameter) for two reasons: (1) it avoids importing torch.nn at
+        # this layer, and (2) it matches the exact mechanism that
+        # nn.parameter._ParameterMeta.__instancecheck__ uses to recognize
+        # Parameter-ness on custom tensor subclasses.
+        if getattr(self, "_is_param", False) and not getattr(
+            result, "_is_param", False
+        ):
+            if result is self._local_tensor:
+                # Avoid mutating the internal storage of this DTensor by
+                # returning a fresh view to attach the flag to.
+                result = result.view_as(result)
+            result._is_param = True
+
+        return result
 
     def redistribute(
         self,
@@ -650,12 +678,16 @@ class DTensor(torch.Tensor):
         Keyword args:
             async_op (bool, optional): whether to perform the DTensor redistribute operation
                 asynchronously or not. Default: False
-            forward_dtype (torch.dtype, optional): the local tensor datatype can be converted to
-                ``forward_dtype`` before redistributing the local tensor in its forward.
-                The result DTensor will be in ``forward_dtype`` Default: None.
-            backward_dtype (torch.dtype, optional): the local tensor datatype can be converted to
-                ``backward_dtype`` before redistributing the local tensor in its backward.
-                The result DTensor gradient would be converted back to the current DTensor dtype. Default: None
+            forward_dtype (torch.dtype, optional): cast the local tensor to
+                ``forward_dtype`` before running the forward collective.
+                The result DTensor will be in ``forward_dtype``. If ``None``,
+                no conversion is performed. Default: None
+            backward_dtype (torch.dtype, optional): cast the gradient to
+                ``backward_dtype`` before running the backward collective.
+                After the collective the gradient is always cast back to the
+                input DTensor's dtype. If ``None``, the backward collective
+                runs at the input DTensor's dtype (not ``forward_dtype``).
+                Default: None
 
         Returns:
             A :class:`DTensor` object
@@ -693,9 +725,24 @@ class DTensor(torch.Tensor):
                 )
         placements = tuple(placements)
 
+        input_dtype = self._local_tensor.dtype
+        forward_dtype = forward_dtype or input_dtype
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(
-            self, device_mesh, placements, async_op, forward_dtype, backward_dtype
+            self,
+            device_mesh,
+            placements,
+            async_op,
+            {
+                "op_dtype": forward_dtype,
+                "out_dtype": forward_dtype,
+                "backward_options": {
+                    # Absent backward_dtype means the backward collective runs
+                    # at the input's storage dtype (matching pre-fix behavior).
+                    "op_dtype": backward_dtype or input_dtype,
+                    "out_dtype": input_dtype,
+                },
+            },
         )
 
     def full_tensor(
@@ -900,8 +947,8 @@ def distribute_tensor(
     assert_no_mixed_partial_types(placements)
     if isinstance(tensor, DTensor):
         # if the tensor is already a DTensor, we need to check:
-        # 1. if the we can further shard this DTensor if the two device mesh belong to
-        #   the same parenet mesh and further sharding is possible.
+        # 1. if we can further shard this DTensor if the two device mesh belong to
+        #   the same parent mesh and further sharding is possible.
         # 2. check if device mesh and placements are the same
         if tensor.device_mesh != device_mesh:
             raise ValueError(

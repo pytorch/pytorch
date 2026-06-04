@@ -4,7 +4,9 @@ import json
 import os
 import pprint
 import sys
+import unittest
 from unittest import mock
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -12,6 +14,14 @@ import torch._inductor.config as inductor_config
 import torch.compiler.config as compiler_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
+)
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -191,11 +201,11 @@ class TestUtils(TestCase):
         self.assertEqual(get_filenames(traced_code_lists), [[__file__, utils_path]])
 
         # === graph break occurs during inlining ===
+        @torch._dynamo.disable_nested_graph_breaks
         @torch.compile(backend=my_backend)
         def fn(x):
             z = x + 1
-            with torch._dynamo.disable_nested_graph_breaks():
-                y = break_it(z)
+            y = break_it(z)
             return y * 2
 
         x = torch.randn(3)
@@ -451,6 +461,10 @@ class TestDynamoTimed(TestCase):
             "'Dynamo does not know how to trace builtin operator `print`'",
         )
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN or IS_LINUX or IS_MACOS or TEST_WITH_ROCM or TEST_WITH_SLOW,
+        "https://github.com/pytorch/pytorch/issues/148093",
+    )
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
@@ -500,7 +514,8 @@ class TestDynamoTimed(TestCase):
             pprint.pformat(utils.compilation_time_metrics),
             filter_expected(
                 """\
-{'GraphLowering.codegen': [0.0, 0.0],
+{'CacheBase.get_system.triton_key': [0.0],
+ 'GraphLowering.codegen': [0.0, 0.0],
  'GraphLowering.compile_to_fn': [0.0, 0.0],
  'GraphLowering.compile_to_module': [0.0, 0.0],
  'GraphLowering.run': [0.0, 0.0],
@@ -554,7 +569,8 @@ class TestDynamoTimed(TestCase):
  'pass.pre_grad_passes.group_batch_fusion_passes': [0.0]}"""
                 if _IS_WINDOWS
                 else """\
-{'GraphLowering.codegen': [0.0, 0.0],
+{'CacheBase.get_system.triton_key': [0.0],
+ 'GraphLowering.codegen': [0.0, 0.0],
  'GraphLowering.compile_to_fn': [0.0, 0.0],
  'GraphLowering.compile_to_module': [0.0, 0.0],
  'GraphLowering.run': [0.0, 0.0],
@@ -606,7 +622,7 @@ class TestDynamoTimed(TestCase):
  'pass.pre_grad_passes.apply_gumbel_max_trick_pass': [0.0],
  'pass.pre_grad_passes.efficient_conv_bn_eval_pass': [0.0],
  'pass.pre_grad_passes.group_batch_fusion_passes': [0.0]}"""
-            ),  # noqa: B950
+            ),
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -639,7 +655,7 @@ class TestDynamoTimed(TestCase):
  'gc': 0.0,
  'inductor_compile': 0.0,
  'total_wall_time': 0.0}"""
-            ),  # noqa: B950
+            ),
         )
 
         # Now validate the CompilationMetrics logs. We expect a log for the
@@ -655,6 +671,7 @@ class TestDynamoTimed(TestCase):
             e.co_filename = None
             e.co_firstlineno = None
             e.inductor_config = None
+            e.functorch_config = None
             e.compiler_config = None
             e.cuda_version = None
             e.triton_version = None
@@ -714,6 +731,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
+ 'functorch_config': None,
  'gc_time_us': 0,
  'graph_input_count': 3,
  'graph_node_count': 5,
@@ -807,6 +825,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
+ 'functorch_config': None,
  'gc_time_us': 0,
  'graph_input_count': 3,
  'graph_node_count': 5,
@@ -863,7 +882,7 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}"""
-            ),  # noqa: B950
+            ),
         )
 
         # Second event is for the backward
@@ -914,6 +933,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': None,
+ 'functorch_config': None,
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
@@ -1007,6 +1027,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': None,
+ 'functorch_config': None,
  'gc_time_us': None,
  'graph_input_count': None,
  'graph_node_count': None,
@@ -1063,7 +1084,7 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}"""
-            ),  # noqa: B950
+            ),
         )
 
     @dynamo_config.patch(
@@ -1251,6 +1272,29 @@ class TestDynamoTimed(TestCase):
         self.assertEqual(compilation_events[0].param_count, 3)
 
 
+class TestTimedSync(TestCase):
+    def test_timed_syncs_on_accelerator(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("sync only triggered for non-CPU devices")
+
+        from torch._dynamo.utils import timed
+
+        called = []
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        inputs = [torch.randn(4, device=device)]
+
+        with patch(
+            "torch.accelerator.synchronize", side_effect=lambda: called.append(1)
+        ):
+            timed(gm, inputs, times=1)
+
+        # once before loop + once per iteration for times=1
+        self.assertEqual(len(called), 2)
+
+
+instantiate_device_type_tests(TestTimedSync, globals(), allow_xpu=True)
+
+
 class TestInductorConfigParsingForLogging(TestCase):
     """
     Test for parsing inductor config for logging in CompilationMetrics.
@@ -1319,6 +1363,39 @@ class TestInductorConfigParsingForLogging(TestCase):
         mocked_inductor_config.get_config_copy.return_value = None
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
         self.assertEqual(inductor_config_json, expected)
+
+
+class TestFunctorchConfigParsingForLogging(TestCase):
+    def test_functorch_config_jsonify(self):
+        functorch_config_json = utils._functorch_config_for_logging()
+        self.assertIsInstance(functorch_config_json, str)
+        parsed = json.loads(functorch_config_json)
+        self.assertIn("activation_memory_budget", parsed)
+        self.assertEqual(parsed["activation_memory_budget"], 1.0)
+
+    def test_functorch_config_blocklist(self):
+        functorch_config_json = utils._functorch_config_for_logging()
+        parsed = json.loads(functorch_config_json)
+        self.assertNotIn("TYPE_CHECKING", parsed)
+        self.assertNotIn("_save_config_ignore", parsed)
+
+    @mock.patch("torch._dynamo.utils.torch._functorch.config")
+    def test_functorch_config_none(self, mocked_config):
+        mocked_config.get_config_copy.side_effect = AttributeError
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+
+    @mock.patch("torch._dynamo.utils.torch._functorch.config")
+    def test_functorch_config_runtime_error(self, mocked_config):
+        mocked_config.get_config_copy.side_effect = RuntimeError
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+
+    @mock.patch("torch._dynamo.utils.justknobs_check", return_value=False)
+    def test_functorch_config_jk_disabled(self, mocked_jk):
+        result = utils._functorch_config_for_logging()
+        self.assertIsNone(result)
+        mocked_jk.assert_called_once_with("pytorch/dynamo:log_functorch_config")
 
 
 if __name__ == "__main__":

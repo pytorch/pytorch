@@ -179,14 +179,14 @@ case "$tag" in
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    XPU_VERSION=2025.2
+    XPU_VERSION=2025.3
     XPU_DRIVER_TYPE=LTS
     TRITON=yes
     ;;
   pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-client | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
-    XPU_VERSION=2025.3
+    XPU_VERSION=2026.0
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else
@@ -249,9 +249,9 @@ case "$tag" in
   pytorch-linux-jammy-linter)
     PYTHON_VERSION=3.10
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter)
+  pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-linter)
     PYTHON_VERSION=3.10
-    CUDA_VERSION=12.8.1
+    CUDA_VERSION=13.0.2
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13)
     ANACONDA_PYTHON_VERSION=3.10
@@ -278,6 +278,7 @@ case "$tag" in
       then
         ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION%?}
         PYTHON_FREETHREADED=1
+        TSAN=yes
       fi
     fi
     if [[ "$image" == *cuda* ]]; then
@@ -316,6 +317,14 @@ if [[ -n "${CI:-}" ]]; then
   progress_flag="--progress=plain"
 fi
 
+# On a remote buildkit builder there is no local Docker daemon to receive
+# `--load`, so push directly to the registry instead. The caller is expected
+# to have logged in to the target registry already (e.g. via ecr-login).
+output_flag="--load -t ${tmp_tag}"
+if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
+  output_flag="--push"
+fi
+
 # Build image
 docker buildx build \
        ${no_cache_flag} \
@@ -344,6 +353,7 @@ docker buildx build \
        --build-arg "HALIDE=${HALIDE}" \
        --build-arg "PALLAS=${PALLAS}" \
        --build-arg "TPU=${TPU}" \
+       --build-arg "TSAN=${TSAN}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
        --build-arg "ACL=${ACL:-}" \
@@ -351,8 +361,7 @@ docker buildx build \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
-       --load \
-       -t "$tmp_tag" \
+       ${output_flag} \
        "$@" \
        .
 
@@ -367,6 +376,14 @@ UBUNTU_VERSION=$(echo ${UBUNTU_VERSION} | sed 's/-rc$//')
 function drun() {
   docker run --rm "$tmp_tag" "$@"
 }
+
+# Post-build sanity checks run the freshly built image locally via `drun`.
+# Skip them when we built on a remote buildkit and pushed straight to the
+# registry, since the image is not present in any local daemon.
+if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
+  echo "REMOTE_BUILDKIT set: skipping local image sanity checks (image was pushed, not loaded)."
+  exit 0
+fi
 
 if [[ "$OS" == "ubuntu" ]]; then
 
