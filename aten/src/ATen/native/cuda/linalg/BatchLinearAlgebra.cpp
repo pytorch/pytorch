@@ -1108,7 +1108,7 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
   if (batchCount(A) <= 8 && A.size(-1) >= 64) {
     triangular_solve_cublas(A, B, left, upper, transpose, unitriangular);
   } else {
-#if !AT_MAGMA_ENABLED() || defined(USE_ROCM)
+#if !AT_MAGMA_ENABLED() || !defined(USE_ROCM)
     triangular_solve_batched_cublas(A, B, left, upper, transpose, unitriangular);
 #else
     // cuBLAS batched is faster than MAGMA batched up until 512x512, after that MAGMA is faster
@@ -1117,7 +1117,7 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
     } else {
       triangular_solve_batched_magma(A, B, left, upper, transpose, unitriangular);
     }
-#endif // AT_MAGMA_ENABLED() || defined(USE_ROCM)
+#endif // !AT_MAGMA_ENABLED() || !defined(USE_ROCM)
   }
 }
 
@@ -1193,7 +1193,7 @@ This is an in-place routine, content of 'input', 'values', 'vectors' is overwrit
 'infos' is an int Tensor containing error codes for each matrix in the batched input.
 For more information see MAGMA's documentation for GEEV routine.
 */
-#if !(defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) && !defined(USE_ROCM)
+#if !(defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) && !(defined(USE_ROCM) && ROCM_VERSION >= 71300)
 template <typename scalar_t>
 void apply_magma_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
 #if !AT_MAGMA_ENABLED()
@@ -1279,7 +1279,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   // tensors should be in batched column major memory format
   // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma' or
   // 'linalg_eig_cusolver_xgeev' both geev routines modify the provided input matrix in-place, therefore we need a copy
-#if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || defined(USE_ROCM)
+#if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71300)
   _warn_once_magma_deprecation("linalg.eig");
   linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
 #else

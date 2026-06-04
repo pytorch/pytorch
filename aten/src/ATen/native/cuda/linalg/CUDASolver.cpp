@@ -1795,7 +1795,7 @@ void xsyevd<c10::complex<double>, double>(
 #endif // USE_CUSOLVER_64_BIT
 
 // cuSOLVER Xgeev bindings (requires cuSOLVER >= 11.7.2, i.e. CUDA 12.8+)
-#if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || defined(USE_ROCM)
+#if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71300)
 
 template <>
 void xgeev_bufferSize<float>(
@@ -2114,7 +2114,7 @@ void xgeev<c10::complex<double>>(
       info));
 }
 
-#endif // (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || defined(USE_ROCM)
+#endif // (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71300)
 
 #ifdef USE_CUSOLVER_64_BIT_XSYEV_BATCHED
 

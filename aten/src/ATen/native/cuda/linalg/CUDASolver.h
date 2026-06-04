@@ -634,7 +634,7 @@ void xsyevd<c10::complex<double>, double>(
 #endif // USE_CUSOLVER_64_BIT
 
 // cuSOLVER Xgeev (non-Hermitian eigen decomposition, CUDA >= 12.8)
-#if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || defined(USE_ROCM)
+#if (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71300)
 
 #define CUDASOLVER_XGEEV_BUFFERSIZE_ARGTYPES(scalar_t)                        \
 cusolverDnHandle_t handle, cusolverDnParams_t params,                         \
@@ -689,7 +689,7 @@ void xgeev<c10::complex<float>>(CUDASOLVER_XGEEV_ARGTYPES(c10::complex<float>));
 template <>
 void xgeev<c10::complex<double>>(CUDASOLVER_XGEEV_ARGTYPES(c10::complex<double>));
 
-#endif // (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || defined(USE_ROCM)
+#endif // (defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)) || (defined(USE_ROCM) && ROCM_VERSION >= 71300)
 
 #ifdef USE_CUSOLVER_64_BIT_XSYEV_BATCHED
 
