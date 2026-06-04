@@ -186,11 +186,13 @@ class TestDecompSharding(TestCase):
         out = aten.glu.default(x)
         self.assertEqual(out.placements, (Replicate(),))
 
-        # index_add previously decomposed cleanly to index_put under DTensor.
-        # Its decomp now emits aten._assert_async.msg (mirroring one_hot) for
-        # bounds checking, which has no DTensor sharding strategy, so index_add
-        # is now xfailed in dtensor_fails_no_strategy (test_dtensor_ops.py)
-        # rather than exercised here. See #185885.
+        # index_add: decomposes into index_put with accumulate=True
+        check_no_strategy(aten.index_add.default)
+        input = d_empty(4, 8, device_mesh=mesh, placements=[Shard(1)])
+        index = distribute_tensor(torch.tensor([0, 2]), mesh, [Replicate()])
+        source = d_empty(2, 8, device_mesh=mesh, placements=[Shard(1)])
+        out = aten.index_add.default(input, 0, index, source)
+        self.assertEqual(out.placements, (Shard(1),))
 
         # polar: force replicate
         check_no_strategy(aten.polar.default)

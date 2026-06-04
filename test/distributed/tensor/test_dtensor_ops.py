@@ -361,9 +361,6 @@ dtensor_fails_no_strategy = {
     xfail("geometric"),
     xfail("histogram"),
     xfail("histogramdd"),
-    # index_add decomposes to include aten._assert_async.msg (mirroring one_hot),
-    # which has no DTensor sharding strategy and errors during propagation.
-    xfail("index_add"),
     xfail("isin"),
     xfail("linalg.matrix_power"),
     xfail("linspace", "tensor_overload"),
