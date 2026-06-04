@@ -7,6 +7,7 @@ import os
 import sys
 import unittest
 import weakref
+from unittest import mock
 
 import torch
 import torch._dynamo
@@ -77,6 +78,29 @@ def less_match_verbose_code_parts(expected):
 
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
+    def test_cpp_shape_guard_missing_windows_compiler_falls_back(self):
+        from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.cpp_builder import check_compiler_exist_windows
+        from torch._inductor.cpu_vec_isa import valid_vec_isa_list
+
+        def fn(x):
+            return x.sin()
+
+        CppCodeCache.cache_clear()
+        check_compiler_exist_windows.cache_clear()
+        valid_vec_isa_list.cache_clear()
+
+        x = torch.randn(2, 3)
+        torch._dynamo.mark_dynamic(x, 0)
+        with (
+            torch._dynamo.config.patch(enable_cpp_symbolic_shape_guards=True),
+            mock.patch("torch._inductor.cpp_builder._IS_WINDOWS", True),
+            mock.patch.dict(os.environ, {"CXX": "definitely_missing_cl_for_157458"}),
+        ):
+            actual = torch.compile(fn, backend="eager")(x)
+
+        self.assertEqual(actual, fn(x))
+
     def test_guard_debug_info_user_stack(self):
         """Test that GuardDebugInfo can store user stack trace information."""
         import traceback
