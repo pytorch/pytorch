@@ -203,35 +203,19 @@ bool can_use_mem_efficient_attention(
   return true;
 }
 
-bool check_prefer_flash_attention() {
-  static const bool prefer_flash =
-      c10::utils::check_env("TORCH_XPU_PREFER_FLASH_ATTENTION") == true;
-  return prefer_flash;
-}
-
 bool priority_order_init = false;
 
 std::array<sdp::SDPBackend, sdp::num_backends> priority_order(
     sdp::sdp_params const& params) {
   if (!priority_order_init) {
     priority_order_init = true;
-    if (check_prefer_flash_attention()) {
-      const std::vector<int64_t> flash_order = {
-          static_cast<int64_t>(at::SDPBackend::flash_attention),
-          static_cast<int64_t>(at::SDPBackend::overrideable),
-          static_cast<int64_t>(at::SDPBackend::math),
-          static_cast<int64_t>(at::SDPBackend::efficient_attention),
-          static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
-      at::globalContext().setSDPPriorityOrder(flash_order);
-    } else {
-      const std::vector<int64_t> priority_order = {
-          static_cast<int64_t>(at::SDPBackend::overrideable),
-          static_cast<int64_t>(at::SDPBackend::flash_attention),
-          static_cast<int64_t>(at::SDPBackend::math),
-          static_cast<int64_t>(at::SDPBackend::efficient_attention),
-          static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
-      at::globalContext().setSDPPriorityOrder(priority_order);
-    }
+    const std::vector<int64_t> priority_order = {
+        static_cast<int64_t>(at::SDPBackend::overrideable),
+        static_cast<int64_t>(at::SDPBackend::flash_attention),
+        static_cast<int64_t>(at::SDPBackend::math),
+        static_cast<int64_t>(at::SDPBackend::efficient_attention),
+        static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
+    at::globalContext().setSDPPriorityOrder(priority_order);
   }
   return at::globalContext().sDPPriorityOrder();
 }
