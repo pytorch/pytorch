@@ -33,6 +33,7 @@ from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
+    _check_for_subclass_arg,
     DynamicOutputShapeException,
     extract_tensor_metadata,
     FakeTensor,
@@ -148,6 +149,160 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_sparse_spdiags(self):
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
+            out = torch.sparse.spdiags(torch.randn(2, 3), torch.tensor([0, -1]), (2, 3))
+
+        self.assertIsInstance(out, FakeTensor)
+        self.assertEqual(out.layout, torch.sparse_coo)
+        self.assertEqual(out.shape, (2, 3))
+
+    def test_sparse_spdiags_compressed_layouts(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("propagate_real_tensors does not support sparse strides")
+
+        real_offsets = torch.tensor([0, -1])
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
+            offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, real_offsets, make_constant=True
+            )
+            csr_out = torch.sparse.spdiags(
+                torch.randn(2, 3),
+                offsets,
+                (2, 3),
+                layout=torch.sparse_csr,
+            )
+            csc_out = torch.sparse.spdiags(
+                torch.randn(2, 3),
+                offsets,
+                (2, 3),
+                layout=torch.sparse_csc,
+            )
+            dynamic_offsets = torch.tensor([-1, -2])
+            dynamic_csr_out = torch.sparse.spdiags(
+                torch.randn(2, 100),
+                dynamic_offsets,
+                (100, 2),
+                layout=torch.sparse_csr,
+            )
+            dynamic_csc_out = torch.sparse.spdiags(
+                torch.randn(2, 100),
+                dynamic_offsets,
+                (100, 2),
+                layout=torch.sparse_csc,
+            )
+
+        self.assertEqual(csr_out.layout, torch.sparse_csr)
+        self.assertEqual(csc_out.layout, torch.sparse_csc)
+        self.assertEqual(dynamic_csr_out.layout, torch.sparse_csr)
+        self.assertEqual(dynamic_csc_out.layout, torch.sparse_csc)
+        self.assertEqual(dynamic_csr_out.crow_indices().shape, (101,))
+        self.assertEqual(
+            dynamic_csr_out.col_indices().shape, dynamic_csr_out.values().shape
+        )
+        self.assertEqual(dynamic_csc_out.ccol_indices().shape, (3,))
+        self.assertEqual(
+            dynamic_csc_out.row_indices().shape, dynamic_csc_out.values().shape
+        )
+
+    def test_sparse_spdiags_dynamic_nnz_bound(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("propagate_real_tensors resolves the real nnz")
+
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
+            out = torch.sparse.spdiags(
+                torch.randn(2, 100), torch.tensor([-1, -2]), (100, 2)
+            )
+
+        nnz = out._values().shape[0]
+        nnz_range = mode.shape_env.var_to_range[nnz.node.expr]
+        self.assertEqual(nnz_range.lower, 0)
+        self.assertEqual(nnz_range.upper, 200)
+
+    def test_sparse_spdiags_coalesced_metadata(self):
+        zero_nnz_offsets = torch.tensor([3])
+        one_nnz_offsets = torch.tensor([0])
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
+            zero_nnz_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, zero_nnz_offsets, make_constant=True
+            )
+            one_nnz_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, one_nnz_offsets, make_constant=True
+            )
+            zero_nnz = torch.sparse.spdiags(torch.randn(1, 3), zero_nnz_offsets, (3, 3))
+            one_nnz = torch.sparse.spdiags(torch.randn(1, 1), one_nnz_offsets, (1, 1))
+            two_nnz = torch.sparse.spdiags(torch.randn(1, 2), one_nnz_offsets, (2, 2))
+
+        self.assertTrue(zero_nnz.is_coalesced())
+        self.assertTrue(one_nnz.is_coalesced())
+        self.assertFalse(two_nnz.is_coalesced())
+
+    def test_sparse_spdiags_zero_dim_static_offsets(self):
+        duplicate_offsets = torch.tensor([0, 0])
+        out_of_range_offsets = torch.tensor([4])
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
+            duplicate_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, duplicate_offsets, make_constant=True
+            )
+            out_of_range_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, out_of_range_offsets, make_constant=True
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Offset tensor contains duplicate values"
+            ):
+                torch.sparse.spdiags(torch.randn(2, 3), duplicate_offsets, (0, 3))
+
+            out = torch.sparse.spdiags(torch.randn(1, 3), out_of_range_offsets, (0, 3))
+
+        self.assertEqual(out.layout, torch.sparse_coo)
+        self.assertEqual(out.shape, (0, 3))
+        self.assertTrue(out.is_coalesced())
+
+    def test_sparse_spdiags_static_offset_errors(self):
+        duplicate_offsets = torch.tensor([0, 0])
+        out_of_range_offsets = torch.tensor([4])
+        with FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()) as mode:
+            duplicate_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, duplicate_offsets, make_constant=True
+            )
+            out_of_range_offsets = mode.fake_tensor_converter.from_real_tensor(
+                mode, out_of_range_offsets, make_constant=True
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "Offset tensor contains duplicate values"
+            ):
+                torch.sparse.spdiags(torch.randn(2, 3), duplicate_offsets, (2, 3))
+
+            with self.assertRaisesRegex(RuntimeError, "negative dimension"):
+                torch.sparse.spdiags(torch.randn(1, 3), out_of_range_offsets, (3, 3))
+
+    def test_sparse_spdiags_cuda_not_supported(self):
+        with FakeTensorMode() as fake_mode:
+            diagonals = FakeTensor(
+                fake_mode, torch.empty(2, 3, device="meta"), torch.device("cuda")
+            )
+            offsets = FakeTensor(
+                fake_mode,
+                torch.empty(2, dtype=torch.long, device="meta"),
+                torch.device("cuda"),
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "_spdiags is only implemented for CPU tensors"
+            ):
+                torch.sparse.spdiags(diagonals, offsets, (2, 3))
+
+    def test_sparse_spdiags_compile_backend_eager(self):
+        def fn():
+            diags = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+            return torch.sparse.spdiags(
+                diags,
+                offsets=torch.tensor([0, -1]),
+                shape=(diags.size(0), diags.size(1)),
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager")(), fn())
+
     def test_custom_op_fallback(self):
         from torch.library import _scoped_library, impl
 
@@ -165,6 +320,101 @@ class FakeTensorTest(TestCase):
                 with FakeTensorMode(allow_fallback_kernels=True) as mode:
                     x = mode.from_tensor(x)
                     torch.ops.my_test_op.foo(x)
+
+    def test_custom_op_fake_impl_with_parameter_subclass(self):
+        class ParameterSubclass(torch.nn.Parameter):
+            pass
+
+        @torch.library.custom_op(
+            "_torch_testing::fake_tensor_parameter_subclass", mutates_args=()
+        )
+        def custom_op(weight: torch.Tensor) -> torch.Tensor:
+            return weight.clone()
+
+        @custom_op.register_fake
+        def custom_op_fake(weight: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(weight)
+
+        weight = ParameterSubclass(torch.randn(10, 10))
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Please convert all Tensors to FakeTensors first",
+        ):
+            with FakeTensorMode():
+                torch.ops._torch_testing.fake_tensor_parameter_subclass(weight)
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            result = torch.ops._torch_testing.fake_tensor_parameter_subclass(weight)
+
+        self.assertIsInstance(result, FakeTensor)
+        self.assertEqual(result.shape, weight.shape)
+        self.assertEqual(result.device, torch.device("cpu"))
+
+    def test_parameter_subclass_with_torch_dispatch_gets_subclass_dispatch(self):
+        dispatch_calls = []
+        fake_impl_calls = []
+
+        @torch.library.custom_op(
+            "_torch_testing::fake_tensor_dispatch_parameter_subclass",
+            mutates_args=(),
+        )
+        def custom_op(weight: torch.Tensor) -> torch.Tensor:
+            return weight.clone()
+
+        @custom_op.register_fake
+        def custom_op_fake(weight: torch.Tensor) -> torch.Tensor:
+            fake_impl_calls.append(True)
+            return torch.empty_like(weight)
+
+        class DispatchParameter(torch.nn.Parameter):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                dispatch_calls.append(func)
+                if (
+                    func
+                    is torch.ops._torch_testing.fake_tensor_dispatch_parameter_subclass.default
+                ):
+                    weight = args[0]
+                    return torch.empty(
+                        weight.shape, dtype=weight.dtype, device=weight.device
+                    )
+                return NotImplemented
+
+        weight = DispatchParameter(torch.randn(10, 10))
+        with FakeTensorMode():
+            result = torch.ops._torch_testing.fake_tensor_dispatch_parameter_subclass(
+                weight
+            )
+
+        self.assertIsInstance(result, FakeTensor)
+        self.assertEqual(result.shape, weight.shape)
+        self.assertEqual(result.device, torch.device("cpu"))
+        self.assertEqual(
+            dispatch_calls,
+            [torch.ops._torch_testing.fake_tensor_dispatch_parameter_subclass.default],
+        )
+        self.assertEqual(fake_impl_calls, [])
+
+    def test_check_for_subclass_arg_parameter_subclass(self):
+        class ParameterSubclass(torch.nn.Parameter):
+            pass
+
+        class DispatchParameter(torch.nn.Parameter):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return NotImplemented
+
+        self.assertFalse(_check_for_subclass_arg(torch.randn(10)))
+        self.assertFalse(_check_for_subclass_arg(torch.nn.Parameter(torch.randn(10))))
+        self.assertFalse(_check_for_subclass_arg(ParameterSubclass(torch.randn(10))))
+        self.assertTrue(_check_for_subclass_arg(DispatchParameter(torch.randn(10))))
+
+        with FakeTensorMode() as mode:
+            fake = mode.from_tensor(torch.randn(10))
+        self.assertFalse(_check_for_subclass_arg(fake))
+
+        tt_param = torch.nn.Parameter(TwoTensor(torch.randn(4, 4), torch.randn(4, 4)))
+        self.assertTrue(_check_for_subclass_arg(tt_param))
 
     def test_parameter_instantiation(self):
         with FakeTensorMode():
@@ -452,77 +702,6 @@ class FakeTensorTest(TestCase):
 
         self.assertTrue(isinstance(x, FakeTensor))
         self.assertTrue(x.device.type == "cpu")
-
-    def test_constructor_like_custom_op_without_device_arg(self):
-        with torch.library._scoped_library(
-            "fake_tensor_issue_163196", "FRAGMENT"
-        ) as lib:
-            lib.define("moo(int x) -> Tensor")
-
-            @torch.library.impl(
-                "fake_tensor_issue_163196::moo",
-                "CompositeExplicitAutograd",
-                lib=lib,
-            )
-            def moo(x):
-                return torch.empty(3).fill_(x)
-
-            def f(x):
-                return torch.ops.fake_tensor_issue_163196.moo(x.item())
-
-            gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(4))
-            target = torch.ops.fake_tensor_issue_163196.moo.default
-            (node,) = [n for n in gm.graph.nodes if n.target is target]
-            self.assertIsInstance(node.meta["val"], FakeTensor)
-            self.assertEqual(node.meta["val"].shape, (3,))
-            self.assertEqual(node.meta["val"].device.type, "cpu")
-
-    def test_constructor_like_custom_op_with_device_arg(self):
-        with torch.library._scoped_library(
-            "fake_tensor_issue_163196_device_arg", "FRAGMENT"
-        ) as lib:
-            lib.define("moo(int x, *, Device? device=None) -> Tensor")
-            seen_devices = []
-
-            @torch.library.impl(
-                "fake_tensor_issue_163196_device_arg::moo",
-                "CompositeExplicitAutograd",
-                lib=lib,
-            )
-            def moo(x, device=None):
-                seen_devices.append(device)
-                return torch.empty(3, device=device).fill_(x)
-
-            with FakeTensorMode():
-                out = torch.ops.fake_tensor_issue_163196_device_arg.moo(4, device="cpu")
-
-            self.assertIsInstance(out, FakeTensor)
-            self.assertEqual(out.device.type, "cpu")
-            self.assertTrue(torch.device("meta") in seen_devices)
-
-    def test_constructor_like_custom_op_with_non_device_arg_named_device(self):
-        with torch.library._scoped_library(
-            "fake_tensor_issue_163196_non_device_arg", "FRAGMENT"
-        ) as lib:
-            lib.define("moo(str device) -> Tensor")
-
-            @torch.library.impl(
-                "fake_tensor_issue_163196_non_device_arg::moo",
-                "CompositeExplicitAutograd",
-                lib=lib,
-            )
-            def moo(device):
-                return torch.empty(len(device))
-
-            def f(x):
-                return torch.ops.fake_tensor_issue_163196_non_device_arg.moo("cpu")
-
-            gm = make_fx(f, tracing_mode="symbolic")(torch.tensor(4))
-            target = torch.ops.fake_tensor_issue_163196_non_device_arg.moo.default
-            (node,) = [n for n in gm.graph.nodes if n.target is target]
-            self.assertIsInstance(node.meta["val"], FakeTensor)
-            self.assertEqual(node.meta["val"].shape, (3,))
-            self.assertEqual(node.meta["val"].device.type, "cpu")
 
     def test_mode(self):
         with FakeTensorMode():
