@@ -19327,7 +19327,6 @@ op_db: list[OpInfo] = [
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,
                     dtypes=all_types_and(torch.bfloat16, torch.half,),
-                    dtypesIfROCM=floating_types_and(torch.bfloat16, torch.half,),
                     dtypesIfHpu=floating_types_and(torch.bfloat16, torch.half,),
                     # __rmod__ computes other % self, so self (lhs) is the divisor;
                     # exclude zero to avoid undefined behavior for integer types.
@@ -19341,6 +19340,11 @@ op_db: list[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
+                        # MTIA does not support integer remainder
+                        DecorateInfo(
+                            unittest.skip("MTIA does not support integer remainder"),
+                            None, None, device_type='mtia',
+                        ),
                     ),
                     # Support autograd after torch.remainder(Tensor, Tensor) supports
                     # autograd of the second argument.
