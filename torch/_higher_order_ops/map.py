@@ -7,9 +7,12 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import _maybe_run_with_interpreter, reenter_make_fx
+from torch._higher_order_ops.utils import (
+    _maybe_run_with_interpreter,
+    reenter_make_fx,
+    register_fake,
+)
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -343,20 +346,19 @@ def map_proxy_torch_dispatch_mode(mode, f, xs, args):
     return trace_map(mode, map_impl, f, xs, args)
 
 
-@map_impl.py_impl(FakeTensorMode)
-def map_fake_tensor_mode(mode, f, xs, args):
+@register_fake(map_impl)
+def map_fake_tensor_mode(f, xs, args):
     from torch._higher_order_ops.utils import first_slice_copy
 
-    with mode:
-        # Use first_slice_copy instead of _unstack_pytree to avoid
-        # iterating over batch dim, which would guard on symbolic sizes.
-        first_row = pytree.tree_map(first_slice_copy, xs)
-        example_output = f(*first_row, *args)
+    # Use first_slice_copy instead of _unstack_pytree to avoid
+    # iterating over batch dim, which would guard on symbolic sizes.
+    first_row = pytree.tree_map(first_slice_copy, xs)
+    example_output = f(*first_row, *args)
 
-        flat_xs, _ = pytree.tree_flatten(xs)
-        batch_size = flat_xs[0].shape[0]
+    flat_xs, _ = pytree.tree_flatten(xs)
+    batch_size = flat_xs[0].shape[0]
 
-        return _broadcast_to_batch(example_output, batch_size)
+    return _broadcast_to_batch(example_output, batch_size)
 
 
 @map_impl.py_functionalize_impl

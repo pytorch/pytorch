@@ -1132,23 +1132,30 @@ def check_input_alias_and_mutation_return_outputs(
 
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
 
+output_alias_hops: set[torch._ops.OpOverload] = set()
+
 
 F = TypeVar("F", bound=Callable)
 
 
 @overload
-def register_fake(hop, fn: None = None) -> Callable[[F], F]: ...
+def register_fake(
+    hop, fn: None = None, *, skip_cache: bool = ...
+) -> Callable[[F], F]: ...
 
 
 @overload
-def register_fake(hop, fn: F) -> F: ...
+def register_fake(hop, fn: F, *, skip_cache: bool = ...) -> F: ...
 
 
-def register_fake(hop, fn=None):
+def register_fake(hop, fn=None, *, skip_cache=False):
     """
     Register a fake function for a HOP. This is conceptually equivalent of the
     register_fake utility for the custom ops. The registered function is called
     inside the fake_tensor _dispatch_impl.
+
+    Set skip_cache=True for HOPs whose fake output aliases itself or tensors
+    nested in container args (identity the cache cannot reconstruct)
     """
     if hop in registered_hop_fake_fns:
         raise AssertionError(f"hop {hop} already registered in registered_hop_fake_fns")
@@ -1159,6 +1166,8 @@ def register_fake(hop, fn=None):
         redirect_to_mode(hop, FakeTensorMode)
 
         registered_hop_fake_fns[hop] = func
+        if skip_cache:
+            output_alias_hops.add(hop)
         return func
 
     if fn is None:

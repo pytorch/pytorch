@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import torch
 import torch.utils._pytree as pytree
+from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -129,16 +130,14 @@ def call_delegate_proxy_torch_dispatch_mode(
     return res
 
 
-@aoti_call_delegate.py_impl(FakeTensorMode)
+@register_fake(aoti_call_delegate)
 def call_delegate_fake_tensor_mode(
-    mode: FakeTensorMode,
     lowered_module: AOTI_LOWERED_MODULE,  # type: ignore[valid-type]
     original_gm: torch.fx.GraphModule,
     weight_args: list[torch.Tensor],
     input_args: list[torch.Tensor],
 ) -> list[torch.Tensor]:
-    with mode:
-        return call_delegate_cpu(lowered_module, original_gm, weight_args, input_args)
+    return call_delegate_cpu(lowered_module, original_gm, weight_args, input_args)
 
 
 @aoti_call_delegate.py_functionalize_impl

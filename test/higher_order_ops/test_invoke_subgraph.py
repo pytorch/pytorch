@@ -1397,7 +1397,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(exp_out, out)
         self.assertEqual(x_clone, x)
 
-    def test_input_mutation_mutiple_times_fake_tensor_cahche_hit(self):
+    def test_input_mutation_mutiple_times_fake_tensor_cache_hit(self):
         @nested_compile_region
         def gn(x, y):
             x.add_(1)
@@ -1424,7 +1424,7 @@ class GraphModule(torch.nn.Module):
             return (operands[0].clone(),)
 
         with (
-            mock.patch(
+            mock.patch.dict(
                 "torch._higher_order_ops.utils.registered_hop_fake_fns",
                 {torch.ops.higher_order.invoke_subgraph: _mock_invoke_subgraph},
             ),

@@ -5,9 +5,8 @@ import re
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._higher_order_ops.utils import autograd_not_implemented, register_fake
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 
 
@@ -249,10 +248,9 @@ def _elementwise_output_like(*inputs, dtype):
     )
 
 
-@inline_asm_elementwise.py_impl(FakeTensorMode)
-def _(mode, *inputs, asm_str, constraints, dtype, is_pure=True, pack=1):
-    with mode:
-        return _elementwise_output_like(*inputs, dtype=dtype)
+@register_fake(inline_asm_elementwise)
+def _(*inputs, asm_str, constraints, dtype, is_pure=True, pack=1):
+    return _elementwise_output_like(*inputs, dtype=dtype)
 
 
 @inline_asm_elementwise.py_impl(ProxyTorchDispatchMode)

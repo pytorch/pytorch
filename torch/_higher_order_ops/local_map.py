@@ -17,11 +17,12 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     clone_outputs_aliasing_inputs,
     redirect_to_mode,
+    register_fake,
     save_values_for_backward,
     saved_values,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -556,39 +557,37 @@ def functional_mode_key(
         return ctx.wrap_tensors(out)
 
 
-@local_map_hop.py_impl(FakeTensorMode)
+@register_fake(local_map_hop)
 def fake_mode_key(
-    mode: FakeTensorMode,
     gm: GraphModule,
     *args: Any,
     **kwargs: Any,
 ) -> GraphArg:
-    with mode:
-        if not _DEFER_INLINING:
-            return gm(*args, **kwargs)
+    if not _DEFER_INLINING:
+        return gm(*args, **kwargs)
 
-        # otherwise, we need to convert to local shapes for AP
-        is_backward = gm.meta["is_backward"]
-        redistribute_inputs = (
-            redistribute_bw_inputs if is_backward else redistribute_fw_inputs
-        )
-        local_args = redistribute_inputs(
-            args,
-            gm.meta["local_map_kwargs"]["in_placements"],
-            gm.meta["local_map_kwargs"]["device_mesh"],
-            gm.meta["num_activations"],
-        )
-        local_outs = gm(*local_args)
-        redistribute_outputs = (
-            redistribute_bw_outputs if is_backward else redistribute_fw_outputs
-        )
-        global_outs = redistribute_outputs(
-            local_outs,
-            gm.meta["local_map_kwargs"]["out_placements"],
-            gm.meta["local_map_kwargs"]["device_mesh"],
-            gm.meta["num_activations"],
-        )
-        return global_outs
+    # otherwise, we need to convert to local shapes for AP
+    is_backward = gm.meta["is_backward"]
+    redistribute_inputs = (
+        redistribute_bw_inputs if is_backward else redistribute_fw_inputs
+    )
+    local_args = redistribute_inputs(
+        args,
+        gm.meta["local_map_kwargs"]["in_placements"],
+        gm.meta["local_map_kwargs"]["device_mesh"],
+        gm.meta["num_activations"],
+    )
+    local_outs = gm(*local_args)
+    redistribute_outputs = (
+        redistribute_bw_outputs if is_backward else redistribute_fw_outputs
+    )
+    global_outs = redistribute_outputs(
+        local_outs,
+        gm.meta["local_map_kwargs"]["out_placements"],
+        gm.meta["local_map_kwargs"]["device_mesh"],
+        gm.meta["num_activations"],
+    )
+    return global_outs
 
 
 def proxy_mode_key_common(
