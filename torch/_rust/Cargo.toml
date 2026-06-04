@@ -1,0 +1,17 @@
+[package]
+name = "torch_rust"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+cxx = "1.0"
+pyo3 = { version = "0.26", features = ["extension-module"] }
+
+[build-dependencies]
+cxx-build = "1.0"
+pyo3-build-config = "0.26"

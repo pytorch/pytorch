@@ -1075,6 +1075,18 @@ except ImportError:
 from torch import _C as _C
 
 
+try:
+    # OSS path: `_rust` is a separate Python extension (`torch/_rust.so`).
+    from torch import _rust as _rust
+except ImportError:
+    # Buck path: the Rust crate is link_whole'd into `_C.so` and attached as
+    # the `_rust` submodule by `_C`'s init code. Register in `sys.modules` so
+    # `import torch._rust` works like the OSS path.
+    from torch._C import _rust as _rust  # pyrefly: ignore [missing-module-attribute]
+
+    sys.modules["torch._rust"] = _rust
+
+
 __name, __obj = "", None
 for __name in dir(_C):
     if __name[0] != "_" and not __name.endswith("Base"):
