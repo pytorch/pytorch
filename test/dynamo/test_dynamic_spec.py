@@ -928,7 +928,10 @@ class TestDerivedDimSpec(TestCase):
 
         # Violation: 7 != 2 * 4 → guard fails
         torch._dynamo.reset()
-        with self.assertRaisesRegex(AssertionError, "Guard fail"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Guard failed on the same frame it was created",
+        ):
             compiled(torch.randn(4, 3), torch.randn(7, 5))
 
         # Sanity: WITHOUT the derived spec the same conditional DDEs.
@@ -978,7 +981,10 @@ class TestDerivedDimSpec(TestCase):
 
         # Violation: 99 != 3 * 4 + 1
         torch._dynamo.reset()
-        with self.assertRaisesRegex(AssertionError, "Guard fail"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Guard failed on the same frame it was created",
+        ):
             compiled(torch.randn(3, 2), torch.randn(4, 2), torch.randn(99, 2))
 
         # Sanity: WITHOUT the derived spec the same conditional DDEs.
@@ -1050,7 +1056,10 @@ class TestDerivedDimSpec(TestCase):
 
         # Violation: n = 7 != 2 * 4
         torch._dynamo.reset()
-        with self.assertRaisesRegex(AssertionError, "Guard fail"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Guard failed on the same frame it was created",
+        ):
             compiled(torch.randn(4, 3), 7)
 
         # Sanity: WITHOUT the derived spec the same conditional DDEs.
@@ -1130,7 +1139,10 @@ class TestDerivedDimSpec(TestCase):
 
         # Violation: 99 != 3 * 4
         torch._dynamo.reset()
-        with self.assertRaisesRegex(AssertionError, "Guard fail"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Guard failed on the same frame it was created",
+        ):
             compiled(torch.randn(99, 2), torch.randn(3, 2), torch.randn(4, 2))
 
         # Sanity: WITHOUT the derived spec the same conditional DDEs.

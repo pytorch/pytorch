@@ -51,6 +51,7 @@ from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
     ObservedAttributeError,
     raise_observed_exception,
+    raise_user_assertion_error,
     TorchRuntimeError,
     unimplemented,
     UnknownPropertiesDuringBackwardTrace,
@@ -744,7 +745,7 @@ class TensorVariable(VariableTracker):
             size_len = len(size_var.items)
         # Ensure we don't unpack a scalar tensor.
         if size_len == 0:
-            raise AssertionError("Can't unpack scalar tensors.")
+            raise_user_assertion_error("Can't unpack scalar tensors.")
 
         if self.valid_size():
             length = self.size[0]
@@ -770,7 +771,7 @@ class TensorVariable(VariableTracker):
             idxes = range(length)  # type: ignore[arg-type]
         else:
             if len(idxes) != length:
-                raise AssertionError(
+                raise_user_assertion_error(
                     f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
                 )
 

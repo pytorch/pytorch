@@ -3,15 +3,20 @@
 import contextlib
 import dataclasses
 import sys
+import unittest.mock as mock
 
 import torch
 import torch._dynamo.config
+import torch._dynamo.symbolic_convert as symbolic_convert
 import torch._dynamo.test_case
+import torch._dynamo.variables.functions as variables_functions
 import torch._functorch.config
+import torch._guards as torch_guards
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.comptime import comptime, ComptimeContext
+from torch._dynamo.exc import InternalTorchDynamoError, Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -44,6 +49,132 @@ class MyException(OSError):
 
 
 class ExceptionTests(torch._dynamo.test_case.TestCase):
+    def test_internal_assertion_error_wrapped(self):
+        def fn(x):
+            return x + 1
+
+        def fail_internal_assert(self):
+            raise AssertionError("dummy internal assert")
+
+        fail_internal_assert.__code__ = fail_internal_assert.__code__.replace(
+            co_filename=symbolic_convert.__file__
+        )
+
+        with (
+            mock.patch.object(
+                symbolic_convert.InstructionTranslator,
+                "step",
+                fail_internal_assert,
+            ),
+            self.assertRaisesRegex(
+                InternalTorchDynamoError,
+                "AssertionError: dummy internal assert",
+            ),
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+
+    def test_internal_assertion_error_outside_dynamo_wrapped(self):
+        def fn(x):
+            return x + 1
+
+        def fail_internal_assert(self):
+            raise AssertionError("dummy internal assert outside dynamo")
+
+        fail_internal_assert.__code__ = fail_internal_assert.__code__.replace(
+            co_filename=torch_guards.__file__
+        )
+
+        with (
+            mock.patch.object(
+                symbolic_convert.InstructionTranslator,
+                "step",
+                fail_internal_assert,
+            ),
+            self.assertRaisesRegex(
+                InternalTorchDynamoError,
+                "AssertionError: dummy internal assert outside dynamo",
+            ),
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+
+    def test_internal_comptime_plumbing_assertion_error_wrapped(self):
+        def fn(x):
+            def inspect(ctx):
+                pass
+
+            comptime(inspect)
+            return x + 1
+
+        def fail_get_code(self):
+            raise AssertionError("dummy internal comptime plumbing assert")
+
+        fail_get_code.__code__ = fail_get_code.__code__.replace(
+            co_filename=variables_functions.__file__
+        )
+
+        with (
+            mock.patch.object(
+                variables_functions.NestedUserFunctionVariable,
+                "get_code",
+                fail_get_code,
+            ),
+            self.assertRaisesRegex(
+                InternalTorchDynamoError,
+                "AssertionError: dummy internal comptime plumbing assert",
+            ),
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+
+    def test_internal_comptime_context_assertion_error_wrapped(self):
+        def fn(x):
+            def inspect(ctx):
+                ctx.get_local("x")
+
+            comptime(inspect)
+            return x + 1
+
+        def fail_get_local(self, name, *, stacklevel=0):
+            raise AssertionError("dummy internal comptime context assert")
+
+        fail_get_local.__code__ = fail_get_local.__code__.replace(
+            co_filename=ComptimeContext.get_local.__code__.co_filename
+        )
+
+        with (
+            mock.patch.object(ComptimeContext, "get_local", fail_get_local),
+            self.assertRaisesRegex(
+                InternalTorchDynamoError,
+                "AssertionError: dummy internal comptime context assert",
+            ),
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+
+    def test_public_torch_assertion_error_not_wrapped(self):
+        def fn(x):
+            torch._assert(False, "dummy public assert")
+            return x
+
+        with self.assertRaisesRegex(AssertionError, "dummy public assert"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+
+    def test_public_comptime_assertion_error_not_wrapped(self):
+        def fn(x):
+            comptime.force_static(x)
+            return x + 1
+
+        with self.assertRaisesRegex(AssertionError, "cannot force"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+
+    def test_public_comptime_assert_static_error_not_wrapped(self):
+        def fn(x):
+            comptime.assert_static(x.shape[0])
+            return x + 1
+
+        x = torch.randn(2)
+        torch._dynamo.mark_dynamic(x, 0)
+        with self.assertRaisesRegex(AssertionError, "expected static but got dynamic"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
     def test_exception(self):
         def fn(x):
             x = torch.cos(x)
