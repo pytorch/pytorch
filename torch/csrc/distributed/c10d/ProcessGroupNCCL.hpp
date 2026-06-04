@@ -527,10 +527,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
 
-#ifdef NCCL_HAS_CONFIG
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-#endif
 
     // Optional "parent" backend and color to create communicators from
     // via `ncclCommSplit`
@@ -546,14 +544,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // must be within the numerical range of C++ int. Otherwise, Python will
     // raise a RuntimeError saying type is incompatible. See also
     // `_process_group_color` in `distributed_c10d.py`.
-#ifdef NCCL_HAS_COMM_SPLIT
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
-#else
-    // [Note 3]: for older NCCL versions, NCCL_SPLIT_NOCOLOR is not defined. But
-    // `split_color` is pybinded to Python, so we need to define it. So we use
-    // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
-    int split_color{-2};
-#endif
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -1002,11 +993,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   ErrorType getError() override;
 
   bool supportsShrinking() const override {
-#ifdef NCCL_HAS_COMM_SHRINK
     return true;
-#else
-    return false;
-#endif
   }
 
   // Backend-style shrink override that returns a Backend instance.
