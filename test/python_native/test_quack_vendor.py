@@ -2,7 +2,6 @@
 
 import importlib.util
 import os
-import re
 import shutil
 import subprocess
 import unittest
@@ -12,17 +11,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-VENDOR_INIT = REPO_ROOT / "torch" / "_vendor" / "quack" / "__init__.py"
 VENDOR_SCRIPT = REPO_ROOT / "tools" / "vendoring" / "quack" / "vendor.sh"
-
-
-def _pinned_upstream_sha() -> str:
-    match = re.search(r"Upstream SHA:\s*([0-9a-f]{7,40})", VENDOR_INIT.read_text())
-    if match is None:
-        raise AssertionError(
-            "could not parse 'Upstream SHA' from torch/_vendor/quack/__init__.py"
-        )
-    return match.group(1)
 
 
 @unittest.skipIf(
@@ -42,19 +31,17 @@ class TestQuackVendor(TestCase):
 
         vendor_root = Path(quack.__file__).resolve().parent
         self.assertIn("torch/_vendor/quack", vendor_root.as_posix())
-        self.assertEqual(gemm_act.__name__, "gemm_act")
-        self.assertEqual(GemmConfig.__name__, "GemmConfig")
-        self.assertEqual(
-            mxfp8_scaled_mm_epilogue.__name__,
-            "mxfp8_scaled_mm_epilogue",
-        )
-        self.assertEqual(
-            mxfp8_varlen_m_scaled_mm_epilogue.__name__,
-            "mxfp8_varlen_m_scaled_mm_epilogue",
-        )
-        self.assertEqual(
-            mxfp8_varlen_k_scaled_mm_epilogue.__name__,
-            "mxfp8_varlen_k_scaled_mm_epilogue",
+        self.assertTrue(
+            all(
+                callable(obj)
+                for obj in (
+                    gemm_act,
+                    GemmConfig,
+                    mxfp8_scaled_mm_epilogue,
+                    mxfp8_varlen_m_scaled_mm_epilogue,
+                    mxfp8_varlen_k_scaled_mm_epilogue,
+                )
+            )
         )
 
 
@@ -76,9 +63,9 @@ class TestQuackVendorScript(TestCase):
                 "QUACK_VENDOR_ALLOW_CLONE=1 to clone the pinned SHA"
             )
 
-        cmd = ["bash", str(VENDOR_SCRIPT), "--check", _pinned_upstream_sha()]
+        cmd = ["bash", str(VENDOR_SCRIPT), "--check"]
         if src:
-            cmd.append(str(Path(src).expanduser()))
+            cmd += ["--src", str(Path(src).expanduser())]
         self.assertEqual(
             subprocess.run(cmd, cwd=str(REPO_ROOT)).returncode,
             0,

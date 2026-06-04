@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Vendor a subset of the quack library into torch/_vendor/quack.
 #
+# The pinned upstream commit lives in torch/_vendor/quack/__init__.py as the
+# __upstream_sha__ constant. To bump the vendored version, edit that one line
+# in code and re-run this script; the SHA is never passed on the command line.
+#
 # Usage:
-#   tools/vendoring/quack/vendor.sh <sha>                     # clone upstream
-#   tools/vendoring/quack/vendor.sh <sha> <local-checkout>    # use existing clone
-#   tools/vendoring/quack/vendor.sh --check <sha> [checkout]  # re-render + diff, no writes
+#   tools/vendoring/quack/vendor.sh                        # re-vendor the pinned SHA
+#   tools/vendoring/quack/vendor.sh --src <local-checkout> # reuse an existing clone
+#   tools/vendoring/quack/vendor.sh --check [--src <dir>]  # re-render + diff, no writes
 #
 # Pipeline:
-#   1. fetch upstream at <sha>
+#   1. fetch upstream at the pinned SHA
 #   2. copy whitelisted modules + LICENSE into torch/_vendor/quack/
 #   3. apply tools/vendoring/quack/patches/*.patch
 #          (strip torch.library decorators, rename branded strings)
@@ -30,6 +34,8 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
 DEST="$REPO_ROOT/torch/_vendor/quack"
 PATCHES_DIR="$SCRIPT_DIR/patches"
+GITATTRIBUTES="$REPO_ROOT/.gitattributes"
+GENERATED_ATTRIBUTE='torch/_vendor/quack/** linguist-generated=true'
 
 # Temp dirs (cloned upstream, --check render) are removed together on exit via a
 # single trap; helpers append here rather than each installing their own trap.
@@ -96,7 +102,7 @@ FILES=(
 )
 
 die()   { echo "vendor_quack: $*" >&2; exit 1; }
-usage() { echo "usage: $0 [--check] <sha> [local-quack-checkout]" >&2; exit 2; }
+usage() { echo "usage: $0 [--check] [--src <local-quack-checkout>]" >&2; exit 2; }
 
 # Set UPSTREAM_DIR to a quack checkout at $sha. With a local checkout, validate
 # it is at the requested SHA. Otherwise fetch exactly $sha into a tempdir
@@ -127,6 +133,16 @@ extract_version() {
     version=$(sed -n 's/^__version__[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$init")
     [[ -n "$version" ]] || die "could not parse __version__ from $init"
     echo "$version"
+}
+
+# Read the pinned upstream commit from the committed __init__.py. This constant
+# is the single, human-edited source of truth: the script consumes it and never
+# invents or accepts a SHA on the command line.
+pinned_sha() {
+    local init="$REPO_ROOT/torch/_vendor/quack/__init__.py" sha
+    sha=$(sed -n 's/^__upstream_sha__[[:space:]]*=[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p' "$init")
+    [[ -n "$sha" ]] || die "could not read __upstream_sha__ from $init"
+    echo "$sha"
 }
 
 copy_pristine() {
@@ -211,6 +227,13 @@ verify_notices() {
         || die "LICENSE differs from upstream"
 }
 
+ensure_gitattributes() {
+    if [[ -f "$GITATTRIBUTES" ]] && grep -Fxq "$GENERATED_ATTRIBUTE" "$GITATTRIBUTES"; then
+        return
+    fi
+    printf '%s\n' "$GENERATED_ATTRIBUTE" >> "$GITATTRIBUTES"
+}
+
 write_init() {
     local sha=$1 version=$2
     # Heredoc is unquoted so $sha and $version interpolate. The \`\` escapes
@@ -218,15 +241,16 @@ write_init() {
     cat > "$DEST/__init__.py" <<EOF
 """Vendored subset of the quack library (https://github.com/Dao-AILab/quack).
 
-Upstream SHA: $sha (quack $version)
-
-Only the modules required by torch._native.ops.norm.rmsnorm_impl and selected
-GEMM epilogue implementation paths are vendored. Imports are rewritten to be
-package-relative so this copy is independent of any \`\`quack\`\` top-level
-package that may be installed via pip. Custom op namespaces are renamed from
-\`\`quack::\`\` to \`\`torch_vendor_quack::\`\` for the same reason.
+The pinned upstream commit is \`\`__upstream_sha__\`\` below — edit that one line
+and re-run tools/vendoring/quack/vendor.sh to re-vendor. Only the modules
+required by torch._native.ops.norm.rmsnorm_impl and selected GEMM epilogue
+implementation paths are vendored. Imports are rewritten to be package-relative
+so this copy is independent of any \`\`quack\`\` top-level package that may be
+installed via pip. Custom op namespaces are renamed from \`\`quack::\`\` to
+\`\`torch_vendor_quack::\`\` for the same reason.
 """
 __version__ = "$version"
+__upstream_sha__ = "$sha"
 
 # Two CuTeDSL workarounds, both must run before the first cute.compile call:
 #   - cutlass#3161: duplicate .text section flags break MCJIT in multi-process
@@ -274,19 +298,23 @@ assert_matches() {
 }
 
 main() {
-    local check_only=0
-    if [[ "${1:-}" == "--check" ]]; then
-        check_only=1
-        shift
-    fi
-    [[ $# -eq 1 || $# -eq 2 ]] || usage
-    local sha=$1 local_checkout=${2:-} version
+    local check_only=0 local_checkout=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --check) check_only=1; shift ;;
+            --src)   [[ $# -ge 2 ]] || usage; local_checkout=$2; shift 2 ;;
+            *)       usage ;;
+        esac
+    done
 
+    local sha version
+    sha=$(pinned_sha)
     fetch_upstream "$sha" "$local_checkout"
     version=$(extract_version "$UPSTREAM_DIR/quack/__init__.py")
 
     if [[ $check_only -eq 0 ]]; then
         render "$UPSTREAM_DIR" "$sha" "$version"
+        ensure_gitattributes
         echo "Vendored quack @ $sha (quack $version) into $DEST"
         return
     fi

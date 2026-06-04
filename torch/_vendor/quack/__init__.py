@@ -1,14 +1,15 @@
 """Vendored subset of the quack library (https://github.com/Dao-AILab/quack).
 
-Upstream SHA: 77e72af5565cd7aec2132944bb001de2c358617a (quack 0.4.1)
-
-Only the modules required by torch._native.ops.norm.rmsnorm_impl and selected
-GEMM epilogue implementation paths are vendored. Imports are rewritten to be
-package-relative so this copy is independent of any ``quack`` top-level
-package that may be installed via pip. Custom op namespaces are renamed from
-``quack::`` to ``torch_vendor_quack::`` for the same reason.
+The pinned upstream commit is ``__upstream_sha__`` below — edit that one line
+and re-run tools/vendoring/quack/vendor.sh to re-vendor. Only the modules
+required by torch._native.ops.norm.rmsnorm_impl and selected GEMM epilogue
+implementation paths are vendored. Imports are rewritten to be package-relative
+so this copy is independent of any ``quack`` top-level package that may be
+installed via pip. Custom op namespaces are renamed from ``quack::`` to
+``torch_vendor_quack::`` for the same reason.
 """
 __version__ = "0.4.1"
+__upstream_sha__ = "77e72af5565cd7aec2132944bb001de2c358617a"
 
 # Two CuTeDSL workarounds, both must run before the first cute.compile call:
 #   - cutlass#3161: duplicate .text section flags break MCJIT in multi-process
