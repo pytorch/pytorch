@@ -1697,6 +1697,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         except torch._dynamo.exc.Unsupported:
             pass
 
+    def test_fork_rng_with_set_devices(self):
+        def fn():
+            with torch.random.fork_rng(devices={torch.device("cuda:0")}, enabled=False):
+                return torch.randn((1, 2))
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        self.assertEqual(opt_fn().shape, (1, 2))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
     def test_threading_local(self):
         import threading
 
