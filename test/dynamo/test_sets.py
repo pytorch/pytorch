@@ -653,6 +653,12 @@ class _SetBase(_FrozensetBase):
 class FrozensetTests(_FrozensetBase, _BaseSetTests):
     thetype = frozenset
 
+    @make_dynamo_test
+    def test_copy_preserves_identity(self):
+        p = frozenset("abc")
+        self.assertTrue(id(p) == id(p.copy()))
+        self.assertTrue(id(p) == id(frozenset.copy(p)))
+
 
 class SetTests(_SetBase, _BaseSetTests):
     thetype = set
@@ -679,6 +685,17 @@ class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
         pass
 
     thetype = CustomFrozenset
+
+    @make_dynamo_test
+    def test_copy_returns_base_frozenset(self):
+        p = self.thetype("abc")
+        result = p.copy()
+        self.assertTrue(type(result) is frozenset)
+        self.assertTrue(id(result) != id(p))
+
+        result = frozenset.copy(p)
+        self.assertTrue(type(result) is frozenset)
+        self.assertTrue(id(result) != id(p))
 
     def test_in_frozenset(self):
         super().test_in_frozenset()
