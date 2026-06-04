@@ -3660,6 +3660,23 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_softmax_with_unbacked_zero_dim(self):
+        def softmax_fn(x, n):
+            return torch.softmax(x[:, : n.item()], -1)
+
+        def log_softmax_fn(x, n):
+            return torch.log_softmax(x[:, : n.item()], -1)
+
+        x = torch.randn(3, 5)
+        for fn in (softmax_fn, log_softmax_fn):
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            for length in (0, 2, 5):
+                n = torch.tensor(length)
+                actual = compiled_fn(x, n)
+                expected = fn(x, n)
+                torch.testing.assert_close(actual, expected, equal_nan=True)
+
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_local_buffer_in_outer_loop_fusion(self):
         def fn(x):
@@ -6725,7 +6742,6 @@ class CPUReproTests(TestCase):
 
         torch.compile(fn)(torch.randn(2, 2))
 
-    @xfailIf(IS_ARM64)  # https://github.com/pytorch/pytorch/issues/176285
     @skipIfRocmArch(MI200_ARCH)
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @requires_vectorization
@@ -6887,6 +6903,82 @@ class CPUReproTests(TestCase):
                 # Compiled output should match eager mode (whether Eager produces
                 # inf or finite numbers, it shouldn't degrade into unexpected NaNs).
                 self.assertEqual(eager_out, compiled_out)
+
+    def test_cpu_realization_thresholds(self):
+        from torch._inductor.ir import Pointwise, StorageBox
+        from torch._inductor.virtualized import ops
+
+        def inner_opcount_fn(index):
+            value = ops.constant(0.0, torch.float32)
+            for _ in range(45):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        cpu_pointwise = Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=inner_opcount_fn,
+            ranges=[1],
+        )
+        self.assertFalse(cpu_pointwise.has_large_inner_fn())
+        with config.patch(realize_opcount_threshold=1):
+            self.assertTrue(cpu_pointwise.has_large_inner_fn())
+        with config.patch(realize_opcount_threshold=30):
+            self.assertTrue(cpu_pointwise.has_large_inner_fn())
+        self.assertFalse(cpu_pointwise.has_large_inner_fn())
+
+        cuda_pointwise = Pointwise(
+            device=torch.device("cuda"),
+            dtype=torch.float32,
+            inner_fn=inner_opcount_fn,
+            ranges=[1],
+        )
+        self.assertTrue(cuda_pointwise.has_large_inner_fn())
+
+        def inner_tanh_fn(index):
+            return ops.tanh(ops.load("in0", index[0]))
+
+        cpu_tanh_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_tanh_fn,
+                ranges=[10],
+            )
+        )
+        self.assertFalse(cpu_tanh_storage.should_realize_on_reuse(1))
+        self.assertTrue(cpu_tanh_storage.should_realize_on_reuse(2))
+
+        def inner_reads_fn(index):
+            value = ops.constant(0.0, torch.float32)
+            for i in range(10):
+                value = ops.add(value, ops.load(f"in{i}", index[0]))
+            return value
+
+        cpu_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_reads_fn,
+                ranges=[10],
+            )
+        )
+        self.assertFalse(cpu_storage.has_exceeded_max_reads())
+        with config.patch(realize_acc_reads_threshold=1):
+            self.assertTrue(cpu_storage.has_exceeded_max_reads())
+        with config.patch(realize_acc_reads_threshold=8):
+            self.assertTrue(cpu_storage.has_exceeded_max_reads())
+        self.assertFalse(cpu_storage.has_exceeded_max_reads())
+
+        cuda_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cuda"),
+                dtype=torch.float32,
+                inner_fn=inner_reads_fn,
+                ranges=[10],
+            )
+        )
+        self.assertTrue(cuda_storage.has_exceeded_max_reads())
 
 
 if __name__ == "__main__":

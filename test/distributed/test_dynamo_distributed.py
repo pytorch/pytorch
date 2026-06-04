@@ -2650,7 +2650,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_compiled_all_gather_into_tensor_returns_none(self):
         def fn(output, input, w):
-            result = dist.all_gather_into_tensor(output, input, async_op=False)
+            result = dist.all_gather_single(output, input, async_op=False)
             assert result is None  # noqa: S101
             return output @ w
 
@@ -2663,7 +2663,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     def test_compiled_reduce_scatter_tensor_returns_none(self):
         def fn(output, input, w):
-            result = dist.reduce_scatter_tensor(output, input, async_op=False)
+            result = dist.reduce_scatter_single(output, input, async_op=False)
             assert result is None  # noqa: S101
             return output @ w
 
