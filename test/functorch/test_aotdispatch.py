@@ -4805,6 +4805,7 @@ def forward(self, tangents_1):
         meta.flat_tensor_start_idx = 0
         meta.arg_count = 2
         meta.included_subclass_symints = True
+        meta.included_subclass_nested_ints = False
         meta.attrs = {
             "a": PlainTensorMeta(unwrapped_idx=0),
             "b": PlainTensorMeta(unwrapped_idx=1),

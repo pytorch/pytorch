@@ -7728,6 +7728,30 @@ torch.cuda.synchronize()
         if nt._lengths is not None:
             self.assertEqual(nt3._lengths.device, other_device)
 
+    @onlyCUDA
+    @skipIfTorchDynamo("compiles internally")
+    @dtypes(torch.float32)
+    def test_to_device_compile_preserves_nested_int(self, device, dtype):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(4, 5),
+            ],
+            layout=torch.jagged,
+            device=device,
+            dtype=dtype,
+        )
+
+        def f(x):
+            return x.to(device="cpu")
+
+        torch.compiler.reset()
+        out = f(nt)
+        out_compile = torch.compile(f, fullgraph=True, backend="aot_eager")(nt)
+        self.assertEqual(out.shape, out_compile.shape)
+        self.assertEqual(out, out_compile)
+
     @dtypes(torch.float32)
     def test_autograd_function_with_None_grad(self, device, dtype):
         class MyFunction(torch.autograd.Function):
@@ -8892,14 +8916,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
-    # Bug: cross-device conversions with to() result in new nested ints within compile only
-    XFailRule(
-        error_type=AssertionError,
-        error_msg="The values for attribute 'shape' do not match",
-        op_match_fn=lambda device, op: (op.full_name == "to"),
-        sample_match_fn=lambda device, sample: ("-> cpu" in sample.name),
-        name="cross_device_transfer_wrong_nested_int_in_compile",
-    ),
     # clone() -> preserve format on an non-contiguous NJT with holes currently uses
     # unbind(), leading to data-dependent expression. Should be fixed via torch._check()
     XFailRule(
@@ -8959,13 +8975,6 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         ),
         sample_match_fn=lambda device, sample: ("ragged dim" in sample.name),
         name="broken_min_max_compile_backward",
-    ),
-    # to() fails with data-dependent guards OR Unknown layout in record_stream_any_impl;
-    # need to fix with torch._check(), etc.
-    XFailRule(
-        op_match_fn=lambda device, op: (op.full_name == "to"),
-        sample_match_fn=lambda device, sample: ("-> cpu" in sample.name),
-        name="to_data_dependency",
     ),
     # copysign(): formula is broken for (T, NT) broadcasting
     XFailRule(

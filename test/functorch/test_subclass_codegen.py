@@ -140,6 +140,7 @@ def inner_fn(args):
             flat_tensor_start_idx: int
             arg_count: int
             included_subclass_symints: bool
+            included_subclass_nested_ints: bool
             attrs: dict
             outer_size: tuple
             outer_stride: tuple
@@ -151,6 +152,7 @@ def inner_fn(args):
             flat_tensor_start_idx=0,
             arg_count=2,
             included_subclass_symints=True,
+            included_subclass_nested_ints=False,
             attrs={
                 "a": PlainTensorMeta(unwrapped_idx=0),
                 "b": PlainTensorMeta(unwrapped_idx=1),
@@ -165,6 +167,7 @@ def inner_fn(args):
             flat_tensor_start_idx=0,
             arg_count=2,
             included_subclass_symints=True,
+            included_subclass_nested_ints=False,
             attrs={
                 "a": PlainTensorMeta(unwrapped_idx=0),
                 "b": PlainTensorMeta(unwrapped_idx=1),

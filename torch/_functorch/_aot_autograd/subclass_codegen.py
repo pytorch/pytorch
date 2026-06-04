@@ -21,21 +21,28 @@ from .schemas import OpaqueMeta, PlainTensorMeta, SubclassCreationMeta
 log = logging.getLogger(__name__)
 
 
-def _is_symint_placeholder(x: None | int | SymInt) -> bool:
+def _is_symint_placeholder(
+    x: None | int | SymInt, *, include_nested_ints: bool = False
+) -> bool:
     """Check whether a size/stride entry is symbolic and needs a runtime value.
 
     Works both before make_runtime_safe() (entries are SymInt) and after
-    (symbolic entries replaced with None, nested ints with -1).
+    (runtime-carried symbolic entries replaced with None).
     """
     if x is None:
         return True
-    if isinstance(x, SymInt) and not x.node.is_nested_int():
+    if isinstance(x, SymInt) and (include_nested_ints or not x.node.is_nested_int()):
         return True
     return False
 
 
-def _compute_placeholders(outer: Iterable[None | int | SymInt]) -> list[bool]:
-    return [_is_symint_placeholder(s) for s in outer]
+def _compute_placeholders(
+    outer: Iterable[None | int | SymInt], *, include_nested_ints: bool = False
+) -> list[bool]:
+    return [
+        _is_symint_placeholder(s, include_nested_ints=include_nested_ints)
+        for s in outer
+    ]
 
 
 def _safe_attr_access(var: str, attr: str) -> str:
@@ -95,8 +102,14 @@ def _codegen_unwrap_subclass(
 
     # Emit symint extraction
     if include_symints:
-        size_placeholders = _compute_placeholders(meta.outer_size)
-        stride_placeholders = _compute_placeholders(meta.outer_stride)
+        size_placeholders = _compute_placeholders(
+            meta.outer_size,
+            include_nested_ints=meta.included_subclass_nested_ints,
+        )
+        stride_placeholders = _compute_placeholders(
+            meta.outer_stride,
+            include_nested_ints=meta.included_subclass_nested_ints,
+        )
         has_size_symints = any(size_placeholders)
         has_stride_symints = any(stride_placeholders)
 
@@ -153,8 +166,14 @@ def _codegen_wrap_subclass(
     state.emit(f"{inner_dict_var} = {{{', '.join(entries)}}}")
 
     # Reconstruct outer_size and outer_stride
-    size_placeholders = _compute_placeholders(meta.outer_size)
-    stride_placeholders = _compute_placeholders(meta.outer_stride)
+    size_placeholders = _compute_placeholders(
+        meta.outer_size,
+        include_nested_ints=meta.included_subclass_nested_ints,
+    )
+    stride_placeholders = _compute_placeholders(
+        meta.outer_stride,
+        include_nested_ints=meta.included_subclass_nested_ints,
+    )
 
     def _build_tuple(
         outer: Iterable[None | int | SymInt], placeholders: list[bool]

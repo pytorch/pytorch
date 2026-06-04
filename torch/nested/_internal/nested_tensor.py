@@ -334,6 +334,8 @@ class NestedTensor(torch.Tensor):
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
         from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+        from torch.fx.experimental.symbolic_shapes import is_nested_int
 
         # inner tensors: _values, _offsets, [_lengths], [_min_seqlen], [_max_seqlen]
         if not (len(inner_tensors) >= 2 and len(inner_tensors) <= 5):
@@ -356,9 +358,13 @@ class NestedTensor(torch.Tensor):
         # Alternatively, we could make it the caller's responsibility to
         # cache it. But this heuristic seems simple enough.
         ragged_source = offsets if lengths is None else lengths
+        ragged_size = outer_size[ragged_idx]
+        ragged_source = mb_unwrap_functional_tensor(ragged_source)
         if isinstance(ragged_source, FakeTensor):
-            ragged_size = outer_size[ragged_idx]
-            ragged_source.nested_int_memo = ragged_size
+            if is_nested_int(ragged_size):
+                ragged_source.nested_int_memo = ragged_size
+        elif is_nested_int(ragged_size):
+            _tensor_symint_registry[ragged_source] = ragged_size
 
         return NestedTensor(
             values,

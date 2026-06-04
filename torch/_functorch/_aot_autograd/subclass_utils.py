@@ -113,6 +113,8 @@ def create_subclass_metadata(
     start_idx: int,
     count_symints: bool,
     with_memory_format: bool = False,
+    include_nested_ints: bool = False,
+    allowed_nested_int_ids: set[int] | None = None,
 ) -> tuple[Any, int]:
     if not is_traceable_wrapper_subclass(a):
         idx = start_idx + 1
@@ -150,6 +152,8 @@ def create_subclass_metadata(
                     new_start_idx,
                     count_symints=count_symints,
                     with_memory_format=with_memory_format,
+                    include_nested_ints=include_nested_ints,
+                    allowed_nested_int_ids=allowed_nested_int_ids,
                 )
                 attrs[key] = new_subclass_meta
             case _:
@@ -163,8 +167,28 @@ def create_subclass_metadata(
 
     new_start_idx = (
         new_start_idx
-        + count_symints * len(enumerate_filter_symints(a.size()))
-        + count_symints * len(enumerate_filter_symints(a.stride()))
+        + count_symints
+        * len(
+            enumerate_filter_symints(
+                a.size(),
+                include_nested_ints=include_nested_ints,
+                allowed_nested_int_ids=allowed_nested_int_ids,
+            )
+        )
+        + count_symints
+        * len(
+            enumerate_filter_symints(
+                a.stride(),
+                include_nested_ints=include_nested_ints,
+                allowed_nested_int_ids=allowed_nested_int_ids,
+            )
+        )
+    )
+    outer_size = _suppress_disallowed_nested_ints(
+        a.size(), allowed_nested_int_ids=allowed_nested_int_ids
+    )
+    outer_stride = _suppress_disallowed_nested_ints(
+        a.stride(), allowed_nested_int_ids=allowed_nested_int_ids
     )
 
     return (
@@ -172,10 +196,11 @@ def create_subclass_metadata(
             flat_tensor_start_idx=start_idx,
             arg_count=new_start_idx - start_idx,
             included_subclass_symints=count_symints,
+            included_subclass_nested_ints=include_nested_ints,
             attrs=attrs,
             meta=metadata,
-            outer_size=a.size(),  # type: ignore[attr-defined, arg-type]
-            outer_stride=a.stride(),  # type: ignore[arg-type]
+            outer_size=outer_size,  # type: ignore[arg-type]
+            outer_stride=outer_stride,
             original_subclass=a,
             memory_format=maybe_suggest_memory_format(a, with_memory_format),
         ),
@@ -191,6 +216,8 @@ def create_subclass_meta(
     *,
     count_symints: bool = True,
     with_memory_format: bool = False,
+    include_nested_ints: bool = False,
+    allowed_nested_int_ids: set[int] | None = None,
 ) -> list[PlainTensorMeta | SubclassCreationMeta]:
     idx = 0
     infos: list[PlainTensorMeta | SubclassCreationMeta] = []
@@ -206,6 +233,8 @@ def create_subclass_meta(
                 start_idx,
                 count_symints=count_symints,
                 with_memory_format=with_memory_format,
+                include_nested_ints=include_nested_ints,
+                allowed_nested_int_ids=allowed_nested_int_ids,
             )
             infos.append(subclass_meta)
             cnt = subclass_meta.arg_count
@@ -221,16 +250,78 @@ def create_subclass_meta(
     return infos
 
 
-def enumerate_filter_symints(lst: Iterable[IntLikeType]) -> list[tuple[int, SymInt]]:
+def enumerate_filter_symints(
+    lst: Iterable[IntLikeType],
+    *,
+    include_nested_ints: bool = False,
+    allowed_nested_int_ids: set[int] | None = None,
+) -> list[tuple[int, SymInt]]:
     # Capture all SymInts from the iterable.
     def symint_check(s: IntLikeType) -> TypeGuard[SymInt]:
-        return isinstance(s, SymInt) and not s.node.is_nested_int()
+        if not isinstance(s, SymInt):
+            return False
+        if not s.node.is_nested_int():
+            return True
+        if not include_nested_ints:
+            return False
+        if allowed_nested_int_ids is None:
+            return True
+        return _nested_int_id(s) in allowed_nested_int_ids
 
     return [(i, s) for i, s in enumerate(lst) if symint_check(s)]
 
 
+def _nested_int_id(s: SymInt) -> int:
+    if not s.node.is_nested_int():
+        raise AssertionError(f"Expected nested int, got {s}")
+    hint = getattr(s.node, "hint", None)
+    if isinstance(hint, SymInt) and hint.node.is_nested_int():
+        return hint.node.nested_int()
+    nested_int_id = s.node.nested_int()
+    if nested_int_id is None:
+        raise AssertionError(f"Could not determine nested int id for {s}")
+    return nested_int_id
+
+
+def _suppress_disallowed_nested_ints(
+    vals: Iterable[IntLikeType],
+    *,
+    allowed_nested_int_ids: set[int] | None,
+) -> tuple[IntLikeType, ...]:
+    if allowed_nested_int_ids is None:
+        return tuple(vals)
+    return tuple(
+        -1
+        if isinstance(s, SymInt)
+        and s.node.is_nested_int()
+        and _nested_int_id(s) not in allowed_nested_int_ids
+        else s
+        for s in vals
+    )
+
+
+def collect_nested_int_ids(args: object) -> set[int]:
+    nested_int_ids: set[int] = set()
+
+    def visit(t: object) -> None:
+        if isinstance(t, SymInt) and t.node.is_nested_int():
+            nested_int_ids.add(_nested_int_id(t))
+        elif isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
+            for s in (*t.size(), *t.stride()):
+                if isinstance(s, SymInt) and s.node.is_nested_int():
+                    nested_int_ids.add(_nested_int_id(s))
+            inner_keys, _ = t.__tensor_flatten__()
+            for key in inner_keys:
+                visit(getattr(t, key))
+
+    for arg in pytree.arg_tree_leaves(args):
+        visit(arg)
+    return nested_int_ids
+
+
 def compute_symint_placeholders(lst: Iterable[None | int | SymInt]) -> list[bool]:
-    # Non-nested symints are replaced with None in `make_runtime_safe()`
+    # SymInts that are carried at runtime are replaced with None in
+    # `make_runtime_safe()`.
     return [s is None for s in lst]
 
 
@@ -258,6 +349,8 @@ def unwrap_tensor_subclasses(
     wrapped_args_descs: Sequence[AOTDescriptor],
     *,
     append_symints: bool,
+    include_nested_ints: bool = False,
+    allowed_nested_int_ids: set[int] | None = None,
 ) -> tuple[list[FxValue], list[AOTDescriptor]]:
     def _maybe_fakeify_opaque(v: Any) -> Any:
         # Registered opaque types need to be wrapped as FakeScriptObject for
@@ -305,8 +398,16 @@ def unwrap_tensor_subclasses(
             flatten_subclass(inner_value, n_desc, out=out)
 
         if append_symints:
-            sizes = enumerate_filter_symints(t.size())
-            strides = enumerate_filter_symints(t.stride())
+            sizes = enumerate_filter_symints(
+                t.size(),
+                include_nested_ints=include_nested_ints,
+                allowed_nested_int_ids=allowed_nested_int_ids,
+            )
+            strides = enumerate_filter_symints(
+                t.stride(),
+                include_nested_ints=include_nested_ints,
+                allowed_nested_int_ids=allowed_nested_int_ids,
+            )
             out[0].extend(s for _, s in sizes)
             out[0].extend(s for _, s in strides)
             out[1].extend(SubclassSize(desc, i) for i, _ in sizes)
