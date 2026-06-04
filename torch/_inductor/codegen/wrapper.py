@@ -1234,6 +1234,19 @@ class AssertSizeStrideLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class AssertAlignmentLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    name: str
+    alignment: int
+    op_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_assert_alignment(
+            code, self.name, self.alignment, self.op_name
+        )
+
+
+@dataclasses.dataclass
 class AssertDivByZeroLine(WrapperLine):
     """Deferred AOTI runtime check that a sizevar divisor is non-zero.
 
@@ -1755,6 +1768,16 @@ class PythonWrapperCodegen(CodeGen):
         raise NotImplementedError(
             "AOTI div-by-zero check is only emitted by C++ wrappers"
         )
+
+    def write_assert_alignment(self, name: str, alignment: int, op_name: str) -> None:
+        """Queue an assert_alignment for emission during replay."""
+        self.writeline(AssertAlignmentLine(self, name, alignment, op_name))
+
+    def _codegen_assert_alignment(
+        self, code: IndentedBuffer, name: str, alignment: int, op_name: str
+    ) -> None:
+        """Emit one assert_alignment line to `code` (replay-phase target)."""
+        code.writeline(f"assert_alignment({name}, {alignment}, {op_name!r})")
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
