@@ -314,9 +314,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 output = torch.zeros(4 + self.rank, device=device)
                 input = torch.ones(4 * self.world_size, device=device)
                 if self.rank == 0:
-                    wrapper_pg.all_gather_single(output, input).wait()
+                    wrapper_pg._allgather_base(output, input).wait()
                 else:
-                    wrapper_pg.reduce_scatter_single(output, input).wait()
+                    wrapper_pg._reduce_scatter_base(output, input).wait()
 
             op_type = "ALLGATHER_BASE" if self.rank == 0 else "REDUCE_SCATTER_BASE"
             self._validate_error(
@@ -332,7 +332,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 output = torch.zeros(4 + self.rank, device=device)
                 input = torch.ones(4 * (self.world_size + 1), device=device)
 
-                wrapper_pg.reduce_scatter_single(output, input).wait()
+                wrapper_pg._reduce_scatter_base(output, input).wait()
             self._validate_error(
                 exception=cm.exception,
                 op_type="REDUCE_SCATTER_BASE",
@@ -344,7 +344,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 output = torch.zeros(4, device=device)
                 input = torch.ones((4 + self.rank) * self.world_size, device=device)
 
-                wrapper_pg.reduce_scatter_single(output, input).wait()
+                wrapper_pg._reduce_scatter_base(output, input).wait()
             self._validate_error(
                 exception=cm.exception,
                 op_type="REDUCE_SCATTER_BASE",
