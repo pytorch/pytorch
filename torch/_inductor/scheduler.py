@@ -9104,6 +9104,8 @@ class Scheduler:
         # Apply minimum partition size threshold: if a cudagraph-eligible partition
         # has fewer kernels than the threshold, mark it as non-cudagraphable
         min_size = config.triton.cudagraph_min_partition_size
+        if min_size == 0 and config.max_autotune:
+            min_size = config.triton.max_autotune_cudagraph_min_partition_size
         if min_size > 0:
             for i, (partition, skip) in enumerate(zip(partitions, skip_cudagraphs)):
                 if not skip:
