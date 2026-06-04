@@ -70,7 +70,7 @@ jobs:
           # TODO: Re-enable me when docker pin update happens
           # pytorch-linux-jammy-py3-clang18-executorch,
           pytorch-linux-jammy-py3.12-triton-cpu,
-          pytorch-linux-noble-riscv64-py3.12-gcc14
+          pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build
         ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13

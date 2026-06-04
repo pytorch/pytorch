@@ -68,8 +68,8 @@ lark==0.12.0
 #Pinned versions: 0.12.0
 #test that import:
 
-librosa>=0.6.2 ; python_version < "3.11" and platform_machine != "s390x"
-librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
+librosa>=0.6.2 ; python_version < "3.11" and platform_machine != "s390x" and platform_machine != "riscv64"
+librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x" and platform_machine != "riscv64"
 #Description: A python package for music and audio analysis
 #Pinned versions: >=0.6.2
 #test that import: test_spectral_ops.py
@@ -117,8 +117,8 @@ ninja==1.13.0
 #Pinned versions: 1.13.0
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
-numba==0.57.1 ; python_version == "3.10" and platform_machine != "s390x"
-numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x"
+numba==0.57.1 ; python_version == "3.10" and platform_machine != "s390x" and platform_machine != "riscv64"
+numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x" and platform_machine != "riscv64"
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.55.2, 0.60.0
 #test that import: test_numba_integration.py
@@ -137,7 +137,8 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x"
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
 numpy==1.23.2; python_version == "3.10"
-numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
+numpy==1.26.2; python_version == "3.11" or python_version == "3.12" and platform_machine != "riscv64"
+numpy==1.26.4; python_version == "3.11" or python_version == "3.12" and platform_machine == "riscv64" # https://riseproject.gitlab.io/python/wheel_builder/packages/numpy.html
 numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
 numpy==2.3.4; python_version >= "3.14"
 
@@ -287,7 +288,8 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #test that import:
 
 #lintrunner is supported on aarch64-linux only from 0.12.4 version
-lintrunner==0.12.11
+lintrunner==0.12.11 ; platform_machine != "riscv64"
+lintrunner==0.13.0 ; platform_machine == "riscv64"
 #Description: all about linters!
 #Pinned versions: 0.12.11
 #test that import:
@@ -345,17 +347,17 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.21.0
+onnx==1.21.0 ; platform_machine != "riscv64"
 #Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
 
-onnxscript==0.6.2
+onnxscript==0.6.2 ; platform_machine != "riscv64"
 #Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
 
-onnx-ir==0.1.16
+onnx-ir==0.1.16 ; platform_machine != "riscv64"
 #Description: In-memory IR for ONNX, dependency of onnxscript. Pinned to avoid breaking changes in newer versions.
 #Pinned versions:
 #test that import:
@@ -417,7 +419,8 @@ tqdm>=4.66.0
 #Description: progress bar library required for dynamo benchmarks
 #test that import: benchmarks/dynamo/*
 
-aiohttp==3.13.4
+aiohttp==3.13.4 ; platform_machine != "riscv64"
+aiohttp==3.13.5 ; platform_machine == "riscv64"
 #Description: required for torch.distributed.debug
 
 spin==0.17

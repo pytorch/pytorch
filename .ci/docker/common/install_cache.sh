@@ -10,12 +10,22 @@ install_ubuntu() {
   echo "Checking out sccache repo"
   git clone https://github.com/mozilla/sccache -b v0.13.0
   cd sccache
-  echo "Patch dist build on aarch64"
-  sed -i '/all(target_os = "linux", target_arch = "x86_64"),/{ p; s/x86_64/aarch64/; }' src/bin/sccache-dist/main.rs
+  echo "Patch dist build on $(uname -m)"
+  sed -i "/all(target_os = \"linux\", target_arch = \"x86_64\"),/{ p; s/x86_64/$(uname -m)/; }" src/bin/sccache-dist/main.rs
+  if [[ "$(uname -m)" == "riscv64" ]]; then
+    # dist-server has a transient dependency on nix v0.14.1 which doesn't compile
+    # on riscv64. Support was added in nix v0.17.0 with [1], released on Feb 2020.
+    # [1] https://github.com/nix-rust/nix/commit/10e69dbc99812775ad68b30c8d20cdae2346bca2
+    features="dist-client"
+  else
+    features="dist-client dist-server"
+  fi
   echo "Building sccache"
-  . "$HOME/.cargo/env" && cargo build --release --features="dist-client dist-server"
+  . "$HOME/.cargo/env" && cargo build --release --features="$features"
   cp target/release/sccache /opt/cache/bin
-  cp target/release/sccache-dist /opt/cache/bin
+  if [[ "${features}" =~ *dist-server* ]]; then
+    cp target/release/sccache-dist /opt/cache/bin
+  fi
   echo "Cleaning up"
   cd ..
   rm -rf sccache

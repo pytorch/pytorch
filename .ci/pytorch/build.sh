@@ -88,7 +88,7 @@ if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export ACL_ROOT_DIR=/acl
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
   if [[ -f /opt/riscv-cross-env/bin/activate ]]; then
     # shellcheck disable=SC1091
     source /opt/riscv-cross-env/bin/activate
@@ -118,6 +118,9 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
     fi
   done
 
+elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  export USE_CUDA=0
+  export USE_MKLDNN=0
 fi
 
 # Use special scripts for Android builds
@@ -232,7 +235,7 @@ fi
 
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && -d /var/lib/jenkins/workspace ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64*cross* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -258,6 +261,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
   # s390x builds currently fail when WERROR=1
+  # riscv64 builds currently fail when WERROR=1
   # set only when building other architectures
   # or building non-XLA tests.
   if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* ]]; then
@@ -424,7 +428,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   PYTHONPATH=. python tools/stats/export_test_times.py
 fi
-# don't do this for s390x or riscv64 as they don't use sccache
-if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
+# don't do this for s390x as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* ]]; then
   print_sccache_stats
 fi
