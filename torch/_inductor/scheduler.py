@@ -4336,49 +4336,6 @@ class Scheduler:
             for stream_idx in self.node_to_stream.values()
         )
 
-        self._stream_op_stream_indices: OrderedSet[int] = OrderedSet()
-        self._stream_op_event_indices: OrderedSet[int] = OrderedSet()
-        if self._multi_stream_nodes:
-            self._collect_stream_op_indices()
-
-    def _collect_stream_op_indices(self) -> None:
-        _STREAM_OPS = OrderedSet(
-            [
-                "torch.ops.streams.fork.default",
-                "torch.ops.streams.join.default",
-                "torch.ops.streams.wait_stream.default",
-            ]
-        )
-        _EVENT_OPS = OrderedSet(
-            [
-                "torch.ops.streams.record_event.default",
-                "torch.ops.streams.wait_event.default",
-            ]
-        )
-
-        for sched_node in self.nodes:
-            ir_node = sched_node.node
-            if ir_node is None or not isinstance(ir_node, ir.FallbackKernel):
-                continue
-            pkn = ir_node.python_kernel_name
-            if not pkn or "streams" not in pkn:
-                continue
-            const_args = ir_node.constant_args
-            if pkn in _STREAM_OPS:
-                for arg in const_args:
-                    if isinstance(arg, int):
-                        self._stream_op_stream_indices.add(arg)
-            elif pkn in _EVENT_OPS:
-                if len(const_args) >= 2:
-                    if isinstance(const_args[0], int):
-                        self._stream_op_event_indices.add(const_args[0])
-                    if isinstance(const_args[1], int):
-                        self._stream_op_stream_indices.add(const_args[1])
-            elif pkn == "torch.ops.streams.record_stream.default":
-                for arg in const_args:
-                    if isinstance(arg, int):
-                        self._stream_op_stream_indices.add(arg)
-
     def _has_multi_stream_nodes(self) -> bool:
         """Check if any nodes are assigned to non-default streams."""
         return self._multi_stream_nodes
@@ -9481,8 +9438,6 @@ class Scheduler:
                             device.index,
                             num_streams,
                             self.stream_idx_to_user_obj_idx,
-                            self._stream_op_stream_indices,
-                            self._stream_op_event_indices,
                         )
 
             # Handle stream context switching for multi-stream scheduling.

@@ -200,7 +200,8 @@ class TestStreamCodegen(InductorTestCase):
 with torch.cuda._DeviceGuard(0):
     torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
-    stream1 = get_external_object_by_index(3)
+    from torch._dynamo.variables.streams import _get_stream_by_index
+    stream1 = _get_stream_by_index(3)
     with stream1:
 """,
             ),
@@ -211,7 +212,8 @@ with torch.cuda._DeviceGuard(0):
 with torch.xpu._DeviceGuard(0):
     torch.xpu.set_device(0)
     default_stream = torch.xpu.current_stream()
-    stream1 = get_external_object_by_index(3)
+    from torch._dynamo.variables.streams import _get_stream_by_index
+    stream1 = _get_stream_by_index(3)
     with stream1:
 """,
             ),
@@ -222,6 +224,7 @@ with torch.xpu._DeviceGuard(0):
                 graph = SimpleNamespace(
                     cpp_wrapper=False,
                     device_ops=device_ops,
+                    device_type=device,
                 )
 
                 code = IndentedBuffer()
