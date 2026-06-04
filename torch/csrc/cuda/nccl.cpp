@@ -17,14 +17,6 @@
 #include <type_traits>
 #include <unordered_map>
 
-#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 13))
-#define NCCL_HAS_REMOTE_ERROR 1
-#endif
-
-#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14))
-#define NCCL_HAS_COMM_NONBLOCKING 1
-#endif
-
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
   return reinterpret_cast<ncclComm_t*>(var);
 }
@@ -51,14 +43,10 @@ ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
       return ncclResult_t::ncclInvalidArgument;
     case torch::cuda::nccl::ncclResult::InvalidUsage:
       return ncclResult_t::ncclInvalidUsage;
-#ifdef NCCL_HAS_REMOTE_ERROR
     case torch::cuda::nccl::ncclResult::RemoteError:
       return ncclResult_t::ncclRemoteError;
-#endif
-#ifdef NCCL_HAS_COMM_NONBLOCKING
     case torch::cuda::nccl::ncclResult::InProgress:
       return ncclResult_t::ncclInProgress;
-#endif
     case torch::cuda::nccl::ncclResult::NumResults:
       return ncclResult_t::ncclNumResults;
     default:
@@ -80,14 +68,10 @@ torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
       return torch::cuda::nccl::ncclResult::InvalidArgument;
     case ncclInvalidUsage:
       return torch::cuda::nccl::ncclResult::InvalidUsage;
-#ifdef NCCL_HAS_REMOTE_ERROR
     case ncclRemoteError:
       return torch::cuda::nccl::ncclResult::RemoteError;
-#endif
-#ifdef NCCL_HAS_COMM_NONBLOCKING
     case ncclInProgress:
       return torch::cuda::nccl::ncclResult::InProgress;
-#endif
     case ncclNumResults:
       return torch::cuda::nccl::ncclResult::NumResults;
     default:
@@ -182,7 +166,6 @@ static int nccl_nonblocking_timeout() {
 }
 
 static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
-#ifdef NCCL_HAS_COMM_NONBLOCKING
   ncclResult_t result = to_nccl_result(status);
   auto startTimepoint = std::chrono::steady_clock::now();
   while (result == ncclInProgress) {
@@ -199,10 +182,6 @@ static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
   if (result != ncclSuccess) {
     throw_nccl_error(from_nccl_result(result));
   }
-#else
-  TORCH_INTERNAL_ASSERT(
-      false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
-#endif
 }
 
 static void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
@@ -212,7 +191,6 @@ static void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
 static void NCCL_CHECK_TIMEOUT(
     ncclResult status,
     std::vector<ncclComm_t>& comms) {
-#ifdef NCCL_HAS_COMM_NONBLOCKING
   ncclResult_t result = to_nccl_result(status);
   auto startTimepoint = std::chrono::steady_clock::now();
   if (result == ncclInProgress) {
@@ -236,10 +214,6 @@ static void NCCL_CHECK_TIMEOUT(
   if (result != ncclSuccess) {
     throw_nccl_error(from_nccl_result(result));
   }
-#else
-  TORCH_INTERNAL_ASSERT(
-      false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
-#endif
 }
 
 static void NCCL_CHECK_TIMEOUT(
@@ -419,39 +393,26 @@ void check_inputs(
 } // namespace detail
 
 AutoNcclGroup::AutoNcclGroup() : comm_(nullptr), comm_nonblocking_(false) {
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
-  // nccl < 2.0 cannot be called concurrently with cudaFree
-  (c10::cuda::getFreeMutex())->lock();
-#endif
-
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+#if defined(NCCL_MAJOR)
   detail::NCCL_CHECK(ncclGroupStart());
 #endif
 }
 
 AutoNcclGroup::AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking)
     : comm_(comm), comm_nonblocking_(comm_nonblocking) {
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
-  // nccl < 2.0 cannot be called concurrently with cudaFree
-  (c10::cuda::getFreeMutex())->lock();
-#endif
-
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+#if defined(NCCL_MAJOR)
   detail::NCCL_CHECK(ncclGroupStart());
 #endif
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+#if defined(NCCL_MAJOR)
   if (comm_nonblocking_ && comm_ != nullptr) {
     detail::NCCL_CHECK_TIMEOUT(ncclGroupEnd(), comm_);
   } else {
     detail::NCCL_CHECK(ncclGroupEnd());
   }
-#endif
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
-  (c10::cuda::getFreeMutex())->unlock();
 #endif
 }
 
@@ -479,9 +440,6 @@ std::uint64_t version() {
   constexpr std::uint64_t ver = (((uint64_t)NCCL_MAJOR) << 32) |
       (((uint64_t)NCCL_MINOR) << 16) | ((uint64_t)NCCL_PATCH);
   return ver;
-#elif defined(USE_NCCL)
-  // return major version "1"
-  return ((uint64_t)1) << 32;
 #else
   return 0;
 #endif
@@ -555,20 +513,10 @@ constexpr auto count_max =
 // https://github.com/NVIDIA/nccl/issues/696. The issue of skipping send/recv
 // is that it can cause deadlock when a rank send and recv 0 bytes so it's
 // completely skipping the collective, causing mismatch across ranks
-#if defined(NCCL_MAJOR) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR > 13)))
 template <typename T>
 constexpr bool _nccl_should_send_recv([[maybe_unused]] T _unused_) {
   return true;
 }
-#else
-// old NCCL uses 0 byte message for synchronization
-// Avoid send/recv when message size is zero
-template <typename T>
-inline bool _nccl_should_send_recv(T value) {
-  return value != 0;
-}
-#endif
 } // namespace
 
 size_t get_max_count() {
@@ -788,7 +736,6 @@ void all_gather(
         : streams[i]->stream();
 
     ncclComm_t comm = comms_ref[i];
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(ncclAllGather(
         inputs[i].const_data_ptr(),
         outputs[i].mutable_data_ptr(),
@@ -796,15 +743,6 @@ void all_gather(
         data_type,
         to_nccl_comm(comm),
         stream));
-#else
-    NCCL_CHECK(ncclAllGather(
-        inputs[i].const_data_ptr(),
-        count,
-        data_type,
-        outputs[i].mutable_data_ptr(),
-        to_nccl_comm(comm),
-        stream));
-#endif
   }
 #else
   TORCH_CHECK(false, "PyTorch built without NCCL support");
@@ -818,8 +756,6 @@ void all2all_single_equal_split(
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
 
   auto type = to_nccl_data_type(input);
@@ -847,14 +783,7 @@ void all2all_single_equal_split(
           ncclRecv(recvbuff + r * rankdiff, count, type, r, comm, stream));
     }
   }
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclGroupEnd());
-#else
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
-#endif
-#else
-  TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
   TORCH_CHECK(false, "PyTorch built without NCCL support");
@@ -873,8 +802,6 @@ void all2all_single_unequal_split(
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
 
   auto type = to_nccl_data_type(_type);
@@ -917,14 +844,7 @@ void all2all_single_unequal_split(
           stream));
     }
   }
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclGroupEnd());
-#else
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
-#endif
-#else
-  TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
   TORCH_CHECK(false, "PyTorch built without NCCL support");
@@ -937,8 +857,6 @@ void all2all(
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
   auto comm = to_nccl_comm(_comm);
 
@@ -966,14 +884,7 @@ void all2all(
           stream.stream()));
     }
   }
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclGroupEnd());
-#else
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
-#else
-  TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
-#endif
 #else
   TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
@@ -985,18 +896,7 @@ void send(
     at::cuda::CUDAStream stream,
     int dst) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclSend(
-      input.const_data_ptr(),
-      input.numel(),
-      to_nccl_data_type(input),
-      dst,
-      to_nccl_comm(comm),
-      stream.stream()));
-#else
   NCCL_CHECK_TIMEOUT(
       ncclSend(
           input.const_data_ptr(),
@@ -1006,10 +906,6 @@ void send(
           to_nccl_comm(comm),
           stream.stream()),
       comm);
-#endif
-#else
-  TORCH_CHECK(false, "Send is only supported for NCCL lib version >= 2.7.0");
-#endif
 #else
   TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
@@ -1021,18 +917,7 @@ void recv(
     at::cuda::CUDAStream stream,
     int src) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclRecv(
-      output.mutable_data_ptr(),
-      output.numel(),
-      to_nccl_data_type(output),
-      src,
-      to_nccl_comm(comm),
-      stream.stream()));
-#else
   NCCL_CHECK_TIMEOUT(
       ncclRecv(
           output.mutable_data_ptr(),
@@ -1042,10 +927,6 @@ void recv(
           to_nccl_comm(comm),
           stream.stream()),
       comm);
-#endif
-#else
-  TORCH_CHECK(false, "Recv is only supported for NCCL lib version >= 2.7.0");
-#endif
 #else
   TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
@@ -1058,8 +939,6 @@ void gather(
     at::cuda::CUDAStream& stream,
     int32_t root) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
 
   auto comm = to_nccl_comm(_comm);
@@ -1086,15 +965,8 @@ void gather(
   } else {
     NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   }
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclGroupEnd());
-#else
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
 
-#else
-  TORCH_CHECK(false, "gather is only supported for NCCL lib version >= 2.7.0");
-#endif
 #else
   TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
@@ -1107,19 +979,12 @@ void scatter(
     at::cuda::CUDAStream& stream,
     int32_t root) {
 #ifdef USE_NCCL
-#if defined(NCCL_MAJOR) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
 
   auto comm = to_nccl_comm(_comm);
   int numranks = 0, cur_rank = 0;
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclCommCount(comm, &numranks));
-  NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
-#else
   NCCL_CHECK_TIMEOUT(ncclCommCount(comm, &numranks), _comm);
   NCCL_CHECK_TIMEOUT(ncclCommUserRank(comm, &cur_rank), _comm);
-#endif
   NCCL_CHECK(ncclGroupStart());
   if (cur_rank == root) {
     for (const auto r : c10::irange(numranks)) {
@@ -1140,14 +1005,7 @@ void scatter(
     auto* recvbuff = reinterpret_cast<char*>(outputs.mutable_data_ptr());
     NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
   }
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  NCCL_CHECK(ncclGroupEnd());
-#else
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
-#else
-  TORCH_CHECK(false, "scatter is only supported for NCCL lib version >= 2.7.0");
-#endif
 #else
   TORCH_CHECK(false, "PyTorch built without NCCL support");
 #endif
