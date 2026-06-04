@@ -668,6 +668,36 @@ class FakeTensorTest(TestCase):
                     torch._C._dispatch_key_set(y)
                 )
 
+    def test_backend_specific_autograd_kernel_ignored_for_fake(self):
+        def custom_tanh(x):
+            self.fail("FakeTensor dispatch should not run AutogradCPU kernels")
+
+        with torch.library._scoped_library("aten", "IMPL") as aten_lib:
+            aten_lib.impl("tanh", custom_tanh, "AutogradCPU")
+
+            with FakeTensorMode() as mode:
+                x = mode.from_tensor(torch.randn(4, requires_grad=True))
+                y = torch.tanh(x)
+
+        self.assertIsInstance(y, FakeTensor)
+        self.assertTrue(y.requires_grad)
+        self.assertIsNotNone(y.grad_fn)
+
+    def test_compile_backend_specific_autograd_kernel_ignored_for_fake(self):
+        def custom_tanh(x):
+            x.data_ptr()
+            return x + 2
+
+        with torch.library._scoped_library("aten", "IMPL") as aten_lib:
+            aten_lib.impl("tanh", custom_tanh, "AutogradCPU")
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return torch.tanh(x)
+
+            x = torch.randn(4)
+            self.assertEqual(f(x), custom_tanh(x))
+
     def test_compare_tensor_meta_unbacked_numel(self):
         from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
