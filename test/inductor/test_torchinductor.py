@@ -16011,6 +16011,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 ),
             )
 
+    def test_view_dtype_fallback_layout_constraint(self):
+        # https://github.com/pytorch/pytorch/issues/185515
+        def fn_to_contiguous(x):
+            return x.clone(memory_format=torch.contiguous_format).view(torch.uint8)
+
+        x_cl = torch.randn(2, 3, 4, 4, dtype=torch.float32).to(
+            memory_format=torch.channels_last
+        )
+        self.common(fn_to_contiguous, (x_cl,), exact_stride=True, check_lowp=False)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_split_with_sizes_with_unbacked_symints(self):
         @torch.compile()
