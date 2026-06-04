@@ -1733,14 +1733,19 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 self.w_up = torch.nn.Parameter(w_up, requires_grad=False)
                 self.w_down = torch.nn.Parameter(w_down, requires_grad=False)
 
+            def _woq_linear(self, x, weight, scale):
+                out_features = weight.size(0)
+                out = torch._weight_int8pack_mm(
+                    x.reshape(-1, x.size(-1)), weight, scale
+                )
+                return out.reshape(*x.shape[:-1], out_features)
+
             def forward(self, x, s_gate, s_up, s_down, norm_weight):
                 residual = x
-                gate = torch.nn.functional.linear(x, self.w_gate.to(x.dtype)) * s_gate
-                up = torch.nn.functional.linear(x, self.w_up.to(x.dtype)) * s_up
+                gate = self._woq_linear(x, self.w_gate, s_gate)
+                up = self._woq_linear(x, self.w_up, s_up)
                 hidden = torch.nn.functional.silu(gate) * up
-                down = (
-                    torch.nn.functional.linear(hidden, self.w_down.to(x.dtype)) * s_down
-                )
+                down = self._woq_linear(hidden, self.w_down, s_down)
                 y = down + residual
                 variance = y.to(torch.float32).pow(2).mean(-1, keepdim=True)
                 y = y * torch.rsqrt(variance + 1e-5).to(y.dtype)

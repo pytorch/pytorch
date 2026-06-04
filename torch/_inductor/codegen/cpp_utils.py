@@ -173,7 +173,7 @@ class CppCSEVariable(CSEVariable):
                     if isinstance(arg, CppCSEVariable)
                 ]
             )
-            if name == "index_expr":
+            if name in ("index_expr", "value_expr"):
                 self._set_dependent_itervars(args[0])
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
@@ -729,9 +729,13 @@ def template_fusion_with_epilogues_supported(
         template_ir_node = template.node
         if not isinstance(template_ir_node, ir.CppTemplateBuffer):
             return False
-        return any(
-            cls.__name__ == "CppGemmTemplate"
-            for cls in type(template_ir_node.template).__mro__
+        cpp_template = template_ir_node.template
+        return (
+            len(cpp_template.input_nodes) >= 2
+            and cpp_template.input_nodes[1].get_dtype() is torch.int8
+            and any(
+                cls.__name__ == "CppGemmTemplate" for cls in type(cpp_template).__mro__
+            )
         )
 
     def _get_indexes_of_template_buf_read(
