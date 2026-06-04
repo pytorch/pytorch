@@ -156,8 +156,7 @@ class SIMDKernelFeatures:
     @cache_on_self
     def any_index_expr_const_overflows_int32(self) -> bool:
         """Return True if any MemoryDep index has a constant term outside
-        [-2**31, 2**31 - 1].  Uses asymmetric bounds (not Abs) because
-        -2**31 is a legal int32 value."""
+        [-2**31, 2**31 - 1]."""
         int32_max = sympy.Integer(2**31 - 1)
         int32_min = sympy.Integer(-(2**31))
         for node in self.scheduler_nodes():
