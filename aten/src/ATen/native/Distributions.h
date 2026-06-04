@@ -1,9 +1,15 @@
 #pragma once
 
+#if defined(__METAL_VERSION__)
+#include <c10/metal/special_math.h>
+#include <c10/metal/utils.h>
+#include <metal_stdlib>
+#else
 #include <array>
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/MathConstants.h>
+#endif
 
 // ROCm hip compiler doesn't work well with using std:: in kernel functions
 #if defined(__CUDA_ARCH__) || defined(__HIPCC__)
@@ -21,6 +27,13 @@
 #define compat_tan c10::cuda::compat::tan
 #define compat_abs c10::cuda::compat::abs
 #define compat_log1p c10::cuda::compat::log1p
+#elif defined(__METAL_VERSION__)
+#define compat_log ::metal::precise::log
+#define compat_exp ::metal::precise::exp
+#define compat_pow ::metal::precise::pow
+#define compat_sqrt ::metal::precise::sqrt
+#define C10_HOST_DEVICE static
+#define C10_DEVICE static
 #else
 #define compat_exp std::exp
 #define compat_ceil std::ceil
@@ -33,13 +46,21 @@
 #define compat_log1p std::log1p
 #endif
 
+#if defined(__METAL_VERSION__)
+#define STATIC_IF_NOT_METAL
+#else
+#define STATIC_IF_NOT_METAL static
+#endif
+
 namespace {
 
-#if !defined(__CUDA_ARCH__) && !defined(__HIPCC__)
+#if !defined(__CUDA_ARCH__) && !defined(__HIPCC__) && !defined(__METAL_VERSION__)
 // we cannot use std::isnan directly due to some incompatibility of
 // gcc constexpr'ing and nvcc
 using std::isnan;
 #endif
+
+#if !defined(__METAL_VERSION__)
 
 // Here sampler_t should be function type scalar_t(void). For gpu
 // "sampler" is a device function, but since ROCM doesn't have
@@ -296,6 +317,18 @@ C10_DEVICE inline scalar_t digamma_one(scalar_t x) {
       result + compat_log(x) - (0.5f / x) - y + additional_summand);
 }
 
+
+#endif // #if !defined(__METAL_VERSION__)
+
+#if defined(__METAL_VERSION__)
+template<typename scalar_t, typename accscalar_t>
+C10_DEVICE inline scalar_t digamma_one(scalar_t x) {
+  return c10::metal::digamma(x);
+}
+#endif // #if defined(__METAL_VERSION__)
+
+#if !defined(__METAL_VERSION__)
+
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
 // for random number x drawn from a standard Gamma distribution Gamma(alpha).
 template <typename scalar_t, typename accscalar_t>
@@ -366,6 +399,8 @@ C10_HOST_DEVICE scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
   const auto q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));
   return static_cast<scalar_t>(compat_exp(p / q));
 }
+
+#endif // #if !defined(__METAL_VERSION__)
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
 // Assumes x is close to zero and uses a Taylor expansion.
@@ -471,7 +506,7 @@ C10_HOST_DEVICE inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha, s
   }
 
   // Use a rational correction to an analytic approximation.
-  static const accscalar_t c[2][3][3][4] = {
+  STATIC_IF_NOT_METAL const accscalar_t c[2][3][3][4] = {
     {{{1.003668233, -0.01061107488, -0.0657888334, 0.01201642863},
       {0.6336835991, -0.3557432599, 0.05486251648, -0.001465281033},
       {-0.03276231906, 0.004474107445, 0.002429354597, -0.0001557569013}},
