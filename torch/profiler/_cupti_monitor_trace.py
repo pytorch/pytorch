@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 from . import _cupti_monitor as _mon
 
 
+# Matches the value Kineto uses to round the trace base time down to a ~3-month
+# ("trimester") boundary in seconds; we reuse it to derive the default
+# baseTimeNanoseconds so monitor timestamps land in the same range as Kineto's.
 _TRIMONTH_SECONDS = 7889238
 
 
@@ -88,8 +91,22 @@ def _ensure_cupti_python_bindings() -> None:
         _USER_EXTERNAL_CORRELATION_KIND = int(cc.ExternalCorrelationKind.CUSTOM1)
 
 
-def _trimester_base_ns() -> int:
+def _default_base_ns() -> int:
+    # Fallback trace base time (ns) when the trace has no baseTimeNanoseconds:
+    # round "now" down to a _TRIMONTH_SECONDS boundary, matching Kineto.
     return (int(_time.time()) // _TRIMONTH_SECONDS) * _TRIMONTH_SECONDS * 1_000_000_000
+
+
+def _is_trailing_buffer_request(
+    event: dict[str, object], max_non_overhead_end_ns: int
+) -> bool:
+    # CUPTI emits an "Activity Buffer Request" overhead after the last real
+    # activity; drop it so it doesn't stretch the trace past the workload.
+    return (
+        str(event.get("name")) == "Activity Buffer Request"
+        and max_non_overhead_end_ns > 0
+        and _as_int(event.get("start_ns", 0)) > max_non_overhead_end_ns
+    )
 
 
 def _as_int(value: object, default: int = 0) -> int:
@@ -271,11 +288,7 @@ def _trace_window_entries(
             seen_cpu_processes.setdefault(process_id, _as_int(event["start_ns"]))
             seen_cpu_threads.add((process_id, thread_id))
         elif kind == "overhead":
-            if (
-                str(event.get("name")) == "Activity Buffer Request"
-                and max_non_overhead_end_ns
-                and _as_int(event.get("start_ns", 0)) > max_non_overhead_end_ns
-            ):
+            if _is_trailing_buffer_request(event, max_non_overhead_end_ns):
                 continue
             need_overhead_metadata = True
 
@@ -411,11 +424,7 @@ def _trace_window_entries(
             continue
 
         if kind == "overhead":
-            if (
-                str(event.get("name")) == "Activity Buffer Request"
-                and max_non_overhead_end_ns
-                and _as_int(event.get("start_ns", 0)) > max_non_overhead_end_ns
-            ):
+            if _is_trailing_buffer_request(event, max_non_overhead_end_ns):
                 continue
             pid = _OVERHEAD_PID
             tid = 0
@@ -580,7 +589,7 @@ def merge_trace_window_into_chrome_trace(
     with input_opener(cpu_trace_path, "rt") as f:
         data = json.load(f)
 
-    base_ns = int(data.get("baseTimeNanoseconds", _trimester_base_ns()))
+    base_ns = int(data.get("baseTimeNanoseconds", _default_base_ns()))
     original_events = list(data.get("traceEvents", []))
     cpu_thread_by_external_id: dict[int, tuple[int, int]] = {}
     for event in original_events:
