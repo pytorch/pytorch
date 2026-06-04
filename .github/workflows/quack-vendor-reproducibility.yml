@@ -28,6 +28,7 @@ on:
       - tools/vendoring/quack/**
       - test/python_native/test_quack_vendor.py
       - .github/workflows/quack-vendor-reproducibility.yml
+      - .gitattributes
   workflow_dispatch:
 
 concurrency:

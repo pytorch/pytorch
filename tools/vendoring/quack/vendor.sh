@@ -226,11 +226,19 @@ verify_notices() {
         || die "LICENSE differs from upstream"
 }
 
+has_gitattributes_marker() {
+    [[ -f "$GITATTRIBUTES" ]] && grep -Fxq "$GENERATED_ATTRIBUTE" "$GITATTRIBUTES"
+}
+
 ensure_gitattributes() {
-    if [[ -f "$GITATTRIBUTES" ]] && grep -Fxq "$GENERATED_ATTRIBUTE" "$GITATTRIBUTES"; then
+    if has_gitattributes_marker; then
         return
     fi
     printf '%s\n' "$GENERATED_ATTRIBUTE" >> "$GITATTRIBUTES"
+}
+
+assert_gitattributes() {
+    has_gitattributes_marker || die "$GITATTRIBUTES must mark torch/_vendor/quack as generated"
 }
 
 write_init() {
@@ -323,6 +331,7 @@ main() {
     CLEANUP_DIRS+=("$DEST")
     render "$UPSTREAM_DIR" "$sha" "$version"
     assert_matches "$committed"
+    assert_gitattributes
 }
 
 main "$@"
