@@ -6889,6 +6889,7 @@
   dispatch:
     CPU: _dirichlet_grad_cpu
     CUDA: _dirichlet_grad_cuda
+    MPS: _dirichlet_grad_mps
   autogen: _dirichlet_grad.out
 
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor

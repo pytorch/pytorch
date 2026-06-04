@@ -32,7 +32,7 @@ import torch
 import torch.autograd.forward_ad as fwAD
 from functorch import grad, jacfwd, jacrev, vjp, vmap
 from torch import Tensor
-from torch._functorch.eager_transforms import _as_tuple, jvp
+from torch._functorch.eager_transforms import _as_tuple, jvp, safe_unpack_dual
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
@@ -214,12 +214,16 @@ def simulate_jvp(f, primals, tangents):
     return primals_out, tangents_out
 
 
-def ref_jvp(f, primals, tangents):
+def ref_jvp(f, primals, tangents, strict: bool = False):
     with fwAD.dual_level():
         duals = tuple(fwAD.make_dual(p, t) for p, t in zip(primals, tangents))
         result_duals = f(*duals)
         result_duals, spec = tree_flatten(result_duals)
-        primals_out, tangents_out = zip(*(fwAD.unpack_dual(d) for d in result_duals))
+        # Use safe_unpack_dual instead of fwAD.unpack_dual so that we replicate the
+        # strict behavior WRT converting None-tangents to zeros_like.
+        primals_out, tangents_out = zip(
+            *(safe_unpack_dual(d, strict=strict) for d in result_duals)
+        )
         return tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec)
 
 

@@ -345,6 +345,15 @@ native_group_norm_batch_rule(
 
   const int64_t bdim_size{get_bdim_size(input, input_bdim, weight, weight_bdim, bias, bias_bdim)};
   auto input_ = moveBatchDimToFront(input, input_bdim);
+  VmapDimVector final_result_shape{input_.sizes()};
+  if (!input_bdim) {
+    // batch dimension will be implicitly added by either weight or bias, one of which
+    // must be batched or we could not be here.
+    final_result_shape.insert(final_result_shape.begin(), bdim_size);
+  } else {
+    // Reshape the batch dimension to (possibly) handle channels_last.
+    input_ = reshape_dim_into(0, 0, input_);
+  }
   // Only CPU native_group_norm currently supports non-contiguous input tensors.
   auto input_mem_fmt{input_.device().is_cpu() ? input_.suggest_memory_format() : at::MemoryFormat::Contiguous};
   input_ = input_.contiguous(input_mem_fmt);
@@ -352,7 +361,8 @@ native_group_norm_batch_rule(
   if (!weight_bdim && !bias_bdim) {
       auto [result0, mean, rstd] = at::native_group_norm_symint(input_, weight_opt, bias_opt, N * bdim_size, C, HxW, group, eps);
 
-      // mean/rstd are of shape {B0 * N, group}, but should be {B0, N, group}
+      // all the results are of shape {B0 * N, *}, but should be {B0, N, *}
+      result0 = result0.reshape(final_result_shape);
       mean = mean.reshape_symint({bdim_size, N, group});
       rstd = rstd.reshape_symint({bdim_size, N, group});
       const auto stats_bdim = compute_stat_bdim(input_bdim, mean);
@@ -362,41 +372,39 @@ native_group_norm_batch_rule(
 
   _check_group_norm_inputs(weight, weight_bdim, bias, bias_bdim, C);
   auto [result0, mean, rstd] = at::native_group_norm_symint(input_, std::nullopt, std::nullopt, input_bdim ? N * bdim_size : N, C, HxW, group, eps);
-  // Clear any new memory that was allocated with the call to contiguous.
   input_.reset();
 
-  if (!input_bdim) {
-    // If the input isn't batched, then either weight or bias must be.  Repeat the
-    // output (rather than broadcasting) so that we can reshape as needed below.  DO NOT
-    // repeat mean and rstd, since they won't be modified by weight/bias to be batched.
-    VmapDimVector result_repeats(result0.dim() + 1, 1);
-    result_repeats[0] = bdim_size;
-    result0 = result0.repeat(result_repeats);
-  } else {
+  if (input_bdim) {
     // mean/rstd are of shape {B0 * N, group}, but should be {B0, N, group}
     mean = mean.reshape_symint({bdim_size, N, group});
     rstd = rstd.reshape_symint({bdim_size, N, group});
   }
   const auto stats_bdim = compute_stat_bdim(input_bdim, mean);
 
-  VmapDimVector result_shape{result0.sizes()};
-  result0 = result0.reshape_symint({bdim_size, N, C, HxW});
+  result0 = result0.reshape_symint({input_bdim ? bdim_size : 1, N, C, HxW});
+  if (weight.defined() && bias.defined()) {
+    auto weight_ = moveBatchDimToFront(weight, weight_bdim); // [B0?, C]
+    weight_ = weight_.unsqueeze(weight_bdim ? 1 : 0); // [B0?, 1, C]
+    weight_ = padRight(weight_, weight_bdim, result0.dim() - 1); // [B0?, 1, C, ...]
 
-  if (weight.defined()) {
+    auto bias_ = moveBatchDimToFront(bias, bias_bdim); // [B0?, C]
+    bias_ = bias_.unsqueeze(bias_bdim ? 1 : 0); // [B0?, 1, C]
+    bias_ = padRight(bias_, bias_bdim, result0.dim() - 1); // [B0?, 1, C, ...]
+
+    result0 = bias_.addcmul(result0, weight_);
+  } else if (weight.defined()) {
     auto weight_ = moveBatchDimToFront(weight, weight_bdim); // [B0?, C]
     weight_ = weight_.unsqueeze(weight_bdim ? 1 : 0); // [B0?, 1, C]
     weight_ = padRight(weight_, weight_bdim, result0.dim() - 1); // [B0?, 1, C, ...]
     result0 = result0 * weight_;
-  }
-
-  if (bias.defined()) {
+  } else {
     auto bias_ = moveBatchDimToFront(bias, bias_bdim); // [B0?, C]
     bias_ = bias_.unsqueeze(bias_bdim ? 1 : 0); // [B0?, 1, C]
     bias_ = padRight(bias_, bias_bdim, result0.dim() - 1); // [B0?, 1, C, ...]
     result0 = result0 + bias_;
   }
 
-  result0 = result0.reshape(result_shape);
+  result0 = result0.reshape(final_result_shape);
   return std::make_tuple(std::move(result0), 0, std::move(mean), stats_bdim, std::move(rstd), stats_bdim);
 }
 
@@ -405,18 +413,21 @@ static inline Tensor regularize_tensors_group_norm_backward(
     const std::optional<int64_t>& bdim,
     int64_t bdim_size,
     const std::optional<int64_t>& input_bdim,
-    at::MemoryFormat mem_fmt=at::MemoryFormat::Contiguous) {
+    MemoryFormat mem_fmt=MemoryFormat::Contiguous) {
   if (!val.defined()) {
     return val;
   }
 
   auto ret{moveBatchDimToFront(val, bdim)}; // [B0?, N, *]
   ret = ensure_has_bdim(ret, bdim.has_value(), bdim_size); // [B0, N, *]
-  // We batch differently if input isn't batched, so only reshape if it is.
-  if (input_bdim) {
-    ret = reshape_dim_into(0, 0, ret); // [B0 * N, *]
+  VmapDimVector batched_ret_shape{ret.sizes()};
+  ret = reshape_dim_into(0, 0, ret); // [B0 * N, *]
+  ret = ret.contiguous(mem_fmt);
+  // We batch differently if input isn't batched, so undo the reshape.
+  if (!input_bdim) {
+    ret = ret.reshape(batched_ret_shape);
   }
-  return ret.contiguous(mem_fmt);
+  return ret;
 }
 
 static std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
@@ -466,8 +477,16 @@ native_group_norm_backward_multiple_grads_batch_rule(
     grad_rstd,
     grad_rstd_bdim)};
 
-  // Only CPU native_group_norm currently supports non-contiguous input tensors.
-  auto input_mem_fmt{input.device().is_cpu() ? input.suggest_memory_format() : at::MemoryFormat::Contiguous};
+  // Explicitly handle the unbatched case for input, the most likely tensor to
+  // not be batched.
+  auto input_{moveBatchDimToFront(input, input_bdim)};
+  if (input_bdim) {
+    // Reshape the batch dimension to (possibly) handle channels_last.
+    input_ = reshape_dim_into(0, 0, input_);
+  }
+  // Only CPU native_group_norm_backward currently supports non-contiguous input tensors.
+  auto input_mem_fmt{input_.device().is_cpu() ? input_.suggest_memory_format() : at::MemoryFormat::Contiguous};
+  input_ = input_.contiguous(input_mem_fmt);
 
   // This looks expensive, but in normal use as a derivative these are
   // guaranteed to be batched and contiguous already, so this will just be a
@@ -477,10 +496,6 @@ native_group_norm_backward_multiple_grads_batch_rule(
   auto rstd_{regularize_tensors_group_norm_backward(rstd, rstd_bdim, bdim_size, input_bdim)};
   auto grad_mean_{regularize_tensors_group_norm_backward(grad_mean, grad_mean_bdim, bdim_size, input_bdim)};
   auto grad_rstd_{regularize_tensors_group_norm_backward(grad_rstd, grad_rstd_bdim, bdim_size, input_bdim)};
-
-  // Input is the only large tensor that may not be batched; deliberately do not
-  // introduce new batching.
-  auto input_{moveBatchDimToFront(input, input_bdim).contiguous(input_mem_fmt)};
 
   // Weight has shape [B0?, C], but native_group_norm will expect [C].  Manually
   // apply it to grad_out_ in advance.
