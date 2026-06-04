@@ -79,11 +79,13 @@ def _get_kernel_cache() -> dict[str, Any]:
     None cannot turn the caller's subsequent read into AttributeError.
     """
     global _kernel_by_name_cache
-    if _kernel_by_name_cache is None:
+    cache = _kernel_by_name_cache
+    if cache is None:
         with _cache_lock:
             if _kernel_by_name_cache is None:
                 _kernel_by_name_cache = _build_kernel_cache()
-    return _kernel_by_name_cache
+            cache = _kernel_by_name_cache
+    return cache
 
 
 def partition_compatible_kernels(
