@@ -15626,6 +15626,31 @@ class TestFusedRMSNormOverrideRouting(TestCase):
         self.assertFalse(w.is_contiguous())
         self.assertFalse(_fused_rms_norm_cond(x, [128], w, 1e-5))
 
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    @parametrize_test("N", [63, 127, 129, 255])
+    def test_fwd_cond_false_on_unvectorizable_N_16bit(self, dtype, N):
+        # For 16-bit dtypes an odd N gives vecsize=gcd(N, 8)=1, so quack lowers
+        # the gmem->smem copy to a 16-bit cp.async whose cp_size is rejected by
+        # CuTe IR verification at compile time. cond must fall through to aten.
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
+
+        x = torch.randn(8, N, dtype=dtype, device="cuda")
+        w = torch.randn(N, dtype=dtype, device="cuda")
+        self.assertFalse(_fused_rms_norm_cond(x, [N], w, 1e-5))
+
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    @parametrize_test("N", [63, 127, 129, 255])
+    def test_bwd_cond_false_on_unvectorizable_N_16bit(self, dtype, N):
+        from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_backward_cond
+
+        x = torch.randn(8, N, dtype=dtype, device="cuda")
+        w = torch.randn(N, dtype=dtype, device="cuda")
+        gout = torch.randn(8, N, dtype=dtype, device="cuda")
+        rstd = torch.empty(8, dtype=torch.float32, device="cuda")
+        self.assertFalse(
+            _fused_rms_norm_backward_cond(gout, x, [N], rstd, w, [True, True])
+        )
+
     @parametrize_test(
         "output_mask",
         [
@@ -15713,6 +15738,24 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
         out, _ = torch.ops.aten._fused_rms_norm(x, [128], w, 1e-5)
         ref = torch.nn.functional.rms_norm(x, [128], w, 1e-5)
         self.assertEqual(out, ref, atol=1e-12, rtol=0)
+
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize_test("offset", [1, 2, 4])
+    def test_misaligned_base_pointer(self, dtype, offset):
+        # A contiguous input sliced off a flat buffer (buf[offset:].view(M, N))
+        # has clean strides but a base pointer that isn't 16B aligned. quack
+        # compiles assuming the vectorized alignment, so the override must
+        # re-materialize an aligned buffer rather than crash with
+        # "Misaligned Tensor data on argument #0".
+        N, M = 128, 8
+        buf = torch.randn(M * N + offset, dtype=dtype, device="cuda")
+        x = buf[offset:].view(M, N)
+        self.assertTrue(x.is_contiguous())
+        w = torch.randn(N, dtype=dtype, device="cuda")
+        y, _ = torch.ops.aten._fused_rms_norm(x, [N], w, 1e-5)
+        with torch.backends.python_native.operations_disabled("_fused_rms_norm"):
+            y_ref, _ = torch.ops.aten._fused_rms_norm(x, [N], w, 1e-5)
+        self.assertEqual(y, y_ref, atol=1e-1, rtol=0)
 
     # Tolerances picked to match the aten kernel within ~1 ULP of the reduced
     # dtype; the quack kernel uses a different accumulation order.

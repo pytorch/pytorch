@@ -24,10 +24,26 @@ def _torch2cute(t: torch.Tensor | None):  # type: ignore[no-untyped-def]
     return _cute_dsl_utils.torch2cute_dtype_map[t.dtype]
 
 
+def _required_align_bytes(t: torch.Tensor, N: int) -> int:
+    # quack compiles the kernel assuming the input base pointer is aligned to
+    # the vectorized cp.async width: gcd(N, 128 // dtype_bits) elements. A
+    # contiguous tensor with a non-zero storage offset (e.g. buf[1:].view(M, N))
+    # has fine strides but a misaligned base, which trips CuTe's runtime
+    # alignment check ("Misaligned Tensor data on argument #0").
+    itemsize = t.element_size()
+    return math.gcd(N, 128 // (itemsize * 8)) * itemsize
+
+
 def _reshape_2d(t: torch.Tensor, M: int, N: int) -> torch.Tensor:
+    align = _required_align_bytes(t, N)
     if t.ndim == 2 and t.shape[0] == M and t.shape[1] == N and t.is_contiguous():
-        return t
-    return t.reshape(M, N).contiguous()
+        # .contiguous() is a no-op on an already-contiguous tensor and would
+        # preserve a misaligned base; clone to force a fresh (aligned) buffer.
+        return t if t.data_ptr() % align == 0 else t.clone()
+    out = t.reshape(M, N).contiguous()
+    # reshape can return a view that keeps the original (misaligned) storage
+    # offset, and .contiguous() then leaves it untouched.
+    return out if out.data_ptr() % align == 0 else out.clone()
 
 
 def _flatten_rstd(t: torch.Tensor, M: int) -> torch.Tensor:
