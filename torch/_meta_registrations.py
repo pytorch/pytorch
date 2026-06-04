@@ -3715,10 +3715,10 @@ def meta_index_Tensor(self, indices):
     for i, index in enumerate(indices):
         if index is not None:
             torch._check(
-                index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
+                index.dtype in [torch.long, torch.int, torch.int8, torch.bool, torch.uint8],
                 lambda: "tensors used as indices must be long, int, byte or bool tensors",
             )
-            if index.dtype in [torch.int8, torch.bool]:
+            if index.dtype in [torch.int8, torch.bool, torch.uint8]:
                 nonzero = index.nonzero()
                 k = len(result)
                 torch._check_index(
