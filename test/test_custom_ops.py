@@ -3380,6 +3380,7 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(z, x + y)
         self.assertTrue(cpu_called)
 
+    @skipIfTorchDynamo("Annotation introspection test; not a Dynamo runtime test")
     def test_custom_op_call_annotations(self):
         @torch.library.custom_op("_torch_testing::annotated_scale", mutates_args=())
         def annotated_scale(x: Tensor, scale: float) -> Tensor:

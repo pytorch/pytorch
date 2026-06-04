@@ -101,6 +101,7 @@ from ..utils import (
     unpatched_nn_module_getattr,
 )
 from .base import (
+    _RICHCOMPARE_OPS,
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
     MutationType,
@@ -260,22 +261,6 @@ def is_hashable(obj: object) -> bool:
         return True
     except TypeError:
         return False
-
-
-_SENTINEL = object()
-
-
-def _get_underlying_value(vt: "VariableTracker") -> object:
-    """Extract the underlying Python value from a VT for C-level comparison.
-
-    Returns _SENTINEL if the value cannot be extracted.
-    """
-    if isinstance(vt, UserDefinedVariable) and hasattr(vt, "value"):
-        return vt.value
-    try:
-        return vt.as_python_constant()
-    except Exception:
-        return _SENTINEL
 
 
 class UserDefinedVariable(VariableTracker):
@@ -2540,12 +2525,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Skip comparison ops: they go through richcompare_impl on the
             # UserDefined*Variable subclass, which handles _base_vt
             # unwrapping and avoids tracing tensor elements via list_cmp.
-            _CMP_OPS = {"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"}
             if (
                 self._base_vt is not None
                 and self._base_methods is not None
                 and method in self._base_methods
-                and name not in _CMP_OPS
+                and name not in _RICHCOMPARE_OPS
             ):
                 return self._base_vt.call_method(tx, name, args, kwargs)
 
@@ -2839,11 +2823,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
-        if self._base_vt is not None and self._base_methods is not None:
-            iter_method = self._maybe_get_baseclass_method("__iter__")
-            if iter_method is not None and iter_method in self._base_methods:
-                return self._base_vt.unpack_var_sequence(tx)
-        return super().unpack_var_sequence(tx)
+        return unpack_iterable(tx, self)
 
     def is_supported_random(self) -> bool:
         try:
@@ -3657,8 +3637,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 or in_allowlist
                 or is_pybind11_enum_member(self.value)
             ):
-                other_val = _get_underlying_value(other)
-                if other_val is not _SENTINEL:
+                other_val = other.get_real_python_backed_value()
+                if other_val is not NO_SUCH_SUBOBJ:
                     try:
                         result = method(self.value, other_val)
                         return ConstantVariable.create(result)
@@ -4860,15 +4840,6 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None after initialization")
 
-    def richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        if self._base_vt is None:
-            raise AssertionError("expected _base_vt to be set")
-        if isinstance(other, UserDefinedSetVariable) and other._base_vt is not None:
-            other = other._base_vt
-        return self._base_vt.richcompare_impl(tx, other, op)
-
     def as_python_constant(self) -> object:
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None in as_python_constant")
@@ -4994,23 +4965,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             _, (idx, _) = type_attr.__reduce__()
             return self.items[idx]
         return super().resolve_data_descriptor(tx, name, type_attr, source)
-
-    def richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        if op in ("__eq__", "__ne__"):
-            result = self.is_python_equal(other)
-            if op == "__ne__":
-                result = not result
-            return VariableTracker.build(tx, result)
-        # Ordering: delegate to base TupleVariable, unwrapping other if needed.
-        if self._base_vt is None:
-            raise AssertionError("expected _base_vt to be set")
-        if isinstance(other, UserDefinedTupleVariable):
-            if other._base_vt is None:
-                raise AssertionError("expected other._base_vt to be set")
-            other = other._base_vt
-        return self._base_vt.richcompare_impl(tx, other, op)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # Sourceless namedtuples/structseqs (e.g. tensor subclass metadata from
