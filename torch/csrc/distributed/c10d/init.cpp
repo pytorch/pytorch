@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 #ifndef _WIN32
+#include <torch/csrc/distributed/c10d/FakeStore.hpp>
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 #endif
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
@@ -1804,6 +1805,18 @@ Example::
       )")
       .def(py::init<>(), R"(Creates a new HashStore.)");
 #endif
+
+  intrusive_ptr_class_<::c10d::FakeStore>(
+      module,
+      "FakeStore",
+      store,
+      R"(
+A no-op store for use with the fake process group. The fake backend does no
+real communication, so the store is never used for rendezvous; all operations
+are stubbed out. It exists so that fake process groups can be created (and
+split) without a functional store.
+      )")
+      .def(py::init<>(), R"(Creates a new FakeStore.)");
 
   intrusive_ptr_class_<::c10d::TCPStore>(
       module,
@@ -4012,7 +4025,19 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           "fake_option", &::c10d::FakeProcessGroup::Options::fake_option)
       .def_readwrite(
           "error_on_collective",
-          &::c10d::FakeProcessGroup::Options::error_on_collective);
+          &::c10d::FakeProcessGroup::Options::error_on_collective)
+      .def(
+          "__copy__",
+          [](const ::c10d::FakeProcessGroup::Options& self) {
+            return ::c10d::FakeProcessGroup::Options(self);
+          })
+      .def(
+          "__deepcopy__",
+          [](const ::c10d::FakeProcessGroup::Options& self,
+             const py::dict& memo) {
+            return ::c10d::FakeProcessGroup::Options(self);
+          },
+          py::arg("memo"));
   fakeProcessGroup
       .def_static(
           "_create_internal",
