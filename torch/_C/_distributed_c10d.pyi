@@ -470,6 +470,12 @@ class ProcessGroup:
         input_tensor: Tensor,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def all_gather_single(
+        self,
+        output: Tensor,
+        input: Tensor,
+        opts=...,
+    ) -> Work: ...
     def _allgather_base(
         self,
         output: Tensor,
@@ -533,11 +539,25 @@ class ProcessGroup:
         op=...,
         timeout: timedelta | None = None,
     ) -> Work: ...
+    def reduce_scatter_single(
+        self,
+        outputTensor: Tensor,
+        inputTensor: Tensor,
+        opts: ReduceScatterOptions | None,
+    ) -> Work: ...
     def _reduce_scatter_base(
         self,
         outputTensor: Tensor,
         inputTensor: Tensor,
         opts: ReduceScatterOptions | None,
+    ) -> Work: ...
+    def all_to_all_single(
+        self,
+        output_tensor: Tensor,
+        input_tensor: Tensor,
+        output_split_sizes: list[int],
+        input_split_sizes: list[int],
+        opts=...,
     ) -> Work: ...
     @overload
     def alltoall_base(
