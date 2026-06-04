@@ -22,7 +22,6 @@ from typing import Any
 
 import torch
 import torch.fx as fx
-import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.callback import callback_handler, CallbackTrigger
@@ -3202,6 +3201,7 @@ def _codegen_compiled_forward(
 def _codegen_compiled_backward(
     num_rng: int,
     num_tensors_no_vc_check: int | None,
+    inputs_require_grad: bool,
 ) -> Callable[..., Any]:
     from .subclass_codegen import _compile_and_exec_source
 
@@ -3249,11 +3249,14 @@ def _codegen_compiled_backward(
     )
     lines.append("        impl_fn = functools.partial(_cc.run, impl_fn)")
 
-    lines.append("    _ng = torch.is_grad_enabled() and any(")
-    lines.append(
-        "        t.requires_grad for t in all_args if isinstance(t, torch.Tensor))"
-    )
-    lines.append("    if _ng:")
+    if inputs_require_grad:
+        lines.append("    if torch.is_grad_enabled():")
+    else:
+        lines.append("    _ng = torch.is_grad_enabled() and any(")
+        lines.append(
+            "        t.requires_grad for t in all_args if isinstance(t, torch.Tensor))"
+        )
+        lines.append("    if _ng:")
     lines.append("        return _double_bw_(_ctx_, impl_fn, all_args)")
     lines.append("    return impl_fn()")
 
@@ -3330,6 +3333,7 @@ class _AOTDispatchAutogradFunctionFactory:
         _codegen_bwd = _codegen_compiled_backward(
             rng_state.num_rng,
             fw_metadata.num_tensors_saved_with_no_vc_check,
+            any(inp.requires_grad for inp in fw_metadata.input_info),
         )
 
         # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
@@ -3502,6 +3506,14 @@ class _AOTDispatchAutogradFunctionFactory:
                     CompiledFunction._compiled_autograd_key
                 )
 
+                # Saved tensors are detached (forward runs under no-grad), so no
+                # real arg requires grad.  Prepend a dummy requires_grad=True
+                # input so CompiledFunctionBackward.apply attaches a grad_fn and
+                # gradient outputs report requires_grad=True for create_graph=True.
+                if not any(
+                    t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
+                ):
+                    all_args = [torch.empty(0, requires_grad=True)] + all_args
                 return CompiledFunctionBackward.apply(*all_args)
 
             @staticmethod
