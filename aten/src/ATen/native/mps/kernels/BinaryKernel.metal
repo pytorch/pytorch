@@ -447,6 +447,21 @@ struct gcd_functor {
   }
 };
 
+struct lcm_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    T g = gcd_functor{}(a, b);
+    if (g == 0) {
+      return 0;
+    }
+    // `auto` keeps the C++ integer-promoted type (sub-int types widen to int),
+    // so the abs matches the CPU/CUDA kernels: abs is taken before narrowing
+    // back to T on return. Divide before multiplying to limit overflow.
+    auto r = a / g * b;
+    return r < 0 ? -r : r;
+  }
+};
+
 // eq/ne are defined manually (rather than via DEFINE_BINARY_COMPARISON_FUNCTOR)
 // so they can carry complex overloads: `float2 == float2` returns `bool2` in
 // Metal, which doesn't implicitly convert to bool. The reduction `all(...)` /
@@ -599,6 +614,7 @@ REGISTER_INTEGER_BINARY_OP(fmod);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igamma);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igammac);
 REGISTER_INTEGER_BINARY_OP(gcd);
+REGISTER_INTEGER_BINARY_OP(lcm);
 REGISTER_INTEGER_BINARY_OP(bitwise_and);
 REGISTER_INTEGER_BINARY_OP(bitwise_or);
 REGISTER_INTEGER_BINARY_OP(bitwise_xor);
