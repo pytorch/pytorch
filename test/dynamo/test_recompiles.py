@@ -539,6 +539,29 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         f(x, foo1)
         self.assertEqual(counter.frame_count, 2)
 
+    def test_dunder_call_ignores_instance_attribute(self):
+        class Foo:
+            def __init__(self):
+                self.__call__ = lambda x: x + 2
+
+            def __call__(self, x):
+                return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter)
+        def f(x, foo):
+            return foo(x)
+
+        x = torch.ones(2)
+        foo = Foo()
+        self.assertEqual(f(x, foo), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+        foo.__call__ = lambda x: x + 3
+        self.assertEqual(f(x, foo), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+
     def test_no_recompile_over_unused_objects(self):
         # This is a regression test case that imitates
         # https://github.com/city96/ComfyUI-GGUF/blob/47bec6147569a138dd30ad3e14f190a36a3be456/ops.py#L169-L182
