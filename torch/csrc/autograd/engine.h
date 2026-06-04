@@ -15,6 +15,8 @@
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/warnings.h>
 
+#include <c10/util/CallOnce.h>
+
 #include <exception>
 #include <functional>
 #include <memory>
@@ -275,6 +277,11 @@ struct TORCH_API Engine {
   // Destructor will wait for non-reentrant threads to finish
   std::condition_variable non_reentrant_device_thread_condvar_;
   std::mutex non_reentrant_device_thread_mutex_;
+  // Guards one-time creation of device threads.  Unlike the old function-local
+  // static, this member resets on engine reconstruction (fork + reinitialize)
+  // and allows deferred creation when set_multithreading_enabled(False) is
+  // active on the first backward.
+  c10::once_flag device_threads_flag_;
   // stop() must be called before the destruction path goes down to the base
   // class, in order to avoid a data-race-on-vptr. Use this boolean to guard
   // whether stop() has already been called, so we can call this in every
