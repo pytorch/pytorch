@@ -45,7 +45,7 @@ class TestStateDictUtils(DTensorTestBase):
         state_dict = {"dtensor": dist_tensor}
 
         gathered_state_dict = _gather_state_dict(state_dict)
-        expected_gathered_dtensor = funcol.all_gather_single(
+        expected_gathered_dtensor = funcol.all_gather_tensor(
             dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
         self.assertEqual(expected_gathered_dtensor, gathered_state_dict["dtensor"])
@@ -64,7 +64,7 @@ class TestStateDictUtils(DTensorTestBase):
         gathered_state_dict = _gather_state_dict(
             state_dict, cpu_offload=True, ranks_only=(0, 2)
         )
-        expected_gathered_dtensor = funcol.all_gather_single(
+        expected_gathered_dtensor = funcol.all_gather_tensor(
             dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
         if dist.get_rank() in (0, 2):
@@ -102,7 +102,7 @@ class TestStateDictUtils(DTensorTestBase):
             torch.random.manual_seed(dist.get_rank())
             local_tensor = torch.randn(3, 3, 3)
             dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
-            tensor = funcol.all_gather_single(
+            tensor = funcol.all_gather_tensor(
                 dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
             return tensor, dist_tensor

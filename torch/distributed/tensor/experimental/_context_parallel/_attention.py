@@ -286,7 +286,7 @@ class _AllGatherRotater(_RingRotater):
         # We only need to perform allgather once.
         self._idx += 1
         if self._aggregated_buffer is None:
-            self._aggregated_buffer = ft_c.all_gather_single(
+            self._aggregated_buffer = ft_c.all_gather_tensor(
                 curr_buffer.contiguous(), gather_dim=0, group=self._pg
             )
 
@@ -1661,7 +1661,7 @@ def context_parallel_unshard(
     unsharded_buffers = []
     for b, dim in zip(buffers, seq_dims):
         b = b.contiguous()
-        unsharded_b = _maybe_wait(ft_c.all_gather_single(b, dim, mesh))
+        unsharded_b = _maybe_wait(ft_c.all_gather_tensor(b, dim, mesh))
 
         if restore_indices is not None:
             # NOTE: assuming batch dim is 0

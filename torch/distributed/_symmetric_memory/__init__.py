@@ -155,7 +155,7 @@ def _pipelined_multi_all_gather_and_consume(
     communication:
 
         gathered = [
-            all_gather_single(x, gather_dim=0, group=group)
+            all_gather_tensor(x, gather_dim=0, group=group)
             for x in shard
         ]
 
@@ -304,7 +304,7 @@ def _pipelined_all_gather_and_consume(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        ag_out = all_gather_single(shard, gather_dim=0, group=group)
+        ag_out = all_gather_tensor(shard, gather_dim=0, group=group)
         shards = ag_out.chunk(group.size())
         for src_rank, shard in enumerate(shards):
             shard_consumer(shard, src_rank)
@@ -862,7 +862,7 @@ def _fused_all_gather_matmul(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        all_gather_single(A_shard, gather_dim, group_name) @ B
+        all_gather_tensor(A_shard, gather_dim, group_name) @ B
 
     Optimal stride order for A_shard - if A_shard.movedim(gather_dim, 0) is
     contiguous, no extra copy is required for input layout transformation.
@@ -1111,7 +1111,7 @@ def _fused_all_gather_scaled_matmul(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        A = all_gather_single(A_shard, gather_dim, group_name)
+        A = all_gather_tensor(A_shard, gather_dim, group_name)
         leading_dims = A.shape[:-1]
         res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
         res = res.unflatten(0, leading_dims)
@@ -1214,7 +1214,7 @@ def _fused_matmul_reduce_scatter(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        reduce_scatter_single(A @ B, reduce_op, scatter_dim, group_name)
+        reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
 
     Optimal stride order for A - if A.movedim(scatter_dim, 0) is contiguous, no
     extra copy is required for input layout transformation. Otherwise A needs
@@ -1246,7 +1246,7 @@ def _fused_matmul_reduce_scatter_fallback(
     scatter_dim: int,
     group_name: c10d.GroupName,
 ) -> torch.Tensor:
-    res = funcol.reduce_scatter_single(A @ B, reduce_op, scatter_dim, group_name)
+    res = funcol.reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
     res = funcol.wait_tensor(res)
     return res
 
@@ -1431,7 +1431,7 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
         use_fast_accum,
     )
     C = C.view(*output_shape[:-1], B.shape[1])
-    res = funcol.reduce_scatter_single(
+    res = funcol.reduce_scatter_tensor(
         C,
         reduce_op,
         orig_scatter_dim,  # need original scatter dim for 3D+ output tensor here

@@ -14,8 +14,8 @@ from torch._inductor.fx_passes.micro_pipeline_tp import (
 from torch._inductor.fx_passes.post_grad import remove_noop_ops, view_to_reshape
 from torch._inductor.utils import fresh_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
-    all_gather_single,
-    reduce_scatter_single,
+    all_gather_tensor,
+    reduce_scatter_tensor,
 )
 from torch.distributed._symmetric_memory import _test_mode
 from torch.distributed.distributed_c10d import _get_group_size_by_name
@@ -53,7 +53,7 @@ def _fp8_all_gather(
 ) -> torch.Tensor:
     # We don't yet have a canonical pattern for fp8 all-gather. This is a
     # pattern observed in DTensor + float8_experimental.
-    ag = all_gather_single(tensor, gather_dim=0, group=group_name)
+    ag = all_gather_tensor(tensor, gather_dim=0, group=group_name)
     if gather_dim == 0:
         return ag.view(tensor.dtype)
     chunks = ag.chunk(_get_group_size_by_name(group_name))
@@ -90,8 +90,8 @@ class MicroPipelineTPTest(TestCase):
         def func(
             inp: torch.Tensor,
         ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-            a = all_gather_single(inp, gather_dim=0, group=group.group_name)
-            b = all_gather_single(inp, gather_dim=1, group=group.group_name)
+            a = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
+            b = all_gather_tensor(inp, gather_dim=1, group=group.group_name)
             c = _fp8_all_gather(inp, gather_dim=0, group_name=group.group_name)
             d = _fp8_all_gather(inp, gather_dim=1, group_name=group.group_name)
             return a, b, c, d
@@ -141,8 +141,8 @@ class MicroPipelineTPTest(TestCase):
         group = dist.group.WORLD
 
         def func(inp: torch.Tensor) -> torch.Tensor:
-            a = reduce_scatter_single(inp, "sum", scatter_dim=0, group=group.group_name)
-            b = reduce_scatter_single(inp, "avg", scatter_dim=1, group=group.group_name)
+            a = reduce_scatter_tensor(inp, "sum", scatter_dim=0, group=group.group_name)
+            b = reduce_scatter_tensor(inp, "avg", scatter_dim=1, group=group.group_name)
             return a, b
 
         inp = torch.rand(64, 32, device="cuda")
@@ -182,12 +182,12 @@ class MicroPipelineTPTest(TestCase):
         def func(inp: torch.Tensor) -> torch.Tensor:
             a = inp @ inp.T
             # b is unexposed (hidden by a)
-            b = all_gather_single(inp, gather_dim=0, group=group.group_name)
+            b = all_gather_tensor(inp, gather_dim=0, group=group.group_name)
             c = b @ inp.T
             # d is unexposed (hidden by c)
-            d = reduce_scatter_single(b, "avg", scatter_dim=0, group=group.group_name)
+            d = reduce_scatter_tensor(b, "avg", scatter_dim=0, group=group.group_name)
             # e is exposed
-            e = all_gather_single(d, gather_dim=0, group=group.group_name)
+            e = all_gather_tensor(d, gather_dim=0, group=group.group_name)
             return a, c, e
 
         inp = torch.rand(64, 32, device="cuda")
@@ -211,7 +211,7 @@ class MicroPipelineTPTest(TestCase):
         group = dist.group.WORLD
 
         def func(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
-            A = all_gather_single(A_shard, gather_dim=gather_dim, group=group)
+            A = all_gather_tensor(A_shard, gather_dim=gather_dim, group=group)
             if return_A:
                 return A, A @ B
             else:
@@ -253,7 +253,7 @@ class MicroPipelineTPTest(TestCase):
         group = dist.group.WORLD
 
         def func(A_shard: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
-            A = all_gather_single(A_shard, gather_dim=1, group=group)
+            A = all_gather_tensor(A_shard, gather_dim=1, group=group)
             return A @ B
 
         # batch=1: after all_gather, shape[0] == world_size == group_size,
@@ -351,7 +351,7 @@ class MicroPipelineTPTest(TestCase):
         group = dist.group.WORLD
 
         def func(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
-            return reduce_scatter_single(A @ B, "avg", scatter_dim, group)
+            return reduce_scatter_tensor(A @ B, "avg", scatter_dim, group)
 
         if A_dims == 2:
             A = torch.rand(64, 32, device="cuda")
@@ -393,7 +393,7 @@ class MicroPipelineTPTest(TestCase):
                 C = C.view(*A.shape[:-1], B.shape[1])
             else:
                 C = torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=out_dtype)
-            return reduce_scatter_single(C, "avg", scatter_dim, group)
+            return reduce_scatter_tensor(C, "avg", scatter_dim, group)
 
         if A_dims == 2:
             A = torch.rand(64, 32, device="cuda").to(e4m3_type)
@@ -450,7 +450,7 @@ class MicroPipelineTPTest(TestCase):
 
             # reshape output to have same leading dims as original `A` tensor
             C = C.view(*orig_shape[:-1], C.shape[-1])
-            return reduce_scatter_single(C, "sum", scatter_dim, group)
+            return reduce_scatter_tensor(C, "sum", scatter_dim, group)
 
         A = torch.rand(2, 16, 32, device="cuda").to(e4m3_type)
         B = torch.rand(64, 32, device="cuda").to(e4m3_type).T
@@ -550,11 +550,11 @@ class MicroPipelineTP4GPUTest(TestCase):
         )
 
         def func(inp: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor) -> torch.Tensor:
-            hidden = all_gather_single(inp, 0, (device_mesh, 0)) @ w1.t()
-            full_hidden = all_gather_single(hidden, 0, (device_mesh, 1))
+            hidden = all_gather_tensor(inp, 0, (device_mesh, 0)) @ w1.t()
+            full_hidden = all_gather_tensor(hidden, 0, (device_mesh, 1))
             full_hidden /= full_hidden.pow(2).sum().sqrt()
-            hidden = reduce_scatter_single(full_hidden, "avg", 0, (device_mesh, 1))
-            return reduce_scatter_single(hidden @ w2.t(), "avg", 0, (device_mesh, 0))
+            hidden = reduce_scatter_tensor(full_hidden, "avg", 0, (device_mesh, 1))
+            return reduce_scatter_tensor(hidden @ w2.t(), "avg", 0, (device_mesh, 0))
 
         inp = torch.rand(8, 10, device="cuda")
         w1 = torch.rand(7, 10, device="cuda")
