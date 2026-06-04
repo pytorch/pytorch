@@ -1,3 +1,4 @@
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
@@ -289,6 +290,7 @@ Tensor slice(
   }
 
   auto result = convert(v_output);
+  namedinference::propagate_names(result, self);
   return result;
 }
 
