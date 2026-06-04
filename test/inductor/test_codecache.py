@@ -1742,8 +1742,8 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
-        torch.testing.assert_close(out1, out2)
-        torch.testing.assert_close(grad1, grad2)
+        self.assertEqual(out1, out2)
+        self.assertEqual(grad1, grad2)
 
         # Different seed through cached code must produce different output —
         # proves the cached artifact is parameterized by runtime RNG state
