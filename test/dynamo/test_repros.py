@@ -6086,6 +6086,25 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         out_test.sum().backward()
         self.assertEqual(x.grad, x_test.grad)
 
+    def test_data_attr_assignment_graph_break_preserves_version(self):
+        def f(param):
+            out = param**2
+            torch._dynamo.graph_break()
+            param.data = torch.ones_like(param)
+            return out
+
+        eager_param = torch.nn.Parameter(torch.ones(4))
+        compiled_param = torch.nn.Parameter(torch.ones(4))
+
+        eager_out = f(eager_param)
+        compiled_out = torch.compile(f, backend="aot_eager")(compiled_param)
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_param._version, compiled_param._version)
+
+        eager_out.sum().backward()
+        compiled_out.sum().backward()
+        self.assertEqual(eager_param.grad, compiled_param.grad)
+
     # https://github.com/pytorch/pytorch/issues/128072
     def test_map_with_multiple_args(self):
         def f(a, b):

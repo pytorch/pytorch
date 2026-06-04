@@ -572,6 +572,19 @@ class ViewAndMutationMeta:
         self.mutated_graph_handled_indices = mutated_graph_handled_indices
         self.num_mutated_graph_handled_indices = len(self.mutated_graph_handled_indices)
 
+        mutated_graph_handled_indices_hidden_from_autograd = [
+            i
+            for i in mutated_graph_handled_indices
+            if self.input_info[i].mutations_hidden_from_autograd
+        ]
+
+        self.mutated_graph_handled_indices_hidden_from_autograd = (
+            mutated_graph_handled_indices_hidden_from_autograd
+        )
+        self.num_mutated_graph_handled_indices_hidden_from_autograd = len(
+            self.mutated_graph_handled_indices_hidden_from_autograd
+        )
+
         mutated_graph_handled_indices_seen_by_autograd = [
             i
             for i in mutated_graph_handled_indices
