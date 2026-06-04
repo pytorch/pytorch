@@ -289,8 +289,8 @@ def decode_dtype(dtype: int | torch.dtype) -> torch.dtype:
     return dtype
 
 
-def is_integer_type(x: Any) -> TypeGuard[TensorBox | sympy.Expr | int]:
-    if isinstance(x, TensorBox):
+def is_integer_type(x: Any) -> TypeGuard[TensorBox | IRNode | sympy.Expr | int]:
+    if isinstance(x, (TensorBox, IRNode)):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
         return x.is_integer is True  # type: ignore[attr-defined]
@@ -298,8 +298,8 @@ def is_integer_type(x: Any) -> TypeGuard[TensorBox | sympy.Expr | int]:
         return isinstance(x, int)
 
 
-def is_boolean_type(x: Any) -> TypeGuard[TensorBox | bool]:
-    if isinstance(x, TensorBox):
+def is_boolean_type(x: Any) -> TypeGuard[TensorBox | IRNode | bool]:
+    if isinstance(x, (TensorBox, IRNode)):
         return is_boolean_dtype(x.get_dtype())
     else:
         return isinstance(x, bool)
