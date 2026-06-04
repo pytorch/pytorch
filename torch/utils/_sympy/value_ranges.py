@@ -23,11 +23,13 @@ from .functions import (
     FloatTrueDiv,
     FloorDiv,
     IntTrueDiv,
+    Mod,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
     OpaqueUnaryFn_log2,
     OpaqueUnaryFn_sqrt,
     PowByNatural,
+    PythonMod,
     RoundDecimal,
     RoundToInt,
     safe_pow,
@@ -1096,6 +1098,124 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.increasing_map(x, TruncToFloat)
 
 
+def _definitely_ge(
+    expr: sympy.Expr, lower: int, ranges: dict[sympy.Symbol, ValueRanges]
+) -> bool:
+    if lower == 0 and expr.is_nonnegative:
+        return True
+    if lower == 1 and expr.is_positive:
+        return True
+
+    if isinstance(expr, sympy.Symbol):
+        vr = ranges.get(expr)
+        if isinstance(vr, ValueRanges):
+            return bool(vr.lower >= lower)
+
+    return False
+
+
+def _mod_rewrite_is_valid(
+    mod: type[sympy.Function],
+    base: sympy.Expr,
+    divisor: sympy.Expr,
+    ranges: dict[sympy.Symbol, ValueRanges],
+) -> bool:
+    if not _definitely_ge(divisor, 1, ranges):
+        return False
+    return mod is PythonMod or _definitely_ge(base, 0, ranges)
+
+
+def _rewrite_mod_subtraction(
+    base: sympy.Expr,
+    divisor: sympy.Expr,
+    coeff: sympy.Expr,
+) -> sympy.Expr:
+    return coeff * FloorDiv(base, divisor) * divisor
+
+
+def _terms_of_add(expr: sympy.Expr) -> dict[sympy.Expr, sympy.Expr]:
+    terms: dict[sympy.Expr, sympy.Expr] = {}
+    for term in sympy.Add.make_args(expr):
+        coeff, factor = term.as_coeff_Mul()
+        terms[factor] = terms.get(factor, sympy.S.Zero) + coeff
+    return terms
+
+
+def _rewrite_mod_subtractions_in_add(
+    expr: sympy.Add, ranges: dict[sympy.Symbol, ValueRanges]
+) -> sympy.Expr:
+    terms = _terms_of_add(expr)
+
+    replacements = []
+    for factor, mod_coeff in tuple(terms.items()):
+        if mod_coeff == 0 or mod_coeff.is_integer is not True:
+            continue
+
+        mod = factor.func
+        if mod not in (PythonMod, Mod, sympy.Mod):
+            continue
+
+        base, divisor = factor.args
+        if not _mod_rewrite_is_valid(mod, base, divisor, ranges):
+            continue
+
+        matched_terms = []
+        for base_factor, base_coeff in _terms_of_add(base).items():
+            if base_coeff.is_integer is not True:
+                break
+
+            term_coeff = terms.get(base_factor, sympy.S.Zero)
+            needed_coeff = -mod_coeff * base_coeff
+            if needed_coeff == 0:
+                continue
+            if term_coeff == 0 or term_coeff * needed_coeff <= 0:
+                break
+            if needed_coeff > 0 and term_coeff < needed_coeff:
+                break
+            if needed_coeff < 0 and term_coeff > needed_coeff:
+                break
+
+            matched_terms.append((base_factor, needed_coeff))
+        else:
+            for base_factor, needed_coeff in matched_terms:
+                terms[base_factor] -= needed_coeff
+            terms[factor] = sympy.S.Zero
+            replacements.append(_rewrite_mod_subtraction(base, divisor, -mod_coeff))
+
+    if not replacements:
+        return expr
+
+    new_terms = []
+    for factor, coeff in terms.items():
+        if coeff == 0:
+            continue
+        if factor == 1:
+            new_terms.append(coeff)
+        elif coeff == 1:
+            new_terms.append(factor)
+        else:
+            new_terms.append(coeff * factor)
+
+    return sympy.Add(*new_terms, *replacements)
+
+
+def _rewrite_for_value_range_analysis(
+    expr: sympy.Basic, ranges: dict[sympy.Symbol, ValueRanges]
+) -> sympy.Basic:
+    """Preserve simple dependencies that interval arithmetic would lose."""
+    if not expr.args:
+        return expr
+
+    args = tuple(_rewrite_for_value_range_analysis(arg, ranges) for arg in expr.args)
+    if args != expr.args:
+        expr = expr.func(*args)
+
+    if isinstance(expr, sympy.Add):
+        return _rewrite_mod_subtractions_in_add(expr, ranges)
+
+    return expr
+
+
 def bound_sympy(
     expr: sympy.Expr, ranges: dict[sympy.Symbol, ValueRanges] | None = None
 ) -> ValueRanges:
@@ -1125,6 +1245,8 @@ def bound_sympy(
             ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
         else:
             ranges = context.fake_mode.shape_env.var_to_range
+
+    expr = _rewrite_for_value_range_analysis(expr, ranges)
 
     def missing_handler(s):
         if s.is_integer:  # type: ignore[attr-defined]
