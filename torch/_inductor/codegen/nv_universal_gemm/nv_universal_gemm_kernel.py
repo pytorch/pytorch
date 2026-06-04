@@ -167,29 +167,35 @@ def _lookup_gemm_kernel(
 def _create_gemm_cache_key(
     variant_name: str,
     input_tensors,
+    out,
     *,
     has_epilogue: bool = False,
     aux_tensors: tuple = (),
 ):
+    def _tensor_sig(t):
+        return (t.shape, t.stride(), t.dtype, t.device)
+
     if variant_name == "GROUPED_GEMM":
         a, b, offsets = input_tensors
-        cache_key = (a.shape, a.dtype, b.shape, b.dtype, offsets.shape)
+        cache_key = (*_tensor_sig(a), *_tensor_sig(b), *_tensor_sig(offsets))
     elif variant_name == "SCALED_GEMM":
         a, b, scale_a, scale_b = input_tensors
-        cache_key = (a.shape, a.dtype, b.shape, b.dtype, scale_a.shape, scale_b.shape)
+        cache_key = (
+            *_tensor_sig(a),
+            *_tensor_sig(b),
+            *_tensor_sig(scale_a),
+            *_tensor_sig(scale_b),
+        )
     elif variant_name == "GEMM":
         a, b = input_tensors
-        cache_key = (a.shape, a.dtype, b.shape, b.dtype)
+        cache_key = (*_tensor_sig(a), *_tensor_sig(b))
     else:
         raise NotImplementedError(f"Unsupported NVGEMM variant: {variant_name}")
 
+    cache_key = (*cache_key, *_tensor_sig(out))
+
     if has_epilogue:
-        # Aux tensors from the epilogue change the kernel's compiled artifact
-        # (cutlass_api dispatches on their dtype/shape) but the base cache_key
-        # only fingerprints A/B. Without folding aux tensor metadata in, a
-        # wrapper invoked with the same A/B but a differently-shaped aux input
-        # (e.g. dynamic-shape bias) would silently reuse a stale artifact.
-        aux_sig = tuple((t.shape, t.dtype) for t in aux_tensors)
+        aux_sig = tuple((t.shape, t.stride(), t.dtype) for t in aux_tensors)
         return (*cache_key, "epilogue", aux_sig)
     return cache_key
 
@@ -350,8 +356,12 @@ class NVUniversalGemmKernel(Kernel):
         variant_spec = self._build_variant_render_spec()
         epilogue_spec = self._build_epilogue_render_spec()
 
+        disk_cache_config_key = "_DISK_CACHE_CONFIG_KEY"
+
         code = IndentedBuffer()
+        code.writeline("import torch")
         code.writeline("import cutlass")
+        code.writeline("from cutlass_api.artifact import CompiledArtifact")
         code.writeline(
             "from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import ("
         )
@@ -360,6 +370,11 @@ class NVUniversalGemmKernel(Kernel):
             code.writeline("_create_gemm_cache_key,")
             code.writeline("_lookup_gemm_kernel,")
         code.writeline(")")
+        code.writeline(
+            "from torch._inductor.runtime.cutedsl_cache import disk_cache_get, disk_cache_set"
+        )
+        code.writeline("from torch._inductor.utils import _ensure_fp4_dtype_registered")
+        code.writeline("_ensure_fp4_dtype_registered()")
         for import_line in (*variant_spec.import_lines, *epilogue_spec.import_lines):
             code.writeline(import_line)
         code.writeline("")
@@ -371,7 +386,9 @@ class NVUniversalGemmKernel(Kernel):
             code.writeline("")
 
         code.writeline(f"{kernel_name_var} = {kernel_name_str!r}")
+        code.writeline(f"{disk_cache_config_key} = ({kernel_name_var},)")
         code.writeline(f"{cache_var} = {{}}")
+        code.writeline("_disk_fn_cache = {}")
         code.writeline("")
         code.writeline(f"def {self.kernel_name}_main({params_str}):")
         with code.indent():
@@ -404,6 +421,7 @@ class NVUniversalGemmKernel(Kernel):
                 "_lookup_gemm_kernel",
                 (kernel_name_var, *epilogue_spec.kernel_lookup_kwargs),
             )
+            code.writeline("dev_idx = in_ptr0.device.index or 0")
             if epilogue_spec.enabled and self.epilogue_reads:
                 aux_arg = (
                     "aux_tensors=("
@@ -413,6 +431,7 @@ class NVUniversalGemmKernel(Kernel):
                 cache_key_args = (
                     f'variant_name="{self.variant.name}"',
                     "input_tensors=input_tensors",
+                    "out=out_ptr0",
                     f"has_epilogue={epilogue_spec.enabled}",
                     aux_arg,
                 )
@@ -420,6 +439,7 @@ class NVUniversalGemmKernel(Kernel):
                 cache_key_args = (
                     f'variant_name="{self.variant.name}"',
                     "input_tensors=input_tensors",
+                    "out=out_ptr0",
                     f"has_epilogue={epilogue_spec.enabled}",
                 )
             self._write_assign_call(
@@ -428,15 +448,147 @@ class NVUniversalGemmKernel(Kernel):
                 "_create_gemm_cache_key",
                 cache_key_args,
             )
-            code.writeline(f"artifact = {cache_var}.get(cache_key)")
+            code.writeline("mem_key = (cache_key, dev_idx)")
+            code.writeline(f"artifact = {cache_var}.get(mem_key)")
             code.writeline("if artifact is None:")
             with code.indent():
-                code.writeline("artifact = kernel.compile(args)")
-                code.writeline(f"{cache_var}[cache_key] = artifact")
+                code.writeline(
+                    f"compiled_fn = disk_cache_get(_disk_fn_cache, __file__, {disk_cache_config_key}, cache_key, dev_idx)"
+                )
+                code.writeline("if compiled_fn is not None:")
+                with code.indent():
+                    code.writeline("artifact = CompiledArtifact(compiled_fn, kernel)")
+                code.writeline("else:")
+                with code.indent():
+                    code.writeline("artifact = kernel.compile(args)")
+                    code.writeline(
+                        f"disk_cache_set(_disk_fn_cache, __file__, {disk_cache_config_key}, cache_key, artifact.compiled_obj, dev_idx)"
+                    )
+                code.writeline(f"{cache_var}[mem_key] = artifact")
             code.writeline("")
             code.writeline(
                 f"kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)"
             )
+
+        # Precompile hook for subprocess parallel compilation
+        code.writeline("")
+        code.writeline(
+            f"def {self.kernel_name}_precompile("
+            "precompile_shapes, precompile_strides, precompile_dtypes, "
+            "device_index=0, device_capability=None, **kwargs):"
+        )
+        with code.indent():
+            code.writeline(f"global {cache_var}")
+            code.writeline("from torch._subclasses.fake_tensor import FakeTensorMode")
+            code.writeline("")
+            code.writeline("device = f'cuda:{device_index}'")
+            code.writeline("_max_active_clusters = kwargs.get('max_active_clusters')")
+            code.writeline("if _max_active_clusters is None:")
+            with code.indent():
+                code.writeline("return")
+            code.writeline("with FakeTensorMode():")
+            with code.indent():
+                for i, (param_name, _) in enumerate(self._template_input_args):
+                    code.writeline(f"{param_name} = torch.empty_strided(")
+                    with code.indent():
+                        code.writeline(f"tuple(precompile_shapes[{param_name!r}]),")
+                        code.writeline(f"tuple(precompile_strides[{param_name!r}]),")
+                        code.writeline(
+                            f"device=device, dtype=getattr(torch, precompile_dtypes[{param_name!r}]))"
+                        )
+                code.writeline("out_ptr0 = torch.empty_strided(")
+                with code.indent():
+                    code.writeline("tuple(precompile_shapes['output']),")
+                    code.writeline("tuple(precompile_strides['output']),")
+                    code.writeline(
+                        "device=device, dtype=getattr(torch, precompile_dtypes['output']))"
+                    )
+            code.writeline("")
+            code.writeline("import importlib")
+            code.writeline("_patched_mods = []")
+            code.writeline("_mac_fn = lambda *a, **kw: _max_active_clusters")
+            code.writeline("for _mod_name in [")
+            with code.indent():
+                code.writeline("'cutlass_api.providers.cutedsl.utils',")
+                code.writeline(
+                    "'cutlass_api.providers.cutedsl.gemm.sm100_static_persistent',"
+                )
+                code.writeline(
+                    "'cutlass_api.providers.cutedsl.gemm.sm100_static_persistent_efc',"
+                )
+                code.writeline(
+                    "'cutlass_api.providers.cutedsl.gemm.sm100_dense_blockscaled_static_persistent',"
+                )
+                code.writeline(
+                    "'cutlass_api.providers.cutedsl.gemm.sm100_contiguous_offset_2d3d_dense_gemm',"
+                )
+            code.writeline("]:")
+            with code.indent():
+                code.writeline("try:")
+                with code.indent():
+                    code.writeline("_m = importlib.import_module(_mod_name)")
+                code.writeline("except ImportError:")
+                with code.indent():
+                    code.writeline("continue")
+                code.writeline("if hasattr(_m, 'get_max_active_clusters'):")
+                with code.indent():
+                    code.writeline(
+                        "_patched_mods.append((_m, _m.get_max_active_clusters))"
+                    )
+                    code.writeline("_m.get_max_active_clusters = _mac_fn")
+            # Precompile only the base (non-EFC) kernel. EFC kernels produce
+            # closure-wrapped artifacts that can't be serialized to disk cache,
+            # so precompiling them wastes work. The base kernel for the same shape
+            # IS disk-cacheable and benefits from subprocess parallel compilation.
+            code.writeline("try:")
+            with code.indent():
+                code.writeline(f"input_tensors = {input_tensors_expr}")
+                self._write_assign_call(
+                    code,
+                    "args",
+                    "_create_gemm_arguments",
+                    (
+                        f'variant_name="{self.variant.name}"',
+                        "input_tensors=input_tensors",
+                        "out=out_ptr0",
+                        f"accumulator_type={acc_dtype_str}",
+                        *variant_spec.helper_kwargs,
+                    ),
+                )
+                self._write_assign_call(
+                    code,
+                    "kernel",
+                    "_lookup_gemm_kernel",
+                    (kernel_name_var,),
+                )
+                code.writeline("if kernel is None:")
+                with code.indent():
+                    code.writeline("return")
+                self._write_assign_call(
+                    code,
+                    "cache_key",
+                    "_create_gemm_cache_key",
+                    (
+                        f'variant_name="{self.variant.name}"',
+                        "input_tensors=input_tensors",
+                        "out=out_ptr0",
+                    ),
+                )
+                code.writeline("mem_key = (cache_key, device_index)")
+                code.writeline(f"if mem_key not in {cache_var}:")
+                with code.indent():
+                    code.writeline("artifact = kernel.compile(args)")
+                    code.writeline(
+                        f"disk_cache_set(_disk_fn_cache, __file__, {disk_cache_config_key}, "
+                        "cache_key, artifact.compiled_obj, device_index, "
+                        "device_capability=device_capability)"
+                    )
+                    code.writeline(f"{cache_var}[mem_key] = artifact")
+            code.writeline("finally:")
+            with code.indent():
+                code.writeline("for _m, _orig in _patched_mods:")
+                with code.indent():
+                    code.writeline("_m.get_max_active_clusters = _orig")
 
         return code.getvalue()
 
