@@ -131,15 +131,11 @@ TORCH_MODULE(Flatten);
 /// Example:
 /// ```
 /// Unflatten model(UnflattenOptions(0, {2, 2}));
-/// Unflatten model(UnflattenOptions("B", {{"B1", 2}, {"B2", 2}}));
 /// ```
 class TORCH_API UnflattenImpl : public Cloneable<UnflattenImpl> {
  public:
   UnflattenImpl(int64_t dim, std::vector<int64_t> sizes)
       : UnflattenImpl(UnflattenOptions(dim, std::move(sizes))) {}
-  UnflattenImpl(std::string dimname, UnflattenOptions::namedshape_t namedshape)
-      : UnflattenImpl(
-            UnflattenOptions(std::move(dimname), std::move(namedshape))) {}
   explicit UnflattenImpl(UnflattenOptions options_);
 
   void reset() override;
