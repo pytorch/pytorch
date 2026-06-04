@@ -2570,9 +2570,12 @@ def compile_fx_backward(
         compiler_config_extra: Extra configuration for the compiler.
         inner_compile: The inner compile function to use.
     """
-    from torch._dynamo.convert_frame import compile_lock
+    from torch._dynamo.convert_frame import (
+        _disable_profiler_python_tracing,
+        compile_lock,
+    )
 
-    with compile_lock:
+    with compile_lock, _disable_profiler_python_tracing():
         model_outputs_node = output_node(gm)
         if config.bw_outputs_user_visible:
             model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
