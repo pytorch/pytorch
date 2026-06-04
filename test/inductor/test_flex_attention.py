@@ -29,6 +29,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
+    _adjust_num_blocks_and_indices,
     _apply_kernel_options,
     _compute_dq_write_order_from_block_mask,
     _create_empty_block_mask,
@@ -6528,6 +6529,48 @@ class TestBlockMask(InductorTestCase):
                 new_block_mask.full_kv_indices,
                 block_mask.full_kv_indices[:, :, q_index, :],
             )
+
+    @supported_platform
+    def test_adjust_num_blocks_and_indices_recounts_truncated_blocks(self, device):
+        def mask_mod(b, h, q, kv):
+            return ((kv >= 0) & (kv < 128)) | ((kv >= 384) & (kv < 512))
+
+        block_mask = create_block_mask(
+            mask_mod, B=1, H=1, Q_LEN=128, KV_LEN=640, device=device
+        )
+        self.assertIsNotNone(block_mask.full_kv_num_blocks)
+        self.assertIsNotNone(block_mask.full_kv_indices)
+
+        adjusted_num_blocks, adjusted_indices = _adjust_num_blocks_and_indices(
+            block_mask.full_kv_num_blocks,
+            block_mask.full_kv_indices,
+            new_num_rows=1,
+            new_num_cols=3,
+        )
+
+        self.assertEqual(
+            adjusted_num_blocks,
+            torch.tensor([[[1]]], dtype=torch.int32, device=device),
+        )
+        self.assertEqual(adjusted_indices.shape, (1, 1, 1, 3))
+
+        num_blocks = torch.tensor([[[2]]], dtype=torch.int32, device=device)
+        indices = torch.tensor([[[[4, 0, 1, 2, 3]]]], dtype=torch.int32, device=device)
+        adjusted_num_blocks, adjusted_indices = _adjust_num_blocks_and_indices(
+            num_blocks,
+            indices,
+            new_num_rows=1,
+            new_num_cols=3,
+        )
+
+        self.assertEqual(
+            adjusted_num_blocks,
+            torch.tensor([[[1]]], dtype=torch.int32, device=device),
+        )
+        self.assertEqual(
+            adjusted_indices[:, :, :, 0],
+            torch.tensor([[[0]]], dtype=torch.int32, device=device),
+        )
 
     @supported_platform
     def test_block_mask_positional_constructor_preserves_block_size(self, device):

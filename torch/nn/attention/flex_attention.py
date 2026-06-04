@@ -445,10 +445,17 @@ def _adjust_num_blocks_and_indices(
     new_num_rows: int,
     new_num_cols: int,
 ) -> tuple[Tensor, Tensor]:
-    indices = indices[:, :, :new_num_rows, :new_num_cols]
     num_blocks = num_blocks[:, :, :new_num_rows]
-    num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)
-    num_blocks = torch.sum(indices < num_blocks[:, :, :, None], dim=-1).to(torch.int32)
+    indices = indices[:, :, :new_num_rows, :]
+    block_positions = torch.arange(indices.shape[-1], device=indices.device)
+    valid_entries = block_positions < num_blocks[:, :, :, None]
+    valid_entries = torch.logical_and(valid_entries, indices < new_num_cols)
+    num_blocks = torch.sum(valid_entries, dim=-1).to(torch.int32)
+    with torch.fx.traceback.annotate({"fallback_to_eager": True}):
+        valid_order = torch.argsort(
+            valid_entries.to(torch.int32), dim=-1, descending=True, stable=True
+        )
+    indices = torch.gather(indices, dim=-1, index=valid_order)[:, :, :, :new_num_cols]
     return num_blocks, indices
 
 
