@@ -1629,8 +1629,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: The operator 'aten::linalg_lstsq.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
             # https://github.com/pytorch/pytorch/issues/95412
             # see https://github.com/pytorch/pytorch/issues/177249
             DecorateInfo(
@@ -1670,8 +1668,6 @@ op_db: list[OpInfo] = [
                 "TestOperatorSignatures",
                 "test_get_torch_func_signature_exhaustive",
             ),
-            # Exception: The operator 'aten::linalg_lstsq.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
