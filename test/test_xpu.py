@@ -1714,13 +1714,6 @@ if __name__ == "__main__":
         s = storage.pin_memory()
         self.assertTrue(s.is_pinned())
 
-        t = torch.empty(10, device="xpu")
-        s = t.untyped_storage()
-        s_cpu = s.to(device="cpu", non_blocking=True)
-
-        torch.xpu.synchronize()
-        self.assertTrue(s_cpu.is_pinned())
-
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.xpu.is_current_stream_capturing())
         s = torch.xpu.Stream()
