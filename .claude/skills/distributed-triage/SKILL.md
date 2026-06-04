@@ -1,6 +1,12 @@
 ---
 name: distributed-triage
 description: Sub-triages issues in the oncall:distributed queue by assigning distributed module labels, routing to sub-oncalls, and marking triaged. Use when an issue has been routed to oncall:distributed and needs second-level triage.
+hooks:
+  PreToolUse:
+    - matcher: "mcp__github__issue_write|mcp__github__update_issue"
+      hooks:
+        - type: command
+          command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/skills/triaging-issues/scripts/validate_labels.py"
 ---
 
 # Distributed Issue Triage Sub-Skill
