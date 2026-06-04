@@ -710,8 +710,8 @@ instantiate_parametrized_tests(ExprPrinterTests)
 
 
 class TestIndexConstOverflowInt32(InductorTestCase):
-    """Sympy-level tests for
-    ``SIMDKernelFeatures._any_index_expr_const_overflows_int32``."""
+    """Tests for
+    ``SIMDKernelFeatures.any_index_expr_const_overflows_int32``."""
 
     def _make_feats(self, indices):
         # name / var_names / size are unused by the checker; any value works.
@@ -725,7 +725,7 @@ class TestIndexConstOverflowInt32(InductorTestCase):
         return feats
 
     def _check(self, indices):
-        return self._make_feats(indices)._any_index_expr_const_overflows_int32()
+        return self._make_feats(indices).any_index_expr_const_overflows_int32()
 
     def test_production_constant_detected(self):
         # Exact form observed on PyTorch 2.8.0+cu126 / Triton 3.4.0:

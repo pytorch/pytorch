@@ -3131,7 +3131,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     @unittest.skipUnless(HAS_GPU, "requires GPU")
     def test_fused_slice_scatter_int32_const_overflow(self):
         # End-to-end repro for the int32 address-constant overflow guarded
-        # by SIMDKernelFeatures._any_index_expr_const_overflows_int32.
+        # by SIMDKernelFeatures.any_index_expr_const_overflows_int32.
         # On unfixed builds the fused backward kernel raises
         #   ValueError('Scalar -2779057358 is out of range for type int32')
         # because slice_scatter.backward + mm.backward fuse into a kernel
