@@ -100,6 +100,7 @@ from .exc import (
     collapse_resume_frames,
     format_frame_info,
     get_stack_above_dynamo,
+    raise_user_assertion_error,
     raise_value_error,
     ResumePrologueTracingError,
     StepUnsupported,
@@ -1489,7 +1490,9 @@ class InstructionTranslatorBase(
         if hasattr(fn, "fn"):
             inner_fn = fn.fn
         if inner_fn is not None and callable(inner_fn) and is_forbidden(inner_fn):
-            raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
+            raise_user_assertion_error(
+                f"Attempt to trace forbidden callable {inner_fn}"
+            )
         self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
     def inline_generator_function(

@@ -47,7 +47,7 @@ from torch._dynamo.variables.base import VariableTracker
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
-from .exc import unimplemented
+from .exc import raise_user_assertion_error, unimplemented
 from .variables import CellVariable
 from .variables.tensor import SymNodeVariable
 
@@ -146,7 +146,7 @@ class ComptimeVar:
             # TODO: Maybe complain if this isn't a int/bool/float variable
             pass
         else:
-            raise AssertionError(
+            raise_user_assertion_error(
                 f"cannot force {self.__variable} ({type(self.__variable)}) static"
             )
 
@@ -211,7 +211,7 @@ class ComptimeContext:
         Asserts that the int is static (and not dynamic, per dynamic shapes)
         """
         if val.is_dynamic():
-            raise AssertionError(
+            raise_user_assertion_error(
                 "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
             )
 

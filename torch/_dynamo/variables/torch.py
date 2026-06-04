@@ -61,6 +61,7 @@ from ..device_interface import get_registered_device_interfaces
 from ..exc import (
     raise_observed_exception,
     raise_type_error,
+    raise_user_assertion_error,
     unimplemented,
     UserError,
     UserErrorType,
@@ -1586,9 +1587,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             #   (c) some initialization has completed
             # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
             if extra:
-                raise AssertionError("Expect 1 input to cudnn.is_acceptable")
+                raise_user_assertion_error("Expect 1 input to cudnn.is_acceptable")
             if not tensor.is_tensor():
-                raise AssertionError(
+                raise_user_assertion_error(
                     "Expect input to cudnn.is_acceptable to be a tensor"
                 )
             tensor_inp = torch.tensor(0, dtype=tensor.dtype, device=tensor.device)

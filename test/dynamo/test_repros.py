@@ -7328,7 +7328,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             model = Model()
             x = torch.randn(5)
 
-            with self.assertRaises(AssertionError) as e:
+            with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError) as e:
                 torch.compile(model, backend="eager")(x)
 
         msg = str(e.exception)

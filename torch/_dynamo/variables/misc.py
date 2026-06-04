@@ -47,7 +47,14 @@ from ..bytecode_transformation import (
     create_instruction,
 )
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import raise_observed_exception, raise_type_error, unimplemented
+from ..exc import (
+    _UserAssertionError,
+    assertion_error_originates_in_dynamo,
+    raise_observed_exception,
+    raise_type_error,
+    raise_user_assertion_error,
+    unimplemented,
+)
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
@@ -781,6 +788,19 @@ class ComptimeVariable(VariableTracker):
     Dynamo compile time
     """
 
+    @staticmethod
+    def _call_user_fn(func: Callable[..., Any], ctx: Any) -> None:
+        try:
+            func(ctx)
+        except AssertionError as e:
+            if isinstance(e, _UserAssertionError):
+                raise
+            if not assertion_error_originates_in_dynamo(e):
+                raise _UserAssertionError(*e.args).with_traceback(
+                    e.__traceback__
+                ) from None
+            raise
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError("comptime is special form")
 
@@ -814,8 +834,9 @@ class ComptimeVariable(VariableTracker):
                 f"{len(args)} args and {len(kwargs)} kwargs",
             )
         fn = args[0]
+        ctx = ComptimeContext(tx)
         if isinstance(fn, UserFunctionVariable):
-            fn.get_function()(ComptimeContext(tx))
+            self._call_user_fn(fn.get_function(), ctx)
         elif isinstance(fn, NestedUserFunctionVariable):
             # We have to manually bind the freevars ourselves
             code = fn.get_code()
@@ -837,7 +858,7 @@ class ComptimeVariable(VariableTracker):
                 # tuple(make_cell(ComptimeVar(i)) for i in fn.closure.items)
                 (),
             )
-            func(ComptimeContext(tx))
+            self._call_user_fn(func, ctx)
         else:
             raise RuntimeError(f"unsupported argument to comptime: {type(fn)}")
 
@@ -1362,7 +1383,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 if not (tx.one_graph or tx.error_on_graph_break):
-                    raise AssertionError(
+                    raise_user_assertion_error(
                         "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                     )
                 # queue_callback is a method-wrapper, no need to insert a guard.

@@ -28,6 +28,7 @@ Error Formatting:
 
 import json
 import logging
+import os
 import re
 import sys
 import textwrap
@@ -67,6 +68,30 @@ def exportdb_error_message(case_name: str) -> str:
 log = logging.getLogger(__name__)
 graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
+_DYNAMO_PACKAGE_DIR = os.path.normcase(os.path.realpath(os.path.dirname(__file__)))
+_TORCH_GUARDS_FILE = os.path.normcase(
+    os.path.realpath(os.path.join(os.path.dirname(_DYNAMO_PACKAGE_DIR), "_guards.py"))
+)
+
+
+def assertion_error_originates_in_dynamo(e: AssertionError) -> bool:
+    tb = e.__traceback__
+    if tb is None:
+        return True
+
+    while tb.tb_next is not None:
+        tb = tb.tb_next
+
+    filename = tb.tb_frame.f_code.co_filename
+    if filename.startswith("<"):
+        return False
+
+    filename = os.path.normcase(os.path.realpath(filename))
+    return (
+        filename.startswith(_DYNAMO_PACKAGE_DIR + os.sep)
+        or filename == _TORCH_GUARDS_FILE
+    )
+
 
 class TorchDynamoException(RuntimeError):
     """Base exception class for all TorchDynamo-specific exceptions.
@@ -88,6 +113,14 @@ class TorchDynamoException(RuntimeError):
 
 class InternalTorchDynamoError(TorchDynamoException):
     pass
+
+
+class _UserAssertionError(AssertionError):
+    pass
+
+
+def raise_user_assertion_error(msg: str = "") -> NoReturn:
+    raise _UserAssertionError(msg)
 
 
 class ResumePrologueTracingError(TorchDynamoException):
