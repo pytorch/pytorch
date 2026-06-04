@@ -24,7 +24,7 @@ from torch.distributed.tensor._random import (
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -835,7 +835,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             eager_results, eager_rng_states, inductor_results, inductor_rng_states
         )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179985")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_native_dropout(self):
@@ -847,7 +846,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179973")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_normal_(self):
@@ -859,7 +857,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179977")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_rand_like(self):
@@ -871,7 +868,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179963")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_randn_like(self):
@@ -883,7 +879,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179984")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_randint_like(self):
@@ -895,7 +890,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179964")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_uniform_(self):
@@ -907,7 +901,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179981")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_bernoulli(self):
@@ -929,7 +922,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
                 fn, device_mesh, create_input=create_input, placements=placements
             )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179987")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_bernoulli_float(self):
@@ -941,7 +933,6 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/185520")
     @with_comms
     @skip_unless_torch_gpu
     def test_compile_multiple_random_ops(self):
