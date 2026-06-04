@@ -400,6 +400,7 @@ exclude_patterns=[
     '**/*.png',
     '**/*.gz',
     '**/*.patch',
+    'cmake/bolt_profiles/torch.tar.zst',
 ]
 command = [
     'python3',
