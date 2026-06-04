@@ -24,11 +24,7 @@ from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import config, metrics
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
-from torch._inductor.kernel.flex.flex_attention import (
-    _has_single_default_float32_backward_config,
-)
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
-from torch._inductor.template_heuristics.triton import FlexBwDConfig
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention import SDPBackend
@@ -4469,25 +4465,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         ).check("BLOCK_M2 : tl.constexpr = 16").check(
             "BLOCK_N2 : tl.constexpr = 16"
         ).run(source)
-
-        self.assertTrue(
-            _has_single_default_float32_backward_config(
-                [FlexBwDConfig(16, 16, 16, 16, 1, 4)]
-            )
-        )
-        self.assertFalse(
-            _has_single_default_float32_backward_config(
-                [FlexBwDConfig(32, 32, 32, 32, 2, 4)]
-            )
-        )
-        self.assertFalse(
-            _has_single_default_float32_backward_config(
-                [
-                    FlexBwDConfig(16, 16, 16, 16, 1, 4),
-                    FlexBwDConfig(64, 64, 64, 64, 3, 4),
-                ]
-            )
-        )
 
     @supported_platform
     @skip_on_cpu

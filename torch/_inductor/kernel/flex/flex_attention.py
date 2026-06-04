@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast, TYPE_CHECKING
 
 import sympy
@@ -45,6 +45,7 @@ from .flex_flash_attention import (
     _use_flex_flash_attention_backward,
     create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
+    has_unsupported_captured_scalars,
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
@@ -113,24 +114,7 @@ def _has_user_backward_tiling(kernel_options: dict[str, Any]) -> bool:
     )
 
 
-def _has_single_default_float32_backward_config(
-    configs: Sequence[FlexBwDConfig],
-) -> bool:
-    if len(configs) != 1:
-        return False
-
-    conf = configs[0]
-    return (
-        conf.block_m1,
-        conf.block_n1,
-        conf.block_m2,
-        conf.block_n2,
-        conf.num_stages,
-        conf.num_warps,
-    ) == (16, 16, 16, 16, 1, 4)
-
-
-def _maybe_set_float32_backward_default(
+def _use_large_float32_backward_config(
     kernel_options: dict[str, Any],
     dtype: torch.dtype,
     device_type: str,
@@ -140,21 +124,34 @@ def _maybe_set_float32_backward_default(
     v_head_dim: int | Expr,
     sparse_q_block_size: int,
     sparse_kv_block_size: int,
-    has_single_default_config: bool,
-) -> None:
+    configs: Sequence[FlexBwDConfig],
+) -> bool:
     if (
         dtype != torch.float32
         or device_type != "cuda"
         or torch.version.hip is not None
         or _has_user_backward_tiling(kernel_options)
-        or not has_single_default_config
         or sparse_q_block_size % 64 != 0
         or sparse_kv_block_size % 64 != 0
     ):
-        return
+        return False
+
+    if len(configs) != 1:
+        return False
+
+    conf = configs[0]
+    if (
+        conf.block_m1,
+        conf.block_n1,
+        conf.block_m2,
+        conf.block_n2,
+        conf.num_stages,
+        conf.num_warps,
+    ) != (16, 16, 16, 16, 1, 4):
+        return False
 
     sizevars = V.graph.sizevars
-    use_large_tile = sizevars.statically_known_true(
+    return sizevars.statically_known_true(
         sympy.And(
             sympy.Ge(seq_len_q, 128),
             sympy.Ge(seq_len_kv, 128),
@@ -162,15 +159,6 @@ def _maybe_set_float32_backward_default(
             sympy.Le(v_head_dim, 128),
         )
     )
-    if not use_large_tile:
-        return
-
-    kernel_options.setdefault("BLOCK_M1", 64)
-    kernel_options.setdefault("BLOCK_N1", 64)
-    kernel_options.setdefault("BLOCK_M2", 64)
-    kernel_options.setdefault("BLOCK_N2", 64)
-    kernel_options.setdefault("num_stages", 3)
-    kernel_options.setdefault("num_warps", 4)
 
 
 flex_attention_template = TritonTemplate(
@@ -263,9 +251,7 @@ def flex_attention(
     # Early check for FLASH backend: detect unsupported captured scalars before
     # building subgraph buffers (which can trigger unbacked_bindings errors)
     if backend == "FLASH":
-        from .flex_flash_attention import _has_unsupported_captured_scalars
-
-        if _has_unsupported_captured_scalars(
+        if has_unsupported_captured_scalars(
             score_mod_other_buffers, mask_mod_other_buffers
         ):
             raise RuntimeError(
@@ -1014,7 +1000,7 @@ def flex_attention_backward(*args, **kwargs):
     configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
         head_dim, dtype, query.get_device().type
     )
-    _maybe_set_float32_backward_default(
+    if _use_large_float32_backward_config(
         kernel_options,
         dtype,
         device.type,
@@ -1024,8 +1010,19 @@ def flex_attention_backward(*args, **kwargs):
         v_head_dim,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
-        has_single_default_config=_has_single_default_float32_backward_config(configs),
-    )
+        configs,
+    ):
+        configs = [
+            replace(
+                configs[0],
+                block_m1=64,
+                block_n1=64,
+                block_m2=64,
+                block_n2=64,
+                num_stages=3,
+                num_warps=4,
+            )
+        ]
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
