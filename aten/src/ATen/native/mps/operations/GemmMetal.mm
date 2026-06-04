@@ -998,10 +998,20 @@ bool gemm_use_mpp() {
   // matmul2d (MetalPerformancePrimitives) is gated only on the OS deployment
   // target - the SDK exposes it at macOS 26.2+ with no GPU-family requirement, and
   // it lowers to the NAX matrix unit where present and to simdgroup execution
-  // otherwise. macOS 26.4 also guarantees kernels_40.metallib (the metal4.0 build
-  // holding these kernels) is loaded; below it only the metal3.1 simd/gemv kernels
-  // exist, so the simd path is taken instead.
-  static const bool ok = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_4_PLUS);
+  // otherwise.
+  static const bool ok = is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_2_PLUS);
+  return ok;
+}
+
+// True only on the M5 tensor unit (Apple10+). The portable simd kernels are
+// competitive there for tiny shapes, but on earlier Apple GPUs (e.g. M2) matmul2d
+// is far faster even at small K (simd is ~20x slower for bf16/fp32), so the
+// "tiny shape -> simd" fallback in the dispatcher is gated on this.
+static bool gemm_on_m5_tensor_unit() {
+  static const bool ok = [] {
+    auto dev = MPSDevice::getInstance()->device();
+    return dev != nil && [dev supportsFamily:MTLGPUFamilyApple10];
+  }();
   return ok;
 }
 
@@ -1193,8 +1203,11 @@ void mps_gemm(
   const bool transposed = ra.trans || rb.trans;
   // Precise fp32 + transposed is the one tensor-unit combo we do not instantiate.
   const bool m5t_has_variant = want_relaxed || !transposed;
-  const bool use_m5t =
-      use_mpp && m5t_has_variant && M >= 2 && N >= 32 && K >= 64;
+  // K >= 64 sends small-K matmuls to the simd kernel; that is only worthwhile on
+  // the M5 tensor unit. Off it (e.g. M2) simd is ~20x slower, so use matmul2d for
+  // all K there (the kernel takes K as a runtime extent, so any K >= 1 is valid).
+  const bool use_m5t = use_mpp && m5t_has_variant && M >= 2 && N >= 32 &&
+      (K >= 64 || !gemm_on_m5_tensor_unit());
   const bool relaxed = want_relaxed;
 
   if (use_m5t) {
