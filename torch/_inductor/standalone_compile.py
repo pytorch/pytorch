@@ -459,7 +459,16 @@ def _standalone_context(
         torch._guards.tracing(tracing_context),
         CacheArtifactManager.with_fresh_cache(),
         config.patch("triton.autotune_at_compile_time", True),
-        torch._functorch.config.patch("bundled_autograd_cache", aot),
+        torch._functorch.config.patch(
+            {
+                "bundled_autograd_cache": aot,
+                # Standalone artifacts are saved immediately after compile_fx
+                # returns. Training graphs normally lower the backward lazily on
+                # first backward(), so force it while the artifact recorder is
+                # still active.
+                "force_non_lazy_backward_lowering": True,
+            }
+        ),
     ):
         yield
 
