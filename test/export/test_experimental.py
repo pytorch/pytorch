@@ -24,7 +24,7 @@ from torch._functorch.aot_autograd import (
 from torch._guards import tracing as torch_tracing, TracingContext
 from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
-from torch.export.graph_signature import OutputKind
+from torch.export.graph_signature import InputKind, OutputKind
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
@@ -91,6 +91,25 @@ class GlobalContext:
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperiment(TestCase):
+    def _run_joint_and_collect_parameter_grads(self, joint_ep, user_inputs):
+        user_inputs = iter(user_inputs)
+        args = []
+        for spec in joint_ep.graph_signature.input_specs:
+            if spec.kind == InputKind.PARAMETER:
+                args.append(joint_ep.state_dict[spec.target])
+            elif spec.kind == InputKind.USER_INPUT:
+                args.append(next(user_inputs))
+            else:
+                raise AssertionError(f"unexpected input spec kind: {spec.kind}")
+
+        outputs = joint_ep.graph_module(*args)
+        grad_outputs = {
+            spec.target: output
+            for spec, output in zip(joint_ep.graph_signature.output_specs, outputs)
+            if spec.kind == OutputKind.GRADIENT_TO_PARAMETER
+        }
+        return outputs, grad_outputs
+
     def test_joint_basic(self) -> None:
         class Module(torch.nn.Module):
             def __init__(self) -> None:
@@ -604,6 +623,133 @@ def forward(self, args_0):
             m, example_inputs, dynamic_shapes={"x": {0: Dim("x0")}}, strict=True
         )
         _export_forward_backward(ep)
+
+    def test_joint_preserves_input_placeholder_name(self) -> None:
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.randn(4))
+
+            def forward(self, input):
+                return ((self.p * input).sum(),)
+
+        ep = export(Module(), (torch.randn(4),))
+        self.assertEqual(tuple(ep.graph_signature.user_inputs), ("input",))
+
+        joint_ep = _export_forward_backward(ep)
+        self.assertEqual(tuple(joint_ep.graph_signature.user_inputs), ("input",))
+        placeholder_names = [
+            node.name
+            for node in joint_ep.graph_module.graph.nodes
+            if node.op == "placeholder"
+        ]
+        self.assertIn("input", placeholder_names)
+        self.assertNotIn("input_1", placeholder_names)
+
+    def test_joint_tied_weights(self) -> None:
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.input_embeds = torch.nn.Embedding(8, 4, padding_idx=1)
+                self.lm_head = torch.nn.Linear(4, 8)
+                self.lm_head.weight = self.input_embeds.weight
+
+            def forward(self, x):
+                x = self.input_embeds(x)
+                x = self.lm_head(x)
+                return (x.sum(),)
+
+        mod = Module()
+        eager_mod = copy.deepcopy(mod)
+        x = torch.randint(0, 8, (2, 3))
+        eager_loss = eager_mod(x)[0]
+        eager_loss.backward()
+
+        ep = export(mod, (x,))
+        source_meta = {
+            node.name: (id(node.meta["val"]), node.meta["val"].requires_grad)
+            for node in ep.graph_module.graph.nodes
+            if node.op == "placeholder"
+        }
+        joint_ep = _export_forward_backward(ep, joint_loss_index=0)
+        self.assertEqual(
+            {
+                node.name: (id(node.meta["val"]), node.meta["val"].requires_grad)
+                for node in ep.graph_module.graph.nodes
+                if node.op == "placeholder"
+            },
+            source_meta,
+        )
+
+        outputs, grad_outputs = self._run_joint_and_collect_parameter_grads(
+            joint_ep, (x,)
+        )
+        self.assertEqual(set(grad_outputs), {"input_embeds.weight", "lm_head.bias"})
+        self.assertEqual(outputs[0], eager_loss)
+        self.assertEqual(
+            grad_outputs["input_embeds.weight"], eager_mod.input_embeds.weight.grad
+        )
+        self.assertEqual(grad_outputs["lm_head.bias"], eager_mod.lm_head.bias.grad)
+
+    def test_joint_distinct_parameters_sharing_storage(self) -> None:
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                base = torch.randn(4)
+                self.p = torch.nn.Parameter(base)
+                self.q = torch.nn.Parameter(base.detach())
+
+            def forward(self, x):
+                return ((self.p * x).sum() + (self.q * x.square()).sum(),)
+
+        mod = Module()
+        eager_mod = copy.deepcopy(mod)
+        x = torch.randn(4)
+        eager_loss = eager_mod(x)[0]
+        eager_loss.backward()
+
+        ep = export(mod, (x,))
+        self.assertTrue(torch._C._is_alias_of(ep.state_dict["p"], ep.state_dict["q"]))
+        self.assertIsNot(ep.state_dict["p"], ep.state_dict["q"])
+        joint_ep = _export_forward_backward(ep, joint_loss_index=0)
+        outputs, grad_outputs = self._run_joint_and_collect_parameter_grads(
+            joint_ep, (x,)
+        )
+
+        self.assertEqual(set(grad_outputs), {"p", "q"})
+        self.assertEqual(outputs[0], eager_loss)
+        self.assertEqual(grad_outputs["p"], eager_mod.p.grad)
+        self.assertEqual(grad_outputs["q"], eager_mod.q.grad)
+
+    def test_joint_mixed_requires_grad_parameters_sharing_storage(self) -> None:
+        class Module(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                base = torch.randn(4)
+                self.p = torch.nn.Parameter(base, requires_grad=False)
+                self.q = torch.nn.Parameter(base.detach(), requires_grad=True)
+
+            def forward(self, x):
+                return ((self.p * x).sum() + (self.q * x.square()).sum(),)
+
+        mod = Module()
+        eager_mod = copy.deepcopy(mod)
+        x = torch.randn(4)
+        eager_loss = eager_mod(x)[0]
+        eager_loss.backward()
+
+        ep = export(mod, (x,))
+        self.assertTrue(torch._C._is_alias_of(ep.state_dict["p"], ep.state_dict["q"]))
+        self.assertIsNot(ep.state_dict["p"], ep.state_dict["q"])
+        joint_ep = _export_forward_backward(ep, joint_loss_index=0)
+        outputs, grad_outputs = self._run_joint_and_collect_parameter_grads(
+            joint_ep, (x,)
+        )
+
+        self.assertEqual(set(grad_outputs), {"q"})
+        self.assertEqual(outputs[0], eager_loss)
+        self.assertIsNone(eager_mod.p.grad)
+        self.assertEqual(grad_outputs["q"], eager_mod.q.grad)
 
     def test_joint_cifar10_backwards(self) -> None:
         import torch.nn as nn

@@ -573,14 +573,69 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
         return gm, new_graph_signature, new_state_dict
 
+    def _copy_graph_module_preserving_placeholder_names() -> torch.fx.GraphModule:
+        graph_module = copy.deepcopy(ep.graph_module)
+        for old_gm, new_gm in zip(ep.graph_module.modules(), graph_module.modules()):
+            old_phs = [node for node in old_gm.graph.nodes if node.op == "placeholder"]
+            new_phs = [node for node in new_gm.graph.nodes if node.op == "placeholder"]
+            if len(old_phs) != len(new_phs):
+                raise AssertionError(
+                    f"old placeholders length {len(old_phs)} does not match "
+                    f"new placeholders length {len(new_phs)}"
+                )
+            for old_node, new_node in zip(old_phs, new_phs):
+                new_node.name = old_node.name
+            new_gm.graph.lint()
+            new_gm.recompile()
+        return graph_module
+
+    def _canonicalize_tied_parameter_placeholders(
+        gm: torch.fx.GraphModule,
+    ) -> None:
+        placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
+        if len(placeholders) != len(ep.graph_signature.input_specs):
+            raise AssertionError(
+                f"placeholders length {len(placeholders)} does not match "
+                f"input_specs length {len(ep.graph_signature.input_specs)}"
+            )
+
+        canonical_node_for_parameter: dict[int, torch.fx.Node] = {}
+        changed = False
+        for node, spec in zip(placeholders, ep.graph_signature.input_specs):
+            if (
+                spec.kind != InputKind.PARAMETER
+                or not isinstance(spec.arg, TensorArgument)
+                or not isinstance(spec.target, str)
+            ):
+                continue
+
+            param = ep.state_dict[spec.target]
+            param_id = id(param)
+            if param_id not in canonical_node_for_parameter:
+                canonical_node_for_parameter[param_id] = node
+                continue
+
+            canonical_node = canonical_node_for_parameter[param_id]
+            node.replace_all_uses_with(canonical_node)
+            node.meta["val"] = node.meta["val"].detach()
+            changed = True
+
+        if changed:
+            gm.graph.lint()
+            gm.recompile()
+
+    graph_module = _copy_graph_module_preserving_placeholder_names()
+    if joint_loss_index is not None:
+        _canonicalize_tied_parameter_placeholders(graph_module)
+
     old_placeholders = [
-        node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
+        node for node in graph_module.graph.nodes if node.op == "placeholder"
     ]
     fake_args = [node.meta["val"] for node in old_placeholders]
 
-    buffers_to_remove = [name for name, _ in ep.graph_module.named_buffers()]
+    buffers_to_remove = [name for name, _ in graph_module.named_buffers()]
     for name in buffers_to_remove:
-        delattr(ep.graph_module, name)
+        delattr(graph_module, name)
 
     # TODO(zhxhchen17) Return the new graph_signature directly.
     fake_mode_det = detect_fake_mode(fake_args)
@@ -597,7 +652,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         custom_triton_ops_decomposition_ctx(),
     ):
         gm, graph_signature = aot_export_module(
-            ep.graph_module,
+            graph_module,
             fake_args,
             # pyrefly: ignore[bad-argument-type]
             decompositions=python_decomp_table,
