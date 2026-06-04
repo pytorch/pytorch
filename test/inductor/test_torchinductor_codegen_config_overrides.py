@@ -126,10 +126,11 @@ class CodegenInductorTest(InductorTestCase):
         def func(x):
             return torch.var_mean(x, dim=1)
 
-        # Use a large number to force codegen to prefer welford reduction,
-        # in order to test effectiveness of config flag disable_welford_reduction
+        # Use a reduction larger than the CUDA two-step variance threshold to
+        # force codegen to prefer Welford reduction, in order to test
+        # effectiveness of config flag disable_welford_reduction.
         # This test should run fine on GPU as the configuration is not specific to MTIA backend.
-        x = torch.randn((4, 18000), device=torch.device(GPU_TYPE))
+        x = torch.randn((4, 65536), device=torch.device(GPU_TYPE))
         config_patches = {
             "mtia.disable_welford_reduction": disable_welford_reduction,
         }
