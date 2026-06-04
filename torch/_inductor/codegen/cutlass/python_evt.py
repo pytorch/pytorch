@@ -64,7 +64,13 @@ class CutlassEVTOpsMixIn:
 
     @staticmethod
     def constant(value: Any, dtype: Any) -> str:
-        raise NotImplementedError
+        return str(float(value))
+
+    @staticmethod
+    def neg(x0: str) -> str:
+        # Use subtraction from zero instead of unary minus because the
+        # CUTLASS PythonASTFrontend has visit_BinOp but no visit_UnaryOp.
+        return f"(0.0 - {x0})"
 
     @staticmethod
     def mul(x0: str, x1: str) -> str:
