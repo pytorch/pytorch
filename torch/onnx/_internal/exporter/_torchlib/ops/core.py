@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import operator
+import string
 from typing import Sequence
 
 from onnxscript.onnx_opset import opset18 as op
@@ -17,7 +18,7 @@ from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
 aten = torch.ops.aten
 
-_EINSUM_SYMBOLS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_EINSUM_SYMBOLS = string.ascii_letters
 
 
 def _get_einsum_symbol(dim: int) -> str:
