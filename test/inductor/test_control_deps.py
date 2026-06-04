@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
@@ -8,9 +10,13 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU_AND_TRITON,
     requires_gpu,
 )
+
+
+requires_cuda_triton = unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
 
 
 class TestControlDeps(InductorTestCase):
@@ -490,99 +496,72 @@ class TestControlDeps(InductorTestCase):
             "expected MutationOutput entries for pass-through values in control_deps",
         )
 
-    def test_stream_cache_setup_only_once(self):
-        """When codegen_device_guard_enter is called multiple times on the same
-        wrapper instance (e.g., forward + backward sharing a wrapper in
-        activation offloading), only the first call should set
-        setup_stream_cache=True."""
+    def test_stream_cache_setup_only_once_per_device(self):
+        """When codegen_device_guard_enter is called multiple times for the same
+        device (e.g., forward + backward sharing a wrapper), only the first call
+        should set setup_stream_cache=True. A different device gets its own
+        setup."""
         from unittest.mock import MagicMock
 
         from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+        from torch.utils._ordered_set import OrderedSet
 
         codegen = MagicMock(spec=PythonWrapperCodegen)
-        codegen._stream_cache_setup_done = False
+        codegen._stream_cache_setup_devices = OrderedSet()
         codegen.last_seen_device_guard_index = None
         codegen.writeline = MagicMock()
 
         stream_map = {1: 10}
 
-        # Call the real method twice on the same instance
+        # First call for device 0: should setup
         PythonWrapperCodegen.codegen_device_guard_enter(
             codegen,
             device_idx=0,
             num_streams=2,
             stream_idx_to_user_obj_idx=stream_map,
         )
-        first_call_line = codegen.writeline.call_args_list[0][0][0]
-        self.assertTrue(first_call_line.setup_stream_cache)
+        first_line = codegen.writeline.call_args_list[0][0][0]
+        self.assertTrue(first_line.setup_stream_cache)
 
+        # Second call for same device 0: should NOT setup again
         PythonWrapperCodegen.codegen_device_guard_enter(
             codegen,
             device_idx=0,
             num_streams=2,
             stream_idx_to_user_obj_idx=stream_map,
         )
-        second_call_line = codegen.writeline.call_args_list[1][0][0]
+        second_line = codegen.writeline.call_args_list[1][0][0]
         self.assertFalse(
-            second_call_line.setup_stream_cache,
-            "Second device guard entry should not re-execute stream cache setup",
+            second_line.setup_stream_cache,
+            "Second entry for same device should skip stream cache setup",
+        )
+
+        # First call for device 1: should setup (different device)
+        PythonWrapperCodegen.codegen_device_guard_enter(
+            codegen,
+            device_idx=1,
+            num_streams=2,
+            stream_idx_to_user_obj_idx=stream_map,
+        )
+        third_line = codegen.writeline.call_args_list[2][0][0]
+        self.assertTrue(
+            third_line.setup_stream_cache,
+            "First entry for a new device should setup stream cache",
         )
 
     @requires_gpu()
-    def test_stream_event_cache_functions(self):
-        """_setup_stream_event_cache populates thread-local caches that
-        _get_stream_by_index and _get_event_by_index read from."""
-        from torch._dynamo.variables.streams import (
-            _get_event_by_index,
-            _get_stream_by_index,
-            _setup_stream_event_cache,
-            _tls,
-        )
-
-        try:
-            _setup_stream_event_cache(
-                default_stream_indices=[0],
-                new_stream_indices=[1],
-                event_indices=[5],
-            )
-
-            s0 = _get_stream_by_index(0)
-            self.assertEqual(s0, torch.cuda.current_stream())
-
-            s1 = _get_stream_by_index(1)
-            self.assertIsInstance(s1, torch.cuda.Stream)
-            self.assertNotEqual(s1, torch.cuda.current_stream())
-
-            e5 = _get_event_by_index(5)
-            self.assertIsInstance(e5, torch.Event)
-
-            # Same index returns same cached object
-            self.assertIs(_get_stream_by_index(0), s0)
-            self.assertIs(_get_stream_by_index(1), s1)
-            self.assertIs(_get_event_by_index(5), e5)
-        finally:
-            if hasattr(_tls, "stream_cache"):
-                del _tls.stream_cache
-            if hasattr(_tls, "event_cache"):
-                del _tls.event_cache
-
-    @requires_gpu()
-    def test_generated_code_calls_setup_stream_event_cache(self):
-        """Generated inductor code should call _setup_stream_event_cache
-        when the graph has stream/event operations."""
+    def test_generated_code_uses_get_stream_by_index(self):
+        """Generated inductor code should use _get_stream_by_index to
+        retrieve user streams from the external object registry."""
 
         def fn(x):
             s = torch.Stream(device=GPU_TYPE)
-            e = torch.Event()
             with s:
-                y = x + 1
-                e.record()
-            e.wait()
-            return y * 2
+                return x + 1
 
         x = torch.ones(4, 4, device=GPU_TYPE)
         result, code = run_and_get_code(torch.compile(fn), x)
-        FileCheck().check("_setup_stream_event_cache").run(code[0])
+        FileCheck().check("_get_stream_by_index").run(code[0])
 
         expected = fn(torch.ones(4, 4, device=GPU_TYPE))
         torch.testing.assert_close(result, expected)
