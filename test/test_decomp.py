@@ -500,13 +500,11 @@ def any_unsupported(args, kwargs):
 
 core_backward_failures = {
     skip("_softmax_backward_data"),  # slow: fails with --timeout=360 secs
-    xfail("addcdiv"),
     skip("addcmul"),  # slow: fails with --timeout=360 secs
     skip("deg2rad"),  # slow: fails with --timeout=360 secs
     skip("diag_embed"),  # slow: fails with --timeout=360 secs
     skip("frac"),  # slow: fails with --timeout=360 secs
     skip("grid_sampler_2d"),  # slow: fails with --timeout=360 secs
-    xfail("lerp"),
     skip("logaddexp"),  # slow: fails with --timeout=360 secs
     skip("native_dropout_backward"),  # slow: fails with --timeout=360 secs
     xfail("nn.functional.binary_cross_entropy_with_logits"),
