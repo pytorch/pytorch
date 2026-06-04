@@ -1584,6 +1584,90 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
+    @requires_gpu()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_cache_hit_aligned_and_unaligned_inputs(self):
+        """
+        A function compiled with an aligned GPU input should share a cache
+        entry with the same function called with an unaligned GPU input.
+
+        `inputs_to_check` (derived from the example input's actual alignment)
+        used to feed into the cache key, so an aligned vs. unaligned first
+        call produced different keys and a second cache miss. It is no longer
+        part of the key: codegen still picks the aligned vs. unaligned kernel
+        based on the example, but the compiled artifact carries its own runtime
+        realignment (copy_if_misaligned for the inputs the kernel assumes
+        aligned). The cached graph therefore services both alignments --
+        whichever variant compiled first realigns the other at runtime.
+        """
+        device = GPU_TYPE
+
+        def fn(x):
+            return torch.nn.functional.relu(x) * 2
+
+        # Aligned: storage_offset == 0.
+        aligned = torch.randn(1024, device=device)
+        # Unaligned: storage_offset == 1, so data_ptr is offset by
+        # sizeof(float) and is no longer 16-byte aligned.
+        unaligned = torch.randn(1024 + 16, device=device)[1:-15]
+        self.assertEqual(aligned.data_ptr() % 16, 0)
+        self.assertNotEqual(unaligned.data_ptr() % 16, 0)
+        self.assertEqual(aligned.shape, unaligned.shape)
+
+        compiled_fn = torch.compile(fn)
+
+        # First call with the aligned tensor: cache miss.
+        self.assertEqual(fn(aligned), compiled_fn(aligned))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # Drop in-memory state so the cache lookup is exercised.
+        self.reset()
+
+        # Call with the unaligned tensor: should hit.
+        self.assertEqual(fn(unaligned), compiled_fn(unaligned))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        # And back to aligned: still a hit, same cached graph.
+        self.reset()
+        self.assertEqual(fn(aligned), compiled_fn(aligned))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+
+    @requires_gpu()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_aligned_unaligned_inputs_no_recompile(self):
+        """
+        Alignment is deliberately not guarded (storage_offset guards cause
+        recompiles), so calling a compiled function in-process with an aligned
+        then an unaligned variant of the same input must reuse the same graph
+        without recompiling. The unaligned input is realigned at runtime via
+        copy_if_misaligned.
+        """
+        device = GPU_TYPE
+
+        def fn(x):
+            return torch.nn.functional.relu(x) * 2
+
+        aligned = torch.randn(1024, device=device)
+        unaligned = torch.randn(1024 + 16, device=device)[1:-15]
+        self.assertEqual(aligned.data_ptr() % 16, 0)
+        self.assertNotEqual(unaligned.data_ptr() % 16, 0)
+        self.assertEqual(aligned.shape, unaligned.shape)
+
+        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_fn = torch.compile(fn, backend=backend)
+
+        self.assertEqual(fn(aligned), compiled_fn(aligned))
+        self.assertEqual(backend.frame_count, 1)
+
+        # A differently-aligned input must NOT trigger a recompile.
+        self.assertEqual(fn(unaligned), compiled_fn(unaligned))
+        self.assertEqual(backend.frame_count, 1)
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("variant", ("v1", "v2"))
