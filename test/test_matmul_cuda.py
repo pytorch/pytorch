@@ -197,6 +197,7 @@ class TestMatmulCuda(InductorTestCase):
 
     def cublas_addmm(
         self,
+        device,
         size: int,
         dtype: torch.dtype,
         reduced_precision: bool = False,
@@ -251,17 +252,17 @@ class TestMatmulCuda(InductorTestCase):
             m_1 = m_1.to(dtype=dtype)
             m_2 = m_2.to(dtype=dtype)
             res_cpu = res_cpu.to(dtype=dtype)
-        # Move arg tensors to CUDA
-        m_beta = m_beta.to("cuda")
-        m_input = m_input.to("cuda")
-        m_1 = m_1.to("cuda")
-        m_2 = m_2.to("cuda")
-        # Get CUDA result
-        res_cuda = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
+        # Move arg tensors to device
+        m_beta = m_beta.to(device)
+        m_input = m_input.to(device)
+        m_1 = m_1.to(device)
+        m_2 = m_2.to(device)
+        # Get device result
+        res_device = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
         # Move to CPU for comparison
-        res_cuda = res_cuda.to("cpu")
+        res_device = res_device.to("cpu")
         # Compare
-        self.assertEqual(res_cpu, res_cuda)
+        self.assertEqual(res_cpu, res_device)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
@@ -269,15 +270,15 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @dtypes(torch.cfloat, torch.cdouble)
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_mm_with_mH_args(self, dtype, backend):
+    def test_mm_with_mH_args(self, device, dtype, backend):
         # Testing mm with mH-transformed arguments.
         # The root cause of:
         # https://github.com/pytorch/pytorch/issues/174382
         val = 3 + 4j
-        x = torch.zeros(2, 3, dtype=dtype, device="cuda")
+        x = torch.zeros(2, 3, dtype=dtype, device=device)
         x.diagonal().fill_(val)
 
-        ref_corrcoef = torch.empty(2, 2, dtype=dtype, device="cuda")
+        ref_corrcoef = torch.empty(2, 2, dtype=dtype, device=device)
         ref_corrcoef.fill_(-0.5)
         ref_corrcoef.diagonal().fill_(1.0)
 
@@ -296,12 +297,12 @@ class TestMatmulCuda(InductorTestCase):
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("size", [100, 1000, 10000])
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_cublas_addmm(self, size: int, dtype: torch.dtype, backend):
+    def test_cublas_addmm(self, device, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
             if (TEST_WITH_ROCM and backend == "cublas" and isRocmArchAnyOf(NAVI_ARCH) and
                     getRocmVersion() < (6, 4) and dtype == torch.float16 and size >= 10000):
                 self.skipTest(f"failed on Navi for ROCm6.3 due to hipblas backend, dtype={dtype} and size={size}")
-            self.cublas_addmm(size, dtype, False)
+            self.cublas_addmm(device, size, dtype, False)
 
     @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above
@@ -310,9 +311,9 @@ class TestMatmulCuda(InductorTestCase):
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype, backend):
+    def test_cublas_addmm_reduced_precision(self, device, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
-            self.cublas_addmm(size, dtype, True)
+            self.cublas_addmm(device, size, dtype, True)
 
 
     @onlyCUDA
@@ -323,14 +324,14 @@ class TestMatmulCuda(InductorTestCase):
     @dtypes(torch.bfloat16, torch.float16, torch.float32)
     @parametrize("size", [128])
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_cublas_addmm_bias_shapes(self, size: int, dtype: torch.dtype, backend):
+    def test_cublas_addmm_bias_shapes(self, device, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
             # 2D bias
-            self.cublas_addmm(size, dtype, bias_shape_modifier=lambda shape: shape)
+            self.cublas_addmm(device, size, dtype, bias_shape_modifier=lambda shape: shape)
             # 1D bias which is row-broadcast to 2D
-            self.cublas_addmm(size, dtype, bias_shape_modifier=lambda shape: (1, shape[-1]))
+            self.cublas_addmm(device, size, dtype, bias_shape_modifier=lambda shape: (1, shape[-1]))
             # 1D bias which row-broadcasts
-            self.cublas_addmm(size, dtype, bias_shape_modifier=lambda shape: (shape[-1],))
+            self.cublas_addmm(device, size, dtype, bias_shape_modifier=lambda shape: (shape[-1],))
 
 
     @onlyCUDA
@@ -342,15 +343,15 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("small_size", [4, 8])
     @parametrize("size", [32768])
     @parametrize("backend", ["cublaslt", "cublas"])
-    def test_cublas_addmm_no_reduced_precision(self, small_size: int, size: int, dtype: torch.dtype, backend):
+    def test_cublas_addmm_no_reduced_precision(self, device, small_size: int, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
             torch.backends.cuda.preferred_blas_library(backend)
             orig_precision = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-            m1 = torch.full((small_size, size), 65504.0, dtype=dtype, device='cuda')
-            m2 = torch.ones((size, small_size), dtype=dtype, device='cuda')
+            m1 = torch.full((small_size, size), 65504.0, dtype=dtype, device=device)
+            m2 = torch.ones((size, small_size), dtype=dtype, device=device)
             m2[size // 2:, :] = -1.0
-            b = torch.zeros((small_size,), dtype=dtype, device='cuda')
+            b = torch.zeros((small_size,), dtype=dtype, device=device)
             out = torch.addmm(b, m1, m2, beta=1.0)
             self.assertEqual(out.sum().item(), 0.0)
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_precision
@@ -360,7 +361,7 @@ class TestMatmulCuda(InductorTestCase):
     @runOnRocmArch(MI200_ARCH)
     @parametrize("batched", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_fp16_backward_preserves_subnormals_rocm(self, backend, batched):
+    def test_fp16_backward_preserves_subnormals_rocm(self, device, backend, batched):
         # Regression test for issue #182952. On ROCm, the hipBLASLt path for
         # at::Half had no equivalent of rocBLAS's fp16_alt_impl, so backward
         # fp16 GEMMs silently flushed subnormals to zero. The dispatcher now
@@ -373,17 +374,17 @@ class TestMatmulCuda(InductorTestCase):
         with blas_library_context(backend):
             if batched:
                 B = 3
-                x = torch.ones(B, M, K, dtype=dtype, device="cuda")
+                x = torch.ones(B, M, K, dtype=dtype, device=device)
                 w = torch.nn.Parameter(
-                    torch.ones(B, K, N, dtype=dtype, device="cuda")
+                    torch.ones(B, K, N, dtype=dtype, device=device)
                 )
-                d = torch.full((B, M, N), sub_val, dtype=dtype, device="cuda")
+                d = torch.full((B, M, N), sub_val, dtype=dtype, device=device)
             else:
-                x = torch.ones(M, K, dtype=dtype, device="cuda")
+                x = torch.ones(M, K, dtype=dtype, device=device)
                 w = torch.nn.Parameter(
-                    torch.ones(K, N, dtype=dtype, device="cuda")
+                    torch.ones(K, N, dtype=dtype, device=device)
                 )
-                d = torch.full((M, N), sub_val, dtype=dtype, device="cuda")
+                d = torch.full((M, N), sub_val, dtype=dtype, device=device)
             (x @ w).backward(d)
             torch.cuda.synchronize()
             grad = w.grad.flatten()[0].item()
@@ -396,24 +397,24 @@ class TestMatmulCuda(InductorTestCase):
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_cublas_addmm_reduced_precision_fp16_accumulate(self, size: int, dtype: torch.dtype, backend):
+    def test_cublas_addmm_reduced_precision_fp16_accumulate(self, device, size: int, dtype: torch.dtype, backend):
         with blas_library_context(backend):
-            self.cublas_addmm(size, dtype, False, True)
+            self.cublas_addmm(device, size, dtype, False, True)
 
     @onlyCUDA
-    def test_cublas_and_lt_reduced_precision_fp16_accumulate(self):
+    def test_cublas_and_lt_reduced_precision_fp16_accumulate(self, device):
         orig_fp16_accumulate = torch.backends.cuda.matmul.allow_fp16_accumulation
         torch.backends.cuda.matmul.allow_fp16_accumulation = True
-        x = torch.rand(32, 512, 512, device='cuda', dtype=torch.half)
-        w = torch.rand(512, 512, device='cuda', dtype=torch.half)
-        b = torch.rand(512, device='cuda', dtype=torch.half)
+        x = torch.rand(32, 512, 512, device=device, dtype=torch.half)
+        w = torch.rand(512, 512, device=device, dtype=torch.half)
+        b = torch.rand(512, device=device, dtype=torch.half)
         out = torch.nn.functional.linear(x, w, b)
         out_cpu = torch.nn.functional.linear(x.cpu(), w.cpu(), b.cpu())
         self.assertEqual(out, out_cpu, atol=5e-3, rtol=8e-3)
 
-        a = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
-        b = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
-        c = torch.rand(16, 128, 128, device='cuda', dtype=torch.half)
+        a = torch.rand(16, 128, 128, device=device, dtype=torch.half)
+        b = torch.rand(16, 128, 128, device=device, dtype=torch.half)
+        c = torch.rand(16, 128, 128, device=device, dtype=torch.half)
         out = torch.baddbmm(a, b, c)
         out_cpu = torch.baddbmm(a.cpu(), b.cpu(), c.cpu())
         self.assertEqual(out, out_cpu, atol=1e-3, rtol=5e-3)
@@ -422,8 +423,7 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=3e-3)})
     @dtypes(torch.float16)
-    def test_cublas_addmm_alignment(self, dtype):
-        device = 'cuda'
+    def test_cublas_addmm_alignment(self, device, dtype):
         # perturb X, A, or B alignment
         for idx in range(3):
             for offset in range(1, 3):
@@ -532,8 +532,8 @@ class TestMatmulCuda(InductorTestCase):
             N = 2048
             K = 6144
             M_max = 32
-            x = torch.randn(M_max, K, device="cuda", dtype=torch.bfloat16)
-            w = torch.randn(N, K, device="cuda", dtype=torch.bfloat16).t()
+            x = torch.randn(M_max, K, device=device, dtype=dtype)
+            w = torch.randn(N, K, device=device, dtype=dtype).t()
             full = x @ w
             xx = x[:1]
             out = xx @ w
@@ -546,8 +546,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_2d(self, strided, a_row_major, b_row_major, dtype):
-        device = "cuda"
+    def test_grouped_gemm_2d_2d(self, device, strided, a_row_major, b_row_major, dtype):
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
             a = torch.randn(m, k * n_groups + k * int(strided), device=device, dtype=dtype)[:, :k * n_groups]
@@ -583,8 +582,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_2d_3d(self, strided, a_row_major, b_row_major, dtype):
-        device = "cuda"
+    def test_grouped_gemm_2d_3d(self, device, strided, a_row_major, b_row_major, dtype):
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -638,8 +636,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_3d(self, strided, a_row_major, b_row_major, dtype):
-        device = "cuda"
+    def test_grouped_gemm_3d_3d(self, device, strided, a_row_major, b_row_major, dtype):
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -671,8 +668,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, dtype):
-        device = "cuda"
+    def test_grouped_gemm_3d_2d(self, device, strided, a_row_major, b_row_major, dtype):
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
         if a_row_major:
@@ -724,8 +720,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("max_autotune", [False, True])
-    def test_grouped_gemm_compiled(self, op, a_row_major, b_row_major, max_autotune):
-        device = "cuda"
+    def test_grouped_gemm_compiled(self, device, op, a_row_major, b_row_major, max_autotune):
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32
 
@@ -839,7 +834,7 @@ class TestMatmulCuda(InductorTestCase):
 
     @skipCUDAIfNotRocm
     # Fails with triton 3.7
-    def test_grouped_gemm_rocm_ck_flag(self):
+    def test_grouped_gemm_rocm_ck_flag(self, device):
         CK_EQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
         CK_UNEQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
         HIPBLASLT_HINT = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs"
@@ -851,7 +846,6 @@ class TestMatmulCuda(InductorTestCase):
             return any(HIPBLASLT_HINT in k for k in kernels)
 
         def run_grouped_mm(equal_k: bool):
-            device = "cuda"
             dtype = torch.bfloat16
             if equal_k:
                 # 3d-3d grouped GEMM with identical K for all groups
@@ -896,7 +890,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("K", [1, 32, 64])
     @parametrize("batch_size", [None, 1, 16])
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
+    def test_mm_bmm_dtype_overload(self, device, input_dtype, M, N, K, batch_size, backend):
         if torch.version.hip and _get_torch_rocm_version() < (7, 2, 1):
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
@@ -908,7 +902,6 @@ class TestMatmulCuda(InductorTestCase):
             if input_dtype == torch.float16 and M == 64 and N == 1 and K == 64 and batch_size == 1:
                 raise unittest.SkipTest(msg)
 
-        device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
             def create_inputs(B=None):
@@ -963,7 +956,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("broadcast_self", [False, True])
     @parametrize("high_precision_self", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, broadcast_self, high_precision_self, backend):
+    def test_addmm_baddmm_dtype_overload(self, device, input_dtype, M, N, K, batch_size, broadcast_self, high_precision_self, backend):
         if torch.version.hip and _get_torch_rocm_version() < (7, 2, 1):
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
@@ -975,7 +968,6 @@ class TestMatmulCuda(InductorTestCase):
             if input_dtype == torch.float16 and M == 64 and N == 1 and K == 64 and batch_size == 1:
                 raise unittest.SkipTest(msg)
 
-        device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
             def create_inputs(B, broadcast_self):
@@ -1044,9 +1036,8 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @parametrize("batch_size", [1, 32])
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_fp16_accum_and_fp32_out_failure(self, batch_size, backend):
+    def test_fp16_accum_and_fp32_out_failure(self, device, batch_size, backend):
         M, N, K = 32, 32, 32
-        device = "cuda"
         dtype = torch.float16
         with blas_library_context(backend):
             torch.backends.cuda.preferred_blas_library(backend)
@@ -1081,7 +1072,7 @@ class TestMatmulCuda(InductorTestCase):
 
     @onlyCUDA
     @parametrize("ops", [("mm", torch.mm), ("bmm", torch.bmm), ("addmm", torch.addmm), ("baddbmm", torch.baddbmm)])
-    def test_input_dimension_checking_out_dtype(self, ops):
+    def test_input_dimension_checking_out_dtype(self, device, ops):
         op_name, op = ops
         B = 2
         M, N, K = 32, 32, 32
@@ -1093,17 +1084,17 @@ class TestMatmulCuda(InductorTestCase):
             return "bmm" in op_name
 
         if is_batched():
-            a = torch.randn(B, M, K, device="cuda", dtype=torch.bfloat16)
-            mismatch_k_b = torch.randn(B, K + 1, N, device="cuda", dtype=torch.bfloat16)
-            c = torch.randn(B, M, N, device="cuda", dtype=torch.bfloat16)
+            a = torch.randn(B, M, K, device=device, dtype=torch.bfloat16)
+            mismatch_k_b = torch.randn(B, K + 1, N, device=device, dtype=torch.bfloat16)
+            c = torch.randn(B, M, N, device=device, dtype=torch.bfloat16)
             extra_dim_b = a.clone().unsqueeze(0)
 
             mismatch_k_err = "Expected size for first two dimensions of batch2 tensor to be"
             extra_dim_err = "batch2 must be a 3D tensor"
         else:
-            a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-            mismatch_k_b = torch.randn(K + 1, N, device="cuda", dtype=torch.bfloat16)
-            c = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
+            a = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+            mismatch_k_b = torch.randn(K + 1, N, device=device, dtype=torch.bfloat16)
+            c = torch.randn(M, N, device=device, dtype=torch.bfloat16)
             extra_dim_b = a.clone().unsqueeze(0)
 
             mismatch_k_err = "mat1 and mat2 shapes cannot be multiplied"
@@ -1126,7 +1117,7 @@ class TestMatmulCuda(InductorTestCase):
         if is_batched():
             with self.assertRaisesRegex(RuntimeError, "Expected size for first two dimensions of batch2 tensor to be"):
                 # Test mismatch B for bmm/baddbmm
-                mismatch_batch_dim_b = torch.randn(B + 1, K, N, device="cuda", dtype=torch.bfloat16)
+                mismatch_batch_dim_b = torch.randn(B + 1, K, N, device=device, dtype=torch.bfloat16)
                 if is_addmm():
                     op(c, a, mismatch_batch_dim_b, out_dtype=torch.float32)
                 else:
@@ -1138,7 +1129,7 @@ class TestMatmulCuda(InductorTestCase):
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
-    def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
+    def test_mixed_dtypes_linear(self, device, dtype: torch.dtype):
         def run_test(
             batch_shape,
             m,
