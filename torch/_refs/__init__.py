@@ -7,7 +7,7 @@ import itertools
 import math
 import operator
 import warnings
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from functools import partial, reduce, singledispatch, wraps
 from typing import Any, cast, overload
 
@@ -3348,7 +3348,9 @@ def _normalize(
 
 
 # add all specified dimensions
-def _unsqueeze_multiple(x: TensorLikeType, dimensions: list[int]) -> TensorLikeType:
+def _unsqueeze_multiple(
+    x: TensorLikeType, dimensions: Collection[int]
+) -> TensorLikeType:
     for dim in sorted(dimensions):
         x = torch.unsqueeze(x, dim)
     return x
@@ -3392,46 +3394,34 @@ def native_group_norm(
         input_acc,
         (batch_size, num_groups, num_channels // num_groups, flattened_inner_size),
     )
-    reduction_dims = utils.canonicalize_dims(input_reshaped.ndim, reduction_dims)
-    biased_var, mean = torch.var_mean(
-        input_reshaped, dim=reduction_dims, correction=0, keepdim=True
-    )
+    biased_var, mean = torch.var_mean(input_reshaped, dim=reduction_dims, correction=0)
     rstd = torch.rsqrt(biased_var + eps)
 
+    w = _unsqueeze_multiple(rstd, reduction_dims)
     if weight_acc is not None:
         weight_reshaped = torch.reshape(
             weight_acc, (1, num_groups, num_channels // num_groups, 1)
         )
-        w = rstd * weight_reshaped
-    else:
-        w = rstd.broadcast_to((batch_size, num_groups, num_channels // num_groups, 1))
+        w = w * weight_reshaped
 
-    b = -mean * w
+    b = -_unsqueeze_multiple(mean, reduction_dims) * w
     if bias_acc is not None:
         bias_reshaped = torch.reshape(
             bias_acc, (1, num_groups, num_channels // num_groups, 1)
         )
         b = b + bias_reshaped
 
-    w = w.contiguous().as_strided((batch_size, num_channels), (num_channels, 1))
-    b = b.contiguous().as_strided((batch_size, num_channels), (num_channels, 1))
+    w = w.contiguous()
+    b = b.contiguous()
 
-    input_reshaped = input_reshaped.reshape(
-        (batch_size, num_channels, flattened_inner_size)
-    )
-    out = input_reshaped * w.unsqueeze(2) + b.unsqueeze(2)
+    out = w * input_reshaped + b
     out = out.reshape(input.shape)
 
-    out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
-    mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
-    rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
-
-    # remove broadcast dimensions from mean and rstd.  The call to clone removes a view,
-    # matching the behavior of eager native_group_norm.
-    mean = torch.squeeze(mean, reduction_dims).clone()
-    rstd = torch.squeeze(rstd, reduction_dims).clone()
-
-    return (out, mean, rstd)
+    return (
+        _maybe_convert_to_dtype(out, input.dtype),
+        _maybe_convert_to_dtype(mean, input.dtype),
+        _maybe_convert_to_dtype(rstd, input.dtype),
+    )
 
 
 @register_decomposition(aten.native_layer_norm)

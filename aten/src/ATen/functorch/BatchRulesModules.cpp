@@ -33,7 +33,8 @@ static std::tuple<Tensor, std::optional<int64_t>> embedding_batch_rule(
     const auto weight_ = reshape_dim_into(*weight_bdim, /*embedding_dim*/1, weight);
     auto result = at::embedding_symint(weight_, indices, std::move(padding_idx), scale_grad_by_freq, sparse);
     result = reshape_dim_outof(-1, batch_size, result);
-    return std::make_tuple(result, result.dim() - 2);
+    auto result_bdim = result.dim() - 2;
+    return std::make_tuple(std::move(result), result_bdim);
   }
   TORCH_INTERNAL_ASSERT(weight_bdim && indices_bdim);
   // B*, BED -> B*, (BE)D -> B*D
@@ -146,7 +147,7 @@ grid_sample_backward_helper_in(
     const Tensor& input, std::optional<int64_t> input_bdim,
     const Tensor& grid, std::optional<int64_t> grid_bdim) {
 
-  auto batch_size = get_bdim_size3(
+  auto batch_size = get_bdim_size(
       grad_output, grad_output_bdim, input, input_bdim, grid, grid_bdim);
 
   auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
