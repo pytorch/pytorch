@@ -1491,6 +1491,17 @@ class CUDAGraphNode:
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
+        log.debug(
+            "[fqn_trace] _record: graph=%s, cudagraph_kernel_annotations=%s",
+            self.id.id,
+            config.triton.cudagraph_kernel_annotations,
+        )
+
+        # Per-kernel annotations are emitted directly into the generated wrapper code
+        # via AnnotatedKernelCallLine; enable_annotations tells the CUDA graph capture
+        # to process those mark_kernels calls as they execute.
+        should_annotate = config.triton.cudagraph_kernel_annotations
+
         with (
             preserve_rng_state(),
             torch.cuda.device(self.device),
@@ -1500,6 +1511,7 @@ class CUDAGraphNode:
                 stream=self.stream,
                 pool=self.cuda_graphs_pool,
                 capture_error_mode="thread_local",
+                enable_annotations=should_annotate,
             ),
             # NB: must go after torch.cuda.graph which switches the stream
             _update_current_stream_external_object(),
@@ -2822,6 +2834,11 @@ class CUDAGraphTreeManager:
         OutputType,
     ]:
         id = self.new_func_id()
+        log.debug(
+            "[fqn_trace] add_function: id=%s, cudagraph_kernel_annotations=%s",
+            id,
+            config.triton.cudagraph_kernel_annotations,
+        )
         if mode == CompilationMode.BACKWARD:
             user_visible_output_idxs = ()
         user_visible_output_idxs_set = frozenset(user_visible_output_idxs)
