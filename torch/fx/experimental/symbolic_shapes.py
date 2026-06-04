@@ -725,7 +725,8 @@ def rebind_unbacked(
                 continue
 
             # The old and new could be the same if you improperly hit the memo
-            # while retracing.  Make sure you updated FakeTensorMode.epoch
+            # while retracing.  Make sure you invalidated unbacked memos for
+            # this retrace, typically by updating FakeTensorMode.epoch.
             if raw_u0 == raw_u1:
                 raise AssertionError(f"{raw_u0} possible memo disaster")
             # Reuse the OLD symbol name
@@ -4152,6 +4153,25 @@ class ShapeEnv:
         # symbols but add runtime equality checks via torch._check to ensure
         # all dims with the same shape_id are treated as the same symbol.
         self._shape_id_to_unbacked_symbol: dict[str, sympy.Expr] = {}
+
+        # Spec-wiring state, used by `_wire_spec_slot` /
+        # `_drain_shape_spec_pending_assumptions` /
+        # `_finalize_spec_wiring` in `torch/_dynamo/variables/builder.py`
+        # when wiring a `ShapesSpec` into this ShapeEnv during compile.
+        #
+        # `_spec_symbol_to_compile_symbol` maps each spec sympy.Symbol (from a spec
+        # `IntVar`) to the real unbacked sympy.Symbol allocated for the
+        # input that binds it.
+        self._spec_symbol_to_compile_symbol: dict[sympy.Symbol, sympy.Expr] = {}
+
+        # `_shape_spec_pending_assumptions` entries are
+        # `(free_spec_symbols, bool_expr)`: a deferred boolean waiting for
+        # its free spec symbols to be bound in `_spec_symbol_to_compile_symbol`.
+        # Substituted and emitted as a runtime assert once all deps are
+        # bound.
+        self._shape_spec_pending_assumptions: list[
+            tuple[set[sympy.Symbol], sympy.Expr]
+        ] = []
 
     @property
     def allow_scalar_outputs(self) -> bool:
@@ -8741,14 +8761,22 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         """
         from torch._guards import detect_fake_mode
 
+        # Local import avoids a module cycle: fake_tensor imports symbolic shape
+        # helpers while defining FakeTensorMode and fake dispatch behavior.
+        from torch._subclasses.fake_tensor import invalidate_unbacked_memos
+
         fake_mode = detect_fake_mode()
         if fake_mode is None:
             raise AssertionError("fake_mode must not be None")
 
-        # Each old unbacked binding site must allocate a fresh symbol during
-        # retracing so rebind_unbacked can connect it to the old symbol.
         if n.meta.get("unbacked_bindings"):
-            fake_mode.epoch += 1
+            # This node is an old unbacked binding site.  Re-executing it must
+            # allocate a fresh symbol for rebind_unbacked instead of reusing a
+            # memoized symbol that may have already been rebound by an earlier
+            # node in this retrace.
+            args, kwargs = self.fetch_args_kwargs_from_env(n)
+            for value in pytree.tree_leaves((args, kwargs)):
+                invalidate_unbacked_memos(value)
 
         result = super().run_node(n)
         rebind_unbacked(fake_mode.shape_env, n, result)

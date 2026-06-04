@@ -119,6 +119,22 @@ class UnsupportedFakeTensorException(RuntimeError):
     reason: str
 
 
+class FakeTensorDeviceMismatchError(RuntimeError):
+    def __init__(
+        self,
+        func: OpOverload,
+        common_device: torch.device,
+        device: torch.device,
+    ) -> None:
+        self.func = func
+        self.common_device = common_device
+        self.device = device
+        super().__init__(
+            "Expected all tensors to be on the same device, but found "
+            f"at least two devices, {common_device} and {device}!"
+        )
+
+
 @dataclass
 class DynamicOutputShapeException(RuntimeError):
     func: OpOverload
@@ -271,6 +287,25 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
     return None
 
 
+def invalidate_unbacked_memos(t: object) -> None:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(t, FakeTensor):
+        t.invalidate_unbacked_memos()
+    elif is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            invalidate_unbacked_memos(getattr(t, attr))
+    elif isinstance(t, FunctionalTensor):
+        invalidate_unbacked_memos(t.elem)
+    elif isinstance(t, Tensor) and torch._is_functional_tensor(t):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
+        invalidate_unbacked_memos(unwrapped)
+    elif isinstance(t, Tensor) and is_functorch_wrapped_tensor(t):
+        invalidate_unbacked_memos(torch._C._functorch.get_unwrapped(t))
+
+
 @functools.cache
 def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
     return torch._C._SchemaInfo(func._schema)
@@ -368,6 +403,27 @@ class FakeTensorConverter:
                 ten.constant = None
 
         del self.constant_storage_mapping[weak_st]
+
+    def clear_non_cpu_constants(self) -> None:
+        """Clear non-CPU constants while keeping cheap CPU constants for folding."""
+        for weak_st, weak_tensor_refs in list(self.constant_storage_mapping.items()):
+            live_tensor_refs: list[ReferenceType[FakeTensor]] = []
+            constant: Tensor | None = None
+            for weak_tensor_ref in weak_tensor_refs:
+                ten = weak_tensor_ref()
+                if ten is None or ten.constant is None:
+                    continue
+
+                live_tensor_refs.append(weak_tensor_ref)
+                if constant is None:
+                    constant = ten.constant
+
+            if constant is None:
+                del self.constant_storage_mapping[weak_st]
+            elif constant.device.type == "cpu":
+                self.constant_storage_mapping[weak_st] = live_tensor_refs
+            else:
+                self.invalidate_constant_aliases(constant)
 
     def _get_memo(self, t: Tensor) -> FakeTensor | None:
         tid = self.meta_converter.describer.lookup_tensor.get(t)
@@ -760,6 +816,12 @@ class FakeTensor(Tensor):
     def fake_device(self, device: torch.device) -> None:
         self._fake_device = self._normalize_fake_device(device)
 
+    def invalidate_unbacked_memos(self) -> None:
+        self.nonzero_memo = None
+        self.item_memo = None
+        self.unique_memo = None
+        self.unique_consecutive_memo = None
+
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
     # and autograd logic, we update the dispatch keys of FakeTensors
@@ -1069,9 +1131,7 @@ class FakeTensor(Tensor):
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
-            raise RuntimeError(
-                f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
-            )
+            raise FakeTensorDeviceMismatchError(func, common_device, t.device)
 
         for arg in flat_args:
             merge_devices(arg)
@@ -3435,12 +3495,27 @@ def _check_for_subclass(flat_args: Sequence[object]) -> bool:
 
 
 def _check_for_subclass_arg(x: object) -> bool:
-    return (
-        not isinstance(x, FakeTensor)
-        and isinstance(x, Tensor)
-        and type(x) is not Tensor
-        and type(x) is not torch.nn.Parameter
+    if isinstance(x, FakeTensor):
+        return False
+    if not isinstance(x, Tensor):
+        return False
+
+    x_type = type(x)
+    if x_type is Tensor:
+        return False
+
+    # Use the concrete type instead of isinstance because wrapper subclasses
+    # marked as Parameters (e.g. Parameter(TwoTensor(...))) still need subclass
+    # dispatch. Only metadata-only Parameter subclasses that inherit Tensor's
+    # disabled __torch_dispatch__ can follow the regular Parameter path.
+    is_metadata_only_parameter_subclass = (
+        issubclass(x_type, torch.nn.Parameter)
+        and x_type.__torch_dispatch__ is Tensor.__torch_dispatch__
     )
+    if is_metadata_only_parameter_subclass:
+        return False
+
+    return True
 
 
 _DISPATCH_META_HANDLERS = {
