@@ -304,9 +304,7 @@ def collect_nested_int_ids(args: object) -> set[int]:
     nested_int_ids: set[int] = set()
 
     def visit(t: object) -> None:
-        if isinstance(t, SymInt) and t.node.is_nested_int():
-            nested_int_ids.add(_nested_int_id(t))
-        elif isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
+        if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
             for s in (*t.size(), *t.stride()):
                 if isinstance(s, SymInt) and s.node.is_nested_int():
                     nested_int_ids.add(_nested_int_id(s))

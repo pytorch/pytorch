@@ -1340,7 +1340,8 @@ def aot_dispatch_subclass(
         all_args = wrap_tensor_subclasses_maybe_joint(
             args, is_joint_structure=use_trace_joint, meta=meta
         )
-        allowed_nested_int_ids = collect_nested_int_ids(all_args)
+        nested_int_source_args = all_args[0] if use_trace_joint else all_args
+        allowed_nested_int_ids = collect_nested_int_ids(nested_int_source_args)
 
         # Step 2: call the inner function, with our (maybe subclass) inputs
         wrapped_outs, wrapped_outs_descs = call_and_expect_output_descs(fn, all_args)  # type: ignore[arg-type]
