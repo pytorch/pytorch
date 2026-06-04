@@ -2118,6 +2118,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     @staticmethod
     def is_supported_random_function(value: Any) -> bool:
+        if not isinstance(value, (types.BuiltinFunctionType, types.MethodType)):
+            return False
         try:
             return value in UserDefinedObjectVariable._supported_random_functions()
         except (TypeError, AttributeError):
@@ -2848,11 +2850,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
-        if self._base_vt is not None and self._base_methods is not None:
-            iter_method = self._maybe_get_baseclass_method("__iter__")
-            if iter_method is not None and iter_method in self._base_methods:
-                return self._base_vt.unpack_var_sequence(tx)
-        return super().unpack_var_sequence(tx)
+        return unpack_iterable(tx, self)
 
     def is_supported_random(self) -> bool:
         return self.is_supported_random_function(self.value)
