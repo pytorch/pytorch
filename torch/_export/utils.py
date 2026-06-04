@@ -21,6 +21,7 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import PreDispatchTorchFunctionMode
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+from torch.types import py_sym_types
 
 
 if TYPE_CHECKING:
@@ -734,6 +735,91 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
                     )
 
 
+def _dedupe_hoo_subgraph_inputs(gm: torch.fx.GraphModule) -> None:
+    def sym_input_key(node: torch.fx.Node) -> tuple[type, Any] | None:
+        val = node.meta.get("val")
+        if isinstance(val, py_sym_types):
+            return (type(val), val.node.expr)
+        return None
+
+    def dedupe_placeholders(
+        subgraph: torch.fx.GraphModule,
+        duplicate_inputs: dict[int, int],
+        num_args: int,
+    ) -> None:
+        placeholders = [n for n in subgraph.graph.nodes if n.op == "placeholder"]
+        if len(placeholders) < num_args:
+            raise AssertionError(
+                "Expected HOO subgraph to have at least as many placeholders as inputs"
+            )
+
+        for duplicate_i, canonical_i in duplicate_inputs.items():
+            duplicate_ph = placeholders[duplicate_i]
+            canonical_ph = placeholders[canonical_i]
+            duplicate_ph.replace_all_uses_with(canonical_ph)
+
+        for duplicate_i in sorted(duplicate_inputs, reverse=True):
+            subgraph.graph.erase_node(placeholders[duplicate_i])
+        subgraph.graph.lint()
+        subgraph.recompile()
+
+    def dedupe_args(args, subgraphs: list[torch.fx.GraphModule]):
+        if not isinstance(args, (list, tuple)):
+            return args
+
+        seen_inputs: dict[tuple[type, Any], int] = {}
+        duplicate_inputs: dict[int, int] = {}
+        for i, arg in enumerate(args):
+            if not isinstance(arg, torch.fx.Node):
+                continue
+            key = sym_input_key(arg)
+            if key is None:
+                continue
+            if key in seen_inputs:
+                duplicate_inputs[i] = seen_inputs[key]
+            else:
+                seen_inputs[key] = i
+
+        if not duplicate_inputs:
+            return args
+
+        for subgraph in subgraphs:
+            dedupe_placeholders(subgraph, duplicate_inputs, len(args))
+
+        return type(args)(
+            arg for i, arg in enumerate(args) if i not in duplicate_inputs
+        )
+
+    for node in gm.graph.nodes:
+        if not (
+            node.op == "call_function"
+            and isinstance(node.target, torch._ops.HigherOrderOperator)
+            and node.target._name == "cond"
+        ):
+            continue
+
+        pred, true_graph, false_graph, cond_args = node.args
+        if not isinstance(true_graph, torch.fx.Node) or not isinstance(
+            false_graph, torch.fx.Node
+        ):
+            continue
+        if not isinstance(true_graph.target, str) or not isinstance(
+            false_graph.target, str
+        ):
+            continue
+        true_subgraph = getattr(gm, true_graph.target)
+        false_subgraph = getattr(gm, false_graph.target)
+        if not isinstance(true_subgraph, torch.fx.GraphModule) or not isinstance(
+            false_subgraph, torch.fx.GraphModule
+        ):
+            continue
+        cond_args = dedupe_args(cond_args, [true_subgraph, false_subgraph])
+        node.args = (pred, true_graph, false_graph, cond_args)
+
+        _dedupe_hoo_subgraph_inputs(true_subgraph)
+        _dedupe_hoo_subgraph_inputs(false_subgraph)
+
+
 def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
     from torch._export.passes._node_metadata_hook import (
         _node_metadata_hook,
@@ -763,6 +849,10 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
 
         # insert runtime assertions for aten.to nodes
         _insert_aten_to_metadata_assert_pass(gm)
+
+    # Runtime assertion insertion can CSE symbolic scalar HOO inputs.
+    # Keep the operand list and subgraph signatures in sync after that rewrite.
+    _dedupe_hoo_subgraph_inputs(gm)
 
     # update output specs
     gm.recompile()
