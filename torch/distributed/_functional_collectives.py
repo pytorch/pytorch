@@ -1669,6 +1669,63 @@ REDUCE_OP_TO_STR = {
 }
 
 
+class _FunctionalCollectiveWork:
+    def __init__(self, tensor: torch.Tensor, result: torch.Tensor) -> None:
+        self.tensor = tensor
+        self._result = result
+        self._completed = False
+
+    def wait(self, timeout=None) -> bool:
+        if timeout is not None:
+            raise RuntimeError(
+                "timeout is not supported for compiled async all_reduce work"
+            )
+        if not self._completed:
+            self.tensor.copy_(wait_tensor(self._result))
+            self._completed = True
+        return True
+
+    def is_completed(self) -> bool:
+        # Functional collectives do not expose a nonblocking completion query.
+        # Synchronize conservatively so escaped compiled handles cannot make
+        # polling loops spin forever.
+        self.wait()
+        return True
+
+    def is_success(self) -> bool:
+        return True
+
+    def exception(self):
+        return None
+
+    def synchronize(self) -> None:
+        self.wait()
+
+    def result(self) -> list[torch.Tensor]:
+        self.wait()
+        return [self.tensor]
+
+    def get_future(self) -> torch.futures.Future:
+        fut: torch.futures.Future = torch.futures.Future()
+        fut.set_result(self.result())
+        return fut
+
+    def get_future_result(self) -> torch.futures.Future:
+        fut: torch.futures.Future = torch.futures.Future()
+        self.wait()
+        fut.set_result(0)
+        return fut
+
+    def source_rank(self) -> int:
+        raise RuntimeError(
+            "sourceRank() may only be called on work objects that correspond "
+            "to a recv or recv-from-any call."
+        )
+
+    def block_current_stream(self) -> None:
+        self.wait()
+
+
 def all_reduce_inplace(
     tensor: torch.Tensor,
     op: str = "sum",
@@ -1676,16 +1733,24 @@ def all_reduce_inplace(
     async_op: bool = False,
     tag: str = "",
 ):
-    if async_op:
-        raise AssertionError(
-            "Can't remap async version of inplace op to functional collective"
-        )
-
     group = group or dist.group.WORLD
     if group is None:
         raise AssertionError("group cannot be None")
 
-    return tensor.copy_(all_reduce(tensor, op, group, tag))
+    if async_op:
+        if not _are_we_tracing():
+            raise AssertionError(
+                "Can't remap async version of inplace op outside tracing"
+            )
+        group = _resolve_group(group, tag)
+        return _FunctionalCollectiveWork(
+            tensor,
+            torch.ops._c10d_functional.all_reduce(
+                tensor, op.lower(), _group_or_group_name(group)
+            ),
+        )
+
+    tensor.copy_(all_reduce(tensor, op, group, tag))
 
 
 def all_to_all_inplace(
@@ -1857,7 +1922,8 @@ from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecate
 # Dynamo remaps dist.* collectives to these wrappers via traceable_collective_remaps.
 # Each wrapper calls the in-place functional collective and returns None,
 # matching the return type of the original dist.* APIs when async_op=False.
-# async_op=True already graph-breaks in CollectiveFunctionRewriteVariable.
+# async_op=True is only supported for all_reduce, where the returned work handle
+# is represented by _FunctionalCollectiveWork.
 # These must be module-level def statements (not closures from a decorator factory)
 # because _traceable_collectives_source resolves Dynamo guard sources by looking up
 # fn.__name__ as a module attribute — a def's __name__ matches its variable name
@@ -1879,7 +1945,7 @@ def _remapped_reducescatter(*args, **kwargs):
 def _remapped_allreduce(*args, **kwargs):
     if not _are_we_tracing():
         raise AssertionError("_remapped_allreduce should only be called during tracing")
-    all_reduce_inplace(*args, **kwargs)
+    return all_reduce_inplace(*args, **kwargs)
 
 
 def _remapped_all_to_all_single(*args, **kwargs):
