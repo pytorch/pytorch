@@ -201,7 +201,7 @@ activation_memory_budget_runtime_estimator = "flops"
 # used memory-efficient quantized DP solution
 activation_memory_budget_solver = "dp"
 
-# This dumps out a SVG visualization of the expected runtime vs. activation
+# This dumps out an SVG visualization of the expected runtime vs. activation
 # memory tradeoffs for all memory budget values from 0 to 1 in increments of
 # 0.5. See an example here:
 # https://github.com/pytorch/pytorch/pull/126320#discussion_r1625104015
