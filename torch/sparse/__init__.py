@@ -674,7 +674,7 @@ def as_sparse_gradcheck(gradcheck):
             return tuple(new_args)
 
         def restore_from_strided_representation(args):
-            """Restore non-strided differentiable tensosr from their strided representations."""
+            """Restore non-strided differentiable tensors from their strided representations."""
             new_args = []
             args = list(args)
             while args:

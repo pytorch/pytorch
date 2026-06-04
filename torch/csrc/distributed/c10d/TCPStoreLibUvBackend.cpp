@@ -385,7 +385,7 @@ class UvTcpServer : public UvTcpSocket {
 
   static void missingOnConnect(int status) {
     C10D_THROW_ERROR(
-        DistStoreError, "Socket accepted byt onConnect callback missing");
+        DistStoreError, "Socket accepted but onConnect callback missing");
   }
 
   static void on_new_connection(uv_stream_t* server, int status) {
@@ -1405,10 +1405,15 @@ void LibUVStoreDaemon::clearClientWaitState(
     return;
   }
   keysAwaited_.erase(client);
-  std::erase_if(waitingSockets_, [&](auto& entry) {
-    std::erase(entry.second, client);
-    return entry.second.empty();
-  });
+  for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
+    auto& vec = it->second;
+    std::erase(vec, client);
+    if (vec.empty()) {
+      it = waitingSockets_.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 void LibUVStoreDaemon::set(

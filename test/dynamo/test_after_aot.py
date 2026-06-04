@@ -2,20 +2,27 @@
 
 import io
 import os
+import pickle
 import shutil
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch._dynamo.test_case
 from torch._dynamo.repro.after_aot import (
     _extract_distributed_info,
+    _get_compile_args,
     InputReader,
     InputWriter,
+    repro_minify,
+    repro_run,
     save_graph_repro,
 )
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.utils._traceback import report_compile_source_on_error
 from torch.utils._triton import has_triton
@@ -26,6 +33,128 @@ def strip_trailing_whitespace(r):
 
 
 class TestAfterAot(torch._dynamo.test_case.TestCase):
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_save_args_dynamic_shapes(self):
+        import torch._functorch.config as functorch_config
+        from torch._inductor import config as inductor_config
+        from torch._inductor.debug import load_args_and_run_compile_fx_inner
+
+        torch._dynamo.reset()
+
+        def fn(x):
+            output = torch.zeros_like(x)
+            _ = output.numel()
+            return output
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch("torch._inductor.debug.tempfile.gettempdir", return_value=tmpdir),
+            inductor_config.patch(
+                {
+                    "save_args": True,
+                    "force_disable_caches": True,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                }
+            ),
+            functorch_config.patch({"enable_autograd_cache": False}),
+        ):
+            opt_fn = torch.compile(fn, dynamic=True)
+            inp = torch.randn(4)
+            self.assertEqual(opt_fn(inp), fn(inp))
+
+            saved_args_dir = os.path.join(tmpdir, "inductor_saved_args")
+            self.assertTrue(os.path.isdir(saved_args_dir))
+            saved_args_paths = os.listdir(saved_args_dir)
+            self.assertGreater(len(saved_args_paths), 0)
+
+            compiled = load_args_and_run_compile_fx_inner(
+                os.path.join(saved_args_dir, saved_args_paths[0])
+            )
+            self.assertIsNotNone(compiled)
+
+    def test_save_args_custom_sympy_expr(self):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.debug import (
+            load_args_and_run_compile_fx_inner,
+            save_args_for_compile_fx_inner,
+            SymExprMetadataHolder,
+        )
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+        from torch.utils._sympy.functions import ModularIndexing
+
+        shape_env = ShapeEnv()
+        symbol = shape_env.create_symbol(
+            17,
+            ConstantSource("custom_symbol"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            do_not_specialize_zero_one=True,
+        )
+        expr = ModularIndexing(symbol + 3, 2, 5)
+        symint = shape_env.create_symintnode(expr, hint=0)
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch("torch._inductor.debug.tempfile.gettempdir", return_value=tmpdir),
+        ):
+            save_args_for_compile_fx_inner(symint)
+            saved_args_dir = os.path.join(tmpdir, "inductor_saved_args")
+            saved_path = os.path.join(saved_args_dir, os.listdir(saved_args_dir)[0])
+
+            with open(saved_path, "rb") as f:
+                saved_args, _ = pickle.load(f)
+            self.assertIsInstance(saved_args[0], SymExprMetadataHolder)
+            self.assertTrue(saved_args[0].expr.has(ModularIndexing))
+
+            def fake_compile_fx_inner(restored_symint):
+                self.assertIsInstance(restored_symint, torch.SymInt)
+                self.assertTrue(restored_symint.node.expr.has(ModularIndexing))
+                self.assertEqual(restored_symint.node.hint, 0)
+                return restored_symint
+
+            with patch(
+                "torch._inductor.compile_fx.compile_fx_inner", fake_compile_fx_inner
+            ):
+                restored = load_args_and_run_compile_fx_inner(saved_path)
+
+            self.assertIsInstance(restored, torch.SymInt)
+            self.assertTrue(restored.node.expr.has(ModularIndexing))
+
+    def test_repro_minify_disables_repro_after(self):
+        seen_repro_after = object()
+
+        def fake_repro_common(options, mod, load_args):
+            def f(x):
+                return (x,)
+
+            args = [torch.randn(1)]
+            return make_fx(f)(*args), args
+
+        def fake_minifier(*args, **kwargs):
+            nonlocal seen_repro_after
+            seen_repro_after = torch._dynamo.config.repro_after
+
+        options = SimpleNamespace(
+            accuracy="accuracy",
+            check_str=None,
+            isolate=False,
+            save_dir=None,
+            tracing_mode="real",
+            offload_to_disk=False,
+            skip_saving_eager_intermediates=False,
+            skip_sanity=False,
+            max_granularity=None,
+        )
+
+        with (
+            torch._dynamo.config.patch(repro_after="aot"),
+            patch("torch._dynamo.repro.after_aot.repro_common", fake_repro_common),
+            patch("functorch.compile.minifier", fake_minifier),
+        ):
+            repro_minify(options, torch.nn.Identity(), lambda reader: None)
+
+        self.assertIsNone(seen_repro_after)
+
     @unittest.skipIf(IS_FBCODE, "NotImplementedError")
     def test_save_graph_repro(self):
         # TODO: This triggers CUDA context initialization, even though
@@ -133,9 +262,26 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         r = buf.getvalue()
         self.assertIn("reader.opaque('__torch__.MyClass')", r)
 
+    def test_repro_run_accuracy_does_not_reuse_compiled_graph(self):
+        class Repro(torch.nn.Module):
+            def forward(self, arg0, arg1, arg2):
+                vals = torch.ops.aten._foreach_add.Scalar([arg0, arg1, arg2], 1)
+                torch.ops.aten.copy_.default(arg0, vals[0])
+                torch.ops.aten.copy_.default(arg1, vals[1])
+                torch.ops.aten.copy_.default(arg2, vals[2])
+                return ()
+
+        def load_args(reader):
+            reader.args = [torch.rand((), dtype=torch.float32) for _ in range(3)]
+
+        load_args._version = 0
+        options = SimpleNamespace(
+            accuracy="accuracy", save_dir=None, tracing_mode="real"
+        )
+        repro_run(options, Repro(), load_args)
+
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_dump_generator(self):
-        torch.cuda.init()
         gen = torch.cuda.default_generators[0].clone_state()
         writer = InputWriter(None)
         writer.generator("fwd_rng_state_0", gen)
@@ -152,7 +298,6 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_graphsafe_rng_repro(self):
         """save_graph_repro should emit reader.generator() for Generator args."""
-        torch.cuda.init()
         gen = torch.cuda.default_generators[0].clone_state()
 
         def f(x):
@@ -186,6 +331,324 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
         result = _extract_distributed_info(gm)
         self.assertEqual(result, {})
+
+    def test_get_compile_args_symbolic_tracing(self):
+        """_get_compile_args extracts FakeTensor/SymInt from symbolic tracing."""
+
+        def f(x, size):
+            return (x[:size],)
+
+        args = [torch.randn(10), 5]
+        gm = make_fx(f, tracing_mode="symbolic")(*args)
+        result = _get_compile_args(gm, args)
+        # Should NOT be the same object — metadata was extracted
+        self.assertIsNot(result, args)
+        # First element should be a FakeTensor (not a concrete tensor)
+        self.assertIsInstance(result[0], torch._subclasses.FakeTensor)
+        # Second element should be a SymInt (not a concrete int)
+        self.assertIsInstance(result[1], torch.SymInt)
+
+    def test_get_compile_args_preserves_shapes(self):
+        """_get_compile_args preserves symbolic shape info from traced graph."""
+
+        def f(x):
+            return (x * 2,)
+
+        args = [torch.randn(4, 8)]
+        gm = make_fx(f, tracing_mode="symbolic")(*args)
+        result = _get_compile_args(gm, args)
+        # FakeTensor should preserve the shape
+        self.assertEqual(result[0].shape, torch.Size([4, 8]))
+
+    def test_get_compile_args_real_tracing_returns_concrete(self):
+        """_get_compile_args returns original args for real-mode tracing.
+
+        make_fx with tracing_mode='real' produces FakeTensors in placeholder
+        metadata, but from different FakeTensorModes.  Extracting these would
+        cause a FakeTensorMode mismatch in Inductor.  _get_compile_args must
+        detect this and return concrete args instead.
+        """
+
+        def f(x, y):
+            return (x + y,)
+
+        args = [torch.randn(4), torch.randn(4)]
+        gm = make_fx(f, tracing_mode="real")(*args)
+        result = _get_compile_args(gm, args)
+        # For real tracing (no SymInt inputs), should return args as-is
+        self.assertIs(result, args)
+
+    def test_get_compile_args_empty_graph(self):
+        """_get_compile_args handles empty graph with no placeholders."""
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm.graph.output(None)
+        gm.recompile()
+        args = [torch.randn(4)]
+        result = _get_compile_args(gm, args)
+        self.assertIs(result, args)
+
+    def test_get_compile_args_e2e_symbolic_compile(self):
+        """E2E: compile_fx_inner fails with concrete args but succeeds
+        with _get_compile_args for symbolically-traced graphs.
+
+        This is the minimal repro for the 'NameError: name s48 is not
+        defined' bug in fx_graph_runnable repro scripts.
+        """
+        from torch._inductor.compile_fx import compile_fx_inner
+
+        def f(n, x, y):
+            sliced = x[:n]
+            scaled = sliced * (n - 1)
+            return (scaled + y[:n],)
+
+        N = 16
+        concrete_args = [N, torch.randn(32), torch.randn(32)]
+        gm = make_fx(f, tracing_mode="symbolic")(*concrete_args)
+
+        # BUG: concrete args cause NameError on undefined symbolic variable
+        with self.assertRaises(NameError):
+            compiled = compile_fx_inner(gm, concrete_args)
+            self.assertNotIsInstance(compiled, str)
+            compiled(list(concrete_args))
+
+        # FIX: _get_compile_args extracts symbolic metadata
+        symbolic_args = _get_compile_args(gm, concrete_args)
+        compiled = compile_fx_inner(gm, symbolic_args)
+        self.assertNotIsInstance(compiled, str)
+        result = compiled(list(concrete_args))
+        self.assertEqual(result[0].shape, torch.Size([N]))
+
+    def test_get_compile_args_e2e_real_no_fake_mode_mismatch(self):
+        """E2E: compile_fx_inner fails when given FakeTensors from
+        different FakeTensorModes (extracted from real-mode traced graph
+        placeholder metadata) but succeeds with _get_compile_args which
+        returns concrete args for real-mode tracing.
+
+        This is the minimal repro for the FakeTensorMode mismatch
+        AssertionError that affected 85/126 graphs in the model extractor.
+        """
+        from torch._inductor.compile_fx import compile_fx_inner
+
+        def f(x, y):
+            return (x + y,)
+
+        args = [torch.randn(4), torch.randn(4)]
+        gm = make_fx(f, tracing_mode="real")(*args)
+
+        # Verify that real-mode tracing creates FakeTensors with
+        # different FakeTensorModes in placeholder metadata
+        placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+        fake_modes = set()
+        for n in placeholders:
+            val = n.meta.get("val")
+            if isinstance(val, torch._subclasses.FakeTensor):
+                fake_modes.add(id(val.fake_mode))
+        self.assertGreater(len(fake_modes), 1, "Expected different FakeTensorModes")
+
+        # BUG: manually extracting FakeTensors causes mode mismatch
+        fake_args = [n.meta["val"] for n in placeholders]
+        with self.assertRaisesRegex(Exception, "fake mode.*doesn't match"):
+            compile_fx_inner(gm, fake_args)
+
+        # FIX: _get_compile_args returns concrete args for real mode
+        compile_args = _get_compile_args(gm, args)
+        self.assertIs(compile_args, args)
+        compiled = compile_fx_inner(gm, compile_args)
+        self.assertNotIsInstance(compiled, str)
+        result = compiled(list(args))
+        self.assertEqual(result[0].shape, torch.Size([4]))
+
+    def test_symint_expr_serialized(self):
+        """InputWriter serializes symbolic expressions alongside hint values,
+        and InputReader captures them in symint_exprs."""
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_symbol(160, ConstantSource("s0"))
+        s1 = shape_env.create_symbol(200, ConstantSource("s1"))
+
+        si0 = torch.SymInt(SymNode(s0, shape_env, int, hint=160))
+        si1 = torch.SymInt(SymNode(s1, shape_env, int, hint=200))
+        derived = (si0 + si1) // 10
+
+        writer = InputWriter(save_dir=None)
+        writer.symint("free_sym", si0)
+        writer.symint("derived_sym", derived)
+        writer.symint("plain_int", 42)
+
+        lines = writer.lines()
+        code = "\n".join(lines)
+
+        # Free symbol should have expr=
+        self.assertIn("expr=", code)
+        # Plain int should NOT have expr=
+        plain_line = next(l for l in lines if "plain_int" in l)
+        self.assertNotIn("expr=", plain_line)
+
+        # Round-trip: execute load_args and verify reader captures exprs
+        reader = InputReader(save_dir=None)
+        ns: dict = {}
+        exec(compile(code, "<test>", "exec"), ns)
+        ns["load_args"](reader)
+
+        self.assertEqual(len(reader.args), 3)
+        self.assertTrue(hasattr(reader, "symint_exprs"))
+        self.assertGreater(len(reader.symint_exprs), 0)
+        # The derived symint should have an expression with '//'
+        derived_expr = reader.symint_exprs.get(1)
+        self.assertIsNotNone(derived_expr)
+        self.assertIn("//", derived_expr)
+
+    @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode")
+    def test_symint_expr_e2e_repro(self):
+        """End-to-end: generate a repro from a symbolically-traced graph
+        with SymInt args, verify expr= appears, and run the repro."""
+        import subprocess
+        import tempfile
+
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.sym_node import SymNode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_symbol(8, ConstantSource("s0"))
+        si0 = torch.SymInt(SymNode(s0, shape_env, int, hint=8))
+
+        class SimpleGraph(torch.nn.Module):
+            def forward(self, size, x):
+                return (x.sum() + size,)
+
+        mod = SimpleGraph()
+        args = [si0, torch.randn(16)]
+        gm = make_fx(mod, tracing_mode="symbolic")(*args)
+
+        buf = io.StringIO()
+        save_graph_repro(
+            buf,
+            gm,
+            args,
+            "inductor",
+            save_dir=None,
+            tracing_mode="symbolic",
+        )
+        repro_src = buf.getvalue()
+
+        # Verify expr= is serialized for the SymInt arg
+        self.assertIn("expr=", repro_src)
+
+        # Run the generated repro in a subprocess
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
+            tmp.write(repro_src)
+            tmp.flush()
+            res = subprocess.run(
+                [sys.executable, tmp.name],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(
+                res.returncode,
+                0,
+                f"Repro failed:\nSTDERR:\n{res.stderr[-1000:]}",
+            )
+
+
+class TupleOut(torch.nn.Module):
+    def forward(self, x):
+        return (x,)
+
+
+class TestWrapCompilerDebugSync(torch._dynamo.test_case.TestCase):
+    def test_synchronize_called_for_accelerator_tensor(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("sync only triggered for non-CPU devices")
+
+        from torch._dynamo.repro.after_aot import wrap_compiler_debug
+
+        called = []
+
+        def fake_compiler(gm, inputs, **kwargs):
+            def compiled(real_inputs):
+                return [inp + 1 for inp in real_inputs if isinstance(inp, torch.Tensor)]
+
+            return compiled
+
+        wrapped = wrap_compiler_debug(fake_compiler, "test_backend")
+        gm = torch.fx.symbolic_trace(torch.nn.Identity())
+        inputs = [torch.randn(4, device=device)]
+
+        with torch._dynamo.config.patch(repro_after="aot", repro_level=2):
+            with patch(
+                "torch.accelerator.synchronize", side_effect=lambda: called.append(1)
+            ):
+                compiled_fn = wrapped(gm, inputs)
+                compiled_fn(inputs)
+
+        self.assertGreater(len(called), 0)
+
+    def test_inductor_fails_syncs_on_accelerator_tensor(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("sync only triggered for non-CPU devices")
+
+        from torch._dynamo.repro.after_aot import inductor_fails
+
+        called = []
+
+        def fake_compile_fx_inner(gm, args, **kwargs):
+            def compiled(real_args):
+                return gm(*real_args)
+
+            return compiled
+
+        gm = torch.fx.symbolic_trace(TupleOut())
+        args = [torch.randn(4, device=device)]
+
+        with patch(
+            "torch._inductor.compile_fx.compile_fx_inner", fake_compile_fx_inner
+        ):
+            with patch(
+                "torch.accelerator.synchronize", side_effect=lambda: called.append(1)
+            ):
+                inductor_fails(gm, args)
+
+        self.assertGreater(len(called), 0)
+
+    def test_repro_run_syncs_on_accelerator_tensor(self, device):
+        if torch.device(device).type == "cpu":
+            self.skipTest("sync only triggered for non-CPU devices")
+
+        import argparse
+
+        from torch._dynamo.repro.after_aot import repro_run
+
+        called = []
+        gm = torch.fx.symbolic_trace(TupleOut())
+        args = [torch.randn(4, device=device)]
+
+        def fake_compile_fx_inner(gm, compile_args, **kwargs):
+            def compiled(real_args):
+                return [gm(*real_args)]
+
+            return compiled
+
+        with patch(
+            "torch._dynamo.repro.after_aot.repro_common", return_value=(gm, args)
+        ):
+            with patch(
+                "torch._inductor.compile_fx.compile_fx_inner", fake_compile_fx_inner
+            ):
+                with patch(
+                    "torch.accelerator.synchronize",
+                    side_effect=lambda: called.append(1),
+                ):
+                    repro_run(argparse.Namespace(accuracy=""), None, None)
+
+        self.assertGreater(len(called), 0)
+
+
+instantiate_device_type_tests(TestWrapCompilerDebugSync, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":

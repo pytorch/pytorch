@@ -132,6 +132,19 @@ class TestMkldnn(TestCase):
                                        "Cannot access data pointer of Tensor that doesn't have storage",
                                        lambda: mkldnn_tensor.data_ptr() != 0)
 
+    def test_conversion_float8_prepacked_weight(self):
+        weight = torch.linspace(-4, 4, steps=64).reshape(16, 4)
+        weight_fp8 = weight.half().to(torch.float8_e4m3fn)
+        packed_weight = torch.ops.onednn.qlinear_prepack(weight_fp8, [1, 4])
+
+        if not packed_weight.is_mkldnn:
+            self.skipTest("FP8 qlinear prepack fell back to dense weight")
+
+        unpacked = packed_weight.to_dense()
+        self.assertEqual(unpacked.dtype, torch.float8_e4m3fn)
+        self.assertEqual(unpacked.shape, weight_fp8.t().shape)
+        self.assertEqual(unpacked.t().contiguous().float(), weight_fp8.float())
+
     def test_copy(self):
         x = torch.randn(4, 5, dtype=torch.float32)
         mkldnn_x = x.to_mkldnn()

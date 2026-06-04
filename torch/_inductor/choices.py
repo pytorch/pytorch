@@ -13,7 +13,7 @@ from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
-from .kernel_inputs import KernelInputs  # noqa: TC001
+from .kernel_inputs import KernelInputs, MMKernelInputs
 from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
@@ -21,9 +21,11 @@ from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .select_algorithm import ExternKernelChoice
 from .template_heuristics import get_template_heuristic
 from .template_heuristics.triton import (
+    _origami_enabled,
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    IS_ROCM,
     MTIAConfigHeuristic,
     ROCmConfigHeuristic,
     XPUConfigHeuristic,
@@ -47,6 +49,21 @@ if TYPE_CHECKING:
     from torch.utils._ordered_set import OrderedSet  # isort: skip
 
 
+if TYPE_CHECKING or not config.is_fbcode():
+
+    def _maybe_log_inductor_mm_shape(
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        context_fn: Any = None,
+    ) -> None:
+        return
+
+else:
+    from torch._inductor.fb.shape_logging import (
+        log_inductor_mm_shape as _maybe_log_inductor_mm_shape,
+    )
+
+
 class Sortable(typing.Protocol):
     """Anything that can be used as a list.sort() key (int/tuple/etc)"""
 
@@ -56,15 +73,17 @@ class Sortable(typing.Protocol):
 @dataclasses.dataclass
 class FusionScore:
     template_score: int
-    node_type_score: bool
+    node_type_score: int
     memory_score: int
     buffer_overlap_score: int
     proximity_score: int
 
     def __lt__(self, other):
         """
-        node_type_score has higher priority than memory_score unless
-        the memory_score differs too much.
+        node_type_score orders same-kind fusions above mixed-kind fusions unless
+        the memory_score differs too much. Nested reduction candidates use -1
+        so they rank below ordinary mixed-kind fusions; mix-order reductions
+        are still scored through memory_score.
 
         buffer_overlap_score is prioritized below memory_score so that
         strict global memory savings (exact dep matches) are preferred
@@ -157,6 +176,10 @@ class InductorChoices:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
 
+    def _logging_context(self) -> dict[str, Any]:
+        """Extra fields for the per-shape log row. Subclasses may override."""
+        return {}
+
     def _finalize_template_configs(
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
@@ -184,6 +207,10 @@ class InductorChoices:
         Returns:
             Flattened list of KernelTemplateChoice objects across all templates
         """
+        if isinstance(kernel_inputs, MMKernelInputs):
+            _maybe_log_inductor_mm_shape(
+                kernel_inputs, op_name, context_fn=self._logging_context
+            )
         choices: list[KernelTemplateChoice] = []
         for choice_gen in template_choices.values():
             choices.extend(choice_gen)
@@ -234,15 +261,7 @@ class InductorChoices:
         adjusted_choices: list[KernelTemplateChoice],
         op_name: str,
     ) -> bool:
-        """
-        Check if we need to fix the layout instead of keeping it flexible
-
-        Args:
-            ktc: KernelTemplateChoice object
-
-        Returns:
-            True if we need to fix the layout, False otherwise
-        """
+        """Return True if any active backend requires fixed (non-flexible) tensor layouts."""
         # TODO: debug and fix
         # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
         # that for mps, everything stays as it was before this optimization
@@ -253,6 +272,11 @@ class InductorChoices:
             ]:
                 return True
 
+        # Origami requires fixed layouts (grid/workgroup mappings depend on exact
+        # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
+        # doesn't disable flexible layouts unnecessarily.
+        if _origami_enabled() and IS_ROCM:
+            return True
         # Since the following backends are not using get_mm_configs yet through the singular call,
         if not (config.max_autotune or config.max_autotune_gemm):
             # no danger of using other backends than ATEN
@@ -363,17 +387,16 @@ class InductorChoices:
         return fused_name
 
     @staticmethod
-    def should_use_cooperative_reduction(features: SIMDKernelFeatures) -> bool:
+    def should_use_cooperative_reduction(
+        device: torch.device, numel: sympy.Expr, reduction_numel: sympy.Expr
+    ) -> bool:
         """Heuristic to decide if a cooperative reduction should be used."""
         if config.triton.force_cooperative_reductions:
             return True
-        if (
-            not config.triton.cooperative_reductions
-            or V.graph.get_current_device_or_throw().type == "cpu"
-        ):
+        if not config.triton.cooperative_reductions or device.type == "cpu":
             return False
 
-        xhint = V.graph.sizevars.optimization_hint(features.numel, fallback=2)
+        xhint = V.graph.sizevars.optimization_hint(numel, fallback=2)
         if xhint <= 8:
             threshold = 32768 * xhint
         elif xhint <= 16:
@@ -381,11 +404,9 @@ class InductorChoices:
         else:
             return False
         # TODO(jansel): should this default on for dynamic shapes?
-        # TODO(laith) What if hint(features.reduction_numel) >= threshold ?
+        # TODO(laith) What if hint(reduction_numel) >= threshold ?
         # shall we compare hints instead
-        return V.graph.sizevars.statically_known_geq(
-            features.reduction_numel, threshold
-        )
+        return V.graph.sizevars.statically_known_geq(reduction_numel, threshold)
 
     @staticmethod
     def should_use_persistent_reduction(
@@ -420,7 +441,7 @@ class InductorChoices:
             lower = next_power_of_2(int(lower))
             upper = next_power_of_2(int(upper))
 
-            # If we are are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
+            # If we are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
             # (not ReductionHint.OUTER_TINY), do not use persistent reduction if it induces tile
             # quantization. Persistent reduction forces rblock == rnumel, if the bounds between lower
             # and upper are large, for the lower values we will be masking off large % of read/writes,
@@ -478,7 +499,12 @@ class InductorChoices:
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
                 return 1
-            if reduction_numel_hint <= 8192:
+            # based on sum(x[N]) on GB200, split reduction provides higher performance when N >= 1M
+            # TODO: test more hardwares
+            no_split_threshold = (
+                524288 if props.major is not None and props.major >= 10 else 8192
+            )
+            if reduction_numel_hint <= no_split_threshold:
                 return 1
             if reduction_numel_hint * numel_hint <= min_elements_per_device:
                 split_size = min_elements_per_thread
@@ -491,7 +517,7 @@ class InductorChoices:
                 divisors = sympy.divisors(reduction_numel_hint)
                 closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
                 if abs(closest - tmp_split_size) < 30:
-                    # prefer even splits, but never smalle than min_elements_per_thread
+                    # prefer even splits, but never smaller than min_elements_per_thread
                     split_size = max(closest, min_elements_per_thread)
                 else:
                     split_size = tmp_split_size
@@ -677,11 +703,25 @@ class InductorChoices:
                 and memory_score > 0
             )
 
-        type_score = node1.is_reduction() == node2.is_reduction() and memory_score > 0
+        node_type_score = int(
+            node1.is_reduction() == node2.is_reduction() and memory_score > 0
+        )
+        if (
+            config.triton.nested_reduction
+            and node1.is_reduction()
+            and node2.is_reduction()
+            and node1.get_operation_names() & node2.ancestors
+        ):
+            # Mix-order reductions are sibling reductions. Only dependent
+            # cross-reduction-size reductions get the lower nested score here.
+            _, (_, rnumel1) = node1.group
+            _, (_, rnumel2) = node2.group
+            if not V.graph.sizevars.statically_known_equals(rnumel1, rnumel2):
+                node_type_score = -1
 
         return FusionScore(
             template_score,
-            type_score,
+            node_type_score,
             memory_score,
             buffer_overlap_score,
             proximity_score,
