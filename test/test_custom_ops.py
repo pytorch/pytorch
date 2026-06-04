@@ -2864,6 +2864,152 @@ class TestCustomOpAPI(TestCase):
         self.assertIs(result, x)
         self.assertEqual(x, expected)
 
+    @skipIfTorchDynamo("recursive dynamo")
+    @requires_compile
+    @parametrize("use_auto_functionalized_v2", (True, False))
+    def test_custom_op_set_data_compile(self, use_auto_functionalized_v2):
+        name = "v2" if use_auto_functionalized_v2 else "old"
+
+        @torch.library.custom_op(
+            f"_torch_testing::set_data_compile_{name}",
+            mutates_args={"param"},
+        )
+        def set_data(param: Tensor, new_data: Tensor) -> None:
+            param.set_(new_data)
+
+        @set_data.register_fake
+        def _(param, new_data):
+            param.set_(new_data)
+            return None
+
+        class ParameterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.empty(0))
+
+            def forward(self, x):
+                new_data = x * 3
+                y = self.param
+                set_data(y, new_data)
+                return y / 3
+
+        class TensorAttributeModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.empty(0)
+
+            def forward(self, x):
+                new_data = x * 3
+                self.param = torch.empty(0)
+                y = self.param
+                set_data(y, new_data)
+                return y / 3
+
+        for module in (ParameterModule(), TensorAttributeModule()):
+            x = torch.randn(3, 3)
+            with (
+                torch._inductor.config.patch(
+                    enable_auto_functionalized_v2=use_auto_functionalized_v2
+                ),
+                torch.no_grad(),
+            ):
+                result = torch.compile(module, backend="aot_eager")(x)
+
+            self.assertEqual(result, x)
+            self.assertEqual(module.param, x * 3)
+
+    @skipIfTorchDynamo("recursive dynamo")
+    @requires_compile
+    @parametrize("use_auto_functionalized_v2", (True, False))
+    def test_custom_op_set_data_same_shape_compile_aliases_new_data(
+        self, use_auto_functionalized_v2
+    ):
+        name = "v2" if use_auto_functionalized_v2 else "old"
+
+        @torch.library.custom_op(
+            f"_torch_testing::set_data_same_shape_compile_{name}",
+            mutates_args={"param"},
+        )
+        def set_data(param: Tensor, new_data: Tensor) -> None:
+            param.set_(new_data)
+
+        @set_data.register_fake
+        def _(param, new_data):
+            param.set_(new_data)
+            return None
+
+        class ParameterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.empty(3, 3))
+
+            def forward(self, x):
+                new_data = x * 3
+                y = self.param
+                set_data(y, new_data)
+                return y / 3, new_data
+
+        module = ParameterModule()
+        x = torch.randn(3, 3)
+        with (
+            torch._inductor.config.patch(
+                enable_auto_functionalized_v2=use_auto_functionalized_v2
+            ),
+            torch.no_grad(),
+        ):
+            result, new_data = torch.compile(module, backend="aot_eager")(x)
+
+        self.assertEqual(result, x)
+        self.assertEqual(module.param, x * 3)
+        self.assertEqual(
+            module.param.untyped_storage().data_ptr(),
+            new_data.untyped_storage().data_ptr(),
+        )
+
+    @skipIfTorchDynamo("recursive dynamo")
+    @requires_compile
+    @parametrize("use_auto_functionalized_v2", (True, False))
+    def test_custom_op_metadata_only_compile_preserves_storage(
+        self, use_auto_functionalized_v2
+    ):
+        name = "v2" if use_auto_functionalized_v2 else "old"
+
+        @torch.library.custom_op(
+            f"_torch_testing::metadata_only_compile_{name}",
+            mutates_args={"param"},
+        )
+        def transpose_param(param: Tensor) -> None:
+            param.transpose_(0, 1)
+
+        @transpose_param.register_fake
+        def _(param):
+            param.transpose_(0, 1)
+            return None
+
+        class MetadataOnlyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.arange(9.0).reshape(3, 3)
+
+            def forward(self, x):
+                y = self.param
+                transpose_param(y)
+                return y + x
+
+        module = MetadataOnlyModule()
+        original_storage = module.param.untyped_storage().data_ptr()
+        expected = module.param.t().clone()
+        with (
+            torch._inductor.config.patch(
+                enable_auto_functionalized_v2=use_auto_functionalized_v2
+            ),
+            torch.no_grad(),
+        ):
+            result = torch.compile(module, backend="aot_eager")(torch.zeros(3, 3))
+
+        self.assertEqual(result, expected)
+        self.assertEqual(module.param.untyped_storage().data_ptr(), original_storage)
+
     def test_custom_op_inplace_tag_no_positional_arg(self):
         def f(*, x: Tensor) -> Tensor:
             return x

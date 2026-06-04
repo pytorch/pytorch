@@ -6303,24 +6303,37 @@ class ShapeEnv:
                 constraint_size,
                 constraint_stride,
             ) in sources_tensors_constraints:
+                # Rank-changing metadata mutations can leave the tensor with
+                # more dimensions than its original symbolic context.
+                def get_constraint(
+                    constraints: Sequence[DimConstraint], i: int
+                ) -> DimConstraint:
+                    return constraints[i] if i < len(constraints) else None
+
                 if is_sparse_any(curr_t):
                     for i, ss in enumerate(curr_t.size()):
                         property_source = TensorPropertySource(
                             src, TensorProperty.SIZE, i
                         )
-                        track_symint(property_source, ss, constraint_size[i])
+                        track_symint(
+                            property_source, ss, get_constraint(constraint_size, i)
+                        )
                 else:
                     for i, ss in enumerate(curr_t.size()):
                         property_source = TensorPropertySource(
                             src, TensorProperty.SIZE, i
                         )
-                        track_symint(property_source, ss, constraint_size[i])
+                        track_symint(
+                            property_source, ss, get_constraint(constraint_size, i)
+                        )
 
                     for i, ss in enumerate(curr_t.stride()):
                         property_source = TensorPropertySource(
                             src, TensorProperty.STRIDE, i
                         )
-                        track_symint(property_source, ss, constraint_stride[i])
+                        track_symint(
+                            property_source, ss, get_constraint(constraint_stride, i)
+                        )
                     track_symint(
                         TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
                         curr_t.storage_offset(),
