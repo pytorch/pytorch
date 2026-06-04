@@ -2007,14 +2007,19 @@ class MetaConverter(Generic[_TensorT]):
                             r = self._backward_error(r)
 
                     s = t.storage
+                    from torch.fx.experimental.symbolic_shapes import (
+                        guard_or_false,
+                        sym_eq,
+                    )
+
                     if (
                         s is not None
                         and s.id not in self.storage_memo
                         and (
                             r.is_nested
                             or (
-                                r.stride() == strides
-                                and r.storage_offset() == storage_offset
+                                guard_or_false(sym_eq(r.stride(), strides))
+                                and guard_or_false(r.storage_offset() == storage_offset)
                             )
                         )
                     ):
