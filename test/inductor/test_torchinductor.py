@@ -9153,6 +9153,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=1.3e-6,
         )
 
+    def test_upsample_bilinear2d_unique_consecutive(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("covers CPU upsample accumulation order")
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 3, kernel_size=3, stride=1, padding=1)
+                self.upsample = nn.Upsample(
+                    scale_factor=2, mode="bilinear", align_corners=True
+                )
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.floor(x)
+                x = self.upsample(x)
+                return torch.unique_consecutive(x)
+
+        torch.manual_seed(0)
+        model = Model()
+        model.requires_grad_(False)
+        self.common(
+            model,
+            (torch.randn(1, 1, 16, 16),),
+            atol=1e-3,
+            rtol=1e-3,
+        )
+
     @skip_if_gpu_halide  # accuracy issue
     def test_reflection_pad2d(self):
         def fn(a, pad):
