@@ -2502,6 +2502,38 @@ class TestStandaloneCompile(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_save_training_artifact_compiles_backward(self) -> None:
+        mod = torch.nn.Linear(4, 3)
+        x = torch.randn(2, 4)
+        eager_out = mod(x).detach()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with fresh_cache():
+                gm, args, kwargs = self.capture(mod)(x)
+                if kwargs:
+                    raise AssertionError
+
+                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                self.assertTrue(compiled_artifact.is_saveable())
+                compiled_artifact.save(path=temp_dir, format="unpacked")
+
+            with fresh_cache():
+                mod.zero_grad(set_to_none=True)
+                loaded = torch._inductor.CompiledArtifact.load(
+                    path=temp_dir, format="unpacked"
+                )
+                compiled_out = loaded(*args)[0]
+                self.assertEqual(eager_out, compiled_out)
+
+                compiled_out.sum().backward()
+                self.assertEqual(
+                    mod.weight.grad, torch.ones_like(eager_out).t().matmul(x)
+                )
+                self.assertEqual(mod.bias.grad, torch.full_like(mod.bias, x.shape[0]))
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     def test_modify_unpacked_file(self, device: str) -> None:
         if device == GPU_TYPE and not HAS_GPU:
