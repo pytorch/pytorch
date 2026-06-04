@@ -1320,7 +1320,9 @@ def unpack_and_apply_fn(
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
+            variables.RangeVariable,
             variables.SetVariable,
+            variables.TensorVariable,
             variables.TupleVariable,
         ),
     ):
@@ -1358,6 +1360,21 @@ def is_lru_cache_wrapped_function(
     return isinstance(value, functools._lru_cache_wrapper) and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
+
+
+_lru_cache_wrappers_allowed_to_trace_without_warning: weakref.WeakSet[
+    functools._lru_cache_wrapper[Any]
+] = weakref.WeakSet()
+
+
+def allow_lru_cache_wrapper_trace_without_warning(
+    value: functools._lru_cache_wrapper[Any],
+) -> None:
+    _lru_cache_wrappers_allowed_to_trace_without_warning.add(value)
+
+
+def is_lru_cache_wrapper_trace_without_warning_allowed(value: Any) -> bool:
+    return value in _lru_cache_wrappers_allowed_to_trace_without_warning
 
 
 _FuncTypes: TypeAlias = (
@@ -2203,21 +2220,32 @@ class ChromiumEventLogger:
             if metadata:
                 CompileEventLogger.add_record_function_data(event_name, **metadata)
 
-    def reset(self) -> None:
-        # We this on every compile in case a compile crashes or restarts and we haven't
-        # cleared the stack.
+    def _reset_to_state(
+        self,
+        stack_depth: int,
+        pt2_compile_substack_depth: int,
+        event_data_keys: set[str],
+        record_function_keys: set[str],
+    ) -> None:
         stack = self.get_stack()
+        del stack[stack_depth:]
         substack = self.get_pt2_compile_substack()
-        stack.clear()
-        substack.clear()
+        del substack[pt2_compile_substack_depth:]
         event_data = self.get_event_data()
-        event_data.clear()
+        for event_name in list(event_data):
+            if event_name not in event_data_keys:
+                del event_data[event_name]
         # Clean up any lingering record functions (shouldn't happen in normal operation)
         record_functions = self.get_record_functions()
-        if record_functions:
-            for rf in record_functions.values():
+        for event_name, rf in list(record_functions.items()):
+            if event_name not in record_function_keys:
                 rf.__exit__(None, None, None)
-            record_functions.clear()
+                del record_functions[event_name]
+
+    def reset(self) -> None:
+        # We do this on every compile in case a compile crashes or restarts and
+        # we haven't cleared the stack.
+        self._reset_to_state(0, 0, set(), set())
 
     def log_event_end(
         self,
@@ -2398,6 +2426,14 @@ def chromium_event_timed(
     instead. Use this context manager only if you want to avoid dynamo_timed.
     """
     chromium_event_log = get_chromium_event_logger()
+    reset_state: tuple[int, int, set[str], set[str]] | None = None
+    if reset_event_log_on_exit:
+        reset_state = (
+            len(chromium_event_log.get_stack()),
+            len(chromium_event_log.get_pt2_compile_substack()),
+            set(chromium_event_log.get_event_data()),
+            set(chromium_event_log.get_record_functions()),
+        )
     chromium_start_time = time.time_ns()
     chromium_event_log.log_event_start(
         event_name,
@@ -2415,8 +2451,8 @@ def chromium_event_timed(
             chromium_start_time,
             log_pt2_compile_event,
         )
-        if reset_event_log_on_exit:
-            chromium_event_log.reset()
+        if reset_state is not None:
+            chromium_event_log._reset_to_state(*reset_state)
 
 
 @dataclasses.dataclass
@@ -3233,9 +3269,16 @@ def iter_contains(
     from .variables import ConstantVariable
 
     if search.is_python_constant():
+        search_val = search.as_python_constant()
+        # CPython's list_contains/set_contains use PyObject_RichCompareBool
+        # which has an identity shortcut: if v is w, return True for eq.
+        # Check identity first (matters for NaN).
         found_const = any(
             x.is_python_constant()
-            and x.as_python_constant() == search.as_python_constant()
+            and (
+                x.as_python_constant() is search_val
+                or x.as_python_constant() == search_val
+            )
             for x in items
         )
         return ConstantVariable.create(found_const)
@@ -4084,6 +4127,19 @@ def _get_fake_value_impl(
                 str(cause),
                 case_name="constrain_as_size_example",
             ) from cause
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.FakeTensorDeviceMismatchError
+        ):
+            _wrap_graph_break_with_torch_runtime_err(
+                lambda: unimplemented(
+                    gb_type="Tensor device mismatch",
+                    context=f"{op} {node.target}",
+                    explanation=str(cause),
+                    hints=["Move inputs, parameters, and buffers to the same device."],
+                    from_exc=cause,
+                )
+            )
+            raise AssertionError("should not be reachable") from None
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
