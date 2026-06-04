@@ -55,7 +55,7 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import SM100OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -83,10 +83,16 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
+from torch.utils._import_utils import _check_module_exists
 
 
 if TYPE_CHECKING:
     from torch.autograd.profiler_util import FunctionEvent
+
+
+# cupti-python is pip-installable on ROCm hosts too, but CUPTI itself is a no-op
+# there, so gate the monitor tests off ROCm as well.
+TEST_CUPTI_PYTHON = _check_module_exists("cupti") and not TEST_WITH_ROCM
 
 
 def get_profiler_activities(device_type):
@@ -230,7 +236,7 @@ with profile(activities=[ProfilerActivity.CUDA]):
     add_one_graphed(zeros)
 """,
             ],
-            universal_newlines=True,
+            text=True,
             timeout=60,
         )
 
@@ -406,6 +412,115 @@ with profile(activities=[ProfilerActivity.CUDA]):
                 x = torch.randn(10, 10).to("cuda")
                 y = torch.mm(x, x)
         self.assertGreater(len(p.events()), 0)
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @unittest.skipUnless(
+        SM100OrLater, "hardware event sampling requires GB200+ (sm_100)"
+    )
+    def test_cupti_monitor_enable_hes_early_guard(self):
+        import subprocess
+
+        subprocess.check_call(
+            [
+                sys.executable,
+                "-c",
+                """
+import torch
+from torch.profiler import _cupti_monitor
+
+_cupti_monitor.enable_hes_early()
+assert _cupti_monitor.is_hes_enabled()
+""",
+            ],
+            text=True,
+            timeout=60,
+        )
+
+        p = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                """
+import torch
+from torch.profiler import _cupti_monitor
+
+torch.randn(1, device="cuda")
+_cupti_monitor.enable_hes_early()
+""",
+            ],
+            text=True,
+            timeout=60,
+            capture_output=True,
+        )
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn(
+            "enable_hes_early() must be called before CUDA context creation",
+            p.stderr,
+        )
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_collection_raw_dump_smoke(self):
+        from torch.profiler import _cupti_monitor
+
+        with TemporaryDirectoryName() as out_dir:
+            self.assertIsNone(_cupti_monitor.get_monitor())
+            monitor = _cupti_monitor.start_collection(out_dir)
+            self.assertIs(monitor, _cupti_monitor.get_monitor())
+
+            x = torch.randn(64, 64, device="cuda")
+            y = torch.relu(x + 1)
+            y.sum().item()
+            torch.cuda.synchronize()
+
+            stats = _cupti_monitor.stop_collection()
+            self.assertIsNotNone(stats)
+            self.assertIsNone(_cupti_monitor.get_monitor())
+            self.assertTrue(
+                os.path.exists(os.path.join(out_dir, _cupti_monitor._META_FILE))
+            )
+            self.assertTrue(
+                os.path.exists(os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE))
+            )
+            self.assertGreater(
+                os.path.getsize(os.path.join(out_dir, _cupti_monitor._META_FILE)), 0
+            )
+            self.assertGreater(
+                os.path.getsize(os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE)),
+                0,
+            )
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    def test_cupti_monitor_collection_repeated_lifecycle(self):
+        from torch.profiler import _cupti_monitor
+
+        for _ in range(2):
+            with TemporaryDirectoryName() as out_dir:
+                self.assertIsNone(_cupti_monitor.get_monitor())
+                _cupti_monitor.start_collection(out_dir)
+
+                x = torch.randn(32, 32, device="cuda")
+                y = torch.sigmoid(x)
+                y.sum().item()
+                torch.cuda.synchronize()
+
+                stats = _cupti_monitor.stop_collection()
+                self.assertIsNotNone(stats)
+                self.assertIsNone(_cupti_monitor.get_monitor())
+
+                self.assertTrue(
+                    os.path.exists(os.path.join(out_dir, _cupti_monitor._META_FILE))
+                )
+                self.assertTrue(
+                    os.path.exists(
+                        os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE)
+                    )
+                )
+                self.assertGreater(
+                    os.path.getsize(
+                        os.path.join(out_dir, _cupti_monitor._RAW_BUFFER_FILE)
+                    ),
+                    0,
+                )
 
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
