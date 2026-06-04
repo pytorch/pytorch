@@ -5048,6 +5048,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             parent=fwd_tracer,
             source_target=self._HOP_NAME,
         )
+        bwd_tracer.is_autograd_function_backward = True
 
         bwd_args = []
         if fwd_out.is_tensor():
@@ -5076,6 +5077,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         with (
             tx.output.subtracer(fwd_fn, fwd_tracer),  # type: ignore[arg-type]
             tx.strict_translation_mode(is_strict_for),
+            torch.no_grad(),
         ):
             try:
                 bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts, _ = (
@@ -5085,8 +5087,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         bwd_args,
                         {},
                         self._HOP_NAME,
-                        # TODO - revisit if we need enable_grad
-                        enable_grad=False,
+                        enable_grad=None,
                         set_subgraph_inputs="automatic_with_forced_inputs",
                         allow_side_effects=False,
                         tracer=bwd_tracer,
@@ -5103,6 +5104,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     parent=fwd_tracer,
                     source_target=self._HOP_NAME,
                 )
+                bwd_tracer.is_autograd_function_backward = True
                 from .._trace_wrapped_higher_order_op import (
                     autograd_function_backward_rewritten,
                 )
@@ -5126,9 +5128,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         from_exc=e,
                     )
 
-                with mock.patch(
-                    "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
-                    [],
+                with (
+                    mock.patch(
+                        "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
+                        [],
+                    ),
+                    torch.no_grad(),
                 ):
                     bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts, _ = (
                         speculate_subgraph_with_auto_output_flattening(
@@ -5137,7 +5142,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                             bwd_args,
                             {},
                             self._HOP_NAME,
-                            enable_grad=False,
+                            enable_grad=None,
                             set_subgraph_inputs="automatic_with_forced_inputs",
                             allow_side_effects=False,
                             tracer=bwd_tracer,

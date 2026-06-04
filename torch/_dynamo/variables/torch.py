@@ -1225,6 +1225,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_is_grad_enabled(
             self, tx: "InstructionTranslatorBase"
         ) -> ConstantVariable:
+            if tx.output.current_tracer.is_autograd_function_backward:
+                unimplemented(
+                    gb_type="torch.is_grad_enabled in autograd.Function backward",
+                    context="",
+                    explanation=(
+                        "Dynamo does not support tracing custom autograd.Function "
+                        "backward methods that observe grad mode."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             install_guard(GradModeVariable._guards_singleton)
             return VariableTracker.build(tx, torch.is_grad_enabled())
 
