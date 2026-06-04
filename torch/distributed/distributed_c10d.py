@@ -4386,7 +4386,7 @@ def all_gather_single(output_tensor, input_tensor, group=None, async_op=False):
         else:
             return None
 
-    work = group._allgather_base(output_tensor, input_tensor, opts)
+    work = group.all_gather_single(output_tensor, input_tensor, opts)
 
     if async_op:
         return work
@@ -4935,7 +4935,7 @@ def reduce_scatter_single(output, input, op=ReduceOp.SUM, group=None, async_op=F
         else:
             return None
 
-    work = group._reduce_scatter_base(output, input, opts)
+    work = group.reduce_scatter_single(output, input, opts)
 
     if async_op:
         return work
@@ -5130,7 +5130,7 @@ def all_to_all_single(
     input_split_sizes = [] if input_split_sizes is None else input_split_sizes
 
     group = group or _get_default_group()
-    work = group.alltoall_base(
+    work = group.all_to_all_single(
         output, input, output_split_sizes, input_split_sizes, opts
     )
 
