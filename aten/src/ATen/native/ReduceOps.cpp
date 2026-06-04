@@ -355,6 +355,23 @@ TORCH_META_FUNC2(norm, ScalarOpt_dim_dtype)
 
 TORCH_META_FUNC(aminmax)
 (const Tensor& self, std::optional<int64_t> dim_opt, bool keepdim) {
+  const auto& min = maybe_get_output(0);
+  const auto& max = maybe_get_output(1);
+  TORCH_CHECK(
+      !min.defined() || self.dtype() == min.dtype(),
+      "Expected out tensor to have dtype ",
+      self.dtype(),
+      ", but got ",
+      min.dtype(),
+      " instead");
+  TORCH_CHECK(
+      !max.defined() || self.dtype() == max.dtype(),
+      "Expected out tensor to have dtype ",
+      self.dtype(),
+      ", but got ",
+      max.dtype(),
+      " instead");
+
   DimVector shape;
   if (dim_opt.has_value()) {
     auto dim = maybe_wrap_dim(dim_opt.value(), self.ndimension());

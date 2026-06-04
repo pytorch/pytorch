@@ -5504,7 +5504,7 @@ def _reflection_pad_backward(grad_output, x, padding):
 
 
 @register_decomposition(aten.aminmax)
-@out_wrapper("min", "max")
+@out_wrapper("min", "max", exact_dtype=True)
 def aminmax(self, *, dim=None, keepdim=False):
     # pyrefly: ignore [bad-argument-type]
     amin = torch.amin(self, dim=dim, keepdim=keepdim)
