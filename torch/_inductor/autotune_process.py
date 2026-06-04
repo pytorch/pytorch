@@ -22,6 +22,8 @@ from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
 from typing import Any, IO, TYPE_CHECKING
 
+from typing_extensions import override
+
 import torch
 import torch._inductor.async_compile
 from torch._dynamo.device_interface import get_interface_for_device
@@ -654,6 +656,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.workspace_zero_fill = workspace_zero_fill
         self._benchmark_module: Any | None = None
 
+    @override
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
