@@ -13294,6 +13294,19 @@ op_db: list[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           decorators=[
+               # https://github.com/pytorch/pytorch/issues/184350
+               # DTensor lowers mv with a Shard(0) vector into a per-rank
+               # partial sum that is all-reduced, changing the order of
+               # additions vs the reference gemv. In float32 the drift
+               # can exceed the default tolerance for some inputs.
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-5, rtol=2.4e-6)}),
+                   "TestDTensorOps",
+                   "test_dtensor_op_db",
+                   dtypes=(torch.float32,),
+               ),
+           ],
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
