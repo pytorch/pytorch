@@ -183,12 +183,12 @@ def _gather_tensors(
     """
     gathered_redux = local_redux
     for mesh_dim in shard_mesh_dims:
-        gathered_redux = funcol.all_gather_single(
+        gathered_redux = funcol.all_gather_tensor(
             gathered_redux,
             gather_dim=gather_dim,
             group=(device_mesh, mesh_dim),
         )
-        gathered_idxs = funcol.all_gather_single(
+        gathered_idxs = funcol.all_gather_tensor(
             gathered_idxs,
             gather_dim=gather_dim,
             group=(device_mesh, mesh_dim),
