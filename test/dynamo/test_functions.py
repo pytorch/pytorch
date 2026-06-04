@@ -5410,6 +5410,150 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(2)
         self.assertEqual(fn(x), fn_opt(x))
 
+    def test_is_numpy_bool_ufunc_scalar_graph_break(self):
+        def fn(x):
+            a = np.equal(np.array(1), np.array(1), out=None)
+            b = np.equal(np.array(1), np.array(1), out=None)
+            if a is b:
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(
+            Unsupported, "unsupported NumPy identity comparison"
+        ):
+            fn_opt(x)
+
+    def test_is_numpy_bool_function_scalar_graph_break(self):
+        def fn(x):
+            a = np.all(np.array([True]))
+            b = np.all(np.array([True]))
+            return x + (1 if a is b else 2)
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(
+            Unsupported, "unsupported NumPy identity comparison"
+        ):
+            fn_opt(x)
+
+    def test_is_numpy_bool_method_scalar_graph_break(self):
+        def fn(x):
+            a = np.array([True]).all()
+            b = np.array([True]).all()
+            return x + (1 if a is b else 2)
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(
+            Unsupported, "unsupported NumPy identity comparison"
+        ):
+            fn_opt(x)
+
+    def test_is_numpy_ufunc_out_alias_guards(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, out1, out2):
+            r1 = np.sin(np.array(1.0), out=out1)
+            r2 = np.cos(np.array(1.0), out=out2)
+            if r1 is r2:
+                return x + 1
+            else:
+                return x + 2
+
+        x = torch.zeros(2)
+        out = np.empty(())
+
+        self.assertEqual(fn(x, out, out), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x, out, np.empty(())), x + 2)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(fn(x, out, out), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_is_numpy_ufunc_out_transitive_alias_guards(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, out1, out2):
+            r1 = np.sin(np.array(1.0), out=out1)
+            r2 = np.cos(np.array(1.0), out=r1)
+            if r2 is out2:
+                return x + 1
+            else:
+                return x + 2
+
+        x = torch.zeros(2)
+        out = np.empty(())
+
+        self.assertEqual(fn(x, out, out), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x, np.empty(()), out), x + 2)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(fn(x, out, out), x + 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_is_numpy_array_constructor_zero_dim(self):
+        def fn(x):
+            a = np.array(1)
+            b = np.array(1)
+            if a is b:
+                return x + 1
+            else:
+                return x + 2
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
+    def test_id_numpy_bool_scalar_singleton(self):
+        def fn(x):
+            return x + (1 if id(np.bool_(True)) == id(np.bool_(True)) else 2)
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        self.assertEqual(fn(x), fn_opt(x))
+
+    def test_id_numpy_unknown_scalar_graph_break(self):
+        def fn(x):
+            return x + (
+                1 if id(np.all(np.array([True]))) == id(np.all(np.array([True]))) else 2
+            )
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(Unsupported, "unsupported NumPy id"):
+            fn_opt(x)
+
+    def test_id_numpy_float_scalar_graph_break(self):
+        def fn(x):
+            return x + (1 if id(np.float64(1.0)) == id(np.float64(1.0)) else 2)
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(Unsupported, "unsupported NumPy id"):
+            fn_opt(x)
+
+    def test_id_numpy_array_temporary_graph_break(self):
+        def fn(x):
+            return x + (1 if id(np.array(1)) == id(np.array(1)) else 2)
+
+        fn_opt = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.zeros(2)
+        with self.assertRaisesRegex(Unsupported, "unsupported NumPy id"):
+            fn_opt(x)
+
     def test_numpy_operator_identity_metadata_no_extra_user_dispatch(self):
         global numpy_identity_user_dispatch_hits
 
@@ -5574,6 +5718,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x, a, np.float64(1.0)), x + 1)
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(fn(x, a, a), x + 2)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_is_numpy_array_input_alias_guards(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, a, b):
+            if a is b:
+                return x + 1
+            else:
+                return x + 2
+
+        x = torch.zeros(2)
+        a = np.ones(1)
+
+        self.assertEqual(fn(x, a, a), x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x, a, np.ones(1)), x + 2)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(fn(x, a, a), x + 1)
         self.assertEqual(cnt.frame_count, 2)
 
     def test_is_numpy_float_tensor_input_no_identity_recompile(self):

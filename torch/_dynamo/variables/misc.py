@@ -61,6 +61,7 @@ from ..source import (
 from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
+    get_fake_value,
     identity,
     istype,
     proxy_args_kwargs,
@@ -1855,6 +1856,91 @@ class NumpyVariable(VariableTracker):
         except Exception:
             return NO_SUCH_SUBOBJ
 
+    def _numpy_result_kinds(
+        self,
+        tx: "InstructionTranslatorBase",
+        proxy: torch.fx.Proxy,
+        python_value: object,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> bool:
+        try:
+            import numpy as np
+        except ModuleNotFoundError:
+            return False
+
+        if python_value is not NO_SUCH_SUBOBJ:
+            return False
+
+        if isinstance(self.value, type) and issubclass(self.value, np.generic):
+            fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+            if fake_value is None:
+                return False
+            if fake_value.ndim != 0:
+                return True
+            return False
+
+        if self.value in {
+            np.array,
+            np.asarray,
+            np.empty,
+            np.zeros,
+            np.ones,
+            np.full,
+        }:
+            return True
+
+        if not isinstance(self.value, np.ufunc):
+            fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+            if fake_value is None:
+                return False
+            if fake_value.ndim != 0:
+                return True
+            return False
+
+        def is_none(arg: VariableTracker) -> bool:
+            return (
+                isinstance(arg, ConstantVariable) and arg.as_python_constant() is None
+            )
+
+        if "out" in kwargs and not is_none(kwargs["out"]):
+            return True
+
+        if len(args) > self.value.nin and not is_none(args[self.value.nin]):
+            return True
+
+        fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+        if fake_value is None:
+            return False
+        if fake_value.ndim != 0:
+            return True
+        return False
+
+    def _numpy_ufunc_out_arg(
+        self, args: list[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> VariableTracker | None:
+        try:
+            import numpy as np
+        except ModuleNotFoundError:
+            return None
+
+        if not isinstance(self.value, np.ufunc):
+            return None
+
+        def is_none(arg: VariableTracker) -> bool:
+            return (
+                isinstance(arg, ConstantVariable) and arg.as_python_constant() is None
+            )
+
+        out_arg = kwargs.get("out")
+        if out_arg is None and len(args) > self.value.nin:
+            out_arg = args[self.value.nin]
+        if out_arg is None or is_none(out_arg):
+            return None
+        if isinstance(out_arg, variables.NumpyNdarrayVariable):
+            return out_arg
+        return None
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -1949,7 +2035,16 @@ class NumpyVariable(VariableTracker):
                 numpy_to_tensor_wrapper(func),
                 *proxy_args_kwargs(args, kwargs),
             )
-            return NumpyNdarrayVariable.create(tx, proxy, python_value=python_value)
+            is_numpy_ndarray = self._numpy_result_kinds(
+                tx, proxy, python_value, args, kwargs
+            )
+            return NumpyNdarrayVariable.create(
+                tx,
+                proxy,
+                is_numpy_ndarray=is_numpy_ndarray,
+                numpy_identity_alias=self._numpy_ufunc_out_arg(args, kwargs),
+                python_value=python_value,
+            )
 
     def call_method(
         self,
@@ -2362,16 +2457,6 @@ class ConstantLikeVariable(VariableTracker):
         if variables.ConstantVariable.is_literal(result):
             return VariableTracker.build(tx, result)
         return GetAttrVariable(self, name, py_type=type(result))
-
-
-class TorchVersionVariable(ConstantLikeVariable):
-    _error_prefix = "torch.__version__"
-
-    def __init__(self, **kwargs: Any) -> None:
-        kwargs.setdefault("value", torch.__version__)
-        if kwargs["value"] is not torch.__version__:
-            raise AssertionError("TorchVersionVariable value must be torch.__version__")
-        super().__init__(**kwargs)
 
 
 class NumpyDTypeVariable(ConstantLikeVariable):

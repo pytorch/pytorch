@@ -59,6 +59,7 @@ from ..source import (
     GetItemSource,
     GlobalSource,
     is_constant_source,
+    NumpyTensorSource,
     Source,
     TypeSource,
 )
@@ -101,7 +102,6 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
 )
@@ -120,6 +120,8 @@ from .object_protocol import (
     generic_neg,
     generic_pos,
     generic_repr,
+    maybe_get_python_type,
+    pysequence_check,
     vt_add,
     vt_getitem,
     vt_identity_compare,
@@ -238,6 +240,23 @@ def _numpy_scalar_python_value(
     return NO_SUCH_SUBOBJ
 
 
+def _numpy_operator_result_kinds(
+    tx: "InstructionTranslatorBase",
+    proxy: torch.fx.Proxy,
+    python_value: object,
+) -> bool:
+    if python_value is not NO_SUCH_SUBOBJ:
+        return False
+
+    fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+    if fake_value is None:
+        return False
+    if fake_value.ndim != 0:
+        return True
+
+    return False
+
+
 def _call_numpy_user_defined_binop(
     tx: "InstructionTranslatorBase",
     fn: Callable[..., Any],
@@ -288,6 +307,20 @@ def _call_numpy_user_defined_binop(
 def _numpy_identity_compare(
     left: VariableTracker, right: VariableTracker
 ) -> bool | None:
+    if not isinstance(left, variables.NumpyNdarrayVariable) or not isinstance(
+        right, variables.NumpyNdarrayVariable
+    ):
+        raise AssertionError(
+            "_numpy_identity_compare expects NumpyNdarrayVariable arguments"
+        )
+
+    left = _numpy_identity_alias_root(left)
+    right = _numpy_identity_alias_root(right)
+    if not isinstance(left, variables.NumpyNdarrayVariable) or not isinstance(
+        right, variables.NumpyNdarrayVariable
+    ):
+        raise AssertionError("NumPy identity alias must be a NumPy variable")
+
     if left is right:
         return True
 
@@ -296,7 +329,30 @@ def _numpy_identity_compare(
     if left_value is not NO_SUCH_SUBOBJ and right_value is not NO_SUCH_SUBOBJ:
         return left_value is right_value
 
+    left_fake = extract_fake_example_value(left.as_proxy().node, required=False)
+    right_fake = extract_fake_example_value(right.as_proxy().node, required=False)
+    if (
+        left_fake is not None
+        and right_fake is not None
+        and left.is_numpy_ndarray
+        and right.is_numpy_ndarray
+    ):
+        return id(left_fake) == id(right_fake)
+
     return None
+
+
+def _numpy_identity_alias_root(arg: VariableTracker) -> VariableTracker:
+    seen: set[int] = set()
+    while (
+        isinstance(arg, variables.NumpyNdarrayVariable)
+        and arg.numpy_identity_alias is not None
+    ):
+        if id(arg) in seen:
+            raise AssertionError("Cycle in NumPy identity alias")
+        seen.add(id(arg))
+        arg = arg.numpy_identity_alias
+    return arg
 
 
 def _is_known_non_numpy_type(arg: VariableTracker) -> bool:
@@ -338,13 +394,19 @@ def _mixed_numpy_identity_compare(
 
 def _install_numpy_identity_guards(*args: VariableTracker) -> None:
     for arg in args:
-        if (
-            arg.source is not None
-            and arg.get_real_python_backed_value() is not NO_SUCH_SUBOBJ
+        arg = _numpy_identity_alias_root(arg)
+        source = arg.source
+        if source is None:
+            continue
+        if isinstance(source, NumpyTensorSource):
+            source = source.base
+        if not isinstance(arg, variables.NumpyNdarrayVariable) and (
+            arg.get_real_python_backed_value() is NO_SUCH_SUBOBJ
         ):
-            guard_type = arg.get_id_guard_type()
-            if guard_type is not None:
-                install_guard(arg.source.make_guard(guard_type))
+            continue
+        guard_type = arg.get_id_guard_type()
+        if guard_type is not None:
+            install_guard(source.make_guard(guard_type))
 
 
 IN_PLACE_DESUGARING_MAP = {
@@ -453,6 +515,11 @@ BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # In the builtin var, we check if there is a tensor in the first args position,
 # if not, we swap the args and use the r* version of the op.
 BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
+
+# Sentinel for `inspect.getattr_static` lookups that must distinguish
+# "attribute absent" from "attribute is None" (e.g. `__reversed__ = None`
+# opt-out).
+_MISSING_SENTINEL = object()
 
 
 def populate_builtin_to_tensor_fn_map() -> None:
@@ -905,17 +972,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
 
         # Special cases - lower precedence but still prefer these over constant folding
-
-        # List-like addition (e.g. [1, 2] + [3, 4])
-        def tuple_add_handler(
-            tx: "InstructionTranslatorBase", a: BaseListVariable, b: VariableTracker
-        ) -> VariableTracker:
-            return TupleVariable([*a.items, *b.unpack_var_sequence(tx)])
-
-        def size_add_handler(
-            tx: "InstructionTranslatorBase", a: BaseListVariable, b: VariableTracker
-        ) -> VariableTracker:
-            return SizeVariable([*a.items, *b.unpack_var_sequence(tx)])
 
         def create_cmp_op_handlers(
             op: Callable[..., Any],
@@ -1708,8 +1764,12 @@ class BuiltinVariable(BaseBuiltinVariable):
                     *proxy_args_kwargs(args, kwargs),
                 )
 
+                is_numpy_ndarray = _numpy_operator_result_kinds(tx, proxy, python_value)
                 return variables.NumpyNdarrayVariable.create(
-                    tx, proxy, python_value=python_value
+                    tx,
+                    proxy,
+                    is_numpy_ndarray=is_numpy_ndarray,
+                    python_value=python_value,
                 )
 
             if (
@@ -2677,11 +2737,33 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_reversed(
         self, tx: "InstructionTranslatorBase", obj: VariableTracker
-    ) -> VariableTracker | None:
-        if obj.has_unpack_var_sequence(tx):
-            items = list(reversed(obj.unpack_var_sequence(tx)))
-            return variables.TupleVariable(items)
-        return None
+    ) -> VariableTracker:
+        # Mirrors CPython's builtin_reversed_impl (Python/enumobject.c)
+        # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/enumobject.c#L353-L395
+        # 1. Look up __reversed__ via _PyObject_LookupSpecial. If found, call it.
+        # 2. Else require PySequence_Check (sq_item). If absent, TypeError.
+        # 3. Else build a reverse sequence iterator over __len__ + __getitem__.
+
+        obj_type = maybe_get_python_type(obj)
+
+        # Type-level __reversed__ lookup, mirrors _PyObject_LookupSpecial.
+        # getattr_static skips descriptors / metaclass. CPython treats
+        # `__reversed__ = None` on the type as an explicit opt-out, raising
+        # TypeError even if the sequence protocol would otherwise work.
+        reversed_attr = inspect.getattr_static(
+            obj_type, "__reversed__", _MISSING_SENTINEL
+        )
+        if reversed_attr is None:
+            raise_type_error(tx, f"'{obj_type.__name__}' object is not reversible")
+        if reversed_attr is not _MISSING_SENTINEL:
+            return obj.call_method(tx, "__reversed__", [], {})
+
+        if not pysequence_check(obj_type):
+            raise_type_error(tx, "argument to reversed() must be a sequence")
+
+        return variables.UserFunctionVariable(
+            polyfills.builtins.reversed_sequence_iterator
+        ).call_function(tx, [obj], {})
 
     def call_sorted(
         self,
@@ -2724,6 +2806,62 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args=[f"id() takes exactly one argument ({len(args)} given)"],
             )
         arg = args[0]
+
+        if isinstance(arg, variables.NumpyNdarrayVariable):
+            arg = _numpy_identity_alias_root(arg)
+            if not isinstance(arg, variables.NumpyNdarrayVariable):
+                raise AssertionError("NumPy identity alias must be a NumPy variable")
+
+            value = arg.get_real_python_backed_value()
+            if value is not NO_SUCH_SUBOBJ:
+                if arg.source is not None:
+                    _install_numpy_identity_guards(arg)
+                    return VariableTracker.build(tx, id(value))
+                try:
+                    import numpy as np
+                except ModuleNotFoundError:
+                    np = None  # type: ignore[assignment]
+
+                if np is not None and isinstance(value, np.bool_):
+                    return VariableTracker.build(tx, id(value))
+                unimplemented(
+                    gb_type="unsupported NumPy id",
+                    context=f"id({arg})",
+                    explanation=(
+                        "Dynamo cannot determine id() for NumPy results without "
+                        "preserved Python identity."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+            source = arg.source
+            if isinstance(source, NumpyTensorSource):
+                source = source.base
+            if arg.is_numpy_ndarray:
+                if source is not None:
+                    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                    return VariableTracker.build(
+                        tx, id(tx.output.resolve_source_value(source))
+                    )
+                unimplemented(
+                    gb_type="unsupported NumPy id",
+                    context=f"id({arg})",
+                    explanation=(
+                        "Dynamo cannot determine id() for NumPy results without "
+                        "preserved Python identity."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+            unimplemented(
+                gb_type="unsupported NumPy id",
+                context=f"id({arg})",
+                explanation=(
+                    "Dynamo cannot determine id() for NumPy results without "
+                    "preserved Python identity."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
 
         real_id = arg.get_id(tx)
         if real_id is not None:

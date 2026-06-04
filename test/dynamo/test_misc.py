@@ -8195,7 +8195,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         x = torch.tensor([2.0])
         with self.assertRaisesRegex(
-            AssertionError, "Can't unpack a tensor of 1 rows into a tuple of 2 elements"
+            ValueError, r"not enough values to unpack \(expected 2, got 1\)"
         ):
             f1(x)
 
@@ -12470,6 +12470,20 @@ def ___make_guard_fn():
 
         self.assertEqual(fn().item(), 1)
 
+    def test_iter_version(self):
+        def fn(x):
+            s = 0
+            for i in torch.__version__:
+                try:
+                    s += int(i)
+                except ValueError:
+                    pass
+            return (x + s).sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3, 3)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):
             return -1
@@ -13254,12 +13268,21 @@ ShapeEnv not equal: field values don't match:
             foo()
 
     def test_numpy_ufunc_out(self):
-        @torch.compile(backend="eager")
+        @torch.compile(backend="eager", fullgraph=True)
         def foo():
             x = np.arange(5)
             out = np.empty((x.shape[0], x.shape[0]))
             res_out = np.sin(x, out=out)
             assert res_out is out  # noqa: S101
+
+            x_0d = np.array(1.0)
+            out_0d = np.empty(())
+            res_out_0d = np.sin(x_0d, out=out_0d)
+            assert res_out_0d is out_0d  # noqa: S101
+
+            out_0d_pos = np.empty(())
+            res_out_0d_pos = np.sin(x_0d, out_0d_pos)
+            assert res_out_0d_pos is out_0d_pos  # noqa: S101
 
         foo()
 

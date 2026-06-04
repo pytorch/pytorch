@@ -734,9 +734,6 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
         return result
 
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return self.ndim > 0
-
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase", idxes: Sequence[int] | None = None
     ) -> list[VariableTracker]:
@@ -2769,6 +2766,8 @@ class NumpyNdarrayVariable(TensorVariable):
     """
 
     _nonvar_fields = {
+        "is_numpy_ndarray",
+        "numpy_identity_alias",
         "python_value",
         *TensorVariable._nonvar_fields,
     }
@@ -2777,10 +2776,14 @@ class NumpyNdarrayVariable(TensorVariable):
         self,
         proxy: torch.fx.Proxy,
         *,
+        is_numpy_ndarray: bool = False,
+        numpy_identity_alias: VariableTracker | None = None,
         python_value: Any = NO_SUCH_SUBOBJ,
         **kwargs: Any,
     ) -> None:
         super().__init__(proxy, **kwargs)
+        self.is_numpy_ndarray = is_numpy_ndarray
+        self.numpy_identity_alias = numpy_identity_alias
         self.python_value = python_value
 
     def get_real_python_backed_value(self) -> object:
