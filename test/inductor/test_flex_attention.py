@@ -19,6 +19,7 @@ from unittest import expectedFailure, mock, skip, skipUnless
 from unittest.mock import patch
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import config, metrics
@@ -98,6 +99,12 @@ torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
+
+if dist._is_spmd_types_available():
+    import spmd_types as spmd
+    from spmd_types._mesh_axis import _reset
+    from spmd_types.checker import typecheck
+    from spmd_types.runtime import get_partition_spec
 
 
 T = TypeVar("T")
@@ -545,6 +552,35 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         paged_attention.reserve(
             torch.tensor(b),
             target_seq_len[b],
+        )
+
+
+@unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
+class TestFlexAttentionSpmdTypes(common_utils.TestCase):
+    def setUp(self):
+        super().setUp()
+        _reset()
+
+    def test_global_typecheck_sequence_sharded_inputs(self):
+        """Global SPMD typecheck should treat FlexAttention as opaque.
+
+        BlockMask carries internal metadata tensors that are not user operands.
+        The public output should preserve the query's sequence sharding.
+        """
+        axis = spmd.MeshAxis.of(2, stride=1)
+        q = torch.randn(1, 1, 4, 8)
+        k = torch.randn(1, 1, 4, 8)
+        v = torch.randn(1, 1, 4, 8)
+
+        with typecheck(strict_mode="strict", local=False):
+            spmd.assert_type(q, {axis: spmd.S(2)})
+            spmd.assert_type(k, {axis: spmd.S(2)})
+            spmd.assert_type(v, {axis: spmd.S(2)})
+            out = flex_attention(q, k, v)
+
+        self.assertEqual(spmd.get_local_type(out), {axis: spmd.V})
+        self.assertEqual(
+            get_partition_spec(out), spmd.PartitionSpec(None, None, axis, None)
         )
 
 

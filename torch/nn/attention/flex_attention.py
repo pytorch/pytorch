@@ -17,6 +17,7 @@ from typing import Any, cast, Literal, NamedTuple, overload, TypeAlias, TypeVar
 from typing_extensions import deprecated, Never, NotRequired, Self, TypedDict
 
 import torch
+import torch.distributed as dist
 from torch import Tensor
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
@@ -33,6 +34,12 @@ from torch.utils._pytree import (
 if typing.TYPE_CHECKING:
     from torch._prims_common import DeviceLikeType
     from torch.fx.node import BaseArgumentTypes
+
+
+if dist._is_spmd_types_available():
+    import spmd_types as spmd
+    from spmd_types.runtime import get_partition_spec
+    from spmd_types.types import PartitionSpec
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -54,6 +61,40 @@ if typing.TYPE_CHECKING:
 _FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = False
 
 _WARNINGS_SHOWN: set[str] = set()
+
+
+def _assert_flex_attention_spmd_type(
+    query: Tensor,
+    out: Tensor,
+    lse: Tensor,
+    max_scores: Tensor,
+) -> None:
+    if not dist._is_spmd_types_available() or not spmd.is_type_checking():
+        return
+
+    query_type = spmd.get_local_type(query)
+    query_spec = get_partition_spec(query)
+    spmd.assert_type(out, query_type, partition_spec=query_spec)
+
+    if query_spec is None:
+        stats_spec = None
+        stats_type = query_type
+    else:
+        stats_spec = PartitionSpec(*query_spec[:-1])
+        stats_axes = stats_spec.axes_with_partition_spec()
+        stats_type = {
+            axis: axis_type
+            for axis, axis_type in query_type.items()
+            if axis_type is not spmd.V or axis in stats_axes
+        }
+
+    with spmd.no_typecheck():
+        has_lse = lse.numel() > 0
+        has_max_scores = max_scores.numel() > 0
+    if has_lse:
+        spmd.assert_type(lse, stats_type, partition_spec=stats_spec)
+    if has_max_scores:
+        spmd.assert_type(max_scores, stats_type, partition_spec=stats_spec)
 
 
 def _warn_once(
@@ -2459,15 +2500,17 @@ def flex_attention(
             torch._dynamo.mark_static(x, -3)
             torch._dynamo.mark_static(x, -1)
 
-        out, lse, max_scores = flex_attention_hop(
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask.as_tuple(),
-            scale,
-            kernel_options,  # type: ignore[union-attr]
-        )
+        with dist.spmd_no_typecheck():
+            out, lse, max_scores = flex_attention_hop(
+                query,
+                key,
+                value,
+                score_mod,
+                block_mask.as_tuple(),
+                scale,
+                kernel_options,  # type: ignore[union-attr]
+            )
+        _assert_flex_attention_spmd_type(query, out, lse, max_scores)
         return _finalize_outputs(
             out,
             lse,
@@ -2505,15 +2548,17 @@ def flex_attention(
                 _flex_attention_hop_wrapper, backend=backend, fullgraph=True
             )
 
-        out, lse, max_scores = flex_fn(
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask.as_tuple(),
-            scale,
-            kernel_options,
-        )
+        with dist.spmd_no_typecheck():
+            out, lse, max_scores = flex_fn(
+                query,
+                key,
+                value,
+                score_mod,
+                block_mask.as_tuple(),
+                scale,
+                kernel_options,
+            )
+    _assert_flex_attention_spmd_type(query, out, lse, max_scores)
     return _finalize_outputs(
         out,
         lse,
