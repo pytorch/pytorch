@@ -1810,8 +1810,14 @@ class triton:
     # If a partition has fewer nodes than this threshold, it won't be cudagraphed.
     # This helps avoid overhead for very small partitions where cudagraph
     # recording/replay cost outweighs the benefits.
-    # Set to 0 to disable this check.
+    # Set to 0 to disable this general check. Max-autotune can still apply
+    # max_autotune_cudagraph_min_partition_size below.
     cudagraph_min_partition_size = 0
+
+    # Minimum number of kernels required for a max-autotune cudagraph partition.
+    # This avoids paying static input copy overhead for tiny max-autotune graphs.
+    # Set to 0 to disable this max-autotune-specific default.
+    max_autotune_cudagraph_min_partition_size = 2
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
