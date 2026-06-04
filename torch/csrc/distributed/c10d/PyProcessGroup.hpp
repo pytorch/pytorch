@@ -229,28 +229,20 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  c10::intrusive_ptr<Work> all_to_all_single(
+  c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) override {
-    pybind11::gil_scoped_acquire gil;
-    // Prefer the new name; fall back to the deprecated `alltoall_base` for
-    // backward compatibility with existing Python ProcessGroup subclasses.
-    pybind11::function override = pybind11::get_override(
-        static_cast<const ProcessGroup*>(this), "all_to_all_single");
-    if (!override) {
-      override = pybind11::get_override(
-          static_cast<const ProcessGroup*>(this), "alltoall_base");
-    }
-    if (override) {
-      auto o = override(
-          outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
-      return c10::make_intrusive<PyWorkHolder>(o);
-    }
-    return ProcessGroup::all_to_all_single(
-        outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        alltoall_base, /* Name of function in C++ */
+        outputBuffer,
+        inputBuffer,
+        outputSplitSizes,
+        inputSplitSizes,
+        opts);
   }
 
   c10::intrusive_ptr<Work> barrier(
