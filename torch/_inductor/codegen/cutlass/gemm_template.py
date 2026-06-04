@@ -1262,7 +1262,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 assert output_names, "There should be at least one write"
 
                 epilogue_inputs = [name_to_buffer[name] for name in input_names]
-                outputs = [name_to_buffer[name] for name in output_names]
+                # Use D_output_buffer directly for the D output entry in outputs,
+                # not name_to_buffer[D_output_name] which may have been replaced
+                # with template_buffer_node for EVT layout purposes.
+                outputs = [
+                    D_output_buffer if name == D_output_name else name_to_buffer[name]
+                    for name in output_names
+                ]
             else:  # Scaled MM, we read the two scale matrices (and optional bias) and write a single output
                 bias = None if len(self.input_nodes) < 5 else self.input_nodes[4]
                 bias_name = bias.get_name() if bias else None
@@ -1304,9 +1310,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 W,
                 Bias,
                 *epilogue_inputs,  # type: ignore[list-item]
+                Y,
                 *extra_inputs,
             ]
-            # Extend input_reorder to cover epilogue inputs and extra_inputs
+            # Extend input_reorder to cover epilogue inputs, Y, and extra_inputs
             # at their natural positions (identity mapping for new entries)
             if input_reorder is not None:
                 base_len = len(input_reorder)
@@ -1315,13 +1322,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     input_reorder = input_reorder + list(
                         range(base_len, base_len + num_new)
                     )
-            # Y is the D output; include it in outputs (not inputs) so the
-            # wrapper allocates it as a writable buffer.
-            outputs = [Y]
             input_names = [evt_arg_renames.get(name) for name in input_names]
             output_names = [evt_arg_renames.get(name) for name in output_names]
 
-            names_str = ",".join(["X", "W", "Bias", *input_names, *extra_names, "Y"])
+            names_str = ",".join(
+                ["X", "W", "Bias", *input_names, "Y", *output_names, *extra_names]
+            )
         else:
             evt_name = None
             outputs = [Y]
