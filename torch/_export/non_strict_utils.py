@@ -71,6 +71,13 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+_TRACEABLE_TENSOR_NUMPY_DTYPES = (
+    torch.float16,
+    torch.float32,
+    torch.float64,
+)
+
+
 class _KeyPath:
     """
     Wraps `KeyPath` to aid `isinstance` checks.
@@ -1082,6 +1089,28 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
+        if (
+            func is torch.Tensor.numpy
+            and len(args) == 1
+            and isinstance(args[0], torch.Tensor)
+            and all(k == "force" for k in kwargs)
+            and isinstance(kwargs.get("force", False), bool)
+            and args[0].dtype in _TRACEABLE_TENSOR_NUMPY_DTYPES
+        ):
+            # Redirect Tensor.numpy to a traceable tensor view, following Dynamo.  Keep
+            # this narrow because downstream ndarray operations execute as Tensor ops.
+            def run():
+                t = args[0]
+                if t.layout != torch.strided:
+                    raise TypeError(
+                        f"can't convert {t.layout} layout tensor to numpy. "
+                        "Use Tensor.to_dense() first"
+                    )
+                if kwargs.get("force", False):
+                    t = t.detach().cpu()
+                return t.view_as(t)
+
+            return run, [], {}
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
 
             def rewrite(dim, item):
