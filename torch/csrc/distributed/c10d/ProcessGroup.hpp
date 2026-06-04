@@ -431,10 +431,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return work;
   }
 
-  // This function is a coalesced version of `allgather_into_tensor` (currently
-  // still named as `_allgather_base`). Each tensor in the vector corresponds to
-  // an input/output of one `allgather_into_tensor` operation.
-  virtual c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+  // Coalesced version of all_gather_single. Each tensor in the vector
+  // corresponds to an input/output of one all_gather_single operation.
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> all_gather_single_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) {
@@ -459,6 +459,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       }
     }
     return work;
+  }
+
+  // Deprecated: use all_gather_single_coalesced instead. Kept as an alias for
+  // backward compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::allgather_into_tensor_coalesced is deprecated, use all_gather_single_coalesced instead.")
+  virtual c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    return all_gather_single_coalesced(outputTensors, inputTensors, opts);
   }
 
   virtual c10::intrusive_ptr<Work> gather(
@@ -594,10 +605,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return reduce_scatter_single(outputBuffer, inputBuffer, opts);
   }
 
-  // This function is a coalesced version of `reduce_scatter_tensor` (currently
-  // still named as `_reduce_scatter_base`). Each tensor in the vector
-  // corresponds to an input/output of one `reduce_scatter_tensor` operation.
-  virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+  // Coalesced version of reduce_scatter_single. Each tensor in the vector
+  // corresponds to an input/output of one reduce_scatter_single operation.
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) {
@@ -626,6 +637,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       }
     }
     return work;
+  }
+
+  // Deprecated: use reduce_scatter_single_coalesced instead. Kept as an alias
+  // for backward compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::reduce_scatter_tensor_coalesced is deprecated, use reduce_scatter_single_coalesced instead.")
+  virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    return reduce_scatter_single_coalesced(outputTensors, inputTensors, opts);
   }
 
   // Named after the torchcomms backend naming scheme.
