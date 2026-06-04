@@ -3682,10 +3682,12 @@ class GuardBuilder(GuardBuilderBase):
             value.is_contiguous(
                 memory_format=guard.create_fn.keywords["memory_format"]
             ),
+            value._base is None,
         ),
         eval_fn=lambda value, metadata: (
             isinstance(value, torch.Tensor)
             and value.is_contiguous(memory_format=metadata[0]) == metadata[1]
+            and (value._base is None) == metadata[2]
         ),
     )
     def TENSOR_CONTIGUITY_MATCH(
@@ -3694,11 +3696,13 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard)
         expected = value.is_contiguous(memory_format=memory_format)
+        expected_base_is_none = value._base is None
 
         def guard_fn(x: Any) -> bool:
             return (
                 isinstance(x, torch.Tensor)
                 and x.is_contiguous(memory_format=memory_format) == expected
+                and (x._base is None) == expected_base_is_none
             )
 
         memory_format_names = {
@@ -3708,7 +3712,8 @@ class GuardBuilder(GuardBuilderBase):
             torch.preserve_format: "torch.preserve_format",
         }
         code = [
-            f"{ref}.is_contiguous(memory_format={memory_format_names.get(memory_format, repr(memory_format))}) == {expected}"
+            f"{ref}.is_contiguous(memory_format={memory_format_names.get(memory_format, repr(memory_format))}) == {expected}",
+            f"({ref}._base is None) == {expected_base_is_none}",
         ]
         self._set_guard_export_info(guard, code)
         self.get_guard_manager(guard).add_lambda_guard(

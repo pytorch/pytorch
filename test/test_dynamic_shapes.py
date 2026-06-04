@@ -1253,6 +1253,68 @@ def forward(self, x_1):
         result = gm(2, 3, 4)  # should be 2 + 3 + 4 = 9
         self.assertEqual(result, 9)
 
+    def test_build_proxy_for_nary_min_max(self):
+        """
+        Test that _build_proxy_for_sym_expr correctly handles flattened
+        sympy.Max/sympy.Min expressions with more than 2 arguments.
+
+        sympy flattens Max(a, Max(b, c)) -> Max(a, b, c) (and likewise for
+        Min). _build_proxy_for_sym_expr must rebuild these even though
+        torch.sym_max/sym_min are binary; a binary handler would raise
+        TypeError on a 3-arg Max/Min.
+        """
+        import torch.fx as fx
+        from torch.fx.experimental.proxy_tensor import (
+            _build_proxy_for_sym_expr,
+            _SympyExprTrackerValue,
+            PythonKeyTracer,
+            set_meta,
+        )
+        from torch.utils._thunk import Thunk
+
+        # min/max of (2, 3, 4) -> 2 for min, 4 for max
+        for sym_op, expected in [(torch.sym_max, 4), (torch.sym_min, 2)]:
+            with self.subTest(op=sym_op.__name__):
+                shape_env = ShapeEnv()
+                # Unbacked symints keep the expression symbolic (backed symints
+                # would specialize away the Max/Min).
+                u0 = shape_env.create_unbacked_symint()
+                u1 = shape_env.create_unbacked_symint()
+                u2 = shape_env.create_unbacked_symint()
+
+                flattened = sym_op(sym_op(u0, u1), u2)
+                self.assertEqual(len(flattened.node.expr.args), 3)
+
+                # Case 1: out=None must not raise TypeError on the 3-arg expr.
+                tracer_none = PythonKeyTracer()
+                for sym in [u0, u1, u2]:
+                    tracer_none.sympy_expr_tracker[sym.node.expr] = (
+                        _SympyExprTrackerValue(proxy=sym, value=sym)
+                    )
+                result = _build_proxy_for_sym_expr(tracer_none, flattened.node.expr)
+                self.assertEqual(result.node.expr, flattened.node.expr)
+
+                # Case 2: out=flattened (the typical get_proxy_slot path). The
+                # rebuilt node must execute correctly (a binary handler would
+                # have dropped the third argument or crashed).
+                tracer = PythonKeyTracer()
+                tracer.root = torch.nn.Module()
+                tracer.graph = fx.Graph(tracer_cls=PythonKeyTracer)
+                for sym, name in [(u0, "u0"), (u1, "u1"), (u2, "u2")]:
+                    node = tracer.graph.placeholder(name)
+                    proxy = fx.Proxy(node, tracer)
+                    set_meta(proxy, sym)
+                    tracer.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                        proxy=proxy, value=sym
+                    )
+                    tracer.symnode_tracker[sym] = Thunk(lambda p=proxy: p)
+
+                _build_proxy_for_sym_expr(tracer, flattened.node.expr, out=flattened)
+                out_proxy = tracer.symnode_tracker[flattened].force()
+                tracer.graph.output(out_proxy.node)
+                gm = fx.GraphModule(tracer.root, tracer.graph)
+                self.assertEqual(gm(2, 3, 4), expected)
+
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
@@ -1692,6 +1754,87 @@ class f(torch.nn.Module):
         with fake_mode:
             x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
             torch.ops.aten.avg_pool1d(x, [2], [2])
+
+    def test_pixel_shuffle_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, u(shape_env), 3, 3), device="meta")
+            torch.ops.aten.pixel_shuffle(x, 1)
+
+    def test_pdist_forward_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((self._make_unbacked_size(shape_env), 5), device="meta")
+            torch.ops.aten._pdist_forward(x, 2.0)
+
+    def test_reflection_pad2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.reflection_pad2d(x, [1, 1, 1, 1])
+
+    def test_replication_pad2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.replication_pad2d(x, [1, 1, 1, 1])
+
+    def test_reflection_pad1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.reflection_pad1d(x, [1, 1])
+
+    def test_replication_pad1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.replication_pad1d(x, [1, 1])
+
+    def test_reflection_pad3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.reflection_pad3d(x, [1, 1, 1, 1, 1, 1])
+
+    def test_replication_pad3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.replication_pad3d(x, [1, 1, 1, 1, 1, 1])
 
 
 @skipIfTorchDynamo(
@@ -6329,6 +6472,71 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(u2)", 
         y = x[0:1, 0:1]  # y is a view, y._base is x
         result = fn(y)
         self.assertEqual(result.shape, (1, 1))
+
+    @fresh_cache()
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_mark_unbacked_view_base_observed_recompiles(self):
+        cnt = CompileCounterWithBackend("eager")
+
+        def fn(x):
+            return x + (1 if x._base is None else 2)
+
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            dynamic=True,
+            backend=cnt,
+        )
+
+        x = torch.rand(10, 10).t()
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        self.assertEqual(compiled_fn(x), fn(x))
+
+        y = torch.rand(10, 10)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        self.assertEqual(compiled_fn(y), fn(y))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @fresh_cache()
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_mark_unbacked_intermediate_base_observed(self):
+        cnt = CompileCounterWithBackend("eager")
+
+        def fn(x):
+            y = x.contiguous()
+            return y + (1 if y._base is None else 2)
+
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            dynamic=True,
+            backend=cnt,
+        )
+
+        x = torch.arange(12.0)[::2]
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        self.assertEqual(compiled_fn(x), fn(x))
+
+        cnt = CompileCounterWithBackend("eager")
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            dynamic=True,
+            backend=cnt,
+        )
+
+        x = torch.rand(10, 10)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        self.assertEqual(compiled_fn(x), fn(x))
+
+        y = torch.rand(10, 10)[:]
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+        self.assertEqual(compiled_fn(y), fn(y))
+        self.assertEqual(cnt.frame_count, 2)
 
 
 instantiate_parametrized_tests(TestUnbacked)
