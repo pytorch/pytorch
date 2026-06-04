@@ -1039,6 +1039,7 @@ def sequence_repeat(
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
         )
     count = n.nb_index_impl(tx)
+    validate_sequence_repeat_count(tx, count)
     return seq.sq_repeat_impl(tx, count)
 
 
@@ -1059,7 +1060,21 @@ def sequence_inplace_repeat(
             f"can't multiply sequence by non-int of type '{n.python_type_name()}'",
         )
     count = n.nb_index_impl(tx)
+    validate_sequence_repeat_count(tx, count)
     return seq.sq_inplace_repeat_impl(tx, count)
+
+
+def validate_sequence_repeat_count(
+    tx: "InstructionTranslatorBase",
+    count: VariableTracker,
+) -> None:
+    n = count.as_python_constant()
+    if n < -sys.maxsize - 1 or n > sys.maxsize:
+        raise_observed_exception(
+            OverflowError,
+            tx,
+            args=["cannot fit 'int' into an index-sized integer"],
+        )
 
 
 def generic_multiply(
