@@ -70,6 +70,7 @@ from ..scheduler import (
 from ..shape_propagation import get_broadcasted_shape
 from ..stream_utils import get_raw_stream_name
 from ..utils import (
+    _TMA_SUPPORTED_DTYPES,
     cache_on_self,
     DelayReplaceLine,
     device_supports_fp64,
@@ -2807,6 +2808,14 @@ class TMACompatibilityChecker:
             log.debug(
                 "%s stores with `no_x_dim` cannot load 16 bytes.",
                 self.failed_debug_prefix,
+            )
+            return False
+
+        if self.dtype not in _TMA_SUPPORTED_DTYPES:
+            log.debug(
+                "%s dtype %s has no CUtensorMapDataType mapping.",
+                self.failed_debug_prefix,
+                self.dtype,
             )
             return False
 
