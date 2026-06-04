@@ -239,6 +239,18 @@ class FSDPState(_State):
                 fsdp_param_group.comm_ctx = self._comm_ctx
                 fsdp_param_group._param_group_index = i
                 fsdp_param_group._num_param_groups = num_groups
+        # The reduce-scatter input-buffer cap governs the single shared
+        # reduce_scatter_states list, so resolve the per-group caps into one
+        # effective value (the most aggressive); a lower-cap group must not
+        # silently undo a higher-cap group's retention.
+        self._comm_ctx.reduce_scatter_max_input_buffers = max(
+            (
+                fsdp_param_group.reduce_scatter_max_input_buffers
+                for state in self._state_ctx.all_states
+                for fsdp_param_group in state._fsdp_param_groups
+            ),
+            default=1,
+        )
 
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""

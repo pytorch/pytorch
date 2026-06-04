@@ -619,6 +619,54 @@ class TestFullyShardCommunication(FSDPTest):
             optim.zero_grad()
 
     @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_max_input_buffers_resolves_to_max(self):
+        """
+        Per-module reduce-scatter input-buffer caps share one pipeline (a single
+        ``comm_ctx.reduce_scatter_states`` list), so mixed caps must resolve to
+        the max on the shared comm context: a lower-cap module cannot silently
+        undo a higher-cap module's retention. The per-group values stay as set.
+        """
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0)
+        model = Transformer(model_args)
+        blocks = [m for m in model.modules() if isinstance(m, TransformerBlock)]
+        self.assertGreaterEqual(len(blocks), 2)
+        for block in blocks:
+            fully_shard(block)
+        model = fully_shard(model)
+        # Set a non-default cap on a single block only (recurse=False); every
+        # other group (including the root) keeps the default of 1.
+        expected_max = 3
+        blocks[0].set_reduce_scatter_max_input_buffers(expected_max, recurse=False)
+
+        # Resolution runs in lazy init on the first forward.
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        model(inp).sum().backward()
+
+        comm_ctx = model._get_fsdp_state()._comm_ctx
+        self.assertEqual(comm_ctx.reduce_scatter_max_input_buffers, expected_max)
+        # Resolution leaves the per-group input values untouched.
+        block0_pg = blocks[0]._get_fsdp_state()._fsdp_param_groups[0]
+        block1_pg = blocks[1]._get_fsdp_state()._fsdp_param_groups[0]
+        self.assertEqual(block0_pg.reduce_scatter_max_input_buffers, expected_max)
+        self.assertEqual(block1_pg.reduce_scatter_max_input_buffers, 1)
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_reduce_scatter_max_input_buffers_validation(self):
+        model = fully_shard(nn.Linear(16, 16))
+        # Non-positive -> ValueError
+        with self.assertRaises(ValueError):
+            model.set_reduce_scatter_max_input_buffers(0)
+        # Non-int -> TypeError, even though 2.5 >= 1 numerically
+        with self.assertRaises(TypeError):
+            model.set_reduce_scatter_max_input_buffers(2.5)
+        # bool is an int subclass but is not a valid count -> TypeError
+        with self.assertRaises(TypeError):
+            model.set_reduce_scatter_max_input_buffers(True)
+        # A valid value is accepted
+        model.set_reduce_scatter_max_input_buffers(2)
+
+    @skip_if_lt_x_gpu(2)
     def test_set_reshard_after_forward(self):
         """
         Tests that FSDP issues the expected number of all-gathers and

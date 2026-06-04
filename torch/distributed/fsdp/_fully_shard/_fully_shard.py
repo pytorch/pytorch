@@ -733,6 +733,14 @@ class FSDPModule:
             recurse (bool): Whether to set for all FSDP submodules or just the
                 passed-in module.
         """
+        # bool is an int subclass; reject it so True does not silently mean 1.
+        if isinstance(max_input_buffers, bool) or not isinstance(
+            max_input_buffers, int
+        ):
+            raise TypeError(
+                "max_input_buffers must be an int, got "
+                f"{type(max_input_buffers).__name__}"
+            )
         if max_input_buffers < 1:
             raise ValueError(
                 f"max_input_buffers must be a positive int, got {max_input_buffers}"
