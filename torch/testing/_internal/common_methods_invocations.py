@@ -6988,6 +6988,12 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
             *[dict(reduction=r) for r in reductions if r != "mean"],
             *[dict(weight="<to be initialized>", reduction=r) for r in reductions],
             dict(ignore_index=1),
+            # Reference path exercising the linear_bias kwarg; shape
+            # depends on linear_weight, so the actual tensor is
+            # constructed below.
+            dict(linear_bias="<to be initialized>"),
+            dict(linear_bias="<to be initialized>",
+                 weight="<to be initialized>", reduction="sum"),
         ]
 
     for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
@@ -7035,6 +7041,15 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
                 # kernels-level tolerances (e.g. CUDA matmul contig vs
                 # non-contig drift) stay within bounds.
                 kwargs["weight"] = make_tensor((num_classes,), device=device, dtype=dtype, low=0.5, high=2)
+            if "linear_bias" in kwargs:
+                # Logical shape matches the logits-per-batch slice:
+                # (num_classes, *out_features). Derived from
+                # linear_weight.shape[:-1] so it covers both the 2-D
+                # and K-dim swapped cases above.
+                kwargs["linear_bias"] = make_tensor(
+                    linear_weight.shape[:-1],
+                    device=device, dtype=dtype, requires_grad=requires_grad,
+                )
             if probabilities_target:
                 # ignore_index is not supported for probabilities target
                 if "ignore_index" in kwargs:
@@ -7091,6 +7106,10 @@ def error_inputs_linear_cross_entropy(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(make_arg(3), make_arg(2, 4, 3), make_arg(2, 4)),
                      error_regex=("K-dimensional loss defined by linear_weight shape [(]2, 4, 3[)]"
                                   " requires batched input, [(]N, 3[)], got unbatched input with shape [(]3,[)]"))
+
+    yield ErrorInput(SampleInput(make_arg(2, 3), make_arg(2, 3), make_arg(2,),
+                                 linear_bias=make_arg(3)),
+                     error_regex=r"expected linear_bias shape \(2,\), got \(3,\)")
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
@@ -13264,6 +13283,19 @@ op_db: list[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           decorators=[
+               # https://github.com/pytorch/pytorch/issues/184350
+               # DTensor lowers mv with a Shard(0) vector into a per-rank
+               # partial sum that is all-reduced, changing the order of
+               # additions vs the reference gemv. In float32 the drift
+               # can exceed the default tolerance for some inputs.
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-5, rtol=2.4e-6)}),
+                   "TestDTensorOps",
+                   "test_dtensor_op_db",
+                   dtypes=(torch.float32,),
+               ),
+           ],
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -26076,14 +26108,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.logical_not",
         torch_opinfo_name="logical_not",
-        skips=(
-            # _refs.logical_not precision divergence on MPS for non-contiguous
-            # complex inputs; pre-existing edge case in the decomposition.
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_or",
