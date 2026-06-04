@@ -299,11 +299,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
   auto gpu_subslice_count = [](const DeviceProp& prop) {
     return (prop.gpu_eu_count / prop.gpu_eu_count_per_subslice);
   };
-#if SYCL_COMPILER_VERSION >= 20250000
   auto get_device_architecture = [](const DeviceProp& prop) {
     return static_cast<int64_t>(prop.architecture);
   };
-#endif
   // Wrapper class for XPU UUID
   struct XPUuuid {
     XPUuuid(const std::array<unsigned char, 16>& uuid) : bytes(uuid) {}
@@ -356,9 +354,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
       // TODO: Expose cache size by level when available from SYCL
       .def_readonly("last_level_cache_size", &DeviceProp::global_mem_cache_size)
       .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
-#if SYCL_COMPILER_VERSION >= 20250000
       .def_property_readonly("architecture", get_device_architecture)
-#endif
       .def_property_readonly("type", get_device_type)
       .def_property_readonly(
           "uuid",
