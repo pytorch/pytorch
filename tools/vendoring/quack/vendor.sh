@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Vendor a subset of the quack library into torch/_vendor/quack.
 #
-# The pinned upstream commit lives in torch/_vendor/quack/__init__.py as the
-# __upstream_sha__ constant. To bump the vendored version, edit that one line
-# in code and re-run this script; the SHA is never passed on the command line.
+# The pinned upstream commit lives in PINNED_SHA below. To bump the vendored
+# version, edit that one line and re-run this script; the SHA is never passed
+# on the command line.
 #
 # Usage:
 #   tools/vendoring/quack/vendor.sh                        # re-vendor the pinned SHA
@@ -30,6 +30,7 @@
 set -euo pipefail
 
 UPSTREAM_URL="https://github.com/Dao-AILab/quack.git"
+PINNED_SHA="77e72af5565cd7aec2132944bb001de2c358617a"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
 DEST="$REPO_ROOT/torch/_vendor/quack"
@@ -135,14 +136,12 @@ extract_version() {
     echo "$version"
 }
 
-# Read the pinned upstream commit from the committed __init__.py. This constant
-# is the single, human-edited source of truth: the script consumes it and never
-# invents or accepts a SHA on the command line.
+# Return the pinned upstream commit. This constant is the single, human-edited
+# source of truth: the script consumes it and never invents or accepts a SHA on
+# the command line.
 pinned_sha() {
-    local init="$REPO_ROOT/torch/_vendor/quack/__init__.py" sha
-    sha=$(sed -n 's/^__upstream_sha__[[:space:]]*=[[:space:]]*"\([0-9a-f]\{7,40\}\)".*/\1/p' "$init")
-    [[ -n "$sha" ]] || die "could not read __upstream_sha__ from $init"
-    echo "$sha"
+    [[ "$PINNED_SHA" =~ ^[0-9a-f]{7,40}$ ]] || die "invalid PINNED_SHA: $PINNED_SHA"
+    echo "$PINNED_SHA"
 }
 
 copy_pristine() {
@@ -241,10 +240,10 @@ write_init() {
     cat > "$DEST/__init__.py" <<EOF
 """Vendored subset of the quack library (https://github.com/Dao-AILab/quack).
 
-The pinned upstream commit is \`\`__upstream_sha__\`\` below — edit that one line
-and re-run tools/vendoring/quack/vendor.sh to re-vendor. Only the modules
-required by torch._native.ops.norm.rmsnorm_impl and selected GEMM epilogue
-implementation paths are vendored. Imports are rewritten to be package-relative
+The pinned upstream commit is recorded in \`\`__upstream_sha__\`\` below and is
+sourced from \`\`PINNED_SHA\`\` in tools/vendoring/quack/vendor.sh. Only the
+modules required by torch._native.ops.norm.rmsnorm_impl and selected GEMM
+epilogue implementation paths are vendored. Imports are rewritten to be package-relative
 so this copy is independent of any \`\`quack\`\` top-level package that may be
 installed via pip. Custom op namespaces are renamed from \`\`quack::\`\` to
 \`\`torch_vendor_quack::\`\` for the same reason.

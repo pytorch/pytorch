@@ -27,14 +27,15 @@ Note: There are a couple of patchsets applied to make the library vendorable - a
 
 Source: https://github.com/Dao-AILab/quack
 
-The pinned upstream commit is the `__upstream_sha__` constant in
-`torch/_vendor/quack/__init__.py` (`__version__` records the upstream version).
-That constant is the single source of truth; do not duplicate the pin here.
+The pinned upstream commit is the `PINNED_SHA` constant in
+`tools/vendoring/quack/vendor.sh` (`__version__` in the generated vendored
+package records the upstream version). That constant is the single source of
+truth; do not duplicate the pin here.
 
 Instructions to update:
 
-Edit `__upstream_sha__` in `torch/_vendor/quack/__init__.py` to the new commit,
-then re-render (the script reads the pin; no SHA is passed):
+Edit `PINNED_SHA` in `tools/vendoring/quack/vendor.sh` to the new commit, then
+re-render (no SHA is passed):
 
 ```
 tools/vendoring/quack/vendor.sh
