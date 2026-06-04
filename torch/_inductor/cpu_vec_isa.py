@@ -34,6 +34,18 @@ def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
 
 
 class VecISA:
+    """Describes a CPU SIMD ISA (AVX2, AVX512, NEON, SVE, VSX, ZVECTOR) for
+    inductor's CPU vectorization.
+
+    Carries the bit width, ``CPU_CAPABILITY_*`` build macros, compiler arch
+    flags, and the per-dtype lane count used by the codegen. Subclasses (one
+    per ISA) override the class-level fields; instances are hashable by their
+    string representation and usable as a dict key. ``bool(vec_isa)`` runs the
+    dry-compile + dlopen probe described in
+    `Note [Checking for Vectorized Support in Inductor]`_ to verify the host
+    toolchain actually produces a working ``.so`` for this ISA.
+    """
+
     _bit_width: int
     _macro: list[str]
     _arch_flags: str
@@ -69,8 +81,16 @@ extern "C" void __avx_chk_kernel() {
 }
 """
 
+    # Skip the slow `import torch` (which has hung under load in CI) on Linux
+    # only: the parent puts torch's lib dir on LD_LIBRARY_PATH so the linker
+    # resolves libtorch_cpu for the test .so on its own. macOS can't do this --
+    # SIP strips DYLD_LIBRARY_PATH from the child -- so it falls back to import.
+    # TODO: extend the no-import path to Windows once its CI build is green
+    # enough to validate it.
     _avx_py_load = """
-import torch
+import sys
+if sys.platform != "linux":
+    import torch  # noqa: F401
 from ctypes import cdll
 cdll.LoadLibrary("__lib_path__")
 """
@@ -90,7 +110,66 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
+    @staticmethod
+    def _build_probe_env() -> dict[str, str]:
+        """Construct the child env for the dlopen probe.
+
+        Make libtorch_cpu (and other torch shlibs) findable by the Linux
+        dynamic linker via LD_LIBRARY_PATH so the probe child does not need to
+        ``import torch`` to bring them into its address space. Prepend rather
+        than append so a successful probe is guaranteed to bind against the
+        torch we are currently running, not an older install on the user's
+        loader path. macOS and Windows do not use this fast path; they
+        ``import torch`` in the child instead (see ``_avx_py_load``).
+        """
+        lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
+        env = python_subprocess_env()
+        existing = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = (
+            os.pathsep.join([lib_dir, existing]) if existing else lib_dir
+        )
+        return env
+
+    def _probe_load(self, output_path: str) -> bool:
+        """Spawn a child Python that ``dlopen``s ``output_path``.
+
+        Bound the dlopen probe so a stuck child cannot hang the parent for
+        the whole 30-minute outer timeout (observed in CI). ``subprocess.run``
+        kills the child on ``TimeoutExpired`` (``check_call`` leaks it).
+        Returns ``False`` on timeout or load failure, ``True`` on success.
+        """
+        probe_cmd = [
+            sys.executable,
+            "-c",
+            VecISA._avx_py_load.replace("__lib_path__", output_path),
+        ]
+        try:
+            subprocess.run(
+                probe_cmd,
+                stderr=subprocess.DEVNULL,
+                env=self._build_probe_env(),
+                timeout=60,
+                check=True,
+            )
+        except subprocess.TimeoutExpired:
+            warnings.warn(
+                f"VecISA dlopen probe for {self} hung after 60s",
+                stacklevel=2,
+            )
+            return False
+        except subprocess.CalledProcessError:
+            return False
+        return True
+
     def check_build(self, code: str) -> bool:
+        """Dry-compile ``code`` with this ISA's flags and verify the resulting
+        shared library can be loaded.
+
+        Compiles into the inductor codecache, then spawns a short-lived
+        subprocess to ``dlopen`` the ``.so``. Returns ``True`` if both build
+        and load succeed, ``False`` on compile error, load failure, or dlopen
+        probe timeout.
+        """
         from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, write
         from torch._inductor.cpp_builder import (
             CppBuilder,
@@ -123,29 +202,10 @@ cdll.LoadLibrary("__lib_path__")
                 )
                 if not os.path.isfile(output_path):
                     x86_isa_help_builder.build()
-
-                # Use a marker file to cache the subprocess load-check result.
-                # The subprocess spawns a full Python process that imports torch
-                # just to verify the .so can be loaded, which takes ~2s each.
-                # Caching the result avoids this on subsequent runs.
-                load_ok_marker = output_path + ".load_ok"
-                if not os.path.isfile(load_ok_marker):
-                    subprocess.check_call(
-                        [
-                            sys.executable,
-                            "-c",
-                            VecISA._avx_py_load.replace("__lib_path__", output_path),
-                        ],
-                        cwd=output_dir,
-                        stderr=subprocess.DEVNULL,
-                        env=python_subprocess_env(),
-                    )
-                    with open(load_ok_marker, "w") as f:
-                        f.write("")
             except Exception:
                 return False
 
-            return True
+            return self._probe_load(output_path)
 
     def __bool__(self) -> bool:
         return self.__bool__impl(config.cpp.vec_isa_ok)

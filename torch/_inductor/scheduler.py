@@ -384,19 +384,31 @@ class MixOrderReduction:
             # Call evaluate_expr rather than statically_known_geq since nrow can
             # have dynamic shape in real models.
             # Don't use hint directly since hint can be non-representative.
-            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow * ncol, size_thres)):
+            if not V.graph.sizevars.evaluate_expr(
+                sympy.Ge(nrow * ncol, size_thres),
+                size_oblivious=True,
+                fallback_value=False,
+            ):
                 return False
 
             # We require more more row than columns since
             # 1, we prefer doing persistent reduction for each row
             # 2, we will split the reduction across the rows
-            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow, ncol * 2)):
+            if not V.graph.sizevars.evaluate_expr(
+                sympy.Ge(nrow, ncol * 2),
+                size_oblivious=True,
+                fallback_value=False,
+            ):
                 return False
 
             # When nrow is small, ncol should also be small (due to the check
             # above). Thus the entire tensor should be well cached in L2.
             # Mix order reduction is less beneficial.
-            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow, 4096)):
+            if not V.graph.sizevars.evaluate_expr(
+                sympy.Ge(nrow, 4096),
+                size_oblivious=True,
+                fallback_value=False,
+            ):
                 return False
 
         # Make sure a persistent reduction will be generated
@@ -852,6 +864,13 @@ class NestedReduction:
         if grouped_reduction_info is None:
             return False
 
+        # Total-element equality also implies divisibility of the grouped
+        # parent extent by group_size (grouped_total factors through
+        # FloorDiv(extent, group_size) * group_size). No separate Mod check
+        # is needed. The sizevars divisible set records Mod(s, s//G) from
+        # the view op, not Mod(s, G), so statically_known_equals on
+        # Mod(extent, group_size) would fail with dynamic shapes.
+        # TODO: teach sizevars to infer Mod(s, G)==0 from Mod(s, s//G)==0
         outer_total = V.graph.sizevars.simplify(outer_numel * outer_rnumel)
         grouped_total = V.graph.sizevars.simplify(grouped_numel * grouped_rnumel)
         if not V.graph.sizevars.statically_known_equals(outer_total, grouped_total):
@@ -864,18 +883,28 @@ class NestedReduction:
             outer_numel,
             outer_rnumel,
             group_size,
+            outer_node=outer_node,
         )
         if grouped_axis is None:
             return False
-        group_size_int = int(group_size)
-        if not (1 <= group_size_int and is_power_of_2(group_size_int)):
-            return False
-        grouped_parent_extent = (
+        parent_grouped_axis = (
             outer_rnumel if grouped_axis is cls.GroupedAxis.R else outer_numel
         )
-        if not V.graph.sizevars.statically_known_equals(
-            sympy.Mod(grouped_parent_extent, group_size), 0
+        iter_ranges, _ = grouped_reduction.get_ranges()
+        if len(iter_ranges) == 2:
+            grouped_axis_groups = (
+                iter_ranges[1] if grouped_axis is cls.GroupedAxis.R else iter_ranges[0]
+            )
+            if not V.graph.sizevars.statically_known_equals(
+                FloorDiv(parent_grouped_axis, group_size), grouped_axis_groups
+            ):
+                return False
+        elif not V.graph.sizevars.statically_known_equals(
+            sympy.Mod(parent_grouped_axis, group_size), 0
         ):
+            return False
+        group_size_int = int(group_size)
+        if not (1 <= group_size_int and is_power_of_2(group_size_int)):
             return False
         if cls._min_block_unprofitable_for_kernel(
             outer_node,
@@ -909,6 +938,8 @@ class NestedReduction:
         outer_numel: sympy.Expr,
         outer_rnumel: sympy.Expr,
         group_size: sympy.Expr,
+        *,
+        outer_node: BaseSchedulerNode | None = None,
     ) -> GroupedAxis | None:
         """Return which parent axis is split by the grouped local reduction."""
         sizevars = V.graph.sizevars
@@ -948,7 +979,76 @@ class NestedReduction:
             FloorDiv(outer_numel, group_size), iter_ranges[0]
         ):
             return cls.GroupedAxis.X
+        if outer_node is not None:
+            return cls._get_grouped_axis_from_loop_body(outer_node, grouped_reduction)
         return None
+
+    @classmethod
+    def _get_grouped_axis_from_loop_body(
+        cls, outer_node: BaseSchedulerNode, grouped_reduction: SchedulerNode
+    ) -> GroupedAxis | None:
+        """Use LoopBody iter/reduce vars to disambiguate equal-size axes."""
+        from torch._inductor.loop_body import MemoryUsageType
+
+        outer_reductions = [sn for sn in outer_node.get_nodes() if sn.is_reduction()]
+        if len(outer_reductions) != 1:
+            return None
+        outer_reduction = typing.cast(SchedulerNode, outer_reductions[0])
+        outer_body = getattr(outer_reduction, "_body", None)
+        grouped_body = getattr(grouped_reduction, "_body", None)
+        if outer_body is None or grouped_body is None:
+            return None
+
+        outer_iter_ranges, outer_reduce_ranges = outer_reduction.get_ranges()
+        grouped_iter_ranges, grouped_reduce_ranges = grouped_reduction.get_ranges()
+        if len(outer_reduce_ranges) != 1 or len(grouped_reduce_ranges) != 1:
+            return None
+
+        def load_exprs_by_name(body: LoopBody) -> dict[str, list[sympy.Expr]]:
+            result: dict[str, list[sympy.Expr]] = defaultdict(list)
+            for entry in body.memory_usage.get(MemoryUsageType.LOAD, ()):
+                if entry.buffer_name is not None:
+                    result[entry.buffer_name].append(
+                        body.indexing_exprs[entry.index_name]
+                    )
+            return result
+
+        if len(outer_body.reduce_vars) != 1 or len(grouped_body.reduce_vars) != 1:
+            return None
+        if len(outer_body.iter_vars) != len(outer_iter_ranges) or len(
+            grouped_body.iter_vars
+        ) != len(grouped_iter_ranges):
+            return None
+
+        outer_reads_by_name = load_exprs_by_name(outer_body)
+        result: NestedReduction.GroupedAxis | None = None
+        grouped_reduce_var = grouped_body.reduce_vars[-1]
+        for name, grouped_read_exprs in load_exprs_by_name(grouped_body).items():
+            outer_read_exprs = outer_reads_by_name.get(name)
+            if not outer_read_exprs:
+                continue
+            for grouped_read_expr in grouped_read_exprs:
+                grouped_coeff = grouped_read_expr.coeff(grouped_reduce_var)
+                if grouped_coeff == 0:
+                    continue
+                for outer_read_expr in outer_read_exprs:
+                    outer_reduce_var = outer_body.reduce_vars[-1]
+                    outer_reduce_coeff = outer_read_expr.coeff(outer_reduce_var)
+                    matches_reduction = grouped_coeff == outer_reduce_coeff
+                    matches_iter = any(
+                        grouped_coeff == outer_read_expr.coeff(var)
+                        for var in outer_body.iter_vars
+                    )
+                    if matches_reduction == matches_iter:
+                        continue
+                    candidate = (
+                        cls.GroupedAxis.R if matches_reduction else cls.GroupedAxis.X
+                    )
+
+                    if result is not None and result != candidate:
+                        return None
+                    result = candidate
+        return result
 
 
 @dataclasses.dataclass
@@ -1882,27 +1982,33 @@ def get_estimate_runtime_cache_key_from_snode(snode: BaseSchedulerNode) -> str:
     return cache_key
 
 
-def _get_mm_like_fn(snode: BaseSchedulerNode) -> Callable[[Any], Any] | None:
+def _get_benchmarkable_extern_fn(
+    snode: BaseSchedulerNode,
+) -> Callable[[Any], Any] | None:
     if not isinstance(snode, ExternKernelSchedulerNode):
-        return None
-    mms_fns = {
-        "extern_kernels.mm": torch.ops.aten.mm,
-        "extern_kernels.bmm": torch.ops.aten.bmm,
-        "extern_kernels.addmm": torch.ops.aten.addmm,
-    }
-    python_kernel_name = getattr(snode.node, "python_kernel_name", "")
-    if python_kernel_name not in mms_fns:
         return None
     if not isinstance(snode.node, ir.ExternKernel):
         return None
-    return mms_fns[python_kernel_name]
+
+    op_overload = snode.node.op_overload
+    if not isinstance(op_overload, torch._ops.OpOverload):
+        return None
+
+    op = op_overload.overloadpacket
+
+    from torch.utils.flop_counter import flop_registry
+
+    if op not in flop_registry:
+        return None
+
+    return op
 
 
 def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> float | None:
     bench_fn = None
     args_kwargs_fn = None
     if config.runtime_estimations_mms_benchmark:
-        mm_fn = _get_mm_like_fn(snode)
+        mm_fn = _get_benchmarkable_extern_fn(snode)
         if mm_fn is None:
             return None
         bench_fn = mm_fn
@@ -2885,6 +2991,7 @@ class FusedNestedReductions(FusedSchedulerNode):
             outer_numel,
             outer_rnumel,
             exact_group_size,
+            outer_node=node1,
         )
         assert grouped_axis is not None
         self.grouped_axis: NestedReduction.GroupedAxis = grouped_axis
@@ -3163,6 +3270,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         prev_node_1: BaseSchedulerNode | None = None,
         prev_node_2: BaseSchedulerNode | None = None,
         enable_autotune: bool = False,
+        per_subkernel_blocks: bool = False,
     ) -> None:
         self.read_to_node = {}
         self.name_to_node = {}
@@ -3232,6 +3340,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.group = (device, ((sympy.Expr("combo_kernel"),),))
         self.origins = OrderedSet[torch.fx.Node]()
         self.enable_autotune = enable_autotune
+        self.per_subkernel_blocks = per_subkernel_blocks
 
     @classmethod
     def combinable_nodes(
@@ -3256,6 +3365,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 "ComboKernels: %d FusedMixOrderReductions nodes are filtered",
                 len(mix_order),
             )
+        nested_reductions = [x for x in nodes if isinstance(x, FusedNestedReductions)]
+        if nested_reductions:
+            log.debug(
+                "ComboKernels: %d FusedNestedReductions nodes are filtered",
+                len(nested_reductions),
+            )
 
         filtered_nodes = [
             x
@@ -3267,6 +3382,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     ExternKernelSchedulerNode,
                     GroupedSchedulerNode,
                     FusedMixOrderReductions,
+                    FusedNestedReductions,
                 ),
             )
         ]
@@ -3724,6 +3840,41 @@ def _is_epilogue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     if tb is not None and tb.allow_epilogue_fusion is not None:
         return tb.allow_epilogue_fusion
     return config.epilogue_fusion
+
+
+def _is_atomic_add_mutation_epilogue(
+    node: BaseSchedulerNode, *, check_config: bool = True
+) -> bool:
+    if check_config and not config.epilogue_fusion_with_atomic_add:
+        return False
+    if not isinstance(node, SchedulerNode):
+        return False
+    if not isinstance(node.node, ir.ComputedBuffer):
+        return False
+    if not isinstance(node.node.data, ir.Scatter):
+        return False
+    if node.node.data.scatter_mode != "atomic_add":
+        return False
+
+    outputs = node.get_outputs()
+    if len(outputs) != 1:
+        return False
+    if outputs[0].get_aliases() or len(outputs[0].get_mutations()) != 1:
+        return False
+
+    writes = node.read_writes.writes
+    return bool(writes) and all(
+        isinstance(write, MemoryDep) and write.mode == "atomic_add" for write in writes
+    )
+
+
+def _can_fuse_atomic_add_template_epilogue(
+    template_node: BaseSchedulerNode, epilogue_node: BaseSchedulerNode
+) -> bool:
+    template_buf = template_node.get_template_node()
+    return isinstance(
+        template_buf, ir.TritonTemplateBuffer
+    ) and _is_atomic_add_mutation_epilogue(epilogue_node)
 
 
 def _is_prologue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
@@ -4903,8 +5054,7 @@ class Scheduler:
         hint_override: int | None = None,
     ) -> str:
         """
-        Benchmark fused list of nodes and return the execution time
-        in milliseconds on randomly generated inputs.
+        Generate a kernel given a list of pre-fused nodes.
         """
         assert len(nodes) > 0
         device = nodes[0].get_device()
@@ -4919,7 +5069,7 @@ class Scheduler:
         self, module: ModuleType, device: torch.device
     ) -> tuple[float, str]:
         """
-        Benchmark fused list of nodes and return the execution time
+        Benchmark a compiled module and return the execution time
         in milliseconds on randomly generated inputs.
         """
         self.current_device = device
@@ -5122,6 +5272,12 @@ class Scheduler:
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
             for n in (node1, node2)
         )
+        atomic_add_template_epilogue = isinstance(
+            node1.get_template_node(), ir.TritonTemplateBuffer
+        ) and _is_atomic_add_mutation_epilogue(node2, check_config=False)
+        if atomic_add_template_epilogue and not config.epilogue_fusion_with_atomic_add:
+            return FusionResult.fuse(False)
+
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
 
@@ -5144,11 +5300,14 @@ class Scheduler:
 
         node_list_2 = node2.get_nodes()
         node_list_fused = list(itertools.chain(node_list_1, node_list_2))
+        has_atomic_add = self._any_atomic_add(node_list_fused)
 
         # We can not accurately benchmark kernel using atomic_add
         # due to how we generate random integer inputs.
-        # Skip benchmarking them by allowing fusion.
-        if self._any_atomic_add(node_list_fused):
+        # Skip benchmarking them by allowing fusion. The
+        # epilogue_fusion_with_atomic_add gate only applies to Triton template
+        # epilogues, so keep the existing non-template behavior here.
+        if has_atomic_add and not is_multi_template:
             return FusionResult.fuse(True)
 
         from triton.compiler.errors import CompilationError
@@ -5192,50 +5351,53 @@ class Scheduler:
             hint_override_best_fusion_choice: dict[
                 int | None, TritonTemplateCallerBase
             ] = {}
-            future_choices: list[tuple[Any, LambdaFuture | None, ModuleType]] = []
-            for hint_override in config.multi_kernel_hints:
-                choice_timings = multi_node.choice_timings(hint_override)
-                for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
-                    if not isinstance(
-                        choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                    ):
-                        continue
-                    with multi_node.swap_as_triton_caller(choice):
-                        future_choices.append(
-                            (
-                                choice,
-                                *self.compile_kernel(
-                                    node_list_fused, hint_override=choice.hint_override
-                                ),
+            if not has_atomic_add:
+                future_choices: list[tuple[Any, LambdaFuture | None, ModuleType]] = []
+                for hint_override in config.multi_kernel_hints:
+                    choice_timings = multi_node.choice_timings(hint_override)
+                    for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
+                        if not isinstance(
+                            choice,
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                        ):
+                            continue
+                        with multi_node.swap_as_triton_caller(choice):
+                            future_choices.append(
+                                (
+                                    choice,
+                                    *self.compile_kernel(
+                                        node_list_fused,
+                                        hint_override=choice.hint_override,
+                                    ),
+                                )
                             )
-                        )
 
-                min_ms_fused = float("inf")
-                ms_fused_choice: TritonTemplateCallerBase | None = None
-                new_timings = {}
-                for choice, future, mod_fused in future_choices:
-                    try:
-                        if future is not None:
-                            future.result()
-                    except Exception as e:
-                        if fusion_log.isEnabledFor(logging.DEBUG):
-                            fusion_log.debug(
-                                "Exception in compiling %s: %s",
-                                "prologue" if not epilogue_fusion else "epilogue",
-                                e,
+                    min_ms_fused = float("inf")
+                    ms_fused_choice: TritonTemplateCallerBase | None = None
+                    new_timings = {}
+                    for choice, future, mod_fused in future_choices:
+                        try:
+                            if future is not None:
+                                future.result()
+                        except Exception as e:
+                            if fusion_log.isEnabledFor(logging.DEBUG):
+                                fusion_log.debug(
+                                    "Exception in compiling %s: %s",
+                                    "prologue" if not epilogue_fusion else "epilogue",
+                                    e,
+                                )
+                            continue
+                        with multi_node.swap_as_triton_caller(choice):
+                            ms_fused, path = self.benchmark_codegened_module(
+                                mod_fused, device
                             )
-                        continue
-                    with multi_node.swap_as_triton_caller(choice):
-                        ms_fused, path = self.benchmark_codegened_module(
-                            mod_fused, device
-                        )
-                        new_timings[choice] = ms_fused
-                        if ms_fused < min_ms_fused:
-                            min_ms_fused = ms_fused
-                            ms_fused_choice = choice
-                multi_node._choice_timings[hint_override] = new_timings
-                assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
-                hint_override_best_fusion_choice[hint_override] = ms_fused_choice
+                            new_timings[choice] = ms_fused
+                            if ms_fused < min_ms_fused:
+                                min_ms_fused = ms_fused
+                                ms_fused_choice = choice
+                    multi_node._choice_timings[hint_override] = new_timings
+                    assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
+                    hint_override_best_fusion_choice[hint_override] = ms_fused_choice
 
             bench_epilogue = config.benchmark_epilogue_fusion
             num_triton_callers = sum(
@@ -5262,6 +5424,81 @@ class Scheduler:
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
 
+            from torch._inductor.codegen.simd import CantSplit
+
+            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
+                if not isinstance(
+                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
+                ):
+                    return False
+                # For prologue fusion we check if the underlying template of the choice
+                # supports all allowed prologue inputs. If not, we skip this choice in
+                # the fusion benchmark.
+                # TODO: Remove this check after all Triton templates support prologue fusion.
+                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
+                return not (
+                    not epilogue_fusion
+                    and hasattr(choice, "allowed_prologue_inps")
+                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
+                )
+
+            def compile_without_benchmarking(
+                choice: torch._inductor.select_algorithm.TritonTemplateCaller,
+            ) -> bool:
+                with multi_node.swap_as_triton_caller(choice):
+                    try:
+                        future, mod_fused = self.compile_kernel(
+                            node_list_fused, hint_override=choice.hint_override
+                        )
+                        if future is not None:
+                            future.result()
+                        else:
+                            mod_fused.triton_.precompile()
+                    except CantSplit:
+                        return False
+                    except Exception as e:
+                        if fusion_log.isEnabledFor(logging.DEBUG):
+                            fusion_log.debug(
+                                "Exception in compiling %s: %s",
+                                "prologue" if not epilogue_fusion else "epilogue",
+                                e,
+                            )
+                        return False
+                return True
+
+            if has_atomic_add:
+                if not epilogue_fusion:
+                    return FusionResult.fuse(False)
+
+                for hint_override in [*config.multi_kernel_hints, None]:
+                    choice_timings = multi_node.choice_timings(hint_override)
+                    ms_fused_choice: TritonTemplateCallerBase | None = None
+                    for choice, _ in sorted(
+                        choice_timings.items(), key=operator.itemgetter(1)
+                    ):
+                        if not choice_supports_fusion(choice):
+                            continue
+                        triton_choice = typing.cast(
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                            choice,
+                        )
+                        if compile_without_benchmarking(triton_choice):
+                            ms_fused_choice = triton_choice
+                            break
+                    if ms_fused_choice is None:
+                        return FusionResult.fuse(False)
+                    hint_override_best_fusion_choice[hint_override] = ms_fused_choice
+
+                if config.multi_kernel_hints:
+                    multi_node.finalize_as_triton_callers(
+                        hint_override_best_fusion_choice
+                    )
+                else:
+                    multi_node.finalize_as_triton_caller(
+                        hint_override_best_fusion_choice[None]
+                    )
+                return FusionResult.fuse(True)
+
             if bench_epilogue:
                 ms2, path2 = (
                     self.benchmark_fused_nodes(node_list_2)
@@ -5277,25 +5514,12 @@ class Scheduler:
                 ms2_fused = _estimate_fused_epilogue_runtime(node1, node2, ms2)
 
             # Start compiling choices in parallel
-            from torch._inductor.codegen.simd import CantSplit
-
             future_choices: list[tuple[Any, LambdaFuture | None, ModuleType]] = []
             triton_choices = 0
             for choice, unfused_time in choice_timings_iter:
-                if not isinstance(choice, TritonTemplateCallerBase):
+                if not choice_supports_fusion(choice):
                     continue
-
-                # For prologue fusion we check if the underlying template of the choice
-                # supports all allowed prologue inputs. If not, we skip this choice in
-                # the fusion benchmark.
-                # TODO: Remove this check after all Triton templates support prologue fusion.
-                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
-                if (
-                    not epilogue_fusion
-                    and hasattr(choice, "allowed_prologue_inps")
-                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
-                ):
-                    continue
+                choice = typing.cast(TritonTemplateCallerBase, choice)
 
                 if bench_epilogue and unfused_time >= ms1 + ms2:
                     break
@@ -5933,6 +6157,7 @@ class Scheduler:
                         window,
                         use_custom_partition_algo=True,
                         enable_autotune=enable_autotune,
+                        per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
                     )
                     _register_accept(combo_node, window, num)
 
@@ -6022,6 +6247,7 @@ class Scheduler:
             group_nodes,
             use_custom_partition_algo=True,
             enable_autotune=enable_autotune,
+            per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
         )
         # Wire the combo's pred_buffers from its members so the gate
         # simulator can read `node.mpi_node.pred_buffers` uniformly.
@@ -7281,7 +7507,9 @@ class Scheduler:
                 why("prologue fusion not implemented for kernel for these inputs")
                 return False
 
-            if node1.has_aliasing_or_mutation() or node2.has_aliasing_or_mutation():
+            if node1.has_aliasing_or_mutation() or (
+                template.has_aliasing_or_mutation_for_prologue_fusion(node2)
+            ):
                 why("template prologue can only fuse functional pointwise nodes")
                 return False
 
@@ -7315,8 +7543,11 @@ class Scheduler:
                 return False
 
         if node1.is_template():
+            atomic_add_mutation_epilogue = _can_fuse_atomic_add_template_epilogue(
+                node1, node2
+            )
             if (
-                node2.has_aliasing_or_mutation()
+                (node2.has_aliasing_or_mutation() and not atomic_add_mutation_epilogue)
                 or node2.is_reduction()
                 or not _is_epilogue_fusion_enabled(node1)
             ):
@@ -7398,7 +7629,7 @@ class Scheduler:
 
         if node1.get_operation_names() & node2.ancestors:
             # node2 depends on node1 outputs
-            return (
+            if (
                 self.can_fuse_vertical(
                     node1,
                     node2,
@@ -7406,7 +7637,30 @@ class Scheduler:
                 )
                 and V.choices.can_fuse_vertical(self, node1, node2, shared_data_score)
                 and self.get_backend(device).can_fuse_vertical(node1, node2)
-            )
+            ):
+                return True
+
+            # Vertical fusion failed — the iteration domains may not
+            # match (e.g. pointwise reads buf[x//32] while reduction
+            # writes buf[x]).  Try reindexing the pointwise to the
+            # reduction's domain and retry.
+            if (
+                config.loop_reindexing_after_fusion
+                and self._try_reindex_pointwise_for_reduction(node1, node2)
+            ):
+                return (
+                    self.can_fuse_vertical(
+                        node1,
+                        node2,
+                        index_equivalent_dep_names=index_equivalent_dep_names,
+                    )
+                    and V.choices.can_fuse_vertical(
+                        self, node1, node2, shared_data_score
+                    )
+                    and self.get_backend(device).can_fuse_vertical(node1, node2)
+                )
+
+            return False
         else:  # nodes don't depend on each other, but may have common reads
             return V.choices.can_fuse_horizontal(
                 self, node1, node2, shared_data_score
@@ -8657,31 +8911,31 @@ class Scheduler:
         return signatures[::-1]
 
     def clean_removed_buffer_from_partition_signatures(
-        self, signature: GraphPartitionSignature
+        self,
+        signature: GraphPartitionSignature,
+        removed_buffers: OrderedSet[str],
     ) -> GraphPartitionSignature:
         """
         Updates the partition signature by removing buffers specified in
-        V.graph.removed_buffers. See [Note: Removed Graph Partition Arguments]
+        removed_buffers. See [Note: Removed Graph Partition Arguments]
         """
         input_nodes = {
             name: buffer
             for name, buffer in signature.input_nodes.items()
-            if name not in V.graph.removed_buffers
+            if name not in removed_buffers
         }
         input_deallocation = {
             name: val
             for name, val in signature.input_deallocation.items()
-            if name not in V.graph.removed_buffers
+            if name not in removed_buffers
         }
         output_nodes = [
             node
             for node in signature.output_nodes
-            if node.maybe_get_name() not in V.graph.removed_buffers
+            if node.maybe_get_name() not in removed_buffers
         ]
         constant_names = [
-            name
-            for name in signature.constant_names
-            if name not in V.graph.removed_buffers
+            name for name in signature.constant_names if name not in removed_buffers
         ]
         return GraphPartitionSignature(
             signature.symbol_inputs,
@@ -8782,8 +9036,10 @@ class Scheduler:
             reordered_nodes, name_to_freeable_input_buf, graph_outputs
         )
 
-        # 1.1 here means 10% extra peak memory budget which is quite arbitrary
-        if reorder_peak_memory < default_peak_memory * 1.1:
+        if (
+            reorder_peak_memory
+            < default_peak_memory * config.triton.cudagraph_partition_memory_budget
+        ):
             return reordered_nodes
 
         return nodes
@@ -8961,6 +9217,9 @@ class Scheduler:
                 parent_wrapper_code=parent_wrapper_code,
                 partition_signatures=signature,
             )
+            # V.graph.removed_buffers is global to the wrapper. Only buffers added
+            # while codegening this partition should be removed from this signature.
+            removed_buffers_before_codegen = V.graph.removed_buffers.copy()
             self._codegen(partition)
 
             # Note: [Removed Graph Partition Arguments]
@@ -8972,7 +9231,12 @@ class Scheduler:
             # prefix (i.e., generating call function and return outputs) after we have
             # codegen the partition.
             assert isinstance(V.graph.wrapper_code, SubgraphPythonWrapperCodegen)
-            signature = self.clean_removed_buffer_from_partition_signatures(signature)
+            removed_buffers_during_codegen = (
+                V.graph.removed_buffers - removed_buffers_before_codegen
+            )
+            signature = self.clean_removed_buffer_from_partition_signatures(
+                signature, removed_buffers_during_codegen
+            )
             V.graph.wrapper_code.partition_signatures = signature
             V.graph.wrapper_code.write_prefix()
 

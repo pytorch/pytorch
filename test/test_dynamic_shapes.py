@@ -44,9 +44,15 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
+    IS_MACOS,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
     TEST_XPU,
     TestCase,
 )
@@ -1247,6 +1253,68 @@ def forward(self, x_1):
         result = gm(2, 3, 4)  # should be 2 + 3 + 4 = 9
         self.assertEqual(result, 9)
 
+    def test_build_proxy_for_nary_min_max(self):
+        """
+        Test that _build_proxy_for_sym_expr correctly handles flattened
+        sympy.Max/sympy.Min expressions with more than 2 arguments.
+
+        sympy flattens Max(a, Max(b, c)) -> Max(a, b, c) (and likewise for
+        Min). _build_proxy_for_sym_expr must rebuild these even though
+        torch.sym_max/sym_min are binary; a binary handler would raise
+        TypeError on a 3-arg Max/Min.
+        """
+        import torch.fx as fx
+        from torch.fx.experimental.proxy_tensor import (
+            _build_proxy_for_sym_expr,
+            _SympyExprTrackerValue,
+            PythonKeyTracer,
+            set_meta,
+        )
+        from torch.utils._thunk import Thunk
+
+        # min/max of (2, 3, 4) -> 2 for min, 4 for max
+        for sym_op, expected in [(torch.sym_max, 4), (torch.sym_min, 2)]:
+            with self.subTest(op=sym_op.__name__):
+                shape_env = ShapeEnv()
+                # Unbacked symints keep the expression symbolic (backed symints
+                # would specialize away the Max/Min).
+                u0 = shape_env.create_unbacked_symint()
+                u1 = shape_env.create_unbacked_symint()
+                u2 = shape_env.create_unbacked_symint()
+
+                flattened = sym_op(sym_op(u0, u1), u2)
+                self.assertEqual(len(flattened.node.expr.args), 3)
+
+                # Case 1: out=None must not raise TypeError on the 3-arg expr.
+                tracer_none = PythonKeyTracer()
+                for sym in [u0, u1, u2]:
+                    tracer_none.sympy_expr_tracker[sym.node.expr] = (
+                        _SympyExprTrackerValue(proxy=sym, value=sym)
+                    )
+                result = _build_proxy_for_sym_expr(tracer_none, flattened.node.expr)
+                self.assertEqual(result.node.expr, flattened.node.expr)
+
+                # Case 2: out=flattened (the typical get_proxy_slot path). The
+                # rebuilt node must execute correctly (a binary handler would
+                # have dropped the third argument or crashed).
+                tracer = PythonKeyTracer()
+                tracer.root = torch.nn.Module()
+                tracer.graph = fx.Graph(tracer_cls=PythonKeyTracer)
+                for sym, name in [(u0, "u0"), (u1, "u1"), (u2, "u2")]:
+                    node = tracer.graph.placeholder(name)
+                    proxy = fx.Proxy(node, tracer)
+                    set_meta(proxy, sym)
+                    tracer.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                        proxy=proxy, value=sym
+                    )
+                    tracer.symnode_tracker[sym] = Thunk(lambda p=proxy: p)
+
+                _build_proxy_for_sym_expr(tracer, flattened.node.expr, out=flattened)
+                out_proxy = tracer.symnode_tracker[flattened].force()
+                tracer.graph.output(out_proxy.node)
+                gm = fx.GraphModule(tracer.root, tracer.graph)
+                self.assertEqual(gm(2, 3, 4), expected)
+
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
@@ -1606,6 +1674,167 @@ class f(torch.nn.Module):
             bias3 = torch.empty((B, M, N), device="meta")
 
             _ = torch.baddbmm(bias3, A, Bmat)
+
+    def test_lu_unpack_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        m, n = [shape_env.create_unbacked_symint() for _ in range(2)]
+
+        with fake_mode:
+            LU = torch.empty((m, n), device="meta")
+            pivots = torch.empty((1,), device="meta", dtype=torch.int32)
+            P, L, U = torch.lu_unpack(LU, pivots)
+
+    def test_linalg_qr_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        m, n = [shape_env.create_unbacked_symint() for _ in range(2)]
+
+        with fake_mode:
+            A = torch.empty((m, n), device="meta")
+            Q, R = torch.linalg.qr(A)
+
+    def _make_unbacked_size(self, shape_env):
+        return shape_env.create_unbacked_symint()
+
+    def test_avg_pool2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.avg_pool2d(x, [2, 2], [2, 2], [0, 0])
+
+    def test_max_pool2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.max_pool2d_with_indices(x, [2, 2], [2, 2])
+
+    def test_avg_pool3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.avg_pool3d(x, [2, 2, 2], [2, 2, 2])
+
+    def test_max_pool3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.max_pool3d_with_indices(x, [2, 2, 2], [2, 2, 2])
+
+    def test_avg_pool1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.avg_pool1d(x, [2], [2])
+
+    def test_pixel_shuffle_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, u(shape_env), 3, 3), device="meta")
+            torch.ops.aten.pixel_shuffle(x, 1)
+
+    def test_pdist_forward_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((self._make_unbacked_size(shape_env), 5), device="meta")
+            torch.ops.aten._pdist_forward(x, 2.0)
+
+    def test_reflection_pad2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.reflection_pad2d(x, [1, 1, 1, 1])
+
+    def test_replication_pad2d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty((1, 3, u(shape_env), u(shape_env)), device="meta")
+            torch.ops.aten.replication_pad2d(x, [1, 1, 1, 1])
+
+    def test_reflection_pad1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.reflection_pad1d(x, [1, 1])
+
+    def test_replication_pad1d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            x = torch.empty((1, 3, self._make_unbacked_size(shape_env)), device="meta")
+            torch.ops.aten.replication_pad1d(x, [1, 1])
+
+    def test_reflection_pad3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.reflection_pad3d(x, [1, 1, 1, 1, 1, 1])
+
+    def test_replication_pad3d_unbacked_symint(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        u = self._make_unbacked_size
+        with fake_mode:
+            x = torch.empty(
+                (1, 3, u(shape_env), u(shape_env), u(shape_env)), device="meta"
+            )
+            torch.ops.aten.replication_pad3d(x, [1, 1, 1, 1, 1, 1])
 
 
 @skipIfTorchDynamo(
@@ -3628,6 +3857,15 @@ class TestUnbacked(TestCase):
         with self.assertRaises((AssertionError, RuntimeError)):
             func(a, torch.rand(2, 1))
 
+    @unittest.skipIf(
+        TEST_WITH_ASAN
+        or IS_LINUX
+        or IS_MACOS
+        or TEST_WITH_ROCM
+        or TEST_WITH_SLOW
+        or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/163953",
+    )
     @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_do_not_guard_unbacked_inputs(self):
@@ -3829,6 +4067,37 @@ class TestUnbacked(TestCase):
                 r"Runtime assertion failed for expression Ne\(u0, 1\)",
             ):
                 f(torch.ones(2) * 0.1)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    @torch._dynamo.config.patch("suppress_errors", True)
+    def test_sparse_csr_tensor_no_data_dependent_guard(self):
+        """
+        Test that sparse CSR tensor construction doesn't trigger
+        GuardOnDataDependentSymNode errors due to str() being called
+        on FakeTensors during graph break handling.
+        """
+
+        class MinimalSparseModel(torch.nn.Module):
+            def forward(self, values):
+                crow_indices = torch.tensor([0, 2, 4], dtype=torch.int64)
+                col_indices = torch.tensor([0, 1, 0, 1], dtype=torch.int64)
+                size = (2, 2)
+                sparse = torch.ops.aten.sparse_csr_tensor(
+                    crow_indices, col_indices, values, size
+                )
+                return sparse
+
+        values = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        model = MinimalSparseModel()
+        eager_out = model(values)
+
+        compiled_model = torch.compile(model, fullgraph=False)
+        compiled_out = compiled_model(values)
+
+        self.assertEqual(eager_out.layout, compiled_out.layout)
+        self.assertEqual(eager_out.shape, compiled_out.shape)
+        torch.testing.assert_close(eager_out.values(), compiled_out.values())
 
 
 class TestUbackedOps(TestCase):
