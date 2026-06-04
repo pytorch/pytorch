@@ -7,15 +7,15 @@ from torch._C._distributed_c10d import FakeWork, ProcessGroup
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._functional_collectives import (
     all_gather_into_tensor_coalesced,
-    all_gather_tensor,
-    all_gather_tensor_autograd,
+    all_gather_single,
+    all_gather_single_autograd,
     all_reduce,
     all_reduce_coalesced,
     all_to_all_single,
     all_to_all_single_autograd,
     broadcast,
-    reduce_scatter_tensor,
-    reduce_scatter_tensor_autograd,
+    reduce_scatter_single,
+    reduce_scatter_single_autograd,
     reduce_scatter_tensor_coalesced,
     wait_tensor,
 )
@@ -74,14 +74,14 @@ class TestFakeCollectives(TestCase):
                 wait_tensor(test_tensor)
                 broadcast(test_tensor, src=0, group=dist.group.WORLD)
                 all_reduce(test_tensor, reduceOp="avg", group=dist.group.WORLD)
-                all_gather_tensor(test_tensor, gather_dim=0, group=dist.group.WORLD)
-                all_gather_tensor_autograd(
+                all_gather_single(test_tensor, gather_dim=0, group=dist.group.WORLD)
+                all_gather_single_autograd(
                     test_tensor, gather_dim=0, group=dist.group.WORLD
                 )
-                reduce_scatter_tensor(
+                reduce_scatter_single(
                     test_tensor2, scatter_dim=0, reduceOp="sum", group=dist.group.WORLD
                 )
-                reduce_scatter_tensor_autograd(
+                reduce_scatter_single_autograd(
                     test_tensor2, scatter_dim=0, reduceOp="sum", group=dist.group.WORLD
                 )
                 all_to_all_single(

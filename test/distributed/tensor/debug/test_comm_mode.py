@@ -51,8 +51,8 @@ class TestCommMode(TestCase):
                 self.model = MLPModule(device=device)
 
             def forward(self, x):
-                x = funcol.all_gather_tensor(x, 0, world_pg)
-                x = funcol.reduce_scatter_tensor(x, "sum", 0, world_pg)
+                x = funcol.all_gather_single(x, 0, world_pg)
+                x = funcol.reduce_scatter_single(x, "sum", 0, world_pg)
                 out = self.model(x)
                 return funcol.all_reduce(out, "sum", world_pg)
 
@@ -77,8 +77,8 @@ class TestCommMode(TestCase):
                 self.model = MLPModule(device=device)
 
             def forward(self, x):
-                x = funcol.all_gather_tensor(x, 0, world_pg)
-                x = funcol.reduce_scatter_tensor(x, "sum", 0, world_pg)
+                x = funcol.all_gather_single(x, 0, world_pg)
+                x = funcol.reduce_scatter_single(x, "sum", 0, world_pg)
                 out = self.model(x)
                 return funcol.all_reduce_coalesced([out], "sum", world_pg)
 
