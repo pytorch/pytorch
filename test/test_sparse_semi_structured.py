@@ -1337,10 +1337,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     @xfailIfSM89PreCUDA13
     @parametrize("dense_input_shape", [(256, 128)])
-    @unittest.skipIf(
-        torch.version.hip and not _IS_HIPSPARSELT_AVAILABLE,
-        "HIPSPARSELt is not available for ROCm versions < 7.12",
-    )
     def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
         if torch.backends.cusparselt.version() < 602 and not torch.version.hip:
             self.skipTest("fp8 matmul requires cuSPARSELt v0.6.2+")
