@@ -311,7 +311,7 @@ def user_cache_dir(appname=None, appauthor=None, version=None, opinion=True):
             of your app to be able to run independently. If used, this
             would typically be "<major>.<minor>".
             Only applied when appname is present.
-        "opinion" (boolean) can be False to disable the appending of
+        "opinion" (bool) can be False to disable the appending of
             "Cache" to the base app data dir for Windows. See
             discussion below.
 
@@ -410,7 +410,7 @@ def user_log_dir(appname=None, appauthor=None, version=None, opinion=True):
             of your app to be able to run independently. If used, this
             would typically be "<major>.<minor>".
             Only applied when appname is present.
-        "opinion" (boolean) can be False to disable the appending of
+        "opinion" (bool) can be False to disable the appending of
             "Logs" to the base app data dir for Windows, and "log" to the
             base cache dir for Unix. See discussion below.
 

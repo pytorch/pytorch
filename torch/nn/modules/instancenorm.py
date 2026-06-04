@@ -180,10 +180,10 @@ class InstanceNorm1d(_InstanceNorm):
         num_features: number of features or channels :math:`C` of the input
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
@@ -226,10 +226,10 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
             :math:`(N, C, L)` or :math:`(C, L)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
@@ -300,10 +300,10 @@ class InstanceNorm2d(_InstanceNorm):
             :math:`(N, C, H, W)` or :math:`(C, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
@@ -347,10 +347,10 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
             :math:`(N, C, H, W)` or :math:`(C, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
@@ -420,10 +420,10 @@ class InstanceNorm3d(_InstanceNorm):
             :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
@@ -467,10 +467,10 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
             :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
             Default: ``False``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``

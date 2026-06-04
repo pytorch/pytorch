@@ -407,7 +407,7 @@ def _broadcast_shapes(*_shapes):
     for shape in shapes:
         if not isinstance(shape, Sequence):
             raise RuntimeError(
-                f"Input shapes should be of type ints, a tuple of ints, or a list of ints, got {shape}"
+                f"Input shapes should be of type ints, a tuple of int, or a list of ints, got {shape}"
             )
 
     # Computes common shape
@@ -4563,7 +4563,7 @@ def hsplit(
         isinstance(indices_or_sections, (list, tuple)),
         lambda: (
             "hsplit(): received an invalid combination of arguments. "
-            "Expected indices_or_sections to be of type int, list of ints or tuple of ints "
+            "Expected indices_or_sections to be of type int, list of ints or tuple of int "
             f"but got type {type(indices_or_sections)}"
         ),
     )
@@ -4605,7 +4605,7 @@ def vsplit(
         isinstance(indices_or_sections, (list, tuple)),
         lambda: (
             "vsplit(): received an invalid combination of arguments. "
-            "Expected indices_or_sections to be of type int, list of ints or tuple of ints "
+            "Expected indices_or_sections to be of type int, list of ints or tuple of int "
             f"but got type {type(indices_or_sections)}"
         ),
     )
@@ -5756,7 +5756,7 @@ def movedim(
     return result
 
 
-# NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
+# NOTE: for convenience, shape can be a tuple of int or a tuple containing a tuple of int
 @register_decomposition(aten.empty_strided)
 @out_wrapper()
 def empty_strided(

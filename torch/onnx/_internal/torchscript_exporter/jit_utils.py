@@ -77,7 +77,7 @@ class GraphContext:
             kwargs: The attributes of the ONNX operator, whose keys are named
                 according to the following convention: `alpha_f` indicates
                 the `alpha` attribute with type `f`.  The valid type specifiers are
-                `f` (float), `i` (int), `s` (string) or `t` (Tensor).  An attribute
+                `f` (float), `i` (int), `s` (str) or `t` (Tensor).  An attribute
                 specified with type float accepts either a single float, or a
                 list of floats (e.g., you would say `dims_i` for a `dims` attribute
                 that takes a list of integers).
@@ -129,7 +129,7 @@ class GraphContext:
             kwargs: The attributes of the ONNX operator, whose keys are named
                 according to the following convention: `alpha_f` indicates
                 the `alpha` attribute with type `f`.  The valid type specifiers are
-                `f` (float), `i` (int), `s` (string) or `t` (Tensor).  An attribute
+                `f` (float), `i` (int), `s` (str) or `t` (Tensor).  An attribute
                 specified with type float accepts either a single float, or a
                 list of floats (e.g., you would say `dims_i` for a `dims` attribute
                 that takes a list of integers).
@@ -221,7 +221,7 @@ def _add_op(
         kwargs: The attributes of the ONNX operator, whose keys are named
             according to the following convention: `alpha_f` indicates
             the `alpha` attribute with type `f`.  The valid type specifiers are
-            `f` (float), `i` (int), `s` (string) or `t` (Tensor).  An attribute
+            `f` (float), `i` (int), `s` (str) or `t` (Tensor).  An attribute
             specified with type float accepts either a single float, or a
             list of floats (e.g., you would say `dims_i` for a `dims` attribute
             that takes a list of integers).

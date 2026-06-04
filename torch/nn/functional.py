@@ -497,7 +497,7 @@ def fractional_max_pool2d_with_indices(
             raise AssertionError("output_ratio is unexpectedly None")
         if len(output_ratio) > 2:
             raise ValueError(
-                "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."
+                "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of int."
             )
         _output_ratio = _pair(output_ratio)
         output_size = [
@@ -6001,7 +6001,7 @@ def normalize(
     Args:
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
-        dim (int or tuple of ints): the dimension to reduce. Default: 1
+        dim (int or tuple of int): the dimension to reduce. Default: 1
         eps (float): small value to avoid division by zero. Default: 1e-12
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.

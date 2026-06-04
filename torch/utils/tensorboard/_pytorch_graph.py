@@ -240,7 +240,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
       graph (PyTorch module): The model graph to be parsed.
       trace (PyTorch JIT TracedModule): The model trace to be parsed.
       args (tuple): input tensor[s] for the model.
-      omit_useless_nodes (boolean): Whether to remove nodes from the graph.
+      omit_useless_nodes (bool): Whether to remove nodes from the graph.
     """
     nodes_py = GraphPy()
     for node in graph.inputs():

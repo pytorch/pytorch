@@ -7837,7 +7837,7 @@ def sample_inputs_resize_ops(op_info, device, dtype, requires_grad, **kwargs):
     for shape, args_or_shape in cases:
         # Update `args` based on operator
         if op_info.name == 'resize_':
-            # resize_ takes shape/tuple of ints,
+            # resize_ takes shape/tuple of int,
             args = (args_or_shape, )
         elif op_info.name == 'resize_as_':
             # resize_as_ takes another tensor

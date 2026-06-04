@@ -49,7 +49,7 @@ tensor must not be greater than of the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
       Default: None that is equivalent to ``tuple(range(input.ndim))``.
 
 Keyword args:
@@ -119,7 +119,7 @@ tensor must not be greater than of the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
       Default: None that is equivalent to ``tuple(range(input.ndim))``.
 
 Keyword args:
@@ -488,7 +488,7 @@ tensor must not be greater than of the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
       Default: None that is equivalent to ``tuple(range(input.ndim))``.
 
 Keyword args:
@@ -561,7 +561,7 @@ tensor must not be greater than of the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
       Default: None that is equivalent to ``tuple(range(input.ndim))``.
 
 Keyword args:
@@ -701,7 +701,7 @@ Args:
     input (Tensor): the input tensor
     ord (int, float, optional): the order of vector norm. Default: 2.
       See :func:`torch.linalg.vector_norm` for a list of supported norms.
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
       Default: None that is equivalent to ``tuple(range(input.ndim))``.
 
 Keyword args:
@@ -829,7 +829,7 @@ tensor must not be greater than of the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
       Default: None that is equivalent to ``tuple(range(input.ndim))``.
 
 Keyword args:
@@ -1010,7 +1010,7 @@ tensor must not be greater than of the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
       Default: None that is equivalent to ``tuple(range(input.ndim))``.
     unbiased (bool): when True, use Bessel's correction, otherwise, compute
       the uncorrected sample variance.
@@ -1079,7 +1079,7 @@ tensor must not be greater than of the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
       Default: None that is equivalent to ``tuple(range(input.ndim))``.
 
 Keyword args:
@@ -1146,7 +1146,7 @@ tensor must not be greater than of the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
       Default: None that is equivalent to ``tuple(range(input.ndim))``.
     unbiased (bool): when True, use Bessel's correction, otherwise, compute
       the uncorrected sample variance.

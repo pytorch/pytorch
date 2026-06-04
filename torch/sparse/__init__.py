@@ -230,7 +230,7 @@ def sum(input: Tensor, dim: DimOrDims = None, dtype: DType | None = None) -> Ten
 
     Args:
         input (Tensor): the input sparse tensor
-        dim (int or tuple of ints): a dimension or a list of dimensions to reduce. Default: reduce
+        dim (int or tuple of int): a dimension or a list of dimensions to reduce. Default: reduce
             over all dims.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
             Default: dtype of :attr:`input`.
@@ -375,7 +375,7 @@ and an offset may not be repeated.
 Args:
     diagonals (Tensor): Matrix storing diagonals row-wise
     offsets (Tensor): The diagonals to be set, stored as a vector
-    shape (2-tuple of ints): The desired shape of the result
+    shape (2-tuple of int): The desired shape of the result
 Keyword args:
     layout (:class:`torch.layout`, optional): The desired layout of the
         returned tensor. ``torch.sparse_coo``, ``torch.sparse_csc`` and ``torch.sparse_csr``

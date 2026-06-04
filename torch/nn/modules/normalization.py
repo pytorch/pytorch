@@ -140,7 +140,7 @@ class LayerNorm(Module):
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
         eps: a value added to the denominator for numerical stability. Default: 1e-5
-        elementwise_affine: a boolean value that when set to ``True``, this module
+        elementwise_affine: a bool value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights)
             and zeros (for biases). Default: ``True``
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
@@ -261,7 +261,7 @@ class GroupNorm(Module):
         num_groups (int): number of groups to separate the channels into
         num_channels (int): number of channels expected in input
         eps: a value added to the denominator for numerical stability. Default: 1e-5
-        affine: a boolean value that when set to ``True``, this module
+        affine: a bool value that when set to ``True``, this module
             has learnable per-channel affine parameters initialized to ones (for weights)
             and zeros (for biases). Default: ``True``
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
@@ -369,7 +369,7 @@ class RMSNorm(Module):
             If not specified, uses the machine epsilon of the computation (opmath) type:
             fp16/bf16 and fp32 inputs use ``torch.finfo(torch.float32).eps``, while fp64
             inputs use ``torch.finfo(torch.float64).eps``. Default: ``None``
-        elementwise_affine: a boolean value that when set to ``True``, this module
+        elementwise_affine: a bool value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
 
     Shape:

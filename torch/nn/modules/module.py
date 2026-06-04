@@ -433,7 +433,7 @@ class Module:
         As per the example above, an ``__init__()`` call to the parent class
         must be made before assignment on the child.
 
-    :ivar training: Boolean represents whether this module is in training or
+    :ivar training: bool represents whether this module is in training or
                     evaluation mode.
     :vartype training: bool
     """
@@ -563,12 +563,12 @@ class Module:
             raise AttributeError("cannot assign buffer before Module.__init__() call")
         elif not isinstance(name, str):
             raise TypeError(
-                f"buffer name should be a string. Got {torch.typename(name)}"
+                f"buffer name should be a str. Got {torch.typename(name)}"
             )
         elif "." in name:
             raise KeyError('buffer name can\'t contain "."')
         elif name == "":
-            raise KeyError('buffer name can\'t be empty string ""')
+            raise KeyError('buffer name can\'t be empty str ""')
         elif hasattr(self, name) and name not in self._buffers:
             raise KeyError(f"attribute '{name}' already exists")
         elif tensor is not None and not (
@@ -609,12 +609,12 @@ class Module:
 
         elif not isinstance(name, str):
             raise TypeError(
-                f"parameter name should be a string. Got {torch.typename(name)}"
+                f"parameter name should be a str. Got {torch.typename(name)}"
             )
         elif "." in name:
             raise KeyError('parameter name can\'t contain "."')
         elif name == "":
-            raise KeyError('parameter name can\'t be empty string ""')
+            raise KeyError('parameter name can\'t be empty str ""')
         elif hasattr(self, name) and name not in self._parameters:
             raise KeyError(f"attribute '{name}' already exists")
 
@@ -653,14 +653,14 @@ class Module:
             raise TypeError(f"{torch.typename(module)} is not a Module subclass")
         elif not isinstance(name, str):
             raise TypeError(
-                f"module name should be a string. Got {torch.typename(name)}"
+                f"module name should be a str. Got {torch.typename(name)}"
             )
         elif hasattr(self, name) and name not in self._modules:
             raise KeyError(f"attribute '{name}' already exists")
         elif "." in name:
             raise KeyError(f'module name can\'t contain ".", got: {name}')
         elif name == "":
-            raise KeyError('module name can\'t be empty string ""')
+            raise KeyError('module name can\'t be empty str ""')
         for hook in _global_module_registration_hooks.values():
             output = hook(self, name, module)
             if output is not None:
@@ -705,9 +705,9 @@ class Module:
         used.
 
         Args:
-            target: The fully-qualified string name of the submodule
+            target: The fully-qualified str name of the submodule
                 to look for. (See above example for how to specify a
-                fully-qualified string.)
+                fully-qualified str.)
 
         Returns:
             torch.nn.Module: The submodule referenced by ``target``
@@ -778,9 +778,9 @@ class Module:
         will be raised because ``net_b`` does not have a submodule named ``conv``.
 
         Args:
-            target: The fully-qualified string name of the submodule
+            target: The fully-qualified str name of the submodule
                 to look for. (See above example for how to specify a
-                fully-qualified string.)
+                fully-qualified str.)
             module: The module to set the submodule to.
             strict: If ``False``, the method will replace an existing submodule
                 or create a new submodule if the parent module exists. If ``True``,
@@ -825,9 +825,9 @@ class Module:
         correctly specify ``target``.
 
         Args:
-            target: The fully-qualified string name of the Parameter
+            target: The fully-qualified str name of the Parameter
                 to look for. (See ``get_submodule`` for how to specify a
-                fully-qualified string.)
+                fully-qualified str.)
 
         Returns:
             torch.nn.Parameter: The Parameter referenced by ``target``
@@ -861,9 +861,9 @@ class Module:
         correctly specify ``target``.
 
         Args:
-            target: The fully-qualified string name of the buffer
+            target: The fully-qualified str name of the buffer
                 to look for. (See ``get_submodule`` for how to specify a
-                fully-qualified string.)
+                fully-qualified str.)
 
         Returns:
             torch.Tensor: The buffer referenced by ``target``
@@ -1170,7 +1170,7 @@ class Module:
             This method modifies the module in-place.
 
         Args:
-            dst_type (type or string): the desired type
+            dst_type (type or str): the desired type
 
         Returns:
             Module: self
@@ -2898,7 +2898,7 @@ class Module:
             Module: self
         """
         if not isinstance(mode, bool):
-            raise ValueError("training mode is expected to be boolean")
+            raise ValueError("training mode is expected to be bool")
         self.training = mode
         for module in self.children():
             module.train(mode)
@@ -2994,7 +2994,7 @@ class Module:
         # We treat the extra repr like the sub-module, one item per line
         extra_lines = []
         extra_repr = self.extra_repr()
-        # empty string will be split into list ['']
+        # empty str will be split into list ['']
         if extra_repr:
             extra_lines = extra_repr.split("\n")
         child_lines = []

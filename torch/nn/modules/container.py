@@ -503,13 +503,13 @@ class ModuleList(Module):
 
 
 class ModuleDict(Module):
-    r"""Holds submodules in a dictionary.
+    r"""holds submodules in a dict.
 
-    :class:`~torch.nn.ModuleDict` can be indexed like a regular Python dictionary,
+    :class:`~torch.nn.ModuleDict` can be indexed like a regular Python dict,
     but modules it contains are properly registered, and will be visible by all
     :class:`~torch.nn.Module` methods.
 
-    :class:`~torch.nn.ModuleDict` is an **ordered** dictionary that respects
+    :class:`~torch.nn.ModuleDict` is an \*\*ordered\*\* dict that respects
 
     * the order of insertion, and
 
@@ -522,8 +522,8 @@ class ModuleDict(Module):
     types does not preserve the order of the merged mapping.
 
     Args:
-        modules (iterable, optional): a mapping (dictionary) of (string: module)
-            or an iterable of key-value pairs of type (string, module)
+        modules (iterable, optional): a mapping (dict) of (str: module)
+            or an iterable of key-value pairs of type (str, module)
 
     Example::
 
@@ -609,8 +609,8 @@ class ModuleDict(Module):
             an iterable of key-value pairs, the order of new elements in it is preserved.
 
         Args:
-            modules (iterable): a mapping (dictionary) from string to :class:`~torch.nn.Module`,
-                or an iterable of key-value pairs of type (string, :class:`~torch.nn.Module`)
+            modules (iterable): a mapping (dict) from str to :class:`~torch.nn.Module`,
+                or an iterable of key-value pairs of type (str, :class:`~torch.nn.Module`)
         """
         if not isinstance(modules, container_abcs.Iterable):
             raise TypeError(
@@ -792,13 +792,13 @@ class ParameterList(Module):
 
 
 class ParameterDict(Module):
-    r"""Holds parameters in a dictionary.
+    r"""holds parameters in a dict.
 
-    ParameterDict can be indexed like a regular Python dictionary, but Parameters it
+    ParameterDict can be indexed like a regular Python dict, but Parameters it
     contains are properly registered, and will be visible by all Module methods.
-    Other objects are treated as would be done by a regular Python dictionary
+    Other objects are treated as would be done by a regular Python dict
 
-    :class:`~torch.nn.ParameterDict` is an **ordered** dictionary.
+    :class:`~torch.nn.ParameterDict` is an \*\*ordered\*\* dict.
     :meth:`~torch.nn.ParameterDict.update` with other unordered mapping
     types (e.g., Python's plain ``dict``) does not preserve the order of the
     merged mapping. On the other hand, ``OrderedDict`` or another :class:`~torch.nn.ParameterDict`
@@ -809,9 +809,9 @@ class ParameterDict(Module):
     :class:`~torch.nn.Parameter`.
 
     Args:
-        values (iterable, optional): a mapping (dictionary) of
-            (string : Any) or an iterable of key-value pairs
-            of type (string, Any)
+        values (iterable, optional): a mapping (dict) of
+            (str : Any) or an iterable of key-value pairs
+            of type (str, Any)
 
     Example::
 
@@ -852,10 +852,10 @@ class ParameterDict(Module):
         return getattr(self, attr)
 
     def __setitem__(self, key: str, value: Any) -> None:
-        # Note that all other function that add an entry to the dictionary part of
+        # Note that all other function that add an entry to the dict part of
         # the ParameterDict end up here. So this is the only place where we need
         # to wrap things into Parameter if needed.
-        # Objects added via setattr() are not in the dictionary part and thus won't
+        # Objects added via setattr() are not in the dict part and thus won't
         # call into this function.
         self._keys[key] = None
         attr = self._key_to_attr(key)
@@ -940,7 +940,7 @@ class ParameterDict(Module):
         r"""Return a new ParameterDict with the keys provided.
 
         Args:
-            keys (iterable, string): keys to make the new ParameterDict from
+            keys (iterable, str): keys to make the new ParameterDict from
             default (Parameter, optional): value to set for all keys
         """
         return ParameterDict((k, default) for k in keys)
@@ -965,9 +965,9 @@ class ParameterDict(Module):
             an iterable of key-value pairs, the order of new elements in it is preserved.
 
         Args:
-            parameters (iterable): a mapping (dictionary) from string to
+            parameters (iterable): a mapping (dict) from str to
                 :class:`~torch.nn.Parameter`, or an iterable of
-                key-value pairs of type (string, :class:`~torch.nn.Parameter`)
+                key-value pairs of type (str, :class:`~torch.nn.Parameter`)
         """
         if not isinstance(parameters, container_abcs.Iterable):
             raise TypeError(

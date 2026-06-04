@@ -361,7 +361,7 @@ class SummaryWriter:
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               with seconds after epoch of event
-            new_style (boolean): Whether to use new style (tensor field) or old
+            new_style (bool): Whether to use new style (tensor field) or old
               style (simple_value field). New style could lead to faster data loading.
         Examples::
 

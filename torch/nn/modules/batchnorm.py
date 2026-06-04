@@ -350,9 +350,9 @@ class BatchNorm1d(_BatchNorm):
         momentum: the value used for the running_mean and running_var
             computation. Can be set to ``None`` for cumulative moving average
             (i.e. simple average). Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
@@ -398,9 +398,9 @@ class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
         momentum: the value used for the running_mean and running_var
             computation. Can be set to ``None`` for cumulative moving average
             (i.e. simple average). Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
@@ -466,9 +466,9 @@ class BatchNorm2d(_BatchNorm):
         momentum: the value used for the running_mean and running_var
             computation. Can be set to ``None`` for cumulative moving average
             (i.e. simple average). Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
@@ -513,9 +513,9 @@ class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
         momentum: the value used for the running_mean and running_var
             computation. Can be set to ``None`` for cumulative moving average
             (i.e. simple average). Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
@@ -581,9 +581,9 @@ class BatchNorm3d(_BatchNorm):
         momentum: the value used for the running_mean and running_var
             computation. Can be set to ``None`` for cumulative moving average
             (i.e. simple average). Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
@@ -628,9 +628,9 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
         momentum: the value used for the running_mean and running_var
             computation. Can be set to ``None`` for cumulative moving average
             (i.e. simple average). Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
@@ -701,9 +701,9 @@ class SyncBatchNorm(_BatchNorm):
         momentum: the value used for the running_mean and running_var
             computation. Can be set to ``None`` for cumulative moving average
             (i.e. simple average). Default: 0.1
-        affine: a boolean value that when set to ``True``, this module has
+        affine: a bool value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
-        track_running_stats: a boolean value that when set to ``True``, this
+        track_running_stats: a bool value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.

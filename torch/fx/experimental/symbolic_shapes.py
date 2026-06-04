@@ -4691,7 +4691,7 @@ class ShapeEnv:
     ) -> list[sympy.Expr]:
         if not all(not is_symbolic(val) for val in tensor_size):
             raise AssertionError(
-                f"Expect size to be a plain tuple of ints but got {tensor_size}"
+                f"Expect size to be a plain tuple of int but got {tensor_size}"
             )
         from torch._dynamo.source import TensorProperty, TensorPropertySource
 

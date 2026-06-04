@@ -36,7 +36,7 @@ class EncodedAttrs:
     Attributes:
         attr_keys: List of attribute keys.
         attr_types: List of attribute types. Values can be "i" (int), "f" (float),
-            "s" (string), "is" (int sequence), "fs" (float sequence), or "ss" (string sequence).
+            "s" (str), "is" (int sequence), "fs" (float sequence), or "ss" (string sequence).
         attr_pos: List of tuples representing the start and end positions of each
             attribute in the corresponding list.
         attr_ints: List of integer attributes.

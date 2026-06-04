@@ -992,7 +992,7 @@ _RE_PAREN_NOT_NEEDED = re.compile(r"[a-z0-9_.]+|\([^)]*\)|", flags=re.IGNORECASE
 
 
 def _all_in_parens(string: str) -> bool:
-    if string[0] != "(" or len(string) < 2:
+    if string[0] != "(" or len(str) < 2:
         return False
     count = 1
     for i, char in enumerate(string[1:]):
@@ -1000,7 +1000,7 @@ def _all_in_parens(string: str) -> bool:
             count += 1
         elif char == ")":
             count -= 1
-        if count == 0 and i != len(string) - 2:
+        if count == 0 and i != len(str) - 2:
             return False
     assert count == 0
     return True
@@ -1012,8 +1012,8 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     def paren(string: OpVarT) -> OpVarT:
         if (
             isinstance(string, CSEVariable)
-            or _RE_PAREN_NOT_NEEDED.fullmatch(string)
-            or _all_in_parens(string)
+            or _RE_PAREN_NOT_NEEDED.fullmatch(str)
+            or _all_in_parens(str)
         ):
             # don't put extra parens for strings that are already wrapped in parens
 

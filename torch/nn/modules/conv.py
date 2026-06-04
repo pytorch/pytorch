@@ -250,7 +250,7 @@ class Conv1d(_ConvNd):
       number or a one-element tuple.
 
     * :attr:`padding` controls the amount of padding applied to the input. It
-      can be either a string {{'valid', 'same'}} or a tuple of ints giving the
+      can be either a string {{'valid', 'same'}} or a tuple of int giving the
       amount of implicit padding applied on both sides.
 """
         """
@@ -416,7 +416,7 @@ class Conv2d(_ConvNd):
       number or a tuple.
 
     * :attr:`padding` controls the amount of padding applied to the input. It
-      can be either a string {{'valid', 'same'}} or an int / a tuple of ints giving the
+      can be either a string {{'valid', 'same'}} or an int / a tuple of int giving the
       amount of implicit padding applied on both sides.
 """
         """
@@ -588,7 +588,7 @@ class Conv3d(_ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of padding applied to the input. It
-      can be either a string {{'valid', 'same'}} or a tuple of ints giving the
+      can be either a string {{'valid', 'same'}} or a tuple of int giving the
       amount of implicit padding applied on both sides.
 """
         """

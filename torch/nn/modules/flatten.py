@@ -84,7 +84,7 @@ class Unflatten(Module):
 
     Examples:
         >>> input = torch.randn(2, 50)
-        >>> # With tuple of ints
+        >>> # With tuple of int
         >>> m = nn.Sequential(
         >>>     nn.Linear(50, 50),
         >>>     nn.Unflatten(1, (2, 5, 5))
@@ -146,12 +146,12 @@ class Unflatten(Module):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, int):
                     raise TypeError(
-                        "unflattened_size must be tuple of ints, "
+                        "unflattened_size must be tuple of int, "
                         + f"but found element of type {type(elem).__name__} at pos {idx}"
                     )
             return
         raise TypeError(
-            f"unflattened_size must be a tuple of ints, but found type {type(input).__name__}"
+            f"unflattened_size must be a tuple of int, but found type {type(input).__name__}"
         )
 
     def forward(self, input: Tensor) -> Tensor:

@@ -670,7 +670,7 @@ class Memoizer(_BaseMemoizer):
             dump["collections"] = {}
 
         # JSON serializes None keys as "null" string, so we need to handle both cases
-        # When reading from JSON, the key will be "null" (string), not None
+        # When reading from JSON, the key will be "null" (str), not None
         lookup_key = "null" if self._sub_key is None else self._sub_key
 
         # Get existing entries for this sub_key to merge with
@@ -783,7 +783,7 @@ class Memoizer(_BaseMemoizer):
         """
         collections = dump.get("collections", {})
         # JSON serializes None keys as "null" string, so we need to handle both cases
-        # When reading from JSON, the key will be "null" (string), not None
+        # When reading from JSON, the key will be "null" (str), not None
         lookup_key = "null" if self._sub_key is None else self._sub_key
         return collections.get(lookup_key, {})
 

@@ -5364,12 +5364,12 @@ def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
     torch._check(
         len(kernel_size) == 2,
         lambda: "fractional_max_pool2d: kernel_size must"
-        "either be a single int or tuple of Ints",
+        "either be a single int or tuple of int",
     )
     torch._check(
         len(output_size) == 2,
         lambda: "fractional_max_pool2d: output_size must "
-        "either be a single int or tuple of Ints",
+        "either be a single int or tuple of int",
     )
 
     input_channels = self.size(-3)

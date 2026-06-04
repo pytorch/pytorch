@@ -1784,7 +1784,7 @@ def norm(
 
             Nuclear norm can only be calculated across exactly two dimensions.
 
-        dim (int, tuple of ints, list of ints, optional):
+        dim (int, tuple of int, list of int, optional):
             Specifies which dimension or dimensions of :attr:`input` to
             calculate the norm across. If :attr:`dim` is ``None``, the norm will
             be calculated across all dimensions of :attr:`input`. If the norm

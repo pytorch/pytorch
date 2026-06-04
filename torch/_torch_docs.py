@@ -61,7 +61,7 @@ multi_dim_common = merge_dicts(
     reduceops_common_args,
     parse_kwargs(
         """
-    dim (int or tuple of ints): the dimension or dimensions to reduce.
+    dim (int or tuple of int): the dimension or dimensions to reduce.
 """
     ),
     {
@@ -74,12 +74,12 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
     },
     {
         "opt_dim": """
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
 """
     },
     {
         "opt_dim_all_reduce": """
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
         If ``None``, all dimensions are reduced.
 """
     },
@@ -1957,7 +1957,7 @@ by :attr:`indices_or_sections`. This function is based on NumPy's
    would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and
    :code:`input[3:]`.
 
-   :attr:`indices` can be a list or tuple of ints, or a one-dimensional long
+   :attr:`indices` can be a list or tuple of int, or a one-dimensional long
    tensor on the CPU.
 
 Args:
@@ -2104,7 +2104,7 @@ This function is based on NumPy's :func:`numpy.hsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of int): See argument in :func:`torch.tensor_split`.
 
 Example::
 
@@ -2154,7 +2154,7 @@ This function is based on NumPy's :func:`numpy.vsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of int): See argument in :func:`torch.tensor_split`.
 
 Example::
 
@@ -2196,7 +2196,7 @@ This function is based on NumPy's :func:`numpy.dsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of int): See argument in :func:`torch.tensor_split`.
 
 Example::
 
@@ -3472,7 +3472,7 @@ If no dim is specified then all non-zeros in the tensor are counted.
 
 Args:
     {input}
-    dim (int or tuple of ints, optional): Dim or tuple of dims along which to count non-zeros.
+    dim (int or tuple of int, optional): Dim or tuple of dims along which to count non-zeros.
 
 Example::
 
@@ -7918,8 +7918,8 @@ their original order and appear at the positions not specified in :attr:`destina
 
 Args:
     {input}
-    source (int or tuple of ints): Original positions of the dims to move. These must be unique.
-    destination (int or tuple of ints): Destination positions for each of the original dims. These must also be unique.
+    source (int or tuple of int): Original positions of the dims to move. These must be unique.
+    destination (int or tuple of int): Destination positions for each of the original dims. These must also be unique.
 
 Examples::
 
@@ -10767,7 +10767,7 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 
 Args:
     {input}
-    dim (int or tuple of ints, optional): if given, the input will be squeezed
+    dim (int or tuple of int, optional): if given, the input will be squeezed
            only in the specified dimensions.
 
         .. versionchanged:: 2.0
@@ -11337,11 +11337,11 @@ restored to the original shape.
 
 Args:
     {input}
-    shifts (int or tuple of ints): The number of places by which the elements
+    shifts (int or tuple of int): The number of places by which the elements
         of the tensor are shifted. If shifts is a tuple, dims must be a tuple of
         the same size, and each dimension will be rolled by the corresponding
         value
-    dims (int or tuple of ints): Axis along which to roll
+    dims (int or tuple of int): Axis along which to roll
 
 Example::
 

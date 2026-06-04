@@ -145,7 +145,7 @@ def _generate_node_name_to_qconfig(
 
         elif node.op == "call_method":
             module_path, module_type = node_name_to_scope[node.name]
-            # first use node.target (string) to get the qconfig
+            # first use node.target (str) to get the qconfig
             # this is to support configs like
             # "object_type": [("reshape", qconfig)]
             qconfig = _maybe_adjust_qconfig_for_module_type_or_name(

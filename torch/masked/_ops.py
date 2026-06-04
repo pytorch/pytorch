@@ -205,7 +205,7 @@ Example::
 
     argument_declarations = {
         "dim": """\
-    dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+    dim (int or tuple of int, optional): the dimension or dimensions to reduce.
     Default: None that is equivalent to ``tuple(range(input.ndim))``.""",
         "dim__as_int": """\
     dim (int): the dimension along which {operation name} is computed.""",

@@ -268,7 +268,7 @@ def set_default_backend(backend: str | Callable[..., Any] | None) -> None:
     Passing ``None`` resets the default back to ``"inductor"``.
 
     Args:
-        backend: A backend name (string), a callable backend, or ``None``.
+        backend: A backend name (str), a callable backend, or ``None``.
 
     Example::
 

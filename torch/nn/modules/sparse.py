@@ -19,7 +19,7 @@ class Embedding(Module):
     word embeddings.
 
     Args:
-        num_embeddings (int): size of the dictionary of embeddings
+        num_embeddings (int): size of the dict of embeddings
         embedding_dim (int): the size of each embedding vector
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
                                      therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
@@ -284,7 +284,7 @@ class EmbeddingBag(Module):
     :attr:`per_sample_weights`.
 
     Args:
-        num_embeddings (int): size of the dictionary of embeddings
+        num_embeddings (int): size of the dict of embeddings
         embedding_dim (int): the size of each embedding vector
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.

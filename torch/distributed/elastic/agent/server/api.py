@@ -145,7 +145,7 @@ class Worker:
     The ``id`` of the worker is interpreted
     by the specific implementation of ``ElasticAgent``. For a local
     agent, it could be the ``pid (int)`` of the worker, for a remote
-    agent it could be encoded as ``host:port (string)``.
+    agent it could be encoded as ``host:port (str)``.
 
     Args:
         id (Any): uniquely identifies a worker (interpreted by the agent)
