@@ -6979,10 +6979,22 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
             *[dict(weight="<to be initialized>", reduction=r,
                    options=LCEO(batch_chunk_size=2, allow_retain_graph=(r != "none"))) for r in sweep_reductions],
         ]
-        if not chunked_none:
-            # ignore_index / linear_bias fixed-reduction samples are
-            # scalar-only (default reduction is "mean"); there are no
-            # reduction='none' + linear_bias chunked samples.
+        if chunked_none:
+            # reduction='none' + linear_bias / ignore_index, so the OpInfo
+            # infra tests (cow_input, dtypes, ...) exercise the bias path for
+            # this variant too (numerics live in test_nn.py). allow_retain_graph
+            # is inert for none, so it stays at the default.
+            kwargs_list += [
+                dict(linear_bias="<to be initialized>", reduction="none",
+                     options=LCEO(batch_chunk_size=2)),
+                dict(linear_bias="<to be initialized>", weight="<to be initialized>",
+                     reduction="none", options=LCEO(batch_chunk_size=2)),
+                dict(linear_bias="<to be initialized>", ignore_index=1,
+                     reduction="none", options=LCEO(batch_chunk_size=2)),
+            ]
+        else:
+            # ignore_index / linear_bias fixed-reduction samples (default
+            # reduction is "mean").
             kwargs_list += [
                 dict(ignore_index=1, options=LCEO(batch_chunk_size=2, allow_retain_graph=True)),
                 dict(weight="<to be initialized>", ignore_index=1,

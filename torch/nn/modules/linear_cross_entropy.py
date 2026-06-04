@@ -1045,7 +1045,8 @@ def _(
 @_linear_cross_entropy_batch_chunked.register_vmap
 def _vmap(info, in_dims, *args):
     """vmap rule (slow path: per-sample Python loop). A fold-into-num_batches
-    fast path would need ``reduction="none"`` in the chunked op.
+    fast path is now possible for both ops via the reduction='none' chunked op
+    (``_linear_cross_entropy_batch_chunked_no_reduction``); left as a follow-up.
     """
     batch_size = info.batch_size
 
