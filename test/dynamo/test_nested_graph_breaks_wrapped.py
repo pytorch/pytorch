@@ -188,6 +188,7 @@ for case in xfails:
     unittest.expectedFailure(case)
 
 del case, xfails
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
