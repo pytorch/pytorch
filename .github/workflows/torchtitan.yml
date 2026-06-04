@@ -19,13 +19,49 @@ permissions:
   actions: read
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      check_experiments: arc,lf
+
+  # Resolve the stable CUDA version from generate_binary_build_matrix.py
+  # (CUDA_STABLE) so the build/test environment tracks it without hardcoding.
+  get-cuda-version:
+    name: get-cuda-version
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'pytorch'
+    outputs:
+      stable-cuda: ${{ steps.get.outputs.stable-cuda }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: 1
+      - name: Get stable CUDA version
+        id: get
+        run: |
+          set -eou pipefail
+          echo "stable-cuda=$(python3 .github/scripts/get_ci_variable.py --cuda-stable-version)" >> "${GITHUB_OUTPUT}"
+
   build:
     name: torchtitan-x-pytorch-build
     if: github.repository_owner == 'pytorch'
     uses: ./.github/workflows/_linux-build.yml
+    needs:
+      - get-label-type
+      - get-cuda-version
     with:
-      build-environment: linux-jammy-cuda12.8-py3-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 8.9 9.0 10.0'
       runner: linux.24xlarge.memory
       # torchtitan_h100_integration disabled pending runner availability
@@ -34,14 +70,25 @@ jobs:
           { config: "torchtitan_features_integration", shard: 1, num_shards: 1, runner: "linux.g5.48xlarge.nvidia.gpu" },
           { config: "torchtitan_models_integration", shard: 1, num_shards: 1, runner: "linux.g5.48xlarge.nvidia.gpu" }
         ]}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
     secrets: inherit
 
   test:
     name: torchtitan-x-pytorch-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: build
+    needs:
+      - build
+      - get-label-type
+      - get-cuda-version
     with:
-      build-environment: linux-jammy-cuda12.8-py3-gcc11
+      build-environment: linux-jammy-cuda${{ needs.get-cuda-version.outputs.stable-cuda }}-py3-gcc11
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
+      use-arc: ${{ needs.get-label-type.outputs.use-arc == 'true' }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: ${{ needs.get-cuda-version.outputs.stable-cuda }}
     secrets: inherit

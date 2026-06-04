@@ -1,5 +1,9 @@
 # Owner(s): ["module: inductor"]
+import base64
+import copy
 import functools
+import hashlib
+import json
 import logging
 import os
 import pickle
@@ -8,8 +12,11 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import types
 import unittest
+import warnings
 from contextlib import contextmanager
+from typing import Any, cast
 from typing_extensions import override
 from unittest import mock
 
@@ -20,10 +27,22 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
-from torch._inductor import config, metrics
+from torch._inductor import config, config_comms, metrics
+from torch._inductor.cache_key import (
+    AUTOTUNE_CACHE_KEY_STRATEGY,
+    CacheKeyStrategy,
+    CODE_CACHE_KEY_STRATEGY,
+    COMPACT_CACHE_KEY_STRATEGY,
+    FX_GRAPH_CACHE_KEY_STRATEGY,
+    SYSTEM_CACHE_KEY_STRATEGY,
+)
 from torch._inductor.codecache import (
     BypassFxGraphCache,
+    CacheabilityValidator,
+    CacheBase,
+    CppWrapperCodeCache,
     CUDACodeCache,
+    FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
     PyCodeCache,
@@ -42,13 +61,17 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import clear_caches, fresh_cache
+from torch._inductor.utils import clear_caches, fresh_cache, GPU_KERNEL_BIN_EXTS
 from torch._library import capture_triton
+from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import (
     CacheArtifact,
     CacheArtifactFactory,
     CacheArtifactManager,
+    CacheArtifactRecorder,
+    CacheInfo,
 )
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import (
     SM80OrLater,
     TEST_MULTIGPU,
@@ -96,6 +119,169 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 
+class TestCacheKeyStrategy(TestCase):
+    def _compact_sha256(self, data: bytes) -> str:
+        return (
+            base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
+        )
+
+    def test_strategy_formats_existing_key_shapes(self):
+        self.assertEqual(
+            COMPACT_CACHE_KEY_STRATEGY.key(b"kernel"),
+            self._compact_sha256(b"kernel"),
+        )
+        self.assertEqual(
+            CODE_CACHE_KEY_STRATEGY.key("kernel", "extra"),
+            "c" + self._compact_sha256(b"kernel||extra"),
+        )
+        self.assertEqual(
+            FX_GRAPH_CACHE_KEY_STRATEGY.key(b"graph"),
+            "f" + self._compact_sha256(b"graph"),
+        )
+        self.assertEqual(
+            AUTOTUNE_CACHE_KEY_STRATEGY.key("kernel", b"torch"),
+            hashlib.sha256(b"kerneltorch").hexdigest(),
+        )
+
+    def test_custom_strategy_composes_components(self):
+        strategy = CacheKeyStrategy(
+            name="test",
+            digest_format="hex",
+            prefix="x",
+            separator=b":",
+        )
+
+        self.assertEqual(
+            strategy.key("left", b"right"),
+            "x" + hashlib.sha256(b"left:right").hexdigest(),
+        )
+
+    def test_code_hash_uses_code_strategy(self):
+        from torch._inductor.codecache import code_hash, sha256_hash
+
+        self.assertEqual(
+            sha256_hash(b"kernel"), COMPACT_CACHE_KEY_STRATEGY.key(b"kernel")
+        )
+        self.assertEqual(
+            code_hash("kernel", extra="extra"),
+            CODE_CACHE_KEY_STRATEGY.key("kernel", "extra"),
+        )
+
+    def test_system_strategy_hashes_sorted_json(self):
+        system = {"version": {"triton": "abc"}, "device": {"name": "gpu"}}
+
+        self.assertEqual(
+            SYSTEM_CACHE_KEY_STRATEGY.key_from_json(system),
+            hashlib.sha256(
+                json.dumps(system, sort_keys=True).encode("utf-8")
+            ).hexdigest(),
+        )
+
+    def test_cache_base_get_system_uses_system_strategy(self):
+        class FakeStrategy:
+            value = None
+            sort_keys = None
+
+            def key_from_json(self, value, *, sort_keys=True):
+                self.value = copy.deepcopy(value)
+                self.sort_keys = sort_keys
+                return "sentinel"
+
+        fake_strategy = FakeStrategy()
+        device_properties = types.SimpleNamespace(
+            name="test-gpu", gcnArchName="test-gcn"
+        )
+
+        CacheBase.get_system.cache_clear()
+        try:
+            with (
+                mock.patch(
+                    "torch._inductor.codecache.SYSTEM_CACHE_KEY_STRATEGY",
+                    fake_strategy,
+                ),
+                mock.patch("torch._inductor.runtime.triton_compat.HAS_TRITON", False),
+                mock.patch.object(torch.cuda, "current_device", return_value=0),
+                mock.patch.object(
+                    torch.cuda,
+                    "get_device_properties",
+                    return_value=device_properties,
+                ),
+                mock.patch.object(torch.version, "cuda", "test-cuda"),
+            ):
+                self.assertEqual(CacheBase.get_system()["hash"], "sentinel")
+        finally:
+            CacheBase.get_system.cache_clear()
+
+        self.assertEqual(
+            fake_strategy.value,
+            {
+                "device": {"name": "test-gpu"},
+                "version": {"triton": None, "cuda": "test-cuda"},
+            },
+        )
+        self.assertTrue(fake_strategy.sort_keys)
+
+    def test_autotune_prepare_key_uses_strategy(self):
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+
+        class FakeStrategy:
+            components = None
+
+            def key(self, *components):
+                self.components = components
+                return "sentinel"
+
+        fake_strategy = FakeStrategy()
+        with (
+            mock.patch(
+                "torch._inductor.runtime.autotune_cache.AUTOTUNE_CACHE_KEY_STRATEGY",
+                fake_strategy,
+            ),
+            torch.compiler.config.patch({"cache_key_tag": "tag"}),
+        ):
+            self.assertEqual(AutotuneCache._prepare_key("/tmp/cabcdef.py"), "sentinel")
+
+        self.assertEqual(fake_strategy.components, ("cabcdef.py:tag",))
+
+
+class TestTorchKeyCache(TestCase):
+    def test_prefetch(self):
+        import threading
+
+        from torch._inductor.codecache import torch_key_cache
+
+        done = threading.Event()
+
+        @torch_key_cache
+        def expensive():
+            done.set()
+            return b"result"
+
+        expensive.prefetch()
+        done.wait(timeout=5)
+        self.assertTrue(done.is_set())
+        result = expensive()
+        self.assertEqual(result, b"result")
+
+    def test_concurrent_callers(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from torch._inductor.codecache import torch_key_cache
+
+        call_count = 0
+
+        @torch_key_cache
+        def expensive():
+            nonlocal call_count
+            call_count += 1
+            return b"result"
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda _: expensive(), range(8)))
+        self.assertTrue(all(r == b"result" for r in results))
+        self.assertEqual(call_count, 1)
+
+
 class LogCaptureHandler(logging.Handler):
     def __init__(self, level):
         super().__init__(level)
@@ -139,6 +325,17 @@ class MyModelConv2d(torch.nn.Module):
         return x
 
 
+class _CyclicOpaque(torch._opaque_base.OpaqueBase):
+    """Test helper: opaque type whose instances can form reference cycles."""
+
+    def __init__(self):
+        self.child = None
+
+
+if not torch._library.opaque_object.is_opaque_type(_CyclicOpaque):
+    torch._library.opaque_object.register_opaque_type(_CyclicOpaque, typ="reference")
+
+
 class TestPyCodeCache(TestCase):
     def test_linemaps_empty(self):
         src = """import torch"""
@@ -147,6 +344,34 @@ class TestPyCodeCache(TestCase):
         PyCodeCache.load_by_key_path(key, path, linemap=[])
         stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
         self.assertEqual(stack_frames, None)
+
+    def test_load_by_key_path_can_defer_sys_modules_registration(self):
+        """
+        Benchmark-only modules should not need a global ``sys.modules`` entry,
+        but a later normal runtime load must still be able to publish the same
+        cached module there.
+        """
+        module_name = None
+        try:
+            PyCodeCache.cache_clear()
+            key, path = PyCodeCache.write("value = 1\n")
+
+            module = PyCodeCache.load_by_key_path(
+                key,
+                path,
+                set_sys_modules=False,
+            )
+            module_name = module.__name__
+            self.assertNotIn(module_name, sys.modules)
+
+            registered_module = PyCodeCache.load_by_key_path(key, path)
+            self.assertIs(registered_module, module)
+            self.assertIn(module_name, sys.modules)
+            self.assertIs(sys.modules[module_name], module)
+        finally:
+            if module_name is not None:
+                sys.modules.pop(module_name, None)
+            PyCodeCache.cache_clear()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_editable_cached_wrapper(self):
@@ -208,10 +433,6 @@ class TestPyCodeCache(TestCase):
                 .decode()
                 .strip()
             )
-            # XPU have extra lines, so get the last line, refer https://github.com/intel/torch-xpu-ops/issues/2261
-            if torch.xpu.is_available():
-                wrapper_path = wrapper_path.splitlines()[-1]
-                hit = hit.splitlines()[-1]
             self.assertEqual(hit, "1")
 
             with open(wrapper_path) as f:
@@ -247,6 +468,33 @@ class TestPyCodeCache(TestCase):
             ).decode()
             self.assertIn("debug", out)
 
+    def test_cpp_wrapper_none_output_keeps_none_refcount(self):
+        source = textwrap.dedent(
+            """
+            #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+
+            void inductor_entry_impl(
+                AtenTensorHandle* input_handles,
+                AtenTensorHandle* output_handles
+            ) {
+                output_handles[0] = nullptr;
+            }
+            """
+        )
+
+        with mock.patch.object(
+            CppWrapperCodeCache, "load_async", return_value=lambda: None
+        ) as load_async:
+            CppWrapperCodeCache.load_pybinding_async(
+                ["std::vector<AtenTensorHandle>"],
+                source,
+                device_type="cpu",
+                num_outputs=1,
+            )
+
+        generated_source = load_async.call_args.args[0]
+        self.assertIn("Py_NewRef(Py_None)", generated_source)
+
 
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
@@ -273,6 +521,17 @@ class TestFxGraphCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
+
+    def _find_triton_kernel_binaries(self):
+        found = []
+        triton_dir = os.path.join(cache_dir(), "triton")
+        device_type = "hip" if torch.version.hip else "cuda"
+        binary_ext = GPU_KERNEL_BIN_EXTS[device_type]
+        for dirpath, _, filenames in os.walk(triton_dir):
+            for filename in filenames:
+                if filename.endswith(binary_ext):
+                    found.append(os.path.join(dirpath, filename))
+        return found
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -471,6 +730,70 @@ class TestFxGraphCache(TestCase):
                         grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"compile_threads": 1})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    def test_local_cache_stats(self):
+        from torch._inductor.remote_cache import cache_stats
+
+        cache_stats._stats.clear()
+
+        def fn(x, y):
+            return x * 2 + y
+
+        compiled_fn = torch.compile(fn)
+        a = torch.rand(25)
+        b = torch.rand(25)
+        compiled_fn(a, b)
+
+        stats = cache_stats._stats.get("LocalFxGraphCache")
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats.miss, 1)
+        self.assertEqual(stats.put, 1)
+        self.assertEqual(stats.hit, 0)
+
+        self.reset()
+        compiled_fn(a, b)
+
+        self.assertEqual(stats.hit, 1)
+        cache_stats._stats.clear()
+
+    @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    def test_default_dtype_affects_factory_cache_key(self):
+        old_dtype = torch.get_default_dtype()
+        FxGraphCache.clear()
+
+        def fn():
+            return (
+                torch.ones(2),
+                torch.zeros(2),
+                torch.tensor([1.0, 2.0]),
+                torch.arange(2.0),
+                torch.empty(2),
+            )
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        try:
+            torch.set_default_dtype(torch.float32)
+            first = compiled_fn()
+            self.assertEqual([x.dtype for x in first], [torch.float32] * 5)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            torch.set_default_dtype(torch.float64)
+            expected = fn()
+            actual = compiled_fn()
+            self.assertEqual([x.dtype for x in actual], [x.dtype for x in expected])
+            self.assertEqual([x.dtype for x in actual], [torch.float64] * 5)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        finally:
+            torch.set_default_dtype(old_dtype)
+            FxGraphCache.clear()
+
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -514,6 +837,10 @@ class TestFxGraphCache(TestCase):
                     "fx_graph_remote_cache": True,
                     "bundle_triton_into_fx_graph_cache": bundle_triton,
                     "use_static_triton_launcher": use_static_triton_launcher,
+                    # Disable shape padding to avoid non-deterministic pad_mm
+                    # benchmarking which can produce different FX graphs across
+                    # fresh_cache() iterations, causing flaky cache stats.
+                    "shape_padding": False,
                 }
             ),
             patch.dict(os.environ),
@@ -629,6 +956,55 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+    @requires_cuda_and_triton
+    @config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+            "bundle_triton_into_fx_graph_cache": True,
+            "triton.store_cubin": True,
+            "compile_threads": 1,
+        }
+    )
+    def test_cache_artifact_load_emits_triton_bundle(self):
+        def fn(x, y):
+            return (x.sin() + y.cos()).relu()
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            mock.patch.dict(
+                os.environ,
+                {
+                    "TORCHINDUCTOR_CACHE_DIR": tmpdir,
+                    "TRITON_CACHE_DIR": os.path.join(tmpdir, "triton"),
+                },
+            ),
+        ):
+            self.reset()
+            CacheArtifactManager.clear()
+
+            x = torch.randn(256, 256, device="cuda")
+            y = torch.randn(256, 256, device="cuda")
+            compiled_fn = torch.compile(fn, dynamic=False)
+
+            self.assertEqual(fn(x, y), compiled_fn(x, y))
+            torch.cuda.synchronize()
+
+            artifacts = torch.compiler.save_cache_artifacts()
+            self.assertIsNotNone(artifacts)
+            artifact_bytes, _ = artifacts
+
+            self.assertGreater(len(self._find_triton_kernel_binaries()), 0)
+
+            self.reset()
+            CacheArtifactManager.clear()
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
+
+            self.assertIsNotNone(cache_info)
+            self.assertGreater(len(self._find_triton_kernel_binaries()), 0)
 
     @requires_triton()
     @config.patch(
@@ -2372,6 +2748,87 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             x = torch.randn(5)
             (result,) = compiled_artifact(4, x)
 
+    def test_dynamic_shapes_from_example_inputs_fake_mode(self):
+        def f(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(f)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        fake_x = fake_mode.from_tensor(torch.ones(4), static_shapes=True)
+
+        seen_fake_modes = []
+        seen_ignore_shape_env = []
+
+        def fake_compile_fx(gm, example_inputs, **kwargs):
+            seen_fake_modes.append(torch._guards.TracingContext.get().fake_mode)
+            seen_ignore_shape_env.append(kwargs["ignore_shape_env"])
+            self.assertIs(example_inputs[0], fake_x)
+            return lambda *args: args
+
+        with mock.patch(
+            "torch._inductor.compile_fx.compile_fx", side_effect=fake_compile_fx
+        ):
+            torch._inductor.standalone_compile(
+                gm,
+                (fake_x,),
+                dynamic_shapes="from_example_inputs",
+                fake_mode=fake_mode,
+            )
+
+        self.assertEqual(seen_ignore_shape_env, [True])
+        self.assertIs(seen_fake_modes[0], fake_mode)
+
+        seen_fake_modes.clear()
+        seen_ignore_shape_env.clear()
+        with mock.patch(
+            "torch._inductor.compile_fx.compile_fx", side_effect=fake_compile_fx
+        ):
+            torch._inductor.standalone_compile(
+                gm,
+                (fake_x,),
+                dynamic_shapes="from_example_inputs",
+            )
+
+        self.assertEqual(seen_ignore_shape_env, [True])
+        self.assertIsNot(seen_fake_modes[0], fake_mode)
+        self.assertIsInstance(seen_fake_modes[0], FakeTensorMode)
+        self.assertIsNotNone(seen_fake_modes[0].shape_env)
+
+    def test_standalone_compile_fake_mode_requires_shape_env(self):
+        def f(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(f)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "fake_mode.*ShapeEnv",
+        ):
+            torch._inductor.standalone_compile(
+                gm,
+                (torch.ones(4),),
+                dynamic_shapes="from_example_inputs",
+                fake_mode=FakeTensorMode(),
+            )
+
+    def test_standalone_compile_fake_mode_requires_from_example_inputs(self):
+        def f(x):
+            return x + 1
+
+        gm = torch.fx.symbolic_trace(f)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+        with self.assertRaisesRegex(
+            ValueError,
+            'fake_mode.*dynamic_shapes="from_example_inputs"',
+        ):
+            torch._inductor.standalone_compile(
+                gm,
+                (torch.ones(4),),
+                dynamic_shapes="from_graph",
+                fake_mode=fake_mode,
+            )
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -2527,6 +2984,32 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+        # Lists of properly-registered custom hooks should also allow caching.
+        custom_passes = [TestCustomGraphPass(), TestCustomGraphPass()]
+        with config.patch(
+            {
+                "post_grad_custom_pre_pass": custom_passes,
+                "post_grad_custom_post_pass": custom_passes,
+                "joint_custom_pre_pass": custom_passes,
+                "joint_custom_post_pass": custom_passes,
+            }
+        ):
+            self.reset()
+            counters.clear()
+
+            # Cache miss
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.reset()
+            counters.clear()
+
+            # Cache hit
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
 
 class TestCustomPartitionerFn(CustomPartitionerFn):
     def __init__(self):
@@ -2542,6 +3025,67 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_cacheability_validator_checks_mkldnn_constant(self):
+        graph = torch.fx.Graph()
+        output = graph.get_attr("mkldnn_weight")
+        graph.output(output)
+        gm = torch.fx.GraphModule(
+            {"mkldnn_weight": torch.randn(2, 2).to_mkldnn()}, graph
+        )
+
+        with self.assertRaisesRegex(BypassFxGraphCache, "mkldnn tensors unpickleable"):
+            CacheabilityValidator(gm, require_shape_env=False).validate()
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_check_for_hop_skips_constants(self):
+        graph = torch.fx.Graph()
+        output = graph.get_attr("mkldnn_weight")
+        graph.output(output)
+        gm = torch.fx.GraphModule(
+            {"mkldnn_weight": torch.randn(2, 2).to_mkldnn()}, graph
+        )
+
+        FxGraphCache._check_for_hop(gm)
+
+    def test_check_can_cache_checks_backward_state_example_inputs(self):
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+
+        with self.assertRaisesRegex(BypassFxGraphCache, "Reduce unsupported"):
+            FxGraphCache._check_can_cache(
+                gm,
+                [torch.fx.experimental._backward_state.BackwardState()],
+                require_shape_env=False,
+            )
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_check_can_cache_checks_nested_fx_kwargs_tensor(self):
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        fx_kwargs = cast(
+            Any, {"nested": {"mkldnn_weight": torch.randn(2, 2).to_mkldnn()}}
+        )
+
+        with self.assertRaisesRegex(BypassFxGraphCache, "mkldnn tensors unpickleable"):
+            FxGraphCache._check_can_cache(
+                gm,
+                fx_kwargs=fx_kwargs,
+                require_shape_env=False,
+            )
+
+    def test_bypass_for_pickle_error_logs_traceback(self):
+        with self.assertLogs("torch._inductor.codecache", level="WARNING") as logs:
+            with self.assertRaisesRegex(
+                BypassFxGraphCache, "Failed to pickle cache key"
+            ):
+                try:
+                    raise RuntimeError("pickle failed")
+                except RuntimeError as e:
+                    CacheabilityValidator.bypass_for_pickle_error(e)
+
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("Failed to pickle cache key", logs.records[0].getMessage())
+        self.assertIsNotNone(logs.records[0].exc_info)
+
     def test_parameter_constants(self):
         """
         Test the hashing of parameter constants.
@@ -2746,6 +3290,31 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(details3),
         )
 
+    def test_hash_config_comms_changes(self):
+        """
+        Test that changes to config_comms settings affect hashes.
+        """
+        with config_comms.patch(
+            {"runtime_estimations_use_nccl_lib_estimations": False}
+        ):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with config_comms.patch({"runtime_estimations_use_nccl_lib_estimations": True}):
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+
     def test_hash_private_config_changes(self):
         """
         Test that private config settings affect hashes.
@@ -2929,6 +3498,39 @@ class TestFxGraphCacheHashing(TestCase):
                 pickler.dumps(details1),
                 pickler.dumps(details3),
             )
+
+        custom_pass_1 = TestCustomGraphPass()
+        custom_pass_2 = TestCustomGraphPass()
+        with config.patch(
+            {"post_grad_custom_pre_pass": [custom_pass_1, custom_pass_2]}
+        ):
+            custom_pass_1._uuid = "1"
+            custom_pass_2._uuid = "2"
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+            custom_pass_2._uuid = "3"
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        with config.patch(
+            {"post_grad_custom_pre_pass": [custom_pass_2, custom_pass_1]}
+        ):
+            details4 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details3),
+            pickler.dumps(details4),
+        )
 
     def test_hash_custom_backend_pass(self):
         """
@@ -3135,6 +3737,30 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps([s1, s2]),
         )
 
+    def test_pickle_opaque_type_with_cyclic_references(self):
+        """
+        Test that FxGraphCachePickler can pickle a FakeScriptObject wrapping an
+        opaque type whose real_obj has cyclic references.  Before the fix,
+        fast-mode pickling (no memo table) would hit a ValueError on cycles.
+        """
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        obj = _CyclicOpaque()
+        obj.child = obj  # create a cycle
+
+        fake = FakeScriptObject(
+            wrapped_obj=None,
+            script_class_name="test::_CyclicOpaque",
+            x=obj,
+        )
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+        # Should succeed — the pickler disables fast mode for opaque types
+        # so the memo table can track the cycle.
+        data = pickler.dumps(fake)
+        self.assertIsNotNone(data)
+
     def test_get_hash_for_files(self):
         """
         Test the get_hash_for_files helper.
@@ -3160,6 +3786,158 @@ class TestFxGraphCacheHashing(TestCase):
             finally:
                 temp.close()
                 os.unlink(temp.name)
+
+    def test_reducer_override_unpicklable_type(self):
+        """
+        Test that FxGraphCachePickler handles objects whose __reduce_ex__
+        raises TypeError (e.g. pybind11 enums) via reducer_override instead
+        of crashing or bypassing the cache.
+        """
+
+        class UnpicklableEnum:
+            """Simulates a pybind11 enum that cannot be pickled."""
+
+            def __init__(self, name):
+                self.name = name
+
+            def __reduce_ex__(self, protocol):
+                raise TypeError("cannot pickle 'UnpicklableEnum' object")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        obj_a = UnpicklableEnum("SUM")
+        obj_b = UnpicklableEnum("SUM")
+        obj_c = UnpicklableEnum("PRODUCT")
+
+        # Same name -> same hash (stability)
+        self.assertEqual(pickler.dumps(obj_a), pickler.dumps(obj_b))
+        # Different name -> different hash
+        self.assertNotEqual(pickler.dumps(obj_a), pickler.dumps(obj_c))
+
+    def test_reducer_override_unpicklable_with_pybind11_pattern(self):
+        """
+        Test reducer_override with objects that have the pybind11 enum
+        accessor pattern (obj.type.name).
+        """
+
+        class _EnumType:
+            def __init__(self, name):
+                self.name = name
+
+        class Pybind11Enum:
+            """Simulates pybind11 enum with .type.name access pattern."""
+
+            def __init__(self, type_name, value):
+                self.type = _EnumType(type_name)
+                self.value = value
+
+            def __reduce_ex__(self, protocol):
+                raise TypeError("cannot pickle 'Pybind11Enum' object")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        obj1 = Pybind11Enum("ReduceOp", 0)
+        obj2 = Pybind11Enum("ReduceOp", 0)
+        obj3 = Pybind11Enum("AllReduceOp", 0)
+
+        # Same type.name -> same hash
+        self.assertEqual(pickler.dumps(obj1), pickler.dumps(obj2))
+        # Different type.name -> different hash
+        self.assertNotEqual(pickler.dumps(obj1), pickler.dumps(obj3))
+
+    def test_reducer_override_unpicklable_with_value_pattern(self):
+        """
+        Test reducer_override with objects that only expose a .value
+        accessor (no .type.name or .name).
+        """
+
+        class ValueOnlyObj:
+            def __init__(self, value):
+                self.value = value
+
+            def __reduce_ex__(self, protocol):
+                raise TypeError("cannot pickle 'ValueOnlyObj' object")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        obj1 = ValueOnlyObj(42)
+        obj2 = ValueOnlyObj(42)
+        obj3 = ValueOnlyObj(99)
+
+        # Same value -> same hash
+        self.assertEqual(pickler.dumps(obj1), pickler.dumps(obj2))
+        # Different value -> different hash
+        self.assertNotEqual(pickler.dumps(obj1), pickler.dumps(obj3))
+
+    def test_reducer_override_does_not_affect_normal_types(self):
+        """
+        Test that reducer_override returns NotImplemented for types that
+        pickle normally, so standard pickling is used for them.
+        """
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        # Normal picklable objects should work as before
+        data = pickler.dumps(42)
+        self.assertEqual(pickle.loads(data), 42)
+
+        data = pickler.dumps("hello")
+        self.assertEqual(pickle.loads(data), "hello")
+
+        data = pickler.dumps([1, 2, 3])
+        self.assertEqual(pickle.loads(data), [1, 2, 3])
+
+    def test_reducer_override_caches_probed_types(self):
+        """
+        Test that once a type is probed, it is cached in _pickleable_type_cache
+        for subsequent fast-path lookups (both picklable and unpicklable).
+        """
+
+        class AnotherUnpicklable:
+            def __init__(self, name):
+                self.name = name
+
+            def __reduce_ex__(self, protocol):
+                raise TypeError("cannot pickle")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+        self.addCleanup(
+            FxGraphCachePickler._pickleable_type_cache.pop, AnotherUnpicklable, None
+        )
+
+        # Unpicklable type gets cached as False (class-level cache)
+        self.assertNotIn(AnotherUnpicklable, FxGraphCachePickler._pickleable_type_cache)
+        pickler.dumps(AnotherUnpicklable("x"))
+        self.assertFalse(FxGraphCachePickler._pickleable_type_cache[AnotherUnpicklable])
+
+        # Second call should use fast path (same result)
+        obj1 = AnotherUnpicklable("y")
+        obj2 = AnotherUnpicklable("y")
+        self.assertEqual(pickler.dumps(obj1), pickler.dumps(obj2))
+
+    def test_reducer_override_bypasses_cache_for_totally_opaque_types(self):
+        """
+        Test that unpicklable objects with no stable repr and no known
+        accessors cause BypassFxGraphCache instead of silently producing
+        a potentially incorrect cache key.
+        """
+
+        class TotallyOpaque:
+            def __reduce_ex__(self, protocol):
+                raise TypeError("cannot pickle")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+        self.addCleanup(
+            FxGraphCachePickler._pickleable_type_cache.pop, TotallyOpaque, None
+        )
+
+        with self.assertRaises(BypassFxGraphCache):
+            pickler.dumps(TotallyOpaque())
 
 
 class TestCudaCompileCommand(TestCase):
@@ -3211,6 +3989,7 @@ class TestAutotuneCache(TestCase):
         super().setUp()
         counters.clear()
         PatchCaches.setUp()
+        CacheArtifactManager.clear()
 
     def tearDown(self):
         super().tearDown()
@@ -3220,6 +3999,174 @@ class TestAutotuneCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
+
+    def test_remote_only_autotune_records_cache_artifacts(self):
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+
+        class RemoteCacheStub:
+            def __init__(self) -> None:
+                self.cache = {}
+
+            def get(self, key):
+                return self.cache.get(key)
+
+            def put(self, key, value) -> None:
+                self.cache[key] = value
+
+        class ConfigStub:
+            kwargs = {"BLOCK_M": 16, "BLOCK_N": 16}
+            num_warps = 4
+            num_stages = 3
+
+        remote_cache = RemoteCacheStub()
+        inductor_meta = {
+            "autotune_local_cache": False,
+            "autotune_remote_cache": True,
+            "backend_hash": "backend_hash",
+            "is_fbcode": False,
+        }
+
+        with mock.patch(
+            "torch._inductor.runtime.autotune_cache.create_cache",
+            return_value=remote_cache,
+        ):
+            autotune_cache = AutotuneCache.create(
+                inductor_meta,
+                os.path.join(cache_dir(), "aa", "kernel.py"),
+                "configs_hash",
+            )
+
+        self.assertIsNotNone(autotune_cache)
+        autotune_cache = cast(AutotuneCache, autotune_cache)
+        self.assertIsNone(autotune_cache.local_cache)
+        self.assertIsNotNone(autotune_cache.remote_cache)
+        self.assertIsNotNone(autotune_cache.artifact_recorder)
+        artifact_recorder = cast(
+            CacheArtifactRecorder, autotune_cache.artifact_recorder
+        )
+        expected_artifact_key = artifact_recorder.key
+
+        CacheArtifactManager.clear()
+        autotune_cache.save(ConfigStub(), time_taken_ns=1_000_000)
+
+        artifacts = torch.compiler.save_cache_artifacts()
+        self.assertIsNotNone(artifacts)
+        artifacts = cast(tuple[bytes, CacheInfo], artifacts)
+        _, cache_info = artifacts
+        self.assertEqual(cache_info.autotune_artifacts, [expected_artifact_key])
+
+        CacheArtifactManager.clear()
+        self.assertIsNotNone(autotune_cache._read())
+        artifacts = torch.compiler.save_cache_artifacts()
+        self.assertIsNotNone(artifacts)
+        artifacts = cast(tuple[bytes, CacheInfo], artifacts)
+        _, cache_info = artifacts
+        self.assertEqual(cache_info.autotune_artifacts, [expected_artifact_key])
+
+    @config.patch({"bundled_autotune_remote_cache": True})
+    def test_autotune_cache_bundler_is_compile_context_scoped(self):
+        from torch._guards import compile_context, CompileContext
+        from torch._inductor.runtime.autotune_cache import AutotuneCacheBundler
+
+        class FakeBundledCache:
+            def __init__(self):
+                self.puts = []
+
+            def get(self, key):
+                return None
+
+            def put(self, key, data):
+                self.puts.append((key, data))
+
+        cache1 = FakeBundledCache()
+        cache2 = FakeBundledCache()
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "backend_hash": "backend",
+            "bundled_autotune_remote_cache": True,
+            "is_fbcode": False,
+        }
+
+        ctx1 = CompileContext(None)
+        ctx2 = CompileContext(None)
+        with mock.patch(
+            "torch._inductor.runtime.autotune_cache.create_cache",
+            side_effect=[cache1, cache2],
+        ):
+            with compile_context(ctx1):
+                AutotuneCacheBundler.begin_compile(inductor_meta, code_hash="code1")
+                AutotuneCacheBundler.put("/tmp/cache/aa/entry1.best_config", {"ctx": 1})
+
+                with compile_context(ctx2):
+                    AutotuneCacheBundler.begin_compile(inductor_meta, code_hash="code2")
+                    AutotuneCacheBundler.put(
+                        "/tmp/cache/bb/entry2.best_config", {"ctx": 2}
+                    )
+                    AutotuneCacheBundler.end_compile()
+
+                AutotuneCacheBundler.put("/tmp/cache/aa/entry3.best_config", {"ctx": 1})
+                AutotuneCacheBundler.end_compile()
+
+        self.assertEqual(len(cache1.puts), 1)
+        self.assertEqual(
+            cache1.puts[0][1],
+            {
+                "entry1.best_config": {"ctx": 1},
+                "entry3.best_config": {"ctx": 1},
+            },
+        )
+        self.assertEqual(len(cache2.puts), 1)
+        self.assertEqual(cache2.puts[0][1], {"entry2.best_config": {"ctx": 2}})
+
+    @config.patch({"bundled_autotune_remote_cache": True})
+    def test_autotune_cache_bundler_runs_in_saved_compile_context(self):
+        from torch._guards import compile_context, CompileContext
+        from torch._inductor.output_code import CompiledFxGraph
+        from torch._inductor.runtime.autotune_cache import AutotuneCacheBundler
+
+        class FakeBundledCache:
+            def __init__(self):
+                self.puts = []
+
+            def get(self, key):
+                return None
+
+            def put(self, key, data):
+                self.puts.append((key, data))
+
+        cache = FakeBundledCache()
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "backend_hash": "backend",
+            "bundled_autotune_remote_cache": True,
+            "is_fbcode": False,
+        }
+
+        graph = CompiledFxGraph.__new__(CompiledFxGraph)
+        graph.fx_kwargs = {}
+        graph._compile_context = None
+
+        def current_callable(inputs):
+            AutotuneCacheBundler.put(
+                "/tmp/cache/aa/entry.best_config", {"ctx": "saved"}
+            )
+            return inputs
+
+        graph.current_callable = current_callable
+
+        with mock.patch(
+            "torch._inductor.runtime.autotune_cache.create_cache",
+            return_value=cache,
+        ):
+            with compile_context(CompileContext(None)):
+                AutotuneCacheBundler.begin_compile(inductor_meta, code_hash="code")
+                graph._set_compile_context_for_autotune_cache()
+
+            self.assertEqual(graph(["result"]), ["result"])
+
+        self.assertEqual(len(cache.puts), 1)
+        self.assertEqual(cache.puts[0][1], {"entry.best_config": {"ctx": "saved"}})
+        self.assertIsNone(graph._compile_context)
 
     @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
@@ -3566,6 +4513,82 @@ class TestUtils(TestCase):
         torch.compile(fn)()
 
 
+class TestVecISACheckBuild(TestCase):
+    # Regression tests for the VecISA.check_build dlopen probe behavior:
+    # the parent must (1) bound the child with a timeout and return
+    # False if it expires, and (2) make libtorch findable in the
+    # child's loader path so the child can dlopen the probe .so
+    # without importing torch.
+    #
+    # These target the small helpers (_probe_load, _build_probe_env)
+    # directly so they don't depend on CppBuilder / CppTorchOptions
+    # succeeding on the host, which would otherwise make the tests
+    # platform-specific (the production path is fine; only the
+    # CppTorchOptions construction is brittle to host compiler probes
+    # when handed an off-arch VecISA like VecAVX2 on aarch64/macOS-arm64).
+
+    def test_probe_load_returns_false_on_timeout(self):
+        from torch._inductor import cpu_vec_isa
+
+        calls: list[Any] = []
+
+        def fake_run(*args, **kwargs):
+            calls.append(kwargs.get("timeout"))
+            raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+
+        fake_subprocess = types.SimpleNamespace(
+            run=fake_run,
+            TimeoutExpired=subprocess.TimeoutExpired,
+            CalledProcessError=subprocess.CalledProcessError,
+            DEVNULL=subprocess.DEVNULL,
+        )
+
+        instance = cpu_vec_isa.VecAVX2()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
+                result = instance._probe_load("/nonexistent/probe.so")
+
+        self.assertFalse(result)
+        self.assertEqual(calls, [60])
+        self.assertTrue(
+            any("hung after 60s" in str(w.message) for w in caught),
+            msg=f"expected timeout warning, got: {[str(w.message) for w in caught]}",
+        )
+
+    def test_probe_load_returns_false_on_called_process_error(self):
+        from torch._inductor import cpu_vec_isa
+
+        def fake_run(*args, **kwargs):
+            raise subprocess.CalledProcessError(returncode=1, cmd=args[0])
+
+        fake_subprocess = types.SimpleNamespace(
+            run=fake_run,
+            TimeoutExpired=subprocess.TimeoutExpired,
+            CalledProcessError=subprocess.CalledProcessError,
+            DEVNULL=subprocess.DEVNULL,
+        )
+
+        instance = cpu_vec_isa.VecAVX2()
+        with mock.patch.object(cpu_vec_isa, "subprocess", fake_subprocess):
+            result = instance._probe_load("/nonexistent/probe.so")
+
+        self.assertFalse(result)
+
+    def test_build_probe_env_prepends_torch_lib_dir_to_loader_path(self):
+        from torch._inductor import cpu_vec_isa
+
+        env = cpu_vec_isa.VecISA._build_probe_env()
+
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+        value = env.get("LD_LIBRARY_PATH", "")
+        self.assertEqual(
+            value.split(os.pathsep)[0],
+            torch_lib,
+            msg=f"LD_LIBRARY_PATH should be prepended with {torch_lib!r}, got {value!r}",
+        )
+
+
 class TestCompilationEventLogging(TestCase):
     def reset(self):
         DynamoCache.clear()
@@ -3902,11 +4925,7 @@ class TestAutotuneCacheExtraOptions(TestCase):
         cache.local_cache = (mock_local_backend, "test_key")
         cache.remote_cache = None
 
-        # Mock AutotuneCacheBundler and CacheArtifactManager
-        with (
-            mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"),
-            mock.patch("torch._inductor.runtime.autotune_cache.CacheArtifactManager"),
-        ):
+        with mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"):
             cache.save(config_with_extra, time_taken_ns=1000000)
 
         # Verify extra_options was included in the saved data
@@ -3942,11 +4961,7 @@ class TestAutotuneCacheExtraOptions(TestCase):
         cache.local_cache = (mock_local_backend, "test_key")
         cache.remote_cache = None
 
-        # Mock AutotuneCacheBundler and CacheArtifactManager
-        with (
-            mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"),
-            mock.patch("torch._inductor.runtime.autotune_cache.CacheArtifactManager"),
-        ):
+        with mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"):
             cache.save(config_without_extra, time_taken_ns=1000000)
 
         # Verify extra_options was NOT included in the saved data

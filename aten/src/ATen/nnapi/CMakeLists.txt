@@ -16,6 +16,6 @@ if(PYTORCH_NNAPI_STANDALONE)
   target_link_libraries(pytorch_nnapi torch)
 else()
   # Building within the PyTorch tree.
-  file(GLOB ATen_NNAPI_SRCS "*.cpp")
+  file(GLOB ATen_NNAPI_SRCS CONFIGURE_DEPENDS "*.cpp")
   set(ATen_NNAPI_SRCS ${ATen_NNAPI_SRCS} PARENT_SCOPE)
 endif()

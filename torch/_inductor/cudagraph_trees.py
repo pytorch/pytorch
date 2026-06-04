@@ -56,6 +56,10 @@ from typing import Any, cast, TYPE_CHECKING, TypeVar
 import torch.fx
 from torch import Tensor
 from torch._dynamo.callback import CallbackTrigger
+from torch._dynamo.graph_bytecode_inputs import (
+    CURRENT_STREAM_INDEX,
+    set_external_object_by_index,
+)
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
@@ -65,6 +69,7 @@ from torch._higher_order_ops.cudagraph_conditional_nodes import (
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
+    copy_strided_storage_,
     get_expanded_dims,
     get_input_idxs_to_check,
     index_expanded_dims,
@@ -309,22 +314,30 @@ class TreeManagerContainer:
             return self.tree_manager
 
 
-local = threading.local()
+def _initialize_tls(local: threading.local) -> None:
+    # one tree manager per device
+    local.tree_manager_containers = {}
+    local.tree_manager_locks = defaultdict(threading.Lock)
 
-# one tree manager per device
-local.tree_manager_containers = {}
-local.tree_manager_locks = defaultdict(threading.Lock)
+    # We need to register this as an object that will be copied over as TLS when new
+    # threads are created in autograd
+    torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
+    torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
+
+
+local = threading.local()
+_initialize_tls(local)
+
+
+# CUDA graph capture and private-pool warmup are process-wide CUDA states.  Keep
+# them serialized across Python threads so a synchronize or allocator-pool switch
+# in one thread does not invalidate another thread's capture.
+graph_capture_lock = threading.Lock()
 
 
 # only incremented by user call of mark_step_begin
 class MarkStepBox:
     mark_step_counter = 0
-
-
-# We need to register this as an object that will be copied over as TLS when new
-# threads are created in autograd
-torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
-torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
 
 
 def mark_step_begin() -> None:
@@ -361,9 +374,10 @@ def reset_cudagraph_trees() -> None:
 def get_obj(local: Any, attr_name: str) -> Any:
     if hasattr(local, attr_name):
         return getattr(local, attr_name)
-    else:
-        assert torch._C._is_key_in_tls(attr_name)
-        return torch._C._get_obj_in_tls(attr_name)
+    if not torch._C._is_key_in_tls(attr_name):
+        _initialize_tls(local)
+        return getattr(local, attr_name)
+    return torch._C._get_obj_in_tls(attr_name)
 
 
 def get_container(device_index: int) -> TreeManagerContainer:
@@ -424,11 +438,15 @@ def cudagraphify_impl(
         fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
-
+        compile_id = kwargs.get("compile_id", "")
         if int_key is None:
-            log.info("Recording cudagraph tree for graph without symints")
+            log.info(
+                "[%s] Recording cudagraph tree for graph without symints", compile_id
+            )
         else:
-            log.info("Recording cudagraph tree for symint key %s", int_key)
+            log.info(
+                "[%s] Recording cudagraph tree for symint key %s", compile_id, int_key
+            )
 
         if not has_warn:
             has_warn = maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
@@ -633,6 +651,19 @@ def _use_cuda_memory_pool_manager(
     torch.cuda.current_stream().wait_stream(stream)
 
 
+@contextlib.contextmanager
+def _update_current_stream_external_object() -> Generator[None, None, None]:
+    """Update the external object registry so custom ops see the capture stream.
+
+    During cudagraph recording/warmup the current stream differs from the
+    trace-time default stream.  The external object at CURRENT_STREAM_INDEX
+    must reflect the actual current stream so that custom ops (e.g. event
+    record/wait) executed during capture use the right stream.
+    """
+    set_external_object_by_index(CURRENT_STREAM_INDEX, torch.cuda.current_stream())
+    yield
+
+
 def map_to_ref(t: Tensor | None) -> StorageWeakRefWrapper | None:
     if not isinstance(t, torch.Tensor):
         assert t is None
@@ -725,6 +756,8 @@ class CUDAWarmupNode:
             _use_cuda_memory_pool_manager(
                 self.device_index, self.cuda_graphs_pool, self.stream
             ),
+            # NB: must go after _use_cuda_memory_pool_manager which switches the stream
+            _update_current_stream_external_object(),
             ControlFlowOpWarmupDispatchMode(),
             get_history_recording(),
         ):
@@ -1081,7 +1114,7 @@ class CUDAGraphNode:
         # is the output Storage unaliased in subsequent outputs, of all subsequent paths
         # if it is, we cached the output tensor and adjust storage liveness tracking to also
         # check if the output tensor does not have an additional python reference.
-        # If a descendent node discovers it has an alias of a prior output, then the output
+        # If a descendant node discovers it has an alias of a prior output, then the output
         # will no longer be cached in the ancestor.
         # The large majority of tensors are unaliased, and preserving aliased output tensors would add
         # significant additional complexity with marginal gains
@@ -1126,7 +1159,13 @@ class CUDAGraphNode:
             if not isinstance(srcs[idx], torch.Tensor):
                 continue
             expanded_dims = self.expanded_dims[idx]
-            dst_tensors.append(index_expanded_dims(dsts[idx], expanded_dims))  # type: ignore[arg-type]
+            indexed_dst = index_expanded_dims(dsts[idx], expanded_dims)  # type: ignore[arg-type]
+            if torch._debug_has_internal_overlap(indexed_dst) != 0:
+                # rare path: dst still self-overlaps after dropping expanded dims
+                copy_strided_storage_(dsts[idx], srcs[idx])  # type: ignore[arg-type]
+                srcs[idx] = None  # type: ignore[call-overload]
+                continue
+            dst_tensors.append(indexed_dst)
             src_tensors.append(index_expanded_dims(srcs[idx], expanded_dims))  # type: ignore[arg-type]
             srcs[idx] = None  # type: ignore[call-overload]
         # Fails on empty lists
@@ -1334,6 +1373,8 @@ class CUDAGraphNode:
                 pool=self.cuda_graphs_pool,
                 capture_error_mode="thread_local",
             ),
+            # NB: must go after torch.cuda.graph which switches the stream
+            _update_current_stream_external_object(),
             CUDAGraphCaptureControlFlowOpDispatchMode(),
             get_history_recording(),
         ):
@@ -1577,7 +1618,7 @@ class CUDAGraphNode:
         return True
 
     def add_child(self, function_id: FunctionID, node: CUDAGraphNode) -> None:
-        "Adds node as a a child of self"
+        "Adds node as a child of self"
         self.children[function_id].append(node)
 
     @staticmethod
@@ -2044,7 +2085,7 @@ class CUDAGraphTreeManager:
         # will not be reused; separate recordings would have use the same memory pool, but not
         # the same memory.
 
-        with torch.cuda.device(device_index):
+        with graph_capture_lock, torch.cuda.device(device_index):
             torch.cuda.synchronize()
             self.stream = torch.cuda.Stream()
             self.stream.wait_stream(torch.cuda.current_stream())
@@ -2187,7 +2228,10 @@ class CUDAGraphTreeManager:
     def exceed_rerecord_limit(
         self, node_id: GraphID | None, function_id: FunctionID
     ) -> bool:
-        return False
+        return (
+            self.num_rerecord[node_id][function_id]
+            > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
+        )
 
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
@@ -2232,7 +2276,8 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            return self.run_eager(new_inputs, function_id)
+            with graph_capture_lock:
+                return self.run_eager(new_inputs, function_id)
 
         assert not isinstance(self.current_node, CUDAWarmupNode)
         child_nodes = (
@@ -2250,11 +2295,15 @@ class CUDAGraphTreeManager:
                 if status == CheckInvariantStatus.SUCCESS:
                     return self.execute_node(child, new_inputs)
 
-                if (
-                    status == CheckInvariantStatus.StaticInputIdxMismatch
-                    or status == CheckInvariantStatus.CudagraphManagedIdxMismatch
-                ):
-                    unexpected_rerecord = True
+                if status != CheckInvariantStatus.SUCCESS:
+                    # StaticInputIdxMismatch fires on non-cudagraph-managed
+                    # static inputs (nn parameters and mark_static_address
+                    # tensors) whose identity can churn under
+                    # inline_inbuilt_nn_modules. We re-record but don't count
+                    # those toward cudagraph_unexpected_rerecord_limit. All
+                    # other mismatch reasons do count.
+                    if status != CheckInvariantStatus.StaticInputIdxMismatch:
+                        unexpected_rerecord = True
                     # Only compute detailed reason when debug logging is enabled
                     if log.isEnabledFor(logging.DEBUG):
                         unexpected_rerecord_reason = status_logger()
@@ -2319,7 +2368,8 @@ class CUDAGraphTreeManager:
                 self.apply_checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
-        return self.record_function(new_inputs, function_id)
+        with graph_capture_lock:
+            return self.record_function(new_inputs, function_id)
 
     def shutdown(self) -> None:
         """
@@ -2605,10 +2655,23 @@ class CUDAGraphTreeManager:
         )
 
     @staticmethod
-    def format_dealloc_msg(stack_trace: str | None) -> str:
+    def format_dealloc_msg(
+        stack_trace: str | None, *, is_grad_output: bool = False
+    ) -> str:
         stack_trace = (
             stack_trace.strip() if stack_trace else "[Could not find stack trace]"
         )
+        if is_grad_output:
+            return (
+                "Error: accessing gradient tensor output of CUDAGraphs that has been overwritten "
+                f"by a subsequent run. Stack trace: {stack_trace}. "
+                "This can happen with torch.compile(mode='reduce-overhead') and gradient "
+                "accumulation when a .grad tensor is allocated during CUDAGraph capture. "
+                "If you need gradient accumulation, allocate stable .grad buffers outside "
+                "CUDAGraph capture before the compiled backward runs, for example by running "
+                "an eager warmup iteration or by preallocating zeroed .grad tensors. "
+                "If you do not need gradient accumulation, set .grad to None before each backward."
+            )
         return (
             "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
             f"Stack trace: {stack_trace}. "
@@ -2621,17 +2684,29 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
 
-        stor_stack_trace: dict[int, str | None] = {}
+        stor_dealloc_info: dict[int, tuple[str | None, bool]] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
-            assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            # tensor_weakrefs and stack_traces are paired below with zip(),
+            # matching the defensive handling for outputs_weakrefs and
+            # stack_traces.
+            if len(node.tensor_weakrefs) != len(node.stack_traces):
+                log.warning(
+                    "tensor_weakrefs length (%d) != stack_traces length (%d)",
+                    len(node.tensor_weakrefs),
+                    len(node.stack_traces),
+                )
+            is_grad_output = (
+                self.id_to_mode[node.wrapped_function.id] == CompilationMode.BACKWARD
+            )
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()
                 if ten is None:
                     continue
 
                 torch._C._set_storage_access_error_msg(
-                    ten, self.format_dealloc_msg(stack_trace)
+                    ten,
+                    self.format_dealloc_msg(stack_trace, is_grad_output=is_grad_output),
                 )
 
             # we would to enable the following assertion, but an internal model failed with a command
@@ -2647,7 +2722,10 @@ class CUDAGraphTreeManager:
                 if not storage_ref:
                     continue
 
-                stor_stack_trace[storage_ref.data_ptr()] = stack_trace
+                stor_dealloc_info[storage_ref.data_ptr()] = (
+                    stack_trace,
+                    is_grad_output,
+                )
 
         deleted = OrderedSet[Any]()
         for storage_ref in self.current_node.path_live_weakrefs():
@@ -2655,8 +2733,11 @@ class CUDAGraphTreeManager:
             if _storage_deref and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
 
+                stack_trace, is_grad_output = stor_dealloc_info.get(
+                    storage_ref.data_ptr(), (None, False)
+                )
                 msg = self.format_dealloc_msg(
-                    stor_stack_trace.get(storage_ref.data_ptr())
+                    stack_trace, is_grad_output=is_grad_output
                 )
                 torch._C._free_And_Remove_DeleterFn(_storage_deref)
 

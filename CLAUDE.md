@@ -8,11 +8,23 @@ When asked to review a PR, always use the /pr-review skill.
 
 # Environment
 
-If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.
+If any tool you're trying to use (pip, python, spin, etc) is missing, check for
+a `.venv` directory in the project root or its parent directory. If found,
+activate it and retry. If no `.venv` is found, stop and ask the user if an
+environment is needed. Do NOT try to find alternatives or install these tools.
+
+# CI Docker Images
+
+The `.ci/docker/` directory is content-hashed to determine whether Docker images
+need rebuilding. Any file change inside `.ci/docker/` (including the README)
+changes the hash and triggers a full Docker image rebuild. Do not make changes
+in this directory unless you intend to rebuild Docker images. When Docker builds
+are broken (e.g., due to an upstream Ubuntu outage), avoid touching this
+directory so you don't force a rebuild against the broken state.
 
 # Build
 
-Always ask for build configuration environment variables before running build.
+Always check local memory for build configuration (env vars, incremental-build shortcuts, etc.) before running the build, and apply what you find. If nothing applicable is in memory, ask the user.
 All build (both codegen, C++ and python) is done via `pip install -e . -v --no-build-isolation`.
 You should NEVER run any other command to build PyTorch.
 
@@ -40,6 +52,9 @@ Only use commands provided via `spin` for linting.
 Use `spin help` to list available commands.
 Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automatic fixes.
 
+When the user asks you to commit or amend, run `lintrunner -a` before creating
+the commit. Fix any lint errors it reports, then commit.
+
 # Commit messages
 
 Don't commit unless the user explicitly asks you to.
@@ -49,11 +64,63 @@ changes. Instead, if the PR is large, explain the order to review changes
 (e.g., the logical progression), or if it's short just omit the bullet list
 entirely.
 
-Disclose that the PR was authored with Claude.
+The commit message should be clear, informative, and have a Test Plan section
+that describes how you tested the change. If you are fixing a bug, the commit
+message must explain the root cause of the bug and how the fix works.
+If there were multiple potential paths you could have taken, please call them
+out succinctly and justify the one you took.
+
+When describing the testing strategy in a commit message, include the literal
+commands that were run in fenced Markdown code blocks.
+
+Disclose that the PR was authored with an AI assistant.
+
+When the user asks you to amend a commit, check whether the commit message
+still accurately describes the changes. If it doesn't and the commit is not a
+ghstack commit, update the message. For ghstack commits, amending the message
+is a no-op, so just remind the user to update the PR description if needed.
 
 If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
 you MUST preserve them when rewriting or splitting commit messages. ghstack
 will update the source id automatically when needed.
+
+# ghstack Workflow
+
+ghstack commits follow a different workflow than the conventional GitHub branch
+and PR workflow. First identify whether you're on a ghstack commit:
+
+- If HEAD is a detached commit, you are almost certainly in a ghstack flow.
+- If the commit message contains a `ghstack-source-id` trailer, it is an
+  existing ghstack commit.
+- If the commit is associated with a remote branch like `origin/gh/USERNAME/N`,
+  it is likely a ghstack commit (imperfect signal: local amends without a push
+  can desync this).
+
+Rules for working with ghstack:
+
+- **Don't amend unless asked.** If the user asks you to work on a ghstack
+  commit, leave changes uncommitted so the user can review with `git diff`.
+  Only amend into the commit if the user explicitly asks you to amend or to
+  submit it directly.
+- **Submitting.** Run `ghstack` to submit. When only working on a single
+  commit, use `ghstack --no-stack` to avoid updating the rest of the stack and
+  burning unnecessary CI. Use a full `ghstack` when you're intentionally
+  updating CI for the whole stack.
+- **Preserve metadata trailers.** When editing a commit message, never delete
+  `Pull-Request:` or `ghstack-source-id:` trailers. Always re-read them from
+  HEAD each time you compose an amend — never reuse a saved/cached message
+  body, since `ghstack` rewrites `ghstack-source-id` on every push and a
+  stale trailer will clobber HEAD's current one. If you modified the commit
+  message, run `ghstack -u` afterwards to push the updated PR description.
+- **Never push directly.** Do not `git push` to branches, and never directly
+  modify the `gh/USERNAME/N` branches — ghstack manages those.
+- **Finding the PR.** If the user asks to pull CI results or code review for a
+  ghstack commit, get the PR URL from the `Pull-Request` trailer in the commit
+  message. Use `gh` CLI to fetch status/comments from there.
+- **Editing earlier commits / splitting.** Treat it like a normal stack of
+  commits (use `git rebase`, etc.). Commits that keep their metadata trailers
+  stay associated with their existing PRs; commits without trailers will get a
+  fresh PR on submit. A full `ghstack` run is usually appropriate here.
 
 # Coding Style Guidelines
 
@@ -72,8 +139,17 @@ Follow these rules for all code changes in this repository:
 - Assume the reader has familiarity with PyTorch. They may not be the expert
   on the code that is being read, but they should have some experience in the
   area.
+- ASCII only in newly added code comments. Do not introduce Unicode characters
+  (e.g., smart quotes, em dashes, arrows, non-ASCII letters) in new comments.
+  Leave preexisting Unicode in untouched comments alone; only enforce this for
+  comments you are adding or rewriting.
 
 If uncertain, choose the simpler, more concise implementation.
+
+# cuda.bindings Error Checking
+
+Use `torch.cuda._utils._check_cuda_bindings` to error-check `cuda.bindings`
+runtime calls. Do not write inline error-checking helpers.
 
 # Dynamo Config
 
@@ -161,3 +237,25 @@ if trace_log.handlers:
   - Local files: "FX graph dump: min_cut_failed_graph.txt"
   - Production: "Use tlparse to extract artifacts" (only if tracing enabled)
 - Use `_get_unique_path()` pattern to avoid overwriting existing debug files
+
+# cuda::ptx
+
+When using `<cuda/ptx>` typed wrappers for PTX instructions:
+
+- **Namespace**: Inside `namespace at::native`, unqualified `cuda::ptx` resolves
+  to the sibling `at::cuda` namespace. Always use `::cuda::ptx` or alias it:
+  `namespace ptx = ::cuda::ptx;`
+- **Include conflicts**: The monolithic `<cuda/ptx>` header can fail when included
+  alongside heavy PyTorch headers (e.g. `Loops.cuh`) due to CCCL bugs in
+  transitive headers like `cp_async_bulk_tensor.h`. Workaround: put kernels using
+  `<cuda/ptx>` in a separate `.cu` file with minimal includes.
+- **mbarrier_try_wait_parity is non-blocking**: `ptx::mbarrier_try_wait_parity()`
+  returns `bool` (tries once). You must wrap it in a spin loop:
+  `while (!ptx::mbarrier_try_wait_parity(mbar, parity)) {}`
+- **Half/BFloat16 types**: `cuda::ptx` overloads use CUDA native types (`__half`,
+  `__nv_bfloat16`), not PyTorch wrappers (`c10::Half`, `c10::BFloat16`).
+  Use `reinterpret_cast` at the call site.
+- **cp_async_bulk_wait_group**: Takes a compile-time constant via
+  `ptx::n32_t<N>{}`, not a runtime integer.
+- **Mbarrier smem**: Mbarrier memory must never alias with data targeted by TMA
+  operations. Place mbarriers in a separate smem region from data buffers.

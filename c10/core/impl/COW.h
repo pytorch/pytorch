@@ -26,7 +26,7 @@ C10_API bool has_simple_data_ptr(const c10::StorageImpl& storage);
 // Check if a DataPtr is COW
 C10_API bool is_cow_data_ptr(const c10::DataPtr& data_ptr);
 
-// Eagerly copies a COW storage's data, turning it into a non-COW storage.
-C10_API void materialize_cow_storage(StorageImpl& storage);
+// MaterializeFn for COW storages. Copies shared data on write.
+C10_API void materialize_cow(StorageImpl* storage);
 
 } // namespace c10::impl::cow

@@ -627,7 +627,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         output.transpose_(0, 1);
     }
 
-    return std::make_tuple(output, hy, cy, reserve, weight_buf);
+    return std::make_tuple(
+        std::move(output),
+        std::move(hy),
+        std::move(cy),
+        std::move(reserve),
+        std::move(weight_buf));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
@@ -909,7 +914,7 @@ std::pair<Tensor, hidden_type> _miopen_impl(
         _batch_sizes.device().is_cpu(),
         "batch_sizes tensor should be on CPU, but got ",
         _batch_sizes.device());
-    IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
+    IntArrayRef batch_sizes { _batch_sizes.const_data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
     Tensor dropout_state = at::empty({0}, input.options());
 

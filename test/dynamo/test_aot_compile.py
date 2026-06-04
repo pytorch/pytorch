@@ -374,7 +374,7 @@ class TestVLLMModel(MultiModalMixin, TextModel):
 def _subprocess_entry(fn, queue):
     try:
         fn()
-    except BaseException as exc:  # noqa: BLE001
+    except BaseException as exc:
         import traceback
 
         queue.put((type(exc).__name__, str(exc), traceback.format_exc()))
@@ -1092,6 +1092,20 @@ from user code:
             torch.randn(3, 4),
         )
         self.assertEqual(compiled_foo(inputs), foo(inputs))
+
+    def test_fullgraph_capture_schema_self_arg_no_collision(self):
+        """Regression: aten op schemas with `self` at non-first position
+        (e.g. `aten.where.self(Tensor condition, Tensor self, Tensor other)`)
+        must not produce `def forward(self, condition, self, other):` and
+        SyntaxError at `graph_module.recompile()`."""
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+
+        cond = torch.tensor([True, False, True, False])
+        x = torch.tensor(0.0)
+        y = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        op = torch.ops.aten.where.self
+        compiled = dynamo_graph_capture_for_export(op)(cond, x, y)
+        self.assertEqual(compiled(cond, x, y), op(cond, x, y))
 
     def test_aot_compile_with_closure_save_and_load(self):
         tmp = 2
