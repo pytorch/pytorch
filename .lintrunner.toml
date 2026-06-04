@@ -177,10 +177,6 @@ include_patterns = [
     'torch/csrc/**/*.cpp',
     'torch/csrc/jit/serialization/*.h',
     'torch/csrc/jit/serialization/*.cpp',
-    'torch/nativert/*.h',
-    'torch/nativert/*.cpp',
-    'torch/nativert/**/*.h',
-    'torch/nativert/**/*.cpp',
     'torch/headeronly/**/*.h',
 ]
 exclude_patterns = [
