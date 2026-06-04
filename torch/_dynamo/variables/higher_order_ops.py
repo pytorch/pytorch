@@ -4028,6 +4028,26 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                     f"checkpoint not implemented for {type(ctx)} context_fn"
                 )
 
+        if "policy" in kwargs:
+            from torch._dynamo.variables.dicts import ConstDictVariable
+            from torch.utils.checkpoint import _checkpoint_policy_context_fn
+
+            if context_fn is not None:
+                raise NotImplementedError(
+                    "checkpoint: only one of `policy` and `context_fn` can be passed."
+                )
+            policy_vt = kwargs.pop("policy").realize()
+            if not isinstance(policy_vt, ConstDictVariable):
+                raise NotImplementedError(
+                    f"checkpoint `policy` must be a constant dict, but got "
+                    f"{type(policy_vt)}."
+                )
+            # Guard on the dict keys so a different policy recompiles, then
+            # reconstruct the real dict (OpOverload/str keys and CheckpointPolicy
+            # values all support as_python_constant) and reuse the SAC path.
+            policy_vt.install_dict_keys_match_guard()
+            context_fn = _checkpoint_policy_context_fn(policy_vt.as_python_constant())
+
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
