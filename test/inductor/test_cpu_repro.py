@@ -387,6 +387,28 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(x_comp.grad, grad_x_eager)
         torch.testing.assert_close(w_comp.grad, grad_w_eager)
 
+    def test_compile_dynamic_grad_conv_transpose2d(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/181175
+        batch_norm = torch.nn.BatchNorm2d(5).eval()
+        conv_transpose = torch.nn.ConvTranspose2d(5, 2, 3)
+        max_pool = torch.nn.MaxPool2d(2)
+
+        torch.manual_seed(0)
+        x = torch.randn(3, 5, 14, 15)
+
+        def fn(x):
+            y = batch_norm(x)
+            y = conv_transpose(y)
+            y = max_pool(y)
+            return torch.softmax(y, dim=0).mean()
+
+        expected = torch.func.grad(fn)(x)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(torch.func.grad(fn), backend="inductor", dynamic=True)
+        result = compiled(x)
+        torch.testing.assert_close(result, expected)
+
     @config.patch(freezing=True)
     @requires_mkl
     @patch("torch.cuda.is_available", lambda: False)
@@ -905,6 +927,27 @@ class CPUReproTests(TestCase):
             result, code = run_and_get_cpp_code(fn_opt, inp)
             self.assertNotIn("kernel_src", code)
             self.assertEqual(expected, result)
+
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
+    def test_set_source_tensor_with_view_source(self):
+        def fn(x):
+            x = torch.sigmoid(x).view(x.size(0), -1)
+            param1 = nn.Parameter(x)
+            with torch.no_grad():
+                x.mul_(1.4386868137611386)
+            y = torch.cat([x, x], dim=1)
+            param2 = nn.Parameter(y)
+            z = torch.zeros_like(x) + x
+            param3 = nn.Parameter(z)
+            return param1, param2, param3
+
+        inp = torch.randn(2, 3, 4)
+        with torch.no_grad():
+            expected = fn(inp)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        with torch.no_grad():
+            result = opt_fn(inp)
+        self.assertEqual(expected, result)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -3439,6 +3482,20 @@ class CPUReproTests(TestCase):
             )
         check_metrics_vec_kernel_count(1)
 
+    def test_emulate_precision_casts_explicit_lowp_round_trip(self):
+        # An explicit fp32->fp16->fp32 round-trip must keep its intermediate
+        # rounding under emulate_precision_casts. The CPU codegen used to collapse
+        # it via the reverse lowp-fp->fp32 CSE cache (populated at to_dtype time),
+        # silently dropping the fp16 rounding. See issue #185337.
+        def fn(x):
+            y = x.to(torch.float16).to(torch.float32)
+            return y, y.sum(dim=1)
+
+        x = torch.arange(20, dtype=torch.float32).reshape(5, 4).t() / 7.0
+        with config.patch({"emulate_precision_casts": True}):
+            torch._dynamo.reset()
+            self.common(fn, (x,))
+
     def test_memory_copy_with_fusion(self):
         def fn(x):
             res = x.relu()
@@ -3602,6 +3659,23 @@ class CPUReproTests(TestCase):
         x = torch.rand([], dtype=torch.bfloat16)
         metrics.reset()
         self.common(fn, (x,))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_softmax_with_unbacked_zero_dim(self):
+        def softmax_fn(x, n):
+            return torch.softmax(x[:, : n.item()], -1)
+
+        def log_softmax_fn(x, n):
+            return torch.log_softmax(x[:, : n.item()], -1)
+
+        x = torch.randn(3, 5)
+        for fn in (softmax_fn, log_softmax_fn):
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            for length in (0, 2, 5):
+                n = torch.tensor(length)
+                actual = compiled_fn(x, n)
+                expected = fn(x, n)
+                torch.testing.assert_close(actual, expected, equal_nan=True)
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_local_buffer_in_outer_loop_fusion(self):
@@ -5360,7 +5434,7 @@ class CPUReproTests(TestCase):
         check_metrics_vec_kernel_count(1)
 
         # Tail vectorization case
-        x = torch.rand(37)
+        x = torch.rand(31)
         torch._dynamo.reset()
         metrics.reset()
         with torch.no_grad():
@@ -6543,9 +6617,14 @@ class CPUReproTests(TestCase):
         model = torch.export.export(model, example_batch, strict=True).module()
 
         with torch.no_grad():
+            expected = model(*example_batch)
             metrics.reset()
-            torch.compile(model)(*example_batch)
-            check_metrics_vec_kernel_count(5)
+            actual, code = run_and_get_cpp_code(torch.compile(model), *example_batch)
+            self.assertTrue(same(expected, actual))
+            FileCheck().check("cpp_fused_add_native_layer_norm").run(code)
+            if _can_check_vec_metrics():
+                # The exact split of vectorized loops can vary by CPU backend.
+                self.assertGreaterEqual(metrics.generated_cpp_vec_kernel_count, 5)
 
     def test_dropout(self):
         class Model(nn.Module):
@@ -6663,7 +6742,6 @@ class CPUReproTests(TestCase):
 
         torch.compile(fn)(torch.randn(2, 2))
 
-    @xfailIf(IS_ARM64)  # https://github.com/pytorch/pytorch/issues/176285
     @skipIfRocmArch(MI200_ARCH)
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @requires_vectorization
@@ -6825,6 +6903,82 @@ class CPUReproTests(TestCase):
                 # Compiled output should match eager mode (whether Eager produces
                 # inf or finite numbers, it shouldn't degrade into unexpected NaNs).
                 self.assertEqual(eager_out, compiled_out)
+
+    def test_cpu_realization_thresholds(self):
+        from torch._inductor.ir import Pointwise, StorageBox
+        from torch._inductor.virtualized import ops
+
+        def inner_opcount_fn(index):
+            value = ops.constant(0.0, torch.float32)
+            for _ in range(45):
+                value = ops.add(value, ops.constant(1.0, torch.float32))
+            return value
+
+        cpu_pointwise = Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=inner_opcount_fn,
+            ranges=[1],
+        )
+        self.assertFalse(cpu_pointwise.has_large_inner_fn())
+        with config.patch(realize_opcount_threshold=1):
+            self.assertTrue(cpu_pointwise.has_large_inner_fn())
+        with config.patch(realize_opcount_threshold=30):
+            self.assertTrue(cpu_pointwise.has_large_inner_fn())
+        self.assertFalse(cpu_pointwise.has_large_inner_fn())
+
+        cuda_pointwise = Pointwise(
+            device=torch.device("cuda"),
+            dtype=torch.float32,
+            inner_fn=inner_opcount_fn,
+            ranges=[1],
+        )
+        self.assertTrue(cuda_pointwise.has_large_inner_fn())
+
+        def inner_tanh_fn(index):
+            return ops.tanh(ops.load("in0", index[0]))
+
+        cpu_tanh_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_tanh_fn,
+                ranges=[10],
+            )
+        )
+        self.assertFalse(cpu_tanh_storage.should_realize_on_reuse(1))
+        self.assertTrue(cpu_tanh_storage.should_realize_on_reuse(2))
+
+        def inner_reads_fn(index):
+            value = ops.constant(0.0, torch.float32)
+            for i in range(10):
+                value = ops.add(value, ops.load(f"in{i}", index[0]))
+            return value
+
+        cpu_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=inner_reads_fn,
+                ranges=[10],
+            )
+        )
+        self.assertFalse(cpu_storage.has_exceeded_max_reads())
+        with config.patch(realize_acc_reads_threshold=1):
+            self.assertTrue(cpu_storage.has_exceeded_max_reads())
+        with config.patch(realize_acc_reads_threshold=8):
+            self.assertTrue(cpu_storage.has_exceeded_max_reads())
+        self.assertFalse(cpu_storage.has_exceeded_max_reads())
+
+        cuda_storage = StorageBox(
+            Pointwise(
+                device=torch.device("cuda"),
+                dtype=torch.float32,
+                inner_fn=inner_reads_fn,
+                ranges=[10],
+            )
+        )
+        self.assertTrue(cuda_storage.has_exceeded_max_reads())
 
 
 if __name__ == "__main__":
