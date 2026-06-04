@@ -4464,7 +4464,8 @@ std::tuple<Tensor, Tensor> slogdet_jvp(
     return std::make_tuple(at::imag(trAinvE) * (i * sign), at::real(trAinvE));
   } else {
     return std::make_tuple(
-        at::_efficientzerotensor(sign.sizes(), sign.options()), trAinvE);
+        at::_efficientzerotensor(sign.sizes(), sign.options()),
+        std::move(trAinvE));
   }
 }
 
@@ -5320,7 +5321,8 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           at::_trilinear(*i1, *i2, grad_out, expand1, expand2, sumdim, expand3);
   }
-  return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
+  return std::tuple<Tensor, Tensor, Tensor>(
+      std::move(grad_i1), std::move(grad_i2), std::move(grad_i3));
 }
 
 Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
@@ -5873,7 +5875,8 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
     }
   }
 
-  return std::make_tuple(self_grad, std::move(tau_grad), std::move(other_grad));
+  return std::make_tuple(
+      std::move(self_grad), std::move(tau_grad), std::move(other_grad));
 }
 
 std::tuple<Tensor, Tensor> polar_backward(
@@ -7204,7 +7207,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
   // in tools/autograd/gen_variable_type.py
 
   if (!grad.defined()) {
-    return std::make_tuple(grad_self, grad_src);
+    return std::make_tuple(std::move(grad_self), std::move(grad_src));
   }
 
   if (reduce == "sum") {
@@ -7305,7 +7308,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
   // and should be covered here
 
   if (!grad.defined()) {
-    return std::make_tuple(grad_self, grad_src);
+    return std::make_tuple(std::move(grad_self), std::move(grad_src));
   }
 
   if (reduce == "prod") {

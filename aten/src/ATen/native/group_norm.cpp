@@ -74,8 +74,10 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> gamma_maybe_owned =
       at::borrow_from_optional_tensor(gamma_opt);
+  c10::MaybeOwned<Tensor> beta_maybe_owned =
+      at::borrow_from_optional_tensor(beta_opt);
   const Tensor& gamma = *gamma_maybe_owned;
-  const Tensor& beta = beta_opt.value_or(Tensor());
+  const Tensor& beta = *beta_maybe_owned;
 
   // repeated check so expanded weights can call native_group_norm directly but
   // save mean and variance from forward
@@ -84,6 +86,8 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
       X.suggest_memory_format() : at::MemoryFormat::Contiguous;
 
   TORCH_CHECK(X.is_contiguous(memory_format));
+  TORCH_CHECK(!gamma.defined() || gamma.is_contiguous());
+  TORCH_CHECK(!beta.defined() || beta.is_contiguous());
 
   bool mixed_type = is_mixed_type(X, gamma, beta);
   if (mixed_type) {
@@ -102,7 +106,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   Tensor rstd = at::empty({N, group}, X.options().dtype(dtype));
   GroupNormKernel(
       X.device().type(), X, gamma, beta, N, C, HxW, group, eps, Y, mean, rstd);
-  return std::make_tuple(Y, mean, rstd);
+  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
@@ -130,29 +134,24 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   auto memory_format = X.device().is_cpu() ?
       X.suggest_memory_format() : at::MemoryFormat::Contiguous;
 
+  // Ensure any tensors expected to be potentially noncontiguous are not, and
+  // assert contiguity on the rest.
+  auto dY_ = dY.contiguous(memory_format);
+  auto X_ = X.contiguous(memory_format);
+  TORCH_CHECK(mean.is_contiguous());
+  TORCH_CHECK(rstd.is_contiguous());
+  TORCH_CHECK(!gamma.defined() || gamma.is_contiguous());
+
   Tensor dX;
   if (grad_input_mask[0]) {
     if (N != 0) {
-      dX = at::native::empty_like(
-          X,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          memory_format);
+      dX = at::native::empty_like(X_);
     } else {
-      dX = at::native::zeros_like(
-          X,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          memory_format);
+      dX = at::native::zeros_like(X_);
     }
   }
 
-  auto dparam_options{
-    (gamma.defined() ? gamma.options() : X.options()).memory_format(MemoryFormat::Contiguous)};
+  auto dparam_options{gamma.defined() ? gamma.options() : X_.options().memory_format(MemoryFormat::Contiguous)};
   Tensor dgamma;
   if (grad_input_mask[1]) {
     if (N != 0) {
@@ -173,9 +172,9 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
 
   if (N != 0) {
     GroupNormBackwardKernel(
-        X.device().type(),
-        dY,
-        X,
+        X_.device().type(),
+        dY_,
+        X_,
         mean,
         rstd,
         gamma,
@@ -187,7 +186,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         dgamma,
         dbeta);
   }
-  return std::make_tuple(dX, dgamma, dbeta);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_multiple_grads(
@@ -234,31 +233,28 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_multiple_grads(
   auto memory_format = X.device().is_cpu() ?
       X.suggest_memory_format() : at::MemoryFormat::Contiguous;
 
-  bool dX_output_defined{N != 0 && (dY.defined() || dmean.defined() || drstd.defined())};
+  // Ensure any tensors expected to be potentially noncontiguous are not, and
+  // assert contiguity on the rest.
+  auto dY_ = dY.defined() ? dY.contiguous(memory_format) : dY;
+  auto X_ = X.contiguous(memory_format);
+  TORCH_CHECK(mean.is_contiguous());
+  TORCH_CHECK(rstd.is_contiguous());
+  TORCH_CHECK(!gamma.defined() || gamma.is_contiguous());
+  auto dmean_ = dmean.defined() ? dmean.contiguous() : dmean;
+  auto drstd_ = drstd.defined() ? drstd.contiguous() : drstd;
+
+  bool dX_output_defined{N != 0 && (dY_.defined() || dmean_.defined() || drstd_.defined())};
   Tensor dX;
   if (grad_input_mask[0]) {
     if (dX_output_defined) {
-      dX = at::native::empty_like(
-          X,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          memory_format);
+      dX = at::native::empty_like(X_);
     } else {
-      dX = at::native::zeros_like(
-          X,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          memory_format);
+      dX = at::native::zeros_like(X_);
     }
   }
 
-  bool dparam_output_defined{N != 0 && dY.defined()};
-  auto dparam_options{
-    (gamma.defined() ? gamma.options() : X.options()).memory_format(MemoryFormat::Contiguous)};
+  bool dparam_output_defined{N != 0 && dY_.defined()};
+  auto dparam_options{gamma.defined() ? gamma.options() : X_.options().memory_format(MemoryFormat::Contiguous)};
   Tensor dgamma;
   if (grad_input_mask[1]) {
     if (dparam_output_defined) {
@@ -279,9 +275,9 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_multiple_grads(
 
   if (dX_output_defined) {
     GroupNormBackwardMultipleGradsKernel(
-        X.device().type(),
-        dY,
-        X,
+        X_.device().type(),
+        dY_,
+        X_,
         mean,
         rstd,
         gamma,
@@ -289,13 +285,13 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward_multiple_grads(
         C,
         HxW,
         group,
-        dmean,
-        drstd,
+        dmean_,
+        drstd_,
         dX,
         dgamma,
         dbeta);
   }
-  return std::make_tuple(dX, dgamma, dbeta);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 Tensor group_norm(
