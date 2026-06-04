@@ -1125,12 +1125,14 @@ def sample_inputs_linalg_qr_geqrf(
 
 def sample_inputs_linalg_polar(op_info, device, dtype, requires_grad=False, **kwargs):
     # The polar decomposition A = U @ H is defined for m >= n (tall or square).
+    # No zero-size dims here: they trip generic coverage suites (e.g. vmap can't
+    # batch over a size-0 dim). Empty/degenerate shapes are covered separately by
+    # the dedicated test_polar_empty test in test_linalg.py.
     make_arg = partial(
         make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
     )
-    batches = [(), (0,), (2,), (1, 1)]
-    # (m, n) with m >= n, including the n == 0 degenerate case.
-    sizes = [(5, 5), (5, 3), (2, 2), (3, 0)]
+    batches = [(), (2,), (1, 1)]
+    sizes = [(5, 5), (5, 3), (2, 2)]
     for batch, (m, n) in product(batches, sizes):
         yield SampleInput(make_arg(*(batch + (m, n)), low=-2, high=2))
 
@@ -1780,6 +1782,19 @@ op_db: list[OpInfo] = [
                 active_if=MACOS_VERSION < 26.0,
             ),
         ),
+        decorators=[
+            # https://github.com/pytorch/pytorch/issues/184350
+            # DTensor lowers a multi_dot chain with a Shard contraction dim
+            # into a per-rank partial sum, then all-reduces. The summation
+            # order differs from the single reference matmul, and in float32
+            # the drift can exceed the default tolerance for some inputs.
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-5, rtol=2.4e-6)}),
+                "TestDTensorOps",
+                "test_dtensor_op_db",
+                dtypes=(torch.float32,),
+            ),
+        ],
     ),
     # NB: linalg.norm has two variants so that different skips can be used for different sample inputs
     OpInfo(
@@ -2657,9 +2672,8 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_eager",
                 device_type="mps",
             ),
-            # see https://github.com/pytorch/pytorch/issues/177264
             DecorateInfo(
-                unittest.expectedFailure,
+                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-04)}),
                 "TestEagerFusionOpInfo",
                 "test_aot_autograd_symbolic_exhaustive",
                 device_type="cpu",

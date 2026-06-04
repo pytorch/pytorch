@@ -59,10 +59,6 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
-    # torch.func.jvp with nn.Module doesn't retrace with symbolic sizes
-    "test_jvp_compile_backward_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu", "mps"), is_skip=True
-    ),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
@@ -895,6 +891,49 @@ class TestInductorDynamic(TestCase):
         expect = fn(a, 2)
         actual = cfn(a, 2)
         self.assertEqual(expect, actual)
+
+    def test_magic_method_lowerings_with_symbolic_scalars(self, device):
+        def mod(x):
+            return x.new_ones((x.shape[0] % 3) + 1)
+
+        def floordiv(x):
+            return x.new_ones((x.shape[0] // 3) + 1)
+
+        def shifts(x):
+            return (
+                x.new_ones((x.shape[0] << 1) + 1),
+                x.new_ones((x.shape[0] >> 1) + 1),
+            )
+
+        def comparison(x):
+            n = torch.sym_ite(x.shape[0] < 10, x.shape[0], x.shape[0] + 1)
+            return x.new_ones(n)
+
+        def sym_min_max(x):
+            return (
+                x.new_ones(torch.sym_min(x.shape[0], 3) + 1),
+                x.new_ones(torch.sym_max(x.shape[0], 3) + 1),
+            )
+
+        def pow_log2(x):
+            return x + 2 ** (math.floor(math.log2(x.shape[0]) + 1))
+
+        def float_constant(x):
+            return x + ((x.numel() ** 0) / 1.0)
+
+        x = torch.randn(7, 5, device=device)
+        for fn in (
+            mod,
+            floordiv,
+            shifts,
+            comparison,
+            sym_min_max,
+            pow_log2,
+            float_constant,
+        ):
+            with self.subTest(fn=fn.__name__):
+                cfn = self.compile_fn(fn, fullgraph=True)
+                self.assertEqual(fn(x), cfn(x))
 
     @onlyCPU
     def test_arithmetic_constant_folding(self, device):
