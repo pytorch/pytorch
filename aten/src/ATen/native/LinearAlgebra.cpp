@@ -1993,8 +1993,9 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
   const auto t1_strides = t1->sym_strides();
   for (auto i = int64_t{0}; i < dim_t1 - int64_t{2}; ++i) {
     if (TORCH_GUARD_OR_TRUE(
-            t1_strides[i].sym_ne(t1_strides[i + 1] * t1_shape[i + 1]) &&
-            t1_shape[i + 1].sym_ne(1))) {
+            t1_strides[i]
+                .sym_ne(t1_strides[i + 1] * t1_shape[i + 1])
+                .sym_and(t1_shape[i + 1].sym_ne(1)))) {
       return false;
     }
   }
