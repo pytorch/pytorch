@@ -522,6 +522,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return combs
 
     @make_test
+    def test_itertools_combinations_with_replacement(a, b):
+        combs = []
+        for size in itertools.combinations_with_replacement((1, 2, 3, 4), 2):
+            combs.append(torch.ones(size))
+        return combs
+
+    if sys.version_info >= (3, 12):
+
+        @make_test
+        def test_itertools_batched(a):
+            batches = []
+            for size in itertools.batched((1, 2, 3, 4, 5), 2):
+                batches.append(torch.ones(size))
+            return batches
+
+    @make_test
     def test_itertools_pairwise(a):
         pairs = []
         for size in itertools.pairwise((1, 2, 3, 4)):
