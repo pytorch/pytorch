@@ -189,6 +189,7 @@ __all__ = [
     "optimization_hint",
     "guarding_hint_or_throw",
     "guard_or_false",
+    "guard_or_none",
     "guard_or_true",
     "has_symbolic_sizes_strides",
     "create_contiguous",
@@ -1564,6 +1565,38 @@ def _guard_or(a: BoolLikeType, default: bool) -> bool:
     return bool(r)
 
 
+def guard_or_none(a: BoolLikeType) -> bool | None:
+    """
+    Try to guard a, returning None if a data dependent error is encountered.
+    """
+    if not isinstance(a, SymBool):
+        if not isinstance(a, bool):
+            raise AssertionError(f"Expected bool, got {type(a)}")
+        return a
+
+    # if backed_size_oblivious is True we treat backed as unbacked here.
+    if torch.fx.experimental._config.backed_size_oblivious:
+        return _static_eval_sym_bool(a)
+
+    shape_env = getattr(a.node, "shape_env", None)
+
+    # xla symnode path.
+    if shape_env is None:
+        return guard_bool(a)
+
+    if free_unbacked_symbols(a.node.expr):
+        return _static_eval_sym_bool(a)
+
+    try:
+        return bool(
+            shape_env.evaluate_sym_node(
+                a.node, size_oblivious=False, fallback_value=None
+            )
+        )
+    except GuardOnDataDependentSymNode:
+        return None
+
+
 def guard_or_false(a: BoolLikeType) -> bool:
     """
     Try to guard a, if data dependent error encountered just return false.
@@ -1894,7 +1927,14 @@ def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
 # in the unlikely branch.)  (I think expect is a good name; in recent
 # versions of C++, this is replaced with [[likely]], which is weaker
 # and not accurate for this function!)
-def expect_true(a: BoolLikeType, skip: int = 0) -> bool:
+def expect_true(
+    a: BoolLikeType, skip: int = 0, message: Callable[[], str] | None = None
+) -> bool:
+    """
+    Assert that ``a`` is expected to be true, adding a guard or deferred runtime
+    assert when necessary. ``message`` is used only when an unbacked expression
+    is deferred to a runtime assert.
+    """
     if isinstance(a, SymBool):
         # TODO: check perf implications of this
         frame = inspect.currentframe()
@@ -1903,7 +1943,9 @@ def expect_true(a: BoolLikeType, skip: int = 0) -> bool:
                 break
             frame = frame.f_back
         return a.node.expect_true(
-            frame.f_code.co_filename if frame else "", frame.f_lineno if frame else 0
+            frame.f_code.co_filename if frame else "",
+            frame.f_lineno if frame else 0,
+            message,
         )
     if type(a) is not bool:
         raise AssertionError(f"Expected bool, got {a}")
@@ -2783,6 +2825,7 @@ class RuntimeAssert:
     expr: SympyBoolean
     msg: str = field(repr=False)
     stack: CapturedTraceback = field(repr=False)
+    user_msg: bool = field(default=False, repr=False)
 
 
 # Used for printing SymExprs in compile_fx
@@ -8566,7 +8609,12 @@ class ShapeEnv:
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def guard_or_defer_runtime_assert(
-        self, orig_expr: SympyBoolean, msg: str, fx_node: torch.fx.Node | None = None
+        self,
+        orig_expr: SympyBoolean,
+        msg: str,
+        fx_node: torch.fx.Node | None = None,
+        *,
+        user_msg: bool = False,
     ) -> bool:
         """
         Adds a guard that orig_expr is True if we can or fall back to adding an assert
@@ -8636,7 +8684,7 @@ class ShapeEnv:
             orig_expr = expr
             expr = canonicalize_bool_expr(expr)
             stack = CapturedTraceback.extract(skip=1)
-            ra = RuntimeAssert(expr, msg, stack)
+            ra = RuntimeAssert(expr, msg, stack, user_msg)
 
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted(

@@ -281,13 +281,15 @@ def insert_deferred_runtime_asserts(
                 ):
                     res = _sympy_interp(expr_to_proxy, ra.expr).node
 
+                    msg = f"Runtime assertion failed for expression {ra.expr} on node '{res}'"
+                    if ra.user_msg and ra.msg:
+                        msg = f"{msg}: {ra.msg}"
+
                     graph.call_function(
                         torch.ops.aten._assert_scalar.default,
-                        # TODO: use ra.msg here, but it's pretty
-                        # useless right now
                         (
                             res,
-                            f"Runtime assertion failed for expression {ra.expr} on node '{res}'",
+                            msg,
                         ),
                     )
                 added_asserts.add(ra.expr)
