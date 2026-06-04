@@ -625,7 +625,7 @@ class LocalElasticAgent(SimpleElasticAgent):
                     failures=worker_failures,
                 )
             else:
-                # copy ret_val_queue into a map with a global ranks
+                # copy ret_val_queue into a map with global ranks
                 workers_ret_vals = {}
                 for local_rank, ret_val in result.return_values.items():
                     worker = worker_group.workers[local_rank]

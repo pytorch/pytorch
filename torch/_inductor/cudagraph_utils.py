@@ -303,7 +303,7 @@ def check_for_mutation(
     static_inputs_log.debug(
         "check mutation static input indices: %s", func.static_input_idxs
     )
-    static_inputs_log.debug("check mutation mutation indices: %s", mutation_indices)
+    static_inputs_log.debug("check mutation indices: %s", mutation_indices)
 
     return (
         get_mutation_stack_trace(func.placeholders, mutation_indices)
