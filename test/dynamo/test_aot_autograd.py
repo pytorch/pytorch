@@ -91,6 +91,36 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         # This should not error: we mutated an autograd leaf under no_grad mode.
         aot_fn(x, y)
 
+    def test_native_batch_norm_legit_out(self):
+        args = (
+            torch.rand(5, 5, 5),
+            torch.rand(5),
+            torch.rand(5),
+            torch.rand(5),
+            torch.rand(5),
+            True,
+            0.5,
+            0.6,
+        )
+
+        def clone_args(args):
+            return tuple(x.clone() if isinstance(x, torch.Tensor) else x for x in args)
+
+        eager_args = clone_args(args)
+        compiled_args = clone_args(args)
+        eager_out = (torch.empty(5, 5, 5), torch.empty(5), torch.empty(5))
+        compiled_out = (torch.empty(5, 5, 5), torch.empty(5), torch.empty(5))
+
+        eager_result = torch._native_batch_norm_legit(*eager_args, out=eager_out)
+        compiled_result = torch.compile(
+            torch._native_batch_norm_legit, backend="aot_eager"
+        )(*compiled_args, out=compiled_out)
+
+        self.assertEqual(eager_result, compiled_result)
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_args[3], compiled_args[3])
+        self.assertEqual(eager_args[4], compiled_args[4])
+
     def test_mutation1(self):
         def fn(_stack0: torch.Tensor, diagonal_chunked_attention_scores: torch.Tensor):
             getitem = diagonal_chunked_attention_scores[
