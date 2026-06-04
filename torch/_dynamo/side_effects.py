@@ -351,6 +351,28 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
+    def _was_yielded_during_generator_reconstruction(
+        self, item: VariableTracker
+    ) -> bool:
+        output_graph = self.output_graph_weakref()
+        if not output_graph:
+            return False
+
+        target = item.unwrap()
+        found = False
+
+        def visit(vt: VariableTracker) -> None:
+            nonlocal found
+            if vt is target:
+                found = True
+
+        VariableTracker.visit(
+            visit,
+            getattr(output_graph.current_tx, "generated_items", []),
+            side_effects=self,
+        )
+        return found
+
     def _maybe_record_side_effect(self, item: VariableTracker) -> None:
         """Record the first externally-visible side effect on the current tracer."""
         if item.mutation_type is not None and not is_side_effect_safe(
@@ -377,7 +399,10 @@ class SideEffects:
         if self.should_allow_side_effects_in_hop():
             self._maybe_record_side_effect(item)
             return True
-        if self.is_reconstructing_generator():
+        if self.is_reconstructing_generator() and (
+            not isinstance(item.mutation_type, ValueMutationNew)
+            or self._was_yielded_during_generator_reconstruction(item)
+        ):
             unimplemented(
                 gb_type="Generator reconstruction with mutations",
                 context=f"mutating object: {item}",

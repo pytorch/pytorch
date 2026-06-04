@@ -82,6 +82,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     product,
     proxy_args_kwargs,
+    unpack_iterable,
     unwrap_if_wrapper,
 )
 from .base import typestr, VariableTracker
@@ -98,12 +99,17 @@ from .functions import (
     NestedUserFunctionVariable,
 )
 from .lists import ListVariable, TupleVariable
+from .object_protocol import vt_is_iterable
 from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
     TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
+)
+from .torch_schema import (
+    torch_function_inplace_param_names,
+    torch_function_mutated_first_arg_infos,
 )
 from .user_defined import UserDefinedTupleVariable
 
@@ -131,16 +137,6 @@ T = TypeVar("T")
 log = logging.getLogger(__name__)
 
 
-@functools.lru_cache(None)
-def _torch_function_mutates_first_arg(name: str) -> bool:
-    return any(
-        schema.arguments
-        and schema.arguments[0].alias_info
-        and schema.arguments[0].alias_info.is_write
-        for schema in torch._C._jit_get_schemas_for_operator(f"aten::{name}")
-    )
-
-
 def _check_generator_reconstruction_tensor_mutation_arg(
     tx: "InstructionTranslatorBase", var: VariableTracker
 ) -> None:
@@ -149,6 +145,18 @@ def _check_generator_reconstruction_tensor_mutation_arg(
     elif isinstance(var, (TupleVariable, ListVariable)):
         for item in var.items:
             _check_generator_reconstruction_tensor_mutation_arg(tx, item)
+
+
+def _is_true_constant(var: VariableTracker) -> bool:
+    return var.is_python_constant() and bool(var.as_python_constant())
+
+
+def _matches_mutated_first_arg_schema(
+    var: VariableTracker, is_tensor_list: bool
+) -> bool:
+    if is_tensor_list:
+        return isinstance(var, (TupleVariable, ListVariable))
+    return var.is_tensor()
 
 
 supported_ctx_manager_classes = dict.fromkeys(
@@ -1499,7 +1507,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 tf_state.skip_next = False
                 return VariableTracker.build(tx, False)
             elems = (
-                args[0].unpack_var_sequence(tx)
+                unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
                 else args
             )
@@ -1532,7 +1540,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             try:
                 return func.call_function(
                     tx,
-                    args.unpack_var_sequence(tx),
+                    unpack_iterable(tx, args),
                     kwargs.keys_as_python_constant(),  # type: ignore[attr-defined]
                 )
             finally:
@@ -3221,14 +3229,45 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
-        fn_name = getattr(fn_, "__name__", None)
-        if (
-            fn_name
-            and tx.output.side_effects.is_reconstructing_generator()
-            and _torch_function_mutates_first_arg(fn_name)
-            and args
-        ):
-            _check_generator_reconstruction_tensor_mutation_arg(tx, args[0])
+        if tx.output.side_effects.is_reconstructing_generator():
+            mutated_first_arg_infos = torch_function_mutated_first_arg_infos(fn_)
+            mutated_first_arg = None
+            if mutated_first_arg_infos:
+                if args:
+                    candidate = args[0]
+                    if any(
+                        _matches_mutated_first_arg_schema(candidate, is_tensor_list)
+                        for _, is_tensor_list in mutated_first_arg_infos
+                    ):
+                        mutated_first_arg = candidate
+                for name, is_tensor_list in mutated_first_arg_infos:
+                    if (
+                        mutated_first_arg is None
+                        and name in kwargs
+                        and _matches_mutated_first_arg_schema(
+                            kwargs[name], is_tensor_list
+                        )
+                    ):
+                        mutated_first_arg = kwargs[name]
+                        break
+            if mutated_first_arg is not None:
+                _check_generator_reconstruction_tensor_mutation_arg(
+                    tx, mutated_first_arg
+                )
+            elif inplace_param_names := torch_function_inplace_param_names(fn_):
+                input_name, inplace_name = inplace_param_names
+                signature = inspect.signature(fn_)
+                param_names = tuple(signature.parameters)
+                inplace_idx = param_names.index(inplace_name)
+                inplace_arg = kwargs.get(inplace_name)
+                if inplace_arg is None and len(args) > inplace_idx:
+                    inplace_arg = args[inplace_idx]
+                if inplace_arg is not None and _is_true_constant(inplace_arg):
+                    mutated_first_arg = args[0] if args else kwargs.get(input_name)
+                    if mutated_first_arg is not None:
+                        _check_generator_reconstruction_tensor_mutation_arg(
+                            tx, mutated_first_arg
+                        )
 
         with ctx():
             tensor_variable = wrap_fx_proxy(
@@ -3378,9 +3417,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
-        flat_args_vts, input_spec_vt = _make_inlined(tx, tree_flatten)(
-            VariableTracker.build(tx, (args_with_states, kwargs_with_states))
-        ).unpack_var_sequence(tx)
+        flat_args_vts, input_spec_vt = unpack_iterable(
+            tx,
+            _make_inlined(tx, tree_flatten)(
+                VariableTracker.build(tx, (args_with_states, kwargs_with_states))
+            ),
+        )
         if not isinstance(flat_args_vts, ListVariable):
             raise AssertionError(
                 f"Expected flat_args_vts to be a ListVariable, got {type(flat_args_vts)}"
@@ -3590,12 +3632,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         ) -> TypeIs[Union["NNModuleVariable", "UnspecializedNNModuleVariable"]]:
             return isinstance(var, (NNModuleVariable, UnspecializedNNModuleVariable))
 
-        flat_args_var, tree_spec_var = _make_inlined(tx, pytree.tree_flatten)(
-            VariableTracker.build(tx, (args, kwargs))
-        ).unpack_var_sequence(tx)
+        flat_args_var, tree_spec_var = unpack_iterable(
+            tx,
+            _make_inlined(tx, pytree.tree_flatten)(
+                VariableTracker.build(tx, (args, kwargs))
+            ),
+        )
 
         module_to_index: dict[int, int] = {}
-        for arg in flat_args_var.unpack_var_sequence(tx):
+        for arg in unpack_iterable(tx, flat_args_var):
             if is_module_variable(arg):
                 if arg.source is None:
                     unimplemented(
@@ -3628,7 +3673,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         result_var = _make_inlined(tx, convert_modules_to_states)(
             VariableTracker.build(tx, (args, kwargs)), module_to_index_var
         )
-        return result_var.unpack_var_sequence(tx)  # pyrefly: ignore [bad-return]
+        return unpack_iterable(tx, result_var)  # pyrefly: ignore [bad-return]
 
     def _call_leaf_function(
         self,
@@ -3662,11 +3707,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             tx, args, kwargs
         )
 
-        flat_args_var, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
-            VariableTracker.build(tx, (args_with_states, kwargs_with_states))
-        ).unpack_var_sequence(tx)
+        flat_args_var, input_spec_var = unpack_iterable(
+            tx,
+            _make_inlined(tx, pytree.tree_flatten)(
+                VariableTracker.build(tx, (args_with_states, kwargs_with_states))
+            ),
+        )
         flat_arg_proxies = [
-            arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
+            arg.as_proxy() for arg in unpack_iterable(tx, flat_args_var)
         ]
         input_spec = input_spec_var.as_python_constant()
 
@@ -3747,10 +3795,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             raise AssertionError(f"_ntuple expects no kwargs, got {len(kwargs)}")
 
         def handle_ntuple(value: VariableTracker) -> VariableTracker:
-            if value.has_unpack_var_sequence(tx):
-                return variables.TupleVariable(
-                    list(value.unpack_var_sequence(tx)),
-                )
+            if vt_is_iterable(value):
+                return variables.TupleVariable(unpack_iterable(tx, value))
             elif value.is_python_constant():
                 # constant prop through it
                 return VariableTracker.build(

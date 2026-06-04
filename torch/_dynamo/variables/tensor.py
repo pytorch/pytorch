@@ -78,6 +78,7 @@ from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import TorchScriptObjectVariable
+from .torch_schema import torch_op_mutates_first_arg
 from .user_defined import UserDefinedClassVariable
 
 
@@ -120,16 +121,6 @@ supported_comparison_ops = {
     **supported_tensor_comparison_ops,
     **supported_const_comparison_ops,
 }
-
-
-@functools.lru_cache(None)
-def _tensor_method_mutates_self(name: str) -> bool:
-    return any(
-        schema.arguments
-        and schema.arguments[0].alias_info
-        and schema.arguments[0].alias_info.is_write
-        for schema in torch._C._jit_get_schemas_for_operator(f"aten::{name}")
-    )
 
 
 supported_tensor_comparison_op_values = dict.fromkeys(
@@ -743,9 +734,6 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
         return result
 
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return self.ndim > 0
-
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase", idxes: Sequence[int] | None = None
     ) -> list[VariableTracker]:
@@ -971,7 +959,7 @@ class TensorVariable(VariableTracker):
 
         if (
             tx.output.side_effects.is_reconstructing_generator()
-            and _tensor_method_mutates_self(name)
+            and torch_op_mutates_first_arg(name)
         ):
             tx.output.side_effects.check_allowed_side_effect(self)
 

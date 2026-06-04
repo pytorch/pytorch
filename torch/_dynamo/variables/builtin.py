@@ -101,7 +101,6 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
 )
@@ -120,6 +119,8 @@ from .object_protocol import (
     generic_neg,
     generic_pos,
     generic_repr,
+    maybe_get_python_type,
+    pysequence_check,
     vt_add,
     vt_getitem,
     vt_identity_compare,
@@ -254,6 +255,11 @@ BUILTIN_TO_TENSOR_FN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # In the builtin var, we check if there is a tensor in the first args position,
 # if not, we swap the args and use the r* version of the op.
 BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
+
+# Sentinel for `inspect.getattr_static` lookups that must distinguish
+# "attribute absent" from "attribute is None" (e.g. `__reversed__ = None`
+# opt-out).
+_MISSING_SENTINEL = object()
 
 
 def populate_builtin_to_tensor_fn_map() -> None:
@@ -706,17 +712,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
 
         # Special cases - lower precedence but still prefer these over constant folding
-
-        # List-like addition (e.g. [1, 2] + [3, 4])
-        def tuple_add_handler(
-            tx: "InstructionTranslatorBase", a: BaseListVariable, b: VariableTracker
-        ) -> VariableTracker:
-            return TupleVariable([*a.items, *b.unpack_var_sequence(tx)])
-
-        def size_add_handler(
-            tx: "InstructionTranslatorBase", a: BaseListVariable, b: VariableTracker
-        ) -> VariableTracker:
-            return SizeVariable([*a.items, *b.unpack_var_sequence(tx)])
 
         def create_cmp_op_handlers(
             op: Callable[..., Any],
@@ -1468,7 +1463,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             if fn in IN_PLACE_DESUGARING_MAP and isinstance(
                 args[0], variables.ConstantVariable
             ):
-                # In-place operators like += usually mustate tensor
+                # In-place operators like += usually mutate tensor
                 # values, but in the edge case of immutable values they
                 # re-bind the variable.
                 #
@@ -1477,6 +1472,8 @@ class BuiltinVariable(BaseBuiltinVariable):
                 fn = IN_PLACE_DESUGARING_MAP[fn]
                 args = [args[0], args[1]]  # type: ignore[assignment]
 
+            # Constants were already desugared above because in-place operators
+            # re-bind immutable values. Remaining in-place operators mutate.
             if (
                 fn in IN_PLACE_DESUGARING_MAP
                 and tx.output.side_effects.is_reconstructing_generator()
@@ -2475,11 +2472,33 @@ class BuiltinVariable(BaseBuiltinVariable):
 
     def call_reversed(
         self, tx: "InstructionTranslatorBase", obj: VariableTracker
-    ) -> VariableTracker | None:
-        if obj.has_unpack_var_sequence(tx):
-            items = list(reversed(obj.unpack_var_sequence(tx)))
-            return variables.TupleVariable(items)
-        return None
+    ) -> VariableTracker:
+        # Mirrors CPython's builtin_reversed_impl (Python/enumobject.c)
+        # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/enumobject.c#L353-L395
+        # 1. Look up __reversed__ via _PyObject_LookupSpecial. If found, call it.
+        # 2. Else require PySequence_Check (sq_item). If absent, TypeError.
+        # 3. Else build a reverse sequence iterator over __len__ + __getitem__.
+
+        obj_type = maybe_get_python_type(obj)
+
+        # Type-level __reversed__ lookup, mirrors _PyObject_LookupSpecial.
+        # getattr_static skips descriptors / metaclass. CPython treats
+        # `__reversed__ = None` on the type as an explicit opt-out, raising
+        # TypeError even if the sequence protocol would otherwise work.
+        reversed_attr = inspect.getattr_static(
+            obj_type, "__reversed__", _MISSING_SENTINEL
+        )
+        if reversed_attr is None:
+            raise_type_error(tx, f"'{obj_type.__name__}' object is not reversible")
+        if reversed_attr is not _MISSING_SENTINEL:
+            return obj.call_method(tx, "__reversed__", [], {})
+
+        if not pysequence_check(obj_type):
+            raise_type_error(tx, "argument to reversed() must be a sequence")
+
+        return variables.UserFunctionVariable(
+            polyfills.builtins.reversed_sequence_iterator
+        ).call_function(tx, [obj], {})
 
     def call_sorted(
         self,

@@ -599,10 +599,131 @@ class GraphModule(torch.nn.Module):
         ):
             self._compile_check(fn)
 
+    def test_reconstruct_generator_tensor_mutation_torch_function_kwarg(self):
+        def whoo(t):
+            yield torch.sin_(input=t)
+            yield torch.cos_(input=t)
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
+    def test_reconstruct_generator_tensor_mutation_op_overload(self):
+        def whoo(t):
+            yield torch.ops.aten.sin_.default(t)
+            yield torch.ops.aten.cos_.default(t)
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
+    def test_reconstruct_generator_tensor_mutation_op_overload_packet(self):
+        def whoo(t):
+            yield torch.ops.aten.sin_(t)
+            yield torch.ops.aten.cos_(t)
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
+    def test_reconstruct_generator_tensor_mutation_op_overload_kwarg(self):
+        def whoo(t):
+            yield torch.ops.aten.add_.Tensor(self=t, other=t)
+            yield torch.ops.aten.cos_.default(self=t)
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
     def test_reconstruct_generator_tensor_mutation_out_kwarg(self):
         def whoo(t):
             yield torch.sin(t, out=t)
             yield torch.cos(t, out=t)
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
+    def test_reconstruct_generator_tensor_mutation_functional_inplace(self):
+        def whoo(t):
+            yield torch.nn.functional.relu(t, inplace=True)
+            yield torch.nn.functional.relu(t, inplace=True)
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
+    def test_reconstruct_generator_tensor_mutation_torch_c_nn(self):
+        def whoo(t):
+            yield torch.nn.functional.hardtanh_(t)
+            yield torch.nn.functional.hardtanh_(t)
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
+    def test_reconstruct_generator_tensor_mutation_functional_inplace_positional(self):
+        def whoo(t):
+            yield torch.nn.functional.relu(t, True)
+            yield torch.nn.functional.relu(t, True)
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
+    def test_reconstruct_generator_tensor_mutation_foreach(self):
+        def whoo(t):
+            yield t.sin()
+            torch._foreach_add_([t], 1)
+            yield t.cos()
 
         def fn(t):
             gen = whoo(t)
@@ -619,6 +740,70 @@ class GraphModule(torch.nn.Module):
             yield t.sin()
             t += 1
             yield t.cos()
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Cannot reconstruct a generator with variable mutations",
+        ):
+            self._compile_check(fn)
+
+    def test_reconstruct_generator_allow_in_graph_name_collision(self):
+        @torch._dynamo.allow_in_graph
+        def sin_(t):
+            return t.sin()
+
+        def whoo(t):
+            yield sin_(t)
+            yield sin_(t)
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        t = torch.randn(2)
+        gen = self._compile_check(fn, args=(t,))
+        self.assertEqual(list(gen), [t.sin(), t.sin()])
+
+    def test_reconstruct_generator_tensor_sort_method_allowed(self):
+        def whoo(t):
+            yield t.sin()
+            values, _ = t.sort()
+            yield values
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        t = torch.randn(2)
+        gen = self._compile_check(fn, args=(t,))
+        values, _ = t.sort()
+        self.assertEqual(list(gen), [t.sin(), values])
+
+    def test_reconstruct_generator_torch_sort_allowed(self):
+        def whoo(t):
+            yield t.sin()
+            values, _ = torch.sort(t)
+            yield values
+
+        def fn(t):
+            gen = whoo(t)
+            return gen
+
+        t = torch.randn(2)
+        gen = self._compile_check(fn, args=(t,))
+        values, _ = torch.sort(t)
+        self.assertEqual(list(gen), [t.sin(), values])
+
+    def test_reconstruct_generator_yielded_new_list_mutation(self):
+        def whoo(t):
+            values = []
+            yield values
+            values.append(t)
+            yield values
 
         def fn(t):
             gen = whoo(t)
