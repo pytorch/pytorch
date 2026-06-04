@@ -17,6 +17,7 @@ from torch._dynamo.repro.after_aot import (
     InputReader,
     InputWriter,
     repro_minify,
+    repro_run,
     save_graph_repro,
 )
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -261,6 +262,24 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         r = buf.getvalue()
         self.assertIn("reader.opaque('__torch__.MyClass')", r)
 
+    def test_repro_run_accuracy_does_not_reuse_compiled_graph(self):
+        class Repro(torch.nn.Module):
+            def forward(self, arg0, arg1, arg2):
+                vals = torch.ops.aten._foreach_add.Scalar([arg0, arg1, arg2], 1)
+                torch.ops.aten.copy_.default(arg0, vals[0])
+                torch.ops.aten.copy_.default(arg1, vals[1])
+                torch.ops.aten.copy_.default(arg2, vals[2])
+                return ()
+
+        def load_args(reader):
+            reader.args = [torch.rand((), dtype=torch.float32) for _ in range(3)]
+
+        load_args._version = 0
+        options = SimpleNamespace(
+            accuracy="accuracy", save_dir=None, tracing_mode="real"
+        )
+        repro_run(options, Repro(), load_args)
+
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_dump_generator(self):
         gen = torch.cuda.default_generators[0].clone_state()
@@ -369,11 +388,10 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         self.assertIs(result, args)
 
     def test_get_compile_args_e2e_symbolic_compile(self):
-        """E2E: compile_fx_inner fails with concrete args but succeeds
-        with _get_compile_args for symbolically-traced graphs.
-
-        This is the minimal repro for the 'NameError: name s48 is not
-        defined' bug in fx_graph_runnable repro scripts.
+        """E2E: _get_compile_args produces args usable by compile_fx_inner
+        for symbolically-traced graphs (regression test for the
+        'NameError: name s48 is not defined' issue in fx_graph_runnable
+        repro scripts).
         """
         from torch._inductor.compile_fx import compile_fx_inner
 
@@ -386,13 +404,10 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         concrete_args = [N, torch.randn(32), torch.randn(32)]
         gm = make_fx(f, tracing_mode="symbolic")(*concrete_args)
 
-        # BUG: concrete args cause NameError on undefined symbolic variable
-        with self.assertRaises(NameError):
-            compiled = compile_fx_inner(gm, concrete_args)
-            self.assertNotIsInstance(compiled, str)
-            compiled(list(concrete_args))
+        compiled = compile_fx_inner(gm, concrete_args)
+        self.assertNotIsInstance(compiled, str)
+        compiled(list(concrete_args))
 
-        # FIX: _get_compile_args extracts symbolic metadata
         symbolic_args = _get_compile_args(gm, concrete_args)
         compiled = compile_fx_inner(gm, symbolic_args)
         self.assertNotIsInstance(compiled, str)

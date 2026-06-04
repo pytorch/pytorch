@@ -1173,12 +1173,15 @@ class TritonTemplateKernel(TritonKernel):
                 x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())
             )
 
-        ranges = tuple(getattr(scatter_graph.data, "ranges", ()))
+        assert isinstance(scatter_graph.data, ir.Scatter), (
+            f"scatter_graph.data must be an instance of Scatter but got {type(scatter_graph.data)}"
+        )
+        ranges = tuple(scatter_graph.data.ranges)
         scatter_vars, trailing_shape, trailing_mask = self._create_scatter_index_vars(
             ranges, len(modification_handler.default_input_shape)
         )
         with modification_handler.set_trailing_shape(trailing_shape, trailing_mask):
-            return scatter_graph.data.store_output(  # type: ignore[attr-defined]
+            return scatter_graph.data.store_output(
                 scatter_graph.name, contiguous_strides, scatter_vars
             )
 
