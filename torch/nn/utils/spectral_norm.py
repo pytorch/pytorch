@@ -85,7 +85,7 @@ class SpectralNorm:
         #
         #    However, after we update `u` and `v` in-place, we need to **clone**
         #    them before using them to normalize the weight. This is to support
-        #    backproping through two forward passes, e.g., the common pattern in
+        #    backpropagating through two forward passes, e.g., the common pattern in
         #    GAN training: loss = D(real) - D(fake). Otherwise, engine will
         #    complain that variables needed to do backward for the first forward
         #    (i.e., the `u` and `v` vectors) are changed in the second forward.
@@ -130,7 +130,7 @@ class SpectralNorm:
         )
 
     def _solve_v_and_rescale(self, weight_mat, u, target_sigma):
-        # Tries to returns a vector `v` s.t. `u = F.normalize(W @ v)`
+        # Tries to return a vector `v` s.t. `u = F.normalize(W @ v)`
         # (the invariant at top of this class) and `u @ W @ v = sigma`.
         # This uses pinverse in case W^T W is not invertible.
         v = torch.linalg.multi_dot(
