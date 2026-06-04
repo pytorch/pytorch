@@ -207,6 +207,74 @@ def forward(self, a_1):
         out2.sum().backward()
         self.assertEqual(a1.grad, a2.grad)
 
+    def test_pre_dispatch_traces_saved_variable_detach(self):
+        def f(x):
+            x = x.clone().requires_grad_(True)
+            y = x.sigmoid()
+            y.sum().backward()
+            return x.grad
+
+        fx_g = make_fx(f, pre_dispatch=True)(torch.randn(3))
+
+        sigmoid_backward_node = next(
+            n for n in fx_g.graph.nodes if n.target == aten.sigmoid_backward.default
+        )
+        saved_output = sigmoid_backward_node.args[1]
+        self.assertEqual(saved_output.target, aten.detach.default)
+
+    def test_pre_dispatch_without_mode_does_not_recurse_on_detach(self):
+        from torch._dispatch.python import enable_pre_dispatch
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            sparse_coo = torch.sparse_coo_tensor(
+                torch.tensor([[0, 1], [1, 0]]),
+                torch.randn(2),
+                (2, 2),
+            ).coalesce()
+            sparse_csr = torch.sparse_csr_tensor(
+                torch.tensor([0, 1, 2]),
+                torch.tensor([0, 1]),
+                torch.randn(2),
+                size=(2, 2),
+            )
+            nested = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)])
+
+        with enable_pre_dispatch():
+            x = torch.randn(3, requires_grad=True)
+            y = x.detach()
+            sparse_coo.detach()
+            sparse_csr.detach()
+            nested.detach()
+
+        self.assertEqual(y, x)
+        self.assertFalse(y.requires_grad)
+
+    def test_pre_dispatch_precedes_normal_mode_for_saved_variable_detach(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class EatDetachMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func == aten.detach.default:
+                    return args[0]
+                return func(*args, **kwargs)
+
+        def f(x):
+            x = x.clone().requires_grad_(True)
+            y = x.sigmoid()
+            y.sum().backward()
+            return x.grad
+
+        with EatDetachMode():
+            fx_g = make_fx(f, pre_dispatch=True)(torch.randn(3))
+
+        sigmoid_backward_node = next(
+            n for n in fx_g.graph.nodes if n.target == aten.sigmoid_backward.default
+        )
+        saved_output = sigmoid_backward_node.args[1]
+        self.assertEqual(saved_output.target, aten.detach.default)
+
     def test_make_fx_simple(self):
         def f(x):
             return torch.sin(x)

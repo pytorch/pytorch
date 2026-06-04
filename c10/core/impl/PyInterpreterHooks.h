@@ -35,4 +35,13 @@ C10_API const PyInterpreterHooksInterface& getPyInterpreterHooks();
 // Helper function to get the global interpreter
 C10_API PyInterpreter* getGlobalPyInterpreter();
 
+// Returns true when libtorch_python registered Python interpreter hooks.
+inline bool hasGlobalPyInterpreter() {
+#if !defined C10_MOBILE
+  return PyInterpreterHooksRegistry()->Has("PyInterpreterHooks");
+#else
+  return false;
+#endif
+}
+
 } // namespace c10::impl

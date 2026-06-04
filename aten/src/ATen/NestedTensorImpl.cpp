@@ -300,16 +300,13 @@ template <typename VariableVersion>
 c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
     VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python) &&
-      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = (*c10::impl::getGlobalPyInterpreter())->detach(this);
+  if (auto* interpreter = pyinterpreter_for_shallow_copy_and_detach()) {
+    auto r = (*interpreter)->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
       return r;
     }
-    // otherwise just copy the TensorImpl and not the PyObject.  Since
-    // the interpreter is dead no one can call us out on it
   }
   auto impl = c10::make_intrusive<NestedTensorImpl>(
       storage_,
@@ -319,11 +316,11 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
       nested_strides_,
       storage_offsets_);
 
-      copy_tensor_metadata(
-          /*src_impl=*/this,
-          /*dest_impl=*/impl.get(),
-          /*version_counter=*/std::forward<VariableVersion>(version_counter),
-          /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  copy_tensor_metadata(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/std::forward<VariableVersion>(version_counter),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
   return impl;
 }
 

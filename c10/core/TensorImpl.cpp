@@ -7,6 +7,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/core/impl/PyInterpreterHooks.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Logging.h>
 #include <c10/util/accumulate.h>
@@ -548,22 +549,49 @@ c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
   return autograd_meta_.get();
 }
 
+namespace {
+bool dispatch_key_is_included_and_not_excluded(DispatchKey dispatch_key) {
+  return c10::impl::tls_is_dispatch_key_included(dispatch_key) &&
+      !c10::impl::tls_is_dispatch_key_excluded(dispatch_key);
+}
+} // namespace
+
+c10::impl::PyInterpreter* TensorImpl::
+    pyinterpreter_for_shallow_copy_and_detach() const {
+  if (c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+    return nullptr;
+  }
+
+  if (dispatch_key_is_included_and_not_excluded(DispatchKey::PreDispatch) &&
+      c10::impl::hasGlobalPyInterpreter()) {
+    auto* global_interpreter = c10::impl::getGlobalPyInterpreter();
+    if ((*global_interpreter)->has_pre_dispatch_torch_dispatch_mode()) {
+      return global_interpreter;
+    }
+  }
+
+  const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
+  if (mode_stack_len > 0) {
+    const auto& cur_torch_dispatch_mode_state =
+        c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+    return &cur_torch_dispatch_mode_state->pyinterpreter();
+  }
+
+  if (key_set_.has(DispatchKey::Python)) {
+    return c10::impl::getGlobalPyInterpreter();
+  }
+
+  return nullptr;
+}
+
 template <typename VariableVersion>
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
     VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   c10::intrusive_ptr<TensorImpl> r;
-  const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
   // TODO: do we have to exclude after Python dispatch key set?
-  if (mode_stack_len > 0 &&
-      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    const auto& cur_torch_dispatch_mode_state =
-        c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
-    r = cur_torch_dispatch_mode_state->pyinterpreter()->detach(this);
-  } else if (
-      key_set_.has(DispatchKey::Python) &&
-      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    r = (*c10::impl::getGlobalPyInterpreter())->detach(this);
+  if (auto* interpreter = pyinterpreter_for_shallow_copy_and_detach()) {
+    r = (*interpreter)->detach(this);
   }
   if (r) {
     if (!r->is_inference()) {

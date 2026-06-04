@@ -67,6 +67,10 @@ class TensorBase;
 
 namespace c10 {
 
+namespace impl {
+struct PyInterpreter;
+} // namespace impl
+
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
  */
@@ -2159,6 +2163,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         (is_sparse_compressed(key_set_) && is_sparse_compressed(from));
     ;
   }
+
+ protected:
+  c10::impl::PyInterpreter* pyinterpreter_for_shallow_copy_and_detach() const;
 
  private:
   template <typename VariableVersion>
