@@ -387,7 +387,8 @@ TORCH_IMPL_FUNC(polygamma_out)
 }
 
 TORCH_IMPL_FUNC(signbit_out) (const Tensor& self, const Tensor& result) {
-  if (self.dtype() == at::kBool) {
+  auto dt = self.scalar_type();
+  if (at::isIntegralType(dt, /*includeBool=*/true) && !at::isSignedType(dt)) {
     result.fill_(false);
   } else {
     signbit_stub(device_type(), *this);
@@ -744,7 +745,6 @@ Tensor special_ndtr(const Tensor& self) {
   return calc_ndtr(self);
 }
 
-// FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
   if (self.is_complex()) {
     sgn_stub(device_type(), *this);

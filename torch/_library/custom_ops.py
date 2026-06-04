@@ -2,11 +2,12 @@
 import collections
 import inspect
 import logging
+import os
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, overload, Union
+from typing import Any, overload, TypeAlias, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -17,8 +18,27 @@ from . import autograd, utils
 from .effects import EffectType
 
 
-device_types_t = str | Sequence[str] | None
+device_types_t: TypeAlias = str | Sequence[str] | None  # noqa: PYI042
+tags_t: TypeAlias = _C.Tag | Sequence[_C.Tag] | None  # noqa: PYI042
 log = logging.getLogger(__name__)
+
+
+_FAST_CUSTOM_OPS_ENABLED = os.environ.get("TORCH_ENABLE_FAST_CUSTOM_OPS", "1") == "1"
+
+
+def _normalize_tags(tags: tags_t) -> tuple[_C.Tag, ...]:
+    if tags is None:
+        return ()
+    if isinstance(tags, _C.Tag):
+        tags = (tags,)
+    return tuple(dict.fromkeys(tags))
+
+
+def _with_pt2_compliant_tag(tags: Sequence[_C.Tag]) -> list[_C.Tag]:
+    return [
+        _C.Tag.pt2_compliant_tag,
+        *(tag for tag in tags if tag != _C.Tag.pt2_compliant_tag),
+    ]
 
 
 @overload
@@ -30,7 +50,7 @@ def custom_op(
     mutates_args: str | Iterable[str],
     device_types: device_types_t = None,
     schema: str | None = None,
-    tags: Sequence[_C.Tag] | None = None,
+    tags: tags_t = None,
 ) -> Callable[[Callable[..., object]], "CustomOpDef"]: ...
 
 
@@ -43,7 +63,7 @@ def custom_op(
     mutates_args: str | Iterable[str],
     device_types: device_types_t = None,
     schema: str | None = None,
-    tags: Sequence[_C.Tag] | None = None,
+    tags: tags_t = None,
 ) -> "CustomOpDef": ...
 
 
@@ -56,7 +76,7 @@ def custom_op(
     mutates_args: str | Iterable[str],
     device_types: device_types_t = None,
     schema: str | None = None,
-    tags: Sequence[_C.Tag] | None = None,
+    tags: tags_t = None,
 ) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
     """Wraps a function into custom operator.
 
@@ -89,6 +109,12 @@ def custom_op(
             annotations. We recommend letting us infer a schema unless you
             have a specific reason not to.
             Example: "(Tensor x, int y) -> (Tensor, Tensor)".
+        tags (Tag | Sequence[Tag] | None): one or more tags to apply to the
+            operator. Use ``torch.Tag.inplace`` for operators that mutate their
+            first Tensor argument and return it. Use ``torch.Tag.out`` for
+            operators that mutate keyword-only output tensors and return them.
+            Like PyTorch's built-in ``out=`` operators, ``torch.Tag.out``
+            custom ops do not support autograd.
 
     The following types are supported for the wrapped function's input parameters:
 
@@ -152,6 +178,43 @@ def custom_op(
         >>> numpy_sin_inplace(x)
         >>> assert torch.allclose(x, expected)
         >>>
+        >>> # Example of a custom op with inplace semantics
+        >>> @custom_op(
+        >>>     "mylib::numpy_sin_",
+        >>>     mutates_args={"x"},
+        >>>     device_types="cpu",
+        >>>     tags=torch.Tag.inplace,
+        >>> )
+        >>> def numpy_sin_(x: Tensor) -> Tensor:
+        >>>     x_np = x.numpy()
+        >>>     np.sin(x_np, out=x_np)
+        >>>     return x
+        >>>
+        >>> x = torch.randn(3)
+        >>> expected = x.sin()
+        >>> result = numpy_sin_(x)
+        >>> assert result is x
+        >>> assert torch.allclose(x, expected)
+        >>>
+        >>> # Example of a custom op with out= semantics
+        >>> @custom_op(
+        >>>     "mylib::numpy_sin_out",
+        >>>     mutates_args={"out"},
+        >>>     device_types="cpu",
+        >>>     tags=torch.Tag.out,
+        >>> )
+        >>> def numpy_sin_out(x: Tensor, *, out: Tensor) -> Tensor:
+        >>>     x_np = x.numpy()
+        >>>     out_np = out.numpy()
+        >>>     np.sin(x_np, out=out_np)
+        >>>     return out
+        >>>
+        >>> x = torch.randn(3)
+        >>> out = torch.empty_like(x)
+        >>> result = numpy_sin_out(x, out=out)
+        >>> assert result is out
+        >>> assert torch.allclose(out, x.sin())
+        >>>
         >>> # Example of a factory function
         >>> @torch.library.custom_op("mylib::bar", mutates_args={}, device_types="cpu")
         >>> def bar(device: torch.device) -> Tensor:
@@ -176,13 +239,18 @@ def custom_op(
     def inner(fn: Callable[..., object]) -> CustomOpDef:
         import torch
 
+        normalized_tags = _normalize_tags(tags)
         if schema is None:
-            schema_str = torch.library.infer_schema(fn, mutates_args=mutates_args)
+            schema_str = torch.library.infer_schema(
+                fn,
+                mutates_args=mutates_args,
+                tags=normalized_tags,
+            )
         else:
             schema_str = schema
 
         namespace, opname = name.split("::")
-        result = CustomOpDef(namespace, opname, schema_str, fn, tags)
+        result = CustomOpDef(namespace, opname, schema_str, fn, normalized_tags)
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -220,24 +288,31 @@ class CustomOpDef:
         name: str,
         schema: str,
         fn: Callable,
-        tags: Sequence[_C.Tag] | None = None,
+        tags: tags_t = None,
     ) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
         self._name = name
         self._schema = schema
-        self._tags = tags if tags is not None else []
+        self._tags = _normalize_tags(tags)
 
         self._init_fn = fn
 
         self._backend_fns: dict[str | None, Callable] = {}
+        self._backend_impls: dict[str | None, Callable] = {}
+        self._fast_path: Callable | None = None
+        self._fast_path_hits: int = 0
+        self._autograd_impl: Callable | None = None
+        self._adinplaceorview_impl: Callable | None = None
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
         self._torch_dispatch_fns: dict[type, Callable] = {}
         self._vmap_fn: Callable | None = None
-        self._autocast_cuda_dtype: _dtype | None = None
-        self._autocast_cpu_dtype: _dtype | None = None
+        self._autocast_dtype: dict[str, _dtype | None] = {}
+        self._is_inplace = False
+        self._is_out = False
+        self._out_kwarg_names: tuple[str, ...] = ()
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher(self._tags)
@@ -379,7 +454,33 @@ class CustomOpDef:
                             return inspect.getmodule(fn)
 
                         schema = self._opoverload._schema
-                        if not schema._is_view_op():
+                        if self._is_inplace:
+                            if result is not args[0]:
+                                raise RuntimeError(
+                                    f"{self._name} (with implementation in {get_module()}): "
+                                    "An operator tagged with torch.Tag.inplace must "
+                                    "return its first argument."
+                                )
+                        elif self._is_out:
+                            out_kwarg_names = self._out_kwarg_names
+                            if len(out_kwarg_names) == 1:
+                                returns_out_args = result is kwargs[out_kwarg_names[0]]
+                            else:
+                                returns_out_args = (
+                                    isinstance(result, tuple)
+                                    and len(result) == len(out_kwarg_names)
+                                    and all(
+                                        result[i] is kwargs[name]
+                                        for i, name in enumerate(out_kwarg_names)
+                                    )
+                                )
+                            if not returns_out_args:
+                                raise RuntimeError(
+                                    f"{self._name} (with implementation in {get_module()}): "
+                                    "An operator tagged with torch.Tag.out must "
+                                    "return its mutable keyword-only arguments."
+                                )
+                        elif not schema._is_view_op():
                             utils._c_check_aliasing_constraint(
                                 self._name,
                                 args,
@@ -400,6 +501,8 @@ class CustomOpDef:
                             _C._dispatch_key_for_device(device_type),
                         )
 
+                    self._backend_impls[device_type] = backend_impl
+
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
                 @torch._disable_dynamo
@@ -410,6 +513,8 @@ class CustomOpDef:
                         return fn(*args, **kwargs)
 
                 self._backend_fns[device_type] = wrapped_fn
+            if _FAST_CUSTOM_OPS_ENABLED:
+                self._install_fast_path()
             return fn
 
         if device_types is not None and not utils.has_tensor_arg(
@@ -498,6 +603,14 @@ class CustomOpDef:
             >>> assert torch.allclose(out, x.nonzero())
 
         """
+        if self._is_inplace or self._is_out:
+            tag = "torch.Tag.inplace" if self._is_inplace else "torch.Tag.out"
+            warnings.warn(
+                f"The fake registration for {self} is unnecessary. Custom ops "
+                f"tagged with {tag} already get an autogenerated fake kernel. "
+                "The provided fake impl will be used instead.",
+                stacklevel=2,
+            )
         self._abstract_fn = fn
         return fn
 
@@ -622,6 +735,11 @@ class CustomOpDef:
 
         """
         schema = self._opoverload._schema
+        if utils.is_out(self._opoverload):
+            raise RuntimeError(
+                f"Cannot register autograd formula for operator tagged with "
+                f"torch.Tag.out: {self}. Out variants do not support autograd."
+            )
         if not utils.is_functional_schema(schema, allow_valid_view=True):
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
@@ -637,12 +755,17 @@ class CustomOpDef:
         cpp_schema = _C.parse_schema(schema_str)
         self._validate_schema(cpp_schema, schema_str)
         self._define_dispatcher_op(schema_str, tags)
+        self._is_inplace = utils.is_inplace(self._opoverload)
+        self._is_out = utils.is_out(self._opoverload)
+        if self._is_out:
+            _, out_kwarg_names = utils.mutated_args_kwargs(self._opoverload._schema)
+            self._out_kwarg_names = tuple(out_kwarg_names)
         self._register_fake_dispatcher_impl()
         self._register_autograd_dispatcher_impl()
         self._register_adinplaceorview_dispatcher_impl()
 
     def _validate_schema(self, schema: _C.FunctionSchema, schema_str: str) -> None:
-        if utils.has_kwarg_only_tensors(schema):
+        if utils.has_kwarg_only_tensors(schema) and torch.Tag.out not in self._tags:
             # If you want to support this, the progression is:
             # - supporting kwarg-only Tensors that are non-differentiable
             # - supporting kwarg-only Tensors (regardless of differentiability)
@@ -654,7 +777,7 @@ class CustomOpDef:
     def _define_dispatcher_op(self, schema_str: str, tags: Sequence[_C.Tag]) -> None:
         self._lib.define(
             schema_str,
-            tags=[_C.Tag.pt2_compliant_tag, *tags],
+            tags=_with_pt2_compliant_tag(tags),
         )
         self._opoverload = utils.lookup_op(self._qualname)
 
@@ -677,6 +800,7 @@ class CustomOpDef:
 
     def _register_autograd_dispatcher_impl(self) -> None:
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
+        self._autograd_impl = autograd_impl
         self._lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
 
     def _register_adinplaceorview_dispatcher_impl(self) -> None:
@@ -692,20 +816,30 @@ class CustomOpDef:
     def _register_mutation_version_bump(self, schema: _C.FunctionSchema) -> None:
         mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
 
-        original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
-            f"{self._lib.ns}::{self._name}", "ADInplaceOrView"
-        )
+        is_view = schema._is_view_op()
+        if is_view:
+            original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
+                f"{self._lib.ns}::{self._name}", "ADInplaceOrView"
+            )
+        else:
+            op = self._opoverload
+            after_ADInplaceOrView_keyset = _C._after_ADInplaceOrView_keyset
 
         def adinplaceorview_impl(keyset, *args, **kwargs):
-            # Handle the mutated idx the user gave us explicitly
             all_args, all_kwargs = utils.fill_defaults(schema, args, kwargs)
 
             for idx in mutated_idxs:
                 increment_version(all_args[idx])
             for key in mutated_keys:
                 increment_version(all_kwargs[key])
-            # Handle view + mutation that are in the schema
-            return original_kernel.call_boxed(keyset, *args, **kwargs)
+            if is_view:
+                # View ops need the C++ fallback for aliasing tracking
+                return original_kernel.call_boxed(keyset, *args, **kwargs)
+            # Non-view mutable ops: increment_version is sufficient,
+            # redispatch directly past ADInplaceOrView to the backend.
+            return op.redispatch(keyset & after_ADInplaceOrView_keyset, *args, **kwargs)
+
+        self._adinplaceorview_impl = adinplaceorview_impl
 
         with warnings.catch_warnings():
             warnings.filterwarnings(
@@ -719,6 +853,106 @@ class CustomOpDef:
                 "ADInplaceOrView",
                 with_keyset=True,
             )
+
+    def _install_fast_path(self):
+        """Install a Python fast path that bypasses the C++ dispatcher for
+        common eager-mode calls. The fast path requires all of the following:
+        - All args are plain ``torch.Tensor`` (no subclasses).
+        - No ``TorchFunctionMode`` is active.
+        - No autocast is active.
+        - Device is not ``"meta"`` and the kernel is not disabled.
+        - The resolved keyset contains only keys from the normal eager set:
+          an autograd key, ADInplaceOrView, and a dense backend key.
+          (Falls back to slow path under inference_mode, Functionalize, Vmap, etc.)
+        - The schema has no tensor-list args and is not a view op.
+        When any condition fails, the call falls through to the C++ dispatcher.
+
+        Dispatch chain (all in Python, no C++ dispatcher hops):
+        autograd_impl -> [adinplaceorview_impl ->] backend_dispatch
+        Connected via TLS-based redispatch interception in OpOverload.redispatch."""
+        schema = self._opoverload._schema
+        if schema._is_view_op():
+            return
+
+        has_tensorlist = any(
+            utils.is_tensorlist_like_type(a.type)
+            for a in (*schema.arguments, *schema.returns)
+        )
+        if has_tensorlist:
+            return
+
+        op = self._opoverload
+        autograd_impl = self._autograd_impl
+        adinplaceorview_impl = self._adinplaceorview_impl
+        disabled_kernel = self._disabled_kernel
+        backend_impls = self._backend_impls
+        is_mutable = schema.is_mutable
+        opdef = self
+        chain_cache: dict[str | None, tuple] = {}
+
+        def _build_chain(backend_impl):
+            def backend_dispatch(keyset, *args, **kwargs):
+                return backend_impl(*args, **kwargs)
+
+            if is_mutable:
+                return (autograd_impl, adinplaceorview_impl, backend_dispatch)
+            return (autograd_impl, backend_dispatch)
+
+        def _check_fast_path(args, kwargs):
+            # Dynamo needs the real dispatcher graph;
+            # kwargs / no-positional-arg calls need schema-level handling
+            if torch.compiler.is_compiling() or not args or kwargs:
+                return None
+
+            # Returns (device_type, keyset_raw) or None; rejects subclasses,
+            # modes, autocast, multi-device, nested/sparse/quantized
+            check = _C._custom_op_fast_path_check(  # pyrefly: ignore[missing-attribute]
+                args
+            )
+            if check is None:
+                return None
+
+            device_type, keyset_raw = check
+
+            # meta tensors and disabled kernels need C++ fallback logic
+            if device_type == "meta" or device_type in disabled_kernel:
+                return None
+            # No registered kernel for this device
+            backend_impl = backend_impls.get(device_type) or backend_impls.get(None)
+            if backend_impl is None:
+                return None
+            return (device_type, keyset_raw, backend_impl)
+
+        # Install fast path on the OpOverload's `_op` (read by `torch.ops.ns.name.default(x)`).
+        # Save the original entry once so repeated `_install_fast_path` invocations
+        # (e.g. registering kernels for different devices) don't nest wrappers.
+        # The OpOverloadPacket (torch.ops.ns.name) is NOT wrapped.
+        overload = self._opoverload
+        if not hasattr(overload, "_orig_op"):
+            overload._orig_op = overload._op  # pyrefly: ignore[missing-attribute]
+
+        def fast_op(*args, **kwargs):
+            info = _check_fast_path(args, kwargs)
+            if info is not None:
+                device_type, keyset_raw, backend_impl = info
+                chain = chain_cache.get(device_type)
+                if chain is None:
+                    chain = _build_chain(backend_impl)
+                    chain_cache[device_type] = chain
+
+                opdef._fast_path_hits += 1
+                keyset = _C.DispatchKeySet.from_raw_repr(keyset_raw)
+                prev = _ops._set_fast_redispatch(op, chain)
+                try:
+                    return op.redispatch(keyset, *args)
+                finally:
+                    _ops._unset_fast_redispatch(prev)
+            return overload._orig_op(  # pyrefly: ignore[missing-attribute]
+                *args, **kwargs
+            )
+
+        overload._op = fast_op
+        self._fast_path = fast_op
 
     def _register_backend_select_dispatcher(self, device_arg_index: int):
         """
@@ -854,11 +1088,12 @@ class CustomOpDef:
     ):
         r"""Register an autocast dispatch rule for this custom op.
 
-        Valid `device_type` include: "cpu" and "cuda".
+        Valid ``device_type`` values include any device type that supports autocast.
+        See :func:`torch.amp.is_autocast_available` for details.
 
         Args:
             op (str | OpOverload): The operator to register an autocast dispatch rule to.
-            device_type(str):  Device type to use. 'cuda' or 'cpu'.
+            device_type(str):  Device type to use. 'cuda', 'cpu', 'xpu', or any other device type that supports autocast.
                 The type is the same as the `type` attribute of a :class:`torch.device`.
                 Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
             cast_inputs (:class:`torch.dtype`): When custom op runs in an autocast-enabled region,
@@ -890,31 +1125,27 @@ class CustomOpDef:
             raise ValueError(
                 f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
             )
-        if device_type not in ["cpu", "cuda"]:
-            raise ValueError(f"Unknown device type: {device_type}")
+        if not torch._C._is_autocast_available(device_type):
+            raise ValueError(f"Device type '{device_type}' does not support autocast.")
 
-        need_register_cuda = self._autocast_cuda_dtype is None
-        need_register_cpu = self._autocast_cpu_dtype is None
-        if device_type == "cuda":
-            self._autocast_cuda_dtype = cast_inputs
-        else:
-            self._autocast_cpu_dtype = cast_inputs
+        need_register = self._autocast_dtype.get(device_type) is None
+        if need_register:
+            self._autocast_dtype[device_type] = cast_inputs
+        autocast_key = "Autocast" + torch._C._dispatch_key_for_device(device_type)
+        autocast_dispatch_key = getattr(torch._C.DispatchKey, autocast_key)
 
         def kernel(_, *args, **kwargs):
             if len(kwargs) != 0:
                 raise AssertionError(
                     f"Custom ops do not support kwargs yet, got {list(kwargs.keys())}"
                 )
-            autocast_keyset = torch._C.DispatchKeySet(
-                torch._C.DispatchKey.AutocastCPU
-            ) | torch._C.DispatchKeySet(torch._C.DispatchKey.AutocastCUDA)
-            with torch._C._ExcludeDispatchKeyGuard(autocast_keyset):
+            with torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(autocast_dispatch_key)
+            ):
                 return self._opoverload(*_cast(args, device_type, cast_inputs))
 
-        if need_register_cuda and self._autocast_cuda_dtype:
-            self._lib.impl(self._name, kernel, "AutocastCUDA", with_keyset=True)
-        elif need_register_cpu and self._autocast_cpu_dtype:
-            self._lib.impl(self._name, kernel, "AutocastCPU", with_keyset=True)
+        if need_register:
+            self._lib.impl(self._name, kernel, autocast_key, with_keyset=True)
 
         return kernel
 

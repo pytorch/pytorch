@@ -12,9 +12,9 @@
 
 #if IS_PYTHON_3_14_PLUS && defined(_WIN32)
 #define Py_BUILD_CORE
-#include <internal/pycore_stackref.h>
 #include <internal/pycore_code.h>
 #include <internal/pycore_interpframe.h>
+#include <internal/pycore_stackref.h>
 #undef Py_BUILD_CORE
 #endif
 
@@ -73,8 +73,8 @@ static PyObject* set_eval_frame_isolate_recompiles_id_py(
   return PyLong_FromLongLong(old_id);
 }
 
-// 3.15 Not supported at all. See cpython_defs.c for hints
-#if !(IS_PYTHON_3_15_PLUS)
+// 3.16 Not supported at all. See cpython_defs.c for hints
+#if !(IS_PYTHON_3_16_PLUS)
 
 #define DECLARE_PYOBJ_ATTR(name)                        \
   static PyObject* THPPyInterpreterFrame_##name(        \
@@ -858,14 +858,7 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
 #endif
 
-  if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
-    return NULL;
-  }
-  Py_INCREF(&THPPyInterpreterFrameType);
-  if (PyModule_AddObject(
-          module,
-          "_PyInterpreterFrame",
-          (PyObject*)&THPPyInterpreterFrameType) != 0) {
+  if (PyModule_AddType(module, &THPPyInterpreterFrameType) < 0) {
     return NULL;
   }
 
