@@ -7,7 +7,7 @@ import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config
-from ..runtime.hints import AttrsDescriptorWrapper
+from ..runtime.hints import AttrsDescriptorWrapper, DeviceProperties
 from ..utils import (
     _type_of,
     device_supports_fp64,
@@ -37,6 +37,27 @@ def should_unwrap_unspec_arg(name: str):
     return False
 
 
+def use_uint8_triton_storage_for_cuda_float8_e4m3fn(
+    dtype: torch.dtype, arg_name: str | None = None
+) -> bool:
+    # Triton rejects fp8e4nv pointer types before sm89, but eager CUDA can
+    # still dequantize float8_e4m3fn values by treating storage as raw bytes.
+    if dtype != torch.float8_e4m3fn or torch.version.hip is not None:
+        return False
+    if arg_name is not None and not arg_name.startswith("in_ptr"):
+        return False
+
+    try:
+        device = V.graph.get_current_device_or_throw()
+    except AttributeError:
+        return False
+
+    if device.type != "cuda":
+        return False
+
+    return DeviceProperties.create(device).cc < 89
+
+
 def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
     if isinstance(arg, TensorArg):
         typ = _type_of(arg.dtype)
@@ -47,6 +68,8 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
                 return "fp32"
             else:
                 return new_typ
+        elif use_uint8_triton_storage_for_cuda_float8_e4m3fn(arg.dtype, arg.name):
+            return "*u8"
         else:
             return typ
     if isinstance(arg, SizeArg):
@@ -177,8 +200,7 @@ def _get_buffer_layout(buf_name: str) -> "torch._inductor.ir.Layout":
     return layout
 
 
-def is_unaligned_buffer(arg: TensorArg):
-    buf_name = arg.buffer
+def is_unaligned_buffer_name(buf_name: str) -> bool:
     if buf_name in V.graph.unaligned_buffers:
         return True
 
@@ -197,6 +219,10 @@ def is_unaligned_buffer(arg: TensorArg):
         return not layout.maybe_guard_aligned()
     else:
         return False
+
+
+def is_unaligned_buffer(arg: TensorArg):
+    return is_unaligned_buffer_name(arg.buffer)
 
 
 def _arg_equals_1(arg: KernelArgType) -> bool:
