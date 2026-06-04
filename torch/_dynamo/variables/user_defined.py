@@ -2893,6 +2893,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 source_attr = AttrSource(self.cls_source, "__call__")
                 install_guard(source_attr.make_guard(GuardBuilder.CLOSURE_MATCH))
+            type_attr = self.lookup_class_mro_attr("__call__")
+            if type_attr is not NO_SUCH_SUBOBJ:
+                source = AttrSource(self.source, "__call__") if self.source else None
+                return self.resolve_type_attr(
+                    tx, "__call__", type_attr, source
+                ).call_function(tx, args, kwargs)
             return self.call_method(tx, "__call__", args, kwargs)  # type: ignore[arg-type]
 
         return super().call_function(tx, args, kwargs)
