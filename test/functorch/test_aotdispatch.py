@@ -9571,6 +9571,25 @@ def forward(self, primals_1, tangents_1):
             node = g.call_function(target, args=())
             self.assertEqual(_size_of(node), 0)
 
+    def test_size_of_fake_script_object(self):
+        import torch._functorch.config as functorch_config
+        from torch._functorch.partitioners import _size_of
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        g = torch.fx.Graph()
+        node = g.call_function(torch.ops.aten.abs.default, args=())
+        node.meta["val"] = FakeScriptObject(None, "test_class", None)
+
+        # A (Fake)ScriptObject may hold tensors internally, so by default
+        # _size_of refuses to guess its memory footprint and raises.
+        with self.assertRaisesRegex(RuntimeError, "Cannot compute the size"):
+            _size_of(node)
+
+        # The unsafe escape hatch makes _size_of assume such objects are
+        # zero size, unblocking compilation at the cost of soundness.
+        with functorch_config.patch(unsafe_treat_script_objects_as_zero_size=True):
+            self.assertEqual(_size_of(node), 0)
+
 
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
