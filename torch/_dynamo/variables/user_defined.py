@@ -1016,6 +1016,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
+        elif (
+            result := self._call_method_descriptor(tx, name, args, kwargs)
+        ) is not None:
+            return result
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_len
 
@@ -1077,6 +1081,44 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     break
 
         return super().call_method(tx, name, args, kwargs)
+
+    def _call_method_descriptor(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not args:
+            return None
+
+        try:
+            descriptor = inspect.getattr_static(self.value, name)
+        except AttributeError:
+            return None
+
+        if not isinstance(descriptor, types.MethodDescriptorType):
+            return None
+        owner = descriptor.__objclass__
+
+        try:
+            first_arg_type = args[0].python_type()
+        except NotImplementedError:
+            return None
+
+        if not issubclass(first_arg_type, owner):
+            return None
+
+        receiver = args[0]
+        if first_arg_type is not owner:
+            if not (
+                isinstance(receiver, UserDefinedObjectVariable)
+                and receiver._base_vt is not None
+            ):
+                return None
+            receiver = receiver._base_vt
+
+        return receiver.call_method(tx, name, args[1:], kwargs)
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
