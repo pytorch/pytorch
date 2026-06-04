@@ -79,7 +79,7 @@ def index(
     from itertools import islice
 
     for i, elem in islice(enumerate(iterator), start, end):
-        if item == elem:
+        if elem is item or elem == item:
             return i
     # This will not run in dynamo
     raise ValueError(f"{item} is not in {type(iterator)}")
@@ -194,18 +194,50 @@ def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     raise TypeError(f"argument of type {type(b)} is not iterable")
 
 
-def accumulate_grad(x: torch.Tensor, new_grad: torch.Tensor | None) -> None:
+def accumulate_grad(
+    x: torch.Tensor,
+    variable_grad: torch.Tensor | None,
+    new_grad: torch.Tensor | None,
+) -> torch.Tensor | None:
     # polyfills according to the Gradient Layout Contract
     if new_grad is None:
-        return
+        return variable_grad
     new_grad_strided = torch.empty_like(x)
     new_grad_strided.copy_(new_grad)
-    if x.grad is None:
-        x.grad = new_grad_strided
+    if variable_grad is None:
+        return new_grad_strided
+    elif variable_grad.is_sparse and not new_grad_strided.is_sparse:
+        return new_grad_strided + variable_grad
     elif torch.is_grad_enabled():
-        x.grad = x.grad + new_grad_strided
+        return variable_grad + new_grad_strided
     else:
-        x.grad.add_(new_grad_strided)
+        variable_grad.add_(new_grad_strided)
+        return variable_grad
+
+
+def accumulate_grad_no_alias(
+    x: torch.Tensor,
+    variable_grad: torch.Tensor | None,
+    new_grad: torch.Tensor | None,
+) -> torch.Tensor | None:
+    # Mirrors inductor::accumulate_grad_: same gradient layout logic as
+    # accumulate_grad, but the returned grad must not alias any input.
+    if new_grad is None:
+        if variable_grad is None:
+            return None
+        return variable_grad.clone()
+    new_grad_strided = torch.empty_like(x)
+    new_grad_strided.copy_(new_grad)
+    if variable_grad is None:
+        return new_grad_strided
+    elif variable_grad.is_sparse and not new_grad_strided.is_sparse:
+        return new_grad_strided + variable_grad
+    elif torch.is_grad_enabled():
+        return variable_grad + new_grad_strided
+    else:
+        result = variable_grad.clone()
+        result.add_(new_grad_strided)
+        return result
 
 
 # This mirrors
@@ -241,8 +273,12 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
     if all(isinstance(a, OrderedDict) for a in (d, other)):
         return list(d.items()) == list(other.items())
 
+    # CPython's dict_equal uses PyObject_RichCompareBool for value
+    # comparison, which has an identity shortcut (if v is w, eq is True).
+    # This matters for NaN: {k: nan} == {k: nan} is True when same nan.
     for k, v in d.items():
-        if v != other[k]:
+        ov = other[k]
+        if v is not ov and v != ov:
             return False
 
     return True
