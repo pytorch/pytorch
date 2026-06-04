@@ -1410,6 +1410,16 @@
       ]
     }
   ],
+  "GB7763": [
+    {
+      "Gb_type": "torch.is_grad_enabled in autograd.Function backward",
+      "Context": "",
+      "Explanation": "Dynamo does not support tracing custom autograd.Function backward methods that observe grad mode.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0103": [
     {
       "Gb_type": "Tensor subclass overridden method call",

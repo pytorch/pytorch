@@ -972,6 +972,19 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.visit(visit, (args, kwargs))
 
+        if requires_grad and tx.output.current_tracer.is_autograd_function_backward:
+            from .builder import wrap_fx_proxy
+
+            trampoline_autograd_apply = produce_trampoline_autograd_apply(self.fn_cls)
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    trampoline_autograd_apply,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+            )
+
         if requires_grad and torch.is_grad_enabled():
             source = self.source
 
