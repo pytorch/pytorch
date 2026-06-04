@@ -2514,6 +2514,29 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         return self.call_method(tx, "__imul__", [other], {})
 
+    def nb_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10319-L10322
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__pow__",
+            "__rpow__",
+            nb_slot=PyNumberSlots.NB_POWER,
+            reverse=reverse,
+        )
+
+    def nb_inplace_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        return self.call_method(tx, "__ipow__", [other], {})
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
