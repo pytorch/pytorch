@@ -78,7 +78,6 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   return comm;
 }
 
-#ifdef NCCL_HAS_CONFIG
 std::shared_ptr<NCCLComm> NCCLComm::create(
     int numRanks,
     int rank,
@@ -103,7 +102,6 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
 }
-#ifdef NCCL_HAS_INIT_RANK_SCALABLE
 std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
     int numRanks,
     int rank,
@@ -134,8 +132,6 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
   comm->initialized_ = !comm->nonBlocking_;
   return comm;
 }
-#endif // NCCL_HAS_INIT_RANK_SCALABLE
-#endif // NCCL_HAS_CONFIG
 
 ncclComm_t NCCLComm::getNcclComm() {
   LockType lock(mutex_);
@@ -218,7 +214,6 @@ std::optional<std::string> NCCLComm::getNcclCommFailureReason() const {
   return commFailureReason_;
 }
 
-#if defined(NCCL_HAS_COMM_SPLIT)
 std::shared_ptr<NCCLComm> NCCLComm::split(
     NCCLComm* source,
     int color_id,
@@ -236,11 +231,6 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   auto comm = std::make_shared<NCCLComm>();
   // This call will block until the source communicator is initialized
   auto sourceComm = source->getNcclComm();
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  C10D_NCCL_CHECK(
-      ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
-      std::nullopt);
-#else
   // After calling ncclCommSplit in non-blocking mode, we should wait for the
   // source communicator to be out of ncclInProgress state.
   // Reason 1:
@@ -267,7 +257,6 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   }
   // comm->ncclComm_ should have valid ptr by now, but not necessarily
   // initialized. Rely on getNcclComm() to wait for its initialization.
-#endif
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
   // Child comm should be on the same device as parent comm
@@ -280,9 +269,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
             << comm->repr() << " with color_id " << color_id;
   return comm;
 }
-#endif
 
-#ifdef NCCL_HAS_COMM_SHRINK
 std::shared_ptr<NCCLComm> NCCLComm::shrink(
     NCCLComm* source,
     std::vector<int>& ranks_to_exclude,
@@ -339,7 +326,6 @@ std::shared_ptr<NCCLComm> NCCLComm::shrink(
 
   return comm;
 }
-#endif
 
 void NCCLComm::finalize() {
   LockType lock(mutex_);
@@ -370,19 +356,16 @@ void NCCLComm::destroy() {
 void NCCLComm::abort(std::optional<std::string> commFailureReason) {
   LockType lock(mutex_);
   at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
-#ifdef ENABLE_NCCL_ERROR_CHECKING
   if (aborted_ && !initialized_) {
     // Should not abort twice.
     return;
   }
 
-#ifdef NCCL_HAS_COMM_REGISTER
   // Deregister all registered segments before aborting.
   for (auto& it : registeredSegmentHandles_) {
     void* handle = it.second.first;
     bool is_window = it.second.second;
     if (is_window) {
-#ifdef NCCL_HAS_COMM_WINDOW_REGISTER
       C10D_NCCL_CHECK(
           ::ncclCommWindowDeregister(ncclComm_, (ncclWindow_t)handle),
           c10::str(
@@ -390,7 +373,6 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
               handle,
               " on ncclComm_ ",
               ncclComm_));
-#endif
     } else {
       C10D_NCCL_CHECK(
           ::ncclCommDeregister(ncclComm_, handle),
@@ -402,7 +384,6 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
     }
   }
   registeredSegmentHandles_.clear();
-#endif
 
   // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
   // timeout)
@@ -410,9 +391,6 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
   LOG(INFO) << "Aborting ncclComm_ " << ncclComm_ << " with reason: "
             << (commFailureReason ? *commFailureReason
                                   : "No abort reason provided.");
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_), commFailureReason_);
-#else
   // Note: We already hold the mutex_ lock here, so the direct call to
   // ncclCommGetAsyncError is safe from concurrent access.
   ncclResult_t result = ::ncclCommAbort(ncclComm_);
@@ -437,7 +415,6 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
         "\n" + getNcclErrorDetailStr(result, commFailureReason_);
     TORCH_CHECK_WITH(DistBackendError, false, err);
   }
-#endif
   aborted_ = true;
   ncclComm_ = nullptr;
 
@@ -445,10 +422,6 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
   if (ncclAsyncErr_ == ncclSuccess) {
     ncclAsyncErr_ = ncclSystemError;
   }
-#else
-  // This is a NOOP, if error checks are disabled.
-  return;
-#endif
 }
 
 bool NCCLComm::isInitialized() const {
@@ -467,17 +440,12 @@ uint64_t NCCLComm::getCommSplitCounter() const {
 
 ncclResult_t NCCLComm::checkForNcclError() {
   LockType lock(mutex_);
-#ifdef ENABLE_NCCL_ERROR_CHECKING
   if (ncclAsyncErr_ != ncclSuccess) {
     return ncclAsyncErr_;
   }
   C10D_NCCL_CHECK(
       ncclCommGetAsyncError(ncclComm_, &ncclAsyncErr_), commFailureReason_);
   return ncclAsyncErr_;
-#else
-  // Always return success, if error checks are disabled.
-  return ncclSuccess;
-#endif
 }
 
 ncclResult_t NCCLComm::getAsyncError(ncclResult_t* asyncError) {
@@ -491,7 +459,6 @@ ncclResult_t NCCLComm::registerSegment(
     bool errorOnRereg, /*=true*/
     bool window /*=false*/) {
   LockType lock(mutex_);
-#ifdef NCCL_HAS_COMM_REGISTER
   // We register only segments from cache allocator
   // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
   // maps to a unique handle and should not be registered before the current
@@ -510,7 +477,6 @@ ncclResult_t NCCLComm::registerSegment(
   void* handle = nullptr;
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
   auto comm = getNcclComm();
-#ifdef NCCL_HAS_COMM_WINDOW_REGISTER
   if (window) {
     C10D_NCCL_CHECK(
         ncclCommWindowRegister(
@@ -533,27 +499,12 @@ ncclResult_t NCCLComm::registerSegment(
             " on ncclComm_ ",
             comm));
   }
-#else
-  C10D_NCCL_CHECK(
-      ncclCommRegister(comm, ptr, size, &handle),
-      c10::str(
-          "Failed to register segment with ptr ",
-          ptr,
-          ", size ",
-          size,
-          " on ncclComm_ ",
-          comm));
-#endif
   registeredSegmentHandles_[ptr] = {handle, window};
   return ncclSuccess;
-#else
-  return ncclInvalidUsage;
-#endif
 }
 
 ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
   LockType lock(mutex_);
-#ifdef NCCL_HAS_COMM_REGISTER
   TORCH_CHECK(
       registeredSegmentHandles_.count(ptr) == 1,
       "Segment with ptr ",
@@ -564,7 +515,6 @@ ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
   void* handle = registeredSegmentHandles_[ptr].first;
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
   auto comm = getNcclComm();
-#ifdef NCCL_HAS_COMM_WINDOW_REGISTER
   if (window) {
     C10D_NCCL_CHECK(
         ncclCommWindowDeregister(comm, (ncclWindow_t)handle),
@@ -586,22 +536,8 @@ ncclResult_t NCCLComm::deregisterSegment(void* ptr, bool window /*false*/) {
             " on ncclComm_ ",
             comm));
   }
-#else
-  C10D_NCCL_CHECK(
-      ncclCommDeregister(comm, handle),
-      c10::str(
-          "Failed to deregister segment handle ",
-          handle,
-          ", with ptr ",
-          ptr,
-          " on ncclComm_ ",
-          comm));
-#endif
   registeredSegmentHandles_.erase(ptr);
   return ncclSuccess;
-#else
-  return ncclInvalidUsage;
-#endif
 }
 
 std::string NCCLComm::repr() const {
@@ -776,14 +712,12 @@ std::string getNcclErrorDetailStr(
   }
   std::string interpret;
   std::string err;
-#ifdef ENABLE_NCCL_GET_LAST_ERROR
   auto ret = ncclGetLastError(nullptr);
   if (ret) {
     err = "\nLast error:\n" + std::string(ret);
   } else {
     err = "\nLast error: Unknown NCCL Error\n";
   }
-#endif
   switch (error) {
     case ncclUnhandledCudaError:
       interpret = "ncclUnhandledCudaError: Call to CUDA function failed.";
@@ -791,11 +725,6 @@ std::string getNcclErrorDetailStr(
     case ncclSystemError:
       interpret =
           "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. ";
-#ifndef NCCL_REMOTE_ERROR
-      // Before ncclRemoteError was created, unexpected remote disconnect was
-      // categorized as ncclSystemError
-      interpret += "It can be also caused by unexpected exit of a remote peer.";
-#endif
       break;
     case ncclInternalError:
       interpret = "ncclInternalError: Internal check failed.";
@@ -807,12 +736,10 @@ std::string getNcclErrorDetailStr(
       interpret =
           "ncclInvalidUsage: This usually reflects invalid usage of NCCL library.";
       break;
-#ifdef NCCL_REMOTE_ERROR
     case ncclRemoteError:
       interpret =
           "ncclRemoteError: A call failed possibly due to a network error or a remote process exiting prematurely.";
       break;
-#endif
     default:
       interpret = "Unknown NCCL error!";
   }

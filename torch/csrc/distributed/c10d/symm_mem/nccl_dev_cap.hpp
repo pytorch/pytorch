@@ -5,9 +5,9 @@
 #include <nccl.h>
 #include <torch/csrc/cuda/nccl.h>
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+// NCCL is required to be 2.27+, so symmetric memory support is always available
+// in NCCL builds.
 #define NCCL_HAS_SYMMEM_SUPPORT
-#endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
 #if !defined(USE_ROCM)
