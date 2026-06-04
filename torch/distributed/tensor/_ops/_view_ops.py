@@ -742,6 +742,10 @@ class _ViewShardingPropagator:
         strided_shard_claimed_dims: set[ClaimedDim] = set()
         # Starts as global_input_shape; each mesh dim divides its sharded dim.
         local_tensor_shapes: list[int] = list(self.global_input_shape)
+        # mesh_dim -> output tensor dim it was placed on.  Allows a later
+        # _StridedShard to tell whether an earlier axis landed on the same
+        # output dim (so it must not reduce this axis's expected split_factor).
+        assigned: dict[int, int] = {}
 
         output_placements: list[Placement] = []
         # Process mesh dims in order; _rewrite_*_shard relies on this for
@@ -765,10 +769,14 @@ class _ViewShardingPropagator:
                     strided_shard_claimed_dims,
                     local_tensor_shapes,
                     input_to_output_tensor_dims,
+                    assigned,
                 )
                 output_placements.append(placement)
             else:
-                output_placements.append(p)
+                placement = p
+                output_placements.append(placement)
+            if isinstance(placement, (Shard, _StridedShard)):
+                assigned[mesh_dim] = placement.dim
         return output_placements
 
     # ------------------------------------------------------------------
@@ -1010,12 +1018,24 @@ class _ViewShardingPropagator:
         sharded_dim: int,
         mesh_dim: int,
         placements: Sequence[Placement],
+        assigned: dict[int, int] | None = None,
+        candidate_output_dim: int | None = None,
     ) -> int | None:
         """Compute the residual split factor for ``cmd`` after earlier mesh dims.
 
         Starts from ``math.prod(cmd.group_shape[:cmd.split_id])`` and divides
         out each earlier mesh dim that shards the same input dim.  Returns
         ``None`` if any earlier mesh size doesn't divide evenly.
+
+        ``assigned`` maps already-processed mesh dims to the output tensor dim
+        they were placed on.  When a single output dim is sharded by more than
+        one mesh axis (e.g. a sequence dim sharded by both cp and tp), the
+        stored split_factor counts only the local extent of output dims to the
+        *left* of the target.  So an earlier mesh dim that landed on the same
+        output dim (or one to its right) must not divide this axis's expected
+        split factor.  When ``assigned``/``candidate_output_dim`` are omitted
+        (the analysis phase), every earlier same-input-dim axis divides, which
+        is the original behavior.
         """
         sf = math.prod(cmd.group_shape[: cmd.split_id])
         for m in range(mesh_dim):
@@ -1024,6 +1044,13 @@ class _ViewShardingPropagator:
                 isinstance(other_p, (_StridedShard, Shard))
                 and other_p.dim == sharded_dim
             ):
+                if (
+                    assigned is not None
+                    and candidate_output_dim is not None
+                    and assigned.get(m) is not None
+                    and assigned[m] >= candidate_output_dim
+                ):
+                    continue
                 if sf % self.mesh_sizes[m] != 0:
                     return None
                 sf //= self.mesh_sizes[m]
@@ -1181,6 +1208,7 @@ class _ViewShardingPropagator:
         strided_shard_claimed_dims: set[ClaimedDim],
         local_tensor_shapes: list[int],
         input_to_output_tensor_dims: dict[int, list[int]],
+        assigned: dict[int, int],
     ) -> tuple[Placement, list[int]]:
         """Rewrite _StridedShard placement to target the correct output dim.
 
@@ -1199,25 +1227,50 @@ class _ViewShardingPropagator:
             for d in input_to_output_tensor_dims[p.dim]
             if ClaimedDim(p.dim, d) not in strided_shard_claimed_dims
         ]
-        # Phase 1: resolve SS → Shard.  If an output dim's Split has a
-        # group_shape prefix matching the split_factor, the strided pattern
-        # is fully captured by the Split, so SS simplifies to Shard.
+        # Phase 1: turn this _StridedShard into a plain Shard on the right
+        # output dim.  split_factor tells us which dim: it equals the product
+        # of the output dim sizes to the LEFT of the shard (within the Split
+        # group).  So we look for the output dim whose group_shape prefix
+        # multiplies to split_factor; on that dim the strided layout is the
+        # same as a plain contiguous Shard, so we drop the stride.
         # E.g. unflatten (6, 4) → (2, 3, 4) with SS(0, sf=2) on mesh (3):
-        # sf=2 means 2 groups of contiguous data in dim 0.  Split into
-        # (2, 3, 4) gives group_shape=(2, 3); prod(group_shape[:1])=2==sf,
-        # so the strided pattern lands exactly on output dim 1 → Shard(1).
-        for candidate_dim in tgt_shard_dims:
+        # the Split group_shape is (2, 3); prod(group_shape[:1]) = 2 = sf,
+        # so the shard lands on output dim 1 → Shard(1).
+        #
+        # One output dim can be sharded by two or more mesh axes (e.g. a
+        # sequence dim sharded by both cp and tp), so more than one output dim
+        # can match the same split_factor.  Two layouts to tell apart:
+        #   (a) the axes sit on DIFFERENT output dims, e.g.
+        #       (_SS(0,sf=3), _SS(0,sf=3)) -> (Shard(1), Shard(2))
+        #   (b) the axes sit on the SAME output dim, e.g.
+        #       (Shard(0), _SS(0,sf=4), _SS(0,sf=4)) -> (Shard(0), Shard(1), Shard(1))
+        # Rule: take an unclaimed dim first (case a); reuse an already claimed
+        # dim only when no unclaimed dim matches (case b).  For case (b),
+        # _expected_split_factor ignores earlier axes that already sit on the
+        # same output dim (or one to its right), since split_factor only counts
+        # the dims to the LEFT of this shard.
+        matched_unclaimed: int | None = None
+        matched_claimed: int | None = None
+        for candidate_dim in input_to_output_tensor_dims[p.dim]:
             cmd = self.rule[candidate_dim]
-            if isinstance(cmd, Split):
-                expected_sf = self._expected_split_factor(
-                    cmd, p.dim, mesh_dim, placements
-                )
-                if expected_sf != p.split_factor:
-                    continue
-                strided_shard_claimed_dims.add(ClaimedDim(p.dim, candidate_dim))
-                new_shapes = list(local_tensor_shapes)
-                new_shapes[p.dim] //= self.mesh_sizes[mesh_dim]
-                return Shard(candidate_dim), new_shapes
+            if not isinstance(cmd, Split):
+                continue
+            expected_sf = self._expected_split_factor(
+                cmd, p.dim, mesh_dim, placements, assigned, candidate_dim
+            )
+            if expected_sf != p.split_factor:
+                continue
+            if ClaimedDim(p.dim, candidate_dim) in strided_shard_claimed_dims:
+                if matched_claimed is None:
+                    matched_claimed = candidate_dim
+            elif matched_unclaimed is None:
+                matched_unclaimed = candidate_dim
+        chosen = matched_unclaimed if matched_unclaimed is not None else matched_claimed
+        if chosen is not None:
+            strided_shard_claimed_dims.add(ClaimedDim(p.dim, chosen))
+            new_shapes = list(local_tensor_shapes)
+            new_shapes[p.dim] //= self.mesh_sizes[mesh_dim]
+            return Shard(chosen), new_shapes
 
         # Phase 2: keep SS as SS.  Phase 1 is tried first because we prefer
         # resolving to the simpler Shard when possible.
