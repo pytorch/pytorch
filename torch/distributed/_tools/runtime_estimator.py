@@ -361,7 +361,7 @@ class RuntimeEstimator(TorchDispatchMode):
         fake_mode = active_fake_mode()
         if not isinstance(fake_mode, FakeTensorMode):
             raise AssertionError(
-                "No FakeTensorMode found, designed to used under FakeTensorMode"
+                "No FakeTensorMode found, designed to be used under FakeTensorMode"
             )
         RuntimeEstimator.fake_mode = fake_mode
         self.total_runtime = 0.0

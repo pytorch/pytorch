@@ -91,7 +91,10 @@ def main() -> None:
         if clean not in mapping:
             print(f"error: no ARC runner found for '{clean}'", file=sys.stderr)
             sys.exit(1)
-        entry["runner"] = args.prefix + mapping[clean]
+        mapped = mapping[clean]
+        # Passthrough runners (e.g. linux.rocm.gpu.2, linux.idc.xpu) are not
+        # OSDC-managed so they keep their original label without the prefix.
+        entry["runner"] = mapped if mapped == clean else args.prefix + mapped
 
     set_output("test-matrix", json.dumps(matrix))
 

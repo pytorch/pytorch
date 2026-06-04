@@ -655,8 +655,7 @@ struct ReduceOp {
     __syncthreads();
     // Intra-warp reduction, fix CUDA to have offset decreasing for better numerics
     // matching Triton, etc.
-    // TODO(PaulZhang12): AMD and internal
-    #if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
+    #if defined(USE_ROCM)
     for (int offset = 1; offset < dim_x; offset <<= 1) {
     #else
     for (int offset = dim_x >> 1; offset > 0; offset >>= 1) {
@@ -977,7 +976,7 @@ inline void launch_jitted_reduce_kernel(
 
 class AccumulationBuffer {
  public:
-  AccumulationBuffer() {}
+  AccumulationBuffer() = default;
 
   AccumulationBuffer(size_t acc_t_size, size_t out_t_size, char* out_ptr, int64_t size) {
     out_ptr_ = (char*)out_ptr;

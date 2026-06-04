@@ -1,4 +1,3 @@
-import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -26,6 +25,7 @@ from torch._inductor.fx_passes.overlap_scheduling import (
     is_compute_node,
     log as overlap_scheduling_log,
 )
+from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
 
@@ -143,7 +143,6 @@ class OverlapPreservingBucketer:
         collective_bucketing: bool = True,
         bucket_mode: BucketMode | None = None,
         bucket_exposed_first: bool | None = None,
-        region_of: dict[fx.Node, Any] | None = None,
         bucket_only_internode_comms: bool = False,
     ):
         self.graph = graph
@@ -157,7 +156,6 @@ class OverlapPreservingBucketer:
         self.bucket_only_internode_comms = bucket_only_internode_comms
         self.bucket_mode = bucket_mode or _default_bucket_mode()
         self.collective_bucketing = collective_bucketing
-        self.region_of: dict[fx.Node, Any] = region_of or {}
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
@@ -169,29 +167,17 @@ class OverlapPreservingBucketer:
         self.pg_to_timeline_head: dict[str, PGEvent | None] = self.build_timelines()
         self._add_hiding_interval_constraints()
 
-    def _compute_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
-        """
-        Compute ancestor sets for all nodes including:
-        1. Original graph edges
-        2. Hiding interval deps: collective_start -> hiding_node -> wait
-        """
-        augmented_inputs: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+    def _compute_node_ancestors(self) -> BitsetAncestors:
+        """Compute ancestor sets including hiding interval deps using bitsets."""
+        extra_inputs: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for start, info in self.collective_info.items():
             if info.is_exposed:
                 continue
             for hiding_node in info.hiding_nodes:
-                augmented_inputs[hiding_node].add(start)
-                augmented_inputs[info.wait_node].add(hiding_node)
+                extra_inputs[hiding_node].add(start)
+                extra_inputs[info.wait_node].add(hiding_node)
 
-        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
-        for node in self.scheduled:
-            for input_node in itertools.chain(
-                augmented_inputs[node], node.all_input_nodes
-            ):
-                node_ancestors[node].add(input_node)
-                node_ancestors[node] |= node_ancestors[input_node]
-
-        return node_ancestors
+        return BitsetAncestors(list(self.scheduled), extra_inputs=extra_inputs)
 
     def build_timelines(self) -> dict[str, PGEvent | None]:
         "Construct each process groups ordered series of event"
@@ -374,35 +360,13 @@ class OverlapPreservingBucketer:
                 preserve_node_ordering(self.graph, filtered_deps)
 
     def bucket_collectives(self) -> None:
-        """Run the full bucketing and dep application flow.
-
-        Order is important:
-        1. Bucketing - merge collectives into buckets
-        2. Inline fusions - expand call_module back to original nodes
-        3. Transfer deps - move deps from erased nodes to their replacements
-        4. Add control deps - apply effect tokens and topo sort
-
-        Steps 2-3 MUST happen before step 4, because control deps need to
-        reference the final inlined nodes, not the erased fusion modules.
-        """
+        """Run the full bucketing and dep application flow."""
         # Step 1: Bucket collectives
         all_buckets: list[CollBucket] | None = None
         if self.collective_bucketing:
             all_buckets = self._bucket_collectives_impl()
 
-        # Step 2: Inline fusion regions (expand call_module -> original nodes)
-        replaced: dict[fx.Node, fx.Node | None] = {}
-        if self.region_of:
-            from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
-
-            gm = self.graph.owning_module
-            replaced = expand_fusion_regions(gm, self.region_of)
-
-        # Step 3: Transfer deps from erased fusion modules to inlined nodes
-        if replaced:
-            self.aug_graph.transfer_erased_node_deps(replaced)
-
-        # Step 4: Add control deps (MUST be after inline + transfer)
+        # Step 2: Add control deps
         self._apply_deps_and_effect_tokens()
         self.graph.lint()
 
@@ -535,7 +499,7 @@ class OverlapPreservingBucketer:
             for candidate in sorted_collectives[i + 1 : i + 1 + self.max_coll_distance]:
                 candidate_bytes = self.collective_info[candidate].size_bytes
                 # proxy on memory use, if we see a too large bucket,
-                # dont look for another, later bucket
+                # don't look for another, later bucket
                 if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
                     break
 
@@ -570,7 +534,7 @@ class OverlapPreservingBucketer:
 
     def _ancestor_dep(self, n1: fx.Node, n2: fx.Node) -> bool:
         """Check if there's an ancestor relationship between two nodes."""
-        return n1 in self.node_ancestors[n2] or n2 in self.node_ancestors[n1]
+        return self.node_ancestors.has_dep(n1, n2)
 
     def _get_intervals(
         self, event: PGEvent
@@ -863,28 +827,22 @@ class OverlapPreservingBucketer:
         candidate_wait = candidate_info.wait_node
 
         for coll in bucket_info.collectives:
-            if (
-                coll in self.node_ancestors[candidate]
-                or candidate in self.node_ancestors[coll]
-            ):
+            if self.node_ancestors.has_dep(coll, candidate):
                 return True
 
             # Check if waits are ancestors of each other
             coll_wait = self.collective_info[coll].wait_node
-            if (
-                coll_wait in self.node_ancestors[candidate_wait]
-                or candidate_wait in self.node_ancestors[coll_wait]
-            ):
+            if self.node_ancestors.has_dep(coll_wait, candidate_wait):
                 return True
 
             # Check if existing hiding node conflicts with candidate wait
             for old_hiding_node in self.collective_info[coll].hiding_nodes:
-                if candidate_wait in self.node_ancestors[old_hiding_node]:
+                if self.node_ancestors.is_ancestor(candidate_wait, old_hiding_node):
                     return True
 
             # Check if candidate hiding node conflicts with existing wait
             for new_hiding_node in candidate_info.hiding_nodes:
-                if coll_wait in self.node_ancestors[new_hiding_node]:
+                if self.node_ancestors.is_ancestor(coll_wait, new_hiding_node):
                     return True
 
         return False
@@ -1077,19 +1035,16 @@ def finalize_overlap_scheduling(
     insert_overlap_deps: bool = False,
     max_bucket_memory_gb: float = 2.0,
     max_coll_distance: int = 1000,
-    region_of: dict[fx.Node, Any] | None = None,
     bucket_exposed_first: bool | None = None,
     bucket_only_internode_comms: bool = False,
     bucket_mode: BucketMode | None = None,
 ) -> None:
     """
-    Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
+    Finalize overlap scheduling by applying deps and optionally bucketing.
 
     This is the main entry point for post-scheduling graph transformations:
     1. Bucket collectives (if collective_bucketing=True)
-    2. Inline fusion regions back to original nodes
-    3. Transfer deps from erased nodes to replacements
-    4. Apply topological sort and effect tokens
+    2. Apply topological sort and effect tokens
 
     Args:
         gm: The graph module to modify
@@ -1099,7 +1054,6 @@ def finalize_overlap_scheduling(
         insert_overlap_deps: Whether to insert effect tokens for overlap deps
         max_bucket_memory_gb: Maximum memory for a bucket in GB
         max_coll_distance: Maximum distance for bucketing candidates
-        region_of: Optional dict mapping module nodes to FusionRegions
     """
     bucketer = OverlapPreservingBucketer(
         graph=gm.graph,
@@ -1111,7 +1065,6 @@ def finalize_overlap_scheduling(
         collective_bucketing=collective_bucketing,
         bucket_exposed_first=bucket_exposed_first,
         bucket_only_internode_comms=bucket_only_internode_comms,
-        region_of=region_of,
         bucket_mode=bucket_mode,
     )
     bucketer.bucket_collectives()
