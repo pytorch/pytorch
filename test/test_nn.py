@@ -20,6 +20,7 @@ from collections import OrderedDict
 from unittest import SkipTest
 
 import torch
+import torch._dynamo.config
 from torch import inf, nan
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
@@ -1928,6 +1929,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             m = pickle.loads(pickle.dumps(m))
         self.assertTrue(len(w) == 0)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
@@ -5956,6 +5958,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         self.assertEqual(theta_grad_cf, theta_grad_cl)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @set_default_dtype(torch.double)
     def test_grid_sample(self):
         # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,
