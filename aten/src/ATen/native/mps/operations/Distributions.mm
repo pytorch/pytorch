@@ -13,6 +13,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_dirichlet_grad_native.h>
 #include <ATen/ops/_sample_dirichlet_native.h>
 #include <ATen/ops/_standard_gamma_grad_native.h>
 #include <ATen/ops/_standard_gamma_native.h>
@@ -436,6 +437,35 @@ Tensor _standard_gamma_grad_mps(const Tensor& self, const Tensor& output) {
         auto computeEncoder = stream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, ret, self_contig, output_contig);
+        mtl_dispatch1DJob(computeEncoder, pso, ret.numel());
+      }
+    });
+  }
+
+  return ret;
+}
+
+Tensor _dirichlet_grad_mps(const Tensor& x, const Tensor& alpha, const Tensor& total) {
+  if (x.numel() == 0) {
+    return at::empty_like(x);
+  }
+
+  using namespace mps;
+
+  auto stream = getCurrentMPSStream();
+  Tensor ret = at::empty_like(x, x.options(), at::MemoryFormat::Contiguous);
+  const auto x_contig = x.contiguous();
+  const auto alpha_contig = alpha.contiguous();
+  const auto total_contig = total.contiguous();
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc("dirichlet_grad_" + scalarToMetalTypeString(ret));
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        mtl_setArgs(computeEncoder, ret, x_contig, alpha_contig, total_contig);
         mtl_dispatch1DJob(computeEncoder, pso, ret.numel());
       }
     });
