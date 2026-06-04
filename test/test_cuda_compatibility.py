@@ -30,7 +30,7 @@ class TestCodeCompatibleWithDevice(TestCase):
             torch.cuda._code_compatible_with_device(device_cc=75, code_cc=80)
         )
 
-    def test_igpu_cases(self):
+    def test_igpu_cases_pre_132(self):
         self.assertFalse(
             torch.cuda._code_compatible_with_device(device_cc=53, code_cc=50)
         )
@@ -40,6 +40,15 @@ class TestCodeCompatibleWithDevice(TestCase):
         self.assertTrue(
             torch.cuda._code_compatible_with_device(device_cc=53, code_cc=53)
         )
+
+    def test_igpu_cases_post_132(self):
+        with patch("torch.version.cuda", "13.2"):
+            self.assertTrue(
+                torch.cuda._code_compatible_with_device(device_cc=87, code_cc=80)
+            )
+            self.assertTrue(
+                torch.cuda._code_compatible_with_device(device_cc=53, code_cc=53)
+            )
 
     def test_special_case_sm101_on_sm110(self):
         self.assertTrue(
@@ -156,6 +165,27 @@ class TestCheckCapability(TestCase):
             self.assertNotIn("pip install torch==", msg)
             self.assertIn("No published PyTorch CUDA builds for release", msg)
             self.assertIn("https://pytorch.org/get-started/locally/", msg)
+
+    @patch("torch.cuda.get_arch_list", return_value=["sm_80"])
+    @patch("torch.cuda.get_device_capability", return_value=(8, 7))
+    def test_sbsa_runs_on_jetson_post_cuda132(self, *args):
+        with (
+            patch("torch.version.cuda", "13.2"),
+            warnings.catch_warnings(),
+        ):
+            warnings.simplefilter("error")
+            torch.cuda._check_capability()
+
+    @patch("torch.cuda.get_arch_list", return_value=["sm_87"])
+    @patch("torch.cuda.get_device_capability", return_value=(8, 9))
+    def test_jetson_doesnt_run_on_sbsa_post_cuda132(self, *args):
+        with (
+            patch("torch.version.cuda", "13.2"),
+            self.assertWarnsRegex(
+                UserWarning, r"Found GPU0.*which is of compute capability.*8\.9"
+            ),
+        ):
+            torch.cuda._check_capability()
 
 
 if __name__ == "__main__":
