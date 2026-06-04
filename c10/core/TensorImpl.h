@@ -42,6 +42,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -249,6 +250,13 @@ struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
   bool allow_fallback_kernels_ = true;
+
+  // Operator keys ("<qualified_name>/<overload_name>") that have a Python
+  // decomposition or prim meta impl, snapshotted at mode creation. Used to gate
+  // the Python callbacks in fakeFallback so we don't pay for a GIL acquisition
+  // for ops that have no registration. See _cpp_fake_dispatch_op_keys.
+  std::unordered_set<std::string> decomp_ops_;
+  std::unordered_set<std::string> prim_meta_ops_;
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,

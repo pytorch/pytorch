@@ -640,22 +640,18 @@ void fakeFallback(
 
   auto* interp = c10::impl::getGlobalPyInterpreter();
 
+  std::optional<std::string> op_key_cache;
+  auto fake_op_key = [&]() -> const std::string& {
+    if (!op_key_cache.has_value()) {
+      op_key_cache = c10::toString(op.operator_name());
+    }
+    return *op_key_cache;
+  };
+
   // for ops with symbolic sizes, try decompositions before the meta kernel
   if (has_symints && !cpp_meta_supports_symint(op) && mode) {
-    if (interp) {
-      bool found = false;
-      try {
-        // std::cerr << "[TIMING] " << op.operator_name()
-        //           << " C++ before fake_try_decomp: "
-        //           << std::chrono::duration_cast<std::chrono::microseconds>(
-        //                  std::chrono::steady_clock::now() - t_start).count()
-        //           << "us" << std::endl;
-        found = (*interp)->fake_try_decomp(op, stack);
-        t_start = std::chrono::steady_clock::now();
-      } catch (...) {
-        throw;
-      }
-      if (found) {
+    if (interp && mode->decomp_ops_.count(fake_op_key())) {
+      if ((*interp)->fake_try_decomp(op, stack)) {
         wrap_meta_outputs_with_default_device_logic();
         return;
       }
@@ -681,7 +677,8 @@ void fakeFallback(
   // Sub-ops (e.g. torch.empty inside _iota_meta) still enter fakeFallback
   // because Fake remains in TLS.
   auto op_ns = op.operator_name().getNamespace();
-  if (op_ns.has_value() && *op_ns == "prims" && mode && interp) {
+  if (op_ns.has_value() && *op_ns == "prims" && mode && interp &&
+      mode->prim_meta_ops_.count(fake_op_key())) {
     // In Python, scalar args stay as Python floats/ints. In C++, the
     // dispatcher wraps them as tensors with default dtypes (float64 for
     // floats, int64 for ints), causing dtype mismatches in prim_meta_impl.
@@ -728,11 +725,6 @@ void fakeFallback(
           });
     }
 
-    // std::cerr << "[TIMING] " << op.operator_name()
-    //           << " C++ before fake_try_prim_meta: "
-    //           << std::chrono::duration_cast<std::chrono::microseconds>(
-    //                  std::chrono::steady_clock::now() - t_start).count()
-    //           << "us" << std::endl;
     if ((*interp)->fake_try_prim_meta(op, stack)) {
       wrap_meta_outputs_with_default_device_logic();
       return;
@@ -752,11 +744,6 @@ void fakeFallback(
   }
 
   if (mode && interp) {
-    // std::cerr << "[TIMING] " << op.operator_name()
-    //           << " C++ before fake_try_op_impl: "
-    //           << std::chrono::duration_cast<std::chrono::microseconds>(
-    //                  std::chrono::steady_clock::now() - t_start).count()
-    //           << "us" << std::endl;
     if ((*interp)->fake_try_op_impl(
             op,
             stack,
@@ -792,11 +779,6 @@ void fakeFallback(
         c10::DispatchKeySet(c10::DispatchKey::Python) |
         c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
     c10::impl::IncludeDispatchKeyGuard meta_guard(c10::DispatchKey::Meta);
-    // std::cerr << "[TIMING] " << op.operator_name()
-    //           << " C++ before Meta kernel: "
-    //           << std::chrono::duration_cast<std::chrono::microseconds>(
-    //                  std::chrono::steady_clock::now() - t_start).count()
-    //           << "us" << std::endl;
     op.callBoxed(stack);
     wrap_meta_outputs_with_default_device_logic();
   } catch (...) {

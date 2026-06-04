@@ -3173,6 +3173,19 @@ Call this whenever a new thread is created in order to propagate values from
                 shape_env.ptr(), getPyInterpreter()),
             std::make_shared<c10::SafePyObject>(
                 converter.ptr(), getPyInterpreter()));
+
+        // Snapshot which ops have a Python decomp / prim meta so fakeFallback
+        // can skip the Python callback for ops that have neither.
+        auto keys = py::module::import("torch._subclasses.fake_impls")
+                        .attr("_cpp_fake_dispatch_op_keys")()
+                        .cast<py::tuple>();
+        for (auto k : keys[0]) {
+          mode->decomp_ops_.insert(k.cast<std::string>());
+        }
+        for (auto k : keys[1]) {
+          mode->prim_meta_ops_.insert(k.cast<std::string>());
+        }
+
         c10::impl::FakeTensorModeTLS::create_state(mode);
         return PyCppFakeTensorMode{std::move(mode)};
       },

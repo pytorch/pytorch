@@ -256,6 +256,34 @@ def _deregister_op_impl(op: OpOverload) -> None:
             break
 
 
+def _fake_dispatch_op_key(op: OpOverload) -> str:
+    # Canonical "name.overload" form, matching c10::toString(OperatorName) on
+    # the C++ side (see fakeFallback).
+    return op._name
+
+
+def _cpp_fake_dispatch_op_keys() -> tuple[list[str], list[str]]:
+    """get decomp table + prims keys
+    """
+    from torch._decomp import decomposition_table, meta_table
+
+    decomp_keys = [
+        _fake_dispatch_op_key(op)
+        for op in decomposition_table
+        if isinstance(op, OpOverload) and op not in meta_table
+    ]
+
+    prim_meta_keys = []
+    for packet_name in torch.ops.prims:
+        packet = getattr(torch.ops.prims, packet_name)
+        for overload in packet.overloads():
+            op = getattr(packet, overload)
+            if hasattr(op, "prim_meta_impl"):
+                prim_meta_keys.append(_fake_dispatch_op_key(op))
+
+    return decomp_keys, prim_meta_keys
+
+
 @register_op_impl(op_implementations_dict.__contains__)
 def dispatch_to_op_implementations_dict(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
