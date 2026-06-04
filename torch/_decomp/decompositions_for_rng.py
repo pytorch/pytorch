@@ -257,6 +257,17 @@ register_extra_random_decomp = functools.partial(
 def bernoulli_(self, p=0.5):
     if self.device == torch.device("cpu"):
         return NotImplemented
+    if isinstance(p, torch.Tensor):
+        torch._check_tensor_all(
+            (p >= 0) & (p <= 1),
+            lambda: "bernoulli_ expects all probabilities to be"
+            " in [0, 1], got out-of-range values",
+        )
+    else:
+        torch._check(
+            0 <= p <= 1,
+            lambda: f"bernoulli_ expects p to be in [0, 1], but got p={p}",
+        )
     return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
 
 
@@ -266,6 +277,17 @@ def bernoulli_p(self, p=0.5, *, generator=None):
         return NotImplemented
     if generator is not None:
         raise AssertionError(f"generator must be None, got {generator}")
+    if isinstance(p, torch.Tensor):
+        torch._check_tensor_all(
+            (p >= 0) & (p <= 1),
+            lambda: "bernoulli expects all probabilities to be"
+            " in [0, 1], got out-of-range values",
+        )
+    else:
+        torch._check(
+            0 <= p <= 1,
+            lambda: f"bernoulli expects p to be in [0, 1], but got p={p}",
+        )
     return torch.rand_like(self, dtype=torch.float32) < p
 
 

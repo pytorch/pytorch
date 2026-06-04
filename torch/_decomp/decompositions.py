@@ -5815,6 +5815,11 @@ def bernoulli(
     *,
     generator: torch.Generator | None = None,
 ) -> torch.Tensor:
+    torch._check_tensor_all(
+        (self >= 0) & (self <= 1),
+        lambda: "bernoulli expects all probabilities to be in [0, 1],"
+        " got out-of-range values",
+    )
     if generator is None:
         raw_p = torch.rand(self.size(), dtype=torch.float32, device=self.device)
     else:

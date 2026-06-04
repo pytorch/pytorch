@@ -658,6 +658,29 @@ class TestDecomp(TestCase):
         res_p = res.sum() / torch.prod(torch.tensor(res.size()))
         self.assertEqual(ref_p, res_p, atol=0.06 * p, rtol=0.06)
 
+    def test_bernoulli_invalid_probabilities(self, device):
+        p_t = torch.full((4,), 2.0, dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "bernoulli expects all probabilities to be in \\[0, 1\\]",
+        ):
+            torch._decomp.decompositions.bernoulli(p_t)
+
+        p_t_neg = torch.full((4,), -0.5, dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "bernoulli expects all probabilities to be in \\[0, 1\\]",
+        ):
+            torch._decomp.decompositions.bernoulli(p_t_neg)
+
+    def test_bernoulli_compile_invalid_probabilities(self, device):
+        def model():
+            p = torch.full((4,), 2.0, dtype=torch.float32, device=device)
+            return torch.bernoulli(p)
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(model, backend="inductor")()
+
     def test_broadcasting_index_copy(self, device):
         x = torch.zeros([1, 10], device=device)
         xs = torch.ones([2, 10], device=device)

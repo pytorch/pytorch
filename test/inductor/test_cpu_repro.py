@@ -143,6 +143,32 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    def test_bernoulli_compiled_invalid_probabilities(self):
+        def model():
+            p = torch.full((4,), 2.0, dtype=torch.float32)
+            return torch.bernoulli(p)
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(model, backend="inductor")()
+
+    def test_bernoulli_compiled_negative_probabilities(self):
+        def model():
+            p = torch.full((4,), -0.5, dtype=torch.float32)
+            return torch.bernoulli(p)
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(model, backend="inductor")()
+
+    def test_bernoulli_compiled_valid_probabilities(self):
+        def model():
+            p = torch.full((4,), 0.3, dtype=torch.float32)
+            return torch.bernoulli(p)
+
+        torch._dynamo.reset()
+        result = torch.compile(model, backend="inductor")()
+        self.assertEqual(result.shape, (4,))
+        self.assertTrue(torch.all((result == 0) | (result == 1)))
+
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
         def fn(x):
