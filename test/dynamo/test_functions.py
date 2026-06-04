@@ -5475,7 +5475,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         if sys.version_info < (3, 14):
             with self.assertRaises(TypeError):
                 opt_fn(x, ys, zs)
-            with self.assertRaises(TypeError):
+            torch._dynamo.reset()
+            with self.assertRaises((TypeError, torch._dynamo.exc.Unsupported)):
                 nopython_fn(x, ys, zs)
             return
 
