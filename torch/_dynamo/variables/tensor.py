@@ -677,6 +677,10 @@ class TensorVariable(VariableTracker):
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
+        # as_strided_ is excluded because unlike other inplace views (resize_, unsqueeze_, etc.),
+        # it only mutates size/stride metadata without changing storage layout, so the generic
+        # call_method path (wrap_fx_proxy -> get_fake_value -> _sync_if_inplace_mutation)
+        # handles it correctly. See https://github.com/pytorch/pytorch/issues/185888
         if (
             self.source is not None
             and name != "as_strided_"
@@ -1911,19 +1915,7 @@ class TensorVariable(VariableTracker):
             )
         return None
 
-    def method_as_strided_(
-        self,
-        tx: "InstructionTranslatorBase",
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> VariableTracker | None:
-        tx.output.create_proxy(
-            "call_method",
-            "as_strided_",
-            *proxy_args_kwargs([self, *args], kwargs),
-        )
-        tx.output.side_effects.mutation(self)
-        return self
+
 
     def method_add_(
         self,
