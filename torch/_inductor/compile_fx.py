@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import warnings
 from abc import ABC, abstractmethod
@@ -19,7 +20,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -92,7 +93,9 @@ from torch._inductor.utils import (
     get_static_bw_input_idxs,
     InputType,
     is_gpu,
+    should_assume_input_aligned,
     should_use_remote_fx_graph_cache,
+    tensor_is_aligned,
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
@@ -125,6 +128,7 @@ from .utils import (
     copy_misaligned_inputs,
     get_cloned_parameter_buffer_name,
     get_first_incompatible_cudagraph_node,
+    maybe_get_suppress_shape_guards_ctx,
     output_node,
     remove_unaligned_input_idxs,
     shape_env_from_inputs,
@@ -1848,28 +1852,33 @@ def get_input_idxs_to_check(
     static_input_idxs: Sequence[int],
 ) -> Sequence[int]:
     """
-    Returns indices of GPU tensor inputs that the runtime wrapper should
-    realign via copy_if_misaligned.
-
-    The result must depend only on input *types* and the static-input set,
-    not on the example's actual data-pointer alignment. Codegen always
-    assumes aligned inputs; the wrapper realigns at runtime. Keeping this
-    list independent of actual alignment lets the FX graph cache hit on
-    both aligned and unaligned variants of the same input.
-
-    Static inputs are excluded: cudagraphs requires them to be aligned, and
-    any that weren't have already been demoted by remove_unaligned_input_idxs.
+    This function runs at compile time, and generates a list of indices for which we
+    might need to do a copy to preserve alignment requirements.
     """
-    static_set = OrderedSet(static_input_idxs)
     ids_to_check = []
-    for i, inp in enumerate(inputs):
-        if not isinstance(inp, torch.Tensor):
+
+    for i, input in enumerate(inputs):
+        if not isinstance(input, torch.Tensor):
+            # non-tensors don't need alignment
             continue
-        if not is_gpu(inp.device.type):
+        if not is_gpu(input.device.type):
+            # right now we only care for gpu tensors
             continue
-        if i in static_set:
-            continue
+        with maybe_get_suppress_shape_guards_ctx():
+            # suppress guards so that tensor_is_aligned and should_assume_input_aligned
+            # do not add guards on input's storage offset
+            if i in static_input_idxs and tensor_is_aligned(input):
+                continue
+            if not should_assume_input_aligned(input):
+                continue
+
+        # if we get here, then
+        # (a) our triton code assumes that the input is aligned
+        # (b) we can't be sure ahead of time that the input will actually be aligned.
+        # therefore, at runtime, we'll need to check that the input is aligned
+        # (and if not, clone it to make it aligned.)
         ids_to_check.append(i)
+
     return ids_to_check
 
 
@@ -1905,13 +1914,14 @@ def cudagraphify(
     else:
         cudagraphify_fn = cudagraphify_impl
 
-    compiled_fn = None
+    thread_local = threading.local()
 
     def run(new_inputs: Sequence[InputType]) -> Any:
-        nonlocal compiled_fn
+        compiled_fn = getattr(thread_local, "compiled_fn", None)
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
+            thread_local.compiled_fn = compiled_fn
         return compiled_fn(new_inputs)  # type: ignore[arg-type]
 
     return run
@@ -2657,6 +2667,21 @@ def run_pre_grad_passes(
     return model_
 
 
+@dataclass(frozen=True)
+class _ConstantDecompTable(Generic[_P, _T]):
+    """
+    Picklable wrapper around a user-supplied decomposition dict.
+
+    This module-level class is addressable as (module, qualname), so pickle can
+    serialize an instance by reducing its single field.
+    """
+
+    table: dict[OpOverload, Callable[_P, _T]]
+
+    def __call__(self) -> dict[OpOverload, Callable[_P, _T]]:
+        return self.table
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -2678,9 +2703,9 @@ def compile_fx(
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
     if decompositions is not None:
-
-        def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
-            return decompositions  # pyrefly: ignore[bad-return]
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = (
+            _ConstantDecompTable(decompositions)
+        )
     else:
         get_decomp_fn = select_decomp_table
 
@@ -3122,7 +3147,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         from torch._dynamo.exc import SkipFrame
 
         assert device is not None
-
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
         warnings.warn(
@@ -3140,8 +3164,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
             or node.get_dtype() != torch.bfloat16
         ):
             continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
         device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return

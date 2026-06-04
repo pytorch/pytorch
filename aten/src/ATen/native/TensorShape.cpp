@@ -356,6 +356,7 @@ DEFINE_DISPATCH(stack_serial_stub);
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
   TORCH_CHECK(shape_tensor.dim() == 1);
   std::vector<int64_t> shape;
+  shape.reserve(shape_tensor.numel());
   auto accessor = shape_tensor.accessor<int64_t, 1>();
   for (const auto i : c10::irange(shape_tensor.numel())) {
     shape.push_back(accessor[i]);
@@ -872,6 +873,8 @@ static Tensor cat_sparse_impl(
   int64_t dense_dim = tensors[0].get().dense_dim();
   IntArrayRef sizes = tensors[0].get().sizes();
   if (wrapped < sparse_dim) {
+    indices.reserve(tensors.size());
+    values.reserve(tensors.size());
     for (const auto i : c10::irange(tensors.size())) {
       const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
@@ -946,6 +949,8 @@ static Tensor cat_sparse_impl(
     int64_t cumulative_size = 0;
     std::vector<Tensor> vals_pieces;
     std::vector<Tensor> idxs_pieces;
+    vals_pieces.reserve(tensors.size());
+    idxs_pieces.reserve(tensors.size());
     for (const auto i : c10::irange(tensors.size())) {
       const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
@@ -2550,14 +2555,18 @@ Tensor index_select_sparse_cpu(
             auto [sorted_dim_indices, sorted_dim_indices_idx] =
                 dim_indices.sort();
             return std::make_tuple(
-                sorted_dim_indices, sorted_dim_indices_idx, nneg_index);
+                std::move(sorted_dim_indices),
+                std::move(sorted_dim_indices_idx),
+                nneg_index);
           }
         }
         // sort nneg_index to binary search into it
         else {
           auto [sorted_nneg_index, sorted_nneg_index_idx] = nneg_index.sort();
           return std::make_tuple(
-              sorted_nneg_index, sorted_nneg_index_idx, dim_indices);
+              std::move(sorted_nneg_index),
+              std::move(sorted_nneg_index_idx),
+              dim_indices);
         }
       }();
 
@@ -2939,10 +2948,10 @@ Tensor index_select_sparse_cpu(
               }
             });
 
-        const auto src_idx_offsets =
+        auto src_idx_offsets =
             src_intersection_offsets.sub_(src_intersection_counts);
 
-        return std::make_tuple(src_idx, src_idx_offsets);
+        return std::make_tuple(std::move(src_idx), std::move(src_idx_offsets));
       }();
 
       auto [idx_selected, src_selected] =
