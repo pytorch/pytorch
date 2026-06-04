@@ -2379,6 +2379,251 @@ sum_1: aten.sum.default -> PREFER_RECOMPUTE
 cos: aten.cos.default -> PREFER_RECOMPUTE""",
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_region_activation_memory_budget_reduces_act_mem(self):
+        N, NUM_LAYERS = 1000, 4
+
+        class Model(torch.nn.Module):
+            def __init__(self, budget=None):
+                super().__init__()
+                self.budget = budget
+                self.linears = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+
+            def forward(self, x):
+                if self.budget is not None:
+                    with torch.autograd.graph.region_activation_memory_budget(
+                        self.budget
+                    ):
+                        for linear in self.linears:
+                            x = linear(x).relu()
+                        return x.sum()
+                else:
+                    for linear in self.linears:
+                        x = linear(x).relu()
+                    return x.sum()
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            act_mem = (
+                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
+            )
+            out.backward()
+            return act_mem
+
+        x = torch.randn(N, N, device="cuda")
+
+        torch._dynamo.reset()
+        compiled = torch.compile(Model().cuda(), backend="aot_eager")
+        self.assertGreater(get_act_mem(lambda: compiled(x)), 0)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(Model(budget=0.0).cuda(), backend="aot_eager")
+        self.assertEqual(get_act_mem(lambda: compiled(x)), 0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_region_activation_memory_budget_per_region(self):
+        """Different graphs (separated by a graph break) can have different
+        memory budgets."""
+        N, NUM_LAYERS = 1000, 2
+
+        class Model(torch.nn.Module):
+            def __init__(self, budget_a, budget_b):
+                super().__init__()
+                self.budget_a = budget_a
+                self.budget_b = budget_b
+                self.linears_a = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+                self.linears_b = torch.nn.ModuleList(
+                    [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+                )
+
+            def forward(self, x):
+                with torch.autograd.graph.region_activation_memory_budget(
+                    self.budget_a
+                ):
+                    for linear in self.linears_a:
+                        x = linear(x).relu()
+                torch._dynamo.graph_break()
+                with torch.autograd.graph.region_activation_memory_budget(
+                    self.budget_b
+                ):
+                    for linear in self.linears_b:
+                        x = linear(x).relu()
+                    return x.sum()
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            act_mem = (
+                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
+            )
+            out.backward()
+            return act_mem
+
+        x = torch.randn(N, N, device="cuda")
+
+        torch._dynamo.reset()
+        both_save = torch.compile(Model(1.0, 1.0).cuda(), backend="aot_eager")
+        mem_both_save = get_act_mem(lambda: both_save(x))
+
+        torch._dynamo.reset()
+        a_recomp = torch.compile(Model(0.0, 1.0).cuda(), backend="aot_eager")
+        mem_a_recomp = get_act_mem(lambda: a_recomp(x))
+
+        torch._dynamo.reset()
+        b_recomp = torch.compile(Model(1.0, 0.0).cuda(), backend="aot_eager")
+        mem_b_recomp = get_act_mem(lambda: b_recomp(x))
+
+        torch._dynamo.reset()
+        both_recomp = torch.compile(Model(0.0, 0.0).cuda(), backend="aot_eager")
+        mem_both_recomp = get_act_mem(lambda: both_recomp(x))
+
+        # Both save > either one recomputing > both recomputing
+        self.assertGreater(mem_both_save, mem_a_recomp)
+        self.assertGreater(mem_both_save, mem_b_recomp)
+        self.assertGreater(mem_a_recomp, mem_both_recomp)
+        self.assertGreater(mem_b_recomp, mem_both_recomp)
+
+    def test_region_activation_memory_budget_validation(self):
+        region_activation_memory_budget = (
+            torch.autograd.graph.region_activation_memory_budget
+        )
+        with self.assertRaisesRegex(TypeError, "expects a float"):
+            region_activation_memory_budget(True)
+        with self.assertRaisesRegex(TypeError, "expects a float"):
+            region_activation_memory_budget("0.5")
+        with self.assertRaisesRegex(ValueError, r"\[0, 1\]"):
+            region_activation_memory_budget(2.0)
+        with self.assertRaisesRegex(ValueError, r"\[0, 1\]"):
+            region_activation_memory_budget(-0.1)
+
+    def test_region_activation_memory_budget_eager_raises(self):
+        """Using the context manager outside a torch.compile region is an error."""
+        with self.assertRaisesRegex(RuntimeError, "inside a torch.compile region"):
+            with torch.autograd.graph.region_activation_memory_budget(0.5):
+                pass
+
+    def test_region_activation_memory_budget_conflict_raises(self):
+        """Two different budgets in one graph (no graph break) is an error: the
+        partitioner applies a single budget per graph."""
+
+        def fn(x, y):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                a = (torch.mm(x, y) + 1).relu()
+            with torch.autograd.graph.region_activation_memory_budget(0.8):
+                return (torch.mm(a, y) + 1).relu()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
+            cfn(x, y).sum().backward()
+
+    def test_region_activation_memory_budget_partial_annotation_raises(self):
+        """Annotating only part of a graph is rejected: the budget is applied
+        graph-wide, so it must cover the entire forward."""
+
+        def fn(x, y):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                a = (torch.mm(x, y) + 1).relu()
+            # This op is outside the region -> partial annotation.
+            return (a * 2).relu()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "must cover the entire forward"):
+            cfn(x, y).sum().backward()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_region_activation_memory_budget_covers_invoke_subgraph(self):
+        """A budget covering a forward that contains an invoke_subgraph
+        (nested_compile_region) applies inside the HOP body too: the budget
+        propagates into the body so the whole forward is consistently covered."""
+        from torch.compiler import nested_compile_region
+
+        N, NUM_LAYERS = 1000, 4
+
+        def build(budget):
+            linears = torch.nn.ModuleList(
+                [torch.nn.Linear(N, N) for _ in range(NUM_LAYERS)]
+            ).cuda()
+
+            @nested_compile_region
+            def region(x):
+                for lin in linears:
+                    x = lin(x).relu()
+                return x
+
+            def fn(x):
+                # Wrap the entire forward (HOP call + reduction); the budget must
+                # consistently cover the HOP body too.
+                if budget is None:
+                    return region(x).sum()
+                with torch.autograd.graph.region_activation_memory_budget(budget):
+                    return region(x).sum()
+
+            return fn
+
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            act_mem = (
+                torch.cuda.memory_stats()["requested_bytes.all.current"] - start_mem
+            )
+            out.backward()
+            return act_mem
+
+        x = torch.randn(N, N, device="cuda")
+
+        torch._dynamo.reset()
+        baseline = torch.compile(build(None), backend="aot_eager", fullgraph=True)
+        self.assertGreater(get_act_mem(lambda: baseline(x)), 0)
+
+        torch._dynamo.reset()
+        recompute = torch.compile(build(0.0), backend="aot_eager", fullgraph=True)
+        self.assertEqual(get_act_mem(lambda: recompute(x)), 0)
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_region_activation_memory_budget_distinct_per_invoke_subgraph_raises(self):
+        """Different budgets in two invoke_subgraph regions of a single graph are
+        rejected: the agreement check recurses into nested subgraphs, so the
+        outermost graph sees both budgets. Use a graph break for different
+        budgets."""
+        from torch.compiler import nested_compile_region
+
+        wa = torch.randn(8, 8, requires_grad=True)
+        wb = torch.randn(8, 8, requires_grad=True)
+
+        @nested_compile_region
+        def region_a(x):
+            with torch.autograd.graph.region_activation_memory_budget(0.3):
+                return (x @ wa).relu()
+
+        @nested_compile_region
+        def region_b(x):
+            with torch.autograd.graph.region_activation_memory_budget(0.8):
+                return (x @ wb).relu()
+
+        def fn(x):
+            return region_b(region_a(x)).sum()
+
+        cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
+            cfn(x).backward()
+
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
