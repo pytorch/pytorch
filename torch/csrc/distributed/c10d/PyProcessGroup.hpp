@@ -195,16 +195,27 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+  c10::intrusive_ptr<Work> all_gather_single_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override {
-    WORK_OVERRIDE(
-        ProcessGroup, /* Parent class */
-        allgather_into_tensor_coalesced, /* Name of function in C++ */
-        outputTensors,
-        inputTensors,
-        opts);
+    pybind11::gil_scoped_acquire gil;
+    // Prefer the new name; fall back to the deprecated
+    // `allgather_into_tensor_coalesced` for backward compatibility with
+    // existing Python ProcessGroup subclasses.
+    pybind11::function override = pybind11::get_override(
+        static_cast<const ProcessGroup*>(this), "all_gather_single_coalesced");
+    if (!override) {
+      override = pybind11::get_override(
+          static_cast<const ProcessGroup*>(this),
+          "allgather_into_tensor_coalesced");
+    }
+    if (override) {
+      auto o = override(outputTensors, inputTensors, opts);
+      return c10::make_intrusive<PyWorkHolder>(o);
+    }
+    return ProcessGroup::all_gather_single_coalesced(
+        outputTensors, inputTensors, opts);
   }
 
   c10::intrusive_ptr<Work> allreduce(
@@ -283,16 +294,28 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+  c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
-    WORK_OVERRIDE(
-        ProcessGroup, /* Parent class */
-        reduce_scatter_tensor_coalesced, /* Name of function in C++ */
-        outputTensors,
-        inputTensors,
-        opts);
+    pybind11::gil_scoped_acquire gil;
+    // Prefer the new name; fall back to the deprecated
+    // `reduce_scatter_tensor_coalesced` for backward compatibility with
+    // existing Python ProcessGroup subclasses.
+    pybind11::function override = pybind11::get_override(
+        static_cast<const ProcessGroup*>(this),
+        "reduce_scatter_single_coalesced");
+    if (!override) {
+      override = pybind11::get_override(
+          static_cast<const ProcessGroup*>(this),
+          "reduce_scatter_tensor_coalesced");
+    }
+    if (override) {
+      auto o = override(outputTensors, inputTensors, opts);
+      return c10::make_intrusive<PyWorkHolder>(o);
+    }
+    return ProcessGroup::reduce_scatter_single_coalesced(
+        outputTensors, inputTensors, opts);
   }
 
   c10::intrusive_ptr<Work> send(

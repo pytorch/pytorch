@@ -11,14 +11,14 @@ import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
 from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
-    all_gather_into_tensor_coalesced,
     all_gather_single,
+    all_gather_single_coalesced,
     all_reduce,
     all_reduce_coalesced,
     all_to_all_single,
     AsyncCollectiveTensor,
     reduce_scatter_single,
-    reduce_scatter_tensor_coalesced,
+    reduce_scatter_single_coalesced,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import e4m3_type
@@ -356,7 +356,7 @@ class TestWithNCCL(DistributedTestBase):
                 raise AssertionError(f"Expected output to equal expect[{i}]")
 
         # Test Python API and AsyncCollectiveTensor
-        outputs = all_gather_into_tensor_coalesced(
+        outputs = all_gather_single_coalesced(
             inputs,
             "default",
         )
@@ -436,7 +436,7 @@ class TestWithNCCL(DistributedTestBase):
                 raise AssertionError(f"Expected output to equal {expected}")
 
         # Test Python API and AsyncCollectiveTensor
-        outputs = reduce_scatter_tensor_coalesced(
+        outputs = reduce_scatter_single_coalesced(
             inputs,
             "avg",
             [0] * 10,
@@ -1217,7 +1217,7 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_all_gather_into_tensor_coalesced(self):
         def func(args: list[torch.Tensor]) -> torch.Tensor:
-            ag0 = funcol.all_gather_into_tensor_coalesced(args, "0")
+            ag0 = funcol.all_gather_single_coalesced(args, "0")
             ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
 
@@ -1318,7 +1318,7 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_reduce_scatter_tensor_coalesced(self):
         def func(args: list[torch.Tensor]) -> torch.Tensor:
-            rs0 = funcol.reduce_scatter_tensor_coalesced(
+            rs0 = funcol.reduce_scatter_single_coalesced(
                 args, "avg", [0] * len(args), "0"
             )
             rs0 = [funcol.wait_tensor(out) for out in rs0]
