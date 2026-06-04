@@ -4181,7 +4181,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             lambda x: x.resize_as_(torch.rand(200, 300)): torch.rand(2, 3),
             lambda x: x.swapaxes_(0, 1).mul_(2): torch.rand(2, 3),
             lambda x: x.swapdims_(0, 1).mul_(2): torch.rand(2, 3),
-            lambda x: x.rename_("N", "C").mul_(2): torch.zeros(2, 3),
             lambda x: x.as_strided_((3, 2), (2, 1)).mul_(2): torch.zeros(2, 3),
             lambda x: x.detach_().mul_(2): torch.zeros(2, 3),
         }
@@ -8195,7 +8194,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         x = torch.tensor([2.0])
         with self.assertRaisesRegex(
-            AssertionError, "Can't unpack a tensor of 1 rows into a tuple of 2 elements"
+            ValueError, r"not enough values to unpack \(expected 2, got 1\)"
         ):
             f1(x)
 
@@ -12469,6 +12468,20 @@ def ___make_guard_fn():
             return x
 
         self.assertEqual(fn().item(), 1)
+
+    def test_iter_version(self):
+        def fn(x):
+            s = 0
+            for i in torch.__version__:
+                try:
+                    s += int(i)
+                except ValueError:
+                    pass
+            return (x + s).sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3, 3)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):

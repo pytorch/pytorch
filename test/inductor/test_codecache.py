@@ -27,7 +27,7 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
-from torch._inductor import config, metrics
+from torch._inductor import config, config_comms, metrics
 from torch._inductor.cache_key import (
     AUTOTUNE_CACHE_KEY_STRATEGY,
     CacheKeyStrategy,
@@ -344,6 +344,34 @@ class TestPyCodeCache(TestCase):
         PyCodeCache.load_by_key_path(key, path, linemap=[])
         stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
         self.assertEqual(stack_frames, None)
+
+    def test_load_by_key_path_can_defer_sys_modules_registration(self):
+        """
+        Benchmark-only modules should not need a global ``sys.modules`` entry,
+        but a later normal runtime load must still be able to publish the same
+        cached module there.
+        """
+        module_name = None
+        try:
+            PyCodeCache.cache_clear()
+            key, path = PyCodeCache.write("value = 1\n")
+
+            module = PyCodeCache.load_by_key_path(
+                key,
+                path,
+                set_sys_modules=False,
+            )
+            module_name = module.__name__
+            self.assertNotIn(module_name, sys.modules)
+
+            registered_module = PyCodeCache.load_by_key_path(key, path)
+            self.assertIs(registered_module, module)
+            self.assertIn(module_name, sys.modules)
+            self.assertIs(sys.modules[module_name], module)
+        finally:
+            if module_name is not None:
+                sys.modules.pop(module_name, None)
+            PyCodeCache.cache_clear()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_editable_cached_wrapper(self):
@@ -3248,6 +3276,31 @@ class TestFxGraphCacheHashing(TestCase):
             details2 = FxGraphHashDetails(None, [], {}, [])
 
         with config.patch({"max_autotune": True}):
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+
+    def test_hash_config_comms_changes(self):
+        """
+        Test that changes to config_comms settings affect hashes.
+        """
+        with config_comms.patch(
+            {"runtime_estimations_use_nccl_lib_estimations": False}
+        ):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with config_comms.patch({"runtime_estimations_use_nccl_lib_estimations": True}):
             details3 = FxGraphHashDetails(None, [], {}, [])
 
         gm = torch.fx.GraphModule({}, torch.fx.Graph())

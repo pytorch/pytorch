@@ -108,7 +108,7 @@ def _apply_optim_in_backward_hook(
                 if hasattr(param, "_in_backward_optimizers"):
                     param.grad = None
 
-            # reset for the next backwards pass
+            # reset for the next backward pass
             optim_stream_state.wait_for_optim_stream_enqueued = False
 
         if not optim_stream_state.wait_for_optim_stream_enqueued:

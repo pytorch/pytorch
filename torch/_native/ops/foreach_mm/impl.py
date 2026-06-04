@@ -56,7 +56,9 @@ def _foreach_mm_cond(
     first_a = self[0]
     first_b = mat2[0]
 
-    if not first_a.is_cuda:
+    if not first_a.is_cuda or not first_b.is_cuda:
+        return False
+    if torch.version.hip:
         return False
     _SUPPORTED_DTYPES = {torch.bfloat16, torch.float32}
     if first_a.dtype not in _SUPPORTED_DTYPES or first_b.dtype not in _SUPPORTED_DTYPES:
@@ -83,6 +85,10 @@ def _foreach_mm_cond(
             return False
         if not is_non_overlapping_and_dense_or_false(b):
             return False
+        if not a.is_cuda or not b.is_cuda:
+            return False
+        if a.device != first_a.device or b.device != first_a.device:
+            return False
         K_i, N_i = a.size(1), b.size(1)
         if nvmath_ok and (N_i % alignment != 0 or K_i % alignment != 0):
             nvmath_ok = False
@@ -92,8 +98,6 @@ def _foreach_mm_cond(
         max_dim = max(max_dim, a.size(0), K_i, N_i)
         if i > 0:
             if a.dtype != first_a.dtype or b.dtype != first_b.dtype:
-                return False
-            if a.device != first_a.device or b.device != first_b.device:
                 return False
             if (a.stride(-1) == 1) != first_a_rm or (b.stride(-1) == 1) != first_b_rm:
                 return False
@@ -166,15 +170,7 @@ def _foreach_mm_impl(
     if self[0].dtype == torch.bfloat16:
         global _nvmath_available, _nvmath_warned
         if _check_nvmath_cublaslt():
-            try:
-                return _foreach_mm_impl_nvmath(self, mat2)
-            except RuntimeError as e:
-                warnings.warn(
-                    f"_foreach_mm: nvmath cublasLt failed ({e}), disabling.",
-                    stacklevel=3,
-                )
-                _nvmath_available = False
-                _nvmath_warned = True
+            return _foreach_mm_impl_nvmath(self, mat2)
         else:
             if not _nvmath_warned:
                 _nvmath_warned = True
