@@ -74,6 +74,29 @@ class TestPerOverloadAPI(TestCase):
             torch.ops.aten.linear.default(x, y),
         )
 
+    def test_qualname_opoverloadpacket(self):
+        # qualname should be a module-qualified dotted path, not the raw
+        # pybind11 binding's mangled qualname (see issue #186140).
+        add_packet = torch.ops.aten.add
+        self.assertEqual(add_packet.__name__, "add")
+        self.assertEqual(add_packet.__qualname__, "torch.ops.aten.add")
+
+    def test_qualname_opoverload(self):
+        # qualname on OpOverload should mirror the packet: module.name.overload
+        add_packet = torch.ops.aten.add
+        add_tensoroverload = add_packet.Tensor
+        self.assertEqual(add_tensoroverload.__name__, "add.Tensor")
+        self.assertEqual(
+            add_tensoroverload.__qualname__, "torch.ops.aten.add.Tensor"
+        )
+
+    def test_qualname_nested_namespace(self):
+        # qualname should reflect the resolved namespace, not the class default
+        # ("torch._ops").
+        cumsum_packet = torch.ops.aten.cumsum
+        self.assertEqual(cumsum_packet.__name__, "cumsum")
+        self.assertEqual(cumsum_packet.__qualname__, "torch.ops.aten.cumsum")
+
 
 if __name__ == "__main__":
     run_tests()

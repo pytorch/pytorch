@@ -825,7 +825,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         self.__name__ = f"{self._schema.name.split('::')[1]}.{self._overloadname}"
         self.__module__ = overloadpacket.__module__
         op.__module__ = overloadpacket.__module__
-        self.__qualname__ = self._name
+        self.__qualname__ = f"{self.__module__}.{self.__name__}"
         self.__annotations__ = {}
 
         # If the OpOverload was constructed from a Library.def in Python.
@@ -1397,6 +1397,7 @@ class _OpNamespace(types.ModuleType):
             qualified_op_name, op_name, op, overload_names
         )
         opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
+        opoverloadpacket.__qualname__ = f"{opoverloadpacket.__module__}.{opoverloadpacket.__name__}"
         # cache the opoverloadpacket to ensure that each op corresponds to
         # a unique OpOverloadPacket object
         setattr(self, op_name, opoverloadpacket)
