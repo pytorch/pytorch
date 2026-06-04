@@ -82,6 +82,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     product,
     proxy_args_kwargs,
+    unpack_iterable,
     unwrap_if_wrapper,
 )
 from .base import typestr, VariableTracker
@@ -98,6 +99,7 @@ from .functions import (
     NestedUserFunctionVariable,
 )
 from .lists import ListVariable, TupleVariable
+from .object_protocol import vt_is_iterable
 from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -1223,6 +1225,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_is_grad_enabled(
             self, tx: "InstructionTranslatorBase"
         ) -> ConstantVariable:
+            if tx.output.current_tracer.is_autograd_function_backward:
+                unimplemented(
+                    gb_type="torch.is_grad_enabled in autograd.Function backward",
+                    context="",
+                    explanation=(
+                        "Dynamo does not support tracing custom autograd.Function "
+                        "backward methods that observe grad mode."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             install_guard(GradModeVariable._guards_singleton)
             return VariableTracker.build(tx, torch.is_grad_enabled())
 
@@ -1478,7 +1490,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 tf_state.skip_next = False
                 return VariableTracker.build(tx, False)
             elems = (
-                args[0].unpack_var_sequence(tx)
+                unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
                 else args
             )
@@ -1511,7 +1523,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             try:
                 return func.call_function(
                     tx,
-                    args.unpack_var_sequence(tx),
+                    unpack_iterable(tx, args),
                     kwargs.keys_as_python_constant(),  # type: ignore[attr-defined]
                 )
             finally:
@@ -3346,9 +3358,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
-        flat_args_vts, input_spec_vt = _make_inlined(tx, tree_flatten)(
-            VariableTracker.build(tx, (args_with_states, kwargs_with_states))
-        ).unpack_var_sequence(tx)
+        flat_args_vts, input_spec_vt = unpack_iterable(
+            tx,
+            _make_inlined(tx, tree_flatten)(
+                VariableTracker.build(tx, (args_with_states, kwargs_with_states))
+            ),
+        )
         if not isinstance(flat_args_vts, ListVariable):
             raise AssertionError(
                 f"Expected flat_args_vts to be a ListVariable, got {type(flat_args_vts)}"
@@ -3558,12 +3573,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         ) -> TypeIs[Union["NNModuleVariable", "UnspecializedNNModuleVariable"]]:
             return isinstance(var, (NNModuleVariable, UnspecializedNNModuleVariable))
 
-        flat_args_var, tree_spec_var = _make_inlined(tx, pytree.tree_flatten)(
-            VariableTracker.build(tx, (args, kwargs))
-        ).unpack_var_sequence(tx)
+        flat_args_var, tree_spec_var = unpack_iterable(
+            tx,
+            _make_inlined(tx, pytree.tree_flatten)(
+                VariableTracker.build(tx, (args, kwargs))
+            ),
+        )
 
         module_to_index: dict[int, int] = {}
-        for arg in flat_args_var.unpack_var_sequence(tx):
+        for arg in unpack_iterable(tx, flat_args_var):
             if is_module_variable(arg):
                 if arg.source is None:
                     unimplemented(
@@ -3596,7 +3614,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         result_var = _make_inlined(tx, convert_modules_to_states)(
             VariableTracker.build(tx, (args, kwargs)), module_to_index_var
         )
-        return result_var.unpack_var_sequence(tx)  # pyrefly: ignore [bad-return]
+        return unpack_iterable(tx, result_var)  # pyrefly: ignore [bad-return]
 
     def _call_leaf_function(
         self,
@@ -3630,11 +3648,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             tx, args, kwargs
         )
 
-        flat_args_var, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
-            VariableTracker.build(tx, (args_with_states, kwargs_with_states))
-        ).unpack_var_sequence(tx)
+        flat_args_var, input_spec_var = unpack_iterable(
+            tx,
+            _make_inlined(tx, pytree.tree_flatten)(
+                VariableTracker.build(tx, (args_with_states, kwargs_with_states))
+            ),
+        )
         flat_arg_proxies = [
-            arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
+            arg.as_proxy() for arg in unpack_iterable(tx, flat_args_var)
         ]
         input_spec = input_spec_var.as_python_constant()
 
@@ -3715,10 +3736,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             raise AssertionError(f"_ntuple expects no kwargs, got {len(kwargs)}")
 
         def handle_ntuple(value: VariableTracker) -> VariableTracker:
-            if value.has_unpack_var_sequence(tx):
-                return variables.TupleVariable(
-                    list(value.unpack_var_sequence(tx)),
-                )
+            if vt_is_iterable(value):
+                return variables.TupleVariable(unpack_iterable(tx, value))
             elif value.is_python_constant():
                 # constant prop through it
                 return VariableTracker.build(

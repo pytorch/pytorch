@@ -1291,6 +1291,12 @@
   "GB0094": [
     {
       "Gb_type": "SEND with bad type",
+      "Context": "TOS type: {typestr(receiver)}",
+      "Explanation": "Attempted to SEND with unsupported type {typestr(receiver)}.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "SEND with bad type",
       "Context": "TOS type: {typestr(tos)}",
       "Explanation": "Attempted to SEND with unsupported type {typestr(tos)}.",
       "Hints": []
@@ -1401,6 +1407,16 @@
       "Hints": [
         "Remove `{name}` from the list of banned ops by ",
         "setting `torch._dynamo.config._autograd_backward_strict_mode_banned_ops`."
+      ]
+    }
+  ],
+  "GB7763": [
+    {
+      "Gb_type": "torch.is_grad_enabled in autograd.Function backward",
+      "Context": "",
+      "Explanation": "Dynamo does not support tracing custom autograd.Function backward methods that observe grad mode.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -1559,6 +1575,16 @@
       "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo cannot reconstruct the function.",
       "Hints": [
         "Define the function at module scope instead of inside another function"
+      ]
+    }
+  ],
+  "GB1752": [
+    {
+      "Gb_type": "Missing tp_iteritem",
+      "Context": "_tp_iteritem on {self.python_type_name()}",
+      "Explanation": "Dynamo does not support virtual iteration on {self.python_type_name()}. Add tp_iteritem_impl to this VariableTracker subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

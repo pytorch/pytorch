@@ -2312,16 +2312,6 @@ class ConstantLikeVariable(VariableTracker):
         return GetAttrVariable(self, name, py_type=type(result))
 
 
-class TorchVersionVariable(ConstantLikeVariable):
-    _error_prefix = "torch.__version__"
-
-    def __init__(self, **kwargs: Any) -> None:
-        kwargs.setdefault("value", torch.__version__)
-        if kwargs["value"] is not torch.__version__:
-            raise AssertionError("TorchVersionVariable value must be torch.__version__")
-        super().__init__(**kwargs)
-
-
 class NumpyDTypeVariable(ConstantLikeVariable):
     def as_proxy(self) -> str:
         """Similar to how numpy dtype descriptors (e.g. np.float32 ) are handled by NumpyVariable:

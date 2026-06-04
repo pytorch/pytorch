@@ -2902,6 +2902,13 @@ class OutputGraph(OutputGraphCommon):
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
 
+            if not self.export:
+                # Run after every non-export backend compile, not only the
+                # registered backends covered by convert_frame weakref cleanup.
+                # Backends have already consumed the graph, so non-CPU Dynamo
+                # tracing constants no longer need to keep real tensors alive.
+                old_fake_mode.fake_tensor_converter.clear_non_cpu_constants()
+
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
 
@@ -3759,7 +3766,9 @@ class SubgraphTracer(fx.Tracer):
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False
-        self.is_autograd_function_backward = False
+        self.is_autograd_function_backward = (
+            parent.is_autograd_function_backward if parent is not None else False
+        )
 
         self.debug_level: int = parent.debug_level + 1 if parent is not None else 0
 

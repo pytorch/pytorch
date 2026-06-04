@@ -326,6 +326,75 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             torch.autograd.grad(res.sum(), grad_out),
         )
 
+    def test_backward_is_grad_enabled_graph_breaks(self):
+        class CustomFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                if torch.is_grad_enabled():
+                    return grad_out * 2
+                return grad_out * 3
+
+        def fn(x, grad_out):
+            y = CustomFunc.apply(x)
+            (grad,) = torch.autograd.grad(y, x, grad_out, create_graph=True)
+            return grad
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(3, requires_grad=True)
+        grad_out = torch.randn(3, requires_grad=True)
+
+        self.assertEqual(fn(x, grad_out), opt_fn(x, grad_out))
+        self.assertEqual(cnt.frame_count, 2)
+
+        fullgraph_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "torch.is_grad_enabled in autograd.Function backward",
+        ):
+            fullgraph_fn(x, grad_out)
+
+    def test_backward_nested_is_grad_enabled_graph_breaks(self):
+        class CustomFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                def inner(g):
+                    if torch.is_grad_enabled():
+                        return g * 2
+                    return g * 3
+
+                return torch.utils.checkpoint.checkpoint(
+                    inner, grad_out, use_reentrant=False
+                )
+
+        def fn(x, grad_out):
+            y = CustomFunc.apply(x)
+            (grad,) = torch.autograd.grad(y, x, grad_out, create_graph=True)
+            return grad
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(3, requires_grad=True)
+        grad_out = torch.randn(3, requires_grad=True)
+
+        self.assertEqual(fn(x, grad_out), opt_fn(x, grad_out))
+        self.assertEqual(cnt.frame_count, 2)
+
+        fullgraph_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "torch.is_grad_enabled in autograd.Function backward",
+        ):
+            fullgraph_fn(x, grad_out)
+
     def test_enum_arg(self):
         from enum import Enum
 
@@ -405,7 +474,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             def backward(ctx, grad):
                 return grad * 0.5
 
-        @torch.compile(backend=cnt, fullgraph=True)
+        @torch.compile(backend=cnt)
         def fn(x):
             return ScaleGradient.apply(x)
 
@@ -413,7 +482,14 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         result = fn(x)
 
         self.assertEqual(result, ScaleGradient.apply(x))
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 0)
+
+        fullgraph_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "torch.is_grad_enabled in autograd.Function backward",
+        ):
+            fullgraph_fn(x)
 
     def test_classmethod(self):
         class Shake(torch.autograd.Function):
