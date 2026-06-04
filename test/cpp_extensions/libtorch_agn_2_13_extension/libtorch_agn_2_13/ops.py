@@ -21,10 +21,10 @@ def test_stream_native_handle(device_index) -> int:
     return torch.ops.libtorch_agn_2_13.test_stream_native_handle.default(device_index)
 
 
-def test_kernel_launch_on_stream(input, magic_value: int):
+def test_kernel_launch_on_stream(input, fill_value: int):
     """Launch CUDA kernel using stream from nativeHandle()."""
     return torch.ops.libtorch_agn_2_13.test_kernel_launch_on_stream.default(
-        input, magic_value
+        input, fill_value
     )
 
 

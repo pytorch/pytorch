@@ -461,13 +461,17 @@ class TestLibtorchAgnostic(TestCase):
         import libtorch_agn_2_13 as libtorch_agnostic
 
         device_idx = torch.cuda.current_device()
-        stream = torch.cuda.Stream(device=device_idx)
+        streams = [torch.cuda.Stream(device=device_idx) for _ in range(3)]
 
-        with torch.cuda.stream(stream):
-            expected = torch.accelerator.current_stream(device_idx).native_handle
-            nh = libtorch_agnostic.ops.test_stream_native_handle(device_idx)
+        native_handles = []
+        for stream in streams:
+            with torch.cuda.stream(stream):
+                expected = torch.accelerator.current_stream(device_idx).native_handle
+                nh = libtorch_agnostic.ops.test_stream_native_handle(device_idx)
 
-        self.assertEqual(nh, expected)
+            self.assertEqual(nh, expected)
+            self.assertNotIn(nh, native_handles)
+            native_handles.append(nh)
 
     @skipIfTorchVersionLessThan(2, 13)
     @onlyCUDA
@@ -475,18 +479,18 @@ class TestLibtorchAgnostic(TestCase):
         import libtorch_agn_2_13 as libtorch_agnostic
 
         device_idx = torch.cuda.current_device()
-        magic_value = 42
+        fill_value = 42
 
-        input_tensor = torch.zeros(1, dtype=torch.int32, device=f"cuda:{device_idx}")
+        input_tensor = torch.zeros(1024, dtype=torch.int32, device=f"cuda:{device_idx}")
         custom_stream = torch.cuda.Stream(device=device_idx)
 
         with torch.cuda.stream(custom_stream):
             output = libtorch_agnostic.ops.test_kernel_launch_on_stream(
-                input_tensor, magic_value
+                input_tensor, fill_value
             )
 
         custom_stream.synchronize()
-        self.assertEqual(output.item(), magic_value)
+        self.assertEqual(output, torch.full_like(input_tensor, fill_value))
 
     @onlyCUDA
     @deviceCountAtLeast(2)

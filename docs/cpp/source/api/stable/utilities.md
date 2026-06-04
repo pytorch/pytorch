@@ -39,9 +39,6 @@ tensors and CUDA operations.
 
 ## Stream Utilities
 
-For CUDA stream access, we currently recommend the ABI stable C shim API. This
-will be improved in a future release with a more ergonomic wrapper.
-
 ### Getting the Current CUDA Stream
 
 To obtain the current `cudaStream_t` for use in CUDA kernels:
@@ -52,21 +49,20 @@ PyTorch version 2.13+
 #include <torch/csrc/stable/accelerator.h>
 
 // nativeHandle() requires PyTorch 2.13+
-void* native_handle =
-    torch::stable::accelerator::getCurrentStream(tensor.get_device_index()).nativeHandle();
-cudaStream_t stream = static_cast<cudaStream_t>(native_handle);
+cudaStream_t stream = static_cast<cudaStream_t>(
+    torch::stable::accelerator::getCurrentStream(tensor.get_device_index()).nativeHandle());
 
 // Now you can use 'stream' in your CUDA kernel launches
 my_kernel<<<blocks, threads, 0, stream>>>(args...);
 ```
 
-PyTorch version 2.10-2.12
+PyTorch version 2.9-2.12
 
 ```cpp
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/headeronly/util/shim_utils.h>
 
-// Rely on the ABI stable C shim API to get the current CUDA stream.
+// Use the ABI-stable C shim API to get the current CUDA stream.
 void* stream_ptr = nullptr;
 TORCH_ERROR_CODE_CHECK(
     aoti_torch_get_current_cuda_stream(tensor.get_device_index(), &stream_ptr));
@@ -78,7 +74,7 @@ my_kernel<<<blocks, threads, 0, stream>>>(args...);
 
 ```{note}
 
-The `TORCH_ERROR_CODE_CHECK` macro is required when using C shim APIs to properly check error codes and throw appropriate exceptions. nativeHandle() does this check for you.
+When using C shim APIs, the `TORCH_ERROR_CODE_CHECK` macro is required to properly check error codes and throw appropriate exceptions. `nativeHandle()`, along with all our highlevel C++ utility APIs, does this check for you.
 ```
 
 ## CUDA Error Checking Macros
