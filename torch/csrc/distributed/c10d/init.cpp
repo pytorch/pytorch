@@ -3562,7 +3562,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             return ::c10d::getNcclVersionTuple();
           });
 
-#ifdef NCCL_HAS_CTA_POLICY
   processGroupNCCL.def_property_readonly_static(
       "NCCL_CTA_POLICY_DEFAULT",
       [](const py::object&) { return NCCL_CTA_POLICY_DEFAULT; });
@@ -3574,13 +3573,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       "NCCL_CTA_POLICY_ZERO",
       [](const py::object&) { return NCCL_CTA_POLICY_ZERO; });
 #endif // NCCL_CTA_POLICY_ZERO
-#endif // NCCL_HAS_CTA_POLICY
 
   module.def(
       "_get_intra_node_comm_usage_counter",
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
 
-#ifdef NCCL_HAS_CONFIG
   py::class_<ncclConfig_t>(
       processGroupNCCL,
       "NCCLConfig",
@@ -3597,21 +3594,11 @@ for details.
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
       .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
-#ifdef NCCL_HAS_COMM_SPLIT
       .def_readwrite("split_share", &ncclConfig_t::splitShare)
-#endif
-#ifdef NCCL_HAS_QOS
       .def_readwrite("traffic_class", &ncclConfig_t::trafficClass)
-#endif
-#ifdef NCCL_HAS_COLLNET
       .def_readwrite("collnet_enable", &ncclConfig_t::collnetEnable)
-#endif
-#ifdef NCCL_HAS_CTA_POLICY
       .def_readwrite("cta_policy", &ncclConfig_t::CTAPolicy)
-#endif
-#ifdef NCCL_HAS_NVLS_CTAS
       .def_readwrite("nvls_ctas", &ncclConfig_t::nvlsCTAs)
-#endif
 #ifdef NCCL_HAS_MAX_P2P_PEERS
       .def_readwrite("max_p2p_peers", &ncclConfig_t::maxP2pPeers)
 #endif
@@ -3638,7 +3625,6 @@ for details.
             return ncclConfig_t(self);
           },
           py::arg("memo"));
-#endif // NCCL_HAS_CONFIG
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,
@@ -3674,9 +3660,7 @@ Example::
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
-#ifdef NCCL_HAS_CONFIG
       .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config)
-#endif
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
