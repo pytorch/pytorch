@@ -28,7 +28,6 @@ Error Formatting:
 
 import json
 import logging
-import pickle
 import re
 import sys
 import textwrap
@@ -68,27 +67,42 @@ log = logging.getLogger(__name__)
 graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
-def _is_pickleable(obj: Any) -> bool:
-    try:
-        pickle.dumps(obj)
-    except Exception:
-        return False
-    return True
+_EXCEPTION_STATE_ATTRS_TO_DROP = frozenset(
+    (
+        "_torch_dynamo_tracer_output",
+        "first_useful_frame",
+        "frame_exec_strategy",
+    )
+)
 
 
 def _safe_exception_args(args: tuple[Any, ...]) -> tuple[Any, ...]:
-    return tuple(arg if _is_pickleable(arg) else repr(arg) for arg in args)
+    return args
+
+
+class _SerializedException(RuntimeError):
+    _dynamo_original_exception_type: str
+
+    def __init__(self, exc: BaseException) -> None:
+        super().__init__(str(exc))
+        self._dynamo_original_exception_type = (
+            f"{type(exc).__module__}.{type(exc).__qualname__}"
+        )
+
+
+def _safe_inner_exception(exc: BaseException) -> _SerializedException:
+    return _SerializedException(exc)
 
 
 def _safe_exception_state(state: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for name, value in state.items():
-        if isinstance(value, types.FrameType):
+        if name in _EXCEPTION_STATE_ATTRS_TO_DROP or isinstance(value, types.FrameType):
             result[name] = None
-        elif _is_pickleable(value):
-            result[name] = value
+        elif name == "inner_exception" and isinstance(value, BaseException):
+            result[name] = _safe_inner_exception(value)
         else:
-            result[name] = None
+            result[name] = value
     return result
 
 

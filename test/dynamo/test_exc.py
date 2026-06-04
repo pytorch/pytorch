@@ -93,7 +93,9 @@ class ExcTests(LoggingTestCase):
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_backend_compiler_failed_pickles_without_frame(self):
         def backend_fn(gm, example_inputs):
-            raise RuntimeError("backend exploded")
+            exc = RuntimeError("backend exploded")
+            exc.frame = sys._getframe()
+            raise exc
 
         def fn(x):
             return x + 1
@@ -111,6 +113,10 @@ class ExcTests(LoggingTestCase):
         self.assertEqual(restored.backend_name, "backend_fn")
         self.assertIsInstance(restored.inner_exception, RuntimeError)
         self.assertEqual(str(restored.inner_exception), "backend exploded")
+        self.assertEqual(
+            restored.inner_exception._dynamo_original_exception_type,
+            "builtins.RuntimeError",
+        )
         self.assertIsNone(restored.first_useful_frame)
 
     def test_dynamo_exceptions_pickle_without_rerunning_init(self):
