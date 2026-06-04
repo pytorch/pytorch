@@ -242,6 +242,71 @@ if HAS_CUDA_AND_TRITON:
             self.run_twc(foo_opt, zeros)
             self.assertEqual(self.get_root_children(), [0, 0])
 
+        def test_multithreaded_cudagraph_trees(self):
+            import queue
+            import threading
+            import traceback
+
+            def foo(x, y):
+                return torch.sin(x) + torch.cos(y)
+
+            opt_foo = torch.compile(foo, mode="reduce-overhead")
+            num_threads = 3
+            barrier = threading.Barrier(num_threads)
+            errors = queue.Queue()
+            results = queue.Queue()
+
+            def run_once(
+                check_manager: bool, start_barrier: threading.Barrier | None = None
+            ) -> None:
+                try:
+                    x = torch.rand(4, 4, device="cuda")
+                    y = torch.rand(4, 4, device="cuda")
+                    expected = foo(x, y)
+                    if start_barrier is not None:
+                        start_barrier.wait()
+                    opt_foo(x, y)
+                    result = opt_foo(x, y)
+                    if check_manager:
+                        manager = torch._inductor.cudagraph_trees.get_manager(
+                            x.device.index, create_if_none_exists=False
+                        )
+                        self.assertIsNotNone(manager)
+                    results.put((result, expected))
+                except Exception:
+                    errors.put(traceback.format_exc())
+
+            owner_thread = threading.Thread(target=run_once, args=(True,))
+            owner_thread.start()
+            owner_thread.join()
+
+            def check_errors() -> None:
+                if not errors.empty():
+                    messages = []
+                    while not errors.empty():
+                        messages.append(errors.get())
+                    self.fail("\n".join(messages))
+
+            check_errors()
+            result, expected = results.get()
+            torch.testing.assert_close(result, expected)
+            del result, expected
+
+            def worker() -> None:
+                run_once(True, barrier)
+
+            threads = [threading.Thread(target=worker) for _ in range(num_threads)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            check_errors()
+            while not results.empty():
+                result, expected = results.get()
+                torch.testing.assert_close(result, expected)
+                del result, expected
+
         def check_rng(self):
             @torch.compile(mode="reduce-overhead")
             def foo():

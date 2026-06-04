@@ -6627,6 +6627,22 @@ class ExternKernel(InputsKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        read_writes = super().get_read_writes()
+
+        def add_ir_read(value: Any) -> None:
+            if isinstance(value, IRNode):
+                name = value.maybe_get_name()
+                if name is not None:
+                    read_writes.reads.add(dependencies.StarDep(name))
+
+        pytree.tree_map_(
+            add_ir_read,
+            (self.constant_args, self.kwargs),
+            is_leaf=lambda value: isinstance(value, IRNode),
+        )
+        return read_writes
+
     def collect_arg_kwarg_properties(self) -> None:
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
         # information for args and kwargs, e.g. type and default value, to help with the cpp wrapper codegen
@@ -9417,6 +9433,12 @@ class FallbackKernel(ExternKernelAlloc):
             packed.outputs = tuple(outputs)
         else:
             packed.outputs = [outputs]
+
+        if kernel is torch.ops.aten._efficientzerotensor.default:
+            V.graph.never_reuse_buffers.add(packed.get_name())
+            for output in pytree.tree_leaves(outputs):
+                if isinstance(output, IRNode):
+                    V.graph.never_reuse_buffers.add(output.get_name())
 
         return outputs
 
