@@ -990,6 +990,18 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_dir.mkdir(parents=True, exist_ok=True)
             self.copy_file(export_lib, target_lib)
 
+            # Copy PDB alongside the pyd for debugger symbol resolution.
+            # setuptools places the PDB in build_lib next to the pyd; copy it
+            # into the source tree so LLDB/MSVC debuggers can find it.
+            if build_type.is_debug() or build_type.is_rel_with_deb_info():
+                pyd_rel = self.get_ext_filename("torch._C")
+                pdb_rel = os.path.splitext(pyd_rel)[0] + ".pdb"
+                src_pdb = Path(self.build_lib) / pdb_rel
+                dst_pdb = Path(pdb_rel)
+                if src_pdb.exists():
+                    dst_pdb.parent.mkdir(parents=True, exist_ok=True)
+                    self.copy_file(str(src_pdb), str(dst_pdb))
+
     def get_outputs(self) -> list[str]:
         outputs = super().get_outputs()
         outputs.append(os.path.join(self.build_lib, "caffe2"))
@@ -1066,10 +1078,21 @@ def configure_extension_build() -> tuple[
         # /NODEFAULTLIB makes sure we only link to DLL runtime
         # and matches the flags set for protobuf and ONNX
         extra_link_args: list[str] = ["/NODEFAULTLIB:LIBCMT.LIB"]
-        # /MD links against DLL runtime
-        # and matches the flags set for protobuf and ONNX
+
+        # compile flags common between debug and non-debug builds
         # /EHsc is about standard C++ exception handling
-        extra_compile_args: list[str] = ["/MD", "/FS", "/EHsc"]
+        extra_compile_args = ["/FS", "/EHsc"]
+        if not build_type.is_debug():
+            # /MD links against DLL runtime
+            # and matches the flags set for protobuf and ONNX
+            extra_compile_args += ["/MD"]
+        else:
+            # To align to Windows debug ABI on debug builds, use /MDd instead of /MD;
+            # additionally exclude the debug version of `LIBCMT.LIB` - `LIBCMTD.LIB`.
+            # Propagate /D_DEBUG so that pyconfig.h #pragma comment will be able to select
+            # proper debug version of the python.lib
+            extra_compile_args += ["/MDd", "/D_DEBUG"]
+            extra_link_args += ["/NODEFAULTLIB:LIBCMTD.LIB"]
     else:
         extra_link_args = []
         extra_compile_args = [

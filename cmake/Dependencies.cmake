@@ -872,6 +872,24 @@ add_library(pybind::pybind11 INTERFACE IMPORTED)
 target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
 target_link_libraries(pybind::pybind11 INTERFACE Python::Module)
 
+# when linking against a debug Python (Py_DEBUG), propagate Py_DEBUG so that
+# pybind11 does not strip _DEBUG before including Python.h. Without this,
+# pyconfig.h emits #pragma comment(lib, "python3XX.lib") instead of the
+# debug "python3XX_d.lib", causing LNK1104 on Windows debug builds.
+if(MSVC AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+
+  # probe if python interpreter has debug capabilities
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "import sys; print(hasattr(sys, 'gettotalrefcount'))"
+    OUTPUT_VARIABLE _python_is_debug
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+  if(_python_is_debug STREQUAL "True")
+    message(STATUS "Debug Python detected, defining Py_DEBUG for pybind11 consumers")
+    target_compile_definitions(pybind::pybind11 INTERFACE Py_DEBUG)
+  endif()
+endif()
+
 # ---[ MPI
 if(USE_MPI)
   find_package(MPI)
@@ -916,7 +934,7 @@ if(USE_OPENMP AND NOT TARGET caffe2::openmp)
     list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::openmp)
     if(MSVC AND OpenMP_CXX_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
       target_compile_definitions(caffe2::openmp INTERFACE _OPENMP_NOFORCE_MANIFEST)
-      target_link_options(caffe2::openmp INTERFACE "/NODEFAULTLIB:vcomp")
+      target_link_options(caffe2::openmp INTERFACE "/NODEFAULTLIB:vcomp" "/NODEFAULTLIB:vcompd")
     endif()
   else()
     message(WARNING "Not compiling with OpenMP. Suppress this warning with -DUSE_OPENMP=OFF")
