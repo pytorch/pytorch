@@ -102,9 +102,10 @@ def quack_rmsnorm_bwd(
     rstd_flat = _flatten_rstd(rstd, M)
 
     dx = torch.empty_like(x)
-    from torch._vendor.quack.rmsnorm import _compile_rmsnorm_bwd, _get_sm_count
+    from torch._vendor.quack.rmsnorm import _compile_rmsnorm_bwd
+    from torch._vendor.quack.rmsnorm_config import get_sm_count
 
-    sm_count = _get_sm_count(N, x.device)
+    sm_count = get_sm_count(N, x.device)
 
     # quack's kernel requires a contiguous 1-D weight with matching dtype.
     if weight is not None:

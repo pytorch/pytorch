@@ -1,0 +1,17 @@
+--- a/cache/jit.py
++++ b/cache/jit.py
+@@ -36 +36 @@
+-import quack.cache as _state  # noqa: E402  (intentional partial-import; see __init__.py)
++import torch._vendor.quack.cache as _state  # noqa: E402  (intentional partial-import; see __init__.py)
+@@ -52 +52 @@
+-        cache_dir = Path(tempfile.gettempdir()) / getuser() / "quack_cache"
++        cache_dir = Path(tempfile.gettempdir()) / getuser() / "torch_vendor_quack_cache"
+@@ -78 +78 @@
+-    import quack as _quack
++    import torch._vendor.quack as _quack
+@@ -256 +256 @@
+-                    print(f"quack cache: export failed for key {sha}: {e}")
++                    print(f"torch._vendor.quack cache: export failed for key {sha}: {e}")
+@@ -264 +264 @@
+-                f"quack cache: lock timeout for key {sha}: {e}; "
++                f"torch._vendor.quack cache: lock timeout for key {sha}: {e}; "
