@@ -1468,8 +1468,6 @@ def compiled_fx_graph_hash(
     # cache in this module.
     key = pickler.get_key(details)
     debug_lines = pickler.debug_lines(details)
-    debug_str = "\n".join(debug_lines)
-    log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
     return key, debug_lines
 
 
