@@ -1791,14 +1791,30 @@ class TensorVariable(VariableTracker):
         value: Any | None = None,
     ) -> Any | None:
         if value is not None and config.enable_dynamo_decompositions:
+            mul_var = variables.TorchInGraphFunctionVariable(torch.mul)
+            product = mul_var.call_function(tx, [tensor1, tensor2], {})
+            return self._add_product_with_value(tx, product, value)
+        return None
+
+    def _add_product_with_value(
+        self,
+        tx: "InstructionTranslatorBase",
+        product: VariableTracker,
+        value: VariableTracker,
+    ) -> VariableTracker:
+        if isinstance(value, SymNodeVariable):
+            # AOTAutograd specializes non-tensor symbolic scalar arguments to
+            # prims.fma, so keep .item()-derived values in regular tensor math.
+            mul_var = variables.TorchInGraphFunctionVariable(torch.mul)
+            add_var = variables.TorchInGraphFunctionVariable(torch.add)
+            scaled = mul_var.call_function(tx, [product, value], {})
+            result = add_var.call_function(tx, [self, scaled], {})
+        else:
             from torch._inductor import inductor_prims
 
-            mul_var = variables.TorchInGraphFunctionVariable(torch.mul)
             fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
-            product = mul_var.call_function(tx, [tensor1, tensor2], {})
             result = fma_var.call_function(tx, [product, value, self], {})
-            return self.call_method(tx, "copy_", [result], {})
-        return None
+        return self.call_method(tx, "copy_", [result], {})
 
     def method___setitem__(
         self,
@@ -1940,11 +1956,7 @@ class TensorVariable(VariableTracker):
             result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
                 tx, [tensor1, tensor2], {}
             )
-            from torch._inductor import inductor_prims
-
-            fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
-            fma_result = fma_var.call_function(tx, [result, value, self], {})
-            return self.call_method(tx, "copy_", [fma_result], {})
+            return self._add_product_with_value(tx, result, value)
         return None
 
     def sq_contains(
