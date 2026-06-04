@@ -551,7 +551,6 @@ class ProcessGroup:
         inputTensor: Tensor,
         opts: ReduceScatterOptions | None,
     ) -> Work: ...
-    @overload
     def all_to_all_single(
         self,
         output_tensor: Tensor,
@@ -559,15 +558,6 @@ class ProcessGroup:
         output_split_sizes: list[int],
         input_split_sizes: list[int],
         opts=...,
-    ) -> Work: ...
-    @overload
-    def all_to_all_single(
-        self,
-        output: Tensor,
-        input: Tensor,
-        output_split_sizes: list[int],
-        input_split_sizes: list[int],
-        timeout: timedelta | None = None,
     ) -> Work: ...
     @overload
     def alltoall_base(
