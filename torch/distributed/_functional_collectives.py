@@ -442,7 +442,7 @@ def all_reduce_coalesced(
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
-def all_gather_into_tensor_coalesced(
+def all_gather_single_coalesced(
     self: list[torch.Tensor], group: RANK_TYPES, tag: str = ""
 ) -> list[torch.Tensor]:
     """
@@ -471,7 +471,7 @@ def all_gather_into_tensor_coalesced(
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
-def reduce_scatter_tensor_coalesced(
+def reduce_scatter_single_coalesced(
     inputs: list[torch.Tensor],
     reduceOp: str,
     scatter_dim: list[int],
@@ -517,6 +517,39 @@ def reduce_scatter_tensor_coalesced(
     )
 
     return list(map(_maybe_wrap_tensor, tensor_list))
+
+
+# Guarded warning rather than the @deprecated wrapper so Dynamo can trace
+# through to the _single_coalesced implementation; see the non-coalesced
+# aliases above for the rationale.
+def all_gather_into_tensor_coalesced(
+    self: list[torch.Tensor], group: RANK_TYPES, tag: str = ""
+) -> list[torch.Tensor]:
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.all_gather_into_tensor_coalesced` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.all_gather_single_coalesced` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+    return all_gather_single_coalesced(self, group, tag)
+
+
+def reduce_scatter_tensor_coalesced(
+    inputs: list[torch.Tensor],
+    reduceOp: str,
+    scatter_dim: list[int],
+    group: RANK_TYPES,
+    tag: str = "",
+) -> list[torch.Tensor]:
+    if not torch.compiler.is_compiling():
+        warnings.warn(
+            "`torch.distributed._functional_collectives.reduce_scatter_tensor_coalesced` is deprecated. "
+            "Please use `torch.distributed._functional_collectives.reduce_scatter_single_coalesced` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+    return reduce_scatter_single_coalesced(inputs, reduceOp, scatter_dim, group, tag)
 
 
 # This is a bit unsafe: it checks if the first argument in the schema reports as a non-mutable alias.
