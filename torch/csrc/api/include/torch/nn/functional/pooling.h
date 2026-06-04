@@ -5,6 +5,8 @@
 #include <torch/nn/modules/utils.h>
 #include <torch/nn/options/pooling.h>
 
+#include <limits>
+
 namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -1009,8 +1011,17 @@ inline Tensor lp_pool1d(
     ExpandingArray<1> kernel_size,
     ExpandingArray<1> stride,
     bool ceil_mode) {
+  if (norm_type == std::numeric_limits<double>::infinity()) {
+    return detail::max_pool1d(
+        torch::abs(input),
+        kernel_size,
+        stride,
+        /*padding=*/0,
+        /*dilation=*/1,
+        ceil_mode);
+  }
   Tensor out = detail::avg_pool1d(
-      input.pow(norm_type),
+      torch::abs(input).pow(norm_type),
       kernel_size,
       stride,
       /*padding=*/0,
@@ -1057,8 +1068,17 @@ inline Tensor lp_pool2d(
     bool ceil_mode) {
   auto kw = (*kernel_size)[0];
   auto kh = (*kernel_size)[1];
+  if (norm_type == std::numeric_limits<double>::infinity()) {
+    return detail::max_pool2d(
+        torch::abs(input),
+        kernel_size,
+        stride,
+        /*padding=*/0,
+        /*dilation=*/1,
+        ceil_mode);
+  }
   Tensor out = detail::avg_pool2d(
-      input.pow(norm_type),
+      torch::abs(input).pow(norm_type),
       kernel_size,
       stride,
       /*padding=*/0,
@@ -1107,8 +1127,17 @@ inline Tensor lp_pool3d(
   auto kd = (*kernel_size)[0];
   auto kw = (*kernel_size)[1];
   auto kh = (*kernel_size)[2];
+  if (norm_type == std::numeric_limits<double>::infinity()) {
+    return detail::max_pool3d(
+        torch::abs(input),
+        kernel_size,
+        stride,
+        /*padding=*/0,
+        /*dilation=*/1,
+        ceil_mode);
+  }
   Tensor out = detail::avg_pool3d(
-      input.pow(norm_type),
+      torch::abs(input).pow(norm_type),
       kernel_size,
       stride,
       /*padding=*/0,

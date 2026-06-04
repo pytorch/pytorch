@@ -2443,14 +2443,61 @@ def module_inputs_torch_nn_LocalResponseNorm(module_info, device, dtype, require
     ]
 
 
+def _lppool_reference_fn(m, p, input):
+    del p
+    pooling_dim = input.dim() - 2
+    if pooling_dim == 1:
+        kernel_size = (m.kernel_size,)
+        if m.norm_type == math.inf:
+            return F.max_pool1d(input.abs(), m.kernel_size, m.stride, 0, 1, m.ceil_mode)
+        out = F.avg_pool1d(
+            input.abs().pow(m.norm_type), m.kernel_size, m.stride, 0, m.ceil_mode
+        )
+    elif pooling_dim == 2:
+        kernel_size = (
+            tuple(m.kernel_size)
+            if isinstance(m.kernel_size, tuple)
+            else (m.kernel_size,) * 2
+        )
+        if m.norm_type == math.inf:
+            return F.max_pool2d(input.abs(), m.kernel_size, m.stride, 0, 1, m.ceil_mode)
+        out = F.avg_pool2d(
+            input.abs().pow(m.norm_type), m.kernel_size, m.stride, 0, m.ceil_mode
+        )
+    else:
+        kernel_size = (
+            tuple(m.kernel_size)
+            if isinstance(m.kernel_size, tuple)
+            else (m.kernel_size,) * 3
+        )
+        if m.norm_type == math.inf:
+            return F.max_pool3d(input.abs(), m.kernel_size, m.stride, 0, 1, m.ceil_mode)
+        out = F.avg_pool3d(
+            input.abs().pow(m.norm_type), m.kernel_size, m.stride, 0, m.ceil_mode
+        )
+
+    return out.mul(math.prod(kernel_size)).pow(1.0 / m.norm_type)
+
+
 def module_inputs_torch_nn_LPPool1d(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_signed_input = partial(make_input, low=-1, high=1)
 
     return [
         ModuleInput(
             constructor_input=FunctionInput(1.5, 2),
             forward_input=FunctionInput(make_input((1, 3, 7))),
             desc='norm'),
+        ModuleInput(
+            constructor_input=FunctionInput(2.3273891720497133, 2, 1),
+            forward_input=FunctionInput(make_signed_input((1, 3, 7))),
+            reference_fn=_lppool_reference_fn,
+            desc='signed_fractional_norm'),
+        ModuleInput(
+            constructor_input=FunctionInput(math.inf, 2, 1),
+            forward_input=FunctionInput(make_signed_input((1, 3, 7))),
+            reference_fn=_lppool_reference_fn,
+            desc='infinity_norm'),
         ModuleInput(
             constructor_input=FunctionInput(2, 2, 3),
             forward_input=FunctionInput(make_input((1, 3, 7)))),
@@ -2465,11 +2512,22 @@ def module_inputs_torch_nn_LPPool1d(module_info, device, dtype, requires_grad, t
 
 def module_inputs_torch_nn_LPPool2d(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_signed_input = partial(make_input, low=-1, high=1)
 
     return [
         ModuleInput(
             constructor_input=FunctionInput(2, 2, 2),
             forward_input=FunctionInput(make_input((1, 3, 7, 7)))),
+        ModuleInput(
+            constructor_input=FunctionInput(2.3273891720497133, (2, 2), (1, 1)),
+            forward_input=FunctionInput(make_signed_input((1, 3, 7, 7))),
+            reference_fn=_lppool_reference_fn,
+            desc='signed_fractional_norm'),
+        ModuleInput(
+            constructor_input=FunctionInput(math.inf, (2, 2), (1, 1)),
+            forward_input=FunctionInput(make_signed_input((1, 3, 7, 7))),
+            reference_fn=_lppool_reference_fn,
+            desc='infinity_norm'),
         ModuleInput(
             constructor_input=FunctionInput(2, 2, 2),
             forward_input=FunctionInput(make_input((3, 7, 7))),
@@ -2484,11 +2542,22 @@ def module_inputs_torch_nn_LPPool2d(module_info, device, dtype, requires_grad, t
 
 def module_inputs_torch_nn_LPPool3d(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_signed_input = partial(make_input, low=-1, high=1)
 
     return [
         ModuleInput(
             constructor_input=FunctionInput(2, 2, 2),
             forward_input=FunctionInput(make_input((1, 3, 7, 7, 7)))),
+        ModuleInput(
+            constructor_input=FunctionInput(2.3273891720497133, (2, 2, 2), (1, 1, 1)),
+            forward_input=FunctionInput(make_signed_input((1, 3, 7, 7, 7))),
+            reference_fn=_lppool_reference_fn,
+            desc='signed_fractional_norm'),
+        ModuleInput(
+            constructor_input=FunctionInput(math.inf, (2, 2, 2), (1, 1, 1)),
+            forward_input=FunctionInput(make_signed_input((1, 3, 7, 7, 7))),
+            reference_fn=_lppool_reference_fn,
+            desc='infinity_norm'),
         ModuleInput(
             constructor_input=FunctionInput(2, 2, 2),
             forward_input=FunctionInput(make_input((3, 7, 7, 7))),

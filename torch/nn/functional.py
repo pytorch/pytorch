@@ -1096,7 +1096,7 @@ def lp_pool3d(
     r"""
     Apply a 3D power-average pooling over an input signal composed of several input planes.
 
-    If the sum of all inputs to the power of `p` is
+    If the sum of all absolute inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
     When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
@@ -1115,11 +1115,13 @@ def lp_pool3d(
             ceil_mode=ceil_mode,
         )
     kd, kw, kh = _triple(kernel_size)
+    if norm_type == math.inf:
+        return max_pool3d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
     if stride is not None:
-        out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+        out = avg_pool3d(input.abs().pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
         out = avg_pool3d(
-            input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
+            input.abs().pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
         )
 
     return (
@@ -1137,7 +1139,7 @@ def lp_pool2d(
     r"""
     Apply a 2D power-average pooling over an input signal composed of several input planes.
 
-    If the sum of all inputs to the power of `p` is
+    If the sum of all absolute inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
     When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
@@ -1156,11 +1158,13 @@ def lp_pool2d(
             ceil_mode=ceil_mode,
         )
     kw, kh = _pair(kernel_size)
+    if norm_type == math.inf:
+        return max_pool2d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
     if stride is not None:
-        out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+        out = avg_pool2d(input.abs().pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
         out = avg_pool2d(
-            input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
+            input.abs().pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
         )
 
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1.0 / norm_type)
@@ -1175,7 +1179,7 @@ def lp_pool1d(
 ) -> Tensor:
     r"""Apply a 1D power-average pooling over an input signal composed of several input planes.
 
-    If the sum of all inputs to the power of `p` is
+    If the sum of all absolute inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
     When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
@@ -1193,11 +1197,13 @@ def lp_pool1d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+    if norm_type == math.inf:
+        return max_pool1d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
     if stride is not None:
-        out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+        out = avg_pool1d(input.abs().pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
         out = avg_pool1d(
-            input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
+            input.abs().pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode
         )
 
     return (
