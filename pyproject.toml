@@ -2,36 +2,225 @@
 
 [build-system]
 requires = [
-    "setuptools>=77.0.0,<82",  # 77.0 is the first release with PEP 639 license-files support
-    "cmake>=3.27",
-    "ninja",
     "numpy",
     "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
     "pyyaml",
-    "requests",
-    "six",  # dependency chain: NNPACK -> PeachPy -> six
+    # 0.12 tightens license-files handling (PEP 639); only acceptable if
+    # license-files lives solely under [project], which we do. CI pins the
+    # exact 0.12 patch we test against in .ci/docker/requirements-ci.txt.
+    "scikit-build-core>=0.12",
+    # Imported by torchgen at build time (cmake/Codegen.cmake runs
+    # `python -m torchgen.gen`, and torchgen/utils.py uses `Self` /
+    # `assert_never`). Currently also pulled in transitively through
+    # scikit-build-core, but list it explicitly as a direct build-time
+    # dep. Lower bound matches the legacy pin; the CI Docker image ships
+    # 4.12.2 on Python <3.14, so do not raise this without bumping CI.
     "typing-extensions>=4.10.0",
+    # Dependency chain: NNPACK -> PeachPy -> six. PeachPy emits NNPACK's hot
+    # assembly loops at build time and does `import six`. NNPACK is on by
+    # default (USE_NNPACK=ON); isolated PEP 517 builds need six available.
+    "six",
 ]
-build-backend = "setuptools.build_meta"
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+# experimental = true is required for the metadata.version / metadata.dependencies
+# custom provider modules used below (provider-path-based dynamic metadata is
+# gated behind this flag in scikit-build-core).
+experimental = true
+build-dir = "build"
+
+[tool.scikit-build.cmake]
+# Default to Release. On multi-config generators (Visual Studio), this is
+# passed as --config to cmake --build and cmake --install, ensuring they
+# match. Overrides below handle DEBUG and REL_WITH_DEB_INFO env vars,
+# mirroring the old setup.py behavior.
+build-type = "Release"
+
+[[tool.scikit-build.overrides]]
+if.env.DEBUG = true
+cmake.build-type = "Debug"
+
+[[tool.scikit-build.overrides]]
+if.env.REL_WITH_DEB_INFO = true
+cmake.build-type = "RelWithDebInfo"
+
+[[tool.scikit-build.overrides]]
+# PyTorch CI uses a /opt/conda-installed Python whose sysconfig CC includes
+# "-B <prefix>/compiler_compat" (a too-narrow sysroot). When CC is unset in
+# the parent shell, scikit-build-core's set_environment_for_gen() picks that
+# value up and sets it in the cmake subprocess env, breaking CMake try_compile
+# probes (FindBLAS check_function_exists(sgemm_), FindOpenMP, ...). Passing
+# CMAKE_C/CXX_COMPILER via -D takes precedence over the env-side CC, so cmake
+# uses the bare-named compiler from PATH instead. Defaulting to gcc/g++ when
+# the parent shell didn't pre-set CC/CXX matches what .ci/pytorch/common.sh
+# already does for *gcc* build environments; if a *clang* build environment
+# pre-sets CC=clang/CXX=clang++, the env-backed lookup respects that.
+if.platform-system = "linux"
+if.env.ANACONDA_PYTHON_VERSION = true
+cmake.define.CMAKE_C_COMPILER = { env = "CC", default = "gcc" }
+cmake.define.CMAKE_CXX_COMPILER = { env = "CXX", default = "g++" }
+
+# Other than CMAKE_C/CXX_COMPILER above, cmake.define is intentionally absent
+# -- all BUILD_*/USE_* env vars and additional passthrough variables are
+# forwarded by cmake/EnvVarForwarding.cmake so there is a single source of
+# truth.
+
+[tool.scikit-build.metadata.version]
+# Delegates to tools/generate_torch_version.py which resolves the version from
+# PYTORCH_BUILD_VERSION (release/nightly), PKG-INFO (sdist), or version.txt.
+provider = "version"
+provider-path = "tools/metadata"
+
+[tool.scikit-build.metadata.dependencies]
+# Reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS env var (pipe-separated PEP 508
+# strings) to inject CUDA/ROCm/XPU pip package dependencies into the wheel.
+provider = "dependencies"
+provider-path = "tools/metadata"
+
+[tool.scikit-build.install]
+# scikit-build-core auto-strips binaries in Release builds. PyTorch needs to
+# keep symbols (e.g. for torch.utils.cpp_extension, ABI checks in CI).
+strip = false
+
+[tool.scikit-build.wheel]
+# CMake install destinations (lib/, include/, share/cmake/) are relative to
+# CMAKE_INSTALL_PREFIX. This setting places them under torch/ in the wheel,
+# matching the existing layout (e.g., torch/lib/libtorch_cpu.so).
+install-dir = "torch"
+# Python packages to include in the wheel.
+packages = ["torch", "torchgen", "functorch"]
+# license-files is declared once under [project] (PEP 639 canonical location);
+# scikit-build-core honors it directly. Do NOT also declare it here -- as of
+# 0.12 that triggers an AssertionError.
+
+# Mirror the legacy setup.py package_data allowlist as gitignore-style
+# exclusions: without it, scikit-build-core's package walk plus the CMake
+# install step ship ~2300 extra files (source trees, third-party static
+# archives, cmake configs, dev artifacts) that the legacy setup.py omitted.
+# This block is intended as a temporary filter; a follow-up will replace
+# it with an install-component-based scheme that suppresses third-party
+# install rules at source.
+exclude = [
+    # Static archives never belong in a Python wheel (legacy package_data
+    # used a "lib/*.so*"/".dylib*"/".dll"/".lib" allowlist that excluded *.a
+    # implicitly). The largest single offender today is libtorch_xpu_ops.a
+    # at ~1.1GB.
+    "**/*.a",
+    # GNUInstallDirs places third-party cmake configs and static libs under
+    # lib64/ on x86_64; we don't ship any of them.
+    "torch/lib64/**",
+    # Bulk C++ source tree -- only the AOTI runtime header is consumed by
+    # downstream AOTInductor builds (and is staged explicitly via cmake).
+    "torch/csrc/**",
+    "!torch/csrc/inductor/aoti_runtime/model.h",
+    # Source-only directories the package walk picks up but setup.py excluded.
+    # Keep the .py modules nightly ships under torch/nativert/, and the
+    # libshm headers consumed at runtime (torch/lib/libshm/{*.h},
+    # torch/lib/libshm_windows/libshm.h).
+    "torch/nativert/**",
+    "!torch/nativert/**/*.py",
+    "torch/headeronly/**",
+    "torch/lib/libshm/**",
+    "!torch/lib/libshm/**/*.h",
+    "torch/lib/libshm_windows/**",
+    "!torch/lib/libshm_windows/**/*.h",
+    # Stray CMakeLists.txt copied in by directory installs.
+    "**/CMakeLists.txt",
+    # functorch dev artifacts (docs, notebooks, examples, op-analysis tools).
+    "functorch/docs/**",
+    "functorch/examples/**",
+    "functorch/benchmarks/**",
+    "functorch/op_analysis/**",
+    # torchgen autoheuristic tuning scripts (used to generate heuristics,
+    # not consumed at runtime).
+    "torchgen/_autoheuristic/**",
+    # Third-party cmake configs / docs that subproject installs leak in via
+    # GNUInstallDirs share/cmake/ destinations.
+    "torch/share/doc/**",
+    "torch/share/cmake/fbgemm/**",
+    "torch/share/cmake/kineto/**",
+    "torch/share/cmake/sleef/**",
+    "torch/share/cmake/XNNPACK/**",
+    "torch/share/cmake/ittapi/**",
+    "torch/share/cmake/dnnl/**",
+    "torch/share/cpuinfo/**",
+    # File types that are unambiguously build inputs or dev artifacts; none
+    # of these appear in nightly wheels today.
+    "**/*.bzl",
+    "**/*.ipynb",
+    "**/*.png",
+    "**/*.sh",
+    "**/*.proto",
+    "**/*.pyi.in",   # codegen templates -> .pyi at build time
+    "**/BUCK.oss",   # Bazel build file
+    # Docs and editor / dev metadata that scikit-build-core's package walk
+    # picks up but legacy setup.py omitted.
+    "**/*.md",
+    "**/.gitignore",
+    "**/*.vim",
+    # Lint-tool input only (consumed by tools/linter/adapters/header_only_linter.py),
+    # not at runtime.
+    "torch/header_only_apis.txt",
+    # Example / benchmark sub-trees that look like Python sub-packages but
+    # which legacy setup.py shipped 0 files from. Keeping them in lockstep
+    # with the legacy wheel surface.
+    "torch/ao/pruning/_experimental/data_sparsifier/benchmarks/**",
+    "torch/ao/pruning/_experimental/data_sparsifier/lightning/tests/**",
+    "torch/ao/quantization/experimental/**",
+    "torch/distributed/benchmarks/**",
+    "torch/distributed/checkpoint/examples/**",
+    "torch/distributed/examples/**",
+    "torch/distributed/tensor/examples/**",
+    "torch/fx/experimental/shape_inference/**",
+    # Only the sparse/ sub-dir is leakage; legacy ships the rest of
+    # torch/utils/benchmark/examples/.
+    "torch/utils/benchmark/examples/sparse/**",
+    "torch/utils/_strobelight/examples/**",
+    # Stray license file under torch/fx/experimental/unification/ that
+    # legacy did not ship (the canonical vendored-code licenses we do ship
+    # live under torch/_vendor/).
+    "torch/fx/experimental/unification/LICENSE.txt",
+    # torchgen codegen-generator scripts (not consumed at runtime); legacy
+    # did not ship these either.
+    "torchgen/decompositions/gen_*.py",
+    "torchgen/fuse/gen_*.py",
+    "torchgen/shape_functions/gen_*.py",
+    # Thrift-generated C++ headers under torch/_export/serde/gen-cpp2/ and
+    # the ATen Declarations.yaml codegen artefact -- not in legacy wheels.
+    "torch/_export/serde/gen-cpp2/**",
+    "torch/share/ATen/Declarations.yaml",
+    # Convenience headers duplicated at the package root; the canonical
+    # copies live at torch/include/torch/*.h. legacy ships only the
+    # torch/include/... versions.
+    "torch/script.h",
+    "torch/library.h",
+    "torch/extension.h",
+    "torch/custom_class.h",
+    "torch/custom_class_detail.h",
+    # .py files placed under torch/include/fp16/ by the third_party/FP16
+    # source layout (legacy ships only the .h files from that directory);
+    # and protobuf .inc files legacy did not ship under torch/include/google/.
+    "torch/include/fp16/*.py",
+    "torch/include/google/protobuf/*.inc",
+    # Browser-side JS files loaded from a CDN URL (torch/cuda/_memory_viz.py
+    # references the jsdelivr URL directly) -- the local install copy is
+    # never consumed.
+    "torch/utils/viz/*.js",
+    "torch/distributed/tensor/debug/*.js",
+]
+
+[tool.scikit-build.editable]
+# Editable installs use redirect mode: Python files are found in the source
+# tree, and CMake-built artifacts are rebuilt on import if stale.
+mode = "redirect"
+rebuild = true
 
 [dependency-groups]
 dev = [
-    # This list should be kept in sync with the requirements-build.txt
-    # in PyTorch root until the project fully migrates to pyproject.toml
-    # after which this can be removed as it is already specified in the
-    # [build-system] section
-    "setuptools>=77.0.0,<82",  # 77.0 is the first release with PEP 639 license-files support
-    "cmake>=3.27",
-    "ninja",
-    "numpy",
-    "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
-    "pyyaml",
-    "requests",
-    "six",  # dependency chain: NNPACK -> PeachPy -> six
-    "typing-extensions>=4.10.0",
-
-    # This list should be kept in sync with the requirements.txt in
-    # PyTorch root until the project fully migrates to pyproject.toml
+    # Build-time deps via the build persona; dev/test extras (mirroring
+    # requirements.txt) follow.
+    { include-group = "build" },
     "build[uv]",
     "expecttest>=0.3.0",
     "filelock",
@@ -43,8 +232,120 @@ dev = [
     "optree>=0.13.0",
     "psutil",
     "sympy>=1.13.3",
-    "typing-extensions>=4.15.0",
     "wheel",
+]
+# Build persona: the wheel's build-time deps (mirrors requirements-build.txt),
+# with the per-Python build-time numpy pin folded in (formerly hardcoded in
+# .ci/manywheel/build_install_deps.py::numpy_pin). Consumed lock-pinned via uv;
+# see that script.
+build = [
+    "scikit-build-core>=0.12",
+    "setuptools>=77.0.0,<82",  # 77.0: first release with PEP 639 license-files support
+    "spin",
+    "cmake>=3.27",
+    "ninja",
+    "numpy==2.3.4 ; python_version == '3.14'",
+    "numpy==2.1.0 ; python_version >= '3.10' and python_version != '3.14'",
+    "numpy==2.0.2 ; python_version < '3.10'",
+    "packaging>=24.2",  # required by setuptools>=77 to validate PEP 639 license expressions
+    "pyyaml",
+    "requests",
+    "six",  # dependency chain: NNPACK -> PeachPy -> six
+    "typing-extensions>=4.15.0",
+    "pip",  # makes legacy setup.py invocation work
+]
+
+# Runtime ("rt-") dependency groups: the published wheel's runtime deps, by
+# accelerator variant. rt-base holds what every build needs; each rt-<variant>
+# includes rt-base and adds that accelerator's pins. These groups serve a DUAL
+# role: (1) tools/metadata/dependencies.py reads the selected group to populate
+# the wheel's dynamic [project.dependencies] / Requires-Dist; (2) declared
+# conflicting under [tool.uv] below, they give uv a single uv.lock with one
+# internally-consistent resolution fork per variant. PEP 735 groups are normally
+# dev-only; this reuse as the runtime source of truth is deliberate.
+rt-base = [
+    "filelock",
+    "typing-extensions>=4.10.0",
+    "setuptools<82",
+    "sympy>=1.13.3",
+    "networkx>=2.5.1",
+    "jinja2",
+    "fsspec>=0.8.5",
+]
+# cpu and rocm builds inject no extra runtime pip deps (a CPU wheel has none;
+# ROCm wheels bundle / system-provide their runtime libs), so they are base-only.
+# Declared explicitly for symmetry and a uniform CI handle (uv sync --group rt-cpu).
+rt-cpu = [{ include-group = "rt-base" }]
+rt-rocm = [{ include-group = "rt-base" }]
+rt-cu126 = [
+    { include-group = "rt-base" },
+    "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux'",
+    "cuda-bindings>=12.9.4,<13; platform_system == 'Linux'",
+    "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux'",
+    "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux'",
+    "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux'",
+    "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'",
+]
+rt-cu130 = [
+    { include-group = "rt-base" },
+    "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux'",
+    "nvidia-cublas>=13.1.0.3,<=13.1.1.3; platform_system == 'Linux'",
+    "cuda-bindings>=13.0.3,<14; platform_system == 'Linux'",
+    "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux'",
+    "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux'",
+    "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux'",
+    "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'",
+]
+rt-cu132 = [
+    { include-group = "rt-base" },
+    "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux'",
+    "cuda-bindings>=13.0.3,<14; platform_system == 'Linux'",
+    "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux'",
+    "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux'",
+    "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux'",
+    "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'",
+]
+rt-xpu = [
+    { include-group = "rt-base" },
+    "intel-cmplr-lib-rt==2026.0.0",
+    "intel-cmplr-lib-ur==2026.0.0",
+    "intel-cmplr-lic-rt==2026.0.0",
+    "intel-sycl-rt==2026.0.0",
+    "oneccl-devel==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "oneccl==2022.0.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "impi-rt==2021.18.0; platform_system == 'Linux' and platform_machine == 'x86_64'",
+    "onemkl-license==2026.0.0",
+    "onemkl-sycl-blas==2026.0.0",
+    "onemkl-sycl-dft==2026.0.0",
+    "onemkl-sycl-lapack==2026.0.0",
+    "onemkl-sycl-rng==2026.0.0",
+    "onemkl-sycl-sparse==2026.0.0",
+    "dpcpp-cpp-rt==2026.0.0",
+    "intel-opencl-rt==2026.0.0",
+    "mkl==2026.0.0",
+    "intel-openmp==2026.0.0",
+    "tbb==2023.0.0",
+    "tcmlib==1.5.0",
+    "umf==1.1.0",
+    "intel-pti==0.17.0",
+]
+
+[tool.uv]
+# The rt-<variant> groups are mutually exclusive (a build targets exactly one
+# accelerator). Declaring them conflicting lets `uv lock` emit a single lockfile
+# with one internally-consistent fork per variant -- an otherwise unsatisfiable
+# mix of cu12/cu13 pins. Lock and `uv lock --check` must run with PYTORCH_VARIANT
+# unset, so the root project resolves to rt-base and the matrix is carried by
+# these (env-independent) conflicting groups.
+conflicts = [
+    [
+        { group = "rt-cpu" },
+        { group = "rt-rocm" },
+        { group = "rt-cu126" },
+        { group = "rt-cu130" },
+        { group = "rt-cu132" },
+        { group = "rt-xpu" },
+    ],
 ]
 
 [project]
@@ -61,7 +362,8 @@ license-files = [
     "third_party/**/LICENSE",
     "third_party/**/LICENSE.txt",
     "third_party/**/LICENSE.rst",
-    "third_party/**/COPYING.BSD",
+    "third_party/**/COPYING",
+    "third_party/**/COPYING.txt",
 ]
 authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
 keywords = ["pytorch", "machine learning"]
@@ -84,12 +386,14 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
-dynamic = [
-    "entry-points",
-    "dependencies",
-    "scripts",
-    "version",
-]
+dynamic = ["version", "dependencies"]
+
+[project.scripts]
+torchrun = "torch.distributed.run:main"
+torchfrtrace = "torch.distributed.flight_recorder.fr_trace:main"
+
+[project.entry-points."torchrun.logs_specs"]
+default = "torch.distributed.elastic.multiprocessing:DefaultLogsSpecs"
 
 [project.urls]
 Homepage = "https://pytorch.org"

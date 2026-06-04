@@ -42,7 +42,7 @@ echo "Building for Python: $desired_python Version: $build_version Build: $build
 python_tag="cp$(echo $desired_python | tr -d m.ut)"
 abi_tag="cp$(echo $desired_python | tr -d .)"
 
-# Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
+# Version: uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
 # PYTORCH_BUILD_NUMBER > 1
 if [[ -n "$OVERRIDE_PACKAGE_VERSION" ]]; then
     # This will be the *exact* version, since build_number<1
@@ -185,7 +185,7 @@ export BUILD_TEST=OFF
 pushd "$pytorch_rootdir"
 echo "Calling -m build --wheel --no-isolation at $(date)"
 
-_PYTHON_HOST_PLATFORM=${mac_version} ARCHFLAGS="-arch arm64" python -m build --wheel --no-isolation --outdir "$whl_tmp_dir" -C--plat-name="${mac_version//[-.]/_}"
+_PYTHON_HOST_PLATFORM=${mac_version} ARCHFLAGS="-arch arm64" python -m build --wheel --no-isolation --outdir "$whl_tmp_dir"
 
 echo "Finished -m build --wheel --no-isolation at $(date)"
 

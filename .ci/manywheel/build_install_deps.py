@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 """Install build-time dependencies for a PyTorch wheel build.
 
+Syncs the locked ``dev`` dependency-group (which ``include-group``s the
+``build`` group) from pyproject.toml / uv.lock with ``uv sync``, replacing the
+legacy ``requirements.txt`` + ``requirements-build.txt`` and the ad-hoc
+per-Python numpy pin (now expressed in the ``build`` group). uv is bootstrapped
+with pip because the manylinux build images do not ship it.
+
 Usage: build_install_deps.py <package_dir>
 
 Environment variables:
     DESIRED_CUDA - CUDA variant; "rocm*" triggers the AMD source-rewrite step.
+    SKIP_SETUP_CLEAN - skip `spin clean` when sharing build/ across Pythons.
 """
 
 import argparse
@@ -15,38 +22,22 @@ import time
 from pathlib import Path
 
 
-# NumPy build-time pin selected by Python version.
-# Keep in sync with .ci/manywheel/build_common.sh.
-NUMPY_PINS: list[tuple[str, str]] = [
-    ("cp314", "2.3.4"),
-    ("cp31", "2.1.0"),
-]
-DEFAULT_NUMPY = "2.0.2"
-
-
-def retry(cmd: list[str], delays: tuple[int, ...] = (1, 2, 4, 8)) -> None:
+def retry(
+    cmd: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    delays: tuple[int, ...] = (1, 2, 4, 8),
+) -> None:
     """Run cmd, retrying with backoff on failure (mirrors the shell retry helper)."""
     last_rc = 0
     for delay in (0, *delays):
         if delay:
             time.sleep(delay)
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, env=env)
         if result.returncode == 0:
             return
         last_rc = result.returncode
     sys.exit(last_rc)
-
-
-def pip_install(*args: str) -> None:
-    retry([sys.executable, "-m", "pip", "install", *args])
-
-
-def numpy_pin() -> str:
-    tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
-    for prefix, version in NUMPY_PINS:
-        if tag.startswith(prefix):
-            return version
-    return DEFAULT_NUMPY
 
 
 def main() -> None:
@@ -55,13 +46,22 @@ def main() -> None:
     args = parser.parse_args()
 
     os.chdir(args.package_dir)
-    pip_install("-qU", "-r", "requirements-build.txt")
+
+    # uv is not shipped in the manylinux build images; bootstrap it with pip.
+    retry([sys.executable, "-m", "pip", "install", "-qU", "uv"])
+
+    # Sync the locked `dev` group into the build interpreter's environment
+    # (not a uv-managed .venv). UV_PROJECT_ENVIRONMENT targets that env and
+    # --inexact leaves the image's pre-existing packages in place.
+    retry(
+        ["uv", "sync", "--frozen", "--inexact", "--only-group", "dev"],
+        env={**os.environ, "UV_PROJECT_ENVIRONMENT": sys.prefix},
+    )
+
     # Skip when sharing build/ across Pythons in build_all.sh -- the per-Python
     # bits (libtorch_python, _C.so) are invalidated by tools/setup_helpers/cmake.py.
     if not os.environ.get("SKIP_SETUP_CLEAN"):
-        subprocess.run([sys.executable, "setup.py", "clean"], check=True)
-    pip_install("-q", "-r", "requirements.txt")
-    pip_install("-q", "--pre", f"numpy=={numpy_pin()}")
+        subprocess.run([sys.executable, "-m", "spin", "clean"], check=True)
 
     if "rocm" in os.environ.get("DESIRED_CUDA", ""):
         print(f"Running build_amd.py at {time.strftime('%Y-%m-%d %H:%M:%S')}")

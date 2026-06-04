@@ -1,5 +1,9 @@
 # Build System requirements
+# 0.12 tightens PEP 639 license-files handling; see pyproject.toml for the
+# rationale on this lower bound.
+scikit-build-core>=0.12
 setuptools>=77.0.0,<82  # 77.0 is the first release with PEP 639 license-files support
+spin
 cmake>=3.27
 ninja
 numpy
