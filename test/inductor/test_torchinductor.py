@@ -8577,6 +8577,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn([1, 2, 6, 6]),),
         )
 
+    def test_signbit_unsigned_dtypes(self):
+        def fn(x):
+            return torch.signbit(x)
+
+        for dtype in [
+            torch.bool,
+            torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ]:
+            x = torch.tensor([0, 1, 1, 0, 1], dtype=dtype)
+            self.common(fn, [x], check_lowp=False)
+
     def test_sign_dtype(self):
         def fn(x):
             y = torch.sign(x)
