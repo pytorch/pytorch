@@ -1687,10 +1687,13 @@ def as_strided_(x, size, stride, storage_offset=None):
     return x
 
 
-@register_lowering(aten.as_strided_copy, type_promotion_kind=None)
+@register_lowering(aten.as_strided_copy.default, type_promotion_kind=None)
 def as_strided_copy(x, size, stride, storage_offset=None):
-    result = as_strided(x, size, stride, storage_offset)
-    return clone(result)
+    # as_strided_copy depends on the source tensor's real storage bounds, which
+    # Inductor's ReinterpretView storage model does not track for graph inputs.
+    return fallback_handler(aten.as_strided_copy.default)(
+        x, size, stride, storage_offset
+    )
 
 
 def pointwise_cat(inputs, dim=0):
