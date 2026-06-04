@@ -394,7 +394,8 @@ struct ExpandableSegment {
       size_t segment_size,
       std::vector<c10::DeviceIndex> peers,
       Expandable_Segments_Handle_Type handle_type =
-          Expandable_Segments_Handle_Type::UNSPECIFIED)
+          Expandable_Segments_Handle_Type::UNSPECIFIED,
+      std::optional<size_t> max_handles_override = std::nullopt)
       : device_(device),
         stream_(stream),
         // 2MB for small pool, 20MB for large pool
@@ -407,7 +408,8 @@ struct ExpandableSegment {
     // we allocate enough address space for 1 1/8 the total memory on the GPU.
     // This allows for some cases where we have to unmap pages earlier in the
     // segment to put them at the end.
-    max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
+    max_handles_ = max_handles_override.value_or(
+        numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8));
 #ifdef USE_ROCM
     C10_CUDA_CHECK(hipMemAddressReserve(
         &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
@@ -666,12 +668,17 @@ struct ExpandableSegment {
           "on the producer, or disable expandable_segments.");
     }
 #endif
+    // The IPC receiver only imports and maps the handles exported by the
+    // producer. Unlike normal expandable segments, this imported segment is not
+    // grown by the allocator, so it only needs enough VA space for the shared
+    // handle range.
     auto segment = std::make_unique<ExpandableSegment>(
         device,
         std::nullopt,
         header.segment_size,
         std::move(peers),
-        header.handle_type);
+        header.handle_type,
+        header.num_handles);
 // older build setups (e.g. multiwheels) do not have this syscall, added 2020
 // but the kernel on the system might still support it.
 #ifndef _WIN32
