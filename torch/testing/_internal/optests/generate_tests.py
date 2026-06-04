@@ -729,7 +729,7 @@ def generate_repro(
     else:
         args_kwargs = (
             "# If you rerun your test with PYTORCH_OPCHECK_PRINT_BETTER_REPRO=1\n"
-            "# we will fill them in same (args, kwargs) as in your test\n"
+            "# we will fill in the same (args, kwargs) as in your test\n"
             "args = ()  # args to the operator\n"
             "kwargs = {}  # kwargs to the operator"
         )

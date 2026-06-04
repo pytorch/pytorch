@@ -887,7 +887,7 @@ class _BufferIndexing:
 class _BroadcastedIterVar:
     """Encapsulates information needed to codegen a broadcasted iteration var"""
 
-    # index of this var in `self.range_tree_nodes.items()``
+    # index of this var in `self.range_tree_nodes.items()`
     idx: int
     var_sym: sympy.Symbol
     entry: IterationRangesEntry

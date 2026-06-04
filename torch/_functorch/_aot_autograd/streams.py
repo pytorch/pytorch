@@ -156,7 +156,7 @@ def populate_stream_timeline(
 # we then try and use these timestamps to estimate when to deallocate tensors used in side streams
 # See https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
 # for details on the problem being addressed. Rather than using the automatic memory management approach of record_stream
-# we attempt to find the point which to deallocate based on the estimated timestamps.
+# we attempt to find the point at which to deallocate based on the estimated timestamps.
 def handle_synced_deallocation(
     graph: Graph,
     stream_to_exec_trace: dict[int | None, IndexedDict[Node, float]],

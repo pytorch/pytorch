@@ -15,7 +15,7 @@
 # `_clear_safe_globals()` (`torch.serialization.clear_safe_globals`)
 # `_get_safe_globals()` (`torch.serialization.get_safe_globals`)
 
-# Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
+# Based on https://github.com/python/cpython/blob/main/Lib/pickle.py
 # Expected to be useful for loading PyTorch model weights
 # For example:
 # data = urllib.request.urlopen('https://download.pytorch.org/models/resnet50-0676ba61.pth').read()
