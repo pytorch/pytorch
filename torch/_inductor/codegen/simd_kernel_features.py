@@ -200,7 +200,6 @@ class SIMDKernelFeatures:
                     continue
         return False
 
-
     def get_reduction_hint(
         self, tiling_scores: dict[str, int] | None = None
     ) -> ReductionHint:
