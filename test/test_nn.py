@@ -11988,7 +11988,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_ref, out)
 
     @unittest.expectedFailure
-    @skipIfRocmVersionLessThan(7, 14)
+    @skipIfRocmVersionLessThan((7, 14))
     @onlyCUDA
     def test_upsamplingNearest2d_launch_fail(self, device):
         m = nn.Upsample(scale_factor=2)
