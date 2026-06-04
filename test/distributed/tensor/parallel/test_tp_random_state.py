@@ -93,7 +93,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                 tensor_local = dtensor.to_local()
 
                 # all-gather local shards
-                tensor_gather = funcol.all_gather_single(
+                tensor_gather = funcol.all_gather_tensor(
                     tensor_local,
                     gather_dim=0,
                     group=_1d_mesh,
@@ -116,7 +116,7 @@ class TensorParallelRandomStateTests(DTensorTestBase):
 
                 # check across TP groups
                 # all-gather local shards
-                tensor_gather = funcol.all_gather_single(
+                tensor_gather = funcol.all_gather_tensor(
                     tensor_local,
                     gather_dim=0,
                     group=dp_mesh,

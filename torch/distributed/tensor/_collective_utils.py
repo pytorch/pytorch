@@ -86,7 +86,7 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
             logger,
             "CPU process group does not support alltoall yet, falling back with allgather + chunk!",
         )
-        out = funcol.all_gather_single(input, gather_dim, (mesh, mesh_dim))
+        out = funcol.all_gather_tensor(input, gather_dim, (mesh, mesh_dim))
         if isinstance(out, funcol.AsyncCollectiveTensor):
             # stick to the same behavior for the alltoall case, remove this once we enable alltoall async
             out = out.wait()
