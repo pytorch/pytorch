@@ -121,7 +121,8 @@ prim = torch.ops.prim
 log = logging.getLogger(__name__)
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
-CONSTANT_NUMEL_LIMIT = 1
+# Keep this in sync with torch._subclasses.fake_tensor.CONSTANT_NUMEL_LIMIT.
+CONSTANT_NUMEL_LIMIT = 8
 
 T = TypeVar("T")
 U = TypeVar("U")

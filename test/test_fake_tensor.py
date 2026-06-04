@@ -1894,14 +1894,12 @@ class FakeTensorConstHandling(TestCase):
             batch_shape = [len(tensors)] + list(tensors[0].shape[:-2]) + list(max_size)
             return tensors[0].new_full(batch_shape, 0.0)
 
-        with self.assertRaises(
-            torch._subclasses.fake_tensor.DataDependentOutputException
-        ):
-            with torch._subclasses.fake_tensor.FakeTensorMode():
-                a = torch.randn(3, 800, 1199)
-                b = torch.randn(3, 800, 800)
-                inputs = [a, b]
-                ref = fn(inputs)
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            a = torch.randn(3, 800, 1199)
+            b = torch.randn(3, 800, 800)
+            inputs = [a, b]
+            ref = fn(inputs)
+            self.assertEqual(ref.shape, torch.Size([2, 3, 800, 1216]))
 
     def test_fake_tensor_batch_norm_cpu(self):
         with torch._subclasses.CrossRefFakeMode():
@@ -1923,7 +1921,7 @@ class FakeTensorConstHandling(TestCase):
     def test_aliased_const_write(self):
         with FakeTensorMode():
             x = torch.tensor([1])
-            y = x.expand([4])
+            y = x.expand([torch._subclasses.fake_tensor.CONSTANT_NUMEL_LIMIT + 1])
             self.assertNotConst(y)
             y[0] = 1
             self.assertNotConst(x)

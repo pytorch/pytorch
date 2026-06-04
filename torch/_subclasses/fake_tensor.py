@@ -82,7 +82,9 @@ T = TypeVar("T")
 
 aten = torch._ops.ops.aten
 
-CONSTANT_NUMEL_LIMIT = 1
+# Keep small tensors constant so shape tensors built during tracing preserve
+# their values through downstream scalar uses such as item() or SymInt args.
+CONSTANT_NUMEL_LIMIT = 8
 
 RECURSION_COUNT = 0
 

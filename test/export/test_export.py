@@ -580,6 +580,31 @@ class InputModuleWithNestedSubclass(torch.nn.Module):
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
+    def test_strict_export_constant_props_small_shape_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                spatial_shapes = []
+                for xi in x:
+                    spatial_shapes.append(xi.shape[2:])
+
+                spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long)
+                reference_points_list = []
+                for H, W in spatial_shapes:
+                    reference_points_list.append(
+                        torch.linspace(0.5, H - 0.5, H, dtype=torch.float32)
+                    )
+                return reference_points_list
+
+        example_kwargs = {
+            "x": [
+                torch.rand(1, 3, 64, 64),
+                torch.rand(1, 3, 32, 32),
+            ],
+        }
+
+        ep = export(M(), (), kwargs=example_kwargs, strict=True)
+        self.assertEqual(ep.module()(**example_kwargs), M()(**example_kwargs))
+
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
         exported_program = export(f, args, kwargs)
