@@ -349,6 +349,8 @@ class TestCase(InductorTestCase):
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,
                     "generate_intermediate_hooks": True,
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
                 }
             )
         )
@@ -8576,6 +8578,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn,
             (torch.randn([1, 2, 6, 6]),),
         )
+
+    def test_signbit_unsigned_dtypes(self):
+        def fn(x):
+            return torch.signbit(x)
+
+        for dtype in [
+            torch.bool,
+            torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        ]:
+            x = torch.tensor([0, 1, 1, 0, 1], dtype=dtype)
+            self.common(fn, [x], check_lowp=False)
 
     def test_sign_dtype(self):
         def fn(x):
@@ -18097,9 +18113,6 @@ if RUN_GPU or HAS_MPS:
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
 if RUN_TPU:
-    from torch_tpu import api as tpu_api  # type: ignore[import-not-found]
-
-    tpu_api.tpu_device()  # initialize TPU runtime
 
     class SweepInputsTpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "tpu")
