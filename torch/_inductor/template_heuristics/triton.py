@@ -276,7 +276,7 @@ class ROCmFlexDecodeConfig(FlexDecodeConfig):
 
 class BaseHeuristicSingleton(type):
     """
-    Thread-safe implementation of single to be used in the config heuristic subclasses
+    Thread-safe implementation of singleton to be used in the config heuristic subclasses
     to ensure heavy __init__ calls are not repeatedly run
     """
 
@@ -2740,7 +2740,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
 
 
 class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
-    """Mixing for scaled mm with the regular mm template"""
+    """Mixin for scaled mm with the regular mm template"""
 
     def get_extra_kwargs(
         self,
