@@ -931,6 +931,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_xor_impl(tx, args[0], reverse=True)
         elif name == "__ixor__":
             return self.nb_inplace_xor_impl(tx, args[0])
+        elif name == "__pow__":
+            return self.nb_power_impl(tx, args[0])
+        elif name == "__rpow__":
+            return self.nb_power_impl(tx, args[0], reverse=True)
+        elif name == "__ipow__":
+            return self.nb_inplace_power_impl(tx, args[0])
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
@@ -1480,6 +1486,27 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_xor slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_power_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_power slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rpow__`` instead of ``__pow__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_power_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_power slot. Default: returns NotImplemented."""
         return variables.ConstantVariable(NotImplemented)
 
     def nb_multiply_impl(

@@ -581,8 +581,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 operator.ifloordiv,
             ),
             operator.mod: (["__mod__", "__rmod__", "__imod__"], operator.imod),
-            pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
-            operator.pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
             # operator.matmul
@@ -2736,6 +2734,26 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_iop(tx, a, b, "nb_inplace_rshift", "nb_rshift", ">>=")
+
+    def call_pow(
+        self,
+        tx: "InstructionTranslatorBase",
+        a: VariableTracker,
+        b: VariableTracker,
+        c: VariableTracker | None = None,
+    ) -> VariableTracker | None:
+        # 3-arg pow(x, y, z) uses the same nb_power slot but passes a modulus
+        # as the third argument. Fall through to constant-fold / graph insertion
+        # for that case; only the binary form maps cleanly to nb_power here.
+        # https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L920
+        if c is not None:
+            return None
+        return binary_op(tx, a, b, "nb_power", "**")
+
+    def call_ipow(
+        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+    ) -> VariableTracker | None:
+        return binary_iop(tx, a, b, "nb_inplace_power", "nb_power", "**=")
 
     def call_not_(
         self, tx: "InstructionTranslatorBase", a: VariableTracker

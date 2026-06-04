@@ -35,6 +35,16 @@ if TYPE_CHECKING:
     from .functions import UserFunctionVariable
 
 
+def _pow_op(v: Any, w: Any) -> Any:
+    # CHECK_BINOP: long_pow/float_pow/complex_pow all verify both operands are
+    # numeric before computing, returning NotImplemented for non-numeric types.
+    if not isinstance(v, (int, float, complex)) or not isinstance(
+        w, (int, float, complex)
+    ):
+        return NotImplemented
+    return v**w
+
+
 class ConstantVariable(VariableTracker):
     """
     Variable tracker for Python literals and basic immutable types, with automatic
@@ -529,7 +539,7 @@ class ConstantVariable(VariableTracker):
         v, w = self_.as_python_constant(), other_.as_python_constant()
         try:
             result = op(v, w)
-        except (TypeError, ValueError, OverflowError) as e:
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
         if result is NotImplemented:
             return ConstantVariable.create(NotImplemented)
@@ -708,6 +718,24 @@ class ConstantVariable(VariableTracker):
 
         return self._nb_binary_impl(
             tx, other, operator.add, type_implements_nb_add, reverse
+        )
+
+    def nb_power_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, float, and complex all define nb_power (bool inherits int's).
+        # All three use CHECK_BINOP, returning NotImplemented when either operand is
+        # not the expected numeric type; _pow_op mirrors this behavior.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c (long_pow)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c (float_pow)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c (complex_pow)
+        from .object_protocol import type_implements_nb_power
+
+        return self._nb_binary_impl(
+            tx, other, _pow_op, type_implements_nb_power, reverse
         )
 
     def nb_absolute_impl(
