@@ -115,6 +115,33 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
+        def test_bincount_weighted_count_nonzero_dtype(self):
+            def fn(x, weights):
+                counts = torch.bincount(x, weights=weights, minlength=6)
+                return counts, counts.count_nonzero()
+
+            x = torch.tensor(
+                [0, 2, 2, 3, 1, 0, 3, 3],
+                dtype=torch.int64,
+            )
+            weights = torch.tensor(
+                [1.0, -2.0, 3.0, 0.0, 4.0, -5.0, 6.0, 7.0],
+                dtype=torch.float32,
+            )
+
+            expected = fn(x, weights)
+            for dynamic in [False, True]:
+                torch._dynamo.reset()
+                compiled_fn = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    dynamic=dynamic,
+                )
+                actual = compiled_fn(x, weights)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[1], expected[1])
+
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
@@ -864,6 +891,49 @@ class TestInductorDynamic(TestCase):
         expect = fn(a, 2)
         actual = cfn(a, 2)
         self.assertEqual(expect, actual)
+
+    def test_magic_method_lowerings_with_symbolic_scalars(self, device):
+        def mod(x):
+            return x.new_ones((x.shape[0] % 3) + 1)
+
+        def floordiv(x):
+            return x.new_ones((x.shape[0] // 3) + 1)
+
+        def shifts(x):
+            return (
+                x.new_ones((x.shape[0] << 1) + 1),
+                x.new_ones((x.shape[0] >> 1) + 1),
+            )
+
+        def comparison(x):
+            n = torch.sym_ite(x.shape[0] < 10, x.shape[0], x.shape[0] + 1)
+            return x.new_ones(n)
+
+        def sym_min_max(x):
+            return (
+                x.new_ones(torch.sym_min(x.shape[0], 3) + 1),
+                x.new_ones(torch.sym_max(x.shape[0], 3) + 1),
+            )
+
+        def pow_log2(x):
+            return x + 2 ** (math.floor(math.log2(x.shape[0]) + 1))
+
+        def float_constant(x):
+            return x + ((x.numel() ** 0) / 1.0)
+
+        x = torch.randn(7, 5, device=device)
+        for fn in (
+            mod,
+            floordiv,
+            shifts,
+            comparison,
+            sym_min_max,
+            pow_log2,
+            float_constant,
+        ):
+            with self.subTest(fn=fn.__name__):
+                cfn = self.compile_fn(fn, fullgraph=True)
+                self.assertEqual(fn(x), cfn(x))
 
     @onlyCPU
     def test_arithmetic_constant_folding(self, device):
