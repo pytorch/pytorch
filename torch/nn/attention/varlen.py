@@ -29,6 +29,11 @@ def _normalize_window_size(window_size: list[int] | None) -> list[int]:
 @lru_cache(maxsize=8)
 def _should_use_cudnn(device_index: int) -> bool:
     """Cache device capability check to avoid repeated CUDA calls."""
+    if torch.version.hip is not None:
+        return False
+    cudnn_version = torch.backends.cudnn.version()
+    if cudnn_version is None or cudnn_version < 91800:
+        return False
     major_cap = torch.cuda.get_device_capability(device_index)[0]
     if major_cap == 9 or major_cap == 10:
         return True
