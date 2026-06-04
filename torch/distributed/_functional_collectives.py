@@ -215,7 +215,7 @@ def all_gather_tensor(
         # If not, it will use torch.cat which needs the data anyway, so
         # wait early to avoid AsyncCollectiveTensor dispatch overhead.
         if isinstance(res, AsyncCollectiveTensor):
-            shape = list(res.shape)
+            shape = res.shape
             numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
             can_use_view = shape[0] == group_size and numel_between == 1
             if not can_use_view:
@@ -252,7 +252,7 @@ def all_gather_tensor_autograd(
         # If not, it will use torch.cat which needs the data anyway, so
         # wait early to avoid AsyncCollectiveTensor dispatch overhead.
         if isinstance(res, AsyncCollectiveTensor):
-            shape = list(res.shape)
+            shape = res.shape
             numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
             can_use_view = shape[0] == group_size and numel_between == 1
             if not can_use_view:

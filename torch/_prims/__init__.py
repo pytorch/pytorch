@@ -250,7 +250,7 @@ def TensorMeta(
             raise AssertionError(
                 f"tensorlike must be torch.Tensor, got {type(tensorlike)}"
             )  # mypy
-        inferred_shape = tuple(tensorlike.shape)
+        inferred_shape = tensorlike.shape
         inferred_strides = tuple(tensorlike.stride())
         inferred_dtype = tensorlike.dtype
         inferred_device = tensorlike.device

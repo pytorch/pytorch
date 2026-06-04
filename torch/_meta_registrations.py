@@ -4542,7 +4542,7 @@ def meta_repeat(self, repeats):
     # number of target dimensions is larger than the
     # number of source dimensions.
     num_new_dimensions = len(repeats) - self.dim()
-    padded_size = (1,) * num_new_dimensions + tuple(self.shape)
+    padded_size = (1,) * num_new_dimensions + self.shape
     target_size = [padded_size[i] * repeats[i] for i in range(len(repeats))]
     return self.new_empty(target_size)
 
@@ -6169,7 +6169,7 @@ def alloc_with_matching_layout(
     query: Tensor,
     res_shape: tuple[int, ...],
 ):
-    if tuple(query.shape) == res_shape:
+    if query.shape == res_shape:
         res = torch.empty_like(query)
     else:
         dim_order = sorted(

@@ -1240,7 +1240,7 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
             maxval = sys.maxsize - 1
 
             if not has_free_symbols(arg.numel()):
-                maxval = int(arg.numel())
+                maxval = arg.numel()
             else:
                 prod_node = math.prod(arg.shape).node  # type: ignore[union-attr]
                 prod_range = bound_sympy(
@@ -1290,7 +1290,7 @@ def _padded_dense_to_jagged_forward(
         )
 
         if not has_free_symbols(padded.numel()):
-            maxval = int(padded.numel())
+            maxval = padded.numel()
 
         _constrain_range_for_size(total_L, min=0, max=maxval)
 
@@ -1423,7 +1423,7 @@ def masked_select(
     # the concrete value based on upper bounds. Otherwise,
     # we can set max val directly.
     if not has_free_symbols(self.numel()):
-        num_elements = int(self.numel())
+        num_elements = self.numel()
     else:
         prod_node = math.prod(self.shape).node  # type: ignore[union-attr]
         prod_range = bound_sympy(prod_node.expr, prod_node.shape_env.var_to_range)
