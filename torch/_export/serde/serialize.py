@@ -1393,7 +1393,11 @@ class GraphModuleSerializer(metaclass=Final):
                     raise SerializeError(f"Dict keys must be strings, got {type(key)}")
                 serialized_dict[key] = self.serialize_input(value)
             return Argument.create(as_string_to_argument=serialized_dict)
-        elif isinstance(arg, (list, tuple)):
+        elif isinstance(arg, tuple):
+            return Argument.create(
+                as_tuple=[self.serialize_input(element) for element in arg]
+            )
+        elif isinstance(arg, list):
             if len(arg) == 0:
                 if arg_type is not None:
                     if isinstance(arg_type, torch.OptionalType):
@@ -3140,6 +3144,8 @@ class GraphModuleDeserializer(metaclass=Final):
                 return {k: self.deserialize_input(v) for k, v in value.items()}
             else:
                 raise SerializeError(f"Unknown dict type: {typ_}")
+        elif typ_ == "as_tuple":
+            return tuple(self.deserialize_input(arg) for arg in value)
         elif isinstance(value, list):
             if len(value) == 0:
                 return []
@@ -3858,6 +3864,8 @@ def _canonicalize_graph(
             return None
         elif a.type == "as_nested_tensors":
             return a.as_nested_tensors
+        elif a.type == "as_tuple":
+            return tuple(_get_argument(arg) for arg in a.as_tuple)
         else:
             raise AssertionError(f"Unknown input type to the ExportedProgram: {a}")
 
