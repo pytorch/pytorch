@@ -915,8 +915,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         from . import (
             ConstantVariable,
+            DataPtrVariable,
             GradModeVariable,
             InferenceModeVariable,
+            LazyVariableTracker,
             StreamContextVariable,
             SymNodeVariable,
             TensorVariable,
@@ -2135,9 +2137,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
+            def realize(x: VariableTracker) -> VariableTracker:
+                if isinstance(x, LazyVariableTracker):
+                    return x.realize()
+                return x
+
             def check_any_unspec(x: VariableTracker) -> bool:
+                x = realize(x)
                 # NB: This includes UnspecializedPythonVariable
-                if x.is_tensor() or isinstance(x, SymNodeVariable):
+                if x.is_tensor() or isinstance(x, (DataPtrVariable, SymNodeVariable)):
                     return True
                 elif isinstance(x, (ListVariable, TupleVariable)):
                     return any(check_any_unspec(y) for y in x.items)
@@ -2145,6 +2153,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # check
                 else:
                     return False
+
+            def check_any_data_ptr(x: VariableTracker) -> bool:
+                x = realize(x)
+                if isinstance(x, DataPtrVariable):
+                    return True
+                elif isinstance(x, (ListVariable, TupleVariable)):
+                    return any(check_any_data_ptr(y) for y in x.items)
+                else:
+                    return False
+
+            def materialize_data_ptr(x: VariableTracker) -> VariableTracker:
+                x = realize(x)
+                if isinstance(x, DataPtrVariable):
+                    return x.as_sym_node(tx)
+                elif isinstance(x, (ListVariable, TupleVariable)):
+                    return x.modified([materialize_data_ptr(y) for y in x.items])
+                else:
+                    return x
 
             data_arg = None
             if args:
@@ -2158,6 +2184,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and not data_arg.is_tensor()
                 and check_any_unspec(data_arg)
             ):
+                if check_any_data_ptr(data_arg):
+                    if args:
+                        args = (materialize_data_ptr(data_arg), *args[1:])
+                    else:
+                        kwargs = {**kwargs, "data": materialize_data_ptr(data_arg)}
                 # This is slower and less canonical, so only use it if we
                 # have to
                 return TorchInGraphFunctionVariable(torch._refs.tensor).call_function(
@@ -2165,6 +2196,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             else:
                 return None
+
+        @register(torch.scalar_tensor)
+        def handle_scalar_tensor(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            data_arg = args[0] if args else kwargs.get("s")
+            if isinstance(data_arg, LazyVariableTracker):
+                data_arg = data_arg.realize()
+            if not isinstance(data_arg, DataPtrVariable):
+                return None
+
+            sym_node = data_arg.as_sym_node(tx)
+            if args:
+                args = (sym_node, *args[1:])
+            else:
+                kwargs = {**kwargs, "s": sym_node}
+            return TorchInGraphFunctionVariable(torch.scalar_tensor).call_function(
+                tx, list(args), kwargs
+            )
 
         @register(torch._C._pop_torch_function_stack)
         def handle_pop_torch_function(
