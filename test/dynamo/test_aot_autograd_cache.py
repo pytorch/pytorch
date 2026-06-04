@@ -2675,6 +2675,51 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_custom_memory_budget_annotation_causes_cache_miss(self):
+        """Changing per-region memory_budget set via fx_traceback.annotate
+        invalidates the AOTAutograd cache."""
+        import torch.fx.traceback as fx_traceback
+
+        def make_fn(budget):
+            def fn(x, y):
+                with fx_traceback.annotate({"memory_budget": budget}):
+                    return (torch.mm(x, y) + 1).relu()
+
+            return fn
+
+        with fresh_cache():
+            compiled_fn1 = torch.compile(make_fn(0.3), backend="inductor")
+            x1 = torch.randn(10, 10, requires_grad=True)
+            y1 = torch.randn(10, 10, requires_grad=True)
+            compiled_fn1(x1, y1).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            compiled_fn2 = torch.compile(make_fn(0.8), backend="inductor")
+            x2 = torch.randn(10, 10, requires_grad=True)
+            y2 = torch.randn(10, 10, requires_grad=True)
+            compiled_fn2(x2, y2).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            # Same budget as the first compile -> cache hit.
+            compiled_fn3 = torch.compile(make_fn(0.3), backend="inductor")
+            x3 = torch.randn(10, 10, requires_grad=True)
+            y3 = torch.randn(10, 10, requires_grad=True)
+            compiled_fn3(x3, y3).sum().backward()
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"activation_memory_budget": 0.5})
     def test_different_custom_estimator_uuids_cause_cache_miss(self):
         """Test that different uuid values cause cache miss."""

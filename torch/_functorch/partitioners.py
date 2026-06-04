@@ -3791,10 +3791,25 @@ def min_cut_rematerialization_partition(
             for user in node.users:
                 node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
 
+    # Per-region memory_budget override resolution. Two reader paths share the
+    # same precedence rule: first matching node wins, custom overrides legacy.
+    #   - Legacy: node.meta["memory_budget"], populated by the
+    #     `MemoryBudgetMode` / `set_memory_budget` allow_in_graph marker.
+    #   - Custom: node.meta["custom"]["memory_budget"], populated by
+    #     `fx_traceback.annotate({"memory_budget": ...})` and propagated to all
+    #     FX nodes via _COPY_META_FIELDS["custom"]. The annotate path is the
+    #     supported replacement -- its contextmanager `finally:` restores
+    #     `current_meta` on every exit path, so it cannot leak across compiles
+    #     the way the legacy marker did (no-op __exit__ under Dynamo).
     memory_budget = config.activation_memory_budget
     for node in joint_graph.nodes:
         if isinstance(node.meta.get("memory_budget", None), float):
             memory_budget = node.meta["memory_budget"]
+            break
+    for node in joint_graph.nodes:
+        custom_budget = node.meta.get("custom", {}).get("memory_budget", None)
+        if isinstance(custom_budget, float):
+            memory_budget = custom_budget
             break
     saved_values = choose_saved_values_set(
         joint_graph,
