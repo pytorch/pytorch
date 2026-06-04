@@ -862,7 +862,7 @@ def _maybe_cupti_monitor():
     return _cupti_monitor_module
 
 
-class record_function(_ContextDecorator):
+class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritance]
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
     Label will only appear if CPU activity tracing is enabled.
 
@@ -919,17 +919,23 @@ class record_function(_ContextDecorator):
         self.record = torch.ops.profiler._record_function_enter_new(
             self.name, self.args
         )
-        monitor = _maybe_cupti_monitor()
-        if monitor is not None:
-            self._cupti_monitor_external_id = monitor.push_user_annotation(self.name)
+        # Guard the CUPTI monitor hookup behind is_scripting() so TorchScript
+        # never compiles _maybe_cupti_monitor (it uses globals/imports).
+        if not torch.jit.is_scripting():
+            monitor = _maybe_cupti_monitor()
+            if monitor is not None:
+                self._cupti_monitor_external_id = monitor.push_user_annotation(
+                    self.name
+                )
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
-        if self._cupti_monitor_external_id is not None:
-            monitor = _maybe_cupti_monitor()
-            if monitor is not None:
-                monitor.pop_user_annotation()
-            self._cupti_monitor_external_id = None
+        if not torch.jit.is_scripting():
+            if self._cupti_monitor_external_id is not None:
+                monitor = _maybe_cupti_monitor()
+                if monitor is not None:
+                    monitor.pop_user_annotation()
+                self._cupti_monitor_external_id = None
         if not self.run_callbacks_on_exit:
             return
 
