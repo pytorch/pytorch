@@ -195,27 +195,16 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  c10::intrusive_ptr<Work> all_gather_single_coalesced(
+  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override {
-    pybind11::gil_scoped_acquire gil;
-    // Prefer the new name; fall back to the deprecated
-    // `allgather_into_tensor_coalesced` for backward compatibility with
-    // existing Python ProcessGroup subclasses.
-    pybind11::function override = pybind11::get_override(
-        static_cast<const ProcessGroup*>(this), "all_gather_single_coalesced");
-    if (!override) {
-      override = pybind11::get_override(
-          static_cast<const ProcessGroup*>(this),
-          "allgather_into_tensor_coalesced");
-    }
-    if (override) {
-      auto o = override(outputTensors, inputTensors, opts);
-      return c10::make_intrusive<PyWorkHolder>(o);
-    }
-    return ProcessGroup::all_gather_single_coalesced(
-        outputTensors, inputTensors, opts);
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        allgather_into_tensor_coalesced, /* Name of function in C++ */
+        outputTensors,
+        inputTensors,
+        opts);
   }
 
   c10::intrusive_ptr<Work> allreduce(
@@ -240,28 +229,20 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  c10::intrusive_ptr<Work> all_to_all_single(
+  c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) override {
-    pybind11::gil_scoped_acquire gil;
-    // Prefer the new name; fall back to the deprecated `alltoall_base` for
-    // backward compatibility with existing Python ProcessGroup subclasses.
-    pybind11::function override = pybind11::get_override(
-        static_cast<const ProcessGroup*>(this), "all_to_all_single");
-    if (!override) {
-      override = pybind11::get_override(
-          static_cast<const ProcessGroup*>(this), "alltoall_base");
-    }
-    if (override) {
-      auto o = override(
-          outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
-      return c10::make_intrusive<PyWorkHolder>(o);
-    }
-    return ProcessGroup::all_to_all_single(
-        outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        alltoall_base, /* Name of function in C++ */
+        outputBuffer,
+        inputBuffer,
+        outputSplitSizes,
+        inputSplitSizes,
+        opts);
   }
 
   c10::intrusive_ptr<Work> barrier(
@@ -294,28 +275,16 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
-  c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
+  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
-    pybind11::gil_scoped_acquire gil;
-    // Prefer the new name; fall back to the deprecated
-    // `reduce_scatter_tensor_coalesced` for backward compatibility with
-    // existing Python ProcessGroup subclasses.
-    pybind11::function override = pybind11::get_override(
-        static_cast<const ProcessGroup*>(this),
-        "reduce_scatter_single_coalesced");
-    if (!override) {
-      override = pybind11::get_override(
-          static_cast<const ProcessGroup*>(this),
-          "reduce_scatter_tensor_coalesced");
-    }
-    if (override) {
-      auto o = override(outputTensors, inputTensors, opts);
-      return c10::make_intrusive<PyWorkHolder>(o);
-    }
-    return ProcessGroup::reduce_scatter_single_coalesced(
-        outputTensors, inputTensors, opts);
+    WORK_OVERRIDE(
+        ProcessGroup, /* Parent class */
+        reduce_scatter_tensor_coalesced, /* Name of function in C++ */
+        outputTensors,
+        inputTensors,
+        opts);
   }
 
   c10::intrusive_ptr<Work> send(

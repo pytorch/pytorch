@@ -136,11 +136,11 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=group.WORLD):
     if torch.compiler.is_compiling():
         _not_supported_under_compile(
             "reduce_scatter",
-            suggestion="torch.distributed._functional_collectives.reduce_scatter_single",
+            suggestion="torch.distributed._functional_collectives.reduce_scatter_tensor",
         )
     _deprecated(
         "reduce_scatter",
-        "torch.distributed._functional_collectives.reduce_scatter_single",
+        "torch.distributed._functional_collectives.reduce_scatter_tensor",
     )
     return _Reduce_Scatter.apply(op, group, output, *input_list)
 
@@ -160,10 +160,10 @@ def all_gather(tensor, group=group.WORLD):
     if torch.compiler.is_compiling():
         _not_supported_under_compile(
             "all_gather",
-            suggestion="torch.distributed._functional_collectives.all_gather_single",
+            suggestion="torch.distributed._functional_collectives.all_gather_tensor",
         )
     _deprecated(
-        "all_gather", "torch.distributed._functional_collectives.all_gather_single"
+        "all_gather", "torch.distributed._functional_collectives.all_gather_tensor"
     )
     return _AllGather.apply(group, tensor)
 
