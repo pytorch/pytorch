@@ -213,6 +213,7 @@ from .ctx_manager import (
     ErrorOnGraphBreakVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
+    RecordFunctionVariable,
 )
 from .dicts import ConstDictVariable, MappingProxyVariable, SetVariable
 from .distributed import WorldMetaClassVariable
@@ -268,7 +269,6 @@ from .misc import (
     RandomVariable,
     SavedTensorBox,
     StringFormatVariable,
-    TorchVersionVariable,
     TypingVariable,
     WeakRefVariable,
 )
@@ -971,7 +971,6 @@ class VariableBuilder:
                     **self.install_guards(GuardBuilder.CLOSURE_MATCH),
                 ),
             ),
-            (torch.__version__, lambda self, value: TorchVersionVariable()),
         ]
 
         # pyrefly: ignore [implicit-any]
@@ -1068,6 +1067,9 @@ class VariableBuilder:
             ):
                 return self.wrap_tensor(value)
 
+        if isinstance(value, torch.profiler.record_function):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return RecordFunctionVariable(value)
         if is_namedtuple(value):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
             output: list[VariableTracker] = [

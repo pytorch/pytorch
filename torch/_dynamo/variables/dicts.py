@@ -553,8 +553,10 @@ class ConstDictVariable(VariableTracker):
             backing_dict_id = tx.output.side_effects.dict_backing_id_for_variable(self)
             return DictItemsVariable(
                 self,
-                source=self.source and CallMethodNoArgsSource(self.source, "items"),
                 backing_dict_id=backing_dict_id,
+                backing_dict_mutation_version=tx.output.side_effects.dict_backing_mutation_version(
+                    backing_dict_id
+                ),
             )
         elif name == "keys":
             if len(args):
@@ -565,8 +567,27 @@ class ConstDictVariable(VariableTracker):
             backing_dict_id = tx.output.side_effects.dict_backing_id_for_variable(self)
             return DictKeysVariable(
                 self,
-                source=self.source and CallMethodNoArgsSource(self.source, "keys"),
                 backing_dict_id=backing_dict_id,
+                backing_dict_mutation_version=tx.output.side_effects.dict_backing_mutation_version(
+                    backing_dict_id
+                ),
+            )
+        elif name == "__reversed__":
+            # dict.__reversed__: reverse insertion-order key iterator.
+            # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            self.install_dict_keys_match_guard()
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
+            reversed_keys = [k.vt for k in reversed(list(self.items.keys()))]
+            return variables.ListIteratorVariable(
+                reversed_keys, mutation_type=ValueMutationNew()
             )
         elif name == "values":
             if args or kwargs:
@@ -584,8 +605,10 @@ class ConstDictVariable(VariableTracker):
             backing_dict_id = tx.output.side_effects.dict_backing_id_for_variable(self)
             return DictValuesVariable(
                 self,
-                source=self.source and CallMethodNoArgsSource(self.source, "values"),
                 backing_dict_id=backing_dict_id,
+                backing_dict_mutation_version=tx.output.side_effects.dict_backing_mutation_version(
+                    backing_dict_id
+                ),
             )
         elif name == "copy":
             self.install_dict_keys_match_guard()
@@ -851,13 +874,18 @@ class ConstDictVariable(VariableTracker):
 class MappingProxyVariable(VariableTracker):
     # PyDictProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c#L1995
     _cpython_type = types.MappingProxyType
-    _nonvar_fields = {"backing_dict_id", *VariableTracker._nonvar_fields}
+    _nonvar_fields = {
+        "backing_dict_id",
+        "backing_dict_mutation_version",
+        *VariableTracker._nonvar_fields,
+    }
 
     # proxies to the original dict_vt
     def __init__(
         self,
         dv_dict: ConstDictVariable,
         backing_dict_id: int | None = None,
+        backing_dict_mutation_version: int = 0,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -865,6 +893,7 @@ class MappingProxyVariable(VariableTracker):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
         self.backing_dict_id = backing_dict_id
+        self.backing_dict_mutation_version = backing_dict_mutation_version
 
     def python_type(self) -> type:
         return types.MappingProxyType
@@ -967,6 +996,11 @@ class MappingProxyVariable(VariableTracker):
         ):
             if isinstance(result, DictViewVariable):
                 result.backing_dict_id = self.backing_dict_id
+                result.backing_dict_mutation_version = (
+                    tx.output.side_effects.dict_backing_mutation_version(
+                        self.backing_dict_id
+                    )
+                )
         if (
             name in ("keys", "values", "items")
             and not args
@@ -1027,12 +1061,17 @@ class DictViewVariable(VariableTracker):
     """
 
     kv: str | None = None
-    _nonvar_fields = {"backing_dict_id", *VariableTracker._nonvar_fields}
+    _nonvar_fields = {
+        "backing_dict_id",
+        "backing_dict_mutation_version",
+        *VariableTracker._nonvar_fields,
+    }
 
     def __init__(
         self,
         dv_dict: ConstDictVariable,
         backing_dict_id: int | None = None,
+        backing_dict_mutation_version: int = 0,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -1044,9 +1083,12 @@ class DictViewVariable(VariableTracker):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
         self.backing_dict_id = backing_dict_id
+        self.backing_dict_mutation_version = backing_dict_mutation_version
 
     def _check_mutation_guard(self, tx: "InstructionTranslatorBase") -> None:
-        if tx.output.side_effects.has_mutated_dict_backing_id(self.backing_dict_id):
+        if tx.output.side_effects.has_mutated_dict_backing_id_since(
+            self.backing_dict_id, self.backing_dict_mutation_version
+        ):
             unimplemented(
                 gb_type="Dict view used after dictionary mutation",
                 context=f"Backing dict id: {self.backing_dict_id}",
@@ -1115,6 +1157,30 @@ class DictViewVariable(VariableTracker):
             for key, value in self.view_items
         )
         return VariableTracker.build(tx, f"dict_items([{items}])")
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__reversed__":
+            # dict_keys/values/items __reversed__: reverse insertion order.
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
+                tx.output.guard_on_key_order.add(self.dv_dict.source)
+            return variables.ListIteratorVariable(
+                list(reversed(self.view_items_vt)),
+                mutation_type=ValueMutationNew(),
+            )
+        return super().call_method(tx, name, args, kwargs)
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for dict view objects."""

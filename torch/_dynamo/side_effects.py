@@ -151,6 +151,7 @@ class SideEffects:
         ]
         | None = None,
         mutated_dict_backing_ids: set[int] | None = None,
+        dict_backing_mutation_versions: dict[int, int] | None = None,
     ) -> None:
         super().__init__()
         self.output_graph_weakref = weakref.ref(output_graph)
@@ -165,6 +166,12 @@ class SideEffects:
         # dict
         self._has_existing_dict_mutation = False
         self._mutated_dict_backing_ids = mutated_dict_backing_ids or set()
+        self._dict_backing_mutation_versions = {}
+        if dict_backing_mutation_versions is not None:
+            self._dict_backing_mutation_versions.update(dict_backing_mutation_versions)
+        else:
+            for backing_id in self._mutated_dict_backing_ids:
+                self._dict_backing_mutation_versions[backing_id] = 1
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var: ListVariable | None = None
@@ -288,6 +295,8 @@ class SideEffects:
             and self.save_for_backward == other.save_for_backward
             and self.tensor_hooks == other.tensor_hooks
             and self._mutated_dict_backing_ids == other._mutated_dict_backing_ids
+            and self._dict_backing_mutation_versions
+            == other._dict_backing_mutation_versions
         )
 
     def diff(self, other: "SideEffects") -> str | None:
@@ -313,6 +322,11 @@ class SideEffects:
             return "tensor_hooks"
         elif self._mutated_dict_backing_ids != other._mutated_dict_backing_ids:
             return "mutated_dict_backing_ids"
+        elif (
+            self._dict_backing_mutation_versions
+            != other._dict_backing_mutation_versions
+        ):
+            return "dict_backing_mutation_versions"
         else:
             return None
 
@@ -335,6 +349,7 @@ class SideEffects:
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
             mutated_dict_backing_ids=set(self._mutated_dict_backing_ids),
+            dict_backing_mutation_versions=dict(self._dict_backing_mutation_versions),
         )
 
     def __contains__(self, item: Any) -> bool:
@@ -467,7 +482,7 @@ class SideEffects:
         if item_source is not None:
             self.mutated_sources.add(AttrSource(item_source, name))
         if backing_id is not None:
-            self._mutated_dict_backing_ids.add(backing_id)
+            self._mark_dict_backing_id_mutated(backing_id)
 
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
@@ -992,13 +1007,32 @@ class SideEffects:
         if var.source and isinstance(var, variables.ConstDictVariable):
             self._has_existing_dict_mutation = True
         if backing_id is not None:
-            self._mutated_dict_backing_ids.add(backing_id)
+            self._mark_dict_backing_id_mutated(backing_id)
 
     def has_existing_dict_mutation(self) -> bool:
         return self._has_existing_dict_mutation
 
     def has_mutated_dict_backing_id(self, backing_id: int | None) -> bool:
         return backing_id is not None and backing_id in self._mutated_dict_backing_ids
+
+    def has_mutated_dict_backing_id_since(
+        self, backing_id: int | None, mutation_version: int
+    ) -> bool:
+        return (
+            backing_id is not None
+            and self.dict_backing_mutation_version(backing_id) > mutation_version
+        )
+
+    def dict_backing_mutation_version(self, backing_id: int | None) -> int:
+        if backing_id is None:
+            return 0
+        return self._dict_backing_mutation_versions.get(backing_id, 0)
+
+    def _mark_dict_backing_id_mutated(self, backing_id: int) -> None:
+        self._mutated_dict_backing_ids.add(backing_id)
+        self._dict_backing_mutation_versions[backing_id] = (
+            self._dict_backing_mutation_versions.get(backing_id, 0) + 1
+        )
 
     def dict_backing_id_for_variable(self, var: VariableTracker) -> int | None:
         return self._dict_backing_id_for_value_mutation(var)
