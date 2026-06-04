@@ -6,7 +6,10 @@ import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfCrossRef,
@@ -677,6 +680,72 @@ class TestDynamoDecompositionsNumerics(TestCase):
         expected = fn(x.clone(), tensor1, tensor2, value)
         actual = torch.compile(fn, fullgraph=True)(x.clone(), tensor1, tensor2, value)
         self.assertEqual(expected, actual)
+
+    @skipIfCrossRef
+    @onlyCUDA
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcdiv_item_graph_break_scalar_value_loop(self, device):
+        def adam_step(param, grad, m, v, step_t):
+            step_t.add_(1)
+            m.mul_(0.9).add_(grad, alpha=0.1)
+            v.mul_(0.999).addcmul_(grad, grad, value=0.001)
+            step = step_t.item()
+            bc1 = 1 - 0.9**step
+            bc2 = 1 - 0.999**step
+            step_size = 0.001 / bc1
+            denom = (v.sqrt() / (bc2**0.5)).add_(1e-8)
+            param.addcdiv_(m, denom, value=-step_size)
+
+        def fn(param_data, grad_data):
+            p = param_data.clone()
+            g = grad_data.clone()
+            m = torch.zeros_like(p)
+            v = torch.zeros_like(p)
+            step_t = torch.tensor(0.0, device=p.device)
+            for _ in range(3):
+                adam_step(p, g, m, v, step_t)
+            return p
+
+        torch.manual_seed(42)
+        p = torch.randn(128, device=device)
+        g = torch.randn(128, device=device)
+
+        expected = fn(p.clone(), g.clone())
+        torch._dynamo.reset()
+        actual = torch.compile(fn, backend="inductor")(p.clone(), g.clone())
+        self.assertEqual(expected, actual, atol=1e-6, rtol=1e-6)
+
+    @skipIfCrossRef
+    @onlyCUDA
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_addcmul_item_graph_break_scalar_value_loop(self, device):
+        def addcmul_step(param, grad, acc, step_t):
+            step_t.add_(1)
+            acc.mul_(0.9).addcmul_(grad, grad, value=0.1)
+            step = step_t.item()
+            bc1 = 1 - 0.9**step
+            bc2 = 1 - 0.999**step
+            value = 0.001 / bc1
+            scaled = acc / (bc2**0.5)
+            param.addcmul_(scaled, grad, value=-value)
+
+        def fn(param_data, grad_data):
+            p = param_data.clone()
+            g = grad_data.clone()
+            acc = torch.zeros_like(p)
+            step_t = torch.tensor(0.0, device=p.device)
+            for _ in range(3):
+                addcmul_step(p, g, acc, step_t)
+            return p
+
+        torch.manual_seed(42)
+        p = torch.randn(128, device=device)
+        g = torch.randn(128, device=device)
+
+        expected = fn(p.clone(), g.clone())
+        torch._dynamo.reset()
+        actual = torch.compile(fn, backend="inductor")(p.clone(), g.clone())
+        self.assertEqual(expected, actual, atol=1e-6, rtol=1e-6)
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
