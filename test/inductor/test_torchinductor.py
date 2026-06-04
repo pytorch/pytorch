@@ -6854,6 +6854,41 @@ class CommonTemplate:
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2, rtol=1e-3, atol=1e-3)
 
+    @config.patch(fallback_batch_norm=True)
+    def test_fallback_batch_norm_skips_decomp(self):
+        # With fallback_batch_norm on, BN is not decomposed: no welford_reduce
+        # / triton_red_fused__native_batch_norm_* kernel; instead an extern
+        # aten._native_batch_norm_legit_functional call. Output must stay
+        # within standard bf16 autocast tolerance of eager.
+        if self.device == "cpu":
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 64, 3)
+                self.bn = torch.nn.BatchNorm2d(64, momentum=1, affine=True)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.bn(self.conv(x))
+
+        torch.manual_seed(0)
+        eager = M().to(device=self.device).train()
+        compiled_mod = copy.deepcopy(eager)
+        x = torch.randn(5, 1, 28, 28, device=self.device)
+
+        with torch.autocast(self.device, dtype=torch.bfloat16):
+            out_eager = eager(x.clone())
+            compiled = torch.compile(compiled_mod)
+            out_compiled, (fwd_code,) = run_and_get_code(compiled, x.clone())
+
+        self.assertNotIn("welford_reduce", fwd_code)
+        self.assertNotIn("triton_red_fused__native_batch_norm", fwd_code)
+        self.assertIn(
+            "torch.ops.aten._native_batch_norm_legit_functional.default", fwd_code
+        )
+        self.assertEqual(out_eager, out_compiled, atol=1e-2, rtol=1e-2)
+
     @patch.object(config.trace, "enabled", True)
     def test_layer_norm(self):
         m = torch.nn.Sequential(

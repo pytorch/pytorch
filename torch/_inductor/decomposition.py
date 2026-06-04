@@ -109,20 +109,25 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
 # BN decomps gated by config.fallback_batch_norm. When the flag is set we
 # remove these from the active decomp table so the op survives to inductor as
-# a single node and falls back to its registered ATen kernel (MIOpen on ROCm,
-# cuDNN on CUDA), giving bit-identical numerics to eager at the cost of fusion.
-_batch_norm_decomp_ops = [
-    aten._native_batch_norm_legit,
-    aten._native_batch_norm_legit_functional,
-    aten._native_batch_norm_legit_no_training,
-    aten._batch_norm_with_update,
-    aten._batch_norm_with_update_functional,
-    aten._batch_norm_no_update,
-    aten.batch_norm_backward,
-    aten.native_batch_norm,
-    aten.native_batch_norm_backward,
-]
-extra_batch_norm_decomps = get_decompositions(_batch_norm_decomp_ops)
+# a single node and falls back to its registered ATen kernel, giving
+# bit-identical numerics to eager at the cost of fusion. To actually reach the
+# MIOpen / cuDNN code path that eager uses, every layer of the BN decomp chain
+# must be excluded -- including the backend-specific entry points
+# (cudnn_batch_norm, miopen_batch_norm) whose decomps rewrite them into the
+# generic _native_batch_norm_legit_functional path that doesn't route to the
+# accelerated kernel. Otherwise the fallback lands on the plain native CUDA
+# kernel and still drifts from eager by the same ~1 fp32 ULP.
+#
+# We build the set by name-matching against the assembled decompositions dict
+# rather than hardcoding overloads -- this is robust against new BN ops being
+# added and against the inconsistency between OpOverloadPacket and OpOverload
+# registrations (get_decompositions([packet]) does not always yield every
+# overload that ends up in `decompositions`).
+extra_batch_norm_decomps = {
+    k: v
+    for k, v in decompositions.items()
+    if "batch_norm" in (k.name() if hasattr(k, "name") else str(k))
+}
 
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.
@@ -995,7 +1000,24 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     else:
         result = fast_random_decomps()
     if config.fallback_batch_norm:
-        result = {k: v for k, v in result.items() if k not in extra_batch_norm_decomps}
+        # Strip every BN entry by name (rather than set-membership against a
+        # precomputed extra_batch_norm_decomps) to catch BN overloads that
+        # land in `result` via paths other than the inductor list -- e.g.
+        # miopen_batch_norm.default/out registered through extra_random_decomps.
+        # Note: we mutate `decompositions` in place too, so any downstream
+        # consumer that reads the global dict directly (e.g. make_fallback's
+        # assertion fallback) also sees the BN ops as absent. Without this the
+        # global dict still advertises BN as decomposable, the fallback path
+        # takes a different shape and the resulting kernel chain stops drifting
+        # only partially.
+        bn_keys = [
+            k
+            for k in result
+            if "batch_norm" in (k.name() if hasattr(k, "name") else str(k))
+        ]
+        for k in bn_keys:
+            decompositions.pop(k, None)
+        result = {k: v for k, v in result.items() if k not in bn_keys}
     return result
 
 

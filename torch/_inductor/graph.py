@@ -1367,6 +1367,20 @@ class GraphLowering(torch.fx.Interpreter):
                     get_decomp_fn=self.get_decomp_fn,
                     override_decomp=True,
                 )
+            elif (
+                config.fallback_batch_norm
+                and target in torch._inductor.decomposition.extra_batch_norm_decomps
+            ):
+                # Honor fallback_batch_norm even when implicit_fallbacks is off:
+                # the flag's whole purpose is to opt into the ATen kernel for
+                # parity, so it must succeed in environments (e.g. the inductor
+                # test suite) that disable implicit fallbacks by default.
+                make_fallback(
+                    target,
+                    warn=False,
+                    get_decomp_fn=self.get_decomp_fn,
+                    override_decomp=True,
+                )
             elif config.implicit_fallbacks:
                 error = (
                     MissingOperatorWithDecomp
