@@ -1086,10 +1086,6 @@ class CppOverrides(OpOverrides):
         return f"normalized_rand_cpu({seed}, {offset})"
 
     @staticmethod
-    def rand4x(seed: sympy.Expr, offset: sympy.Expr):
-        return CppOverrides.rand(seed, offset)
-
-    @staticmethod
     def rand_eager(
         seed: sympy.Expr,
         base_offset: sympy.Expr,
@@ -1105,10 +1101,6 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def randn(seed: sympy.Expr, offset: sympy.Expr):
         return f"randn_cpu({seed}, {offset})"
-
-    @staticmethod
-    def randn4x(seed: sympy.Expr, offset: sympy.Expr):
-        return CppOverrides.randn(seed, offset)
 
     @staticmethod
     def randint64(seed: sympy.Expr, offset: sympy.Expr, low, high):
@@ -1448,19 +1440,11 @@ class CppVecOverrides(CppOverrides):
         return codegen_rand(offset, code, rand_function)
 
     @staticmethod
-    def rand4x(seed, offset):
-        return CppVecOverrides.rand(seed, offset)
-
-    @staticmethod
     def randn(seed, offset):
         assert isinstance(V.kernel, CppVecKernel)
         code = BracesBuffer()
         rand_function = f"result[offset_idx] = randn_cpu({seed}, offset[offset_idx]);"
         return codegen_rand(offset, code, rand_function)
-
-    @staticmethod
-    def randn4x(seed, offset):
-        return CppVecOverrides.randn(seed, offset)
 
     @staticmethod
     def randint64(seed, offset, low, high):
@@ -5243,7 +5227,6 @@ class CppScheduling(BaseScheduling):
         num_div = 0
         div_expr_ = None
         match_div = False
-        matched_node = None
         matched_index_size = None
 
         # Collect node info for later compatibility check
@@ -5280,7 +5263,6 @@ class CppScheduling(BaseScheduling):
                         split_var = div_expr.args[0]
                         split_number = div_expr.args[1]
                         match_div = True
-                        matched_node = node
                         matched_index_size = index_size
 
         # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
@@ -5300,8 +5282,6 @@ class CppScheduling(BaseScheduling):
             if len(index_size) != matched_num_dims:
                 return nodes
 
-        extra_indexing_constraints = None
-
         def loop_split(sizes, body, vars):
             index_size, reduce_size = sizes
             index_vars, reduce_vars = vars
@@ -5318,28 +5298,44 @@ class CppScheduling(BaseScheduling):
             body = ir.LoopBody(
                 body, [iter_vars, reduce_vars], var_ranges, new_index_vars, reduce_vars
             )
-            nonlocal extra_indexing_constraints
-            if not extra_indexing_constraints:
-                extra_indexing_constraints = (
-                    body.var_ranges,
-                    list(body.indexing_exprs.values()),
-                )
             return (
                 (new_index_size, reduce_size),
                 body,
                 (new_index_vars, reduce_vars),
             )
 
-        # Here decide the final loop order
+        extra_indexing_ranges = None
+        extra_indexing_exprs = OrderedSet[Any]()
+        for _, sizes_body in node_bodies:
+            _, split_body, _ = loop_split(*sizes_body)
+            if extra_indexing_ranges is None:
+                extra_indexing_ranges = split_body.var_ranges
+            assert extra_indexing_ranges == split_body.var_ranges, (
+                extra_indexing_ranges,
+                split_body.var_ranges,
+            )
+            extra_indexing_exprs.update(split_body.indexing_exprs.values())
+
+        assert extra_indexing_ranges is not None
+        extra_indexing_constraints = (
+            extra_indexing_ranges,
+            list(extra_indexing_exprs),
+        )
+
+        snapshots = [(node, node.snapshot_loop_state()) for node in nodes]
         for node in nodes:
-            if node == matched_node:
-                node.recompute_size_and_body(recompute_sizes_body_func=loop_split)
-        for node in nodes:
-            if node != matched_node:
-                node.recompute_size_and_body(
-                    extra_indexing_constraints=extra_indexing_constraints,
-                    recompute_sizes_body_func=loop_split,
-                )
+            node.recompute_size_and_body(
+                extra_indexing_constraints=extra_indexing_constraints,
+                recompute_sizes_body_func=loop_split,
+            )
+
+        # Keep the post-split leaves compatible with CppKernelProxy.codegen_functions.
+        # If simplification still picks different loop factorizations, skip this
+        # optional optimization and codegen the original fused pointwise group.
+        group = nodes[0].group[1]
+        if any(node.group[1] != group for node in nodes[1:]):
+            for node, state in reversed(snapshots):
+                node.restore_loop_state(state)
 
         return nodes
 

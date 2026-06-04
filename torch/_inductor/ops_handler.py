@@ -102,10 +102,6 @@ class OpsHandler(Generic[T]):
         """Computes inductor_prims.random with mode="rand".  offset has dtype int32."""
         raise NotImplementedError
 
-    def rand4x(self, seed: T, offset: T) -> T:
-        """Computes inductor_prims.random with mode="rand" using Philox 4x output."""
-        raise NotImplementedError
-
     def rand_eager(
         self, seed: T, base_offset: T, threads_per_round: T, tid: T, vec: T
     ) -> T:
@@ -114,10 +110,6 @@ class OpsHandler(Generic[T]):
 
     def randn(self, seed: T, offset: T) -> T:
         """Computes inductor_prims.random with mode="randn".  offset has dtype int32."""
-        raise NotImplementedError
-
-    def randn4x(self, seed: T, offset: T) -> T:
-        """Computes inductor_prims.random with mode="randn" using Philox 4x output."""
         raise NotImplementedError
 
     def randint64(self, seed: T, offset: T, low: T, high: T) -> T:
@@ -158,7 +150,7 @@ class OpsHandler(Generic[T]):
         """
         Converts a sympy expression into a scalar of type ``dtype`` that
         participates in tensor value computation. Unlike ``index_expr``, the
-        result dtype is honored, so this is the right op when the user
+        result dtype is respected, so this is the right op when the user
         explicitly requested the dtype (e.g. ``arange(dtype=torch.int64)``
         whose result is added to a tensor rather than used as an index).
         """
