@@ -4605,11 +4605,11 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_reorder_cpu_and_gpu_interleave(self):
-            def f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu):
+            def f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu):
                 # partition 1 on cuda, no dependency
                 x_cuda0 = x_cuda + 1
                 x_cuda1 = x_cuda0 @ weight_cuda
-                x_cuda2 = 2 * (x_cuda1 + x_cuda)
+                x_cuda2 = 2 * (x_cuda1 + bias_cuda)
 
                 # partition 2 on cpu w/ dependency on partition 1
                 y_cpu0 = y_cpu + 1
@@ -4619,7 +4619,7 @@ if HAS_CUDA_AND_TRITON:
                 # partition 3 on cuda w/o dependency
                 z_cuda0 = z_cuda + 1
                 z_cuda1 = z_cuda0 @ weight_cuda
-                z_cuda2 = 2 * (z_cuda1 + z_cuda)
+                z_cuda2 = 2 * (z_cuda1 + bias_cuda)
 
                 # partition 4 on cpu w/o dependency
                 y_cpu2 = y_cpu + 5
@@ -4628,22 +4628,25 @@ if HAS_CUDA_AND_TRITON:
                 # partition 5 on cuda w/o dependency
                 u_cuda0 = z_cuda + 3
                 u_cuda1 = u_cuda0 @ weight_cuda
-                u_cuda2 = 2 * (u_cuda0 + u_cuda1)
+                u_cuda2 = 2 * (u_cuda1 + bias_cuda)
 
                 return x_cuda2, y_cpu1, z_cuda2, y_cpu3, u_cuda2
 
             x_cuda = torch.randn(3, 3, device="cuda")
             y_cpu = torch.randn(3, 3, device="cpu")
             z_cuda = torch.randn(3, 3, device="cuda")
+            # Keep the CUDA adds pointwise so this test continues to exercise
+            # graph partition reordering instead of addmm fusion.
+            bias_cuda = torch.randn(1, 3, device="cuda")
             weight_cuda = torch.randn(3, 3, device="cuda")
             weight_cpu = torch.randn(3, 3, device="cpu")
 
-            eager_out = f(x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu)
+            eager_out = f(x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu)
 
             compiled_f = torch.compile(f, mode="reduce-overhead")
             for _ in range(3):
                 compiled_out = compiled_f(
-                    x_cuda, y_cpu, z_cuda, weight_cuda, weight_cpu
+                    x_cuda, y_cpu, z_cuda, bias_cuda, weight_cuda, weight_cpu
                 )
                 self.assertEqual(eager_out, compiled_out)
 
@@ -5309,6 +5312,41 @@ if HAS_CUDA_AND_TRITON:
             run(20)
             run(10)
             run(25)
+
+        def test_dealloc_handles_tensor_weakrefs_stack_traces_mismatch(self):
+            """Verify dealloc_current_path_weakrefs handles tensor_weakrefs /
+            stack_traces length mismatch without asserting.
+
+            This injects the mismatch directly so the deallocation path is
+            deterministic. The fix replaces the hard assert with a warning and
+            relies on zip(), matching the existing defensive pattern for
+            outputs_weakrefs in the same function.
+            """
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            inp = torch.rand([4], device="cuda")
+
+            # First call: warmup phase creates and runs a CUDAWarmupNode.
+            torch.compiler.cudagraph_mark_step_begin()
+            foo(inp)
+
+            # Simulate the tensor_weakrefs / stack_traces length divergence.
+            node = self.curr_node()
+            self.assertEqual(len(node.tensor_weakrefs), len(node.stack_traces))
+            node.tensor_weakrefs.append(None)
+
+            # Second call: transitions warmup -> recording, which invokes
+            # try_end_curr_warmup -> dealloc_current_path_weakrefs.
+            # cudagraph_mark_step_begin ensures can_start_new_generation()
+            # returns True so dealloc is actually called.
+            # Without the fix, this would hit:
+            #   assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            # With the fix, zip() safely truncates to the shorter list.
+            torch.compiler.cudagraph_mark_step_begin()
+            foo(inp)
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_opaque_value_input_cudagraph(self):
