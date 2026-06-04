@@ -436,12 +436,6 @@ class ProcessGroup:
         tensors: list[Tensor],
         opts=...,
     ) -> Work: ...
-    def reduce_scatter_single_coalesced(
-        self,
-        outputTensors: list[Tensor],
-        inputTensors: list[Tensor],
-        opts: ReduceScatterOptions | None = None,
-    ) -> Work: ...
     def reduce_scatter_tensor_coalesced(
         self,
         outputTensors: list[Tensor],
@@ -491,12 +485,6 @@ class ProcessGroup:
     def allgather_coalesced(
         self,
         output_lists: list[list[Tensor]],
-        input_list: list[Tensor],
-        opts=...,
-    ) -> Work: ...
-    def all_gather_single_coalesced(
-        self,
-        output_lists: list[Tensor],
         input_list: list[Tensor],
         opts=...,
     ) -> Work: ...

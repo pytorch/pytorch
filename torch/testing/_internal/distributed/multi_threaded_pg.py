@@ -475,7 +475,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         tensor_list = list(torch.chunk(input_tensor, self._world_size))
         return self.reduce_scatter([output_tensor], [tensor_list], opts)
 
-    def reduce_scatter_single_coalesced(
+    def reduce_scatter_tensor_coalesced(
         self, output_tensors, input_tensors, opts=ReduceScatterOptions()
     ):
         works = [
@@ -488,7 +488,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
             work.wait()
         return works[-1]
 
-    def all_gather_single_coalesced(
+    def allgather_into_tensor_coalesced(
         self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()
     ):
         res = None
