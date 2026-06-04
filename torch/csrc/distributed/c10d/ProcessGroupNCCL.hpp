@@ -16,6 +16,7 @@
 #include <iostream>
 #include <list>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 
