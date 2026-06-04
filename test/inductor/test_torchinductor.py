@@ -15627,13 +15627,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(x, source)
 
-    # On CUDA an out-of-range index fires a device-side assert that poisons the
-    # context (uncatchable in-process), so this eager/compiled parity check is
-    # CPU-only. triton-cpu and pallas lower the runtime assert to a hard abort
-    # rather than a catchable RuntimeError, so they are xfailed.
+    # This parity check is CPU-only on the default backend. On CUDA an
+    # out-of-range index fires a device-side assert that poisons the context
+    # (uncatchable in-process). The triton-cpu and pallas backends lower the
+    # runtime assert to a hard process abort rather than a catchable
+    # RuntimeError, so the test is skipped there.
     @skipCUDAIf(True, "device-side assert poisons CUDA context; see #185885")
-    @xfail_if_triton_cpu
-    @xfail_if_pallas
+    @skip_if_triton_cpu
+    @skip_if_pallas
     def test_index_add_out_of_bounds(self):
         # https://github.com/pytorch/pytorch/issues/185885
         # Eager index_add bounds-checks the index; the inductor decomp routes
