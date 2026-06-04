@@ -1,6 +1,8 @@
+import ast
 import itertools
-from collections.abc import Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from os import linesep
 from typing import Any
 
@@ -18,6 +20,178 @@ from ...virtualized import V
 
 
 _ACCUMULATOR_ARG_NAME = "accum"
+
+
+def _is_close_constant(node: ast.expr, value: float, tol: float = 1e-6) -> bool:
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, (int, float))
+        and not isinstance(node.value, bool)
+        and abs(float(node.value) - value) < tol
+    )
+
+
+def _match_call(node: ast.expr, name: str) -> "ast.Call | None":
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == name
+        and len(node.args) == 1
+    ):
+        return node
+    return None
+
+
+def _same(a: ast.expr, b: ast.expr) -> bool:
+    return ast.dump(a) == ast.dump(b)
+
+
+def _match_silu(node: ast.expr) -> "ast.expr | None":
+    """Match SiLU decomposition ``x / (1 + exp(0.0 - x))`` and return ``x``.
+
+    Inductor decomposes silu(x) as x / (1 + exp(-x)). With our neg() op
+    emitting (0.0 - x), the generated code is: x / (1.0 + exp((0.0 - x))).
+    """
+    # Must be a division: x / denom
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+        return None
+    x = node.left
+    denom = node.right
+
+    # denom must be: 1.0 + exp(neg_x) or exp(neg_x) + 1.0
+    if not (isinstance(denom, ast.BinOp) and isinstance(denom.op, ast.Add)):
+        return None
+
+    operands = [denom.left, denom.right]
+    one = next((o for o in operands if _is_close_constant(o, 1.0)), None)
+    if one is None:
+        return None
+    exp_part = next((o for o in operands if o is not one), None)
+    if exp_part is None:
+        return None
+
+    # exp_part must be exp(neg_x)
+    exp_call = _match_call(exp_part, "exp")
+    if exp_call is None:
+        return None
+    neg_x = exp_call.args[0]
+
+    # neg_x must be (0.0 - x) where x matches the numerator
+    if (
+        isinstance(neg_x, ast.BinOp)
+        and isinstance(neg_x.op, ast.Sub)
+        and _is_close_constant(neg_x.left, 0.0)
+        and _same(neg_x.right, x)
+    ):
+        return x
+
+    # Also handle unary minus: -x
+    if isinstance(neg_x, ast.UnaryOp) and isinstance(neg_x.op, ast.USub):
+        if _same(neg_x.operand, x):
+            return x
+
+    return None
+
+
+@dataclass(frozen=True)
+class _ActivationPattern:
+    name: str
+    trigger: str
+    match: Callable[[ast.expr], "ast.expr | None"]
+
+
+_ACTIVATION_PATTERNS: tuple[_ActivationPattern, ...] = (
+    _ActivationPattern("silu", "0.0 -", _match_silu),
+)
+
+
+def _fuse_activations(code: str) -> str:
+    """Re-compose decomposed activations into single CUTLASS functor calls.
+
+    Inductor decomposes activations (e.g. silu) into primitive ops before
+    reaching CUTLASS codegen. The CUTLASS EVT frontend natively supports
+    activation functors, so we pattern-match each decomposition and fold it
+    back into a single activation call. This reduces compute-node count and
+    enables fusion for activations whose full decomposition would otherwise
+    fail (e.g. requiring unsupported constants).
+    """
+    active = [p for p in _ACTIVATION_PATTERNS if p.trigger in code]
+    if not active:
+        return code
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+    if not tree.body or not isinstance(tree.body[0], ast.FunctionDef):
+        return code
+    func = tree.body[0]
+
+    assigns: dict[str, ast.expr] = {}
+    for stmt in func.body:
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Name)
+        ):
+            assigns[stmt.targets[0].id] = stmt.value
+
+    def inline(node: ast.expr) -> ast.expr:
+        if isinstance(node, ast.Name) and node.id in assigns:
+            return inline(assigns[node.id])
+        if isinstance(node, ast.BinOp):
+            return ast.BinOp(
+                left=inline(node.left), op=node.op, right=inline(node.right)
+            )
+        if isinstance(node, ast.UnaryOp):
+            return ast.UnaryOp(op=node.op, operand=inline(node.operand))
+        if isinstance(node, ast.Call):
+            return ast.Call(
+                func=node.func, args=[inline(a) for a in node.args], keywords=[]
+            )
+        return node
+
+    changed = False
+    for stmt in func.body:
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Name)
+        ):
+            inlined = inline(stmt.value)
+            for pattern in active:
+                x = pattern.match(inlined)
+                if x is not None:
+                    stmt.value = ast.Call(
+                        func=ast.Name(id=pattern.name, ctx=ast.Load()),
+                        args=[x],
+                        keywords=[],
+                    )
+                    changed = True
+                    break
+
+    if not changed:
+        return code
+
+    # Dead-code elimination: drop temporaries no longer referenced.
+    live: OrderedSet[str] = OrderedSet()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Return) and node.value is not None:
+            live.update(n.id for n in ast.walk(node.value) if isinstance(n, ast.Name))
+
+    kept: list[ast.stmt] = []
+    for stmt in reversed(func.body):
+        if (
+            isinstance(stmt, ast.Assign)
+            and len(stmt.targets) == 1
+            and isinstance(stmt.targets[0], ast.Name)
+        ):
+            if stmt.targets[0].id not in live:
+                continue
+            live.update(n.id for n in ast.walk(stmt.value) if isinstance(n, ast.Name))
+        kept.append(stmt)
+    func.body = list(reversed(kept))
+
+    return ast.unparse(ast.fix_missing_locations(tree))
 
 
 def scaled_mm_evt(
@@ -107,6 +281,14 @@ class CutlassEVTOpsMixIn:
     @staticmethod
     def exp(x0: str) -> str:
         return CutlassEVTOpsMixIn._prefix_un_op("exp", x0)
+
+    @staticmethod
+    def erf(x0: str) -> str:
+        return CutlassEVTOpsMixIn._prefix_un_op("erf", x0)
+
+    @staticmethod
+    def silu(x0: str) -> str:
+        return CutlassEVTOpsMixIn._prefix_un_op("silu", x0)
 
 
 class MockCutlassHandler(CutlassEVTOpsMixIn, WrapperHandler):
@@ -215,12 +397,14 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         )
 
     def get_value(self) -> str:
-        return linesep.join(
-            [
-                self._render_input_signature(),
-                self.body.getvalue(),
-                self._render_return_statement(),
-            ]
+        return _fuse_activations(
+            linesep.join(
+                [
+                    self._render_input_signature(),
+                    self.body.getvalue(),
+                    self._render_return_statement(),
+                ]
+            )
         )
 
     def finalize(self) -> None:
@@ -310,9 +494,25 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
     def _stride_compatible(
         self, left: Iterable[sympy.Expr], right: Iterable[sympy.Expr]
     ) -> bool:
+        left_list = list(left)
+        right_list = list(right)
+        if len(left_list) == len(right_list):
+            return all(
+                sympy.Eq(l, r) or sympy.Eq(l, 0) or sympy.Eq(r, 0)
+                for l, r in zip(left_list, right_list)
+            )
+        # Different lengths: allow compatible reshapes where trailing strides match.
+        shorter, longer = (
+            (left_list, right_list)
+            if len(left_list) <= len(right_list)
+            else (right_list, left_list)
+        )
+        n = len(shorter)
         return all(
-            sympy.Eq(l, r) or sympy.Eq(l, 0) or sympy.Eq(r, 0)
-            for l, r in (zip(left, right))
+            sympy.Eq(shorter[-(i + 1)], longer[-(i + 1)])
+            or sympy.Eq(shorter[-(i + 1)], 0)
+            or sympy.Eq(longer[-(i + 1)], 0)
+            for i in range(n)
         )
 
     def _render_input_signature(self) -> str:

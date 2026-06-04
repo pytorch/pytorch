@@ -430,6 +430,17 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     filtered_ops_cache: dict[str, list[Any]] = {}
     cache_clear = staticmethod(filtered_ops_cache.clear)
 
+    @property
+    def _device_cutlass_config(self):
+        """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
+        from ... import config as inductor_config
+
+        if self.device_type == "xpu":
+            return inductor_config.xpu
+        elif self.device_type == "cuda":
+            return inductor_config.cuda
+        return inductor_cutlass_config
+
     def __init__(
         self,
         input_nodes: list[Buffer],
@@ -592,10 +603,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
 
         with dynamo_timed("CUTLASSGemmTemplate.maybe_append_choice"):
+            device_config = self._device_cutlass_config
             for name, op in ops:
-                for (
-                    swizzle
-                ) in inductor_cutlass_config.cutlass_max_profiling_swizzle_options:
+                for swizzle in device_config.cutlass_max_profiling_swizzle_options:
                     description = f"{name} swizzle={swizzle}"
                     self.maybe_append_choice(
                         choices,
@@ -1070,13 +1080,50 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             len(res),
             time.time() - start_time,
         )
-        sorted_res = sorted(res.items())
-        ret_res = sorted_res[: inductor_cutlass_config.cutlass_max_profiling_configs]
+        sorted_res = self._sort_ops(res)
+        device_config = self._device_cutlass_config
+        ret_res = sorted_res[: device_config.cutlass_max_profiling_configs]
         if len(self.filtered_ops_cache) < 50:
             self.filtered_ops_cache[self.cache_key] = ret_res
         else:
             log.debug("Not caching ops since filtered_ops_cache has reached size 50.")
         return ret_res
+
+    def _sort_ops(
+        self,
+        res: "dict[str, cutlass_gemm_op.GemmOperation]",  # type: ignore[name-defined]  # noqa: F821
+    ) -> "list[tuple[str, cutlass_gemm_op.GemmOperation]]":  # type: ignore[name-defined]  # noqa: F821
+        """Sort CUTLASS operations by predicted quality for this problem.
+
+        For XPU, uses a heuristic that penalizes tiles where tile_M > problem M
+        (wasting computation) and prefers larger tiles (better data reuse).
+        For other devices, uses the default alphabetical sort.
+        """
+        if self.device_type != "xpu":
+            return sorted(res.items())
+
+        # Get problem dimensions from output node
+        try:
+            sizes = self.output_node.get_size()
+            from ...virtualized import V
+
+            M = V.graph.sizevars.guarding_hint_or_throw(sizes[-2])
+        except Exception:
+            return sorted(res.items())
+
+        def _xpu_tile_score(item):
+            """Score tiles: lower is better. Penalize tile_M > M, prefer larger tiles."""
+            name, op = item
+            tile = op.tile_description.threadblock_shape
+            tile_m, tile_n = tile[0], tile[1]
+            # Penalty for wasting M computation (tile extends beyond problem)
+            m_waste = max(0, tile_m - M) / max(tile_m, 1)
+            # Prefer larger tile area (better data reuse, fewer workgroups)
+            tile_area = tile_m * tile_n
+            # Score: penalize waste heavily, then prefer larger tiles
+            return (m_waste, -tile_area, name)
+
+        return sorted(res.items(), key=_xpu_tile_score)
 
     def gemm_mode(self) -> str:
         """
@@ -1661,8 +1708,17 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             raise RuntimeError("Invalid Gemm config: \n" + op_def)
         op_type = match.groups()[0]
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
-            op_def += f"\n  using {op_type}_device_type = cutlass::gemm::device::GemmUniversalAdapter<{op_type}>;\n"
-            op_type = f"{op_type}_device_type"
+            # Append KERNEL_NAME to the struct name to ensure uniqueness across
+            # compiled .so files. When multiple kernels share the same GEMM core
+            # but have different epilogues (e.g., LinearCombination vs EVT), they
+            # produce identical struct names. On SYCL/XPU this causes the runtime
+            # to dispatch the wrong binary; on CUDA it avoids potential symbol
+            # collisions. KERNEL_NAME gets replaced with a unique per-.so hash
+            # in scheduling.py.
+            unique_op_type = f"{op_type}_{Placeholder.KERNEL_NAME}"
+            op_def = op_def.replace(f"struct {op_type} :", f"struct {unique_op_type} :")
+            op_def += f"\n  using {unique_op_type}_device_type = cutlass::gemm::device::GemmUniversalAdapter<{unique_op_type}>;\n"
+            op_type = f"{unique_op_type}_device_type"
 
         return op_def, op_type
 
