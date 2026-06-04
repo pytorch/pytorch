@@ -94,6 +94,13 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   if (quantized_output.numel() == 0) {
     return;
   }
+
+  TORCH_CHECK(input.scalar_type() == c10::kQInt8,
+                "Expected input data type ",
+                toString(c10::kQInt8),
+                " on CUDA, but got ",
+                toString(input.scalar_type()));
+
   auto act_scale = input.q_scale();
   auto weight_scale = orig_weight.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
