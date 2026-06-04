@@ -568,6 +568,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   const Tensor& running_mean = running_mean_opt.value_or(Tensor());
   const Tensor& running_var = running_var_opt.value_or(Tensor());
 
+  TORCH_CHECK(
+      input.dim() >= 2,
+      "batch_norm: expected input to have at least 2 dimensions (N, C, ...), but got input of dimension ",
+      input.dim());
+
   auto num_features = input.sym_sizes()[1];
 
   if (input.sym_numel() == 0) {

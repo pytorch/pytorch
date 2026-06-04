@@ -5183,6 +5183,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
 
+    def test_batchnorm_raises_error_if_input_has_fewer_than_two_dims(self):
+        # at::batch_norm reads the channel dim (index 1) and previously aborted
+        # with an internal assert when the input was 1-D. It should raise a
+        # user-facing error instead.
+        input = torch.randn(1)
+        with self.assertRaisesRegex(RuntimeError, "at least 2 dimensions"):
+            torch.batch_norm(input, None, None, None, None, True, 0.5, 1e-5, True)
+
     def test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad(self):
         args = (
             torch.randn(3, 2, 5),  # input
