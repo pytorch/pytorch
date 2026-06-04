@@ -92,9 +92,6 @@ def _is_set_or_dictview(obj: VariableTracker) -> bool:
 
 
 def _is_removable_handle_id_key(vt: VariableTracker) -> bool:
-    if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
-        return False
-
     # Local import avoids a circular import with user_defined.py.
     from .user_defined import RemovableHandleIdVariable
 
@@ -102,9 +99,6 @@ def _is_removable_handle_id_key(vt: VariableTracker) -> bool:
 
 
 def _removable_handle_id_value(vt: VariableTracker) -> int | None:
-    if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
-        return None
-
     # Local import avoids a circular import with user_defined.py.
     from .user_defined import RemovableHandleIdVariable
 
@@ -193,7 +187,9 @@ def _min_removable_handle_id_key(items: Iterable[object]) -> int | None:
     return min(values) if values else None
 
 
-def _ordinary_key_may_equal_future_removable_handle_id(key: object) -> bool:
+def _ordinary_key_may_equal_future_removable_handle_id(
+    key: object, min_handle_id: int
+) -> bool:
     vt = _hashable_tracker_vt(key)
     return not _is_removable_handle_id_key(vt)
 
@@ -220,7 +216,8 @@ def _set_items_have_non_removable_handle_id_key(
             not _is_removable_handle_id_key(_hashable_tracker_vt(key)) for key in items
         )
     return any(
-        _ordinary_key_may_equal_future_removable_handle_id(key) for key in items
+        _ordinary_key_may_equal_future_removable_handle_id(key, min_handle_id)
+        for key in items
     )
 
 
@@ -397,13 +394,14 @@ class ConstDictVariable(VariableTracker):
     ) -> None:
         if torch.utils.hooks.RemovableHandle.next_id <= max_existing_key:
             _graph_break_removable_handle_id(tx)
-        source = self.source
-        if source is None:
+        if self.source is None:
             _graph_break_removable_handle_id(tx)
         expected_keys = self._constant_key_tuple_or_graph_break(tx)
-        install_guard(source.make_guard(GuardBuilder.REMOVABLE_HANDLE_DICT_KEYS_MATCH))
         install_guard(
-            source.make_guard(
+            self.source.make_guard(GuardBuilder.REMOVABLE_HANDLE_DICT_KEYS_MATCH)
+        )
+        install_guard(
+            self.source.make_guard(
                 functools.partial(
                     GuardBuilder.NN_MODULE_HOOKS_DICT_KEYS_MATCH,
                     expected_keys=expected_keys,
@@ -417,7 +415,7 @@ class ConstDictVariable(VariableTracker):
         min_handle_id = self._min_removable_handle_id_key()
         if (
             min_handle_id is not None
-            and _ordinary_key_may_equal_future_removable_handle_id(key)
+            and _ordinary_key_may_equal_future_removable_handle_id(key, min_handle_id)
         ):
             if HashableTracker(key) in self.items:
                 return
@@ -821,6 +819,23 @@ class ConstDictVariable(VariableTracker):
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
             return DictKeysVariable(self)
+        elif name == "__reversed__":
+            # dict.__reversed__: reverse insertion-order key iterator.
+            # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            self.install_dict_keys_match_guard()
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
+            reversed_keys = [k.vt for k in reversed(list(self.items.keys()))]
+            return variables.ListIteratorVariable(
+                reversed_keys, mutation_type=ValueMutationNew()
+            )
         elif name == "values":
             if args or kwargs:
                 raise_args_mismatch(
@@ -1286,11 +1301,10 @@ class NNModuleHooksDictVariable(ConstDictVariable):
             return
         ConstDictVariable.install_dict_keys_match_guard(self)
         expected_keys = self._constant_key_tuple_or_graph_break(tx)
-        source = self.source
-        if source is None:
+        if self.source is None:
             _graph_break_removable_handle_id(tx)
         install_guard(
-            source.make_guard(
+            self.source.make_guard(
                 functools.partial(
                     GuardBuilder.NN_MODULE_HOOKS_DICT_KEYS_MATCH,
                     expected_keys=expected_keys,
@@ -1453,6 +1467,30 @@ class DictViewVariable(VariableTracker):
             for key, value in self.view_items
         )
         return VariableTracker.build(tx, f"dict_items([{items}])")
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__reversed__":
+            # dict_keys/values/items __reversed__: reverse insertion order.
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
+                tx.output.guard_on_key_order.add(self.dv_dict.source)
+            return variables.ListIteratorVariable(
+                list(reversed(self.view_items_vt)),
+                mutation_type=ValueMutationNew(),
+            )
+        return super().call_method(tx, name, args, kwargs)
 
     def sq_length(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """Sequence length for dict view objects."""

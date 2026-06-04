@@ -2855,11 +2855,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
-        if self._base_vt is not None and self._base_methods is not None:
-            iter_method = self._maybe_get_baseclass_method("__iter__")
-            if iter_method is not None and iter_method in self._base_methods:
-                return self._base_vt.unpack_var_sequence(tx)
-        return super().unpack_var_sequence(tx)
+        return unpack_iterable(tx, self)
 
     def is_supported_random(self) -> bool:
         try:
@@ -4337,10 +4333,7 @@ class RemovableHandleVariable(VariableTracker):
                 extra_dicts = tuple(
                     cls._unwrap_hook_dict(tx, item) for item in extra_dict.items
                 )
-            elif isinstance(extra_dict, variables.TupleVariable):
-                # Eager RemovableHandle intentionally ignores tuple extra_dict values.
-                pass
-            else:
+            elif not isinstance(extra_dict, variables.TupleVariable):
                 extra_dicts = (cls._unwrap_hook_dict(tx, extra_dict),)
 
         return cls(
@@ -5058,26 +5051,6 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         if self._base_vt is None:
             raise AssertionError("_base_vt must not be None in set_items")
         return self._base_vt.set_items  # pyrefly: ignore[missing-attribute]
-
-    def _has_removable_handle_id_key(self) -> bool:
-        if self._base_vt is None:
-            raise AssertionError(
-                "_base_vt must not be None in _has_removable_handle_id_key"
-            )
-        return cast(SetVariable, self._base_vt)._has_removable_handle_id_key()
-
-    def _check_removable_handle_id_set_op(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker
-    ) -> None:
-        if self._base_vt is None:
-            raise AssertionError(
-                "_base_vt must not be None in _check_removable_handle_id_set_op"
-            )
-        if isinstance(other, UserDefinedSetVariable):
-            if other._base_vt is None:
-                raise AssertionError("other._base_vt must not be None")
-            other = other._base_vt
-        cast(SetVariable, self._base_vt)._check_removable_handle_id_set_op(tx, other)
 
     @property
     def items(self) -> dict[HashableTracker, VariableTracker]:

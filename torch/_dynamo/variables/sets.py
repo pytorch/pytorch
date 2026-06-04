@@ -19,7 +19,7 @@ import functools
 import operator
 import types
 from collections.abc import Iterable
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -62,9 +62,6 @@ def pyset_check(obj: VariableTracker) -> bool:
 
 
 def _is_removable_handle_id_key(vt: VariableTracker) -> bool:
-    if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
-        return False
-
     # Local import avoids a circular import with user_defined.py.
     from .user_defined import RemovableHandleIdVariable
 
@@ -72,9 +69,6 @@ def _is_removable_handle_id_key(vt: VariableTracker) -> bool:
 
 
 def _removable_handle_id_value(vt: VariableTracker) -> int | None:
-    if isinstance(vt, variables.LazyVariableTracker) and not vt.is_realized():
-        return None
-
     # Local import avoids a circular import with user_defined.py.
     from .user_defined import RemovableHandleIdVariable
 
@@ -86,20 +80,22 @@ def _removable_handle_id_value(vt: VariableTracker) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def _graph_break_removable_handle_id(tx: "InstructionTranslatorBase") -> NoReturn:
+def _graph_break_removable_handle_id(tx: "InstructionTranslatorBase") -> None:
     # Local import avoids a circular import with user_defined.py.
     from .user_defined import RemovableHandleIdVariable
 
     RemovableHandleIdVariable._graph_break(tx)
 
 
-def _graph_break_removable_handle_id_current_tx() -> NoReturn:
+def _graph_break_removable_handle_id_current_tx() -> None:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
     _graph_break_removable_handle_id(InstructionTranslator.current_tx())
 
 
-def _ordinary_key_may_equal_future_removable_handle_id(key: VariableTracker) -> bool:
+def _ordinary_key_may_equal_future_removable_handle_id(
+    key: VariableTracker, min_handle_id: int
+) -> bool:
     return not _is_removable_handle_id_key(key)
 
 
@@ -175,7 +171,7 @@ class SetVariable(VariableTracker):
                 # pyrefly: ignore [bad-argument-type]
                 hashable_items.append(HashableTracker(item.realize()))
         if min_handle_id is not None and any(
-            _ordinary_key_may_equal_future_removable_handle_id(item)
+            _ordinary_key_may_equal_future_removable_handle_id(item, min_handle_id)
             for item in raw_items
         ):
             _graph_break_removable_handle_id_current_tx()
@@ -257,7 +253,7 @@ class SetVariable(VariableTracker):
         if min_handle_id is None:
             return any(not _is_removable_handle_id_key(key.vt) for key in self.items)
         return any(
-            _ordinary_key_may_equal_future_removable_handle_id(key.vt)
+            _ordinary_key_may_equal_future_removable_handle_id(key.vt, min_handle_id)
             for key in self.items
         )
 
@@ -269,7 +265,7 @@ class SetVariable(VariableTracker):
         min_handle_id = self._min_removable_handle_id_key()
         if (
             min_handle_id is not None
-            and _ordinary_key_may_equal_future_removable_handle_id(key)
+            and _ordinary_key_may_equal_future_removable_handle_id(key, min_handle_id)
         ):
             if HashableTracker(key) in self.items:
                 return
