@@ -3126,6 +3126,15 @@ def max_unpool2d(
             ),
         )
 
+    for i in range(len(output_size)):
+        torch._check(
+            output_size[i] > 0,
+            lambda: (
+                f"max_unpooling2d(): Expected positive output_size, but got "
+                f"output_size[{i}] = {output_size[i]}."
+            ),
+        )
+
     return _max_unpoolnd(self, indices, output_size, 2)
 
 
@@ -3182,6 +3191,15 @@ def max_unpool3d(
         stride[0] > 0 and stride[1] > 0 and stride[2] > 0,
         lambda: f"strides should be greater than zero, but got stride: {stride}",
     )
+
+    for i in range(len(output_size)):
+        torch._check(
+            output_size[i] > 0,
+            lambda: (
+                f"max_unpooling3d(): Expected positive output_size, but got "
+                f"output_size[{i}] = {output_size[i]}."
+            ),
+        )
 
     return _max_unpoolnd(input, indices, output_size, 3)
 

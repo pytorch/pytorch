@@ -959,6 +959,15 @@ def _unpool_output_size(
             + kernel_size[d]
             - 2 * padding[d]
         )
+    for d in range(len(kernel_size)):
+        if default_size[d] <= 0:
+            raise ValueError(
+                f"max_unpooling: inferred output size for dimension {d} is "
+                f"{default_size[d]}, which is non-positive. The combination of "
+                f"input size {input_size[-len(kernel_size) + d]}, kernel_size "
+                f"{kernel_size[d]}, stride {stride[d]}, and padding "
+                f"{padding[d]} leads to invalid output dimensions."
+            )
     if output_size is None:
         ret = default_size
     else:

@@ -480,6 +480,34 @@ class TestPoolingNN(NNTestCase):
             )
             gradcheck(F.max_unpool3d, (output, indices, 2), check_forward_ad=True)
 
+    def test_max_unpool_negative_output_size(self):
+        # https://github.com/pytorch/pytorch/issues/178483
+        # When padding is large relative to input/stride, the inferred
+        # output dimensions can be negative. Verify we raise a clear error.
+
+        # MaxUnpool2d: kernel_size=[1,1], stride=5, padding=[3,4]
+        # dim H = (2-1)*5+1-6=0, dim W = (2-1)*5+1-8=-2
+        x = torch.randn(1, 1, 2, 2)
+        idx = torch.zeros(1, 1, 2, 2, dtype=torch.long)
+        with self.assertRaisesRegex(ValueError, "non-positive"):
+            F.max_unpool2d(x, idx, [1, 1], stride=5, padding=[3, 4])
+        with self.assertRaisesRegex(ValueError, "non-positive"):
+            nn.MaxUnpool2d([1, 1], stride=5, padding=[3, 4])(x, idx)
+
+        # MaxUnpool1d: kernel_size=1, stride=5, padding=4
+        # dim = (2-1)*5+1-8=-2
+        x1d = torch.randn(1, 1, 2)
+        idx1d = torch.zeros(1, 1, 2, dtype=torch.long)
+        with self.assertRaisesRegex(ValueError, "non-positive"):
+            F.max_unpool1d(x1d, idx1d, 1, stride=5, padding=4)
+
+        # MaxUnpool3d: kernel_size=1, stride=5, padding=4
+        # each dim = (2-1)*5+1-8=-2
+        x3d = torch.randn(1, 1, 2, 2, 2)
+        idx3d = torch.zeros(1, 1, 2, 2, 2, dtype=torch.long)
+        with self.assertRaisesRegex(ValueError, "non-positive"):
+            F.max_unpool3d(x3d, idx3d, 1, stride=5, padding=4)
+
     def test_max_unpool3d_input_check(self):
         x = torch.ones(1, 3, 1, 1, 1)
         with self.assertRaises(RuntimeError):

@@ -639,6 +639,23 @@ inline std::vector<int64_t> _unpool_output_size(
             stride[d] +
         kernel_size[d] - 2 * padding[d]);
   }
+  for (const auto d : c10::irange(kernel_size.size())) {
+    TORCH_CHECK(
+        default_size[d] > 0,
+        "max_unpooling: inferred output size for dimension ",
+        d,
+        " is ",
+        default_size[d],
+        ", which is non-positive. The combination of input size ",
+        input_size[input_size.size() - kernel_size.size() + d],
+        ", kernel_size ",
+        kernel_size[d],
+        ", stride ",
+        stride[d],
+        ", and padding ",
+        padding[d],
+        " leads to invalid output dimensions.");
+  }
   if (!output_size) {
     return default_size;
   } else {
