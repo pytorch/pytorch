@@ -44,7 +44,7 @@ from torch.utils._sympy.functions import Max, Min
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import async_compile, config, ir
+from .. import async_compile, config, debug as inductor_debug, ir
 from ..codecache import output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
@@ -2037,11 +2037,18 @@ class PythonWrapperCodegen(CodeGen):
             # doesn't know the memory is still needed and might reuse it.
             ending = f".clone(){ending}"
 
+        if config.trace.provenance_tracking_to_timeline:
+            wrapper_name = self.define_extern_kernel_profile_wrapper(
+                kernel_name, self.next_kernel_suffix()
+            )
+        else:
+            wrapper_name = kernel_name
+
         if no_return:
-            self.writeline(f"{self.declare}{kernel_name}({', '.join(args)}){ending}")
+            self.writeline(f"{self.declare}{wrapper_name}({', '.join(args)}){ending}")
         else:
             self.writeline(
-                f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
+                f"{self.declare}{output_name} = {wrapper_name}({', '.join(args)}){ending}"
             )
             if (
                 self.supports_intermediate_hooks
@@ -2072,9 +2079,15 @@ class PythonWrapperCodegen(CodeGen):
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
-        args.append(f"out={out_view if out_view else out}")
+        args.append(f"out={out_view or out}")
         with debug_printer_manager:
-            self.writeline(f"{kernel}({', '.join(args)})")
+            if config.trace.provenance_tracking_to_timeline:
+                wrapper_name = self.define_extern_kernel_profile_wrapper(
+                    kernel, self.next_kernel_suffix()
+                )
+            else:
+                wrapper_name = kernel
+            self.writeline(f"{wrapper_name}({', '.join(args)})")
 
     def _generate_tma_descriptor_call_experimental(self, desc, apply_size_hints=False):
         dims = desc.dims
@@ -2136,14 +2149,31 @@ class PythonWrapperCodegen(CodeGen):
         kwargs,
         device,
     ):
+        orig_python_kernel_name = python_kernel_name
+        if config.trace.provenance_tracking_to_timeline:
+            python_kernel_name = self.define_extern_kernel_profile_wrapper(
+                python_kernel_name, self.next_kernel_suffix()
+            )
         line = f"{python_kernel_name}({','.join(map(str, inputs))}"
-        if python_kernel_name.startswith("aten.scatter_reduce"):
+        if orig_python_kernel_name.startswith("aten.scatter_reduce"):
             line += ", ".join([""] + kwargs)
         else:
             if reduce:
                 line += f", reduce={repr(reduce)}"
         line += ")"
         self.writeline(line)
+
+    def define_extern_kernel_profile_wrapper(self, kernel_name: str, suffix: str):
+        wrapper_kernel_name = re.sub(
+            r"\W",
+            "_",
+            f"extern_kernels_{kernel_name}_{suffix}",
+        )
+        inductor_debug.alias_kernel_provenance(kernel_name, wrapper_kernel_name)
+        self.header.splice(f"def {wrapper_kernel_name}(*args, **kwargs):")
+        with self.header.indent():
+            self.header.splice(f"return {kernel_name}(*args, **kwargs)")
+        return wrapper_kernel_name
 
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # Collect index tensors into a list.

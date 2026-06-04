@@ -72,7 +72,9 @@ from torch._inductor.cudagraph_utils import (
 )
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.debug import (
+    create_kernel_information_json,
     create_mapping_pre_post_grad_nodes,
+    get_kernel_information_jsons,
     save_args_for_compile_fx_inner,
 )
 from torch._inductor.output_code import (
@@ -838,12 +840,21 @@ def compile_fx_inner(
             "inductor_compile",
             is_backward=kwargs["is_backward"],
         )
-        return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
+        compiled_graph = wrap_compiler_debug(
+            _compile_fx_inner, compiler_name="inductor"
+        )(
             gm,
             example_inputs,
             compile_region_name=compile_region_name,
             **kwargs,
         )
+        if config.trace.provenance_tracking_to_timeline:
+            compile_id = torch._guards.CompileContext.current_compile_id()
+            kernel_information_jsons = get_kernel_information_jsons()
+            key = str((f"Torch-Compiled Region: {compile_id}", kwargs["is_backward"]))
+            if key not in kernel_information_jsons:
+                kernel_information_jsons[key] = create_kernel_information_json()
+        return compiled_graph
 
 
 @time_and_log(attr="compilation time (in seconds)")

@@ -2818,6 +2818,18 @@ class trace:
 
     log_autotuning_results = os.environ.get("LOG_AUTOTUNE_RESULTS", "0") == "1"
 
+    # Add Inductor kernel stack traces back into exported PyTorch profiler timelines.
+    provenance_tracking_to_timeline = (
+        os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
+    )
+
+    # Maximum number of trace events to process in profiler timeline post-processing.
+    # If the trace exceeds this limit, provenance tracking will be skipped to avoid OOM.
+    # Set to 0 to disable this protection.
+    provenance_tracking_max_events: int = int(
+        os.environ.get("TORCH_COMPILE_DEBUG_MAX_EVENTS", "500000")
+    )
+
     # Save mapping info from inductor generated kernel to post_grad/pre_grad fx nodes
     # Levels:
     #   0 - disabled (default)
@@ -2831,6 +2843,8 @@ class trace:
             "INDUCTOR_PROVENANCE", os.environ.get("TORCH_COMPILE_DEBUG", "0")
         )
     )
+    if provenance_tracking_to_timeline:
+        provenance_tracking_level = max(provenance_tracking_level, 1)
 
 
 _save_config_ignore: list[str] = [

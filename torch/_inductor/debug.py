@@ -355,7 +355,24 @@ _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 _pre_grad_graph_id: int | None = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
+_kernel_information_jsons: dict[str, dict[str, Any]] = {}
 _inductor_kernel_provenance_debug_handle: int = 0
+
+
+def get_kernel_information_jsons() -> dict[str, dict[str, Any]]:
+    return _kernel_information_jsons
+
+
+def alias_kernel_provenance(original_kernel_name: str, alias_kernel_name: str) -> None:
+    """Expose existing kernel provenance under an additional generated name."""
+    if original_kernel_name in _inductor_kernel_stack_trace:
+        _inductor_kernel_stack_trace[alias_kernel_name] = _inductor_kernel_stack_trace[
+            original_kernel_name
+        ]
+    if original_kernel_name in _inductor_triton_kernel_to_post_grad_node_info:
+        _inductor_triton_kernel_to_post_grad_node_info[alias_kernel_name] = (
+            _inductor_triton_kernel_to_post_grad_node_info[original_kernel_name]
+        )
 
 
 def reset_inductor_kernel_provenance_debug_handle() -> None:

@@ -1012,6 +1012,134 @@ class TestProfiler(TestCase):
             [(9, 16, [(0, 0, 4), (5, 8, 8)])],
         )
 
+    def test_add_inductor_kernel_stack_to_chrome_trace(self):
+        import torch._inductor.debug as inductor_debug
+
+        kernel_name = "triton_poi_fused_add_0"
+        stack = ["model.py:7 in forward"]
+        prev_kernel_information_jsons = inductor_debug._kernel_information_jsons
+        inductor_debug._kernel_information_jsons = {
+            str(("Torch-Compiled Region: 0/0", False)): {
+                kernel_name: {
+                    "stack_traces": stack,
+                    "post_grad_nodes": ["add"],
+                    "pre_grad_nodes": ["add"],
+                }
+            }
+        }
+        try:
+            trace = {
+                "traceEvents": [
+                    {
+                        "name": "Torch-Compiled Region: 0/0",
+                        "cat": "cpu_op",
+                        "ph": "X",
+                        "ts": 0,
+                        "dur": 100,
+                        "tid": 1,
+                        "args": {},
+                    },
+                    {
+                        "name": "aten::add",
+                        "cat": "cpu_op",
+                        "ph": "X",
+                        "ts": 10,
+                        "dur": 5,
+                        "tid": 1,
+                        "args": {},
+                    },
+                    {
+                        "name": "ac2g",
+                        "cat": "ac2g",
+                        "ph": "s",
+                        "id": 0,
+                        "ts": 15,
+                        "tid": 1,
+                        "args": {},
+                    },
+                    {
+                        "name": kernel_name,
+                        "cat": "cuda_driver",
+                        "ph": "X",
+                        "ts": 20,
+                        "dur": 7,
+                        "tid": 2,
+                        "args": {},
+                    },
+                    {
+                        "name": "ac2g",
+                        "cat": "ac2g",
+                        "ph": "f",
+                        "id": 0,
+                        "ts": 27,
+                        "tid": 2,
+                        "args": {},
+                    },
+                ]
+            }
+
+            prof = _profile()
+            updated_trace = prof.add_to_chrome_trace(trace)
+
+            self.assertEqual(updated_trace["traceEvents"][3]["args"]["stack"], stack)
+        finally:
+            inductor_debug._kernel_information_jsons = prev_kernel_information_jsons
+
+    def test_add_inductor_kernel_stack_to_chrome_trace_by_external_id(self):
+        import torch._inductor.debug as inductor_debug
+
+        kernel_name = "triton_poi_fused_add_0"
+        stack = ["model.py:7 in forward"]
+        prev_kernel_information_jsons = inductor_debug._kernel_information_jsons
+        inductor_debug._kernel_information_jsons = {
+            str(("Torch-Compiled Region: 0/0", False)): {
+                kernel_name + ":1": {
+                    "stack_traces": stack,
+                    "post_grad_nodes": ["add"],
+                    "pre_grad_nodes": ["add"],
+                }
+            }
+        }
+        try:
+            trace = {
+                "traceEvents": [
+                    {
+                        "name": "Torch-Compiled Region: 0/0",
+                        "cat": "cpu_op",
+                        "ph": "X",
+                        "ts": 0,
+                        "dur": 100,
+                        "tid": 1,
+                        "args": {},
+                    },
+                    {
+                        "name": kernel_name,
+                        "cat": "cpu_op",
+                        "ph": "X",
+                        "ts": 10,
+                        "dur": 5,
+                        "tid": 1,
+                        "args": {"External id": 6},
+                    },
+                    {
+                        "name": kernel_name,
+                        "cat": "kernel",
+                        "ph": "X",
+                        "ts": 20,
+                        "dur": 3,
+                        "tid": 2,
+                        "args": {"External id": 6},
+                    },
+                ]
+            }
+
+            prof = _profile()
+            updated_trace = prof.add_to_chrome_trace(trace)
+
+            self.assertEqual(updated_trace["traceEvents"][2]["args"]["stack"], stack)
+        finally:
+            inductor_debug._kernel_information_jsons = prev_kernel_information_jsons
+
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
