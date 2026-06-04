@@ -407,8 +407,8 @@ cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != 
 #Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. PyTorch CI CUDA builds use CUDA 13, so depend on the matching cuda-bindings major while allowing minor updates within that major.
 #test that import: test_cuda.py
 
-cupti-python>13.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin"
-#Description: required for the experimental CUPTI monitor (torch.profiler._cupti_monitor). >13.0 to match CUDA 13.x toolkits.
+cupti-python>13.0 ; platform_system == "Linux" and (platform_machine == "x86_64" or platform_machine == "aarch64")
+#Description: required for the experimental CUPTI monitor (torch.profiler._cupti_monitor). >13.0 to match CUDA 13.x toolkits. cupti-python only ships Linux x86_64/aarch64 wheels, so guard to those.
 #test that import: test_profiler.py
 
 setuptools-git-versioning==2.1.0
