@@ -5346,16 +5346,15 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-    @unittest.skip("See https://github.com/pytorch/pytorch/issues/135759")
     def test_error_when_passing_mutating_primitive_op(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 return x.sin()
 
         ep = export(Foo(), (torch.ones(3, 3),))
-        with self.assertWarnsRegex(
-            UserWarning,
-            "The op aten.index_put_.default",
+        with self.assertRaisesRegex(
+            ValueError,
+            "non-functional operator.*aten::index_put_",
         ):
             ep.run_decompositions({torch.ops.aten.index_put_.default: None})
 

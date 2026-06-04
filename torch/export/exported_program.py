@@ -279,11 +279,6 @@ def _split_decomp_table_to_cia_and_python_decomp(
     cia_ops_to_callable = {}
 
     for op in list(decomp_table.keys()):
-        # TODO we are silently allowing non-safe(non-functional) ops through a crack
-        # due to core aten decomp table having non-functional entries. Once we have
-        # a tighter check around core aten decomp, we should warn users about them.
-        # Tracking issue: (https://github.com/pytorch/pytorch/issues/135759)
-
         # if it is a valid CIA op we can mess with in export, we check if it is:
         #  1. Has been marked as to be decomposed. Example:
         #        decomp_table = decomp_table_to_core_aten()
@@ -310,6 +305,23 @@ def _split_decomp_table_to_cia_and_python_decomp(
                     f"This should be a custom op, got aten op: {op_name}"
                 )
             cia_ops_to_callable[op] = decomp_table[op]
+
+    non_functional_ops = sorted(
+        (
+            op
+            for op in decomp_table
+            if isinstance(op, torch._ops.OpOverload) and op._schema.is_mutable
+        ),
+        key=lambda op: op.name(),
+    )
+    if non_functional_ops:
+        op_names = ", ".join(op.name() for op in non_functional_ops[:5])
+        if len(non_functional_ops) > 5:
+            op_names += f", and {len(non_functional_ops) - 5} more"
+        raise ValueError(
+            "The decomposition table contains non-functional operator(s) "
+            f"that cannot appear after functionalization: {op_names}"
+        )
 
     # If we reached here, it means user intentionally deleted these CIA ops from
     # decomp table.

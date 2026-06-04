@@ -304,7 +304,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
     torch._ops.OperatorBase, Callable
 ]:
     aten = torch.ops.aten
-    return get_decompositions(
+    decompositions = get_decompositions(
         [
             aten.addcdiv,
             aten.addcdiv_,
@@ -559,3 +559,8 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten._weight_norm_interface,
         ]
     )
+    return {
+        op: decomp
+        for op, decomp in decompositions.items()
+        if not (isinstance(op, OpOverload) and op._schema.is_mutable)
+    }

@@ -1407,6 +1407,14 @@ class HasDecompTest(TestCase):
             "".join(sorted(op.name() + "\n" for op in ops_missing_decomp))
         )
 
+    def test_core_aten_decompositions_are_functional(self):
+        mutable_ops = sorted(
+            op.name()
+            for op in core_aten_decompositions()
+            if isinstance(op, torch._ops.OpOverload) and op._schema.is_mutable
+        )
+        self.assertEqual(mutable_ops, [])
+
     def test_aten_core_operators(self):
         # If a decomposition isn't included in the core decompositions,
         # then it must decompose a core ATen operator.
@@ -1421,10 +1429,16 @@ class HasDecompTest(TestCase):
 
         # Some decompositions are registered for CompositeImplicitAutograd
         # operators, which never appear in AOTAutograd's graph so are never used.
+        # Mutable overloads are omitted because the core table is used after
+        # functionalization.
         useful_decomps = {
             op
             for op in decomposition_table
-            if isinstance(op, torch._ops.OpOverload) and self._can_appear_in_trace(op)
+            if (
+                isinstance(op, torch._ops.OpOverload)
+                and self._can_appear_in_trace(op)
+                and not op._schema.is_mutable
+            )
         }
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
