@@ -48,7 +48,6 @@ from typing import Any, NamedTuple, TYPE_CHECKING
 from unittest.mock import patch
 
 import sympy
-
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
