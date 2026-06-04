@@ -3396,6 +3396,7 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @skipMPS  # flaky precision error for MPS
     @set_default_dtype_if_supported(torch.double)
     def test_wishart_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
