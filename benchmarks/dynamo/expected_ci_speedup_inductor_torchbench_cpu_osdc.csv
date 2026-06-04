@@ -1,6 +1,6 @@
 # ARC/OSDC baseline for linux.24xl.spr-metal mapped to l-bx86iamx-92-167.
 #name,backend,data_type,shape,wrapper,perf_speedup_target_l_bx86iamx_92_167
-phlippe_densenet,inductor,float32,static,default,1.897311
+phlippe_densenet,inductor,float32,static,default,1.88212
 basic_gnn_edgecnn,inductor,float32,dynamic,default,1.547441
 llama_v2_7b_16h,inductor,float32,dynamic,default,1.10000000
 resnet50,inductor,float32,dynamic,default,1.50000000
