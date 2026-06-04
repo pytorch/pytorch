@@ -7346,7 +7346,7 @@ def div_mode(a, b, rounding_mode=None):
         return floordiv(a, b) if both_integer else floor(_div_rn(a, b))
     if rounding_mode == "trunc":
         assert not both_boolean, "truncdiv operands can not be boolean at the same time"
-        return truncdiv(a, b) if both_integer else trunc(div(a, b))
+        return truncdiv(a, b) if both_integer else trunc(_div_rn(a, b))
     return div(a, b)
 
 

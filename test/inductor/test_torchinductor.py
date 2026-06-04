@@ -4022,6 +4022,24 @@ class CommonTemplate:
                 b = torch.full((8,), b_val, dtype=dtype, device=self.device)
                 self.common(fn, (a, b))
 
+    def test_truncdiv_float_accuracy(self):
+        # Same root cause as test_floordiv_float_accuracy: Triton's approximate
+        # fp32 division can be off by one for trunc(a / b) when the quotient is
+        # near an integer.  Verify trunc(_div_rn(a, b)) fixes it.
+        # See https://github.com/pytorch/pytorch/issues/184408
+        def fn(a, b):
+            return torch.div(a, b, rounding_mode="trunc")
+
+        # Near-integer quotients: off by +1 without _div_rn
+        a = torch.tensor([14.999999, 26.999999, 13.999999], device=self.device)
+        b = torch.tensor([3.0, 3.0, 7.0], device=self.device)
+        self.common(fn, (a, b))
+
+        # Exact integer quotients: off by -1 without _div_rn
+        a = torch.tensor([148.0, 1073.0, 2112.0], device=self.device)
+        b = torch.tensor([37.0, 37.0, 33.0], device=self.device)
+        self.common(fn, (a, b))
+
     def test_div_precision(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/101039
 
