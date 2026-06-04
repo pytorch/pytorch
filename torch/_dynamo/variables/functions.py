@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import sys
+import time
 import traceback
 import types
 import typing
@@ -95,7 +96,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import call_runtime_value_fn, UserDefinedObjectVariable
 
 
 try:
@@ -2270,6 +2271,12 @@ class SkipFunctionVariable(VariableTracker):
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
             return VariableTracker.build(tx, result)
+
+        # Model wall-clock reads as runtime scalar inputs, like RNG values.
+        if self.value is time.time and not args and not kwargs:
+            return call_runtime_value_fn(
+                tx, self.value, args, kwargs, example_value=0.0
+            )
 
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             msg = inspect.getattr_static(self.value, "_torchdynamo_disable_msg", None)
