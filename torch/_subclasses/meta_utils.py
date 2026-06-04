@@ -440,7 +440,7 @@ class MetaTensorDescriber:
             stride=stride,
             # pyrefly: ignore [bad-argument-type]
             storage_offset=storage_offset,
-            dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", set())),
+            dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", ())),
             dynamo_hint_overrides=getattr(t, "_dynamo_hint_overrides", {}),
             sparse_dim=(
                 t.sparse_dim() if t.is_sparse or is_sparse_compressed(t) else None
@@ -868,7 +868,7 @@ def _grad_context_compatible(
 # one of these, and then call it repeatedly on all the tensors you want to
 # convert.  It's important to use the same object for tensors you want to
 # share storage because this is how we correlate shared storages to the same
-# meta storages. This class will hold weak references to cached tenosrs
+# meta storages. This class will hold weak references to cached tensors
 # and tensor storages.
 class MetaConverter(Generic[_TensorT]):
     def __init__(self, *, copy_data: bool = False) -> None:
@@ -1119,24 +1119,25 @@ class MetaConverter(Generic[_TensorT]):
                     and symbolic_context is None
                 ):
                     return (t.size, t.stride, t.storage_offset)
-                else:
-                    # TODO: deduplicate this
-                    t_size = tuple(
-                        shape_env._maybe_specialize_sym_int_with_hint(sz)
-                        for sz in t.size
-                    )
-                    t_stride = tuple(
-                        shape_env._maybe_specialize_sym_int_with_hint(sd)
-                        for sd in t.stride
-                    )
-                    t_storage_offset = shape_env._maybe_specialize_sym_int_with_hint(
-                        t.storage_offset
-                    )
+                elif fake_mode is None:
+                    # Real tensor (not a FakeTensor).  Use
+                    # _create_symbolic_sizes_strides_storage_offset directly
+                    # since there are no foreign symbols to transfer.
                     return shape_env._create_symbolic_sizes_strides_storage_offset(
-                        t_size,
-                        t_stride,
-                        t_storage_offset,
-                        [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
+                        t.size,
+                        t.stride,
+                        t.storage_offset,
+                        [False] * t.ndim,
+                        src,
+                        symbolic_context=symbolic_context,
+                        hint_overrides=t.dynamo_hint_overrides,
+                    )
+                else:
+                    # FakeTensor from a different ShapeEnv.  Transfer symbols.
+                    return shape_env.transfer_symbols_from_foreign_shape_env(
+                        t.size,
+                        t.stride,
+                        t.storage_offset,
                         src,
                         symbolic_context=symbolic_context,
                         hint_overrides=t.dynamo_hint_overrides,
@@ -2004,11 +2005,16 @@ class MetaConverter(Generic[_TensorT]):
                     s = t.storage
                     if s is None:
                         raise AssertionError("t.storage must not be None")
+                    from torch.fx.experimental.symbolic_shapes import (
+                        guard_or_false,
+                        sym_eq,
+                    )
+
                     if s.id not in self.storage_memo and (
                         r.is_nested
                         or (
-                            r.stride() == strides
-                            and r.storage_offset() == storage_offset
+                            guard_or_false(sym_eq(r.stride(), strides))
+                            and guard_or_false(r.storage_offset() == storage_offset)
                         )
                     ):
                         # You're normal and happy, install the fresh storage into the memo

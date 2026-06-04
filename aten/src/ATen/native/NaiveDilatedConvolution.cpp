@@ -397,7 +397,7 @@ void slow_conv_dilated_all_cpu_template(
         Tensor grad_input_n = grad_input.select(0, elt);
 
         col2hvol<scalar_t, dim>(
-            columns.data_ptr<scalar_t>(),
+            columns.const_data_ptr<scalar_t>(),
             nInputPlane,
             input_size,
             output_size,
@@ -612,7 +612,7 @@ Tensor slow_conv_dilated3d_cpu(
   Tensor output_ = (is_batch ? output : output.unsqueeze(0));
 
   slow_conv_dilated_all_cpu_template<3>(
-      output,
+      output_,
       input_,
       weight_,
       bias_,

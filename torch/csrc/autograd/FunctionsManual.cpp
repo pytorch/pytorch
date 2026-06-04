@@ -1060,7 +1060,7 @@ Tensor unbind_backward_nested(
     } else {
       const auto component_size = nt_sizes[i].contiguous();
       const c10::IntArrayRef grad_size(
-          component_size.data_ptr<int64_t>(), component_size.size(0));
+          component_size.const_data_ptr<int64_t>(), component_size.size(0));
       grads_tensors.push_back(at::zeros(grad_size, options));
     }
   }
@@ -3697,7 +3697,7 @@ Tensor svd_backward(
   // canonical (real) inner product in C^{n x k} we get that the function is
   // invariant under action of U(1)^k iff Im(diag(U^H gU + V^H gV)) = 0
   //
-  // Using this in the derviaton for the forward AD, one sees that, with the
+  // Using this in the derivation for the forward AD, one sees that, with the
   // notation from those notes Using this and writing sym(X) = X + X^H, we get
   // that the forward AD for SVD in the complex case is given by dU = U (sym(dX
   // S) / E + i Im(diag(dX)) / (2S)) if m > n
@@ -4464,7 +4464,8 @@ std::tuple<Tensor, Tensor> slogdet_jvp(
     return std::make_tuple(at::imag(trAinvE) * (i * sign), at::real(trAinvE));
   } else {
     return std::make_tuple(
-        at::_efficientzerotensor(sign.sizes(), sign.options()), trAinvE);
+        at::_efficientzerotensor(sign.sizes(), sign.options()),
+        std::move(trAinvE));
   }
 }
 
@@ -5323,7 +5324,8 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           at::_trilinear(*i1, *i2, grad_out, expand1, expand2, sumdim, expand3);
   }
-  return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
+  return std::tuple<Tensor, Tensor, Tensor>(
+      std::move(grad_i1), std::move(grad_i2), std::move(grad_i3));
 }
 
 Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
@@ -5876,7 +5878,8 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
     }
   }
 
-  return std::make_tuple(self_grad, std::move(tau_grad), std::move(other_grad));
+  return std::make_tuple(
+      std::move(self_grad), std::move(tau_grad), std::move(other_grad));
 }
 
 std::tuple<Tensor, Tensor> polar_backward(
@@ -7207,7 +7210,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
   // in tools/autograd/gen_variable_type.py
 
   if (!grad.defined()) {
-    return std::make_tuple(grad_self, grad_src);
+    return std::make_tuple(std::move(grad_self), std::move(grad_src));
   }
 
   if (reduce == "sum") {
@@ -7238,7 +7241,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
     // is disabled; this also avoids having the item() call in the usual case.
     if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
-      auto node = std::make_shared<DelayedError>(
+      auto node = c10::make_intrusive<DelayedError>(
           "scatter_reduce(): Double backward is unsupported for src when >1 zeros in src are scattered to the same position in self",
           /* num inputs */ 1);
       auto result = node->apply({std::move(grad_src1)});
@@ -7308,7 +7311,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
   // and should be covered here
 
   if (!grad.defined()) {
-    return std::make_tuple(grad_self, grad_src);
+    return std::make_tuple(std::move(grad_self), std::move(grad_src));
   }
 
   if (reduce == "prod") {
@@ -7335,7 +7338,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
     // is disabled this also avoids having the item() call in the usual case
     if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
-      auto node = std::make_shared<DelayedError>(
+      auto node = c10::make_intrusive<DelayedError>(
           "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
           /* num inputs */ 1);
       auto result = node->apply({std::move(grad_src1)});

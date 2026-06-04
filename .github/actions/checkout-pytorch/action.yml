@@ -17,6 +17,18 @@ inputs:
   checkout-mode:
     description: 'Mode of checkout; one of "normal", "blobless", "treeless".'
     default: "normal"
+  sparse-checkout:
+    description: >
+      Newline-separated list of patterns to sparse-checkout. When set, only the
+      matching paths are materialized in the working tree. Ignored if the
+      partial-clone filter (from checkout-mode) is also honored by the underlying
+      action; passed through to actions/checkout's sparse-checkout input.
+    required: false
+    default: ""
+  sparse-checkout-cone-mode:
+    description: Whether to use cone-mode when doing a sparse checkout.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -65,6 +77,8 @@ runs:
         show-progress: false
         filter: ${{ env.filter }}
         submodules-filter: ${{ env.filter }}
+        sparse-checkout: ${{ inputs.sparse-checkout }}
+        sparse-checkout-cone-mode: ${{ inputs.sparse-checkout-cone-mode }}
 
     - name: Clean submodules post checkout
       id: clean-submodules
@@ -113,3 +127,5 @@ runs:
         show-progress: false
         filter: ${{ env.filter }}
         submodules-filter: ${{ env.filter }}
+        sparse-checkout: ${{ inputs.sparse-checkout }}
+        sparse-checkout-cone-mode: ${{ inputs.sparse-checkout-cone-mode }}
