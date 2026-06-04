@@ -1471,7 +1471,7 @@ class TestFullyShardNonFloatParam(FSDPTest):
         expected_ag_dtype = (
             next(iter(ag_input_dtypes)) if len(ag_input_dtypes) == 1 else torch.uint8
         )
-        orig_ag = dist.all_gather_into_tensor
+        orig_ag = dist.all_gather_single
 
         def assert_all_gather(*args, **kw):
             output = kw.get("output", args[0] if len(args) > 0 else None)
@@ -1483,7 +1483,7 @@ class TestFullyShardNonFloatParam(FSDPTest):
         expected_rs_input_numel = sum(
             p.numel() for p in model.parameters() if p.requires_grad
         )
-        orig_rs = dist.reduce_scatter_tensor
+        orig_rs = dist.reduce_scatter_single
 
         def assert_reduce_scatter(*args, **kw):
             input = kw.get("input", args[1] if len(args) > 1 else None)

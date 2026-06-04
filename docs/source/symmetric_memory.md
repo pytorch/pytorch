@@ -283,7 +283,7 @@ To use CE collectives, you need to:
 3. Allocate tensors using symmetric memory
 4. Register the tensors with symmetric memory via rendezvous
 
-Once set up, standard collective functions like {func}`all_gather_into_tensor` and
+Once set up, standard collective functions like {func}`all_gather_single` and
 {func}`all_to_all_single` will automatically use the copy engines when operating
 on symmetric memory tensors.
 
@@ -315,7 +315,7 @@ symm_mem.rendezvous(out, group=group_name)
 
 # Perform collective operation using copy engines
 # This now runs on DMA engines instead of SMs
-work = dist.all_gather_into_tensor(out, inp, async_op=True)
+work = dist.all_gather_single(out, inp, async_op=True)
 work.wait()
 ```
 

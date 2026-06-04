@@ -2547,7 +2547,7 @@ class DistributedTest:
             self.call_dist_op(
                 ":reduce_scatter_tensor",
                 False,
-                dist.reduce_scatter_tensor,
+                dist.reduce_scatter_single,
                 tensor_out,
                 tensor_in,
                 dist.ReduceOp.SUM,
@@ -3570,7 +3570,7 @@ class DistributedTest:
             self.call_dist_op(
                 ":all_gather_into_tensor",
                 False,
-                dist.all_gather_into_tensor,
+                dist.all_gather_single,
                 tensor_out,
                 tensor_in,
                 group_id,
