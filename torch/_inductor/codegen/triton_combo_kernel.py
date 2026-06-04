@@ -9,6 +9,10 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 from sympy import Integer, Symbol
 
+
+if TYPE_CHECKING:
+    import triton
+
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, metrics
@@ -23,11 +27,6 @@ from ..scheduler import BaseSchedulerNode
 from ..stream_utils import get_raw_stream_name
 from ..utils import Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
-
-
-if TYPE_CHECKING:
-    import triton
-
 from .common import (
     ArgName,
     ConstexprArg,
@@ -1199,9 +1198,15 @@ class ComboKernel(Kernel):
         if not self.enable_autotune:
             default_config: dict[str, int] = {}
             if self.no_bench_stitched_config is not None:
-                default_config = dict(self.no_bench_stitched_config.kwargs)
-                meta["stitched_num_warps"] = self.no_bench_stitched_config.num_warps
-                meta["stitched_num_stages"] = self.no_bench_stitched_config.num_stages
+                stitched = self.no_bench_stitched_config
+                default_config = {
+                    k: int(v) for k, v in stitched.kwargs.items() if "BLOCK" in k
+                }
+                meta["stitched_backend_kwargs"] = {
+                    k: v for k, v in stitched.kwargs.items() if "BLOCK" not in k
+                }
+                meta["stitched_num_warps"] = stitched.num_warps
+                meta["stitched_num_stages"] = stitched.num_stages
             elif self.per_subkernel_blocks:
                 # Per-subkernel block sizes: XBLOCK_0, XBLOCK_1, etc.
                 for num, sub_kernel in enumerate(self.sub_kernels):

@@ -3442,23 +3442,22 @@ class SIMDScheduling(BaseScheduling):
         self.kernel_type.apply_feature_required_overrides(
             node_info.features, kernel_kwargs
         )
-        kernel = self.kernel_type(
-            node_info.tiling,
-            features=node_info.features,
-            tiling_scores=node_info.tiling_scores,
-            **kernel_kwargs,
-        )
-        config_patches = self._collect_config_patches(node_info.node_schedule)
-        config_patches["benchmark_kernel"] = False
+        kernel_count_before = metrics.generated_kernel_count
         unaligned_snapshot = OrderedSet(V.graph.unaligned_buffers)
         try:
-            with config.patch(**config_patches), V.set_kernel_handler(kernel):
+            kernel = self.kernel_type(
+                node_info.tiling,
+                features=node_info.features,
+                tiling_scores=node_info.tiling_scores,
+                **kernel_kwargs,
+            )
+            with config.patch(benchmark_kernel=False), V.set_kernel_handler(kernel):
                 self.codegen_node_schedule_with_kernel(node_info.node_schedule, kernel)
                 _ = kernel.codegen_kernel()
         finally:
             V.graph.unaligned_buffers = unaligned_snapshot
             # pyrefly: ignore [bad-assignment]
-            metrics.generated_kernel_count -= 1
+            metrics.generated_kernel_count = kernel_count_before
 
         size_hints = {
             prefix: next_power_of_2(int(V.graph.sizevars.optimization_hint(numel)))
@@ -3516,43 +3515,29 @@ class SIMDScheduling(BaseScheduling):
                 te *= int(cfg.kwargs[k])
             return te
 
-        stitched_kwargs: dict[str, Any] = {}
-        for i, cfg in enumerate(chosen_configs):
-            for key in block_keys(cfg):
-                stitched_kwargs[f"{key}_{i}"] = int(cfg.kwargs[key])
+        # Heaviest subkernel (largest effective tile elems) dominates runtime;
+        # its config is authoritative for the combo. Its num_warps, num_stages,
+        # and non-BLOCK kwargs (HIP backend options like waves_per_eu) apply
+        # combo-wide. Per-subkernel BLOCK kwargs are suffixed (XBLOCK_0, ...).
+        winner_cfg = max(chosen_configs, key=effective_tile_elems)
 
-        configs_by_tile_elems = sorted(
-            enumerate(chosen_configs),
-            key=lambda iv: effective_tile_elems(iv[1]),
-            reverse=True,
+        stitched_kwargs: dict[str, Any] = {
+            f"{key}_{i}": int(cfg.kwargs[key])
+            for i, cfg in enumerate(chosen_configs)
+            for key in block_keys(cfg)
+        }
+        stitched_kwargs.update(
+            {
+                key: value
+                for key, value in winner_cfg.kwargs.items()
+                if not key.endswith("BLOCK")
+            }
         )
-        top_k = max(1, len(configs_by_tile_elems) // 2)
-        num_warps = int(max(cfg.num_warps for _, cfg in configs_by_tile_elems[:top_k]))
-        # Heaviest subkernel's num_stages wins (consistent with backend kwargs).
-        num_stages = int(configs_by_tile_elems[0][1].num_stages)
-
-        # Non-BLOCK backend kwargs (waves_per_eu, kpack, etc.): heaviest setter wins.
-        backend_kwarg_keys: OrderedSet[str] = OrderedSet()
-        for cfg in chosen_configs:
-            for k in cfg.kwargs:
-                if not k.endswith("BLOCK"):
-                    backend_kwarg_keys.add(k)
-        for k in backend_kwarg_keys:
-            for _, cfg in configs_by_tile_elems:
-                if k in cfg.kwargs:
-                    value = cfg.kwargs[k]
-                    if isinstance(value, bool):
-                        stitched_kwargs[k] = value
-                    elif isinstance(value, int):
-                        stitched_kwargs[k] = int(value)
-                    else:
-                        stitched_kwargs[k] = value
-                    break
 
         return triton.Config(
-            dict(stitched_kwargs),
-            num_warps=num_warps,
-            num_stages=num_stages,
+            stitched_kwargs,
+            num_warps=int(winner_cfg.num_warps),
+            num_stages=int(winner_cfg.num_stages),
         )
 
     def generate_combo_kernel_code(
