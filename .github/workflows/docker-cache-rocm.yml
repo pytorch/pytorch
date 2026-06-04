@@ -17,9 +17,9 @@ on:
         description: Workflow run id to pull artifacts from
         required: true
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
-  cancel-in-progress: true
+# concurrency:
+#   group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
+#   cancel-in-progress: true
 
 permissions:
   id-token: write
@@ -56,8 +56,7 @@ jobs:
     needs: download-docker-builds-artifacts
     strategy:
       fail-fast: false
-      matrix:
-        runner: [linux.rocm.mi210.docker-cache, linux.rocm.mi350.docker-cache]
+      matrix:        runner: [linux.rocm.mi350.docker-cache]
         docker-image: [
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}"
