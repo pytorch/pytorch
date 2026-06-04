@@ -352,7 +352,7 @@ std::tuple<at::Tensor, at::Tensor> set_params_splitkv(Flash_fwd_params &params, 
         TORCH_CHECK(params.num_splits <= 128, "num_splits > 128 not supported");
     }
 
-    return std::make_tuple(softmax_lse_accum, out_accum);
+    return std::make_tuple(std::move(softmax_lse_accum), std::move(out_accum));
 }
 
 void set_params_alibi(Flash_fwd_params &params, std::optional<at::Tensor> &alibi_slopes_, int batch_size, int num_heads){
@@ -590,7 +590,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                int window_size_right,
                const float softcap,
                const bool return_softmax,
-               std::optional<at::Generator> gen_) {
+               std::optional<at::Generator> gen_,
+               int num_splits) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm80_or_newer = (dprops->major * 10) >= 80;
@@ -763,11 +764,10 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     params.page_block_size = page_block_size;
     // Keep references to these tensors to extend their lifetime
     at::Tensor softmax_lse_accum, out_accum;
-    if (seqlenq_ngroups_swapped) {
-        // Only apply split-k for decoding
+    if (paged_KV || seqlenq_ngroups_swapped) {
         std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                            head_size, max_seqlen_k, max_seqlen_q,
-                           head_size_rounded, p_dropout, /*num_splits*/0, dprops, opts);
+                           head_size_rounded, p_dropout, num_splits, dprops, opts);
     }
 
     // [Note] BC breaking change to flash seed/offset

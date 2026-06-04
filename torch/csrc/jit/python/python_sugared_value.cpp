@@ -127,7 +127,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
   MatchedSchema matched_schema =
       matchSchema(schema, loc, *m.graph(), argsWithSelf, kwargs);
 
-  // If if a function is marked as dropped,
+  // If a function is marked as dropped,
   // we throw an exception if it is invoked.
   if (py::cast<bool>(py::module::import("torch._jit_internal")
                          .attr("should_drop")(self))) {

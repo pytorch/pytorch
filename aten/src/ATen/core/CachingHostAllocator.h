@@ -298,7 +298,14 @@ struct CachingHostAllocatorImpl {
 
     // Round up the allocation to the nearest power of two to improve reuse.
     // These power of two sizes are also used to index into the free list.
-    size_t roundSize = c10::llvm::PowerOf2Ceil(size);
+    const auto roundSize = [&]() -> size_t {
+      if (size <= pinned_max_round_threshold() &&
+          size <= pinned_max_cached_size()) {
+        return c10::llvm::PowerOf2Ceil(size);
+      } else {
+        return size;
+      }
+    }();
 
     // First, try to allocate from the free list of the chosen pool
     auto* block = get_free_block(roundSize, pool);
@@ -382,9 +389,7 @@ struct CachingHostAllocatorImpl {
 
     if (!events.has_value()) {
       auto& pool = pool_from_block(block);
-      auto index = size_index(block->size_);
-      std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-      pool.free_list_[index].list_.push_back(block);
+      maybe_cache_block(block, pool);
     } else if (allocated_during_capture) {
       // pass: No events are ever recorded during stream capture.
 
@@ -436,15 +441,7 @@ struct CachingHostAllocatorImpl {
       pool.free_list_[i].list_.clear();
 
       for (auto* block : blocks_to_remove) {
-        pool.blocks_.erase(block);
-        pool.ptr_to_block_.erase(block->ptr_);
-        auto index = size_index(block->size_);
-        free_block(block);
-        stats_.allocations.decrease(1);
-        stats_.allocated_bytes.decrease(block->size_);
-        stats_.allocation_bucket_stats[index].decrease(1);
-        stats_.allocated_bytes_bucket_stats[index].decrease(block->size_);
-        delete block;
+        destroy_block(block, pool, /*is_active=*/false);
       }
     }
   }
@@ -719,11 +716,8 @@ struct CachingHostAllocatorImpl {
       }
 
       if (available) {
-        auto index = size_index(block->size_);
-        std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-        pool.free_list_[index].list_.push_back(block);
-        stats_.active_bucket_stats[index].decrease(1);
-        stats_.active_bytes_bucket_stats[index].decrease(size);
+        auto& pool = pool_from_block(block);
+        maybe_cache_block(block, pool);
         if (size != -1) {
           return;
         }
@@ -734,6 +728,54 @@ struct CachingHostAllocatorImpl {
   TaskThreadPool* getBackgroundThreadPool() {
     static TaskThreadPool* pool = new TaskThreadPool(1);
     return pool;
+  }
+
+  void maybe_cache_block(B* block, BlockPool& pool) {
+    auto size = block->size_;
+    auto index = size_index(size);
+
+    if (size > pinned_max_cached_size()) {
+      std::lock(pool.free_list_[index].mutex_, pool.blocks_mutex_);
+      std::lock_guard<std::mutex> gf(pool.free_list_[index].mutex_, std::adopt_lock);
+      std::lock_guard<std::mutex> gb(pool.blocks_mutex_, std::adopt_lock);
+      destroy_block(block, pool, /*is_active=*/true);
+    } else {
+      std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+      pool.free_list_[index].list_.push_back(block);
+      stats_.active_bucket_stats[index].decrease(1);
+      stats_.active_bytes_bucket_stats[index].decrease(size);
+    }
+  }
+
+  // Remove a block from the pool, free its memory, update stats, and delete it.
+  // Caller must hold both pool.blocks_mutex_ and pool.free_list_[index].mutex_.
+  // When is_active is true, also decrements active stats (for blocks going
+  // directly from in-use to freed without being cached first).
+  void destroy_block(B* block, BlockPool& pool, bool is_active) {
+    auto size = block->size_;
+    auto index = size_index(size);
+
+    pool.blocks_.erase(block);
+    pool.ptr_to_block_.erase(block->ptr_);
+    free_block(block);
+
+    stats_.allocations.decrease(1);
+    stats_.allocated_bytes.decrease(size);
+    stats_.allocation_bucket_stats[index].decrease(1);
+    stats_.allocated_bytes_bucket_stats[index].decrease(size);
+    if (is_active) {
+      stats_.active_bucket_stats[index].decrease(1);
+      stats_.active_bytes_bucket_stats[index].decrease(size);
+    }
+    delete block;
+  }
+
+  virtual size_t pinned_max_round_threshold() const {
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::pinned_max_round_threshold();
+  }
+
+  virtual size_t pinned_max_cached_size() const {
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::pinned_max_cached_size();
   }
 
  public:

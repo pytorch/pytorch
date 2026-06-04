@@ -1,21 +1,94 @@
 #pragma once
 
 #include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
 
-#include <cstdint>
+#include <iosfwd>
 #include <memory>
+#include <string_view>
 
 namespace c10 {
 
-enum class C10_API_ENUM DebugInfoKind : uint8_t {
-  PRODUCER_INFO = 0,
-  MOBILE_RUNTIME_INFO,
-  PROFILER_STATE,
-  INFERENCE_CONTEXT, // for inference usage
-  PARAM_COMMS_INFO,
+// Identifies a slot in ThreadLocalDebugInfo for storing a specific type
+// of thread-local state.
+//
+// This class is trivial to copy and move, and is cheap to construct and
+// destroy.
+//
+// Example:
+//
+//   inline constexpr std::string_view kMyCustomInfoName = "MY_CUSTOM_INFO";
+//   inline const DebugInfoKind kMyCustomInfo(&kMyCustomInfoName);
+//   ...
+//   ThreadLocalDebugInfo::_push(kMyCustomInfo, my_custom_info_shared_ptr);
+//   ...
+//   const DebugInfoBase* info = ThreadLocalDebugInfo::get(kMyCustomInfo);
+//   ...
+//   ThreadLocalDebugInfo::_pop(kMyCustomInfo);
+class DebugInfoKind {
+ private:
+  // Must be a non-null pointer to a string_view literal with static storage
+  // duration.
+  using value_type = const std::string_view*;
 
-  TEST_INFO, // used only in tests
-  TEST_INFO_2, // used only in tests
+ public:
+  // Creates an uninitialized DebugInfoKind.
+  constexpr DebugInfoKind() = default;
+
+  // Creates a DebugInfoKind with the given identity, which must be a non-null
+  // pointer to a string_view literal with static storage duration. The pointer
+  // address (not the string itself) is used as the identifier for the slot. The
+  // string itself is only used for debugging purposes and should be descriptive
+  // of the slot's purpose and ideally (but not required) be unique.
+  //
+  // If called with a null value in a constexpr context, will trigger a compile
+  // time error. If called with a null value in a non-constexpr context, will
+  // trigger a runtime exception.
+  explicit constexpr DebugInfoKind(value_type value) : value_(value) {
+    if (value == nullptr) {
+      // Since this function is not constexpr, it will trigger a compile-time
+      // error if the DebugInfoKind() ctor is called in a constexpr context
+      // with a null value.
+      DebugInfoKind_ctor_parameter_must_not_be_null();
+    }
+  }
+
+  // Predefined DebugInfoKinds for common use cases.
+  static C10_API const DebugInfoKind PRODUCER_INFO;
+  static C10_API const DebugInfoKind MOBILE_RUNTIME_INFO;
+  static C10_API const DebugInfoKind PROFILER_STATE;
+  static C10_API const DebugInfoKind INFERENCE_CONTEXT; // for inference usage
+  static C10_API const DebugInfoKind PARAM_COMMS_INFO;
+  static C10_API const DebugInfoKind TEST_INFO; // used only in tests
+  static C10_API const DebugInfoKind TEST_INFO_2; // used only in tests
+
+  // Comparison operators. These allow putting DebugInfoKind in containers like
+  // std::set and std::map.
+  constexpr bool operator==(const DebugInfoKind other) const {
+    return value_ == other.value_;
+  }
+  constexpr bool operator!=(const DebugInfoKind other) const {
+    return value_ != other.value_;
+  }
+  constexpr bool operator<(const DebugInfoKind other) const {
+    return value_ < other.value_;
+  }
+
+  C10_API friend std::ostream& operator<<(
+      std::ostream& os,
+      const DebugInfoKind& kind);
+
+ private:
+  // Doesn't compile in a constexpr context; throws in a non-constexpr context.
+  // The function name is intentionally verbose to make the compiler error
+  // more readable.
+  [[noreturn]] static inline void
+  DebugInfoKind_ctor_parameter_must_not_be_null() {
+    TORCH_INTERNAL_ASSERT(
+        false, "DebugInfoKind must be initialized with a non-null pointer.");
+  }
+
+  value_type value_ = nullptr;
 };
 
 class C10_API DebugInfoBase {

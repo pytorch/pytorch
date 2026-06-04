@@ -460,21 +460,16 @@ class Optimizer:
             return
 
         # Determine available accelerator device
-        accelerator = None
-        if torch.cuda.is_available():
-            accelerator = (torch.cuda, "CUDA")
-        elif torch.xpu.is_available():
-            accelerator = (torch.xpu, "XPU")
+        accelerator = torch.accelerator.current_accelerator(check_available=True)
 
-        if accelerator:
-            device_module, device_name = accelerator
-            capturing = device_module.is_current_stream_capturing()
+        if accelerator and accelerator.type in {"cuda", "xpu"}:
+            capturing = torch.accelerator.current_stream().is_capturing()
 
             if capturing and not all(
                 group["capturable"] for group in self.param_groups
             ):
                 raise RuntimeError(
-                    f"Attempting {device_name} graph capture of step() for an instance of "
+                    f"Attempting {accelerator.type.upper()} graph capture of step() for an instance of "
                     + self.__class__.__name__
                     + " but param_groups' capturable is False."
                 )
@@ -486,7 +481,7 @@ class Optimizer:
             ):
                 warnings.warn(
                     "This instance was constructed with capturable=True or some of all the param_groups came with capturable=True, "
-                    f"but step() is running without {device_name} graph capture. If you never intend to graph-capture this "
+                    f"but step() is running without {accelerator.type.upper()} graph capture. If you never intend to graph-capture this "
                     "instance, capturable=True can impair performance, and you should set capturable=False.",
                     stacklevel=2,
                 )
@@ -502,7 +497,7 @@ class Optimizer:
 
         When python tracing is enabled the profiler will hook into this
         function at the CPython level to inspect the optimizer's parameters and
-        param groups. It is called it after `step()` since many optimizers
+        param groups. It is called after `step()` since many optimizers
         lazily initialize state.
 
         This is a workaround due to lack of a proper step hook on the optimizer,
@@ -907,27 +902,26 @@ class Optimizer:
 
         Example:
             >>> # xdoctest: +SKIP
-            >>> model = torch.nn.Linear(10, 10)
-            >>> optim = torch.optim.SGD(model.parameters(), lr=3e-4)
+            >>> optimizer = ...  # initialized optimizer matching the saved state
             >>> scheduler1 = torch.optim.lr_scheduler.LinearLR(
-            ...     optim,
+            ...     optimizer,
             ...     start_factor=0.1,
             ...     end_factor=1,
             ...     total_iters=20,
             ... )
             >>> scheduler2 = torch.optim.lr_scheduler.CosineAnnealingLR(
-            ...     optim,
+            ...     optimizer,
             ...     T_max=80,
             ...     eta_min=3e-5,
             ... )
             >>> lr = torch.optim.lr_scheduler.SequentialLR(
-            ...     optim,
+            ...     optimizer,
             ...     schedulers=[scheduler1, scheduler2],
             ...     milestones=[20],
             ... )
             >>> lr.load_state_dict(torch.load("./save_seq.pt"))
             >>> # now load the optimizer checkpoint after loading the LRScheduler
-            >>> optim.load_state_dict(torch.load("./save_optim.pt"))
+            >>> optimizer.load_state_dict(torch.load("./save_optim.pt"))
 
         """
         # shallow copy, to be consistent with module API

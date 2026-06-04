@@ -1212,7 +1212,7 @@ def _register_concat_linear_int8_woq_lowering(
         # Some other pass is making some changes that entails
         # adding a node before it's used, but it can only be found when
         # lint is run. stable_topological_sort() is being run before lint,
-        # so that error was not being being discovered.
+        # so that error was not being discovered.
         # We call stable_topological_sort here as a workaround.
         stable_topological_sort(match.graph)
         with match.graph.inserting_before(user_of_scaling_node):
@@ -1520,7 +1520,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
                 return _node
             else:
                 assert len(_node.args) >= 1, (
-                    "In in dequant pattern, each node should have more than 1 arg."
+                    "In dequant pattern, each node should have more than 1 arg."
                 )
                 return _find_first_node_in_dequant_pattern(_node.args[0])
 

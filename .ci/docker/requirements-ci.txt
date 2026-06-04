@@ -77,8 +77,8 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 
 # Only mkl-static and mkl-include are needed; the mkl package contains
 # dynamic libraries that are not discoverable by our build scripts.
-mkl-static==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
-mkl-include==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
+mkl-static==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
+mkl-include==2024.2.0 ; platform_machine == "x86_64" or platform_machine == "AMD64"
 #Description: Intel oneAPI Math Kernel Library
 #Pinned versions: 2024.2.0
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
@@ -111,14 +111,14 @@ networkx==2.8.8
 #Pinned versions: 2.8.8
 #test that import: functorch
 
-ninja==1.11.1.4
+ninja==1.13.0
 #Description: build system. Used in some tests. Used in build to generate build
 #time tracing information
-#Pinned versions: 1.11.1.4
+#Pinned versions: 1.13.0
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
 numba==0.57.1 ; python_version == "3.10" and platform_machine != "s390x"
-numba==0.60.0 ; python_version == "3.12" and platform_machine != "s390x"
+numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x"
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.55.2, 0.60.0
 #test that import: test_numba_integration.py
@@ -335,7 +335,7 @@ pywavelets==1.7.0 ; python_version >= "3.12"
 #test that import:
 
 lxml==5.3.0 ; python_version < "3.14"
-lxml==6.0.2 ; python_version >= "3.14"
+lxml==6.1.0 ; python_version >= "3.14"
 #Description: This is a requirement of unittest-xml-reporting
 
 PyGithub==2.3.0
@@ -379,7 +379,7 @@ pip==26.0.1
 pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1
-packaging==24.0
+packaging==24.2
 six
 
 scons==4.5.2 ; platform_machine == "aarch64"
@@ -403,7 +403,7 @@ tlparse==0.4.0
 filelock==3.20.3
 #Description: required for inductor testing
 
-cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x" and platform_system != "Darwin"
+cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin"
 #Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. Note "Any fix in the latest bindings would be backported to the prior major version" means that only the newest version of cuda-bindings will get fixes. Depending on the latest version of 12.x is okay because all 12.y versions will be supported via "CUDA minor version compatibility". Pytorch builds against 13.z versions of cuda toolkit work with 12.x versions of cuda-bindings as well because newer drivers work with old toolkits.
 #test that import: test_cuda.py
 
@@ -419,3 +419,13 @@ tqdm>=4.66.0
 
 aiohttp==3.13.4
 #Description: required for torch.distributed.debug
+
+spin==0.17
+#Description: required for testing spin commands
+#Pinned versions: 0.17
+#test that import: spincli/test_spin.py
+
+uv
+#Description: required for running spin commands via uvx
+#Pinned version:
+#test that import:

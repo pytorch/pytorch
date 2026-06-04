@@ -948,6 +948,16 @@ void ldl_solve_kernel(
     const Tensor& result,
     bool upper,
     bool hermitian) {
+  // Lapack SYTRS writes into unrelated memory if |IPIV(k)| is outside [1, N]
+  // (negative values encode 2x2 block pivots), so sanity-check user-provided
+  // pivots before dispatch on CPU.
+  TORCH_CHECK(pivots.abs().ge(1).all().item<bool>(),
+              "Pivots given to ldl_solve must all satisfy |pivot| >= 1. "
+              "Did you properly pass the result of ldl_factor?");
+  TORCH_CHECK(pivots.abs().le(LD.size(-2)).all().item<bool>(),
+              "Pivots given to ldl_solve must all satisfy |pivot| <= LD.size(-2). "
+              "Did you properly pass the result of ldl_factor?");
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       LD.scalar_type(), "ldl_solve_kernel_cpu", [&] {
         apply_ldl_solve<scalar_t>(LD, pivots, result, upper, hermitian);
