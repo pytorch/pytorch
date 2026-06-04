@@ -2955,7 +2955,9 @@ class GraphModuleDeserializer(metaclass=Final):
                 "Identity": torch.utils._sympy.functions.Identity,
             }
             self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}
-            self.constants = deserialize_torch_artifact(constants, weights_only=weights_only)
+            self.constants = deserialize_torch_artifact(
+                constants, weights_only=weights_only
+            )
             self.signature = self.deserialize_signature(
                 serialized_graph_module.signature
             )
@@ -2991,7 +2993,9 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.shape_env.unbacked_symint_counter += 1
 
             if example_inputs is not None and len(example_inputs) > 0:
-                self.example_inputs = deserialize_torch_artifact(example_inputs, weights_only=weights_only)
+                self.example_inputs = deserialize_torch_artifact(
+                    example_inputs, weights_only=weights_only
+                )
             else:
                 self.example_inputs = None
             self.deserialize_graph(serialized_graph_module.graph)
@@ -3017,7 +3021,9 @@ class GraphModuleDeserializer(metaclass=Final):
                 signature=self.signature,
                 module_call_graph=module_call_graph,
                 names_to_symbols=self.symbol_name_to_symbol,
-                state_dict=deserialize_torch_artifact(serialized_state_dict, weights_only=weights_only),
+                state_dict=deserialize_torch_artifact(
+                    serialized_state_dict, weights_only=weights_only
+                ),
                 constants=self.constants,
                 example_inputs=self.example_inputs,
             )

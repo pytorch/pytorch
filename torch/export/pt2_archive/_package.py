@@ -968,7 +968,9 @@ def _load_constants(
 
             elif path_name.startswith(CUSTOM_OBJ_FILENAME_PREFIX):
                 if weights_only:
-                    raise ValueError(f"Cannot load custom object {path_name} with weights_only=True")
+                    raise ValueError(
+                        f"Cannot load custom object {path_name} with weights_only=True"
+                    )
                 constant_bytes = archive_reader.read_bytes(
                     os.path.join(CONSTANTS_DIR, path_name)
                 )
@@ -976,7 +978,9 @@ def _load_constants(
 
             elif path_name.startswith(OPAQUE_OBJ_FILENAME_PREFIX):
                 if weights_only:
-                    raise ValueError(f"Cannot load opaque object {path_name} with weights_only=True")
+                    raise ValueError(
+                        f"Cannot load opaque object {path_name} with weights_only=True"
+                    )
                 constant_bytes = archive_reader.read_bytes(
                     os.path.join(CONSTANTS_DIR, path_name)
                 )
@@ -1015,8 +1019,12 @@ def _load_exported_programs(
         serialized_exported_program = _bytes_to_dataclass(
             schema.ExportedProgram, exported_program_bytes
         )
-        state_dict = _load_state_dict(archive_reader, model_name, weights_only=weights_only)
-        constants = _load_constants(archive_reader, model_name, weights_only=weights_only)
+        state_dict = _load_state_dict(
+            archive_reader, model_name, weights_only=weights_only
+        )
+        constants = _load_constants(
+            archive_reader, model_name, weights_only=weights_only
+        )
 
         ep = ExportedProgramDeserializer(expected_opset_version).deserialize(
             serialized_exported_program,
@@ -1114,9 +1122,9 @@ def load_pt2(
             to be loaded. By default, `device_index=-1` is used, which corresponds
             to the device `cuda` when using CUDA. Passing `device_index=1` would
             load the package to `cuda:1`, for example.
-            
+
         load_weights_from_disk (bool): Whether to load weights from disk.
-        
+
         weights_only (bool): If True, only weights will be loaded and no complex
             pickled objects. Recommended for untrusted sources. See `torch.load`
             for more details. Default: False.
@@ -1155,7 +1163,10 @@ def load_pt2(
         file_names = archive_reader.get_file_names()
 
         exported_programs = _load_exported_programs(
-            archive_reader, file_names, expected_opset_version, weights_only=weights_only
+            archive_reader,
+            file_names,
+            expected_opset_version,
+            weights_only=weights_only,
         )
         extra_files = _load_extra_files(archive_reader, file_names)
 
@@ -1181,7 +1192,9 @@ def load_pt2(
                     len(WEIGHTS_DIR) :
                 ]  # remove data/weights/ prefix
                 weight_bytes = archive_reader.read_bytes(file)
-                loaded_weight = torch.load(io.BytesIO(weight_bytes), weights_only=weights_only)
+                loaded_weight = torch.load(
+                    io.BytesIO(weight_bytes), weights_only=weights_only
+                )
                 weights[weight_file_name] = loaded_weight
 
     if isinstance(f, (io.IOBase, IO)):

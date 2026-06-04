@@ -211,9 +211,9 @@ class TestSerialize(TestCase):
         buffer = io.BytesIO()
         torch.export.save(ep, buffer)
         buffer.seek(0)
-        
+
         loaded_ep = torch.export.load(buffer, weights_only=True)
-        
+
         exp_out = ep.module()(*inp)
         actual_out = loaded_ep.module()(*inp)
         self.assertEqual(exp_out, actual_out)
