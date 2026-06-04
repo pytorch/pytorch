@@ -62,7 +62,7 @@ jobs:
           echo "Loaded ${#MODULE_LABELS[@]} module labels: ${MODULE_LABELS[*]}"
           echo "Loaded ${#SUB_ONCALL_LABELS[@]} sub-oncall labels: ${SUB_ONCALL_LABELS[*]}"
 
-          # Find open issues with oncall:distributed but without ptd-bot-triaged
+          # Find open issues with oncall:distributed but without bot-triaged
           ISSUES=$(gh issue list \
             --repo ${{ github.repository }} \
             --label "oncall: distributed" \
@@ -80,7 +80,7 @@ jobs:
             LABEL_NAMES=$(echo "$issue" | jq -r '.labels[].name')
 
             # Skip if already processed by distributed bot OR finalized by PT-level bot
-            if echo "$LABEL_NAMES" | grep -qxF "ptd-bot-triaged" \
+            if echo "$LABEL_NAMES" | grep -qxF "bot-triaged" \
                || echo "$LABEL_NAMES" | grep -qxF "triaged"; then
               continue
             fi
@@ -109,10 +109,10 @@ jobs:
             if [ -n "$REASON" ] && [ "$HAS_SUB_ONCALL" = true ]; then
               PHASE1_COUNT=$((PHASE1_COUNT + 1))
               if [ "$DRY_RUN" = "true" ]; then
-                echo "[DRY RUN] Would add 'ptd-bot-triaged' to #${ISSUE_NUM} (${REASON})"
+                echo "[DRY RUN] Would add 'bot-triaged' + 'triaged' to #${ISSUE_NUM} (${REASON})"
               else
-                echo "Adding 'ptd-bot-triaged' to #${ISSUE_NUM} (${REASON}; full labels: ${LABELS})"
-                gh issue edit "$ISSUE_NUM" --repo ${{ github.repository }} --add-label "ptd-bot-triaged"
+                echo "Adding 'bot-triaged' + 'triaged' to #${ISSUE_NUM} (${REASON}; full labels: ${LABELS})"
+                gh issue edit "$ISSUE_NUM" --repo ${{ github.repository }} --add-label "bot-triaged" --add-label "triaged"
 
                 # Fetch title and append to daily manifest
                 TITLE=$(gh issue view "$ISSUE_NUM" --repo ${{ github.repository }} --json title --jq '.title')
@@ -133,7 +133,7 @@ jobs:
             fi
           done <<< "$ISSUES"
 
-          echo "Phase 1 complete: ${PHASE1_COUNT} issues marked as ptd-bot-triaged"
+          echo "Phase 1 complete: ${PHASE1_COUNT} issues marked as bot-triaged + triaged"
 
       - name: "Phase 2: Collect issues needing LLM triage"
         id: collect
@@ -144,7 +144,7 @@ jobs:
           echo "=== Phase 2: Collecting issues needing LLM triage ==="
 
           # Find open issues with oncall:distributed that haven't been triaged yet.
-          # Exclude issues already marked ptd-bot-triaged (distributed bot done)
+          # Exclude issues already marked bot-triaged (distributed bot done)
           # or triaged (PT-level bot finalized — hands off).
           # Use exact label-name match (any(.name == ...)) rather than jq's
           # contains(), which does substring matching and would falsely match
@@ -155,7 +155,7 @@ jobs:
             --state open \
             --limit 1000 \
             --json number,labels \
-            --jq '[.[] | select(.labels | any(.name == "ptd-bot-triaged") | not)
+            --jq '[.[] | select(.labels | any(.name == "bot-triaged") | not)
                       | select(.labels | any(.name == "triaged") | not)
                       | .number] | sort | .[:'"${BATCH_SIZE}"']')
 
