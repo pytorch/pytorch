@@ -59,9 +59,8 @@ if TYPE_CHECKING:
 
 
 def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
-    from torch._subclasses.fake_tensor import FakeTensor
-
-    return isinstance(t, FakeTensor)
+    from torch._subclasses.fake_tensor import is_fake
+    return is_fake(t)
 
 
 DimList = list
