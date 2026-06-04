@@ -8196,7 +8196,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         x = torch.tensor([2.0])
         with self.assertRaisesRegex(
-            AssertionError, "Can't unpack a tensor of 1 rows into a tuple of 2 elements"
+            ValueError, r"not enough values to unpack \(expected 2, got 1\)"
         ):
             f1(x)
 
@@ -12471,6 +12471,20 @@ def ___make_guard_fn():
 
         self.assertEqual(fn().item(), 1)
 
+    def test_iter_version(self):
+        def fn(x):
+            s = 0
+            for i in torch.__version__:
+                try:
+                    s += int(i)
+                except ValueError:
+                    pass
+            return (x + s).sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3, 3)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):
             return -1
@@ -16051,6 +16065,61 @@ def forward(self, L_x_ : torch.Tensor):
         x = torch.ones(2, 3)
         opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
         self.assertEqual(opt(x), fn(x))
+
+    def test_string_format_isspace_dynamic_shape(self):
+        def fn(x):
+            return "{} {}".format(x.size(0), "a").isspace()
+
+        x = torch.ones(2, 3)
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_string_format_invalid_spec_isspace_graph_breaks(self):
+        def fn(x):
+            return "x {:q}".format(x.size(0)).isspace()
+
+        x = torch.ones(2, 3)
+        with self.assertRaisesRegex(ValueError, "Unknown format code 'q'"):
+            fn(x)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(Unsupported, "Unsupported method call"):
+            opt(x)
+
+    def test_string_format_converted_symbolic_precision_graph_breaks(self):
+        def isspace_fn(x):
+            return " {!s:.0}".format(x.size(0)).isspace()
+
+        def bool_fn(x):
+            if "{!s:.0}".format(x.size(0)):
+                return 1
+            return 2
+
+        x = torch.ones(2, 3)
+        self.assertEqual(isspace_fn(x), True)
+        self.assertEqual(bool_fn(x), 2)
+
+        opt = torch.compile(isspace_fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(Unsupported, "Unsupported method call"):
+            opt(x)
+
+        opt = torch.compile(bool_fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(Unsupported, "Data-dependent branching"):
+            opt(x)
+
+    def test_string_format_converted_symbolic_empty_splitlines_graph_breaks(self):
+        def fn(x):
+            return "{!s:.0}".format(x.size(0)).splitlines()
+
+        x = torch.ones(2, 3)
+        self.assertEqual(fn(x), [])
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "formatted field may be empty in splitlines",
+        ):
+            opt(x)
 
     def test_string_format_custom_strip_truthiness_graph_breaks(self):
         def fn(x):

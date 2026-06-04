@@ -2219,6 +2219,54 @@ class StringFormatVariable(VariableTracker):
 
         return True
 
+    def _can_prove_field_nonempty(
+        self,
+        tx: "InstructionTranslatorBase",
+        field_arg: VariableTracker,
+        format_spec: str,
+        conversion: str | None,
+    ) -> bool | None:
+        field_format = self._format_field(format_spec, conversion)
+        if field_arg.is_python_constant():
+            try:
+                return bool(field_format.format(field_arg.as_python_constant()))
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+
+        if isinstance(field_arg, StringFormatVariable):
+            if not self._validate_field_format(field_arg, format_spec, conversion):
+                return None
+            if format_spec or conversion is not None:
+                return None
+            return field_arg.as_bool_constant()
+
+        if isinstance(field_arg, StringFormatStripVariable):
+            if not self._validate_field_format(field_arg, format_spec, conversion):
+                return None
+            if format_spec or conversion is not None:
+                return None
+            return field_arg.as_bool_constant()
+
+        from .tensor import SymNodeVariable
+
+        if isinstance(field_arg, SymNodeVariable):
+            if not self._validate_field_format(field_arg, format_spec, conversion):
+                return None
+            if conversion is not None or format_spec.endswith("c"):
+                return None
+            return True
+
+        if not self._validate_field_format(field_arg, format_spec, conversion):
+            return None
+        if conversion is not None or format_spec.endswith("c"):
+            return None
+        try:
+            if field_arg.python_type() is str:
+                return None
+        except NotImplementedError:
+            return None
+        return True
+
     def _can_prove_no_linebreak(self, tx: "InstructionTranslatorBase") -> bool:
         auto_index: int | None = 0
         try:
@@ -2247,22 +2295,27 @@ class StringFormatVariable(VariableTracker):
         line_args: list[VariableTracker] = []
         lines: list[VariableTracker] = []
         auto_index: int | None = 0
+        current_line_known_nonempty = False
+        current_line_maybe_empty = False
 
         def flush_line() -> None:
+            nonlocal current_line_known_nonempty, current_line_maybe_empty
             lines.append(
                 StringFormatVariable.create("".join(line_format_parts), line_args, {})
             )
             line_format_parts.clear()
             line_args.clear()
+            current_line_known_nonempty = False
+            current_line_maybe_empty = False
 
         def append_literal(literal_text: str) -> None:
+            nonlocal current_line_known_nonempty
             for piece in literal_text.splitlines(True):
                 without_linebreak, has_linebreak = self._split_linebreak(piece)
-                line_format_parts.append(
-                    self._literal_to_format_string(
-                        piece if keepends else without_linebreak
-                    )
-                )
+                rendered_piece = piece if keepends else without_linebreak
+                if rendered_piece:
+                    current_line_known_nonempty = True
+                line_format_parts.append(self._literal_to_format_string(rendered_piece))
                 if has_linebreak:
                     flush_line()
 
@@ -2292,10 +2345,26 @@ class StringFormatVariable(VariableTracker):
                     )
                 line_format_parts.append(self._format_field(format_spec, conversion))
                 line_args.append(field_arg)
+                field_nonempty = self._can_prove_field_nonempty(
+                    tx, field_arg, format_spec, conversion
+                )
+                if field_nonempty is True:
+                    current_line_known_nonempty = True
+                elif field_nonempty is None:
+                    current_line_maybe_empty = True
         except ValueError as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
         if line_format_parts or line_args:
+            if not current_line_known_nonempty:
+                if current_line_maybe_empty:
+                    unimplemented(
+                        gb_type="formatted field may be empty in splitlines",
+                        context=f"format string: {self.format_string!r}",
+                        explanation="Dynamo cannot split a delayed format string when the final line may be empty.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                return ListVariable(lines, mutation_type=ValueMutationNew())
             flush_line()
 
         return ListVariable(lines, mutation_type=ValueMutationNew())
@@ -2358,6 +2427,8 @@ class StringFormatVariable(VariableTracker):
                             field_arg, format_spec, conversion
                         ):
                             return None
+                        if conversion is not None:
+                            return None
                         if chars is not None:
                             return None
                         known_truthy = True
@@ -2370,6 +2441,8 @@ class StringFormatVariable(VariableTracker):
                         if not self._validate_field_format(
                             field_arg, format_spec, conversion
                         ):
+                            return None
+                        if conversion is not None:
                             return None
                         return None
                     return None
@@ -2436,6 +2509,8 @@ class StringFormatVariable(VariableTracker):
                             field_arg, format_spec, conversion
                         ):
                             return None
+                        if conversion is not None:
+                            return None
                         if format_spec.endswith("c"):
                             return None
                         known_truthy = True
@@ -2445,6 +2520,100 @@ class StringFormatVariable(VariableTracker):
             return None
 
         return True if known_truthy else None if saw_field else False
+
+    def as_isspace_constant(self) -> bool | None:
+        auto_index: int | None = 0
+        saw_field = False
+        known_nonempty = False
+        known_nonspace = False
+        try:
+            parsed = string.Formatter().parse(self.format_string)
+            for literal_text, field_name, format_spec, conversion in parsed:
+                if literal_text:
+                    known_nonempty = True
+                    if not literal_text.isspace():
+                        known_nonspace = True
+                if field_name is None:
+                    continue
+                saw_field = True
+                format_spec = format_spec or ""
+                field_arg, auto_index = self._resolve_field(field_name, auto_index)
+                field_format = self._format_field(format_spec, conversion)
+                if field_arg.is_python_constant():
+                    try:
+                        formatted = field_format.format(field_arg.as_python_constant())
+                    except Exception:
+                        return None
+                    if formatted:
+                        known_nonempty = True
+                        if not formatted.isspace():
+                            known_nonspace = True
+                elif isinstance(field_arg, StringFormatVariable):
+                    if not self._validate_field_format(
+                        field_arg, format_spec, conversion
+                    ):
+                        return None
+                    if format_spec or conversion is not None:
+                        return None
+                    field_isspace = field_arg.as_isspace_constant()
+                    if field_isspace is False:
+                        known_nonspace = True
+                    if field_isspace is True:
+                        known_nonempty = True
+                    if field_isspace is None:
+                        return None
+                elif isinstance(field_arg, StringFormatStripVariable):
+                    if not self._validate_field_format(
+                        field_arg, format_spec, conversion
+                    ):
+                        return None
+                    if format_spec or conversion is not None:
+                        return None
+                    field_isspace = field_arg.as_isspace_constant()
+                    if field_isspace is False:
+                        known_nonspace = True
+                    if field_isspace is True:
+                        known_nonempty = True
+                    if field_isspace is None:
+                        return None
+                else:
+                    from .tensor import SymNodeVariable
+
+                    if isinstance(
+                        field_arg, SymNodeVariable
+                    ) and not format_spec.endswith("c"):
+                        if not self._validate_field_format(
+                            field_arg, format_spec, conversion
+                        ):
+                            return None
+                        if conversion is not None:
+                            return None
+                        known_nonspace = True
+                        known_nonempty = True
+                        continue
+                    try:
+                        typ = field_arg.python_type()
+                    except NotImplementedError:
+                        typ = object
+                    if typ is not str:
+                        if not self._validate_field_format(
+                            field_arg, format_spec, conversion
+                        ):
+                            return None
+                        if conversion is not None:
+                            return None
+                        if format_spec.endswith("c"):
+                            return None
+                        known_nonspace = True
+                        known_nonempty = True
+                        continue
+                    return None
+        except (IndexError, ValueError):
+            return None
+
+        if known_nonspace:
+            return False
+        return True if known_nonempty else None if saw_field else False
 
     @staticmethod
     def _debug_format_arg(arg: VariableTracker) -> object:
@@ -2531,6 +2700,18 @@ class StringFormatVariable(VariableTracker):
                 chars = None
             return StringFormatStripVariable(self, chars)
 
+        if name == "isspace":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            result = self.as_isspace_constant()
+            if result is not None:
+                return ConstantVariable.create(result)
+
         return super().call_method(tx, name, args, kwargs)
 
     def sq_concat_impl(
@@ -2602,6 +2783,18 @@ class StringFormatStripVariable(VariableTracker):
                 chars = None
             return StringFormatStripVariable(self, chars)
 
+        if name == "isspace":
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            result = self.as_isspace_constant()
+            if result is not None:
+                return ConstantVariable.create(result)
+
         return super().call_method(tx, name, args, kwargs)
 
     def as_bool_constant(self) -> bool | None:
@@ -2613,6 +2806,13 @@ class StringFormatStripVariable(VariableTracker):
             base = self.base.as_python_constant()
             if isinstance(base, str):
                 return bool(base.strip(self.chars))
+        return None
+
+    def as_isspace_constant(self) -> bool | None:
+        if self.base.is_python_constant():
+            base = self.base.as_python_constant()
+            if isinstance(base, str):
+                return base.strip(self.chars).isspace()
         return None
 
     def can_prove_no_linebreak(self, tx: "InstructionTranslatorBase") -> bool:
@@ -2890,16 +3090,6 @@ class ConstantLikeVariable(VariableTracker):
         if variables.ConstantVariable.is_literal(result):
             return VariableTracker.build(tx, result)
         return GetAttrVariable(self, name, py_type=type(result))
-
-
-class TorchVersionVariable(ConstantLikeVariable):
-    _error_prefix = "torch.__version__"
-
-    def __init__(self, **kwargs: Any) -> None:
-        kwargs.setdefault("value", torch.__version__)
-        if kwargs["value"] is not torch.__version__:
-            raise AssertionError("TorchVersionVariable value must be torch.__version__")
-        super().__init__(**kwargs)
 
 
 class NumpyDTypeVariable(ConstantLikeVariable):
