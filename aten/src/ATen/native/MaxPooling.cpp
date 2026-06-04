@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
@@ -28,6 +29,7 @@ Tensor max_pool1d_impl(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+  NoNamesGuard guard;
 
   // If stride=None then set it to kernel_size
   if (stride.empty()) {
@@ -51,6 +53,9 @@ Tensor max_pool1d_impl(
   if (self.dim() == 2) {
     output.squeeze_(0);
   }
+
+  guard.reset();
+  namedinference::propagate_names(output, self);
 
   return output;
 }
