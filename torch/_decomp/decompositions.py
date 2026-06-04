@@ -4043,7 +4043,7 @@ def one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
 
     out = torch.cat(step_output, 0)
 
-    return out, (hx.squeeze(1), cx.squeeze(1))
+    return out, (hx.squeeze(0), cx.squeeze(0))
 
 
 def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=False):

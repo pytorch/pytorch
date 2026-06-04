@@ -51,6 +51,7 @@ from torch._inductor.compile_fx import split_const_gm
 from torch._library.opaque_object import _OPAQUE_TYPES_BY_NAME
 from torch._subclasses import FakeTensorMode
 from torch.export import default_decompositions, Dim, export, unflatten
+from torch.export._patches import register_lstm_while_loop_decomposition
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
@@ -1348,10 +1349,7 @@ graph():
         # while-loop decomposition, avoiding numerical divergence from the
         # fused mkldnn kernel.
         with torch.backends.mkldnn.flags(enabled=False):
-            from torch.export._patches import (
-                register_gru_while_loop_decomposition,
-                register_lstm_while_loop_decomposition,
-            )
+            from torch.export._patches import register_gru_while_loop_decomposition
 
             # Test 1: Basic single-layer LSTM with dynamic sequence length
             seqlen = 32
@@ -8675,6 +8673,87 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 "Dynamo does not support RNN, GRU, or LSTM.",
             ):
                 _ = export(mod, inp, strict=True)
+
+    def test_export_lstm_hidden_state_shapes(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(
+                    input_size=13,
+                    hidden_size=20,
+                    num_layers=1,
+                    bias=False,
+                    batch_first=True,
+                    bidirectional=True,
+                )
+
+            def forward(self, x):
+                output, (h_n, c_n) = self.lstm(x)
+                return output, h_n, c_n
+
+        m = M()
+        x = torch.randn(4, 10, 13)
+
+        with torch.backends.mkldnn.flags(enabled=False):
+            ep = export(m, (x,))
+            output_node = next(node for node in ep.graph.nodes if node.op == "output")
+            graph_outputs = output_node.args[0]
+
+            self.assertEqual(
+                graph_outputs[0].meta["val"].shape, torch.Size([4, 10, 40])
+            )
+            self.assertEqual(graph_outputs[1].meta["val"].shape, torch.Size([2, 4, 20]))
+            self.assertEqual(graph_outputs[2].meta["val"].shape, torch.Size([2, 4, 20]))
+            eager_outputs = m(x)
+            export_outputs = ep.module()(x)
+        self.assertEqual(eager_outputs, export_outputs)
+
+        with (
+            torch.backends.mkldnn.flags(enabled=False),
+            register_lstm_while_loop_decomposition(),
+        ):
+            ep = export(m, (x,))
+            output_node = next(node for node in ep.graph.nodes if node.op == "output")
+            graph_outputs = output_node.args[0]
+
+            self.assertEqual(
+                graph_outputs[0].meta["val"].shape, torch.Size([4, 10, 40])
+            )
+            self.assertEqual(graph_outputs[1].meta["val"].shape, torch.Size([2, 4, 20]))
+            self.assertEqual(graph_outputs[2].meta["val"].shape, torch.Size([2, 4, 20]))
+
+    def test_export_lstm_where_hidden_state_shape(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(
+                    input_size=24,
+                    hidden_size=32,
+                    num_layers=1,
+                    batch_first=False,
+                )
+
+            def forward(self, x):
+                seq_out, (h_n, _) = self.rnn(x)
+                cond = torch.tensor(True)
+                return torch.where(cond, seq_out[-1], h_n[0])
+
+        m = M().eval()
+        x = torch.randn(6, 2, 24)
+
+        with torch.no_grad(), torch.backends.mkldnn.flags(enabled=False):
+            ep = export(m, (x,), dynamic_shapes={"x": {1: Dim("batch")}})
+
+        where_node = next(
+            node for node in ep.graph.nodes if node.target == torch.ops.aten.where.self
+        )
+        where_shape = where_node.meta["val"].shape
+        self.assertEqual(len(where_shape), 2)
+        self.assertEqual(where_shape[1], 32)
+
+        with torch.no_grad(), torch.backends.mkldnn.flags(enabled=False):
+            runtime_output = ep.module()(torch.randn(6, 4, 24))
+        self.assertEqual(runtime_output.shape, torch.Size([4, 32]))
 
     @requires_gpu
     def test_export_lstm_gpu(self):
