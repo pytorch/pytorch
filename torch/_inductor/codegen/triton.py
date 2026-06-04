@@ -70,6 +70,7 @@ from ..scheduler import (
 from ..shape_propagation import get_broadcasted_shape
 from ..stream_utils import get_raw_stream_name
 from ..utils import (
+    _TMA_SUPPORTED_DTYPES,
     cache_on_self,
     DelayReplaceLine,
     device_supports_fp64,
@@ -124,6 +125,7 @@ from .triton_utils import (
     non_constexpr_signature,
     should_unwrap_unspec_arg,
     signature_to_meta,
+    use_uint8_triton_storage_for_cuda_float8_e4m3fn,
 )
 from .wrapper import SymbolicCallArg
 
@@ -1297,6 +1299,12 @@ class TritonOverrides(OpOverrides):
                 _get_min_elements_per_thread(src_dtype, dtype),
                 V.kernel.min_elem_per_thread,
             )
+
+        if src_dtype is not None and use_uint8_triton_storage_for_cuda_float8_e4m3fn(
+            src_dtype
+        ):
+            x = f"triton_helpers.fp8e4m3fn_to_float32({x})"
+            src_dtype = torch.float32
 
         if dtype == torch.bool:
             return f"({x} != 0)"
@@ -2810,6 +2818,14 @@ class TMACompatibilityChecker:
             )
             return False
 
+        if self.dtype not in _TMA_SUPPORTED_DTYPES:
+            log.debug(
+                "%s dtype %s has no CUtensorMapDataType mapping.",
+                self.failed_debug_prefix,
+                self.dtype,
+            )
+            return False
+
         return True
 
     def are_block_parameters_compatible(
@@ -4093,6 +4109,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
         dtype = V.graph.get_dtype(name)
+        uses_uint8_storage = use_uint8_triton_storage_for_cuda_float8_e4m3fn(dtype, var)
         indexing = self.indexing(
             index,
             block_ptr=True,
@@ -4151,6 +4168,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if (has_tmpmask or has_rindex) and indexing.has_mask():
             if self._load_other:
                 other = f", other={constant_repr(self._load_other)}"
+            elif uses_uint8_storage:
+                other = ", other=0"
             else:
                 other = ", other=0.0"
         else:
