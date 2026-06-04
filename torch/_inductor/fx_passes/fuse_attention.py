@@ -2,7 +2,6 @@
 import functools
 import inspect
 import logging
-import warnings
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -17,6 +16,7 @@ from ..pattern_matcher import (
 
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 aten = torch.ops.aten
 
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
@@ -867,7 +867,7 @@ def _warn_tf32_disabled() -> None:
         and torch.backends.cuda.matmul.fp32_precision != "tf32"
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
-        warnings.warn(
+        perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Skipping pattern matching to fused flash-attention. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
