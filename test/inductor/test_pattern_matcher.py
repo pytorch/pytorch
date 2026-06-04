@@ -1487,11 +1487,33 @@ class TestPatternMatcher(TestCase):
 
         @torch.compile()
         def fn(inp, a, b):
+            inp = torch.sin(inp)
             return torch.nn.functional.gelu(torch.ops.aten.addmm(inp, a, b))
 
         actual, (code) = run_and_get_code(fn, args[0], args[1], args[2])
-        self.assertEqual(actual, torch.nn.functional.gelu(torch.addmm(*args)))
+        self.assertEqual(
+            actual, torch.nn.functional.gelu(torch.addmm(torch.sin(args[0]), *args[1:]))
+        )
         FileCheck().check("extern_kernels.addmm(").run(code[0])
+
+    def test_unfuse_same_shape_leaf_bias_addmm(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.nn.Parameter(torch.randn(10, 20, device=GPU_TYPE))
+
+            def forward(self, a, b):
+                return (torch.mm(a, b) + self.bias).relu()
+
+        mod = Mod()
+        args = [
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
+        ]
+
+        actual, (code) = run_and_get_code(torch.compile(mod), args[0], args[1])
+        self.assertEqual(actual, mod(*args))
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
     def test_unfuse_expanded_bias_addmm(self):
         bias = torch.randn(20, device=GPU_TYPE).unsqueeze(0).expand(10, 20)
