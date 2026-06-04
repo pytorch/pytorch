@@ -1,19 +1,93 @@
 # Owner(s): ["module: dynamo"]
+import cProfile
+import os
+import pstats
+import sys
+import tempfile
 import threading
+import unittest
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.convert_frame as convert_frame
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 from torch._dynamo.utils import chromium_event_timed, ChromiumEventLogger, dynamo_timed
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import ProfilerRecordFunctionContextVariable
+from torch._guards import compile_context, CompileContext, CompileId
 from torch.profiler import record_function
 from torch.testing._internal.common_utils import TemporaryFileName
 
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(sys.version_info < (3, 12), "Python 3.12+ cProfile behavior")
+    def test_compile_cprofile_skips_when_external_profiler_active(self):
+        def fn():
+            return "ok"
+
+        wrapped = convert_frame.cprofile_wrapper(fn)
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(convert_frame.tempfile, "gettempdir", return_value=tmpdir),
+            compile_context(CompileContext(CompileId(frame_id=0, frame_compile_id=0))),
+        ):
+            result = cProfile.Profile().runcall(wrapped)
+
+            self.assertEqual(result, "ok")
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, "fn_0_0.profile")))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "Python 3.12+ cProfile behavior")
+    def test_compile_cprofile_with_torch_compile_and_external_profiler(self):
+        def run():
+            def fn(x):
+                return x + 1
+
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt)
+            self.assertEqual(opt_fn(torch.ones(2)), torch.full((2,), 2.0))
+            self.assertEqual(cnt.frame_count, 1)
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            torch._dynamo.config.patch(cprofile=True),
+            patch.object(convert_frame.tempfile, "gettempdir", return_value=tmpdir),
+        ):
+            cProfile.Profile().runcall(run)
+
+            self.assertEqual(os.listdir(tmpdir), [])
+
+    def test_compile_cprofile_nested_wrappers_write_profiles(self):
+        def inner():
+            return "inner"
+
+        wrapped_inner = convert_frame.cprofile_wrapper(inner)
+
+        def outer():
+            return wrapped_inner()
+
+        wrapped_outer = convert_frame.cprofile_wrapper(outer)
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(convert_frame.tempfile, "gettempdir", return_value=tmpdir),
+            patch.object(
+                convert_frame.subprocess, "Popen", side_effect=FileNotFoundError
+            ),
+            patch.object(
+                convert_frame, "maybe_upload_prof_stats_to_manifold", return_value=None
+            ),
+            compile_context(CompileContext(CompileId(frame_id=0, frame_compile_id=0))),
+        ):
+            self.assertEqual(wrapped_outer(), "inner")
+
+            inner_stats = pstats.Stats(os.path.join(tmpdir, "inner_0_0.profile"))
+            outer_stats = pstats.Stats(os.path.join(tmpdir, "outer_0_0.profile"))
+            self.assertGreater(inner_stats.total_calls, 0)
+            self.assertGreater(outer_stats.total_calls, 0)
+
     def test_dynamo_timed_profiling_isolated(self):
         # dynamo_timed functions should appear in profile traces.
         def inner_fn(x):

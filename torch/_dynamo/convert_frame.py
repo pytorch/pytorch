@@ -485,6 +485,18 @@ def exception_handler(
 
 FRAME_COUNTER = 0
 FRAME_COMPILE_COUNTER: typing.Counter[int | FrameStateSizeEntry] = collections.Counter()
+_cprofile_tls = threading.local()
+
+
+def _is_python_profiler_active() -> bool:
+    monitoring = getattr(sys, "monitoring", None)
+    profiler_id = getattr(monitoring, "PROFILER_ID", None)
+    if monitoring is None or profiler_id is None:
+        return False
+    try:
+        return monitoring.get_tool(profiler_id) is not None
+    except ValueError:
+        return False
 
 
 def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -505,19 +517,32 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
                 f"{func.__name__}_{str(trace_id).replace('/', '_')}.profile",
             )
         )
+        active_profiler = getattr(_cprofile_tls, "profiler", None)
+        if active_profiler is None and _is_python_profiler_active():
+            log.warning(
+                "Skipping cProfile for %s trace id [%s] because another Python "
+                "profiling tool is already active",
+                func.__name__,
+                trace_id,
+            )
+            return func(*args, **kwargs)
+
+        if active_profiler is not None:
+            active_profiler.disable()
+
         prof = cProfile.Profile()
         try:
             start_ts = time.time()
-            # runcall calls prof.enable() and prof.disable(), so do NOT call
-            # enable outside. This leads to issues like
-            # ValueError: Another profiling tool is already active
+            _cprofile_tls.profiler = prof
             # pyrefly: ignore [bad-argument-type]
             retval = prof.runcall(func, *args, **kwargs)
             profile_latency = time.time() - start_ts
-        except ValueError:
-            log.exception("failed to enable cProfile")
-            profile_latency = 0
-            retval = func(*args, **kwargs)
+        finally:
+            if active_profiler is not None:
+                _cprofile_tls.profiler = active_profiler
+                active_profiler.enable()
+            else:
+                del _cprofile_tls.profiler
         log.warning(
             "### Cprofile for %s trace id [%s] took %.3f seconds ###",
             func.__name__,
