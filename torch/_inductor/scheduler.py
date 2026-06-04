@@ -2201,6 +2201,47 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         if not isinstance(self.node, ir.ExternKernel):
             raise AssertionError("expected self.node to be an ir.ExternKernel")
+        if (
+            torch._inductor.config.triton.cudagraph_kernel_annotations
+            and not V.graph.cpp_wrapper
+        ):
+            from torch._inductor.codegen.wrapper import AnnotatedExternKernelBlock
+            from torch._inductor.fx_passes.graph_view import (
+                _clean_stack_name,
+                _strip_instance_suffix,
+                get_fused_kernel_module_fqn,
+            )
+
+            module_fqn = None
+            origin_node = self.node.origin_node
+            if origin_node is not None:
+                stack = origin_node.meta.get("nn_module_stack")
+                if stack:
+                    module_path = _clean_stack_name(next(reversed(stack.values()))[0])
+                    if module_path:
+                        op_name = _strip_instance_suffix(origin_node.name)
+                        module_fqn = f"{module_path}.{op_name}"
+            else:
+                # origin_node not set for this extern kernel (e.g. convolution);
+                # fall back to walking origins. For ops whose inputs are weights
+                # or placeholders (no nn_module_stack), this produces a clean
+                # single-FQN result without cascading upstream names.
+                module_fqn = get_fused_kernel_module_fqn([self])
+            if module_fqn and hasattr(V.graph, "fx_extern_fqns"):
+                V.graph.fx_extern_fqns.add(module_fqn)
+            log.debug(
+                "[fqn_trace] ExternKernelSchedulerNode.codegen: module_fqn=%s for %s",
+                module_fqn,
+                self.get_name(),
+            )
+            if module_fqn:
+                n_before = len(wrapper.lines)
+                self.node.codegen(wrapper)
+                inner_lines = wrapper.lines[n_before:]
+                wrapper.lines[n_before:] = [
+                    AnnotatedExternKernelBlock(inner_lines, module_fqn)
+                ]
+                return
         return self.node.codegen(wrapper)
 
 
@@ -4658,6 +4699,15 @@ class Scheduler:
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
+            if node.node is not None:
+                log.debug(
+                    "[fqn_trace] scheduling %s origins_stacks=[%s]",
+                    getattr(node.node, "name", node),
+                    ", ".join(
+                        f"{o.name}:{list(o.meta['nn_module_stack'].values()) if o.meta.get('nn_module_stack') else 'no_stack'}"
+                        for o in node.node.origins
+                    ),
+                )
 
             if has_non_input_unbacked_defs:
                 if node.node is None:

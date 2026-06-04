@@ -459,6 +459,14 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.buffers: list[ir.Buffer] = []
         self.operations: list[ir.Operation] = []
+        # Maps FX node name -> fully-qualified module FQN string, e.g.
+        # "convolution_1" -> "L.networks.1.conv.convolution".
+        # Populated during run_node for every FX node that has nn_module_stack.
+        self.fx_fqn_map: dict[str, str] = {}
+        # FQN strings claimed by ExternKernelSchedulerNodes (e.g. convolution).
+        # Populated during codegen so Pass 2 of get_fused_kernel_module_fqn
+        # skips ops already annotated by their own extern kernel wrapper.
+        self.fx_extern_fqns: set[str] = set()
         self.const_output_index: dict[str, int] = (
             const_output_index if const_output_index else {}
         )
@@ -1910,8 +1918,37 @@ class GraphLowering(torch.fx.Interpreter):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
             self._realize_inputs_at_stream_boundaries(n)
+        log.debug(
+            "[fqn_trace] run_node: n=%s op=%s origins=[%s]",
+            n.name,
+            n.op,
+            ", ".join(
+                f"{o.name}:{list(o.meta['nn_module_stack'].values()) if o.meta.get('nn_module_stack') else 'no_stack'}"
+                for o in origins
+            ),
+        )
+        # Populate fx_fqn_map for n itself if it has nn_module_stack.
+        # Every FX node is processed by run_node exactly once, so iterating
+        # over n (not the accumulated origins) gives us a complete map by the
+        # time lowering finishes.
+        _stack = n.meta.get("nn_module_stack")
+        if _stack:
+            from torch._inductor.fx_passes.graph_view import (
+                _clean_stack_name,
+                _strip_instance_suffix,
+            )
+
+            _innermost = _clean_stack_name(list(_stack.values())[-1][0])
+            self.fx_fqn_map[n.name] = f"{_innermost}.{_strip_instance_suffix(n.name)}"
+            log.debug(
+                "[fqn_trace] run_node: n=%s fx_fqn_map entry: %s -> %s",
+                n.name,
+                n.name,
+                self.fx_fqn_map[n.name],
+            )
         with (
             ir.IRNode.current_origins(origins),
+            ir.IRNode.current_primary_node(n),
             ir.IRNode.current_stream_idx(self._get_node_stream(n)),
             self.set_current_node(n),
             V.set_current_node(n),

@@ -3953,6 +3953,29 @@ class SubgraphTracer(fx.Tracer):
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+            # Verify: at assignment time we have both node.name and the full
+            # stack, so we can derive the unambiguous FQN mapping here.
+            # Uses same cleaning logic as graph_view._clean_stack_name.
+            _raw = list(nn_module_stack.values())[-1][0]
+            _cleaned = re.sub(r"^L\['self'\]\.?", "", _raw)
+            _parts = re.findall(r"\['([^']+)'\]", _cleaned)
+            _suffix = ".".join(_parts) if _parts else _cleaned
+            _innermost_clean = f"L.{_suffix}" if _suffix else "L"
+            _stripped_name = re.sub(r"_\d+$", "", rv.node.name)
+            _derived_fqn = f"{_innermost_clean}.{_stripped_name}"
+            _stack_entries = list(nn_module_stack.values())
+            log.debug(
+                "[fqn_trace] nn_module_stack assigned: node=%s derived_fqn=%s\n"
+                "  full stack (%d entries, outermost->innermost):\n%s",
+                rv.node.name,
+                _derived_fqn,
+                len(_stack_entries),
+                "\n".join(
+                    f"  {'[outermost]' if i == 0 else '[innermost]' if i == len(_stack_entries) - 1 else '          '} "
+                    f"[{i}] path={entry[0]!r} class={entry[1].__name__}"
+                    for i, entry in enumerate(_stack_entries)
+                ),
+            )
 
         if kind in {"call_function", "call_method"}:
             stack = (rv.node.name, target)
@@ -3997,6 +4020,11 @@ class SubgraphTracer(fx.Tracer):
                 nn_module_stack = tx.nn_module_stack
                 if nn_module_stack:
                     rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+                    log.debug(
+                        "[fqn_trace] nn_module_stack assigned (retracing path): node=%s stack=%s",
+                        rv.node.name,
+                        {k: v for k, v in nn_module_stack.items()},
+                    )
 
             if "source_fn_stack" not in rv.node.meta:
                 if kind in {"call_function", "call_method"}:

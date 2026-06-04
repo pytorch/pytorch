@@ -574,6 +574,7 @@ class IRNode:
 
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
     _current_stream_idx: ClassVar[int | None] = None
+    _current_primary_node: ClassVar[torch.fx.Node | None] = None
 
     # NB: These are kinda weird,
     origins: OrderedSet[Any] = dataclasses.field(init=False)
@@ -608,6 +609,18 @@ class IRNode:
             IRNode._current_stream_idx = old
 
     @staticmethod
+    @contextlib.contextmanager
+    def current_primary_node(
+        node: torch.fx.Node | None,
+    ) -> Generator[None, None, None]:
+        old = IRNode._current_primary_node
+        IRNode._current_primary_node = node
+        try:
+            yield
+        finally:
+            IRNode._current_primary_node = old
+
+    @staticmethod
     def is_realized_node(node: IRNode) -> bool:
         return isinstance(
             node,
@@ -635,10 +648,19 @@ class IRNode:
         self._post_init_setattr(
             "traceback", traceback.format_stack() if config.debug_ir_traceback else None
         )
-        self._post_init_setattr("origin_node", None)
+        self._post_init_setattr("origin_node", self._current_primary_node)
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self._post_init_setattr("annotations", {})
         self._post_init_setattr("stream_idx", self._current_stream_idx)
+        log.debug(
+            "[fqn_trace] IRNode.__post_init__: type=%s origin_node=%s origins=[%s]",
+            type(self).__name__,
+            self._current_primary_node.name if self._current_primary_node is not None else None,
+            ", ".join(
+                f"{o.name}:{list(o.meta['nn_module_stack'].values()) if o.meta.get('nn_module_stack') else 'no_stack'}"
+                for o in origins
+            ),
+        )
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -5089,9 +5111,11 @@ class Buffer(IRNode, CodegenSymbol):
     # Multi-output buffers will define 'outputs: List[Buffer]'. Confusingly,
     # MultiOutput does NOT define this!
 
+    # NB: parent IRNode.__post_init__ now sets origin_node from
+    # _current_primary_node; the previous override that reset it to None
+    # would defeat that.
     def __post_init__(self) -> None:
         super().__post_init__()
-        self._post_init_setattr("origin_node", None)
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
         return self.get_layout().make_indexer()
