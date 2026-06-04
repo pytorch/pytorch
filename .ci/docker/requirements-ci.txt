@@ -245,7 +245,7 @@ pygments==2.20.0
 #Pinned versions: 14.1.0
 #test that import:
 
-scikit-image==0.22.0
+# scikit-image==0.22.0
 #Description: image processing routines
 #Pinned versions: 0.22.0
 #test that import: test_nn.py
