@@ -40,7 +40,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
-    skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
     TEST_WITH_ROCM,
@@ -477,7 +476,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @patches
     def test_mm_dropout(self):
         @torch.compile
@@ -486,7 +484,12 @@ class TestSelectAlgorithm(TestCase):
             rnd = torch.ops.prims.inductor_random.default(mm_4.shape, seed, "rand")
             return mm_4 * rnd
 
-        if GPU_TYPE == "xpu":
+        # Triton MFMA matmul on AMD GPUs and Intel XPUs produces
+        # ~1 ULP fp16 rounding differences vs the aten reference used by the
+        # autotuner's internal VERIFY path. Max abs diff 0.0625 (= 2^-4),
+        # max rel diff 2^-10 (fp16 mantissa LSB). Benign; expand tolerance
+        # to match the existing XPU pattern.
+        if GPU_TYPE == "xpu" or torch.version.hip:
             patcher = patch.object(
                 select_algorithm, "VERIFY", dict(atol=1e-3, rtol=1e-3)
             )
@@ -1073,6 +1076,15 @@ class TestGetInputsStorageSizeCheck(TestCase):
 
 
 class TestTemplateRender(TestCase):
+    @staticmethod
+    def _template_kernel_has_atomic_add(code):
+        template_kernels = code.split("@triton.jit\n")
+        return any(
+            kernel.startswith("def triton_tem")
+            and "tl.atomic_add" in kernel.split("'''", 1)[0]
+            for kernel in template_kernels
+        )
+
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
@@ -1337,6 +1349,65 @@ class TestTemplateRender(TestCase):
             self.assertIn("triton_helpers.maximum", code)
             # Verify prologue fusion: sigmoid fused via hook
             self.assertIn("tl.sigmoid", code)
+
+    @inductor_config.patch(
+        {
+            "epilogue_fusion_first": True,
+            "epilogue_fusion_with_atomic_add": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    @requires_gpu()
+    @requires_triton()
+    @patches
+    def test_template_atomic_add_epilogue_fusion(self):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(a, b, index, out):
+            mm = torch.matmul(a, b)
+            return out.index_add_(0, index, mm)
+
+        a = torch.randn(64, 64, device=GPU_TYPE)
+        b = torch.randn(64, 64, device=GPU_TYPE)
+        index = torch.arange(64, device=GPU_TYPE) // 2
+        out = torch.randn(32, 64, device=GPU_TYPE)
+
+        expected = fn(a, b, index, out.clone())
+        opt_fn = torch.compile(fn, mode="max-autotune-no-cudagraphs")
+        actual, (code,) = run_and_get_code(opt_fn, a, b, index, out.clone())
+
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+        self.assertTrue(self._template_kernel_has_atomic_add(code))
+
+    @inductor_config.patch(
+        {
+            "epilogue_fusion_first": True,
+            "epilogue_fusion_with_atomic_add": False,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    @requires_gpu()
+    @requires_triton()
+    @patches
+    def test_template_atomic_add_epilogue_fusion_disabled(self):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(a, b, index, out):
+            mm = torch.matmul(a, b)
+            return out.index_add_(0, index, mm)
+
+        a = torch.randn(64, 64, device=GPU_TYPE)
+        b = torch.randn(64, 64, device=GPU_TYPE)
+        index = torch.arange(64, device=GPU_TYPE) // 2
+        out = torch.randn(32, 64, device=GPU_TYPE)
+
+        expected = fn(a, b, index, out.clone())
+        opt_fn = torch.compile(fn, mode="max-autotune-no-cudagraphs")
+        actual, (code,) = run_and_get_code(opt_fn, a, b, index, out.clone())
+
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+        self.assertIn("tl.atomic_add", code)
+        self.assertFalse(self._template_kernel_has_atomic_add(code))
 
 
 if __name__ == "__main__":
