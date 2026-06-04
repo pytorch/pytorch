@@ -10,7 +10,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial
 from typing import Any, Literal
-from typing_extensions import deprecated
+from typing_extensions import deprecated, Self
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -2036,6 +2036,104 @@ def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
     _SymmetricMemory.set_backend(name)
 
 
+class _NcclCommRegistration:
+    r"""
+    Handle returned by :func:`_register_external_nccl_comm`.
+
+    Keeps an externally-owned NCCL communicator published in PyTorch's
+    symmetric memory registry for as long as this object is alive. Dropping it
+    (via ``del``, exiting its ``with`` block, or calling :meth:`unregister`)
+    removes the entry so a successor producer can register cleanly under the
+    same ``group_name``.
+
+    The comm's lifetime is *not* owned by this object; the registration only
+    publishes a borrowed pointer. Optionally a strong reference to the source
+    comm object is held so a stray ``del comm`` cannot dangle the registered
+    pointer for the lifetime of the registration.
+    """
+
+    def __init__(
+        self,
+        group_name: str,
+        device: torch.device,
+        comm: object | None = None,
+    ) -> None:
+        self._group_name = group_name
+        self._device = device
+        self._comm = comm
+        self._active = True
+
+    def unregister(self) -> None:
+        """Remove the registration. Idempotent."""
+        if not self._active:
+            return
+        # Imported lazily: only present in NCCL builds with symmetric-memory
+        # device support.
+        from torch._C._distributed_c10d import _unregister_external_nccl_comm
+
+        _unregister_external_nccl_comm(self._group_name, self._device)
+        self._active = False
+        self._comm = None
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.unregister()
+
+    def __del__(self) -> None:
+        try:
+            self.unregister()
+        except Exception:
+            # Best-effort cleanup; never raise from __del__ (e.g. during
+            # interpreter teardown the C extension may already be gone).
+            pass
+
+
+def _register_external_nccl_comm(
+    group_name: str,
+    comm_ptr: int,
+    device: _device,
+    comm: object | None = None,
+) -> _NcclCommRegistration:
+    r"""
+    Publish an externally-owned ``ncclComm_t`` into PyTorch's symmetric memory
+    registry under ``group_name``.
+
+    This lets producers that are not a ``ProcessGroupNCCL`` (e.g. torchcomms
+    backends) supply the host NCCL communicator that
+    :func:`rendezvous` needs, without symmetric memory having to
+    ``dynamic_cast`` to a specific process-group implementation. After this
+    call, ``rendezvous(tensor, group=group_name)`` on a tensor in a process
+    group registered under ``group_name`` will find this comm.
+
+    Args:
+        group_name (str): the process-group name to register the comm under.
+        comm_ptr (int): the host ``ncclComm_t`` as an opaque integer pointer
+            (e.g. from ``torchcomms`` ``get_nccl_comm_ptr()``).
+        device (`torch.device` or str): the CUDA device the comm belongs to.
+        comm (object, optional): the source comm object. When provided, a
+            strong reference is held by the returned registration so the comm
+            cannot be garbage-collected while still registered.
+
+    Returns:
+        _NcclCommRegistration: keep this alive for as long as symmetric memory
+        should use this comm; drop it (or call ``unregister()``) to remove the
+        registration.
+
+    .. note::
+        This is only available in NCCL builds with symmetric-memory device
+        support; otherwise it raises :class:`ImportError`.
+    """
+    from torch._C._distributed_c10d import (
+        _register_external_nccl_comm as _register_external_nccl_comm_impl,
+    )
+
+    device = torch.device(device)
+    _register_external_nccl_comm_impl(group_name, comm_ptr, device)
+    return _NcclCommRegistration(group_name, device, comm)
+
+
 def get_backend(device: _device) -> str | None:
     r"""
     Get the backend for symmetric memory allocation for a given device. If not
@@ -2272,89 +2370,6 @@ def reduce_scatter_offset(
         )
 
 
-def all_to_all_vdev(
-    input: torch.Tensor,
-    out: torch.Tensor,
-    in_splits: torch.Tensor,
-    out_splits_offsets: torch.Tensor,
-    group: str,
-) -> None:
-    r"""
-    all_to_all_vdev(input, out, in_splits, out_splits_offsets, group) -> None
-
-    Variable-length AllToAll where the per-peer split sizes live on device.
-    Functionally equivalent to :func:`torch.distributed.all_to_all_single` with
-    explicit ``input_split_sizes`` / ``output_split_sizes``, but the splits
-    never have to leave the device, which avoids the host/device sync that the
-    standard collective imposes when the splits are device tensors.
-
-    All four tensor arguments must be allocated via
-    :func:`torch.distributed._symmetric_memory.empty` and rendezvous'd on
-    ``group`` (i.e. they must be symmetric-memory tensors on the *same*
-    backend).
-
-    Args:
-        input (Tensor): Send buffer (contiguous).  Sized to fit
-            ``sum(in_splits)`` rows along dim 0.  All ranks must agree on the
-            tensor shape and dtype.
-        out (Tensor): Recv buffer (contiguous).  Must be large enough to hold
-            the rows pulled from every peer (i.e. the sum of the output splits
-            this rank receives).  Same dtype as ``input``.
-        in_splits (Tensor): 1-D ``int64`` tensor of length
-            ``group.size()``.  ``in_splits[p]`` = number of rows this rank
-            sends to peer ``p``.
-        out_splits_offsets (Tensor): 2-D ``int64`` tensor of shape
-            ``(2, group.size())``.  On return:
-
-            - ``out_splits_offsets[0, p]`` = number of rows received from peer ``p``.
-            - ``out_splits_offsets[1, p]`` = exclusive prefix-sum of row 0
-              (the position of peer ``p``'s chunk inside ``out``).
-
-            The contents on entry are ignored / used as scratch.
-        group (str): Name of the :class:`~torch.distributed.ProcessGroup` to
-            perform the operation on.
-
-    Backend dispatch:
-
-    - ``"NCCL"``    -> :func:`torch.ops.symm_mem.nccl_all_to_all_vdev`
-      (NCCL device-API based, requires NCCL >= 2.28).
-    - ``"NVSHMEM"`` -> :func:`torch.ops.symm_mem.all_to_all_vdev`
-      (NVSHMEM-based, requires PyTorch built with NVSHMEM support).
-
-    Other backends raise :class:`NotImplementedError`.
-
-    Example::
-
-        >>> # doctest: +SKIP
-        >>> # MoE token shuffle: every rank decides per-peer how many tokens to send
-        >>> max_in = group.size() * max_tokens_per_peer
-        >>> max_out = group.size() * max_tokens_per_peer  # upper bound on rows received
-        >>> input  = symm_mem.empty(max_in, hidden, dtype=torch.bfloat16, device="cuda")
-        >>> out    = symm_mem.empty(max_out, hidden, dtype=torch.bfloat16, device="cuda")
-        >>> in_sp  = symm_mem.empty(group.size(), dtype=torch.int64, device="cuda")
-        >>> out_sp = symm_mem.empty(2, group.size(), dtype=torch.int64, device="cuda")
-        >>> for t in (input, out, in_sp, out_sp):
-        ...     symm_mem.rendezvous(t, group=group_name)
-        >>> # ... fill `input` and `in_sp` from your router on device ...
-        >>> symm_mem.all_to_all_vdev(input, out, in_sp, out_sp, group_name)
-        >>> # `out_sp[0]` = received splits, `out_sp[1]` = exclusive offsets in `out`
-    """
-    backend = get_backend(input.device)
-    match backend:
-        case "NCCL":
-            torch.ops.symm_mem.nccl_all_to_all_vdev(
-                input, out, in_splits, out_splits_offsets, group
-            )
-        case "NVSHMEM":
-            torch.ops.symm_mem.all_to_all_vdev(
-                input, out, in_splits, out_splits_offsets, group
-            )
-        case _:
-            raise NotImplementedError(
-                f"all_to_all_vdev: unsupported backend: {backend}"
-            )
-
-
 def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
     r"""
     is_symm_mem_tensor(tensor) -> bool
@@ -2382,5 +2397,4 @@ __all__ = [
     "get_signal_pad_size",
     "get_mem_pool",
     "reduce_scatter_offset",
-    "all_to_all_vdev",
 ]
