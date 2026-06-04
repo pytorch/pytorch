@@ -71,6 +71,28 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+_DATA_PTR_ACCESS_ERROR = "Cannot access data pointer of Tensor"
+_RAW_TRITON_KERNEL_NON_STRICT_EXPORT_ERROR = (
+    "Raw Triton kernel calls are not supported by non-strict torch.export. "
+    "Wrap the kernel in a torch.library.triton_op and call it through "
+    "torch.library.wrap_triton (or torch._library.capture_triton) so export "
+    "records a stable custom operator instead of tracing into Triton's runtime."
+)
+
+
+def _is_raw_triton_kernel_data_ptr_error(func, exc: RuntimeError) -> bool:
+    if getattr(func, "__name__", None) != "data_ptr":
+        return False
+    if _DATA_PTR_ACCESS_ERROR not in str(exc):
+        return False
+
+    for frame in inspect.stack(context=0):
+        filename = frame.filename.replace("\\", "/")
+        if "/triton/runtime/" in filename:
+            return True
+    return False
+
+
 class _KeyPath:
     """
     Wraps `KeyPath` to aid `isinstance` checks.
@@ -1169,4 +1191,8 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             return func(*args, **kwargs)
         except GuardOnDataDependentSymNode as e:
             _suggest_fixes_for_data_dependent_error_non_strict(e)
+            raise
+        except RuntimeError as e:
+            if _is_raw_triton_kernel_data_ptr_error(func, e):
+                raise RuntimeError(_RAW_TRITON_KERNEL_NON_STRICT_EXPORT_ERROR) from e
             raise
