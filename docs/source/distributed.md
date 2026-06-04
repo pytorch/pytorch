@@ -629,7 +629,7 @@ if rank == 0:
 ```
 
 ```{eval-rst}
-.. autofunction:: all_gather_into_tensor
+.. autofunction:: all_gather_single
 ```
 
 ```{eval-rst}
@@ -661,7 +661,7 @@ if rank == 0:
 ```
 
 ```{eval-rst}
-.. autofunction:: reduce_scatter_tensor
+.. autofunction:: reduce_scatter_single
 ```
 
 ```{eval-rst}

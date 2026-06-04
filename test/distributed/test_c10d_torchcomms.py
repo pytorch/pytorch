@@ -66,7 +66,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
     def test_all_gather_into_tensor(self):
         input_tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         output_tensor = torch.empty(self.world_size, dtype=torch.float32)
-        dist.all_gather_into_tensor(output_tensor, input_tensor, group=self.pg)
+        dist.all_gather_single(output_tensor, input_tensor, group=self.pg)
         expected = list(range(1, self.world_size + 1))
         self.assertEqual([t.item() for t in output_tensor], expected)
 
@@ -122,7 +122,7 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
             (self.world_size,), self._rank_value, dtype=torch.float32
         )
         output_tensor = torch.empty(1, dtype=torch.float32)
-        dist.reduce_scatter_tensor(output_tensor, input_tensor, op=op, group=self.pg)
+        dist.reduce_scatter_single(output_tensor, input_tensor, op=op, group=self.pg)
         self.assertEqual(output_tensor.item(), self._expected_reduce_result(op))
 
     def test_all_to_all(self):
