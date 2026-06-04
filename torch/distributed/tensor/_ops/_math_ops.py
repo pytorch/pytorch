@@ -381,6 +381,43 @@ def linear_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
+def _shard_non_reduction_dim(
+    args_schema: tuple[Any, ...],
+    dim: int,
+    keep_dim: bool,
+    n_outputs: int,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Shared logic for ops that shard on non-reduction dims with dim remapping.
+
+    Used by dim-reduction ops returning (values, indices) and argmax/argmin.
+
+    Args:
+        args_schema: Op args with TensorMeta at position 0.
+        dim: The reduction dimension.
+        keep_dim: Whether the reduction dim is kept.
+        n_outputs: Number of output tensors (1 for argmax, 2 for max.dim).
+    """
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+
+    ndim = len(input_meta.shape)
+    dim = normalize_dim(dim, ndim)
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d == dim:
+            continue
+        out_d = d if keep_dim or d < dim else d - 1
+        strategies.append(
+            [_ShardingPlaceholder(out_d)]
+            * n_outputs  # pyrefly: ignore[bad-argument-type]
+            + [_ShardingPlaceholder(d)]
+        )
+    return strategies
+
+
+# Category B: Dim-reduction ops returning (values, indices)
 # max.dim/min.dim return (values, indices). Indices are local to each shard
 # and cannot be combined across ranks, so we force Replicate on reduction dims
 # (same approach as argmax/argmin).
@@ -394,27 +431,44 @@ def max_min_dim_single_dim_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
+    dim = cast(int, args_schema[1])
+    keep_dim = len(args_schema) > 2 and bool(args_schema[2])
+    return _shard_non_reduction_dim(args_schema, dim, keep_dim, n_outputs=2)
+
+
+# @register_single_dim_strategy(
+#     list(ARGMAX_ARGMIN_OPS.keys()),
+#     schema_info=RuntimeSchemaInfo(1),
+#     allow_uneven_sharding=True,
+# )
+def argmax_argmin_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """argmax/argmin return indices only. Shard on non-reduction dims."""
     input_meta = args_schema[0]
     if not isinstance(input_meta, TensorMeta):
         raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
-
     ndim = len(input_meta.shape)
-    dim = normalize_dim(cast(int, args_schema[1]), ndim)
+
+    dims = None
+    if len(args_schema) > 1:
+        dims = _infer_reduction_dims(args_schema[1], ndim)
+    reduce_dims = list(range(ndim)) if dims is None else dims
     keep_dim = len(args_schema) > 2 and bool(args_schema[2])
+
+    if len(reduce_dims) == ndim:
+        return []
 
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
     for d in range(ndim):
-        if d == dim:
+        if d in reduce_dims:
             continue
-        out_d = d if keep_dim or d < dim else d - 1
-        # [values, indices, input]: shard on non-reduction dim
-        strategies.append(
-            [
-                _ShardingPlaceholder(out_d),
-                _ShardingPlaceholder(out_d),
-                _ShardingPlaceholder(d),
-            ]
-        )
+        out_d = d
+        if not keep_dim:
+            out_d = d - sum(1 for rd in reduce_dims if rd < d)
+        strategies.append([_ShardingPlaceholder(out_d), _ShardingPlaceholder(d)])
     return strategies
 
 
@@ -553,27 +607,9 @@ def dim_reduction_with_indices_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    input_meta = args_schema[0]
-    if not isinstance(input_meta, TensorMeta):
-        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
-
-    ndim = len(input_meta.shape)
-    dim = normalize_dim(cast(int, args_schema[1]) if len(args_schema) > 1 else -1, ndim)
+    dim = cast(int, args_schema[1]) if len(args_schema) > 1 else -1
     keep_dim = len(args_schema) > 2 and bool(args_schema[2])
-
-    strategies: list[list[Placement | _ShardingPlaceholder]] = []
-    for d in range(ndim):
-        if d == dim:
-            continue
-        out_d = d if keep_dim or d < dim else d - 1
-        strategies.append(
-            [
-                _ShardingPlaceholder(out_d),
-                _ShardingPlaceholder(out_d),
-                _ShardingPlaceholder(d),
-            ]
-        )
-    return strategies
+    return _shard_non_reduction_dim(args_schema, dim, keep_dim, n_outputs=2)
 
 
 @register_single_dim_strategy(
@@ -586,27 +622,9 @@ def kthvalue_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    input_meta = args_schema[0]
-    if not isinstance(input_meta, TensorMeta):
-        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
-
-    ndim = len(input_meta.shape)
-    dim = normalize_dim(cast(int, args_schema[2]) if len(args_schema) > 2 else -1, ndim)
+    dim = cast(int, args_schema[2]) if len(args_schema) > 2 else -1
     keep_dim = len(args_schema) > 3 and bool(args_schema[3])
-
-    strategies: list[list[Placement | _ShardingPlaceholder]] = []
-    for d in range(ndim):
-        if d == dim:
-            continue
-        out_d = d if keep_dim or d < dim else d - 1
-        strategies.append(
-            [
-                _ShardingPlaceholder(out_d),
-                _ShardingPlaceholder(out_d),
-                _ShardingPlaceholder(d),
-            ]
-        )
-    return strategies
+    return _shard_non_reduction_dim(args_schema, dim, keep_dim, n_outputs=2)
 
 
 # @register_single_dim_strategy(
