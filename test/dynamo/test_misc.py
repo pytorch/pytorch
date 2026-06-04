@@ -2277,6 +2277,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.tensor([1.0, 2.0, 3.0])
         self.assertEqual(f(x), x + 1)
 
+    def test_check_tensor_predicate_raises_clear_error(self):
+        @torch.compile(backend="eager")
+        def f(x):
+            torch._check(x > 0)
+            return torch.log(x)
+
+        with self.assertRaisesRegex(
+            TypeError, r"cond must be a bool.*torch[.]_check_tensor_all"
+        ) as cm:
+            f(torch.rand(1))
+
+        self.assertNotIn("FakeTensor", str(cm.exception))
+
     def test_check_with_closure_constant(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(x):

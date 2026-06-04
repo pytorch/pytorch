@@ -6770,7 +6770,9 @@ class TestTorch(TestCase):
             with self.assertRaisesRegex(TypeError, 'cond must be a bool'):
                 check_fn('wrong type')
 
-            with self.assertRaisesRegex(TypeError, 'cond must be a bool'):
+            with self.assertRaisesRegex(
+                TypeError, r'cond must be a bool.*torch[.]_check_tensor_all'
+            ):
                 check_fn(torch.tensor(True))
 
     # FIXME: move to indexing test suite
