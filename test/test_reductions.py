@@ -3499,7 +3499,7 @@ class TestReductions(TestCase):
         _run_test([1, 32 * 8 * 32 * 8])
         _run_test([1, 32770])
 
-    @dtypes(torch.float, torch.bfloat16)
+    @parametrize("dtype", [torch.float, torch.bfloat16])
     def test_dim_reduction_lastdim(self, dtype):
         x = torch.randn(3, 5, 40, dtype=dtype)
         x = x[:, :, 0:40:2]
@@ -3541,7 +3541,7 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "nansum on CPU does not support complex inputs"):
             torch.nansum(x)
 
-    @dtypes(torch.bfloat16, torch.float16)
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_sum_noncontig_lowp(self, dtype) -> None:
         dim_sequences = {
             2: [0, 1],
