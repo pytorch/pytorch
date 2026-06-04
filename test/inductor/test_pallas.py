@@ -2643,9 +2643,6 @@ if test_torchinductor.RUN_GPU and has_cuda_pallas():
     # make_pallas(test_torchinductor.GPUTests)
 
 if test_torchinductor.RUN_TPU and has_tpu_pallas():
-    from torch_tpu import api as tpu_api  # type: ignore[import-not-found]
-
-    tpu_api.tpu_device()  # initialize TPU runtime
 
     class PallasTestsTPU(PallasTestsMixin, TestCase):
         DEVICE = "tpu"
