@@ -56,7 +56,7 @@ from torch._dynamo.utils import (
     dynamo_timed,
     get_metrics_context,
 )
-from torch._inductor import config, exc, metrics
+from torch._inductor import config, config_comms, exc, metrics
 from torch._inductor.codegen.common import (
     custom_backend_codegen_configs,
     custom_backend_passes,
@@ -91,6 +91,8 @@ from torch._inductor.custom_graph_pass import (
     CustomGraphPassCallable,
     CustomPartitionerFn,
     CustomPartitionerFnType,
+    CustomPassBase,
+    CustomSchedulerPass,
     get_custom_graph_passes,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
@@ -1053,7 +1055,7 @@ class CacheabilityValidator:
         # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
         # and ensure they are not passing us raw callables
         if config._pre_fusion_custom_pass is not None:
-            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
+            if not isinstance(config._pre_fusion_custom_pass, CustomSchedulerPass):
                 self.bypass("Unsupported _pre_fusion_custom_pass")
         for p in config._fuse_ddp_communication_passes:
             if callable(p) and not isinstance(p, CustomGraphPass):
@@ -1334,6 +1336,11 @@ class FxGraphHashDetails:
         self.inductor_config = config.save_config_portable(
             ignore_private_configs=False, readonly_values=True
         )
+        # pyrefly: ignore [missing-attribute]
+        self.inductor_config_comms = config_comms.save_config_portable(
+            ignore_private_configs=False, readonly_values=True
+        )
+
         # Custom passes should provide an ID to hash when they run late (after cache lookup).
         if resolve_pre_grad_pass_timing() != "early":
             self.pre_grad_custom_pass = self._get_custom_pass_detail(
@@ -1410,7 +1417,7 @@ class FxGraphHashDetails:
             return tuple(self._get_custom_pass_detail_unsafe(x) for x in custom_pass)
         if isinstance(custom_pass, str):
             return custom_pass
-        if isinstance(custom_pass, CustomGraphPass):
+        if isinstance(custom_pass, CustomPassBase):
             return custom_pass.uuid()
         if callable(custom_pass):
             # Returning None is safe here because we raise an explicit bypass error
@@ -1659,6 +1666,7 @@ class InductorCacheArtifact(CacheArtifact):
     @override
     def populate_cache(self) -> None:
         FxGraphCache._write_to_local_cache(self.key, self.content)
+        FxGraphCache._emit_triton_bundle(self.content)
 
     @override
     @staticmethod
@@ -1938,6 +1946,15 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
         write_atomic(path, content, make_dirs=True)
+
+    @staticmethod
+    def _emit_triton_bundle(content: bytes) -> None:
+        if not TritonBundler.is_enabled():
+            return
+
+        graph = pickle.loads(content)
+        if bundle := graph._triton_bundle:
+            TritonBundler.read_and_emit(bundle)
 
     @staticmethod
     def _save_graph(
