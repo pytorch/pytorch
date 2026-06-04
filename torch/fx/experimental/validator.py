@@ -250,7 +250,7 @@ try:
             return z3.Abs(number)
 
         def round_to_int(self, number: z3.ArithRef) -> z3.ArithRef:
-            # Pythons builtin 'round' implements the 'round half to even' strategy
+            # Python's builtin 'round' implements the 'round half to even' strategy
             # See https://en.wikipedia.org/wiki/Rounding#Rounding_half_to_even
             # z3 has an equivalent z3.fpRoundToIntegral(z3.RoundNearestTiesToEven(), ...), but this only applies to
             # floating point numbers, which is different from real numbers that we are dealing with here.
@@ -535,7 +535,7 @@ try:
                 raise AssertionError(f"Z3 variable not found for: {symbol}")
             return self.symbols[symbol]
 
-        # Create a variable in Z3 of 'type' for 'symbol', if it doesn't already exists.
+        # Create a variable in Z3 of 'type' for 'symbol', if it doesn't already exist.
         def add_var(self, symbol: sympy.Symbol, type: type) -> z3.ExprRef:
             if symbol in self.symbols:
                 return self.symbols[symbol]

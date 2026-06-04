@@ -1222,7 +1222,7 @@ class FSDPTestMixin:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
-        # Actual tests will be skipped if there is no enough GPUs.
+        # Actual tests will be skipped if there are not enough GPUs.
         try:
             if fake_pg:
                 store = torch.testing._internal.distributed.fake_pg.FakeStore()
@@ -1565,7 +1565,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
-        # Actual tests will be skipped if there is no enough GPUs.
+        # Actual tests will be skipped if there are not enough GPUs.
         try:
             if fake_pg:
                 store = torch.testing._internal.distributed.fake_pg.FakeStore()

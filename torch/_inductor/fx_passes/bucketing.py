@@ -219,7 +219,7 @@ def _populate_node_meta(
         for n in new_nodes:
             # For the following keys, we only store the information of the first node so
             # gm.print_readable shows some information
-            # Full information are stored in "bucketing_{key}_sources"
+            # Full information is stored in "bucketing_{key}_sources"
             for key, default in [
                 ("nn_module_stack", ""),
                 ("fwd_nn_module_stack", ""),
