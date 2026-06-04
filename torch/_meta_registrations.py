@@ -7288,25 +7288,43 @@ def _check_scaled_mm_sizes_v2(
         # Given scaling types, check input dimensions
 
         if is_tensorwise(scale_recipe_a, scale_recipe_b):
-            # TensorWise
-            torch._check(
-                scale_a[0].numel() == 1
-                and scale_b[0].numel() == 1
-                and scale_a[0].dtype == torch.float32
-                and scale_b[0].dtype == torch.float32,
-                lambda: "For Tensorwise scaling, both scale_a and scale_b must be single element float (fp32) tensors",
+            # TensorWise: mirror the C++ CPU impl's per-tensor checks so the
+            # exception types and messages match eager (ValueError).
+            torch._check_value(
+                scale_a[0].numel() == 1 and scale_a[0].dtype == torch.float32,
+                lambda: "scale_a must have 1 Float element",
+            )
+            torch._check_value(
+                scale_b[0].numel() == 1 and scale_b[0].dtype == torch.float32,
+                lambda: "scale_b must have 1 Float element",
             )
         elif is_rowwise(scale_recipe_a, scale_recipe_b):
-            torch._check(
-                scale_a[0].shape[0] == M
-                and scale_a[0].numel() == M
-                and scale_a[0].dtype == torch.float32
-                and scale_b[0].numel() == N
-                and scale_b[0].dtype == torch.float32,
+            # RowWise: mirror the C++ CPU impl's per-tensor checks.
+            torch._check_value(
+                scale_a[0].size(0) == M and scale_a[0].size(1) == 1,
                 lambda: (
-                    f"For Rowwise scaling, scale_a must have {self.shape[0]} elements (got: {scale_a[0].numel()})"
-                    f", and scale_b must have {mat2.shape[1]} elements (got: {scale_b[0].numel()})"
+                    f"scale_a must have shape [{M}, 1], got {list(scale_a[0].size())}"
                 ),
+            )
+            torch._check_value(
+                scale_a[0].numel() == M and scale_a[0].dtype == torch.float32,
+                lambda: (
+                    f"scale_a must have {M} Float elements, got {scale_a[0].numel()}"
+                ),
+            )
+            torch._check_value(
+                scale_b[0].numel() == N and scale_b[0].dtype == torch.float32,
+                lambda: (
+                    f"scale_b must have {N} Float elements, got {scale_b[0].numel()}"
+                ),
+            )
+            torch._check_value(
+                scale_a[0].stride(1) == 1,
+                lambda: f"expected scale_a.stride(1) to be 1, but got {scale_a[0].stride(1)}",
+            )
+            torch._check_value(
+                scale_b[0].stride(1) == 1,
+                lambda: f"expected scale_b.stride(1) to be 1, but got {scale_b[0].stride(1)}",
             )
         elif is_1x128_1x128(scale_recipe_a, scale_recipe_b):
             # A, B are fp8, scales are fp32
