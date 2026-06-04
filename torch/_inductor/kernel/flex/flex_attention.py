@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast, TYPE_CHECKING
 
 import sympy
@@ -95,6 +95,70 @@ def get_float32_precision():
         return "'ieee'"
     else:
         return "'tf32'"
+
+
+_BACKWARD_TILING_OPTIONS = (
+    "BLOCK_M1",
+    "BLOCK_N1",
+    "BLOCK_M2",
+    "BLOCK_N2",
+    "num_stages",
+    "num_warps",
+)
+
+
+def _has_user_backward_tiling(kernel_options: dict[str, Any]) -> bool:
+    return any(
+        name in kernel_options or f"bwd_{name}" in kernel_options
+        for name in _BACKWARD_TILING_OPTIONS
+    )
+
+
+def _use_large_float32_backward_config(
+    kernel_options: dict[str, Any],
+    dtype: torch.dtype,
+    device_type: str,
+    seq_len_q: int | Expr,
+    seq_len_kv: int | Expr,
+    qk_head_dim: int | Expr,
+    v_head_dim: int | Expr,
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
+    configs: Sequence[FlexBwDConfig],
+) -> bool:
+    if (
+        dtype != torch.float32
+        or device_type != "cuda"
+        or torch.version.hip is not None
+        or _has_user_backward_tiling(kernel_options)
+        or sparse_q_block_size % 64 != 0
+        or sparse_kv_block_size % 64 != 0
+    ):
+        return False
+
+    if len(configs) != 1:
+        return False
+
+    conf = configs[0]
+    if (
+        conf.block_m1,
+        conf.block_n1,
+        conf.block_m2,
+        conf.block_n2,
+        conf.num_stages,
+        conf.num_warps,
+    ) != (16, 16, 16, 16, 1, 4):
+        return False
+
+    sizevars = V.graph.sizevars
+    return sizevars.statically_known_true(
+        sympy.And(
+            sympy.Ge(seq_len_q, 128),
+            sympy.Ge(seq_len_kv, 128),
+            sympy.Le(qk_head_dim, 128),
+            sympy.Le(v_head_dim, 128),
+        )
+    )
 
 
 flex_attention_template = TritonTemplate(
@@ -936,6 +1000,29 @@ def flex_attention_backward(*args, **kwargs):
     configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
         head_dim, dtype, query.get_device().type
     )
+    if _use_large_float32_backward_config(
+        kernel_options,
+        dtype,
+        device.type,
+        seq_len_q,
+        seq_len_kv,
+        qk_head_dim,
+        v_head_dim,
+        SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
+        configs,
+    ):
+        configs = [
+            replace(
+                configs[0],
+                block_m1=64,
+                block_n1=64,
+                block_m2=64,
+                block_n2=64,
+                num_stages=3,
+                num_warps=4,
+            )
+        ]
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
