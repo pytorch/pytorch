@@ -517,7 +517,7 @@ class FSDPMemTracker(MemTracker):
         self._depth += 1
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self._depth -= 1
         if self._depth == 0:
             self._deregister_module_and_optimizer_hooks()

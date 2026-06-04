@@ -107,7 +107,7 @@ class PT2ArchiveWriter:
     def __enter__(self) -> "PT2ArchiveWriter":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         if not self.has_record(ARCHIVE_FORMAT_PATH):
             self.write_string(ARCHIVE_FORMAT_PATH, ARCHIVE_FORMAT_VALUE)
 
@@ -207,7 +207,7 @@ class PT2ArchiveReader:
     def __enter__(self) -> "PT2ArchiveReader":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         # torch._C.PyTorchFileReader doesn't have a close method
         pass
 

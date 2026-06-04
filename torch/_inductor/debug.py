@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import copy
+import types
 import dataclasses
 import functools
 import io
@@ -534,7 +535,7 @@ class DebugContext:
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: Any | None,
+        exc_tb: types.TracebackType | None,
     ) -> None:
         if self._prof:
             self._prof.disable()

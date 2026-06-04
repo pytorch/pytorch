@@ -1,6 +1,7 @@
 from typing import Any
 
 import lldb  # type: ignore[import]
+import types
 
 
 def get_target() -> Any:
@@ -24,7 +25,7 @@ class DisableBreakpoints:
         if target.DisableAllBreakpoints() is False:
             print("[-] error: failed to disable all breakpoints.")
 
-    def __exit__(self, etype: Any, evalue: Any, tb: Any) -> None:
+    def __exit__(self, etype: type[BaseException] | None, evalue: BaseException | None, tb: types.TracebackType | None) -> None:
         target = get_target()
 
         if target.EnableAllBreakpoints() is False:

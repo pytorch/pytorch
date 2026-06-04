@@ -24,6 +24,7 @@ from typing_extensions import Self
 
 
 if TYPE_CHECKING:
+    import types
     from collections.abc import Iterator
 
 from torch.utils._traceback import CapturedTraceback
@@ -89,7 +90,7 @@ class MetricsContext:
         self,
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
-        _traceback: Any,
+        _traceback: types.TracebackType | None,
     ) -> None:
         """
         At exit, call the provided on_exit function.

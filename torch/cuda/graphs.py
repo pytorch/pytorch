@@ -23,6 +23,8 @@ except ImportError:
 
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
     from torch.cuda import _POOL_HANDLE
     from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
@@ -468,14 +470,19 @@ class graph:
             check_input_liveness=self.check_input_liveness,
         )
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         if self._enable_annotations:
             from torch.cuda._graph_annotations import resolve_pending_annotations
 
             resolve_pending_annotations()
 
         self.cuda_graph.capture_end()
-        self.stream_ctx.__exit__(*args)
+        self.stream_ctx.__exit__(exc_type, exc_value, traceback)
 
         if self._enable_annotations:
             from torch.cuda._graph_annotations import remap_to_exec_graph

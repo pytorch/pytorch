@@ -219,7 +219,12 @@ class dual_level(_DecoratorContextManager):
     def __enter__(self):
         return enter_dual_level()
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
+    ) -> None:
         exit_dual_level()
 
 
@@ -237,5 +242,10 @@ class _set_fwd_grad_enabled(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: Any,  # noqa: PYI036
+        exc_value: Any,  # noqa: PYI036
+        traceback: Any,  # noqa: PYI036
+    ) -> None:
         torch._C._set_fwd_grad_enabled(self.prev)

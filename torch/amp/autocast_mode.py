@@ -340,7 +340,12 @@ class autocast:
 
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
+    def __exit__(
+        self,
+        exc_type: Any,  # noqa: PYI036
+        exc_val: Any,  # noqa: PYI036
+        exc_tb: Any,  # noqa: PYI036
+    ):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
             return
 

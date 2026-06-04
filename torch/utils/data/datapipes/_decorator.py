@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import inspect
+import types
 from collections.abc import Callable
 from functools import wraps
-from typing import Any, get_type_hints
+from typing import get_type_hints
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
@@ -67,7 +68,12 @@ class guaranteed_datapipes_determinism:
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: types.TracebackType | None,
+    ) -> None:
         global _determinism
         _determinism = self.prev
 
@@ -181,7 +187,12 @@ class runtime_validation_disabled:
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: types.TracebackType | None,
+    ) -> None:
         global _runtime_validation_enabled
         _runtime_validation_enabled = self.prev
 

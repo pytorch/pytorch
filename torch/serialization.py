@@ -25,6 +25,7 @@ from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
 from torch.types import FileLike, Storage
+import types
 
 
 __all__ = [
@@ -259,7 +260,7 @@ class set_default_mmap_options:
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: types.TracebackType | None) -> None:
         from torch.utils.serialization import config
 
         config.load.mmap_flags = self.prev

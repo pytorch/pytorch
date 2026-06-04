@@ -4,6 +4,7 @@ from collections import OrderedDict
 import weakref
 import warnings
 from typing import Any
+import types
 
 __all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
 
@@ -65,7 +66,7 @@ class RemovableHandle:
     def __enter__(self) -> "RemovableHandle":
         return self
 
-    def __exit__(self, type: Any, value: Any, tb: Any) -> None:
+    def __exit__(self, type: type[BaseException] | None, value: BaseException | None, tb: types.TracebackType | None) -> None:
         self.remove()
 
 

@@ -5,6 +5,7 @@
 import functools
 import inspect
 import sys
+import types
 import warnings
 from collections.abc import Callable
 from typing import Any, cast, overload, TypeVar
@@ -148,7 +149,12 @@ class _DecoratorContextManager:
     def __enter__(self) -> None:
         raise NotImplementedError
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: types.TracebackType | None,
+    ) -> None:
         raise NotImplementedError
 
     def clone(self):

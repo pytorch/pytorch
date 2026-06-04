@@ -40,6 +40,7 @@ from types import (
     FunctionType,
     MethodType,
     ModuleType,
+    TracebackType,
 )
 from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import NotRequired, override, Self, TypedDict
@@ -452,7 +453,7 @@ class WritableTempFile:
         )
         return self.temp_file
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None) -> None:
         self.temp_file.close()
         try:
             os.unlink(self.temp_file.name)
@@ -4599,7 +4600,7 @@ class DLLWrapper:
     def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         self.close()
 
     def __del__(self) -> None:
