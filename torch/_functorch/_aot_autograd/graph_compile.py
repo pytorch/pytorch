@@ -90,7 +90,7 @@ from .schemas import (
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
     contain_metadata_mutation_ops,
-    get_cuda_generator_meta_val,
+    get_default_generator,
     make_boxed_func,
     simple_wraps,
     strict_zip,
@@ -221,6 +221,13 @@ def aot_stage1_graph_capture(
             fw_metadata=aot_state.fw_metadata,
         )
     )
+    if aot_config.disable_functionalization:
+        # Effect tokens are introduced by FunctionalTensorMode.  The
+        # disable_functionalization path intentionally traces without the
+        # effect-token wrapper, so metadata-discovered tokens must not affect
+        # graph signatures or forward/backward output partitioning.
+        aot_state.fw_metadata.tokens = {}
+        aot_state.fw_metadata.num_backward_tokens = 0
 
     # NB: This is currently only used for backwards, where fwd/bwd
     # deterministic TLS can be different
@@ -1933,7 +1940,9 @@ def _partition_joint_graph_into_fw_bw(
     ]
     fw_metadata.num_graphsafe_rng_states = len(rng_states)
     if rng_states:
-        fw_metadata.graphsafe_rng_state_index = rng_states[0].meta["val"].device.index
+        rng_device = rng_states[0].meta["val"].device
+        fw_metadata.graphsafe_rng_state_index = rng_device.index
+        fw_metadata.graphsafe_rng_device = rng_device
 
     return fw_module, bw_module, num_inner_fwd_outputs
 
@@ -2758,8 +2767,13 @@ def _aot_stage2b_compile_forward_or_inference(
                 raise AssertionError(
                     "fw_metadata.graphsafe_rng_state_index must not be None when num_graphsafe_rng_states > 0"
                 )
+            device = fw_metadata.graphsafe_rng_device
+            if device is None:
+                raise AssertionError(
+                    "fw_metadata.graphsafe_rng_device must not be None when num_graphsafe_rng_states > 0"
+                )
             rng_states = [
-                get_cuda_generator_meta_val(index)
+                get_default_generator(device).clone_state()
                 for _ in range(fw_metadata.num_graphsafe_rng_states)
             ]
             adjusted_flat_args.extend(rng_states)  # type: ignore[arg-type]
@@ -2772,6 +2786,13 @@ def _aot_stage2b_compile_forward_or_inference(
         if tracing_context := torch._guards.TracingContext.try_get():
             tracing_context.fw_metadata = _get_inner_meta(
                 maybe_subclass_meta, fw_metadata
+            )
+
+        if config.enable_complex_wrapper:
+            from .complex_decomposition import decompose_complex_in_graph
+
+            fw_module = decompose_complex_in_graph(
+                fw_module, adjusted_flat_args, aot_config.decompositions
             )
 
         with TracingContext.report_output_strides() as fwd_output_strides:

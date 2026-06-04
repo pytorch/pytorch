@@ -331,13 +331,7 @@ static PyObject* TensorGuards_new(
 
 static std::vector<std::optional<c10::SymInt>> wrapIntegersInOptional(
     const c10::SymIntArrayRef& intArray) {
-  std::vector<std::optional<c10::SymInt>> optVec(intArray.size());
-  std::transform(
-      intArray.begin(),
-      intArray.end(),
-      optVec.begin(),
-      [](const c10::SymInt& value) { return value; });
-  return optVec;
+  return {intArray.begin(), intArray.end()};
 }
 
 static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
@@ -1578,11 +1572,10 @@ class StorageOverlapChecker {
       size_t size) {
     std::vector<Tensor> tensors;
     tensors.reserve(size);
-    std::transform(
-        objects.begin(),
-        objects.end(),
-        std::back_inserter(tensors),
-        [=](PyObject* obj) { return THPVariable_Unpack(obj); });
+    std::ranges::transform(
+        objects, std::back_inserter(tensors), [](PyObject* obj) {
+          return THPVariable_Unpack(obj);
+        });
     return tensors;
   }
 
@@ -3785,25 +3778,45 @@ class GuardManager {
   }
 
   // Caller must hold dict_to_guard_managers lock.
+  //
+  // This function does two things; they must be gated differently.
+  //
+  // 1) Map cleanup: remove `this` from `map[dict]` for every dict this
+  //    manager watched. Must always run -- including when
+  //    `_disable_dict_tag_matching` is already true -- otherwise a later
+  //    watch callback on a still-live dict would dereference the freed
+  //    manager (heap-use-after-free at the `_disable_dict_tag_matching`
+  //    read in this function).
+  //
+  // 2) PyDict_Unwatch + erase of the dict-keyed map entry: only safe
+  //    when the dict pointer is still alive. The watch callback sets
+  //    `_disable_dict_tag_matching = true` on every event, including
+  //    `PyDict_EVENT_DEALLOCATED`. Once the flag is set, dict pointers
+  //    in our map may have been freed, so PyDict_Unwatch on them would
+  //    crash. When the flag is true, the dict's eventual deallocation
+  //    will tear down the watch automatically; skipping PyDict_Unwatch
+  //    here only loses an early-cleanup optimisation.
   void unwatch_all_saved_dict_pointers(DictToGuardManagersMap& map) {
 #if IS_PYTHON_3_12_PLUS
-    if (!_disable_dict_tag_matching) {
-      for (auto& value_stashed_pointers : _dict_pointers) {
-        auto stashed_pointers = value_stashed_pointers.second;
+    for (auto& value_stashed_pointers : _dict_pointers) {
+      auto stashed_pointers = value_stashed_pointers.second;
 
-        for (auto& stashed_pointer : stashed_pointers) {
-          PyObject* dict_pointer = stashed_pointer.first;
+      for (auto& stashed_pointer : stashed_pointers) {
+        PyObject* dict_pointer = stashed_pointer.first;
+        auto& managers = map[dict_pointer];
 
-          auto it = std::find(
-              map[dict_pointer].begin(), map[dict_pointer].end(), this);
-          if (it != map[dict_pointer].end()) {
-            map[dict_pointer].erase(it);
-          }
+        // (1) Always: remove this manager from the per-dict list.
+        auto it = std::find(managers.begin(), managers.end(), this);
+        if (it != managers.end()) {
+          managers.erase(it);
+        }
 
-          if (map[dict_pointer].empty()) {
-            PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
-            map.erase(dict_pointer);
-          }
+        // (2) Only when the dict is still guaranteed alive: unwatch and
+        // erase the now-empty map entry. The map.erase below invalidates
+        // the `managers` reference, so it must be the last use.
+        if (!_disable_dict_tag_matching && managers.empty()) {
+          PyDict_Unwatch(dict_recursive_tag_watcher_id, dict_pointer);
+          map.erase(dict_pointer);
         }
       }
     }
@@ -3945,7 +3958,11 @@ class GuardManager {
     return GuardDebugInfo(true, num_guards_executed);
   }
 
-  bool has_no_accessors() {
+  bool has_no_leaf_guards() const {
+    return _leaf_guards.empty();
+  }
+
+  bool has_no_accessors() const {
     return _accessors.empty();
   }
 
@@ -4266,18 +4283,25 @@ class RootGuardManager : public GuardManager {
     _epilogue_lambda_guards.emplace_back(std::move(leaf_guard));
   }
 
+  bool has_no_guards() const {
+    return has_no_leaf_guards() && has_no_accessors() &&
+        _epilogue_lambda_guards.empty();
+  }
+
   void set_init_local_state_flag() {
     _init_local_state = true;
   }
 
   // See note on [Ownership with cloning]
-  RootGuardManager* clone_manager(const py::function& clone_filter_fn) {
+  std::unique_ptr<RootGuardManager> clone_manager(
+      const py::function& clone_filter_fn) {
     // Use clone_filter_fn
     if (!py::cast<bool>(clone_filter_fn(this))) {
       return nullptr;
     }
-    RootGuardManager* cloned_root = new RootGuardManager();
-    clone_common(cloned_root, cloned_root, clone_filter_fn);
+    std::unique_ptr<RootGuardManager> cloned_root =
+        std::make_unique<RootGuardManager>();
+    clone_common(cloned_root.get(), cloned_root.get(), clone_filter_fn);
     for (const auto& guard : _epilogue_lambda_guards) {
       cloned_root->_epilogue_lambda_guards.emplace_back(guard);
     }
@@ -5461,9 +5485,10 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "FrameLocalsGuardAccessor(key=" +
-        py::repr(_key).cast<std::string>() +
-        ", framelocals_idx=" + std::to_string(_framelocals_idx) + ")";
+    return fmt::format(
+        "FrameLocalsGuardAccessor(key={}, framelocals_idx={})",
+        py::repr(_key).cast<std::string>(),
+        _framelocals_idx);
   }
 
  public: // cloning functions
@@ -5630,7 +5655,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "ListGetItemGuardAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("ListGetItemGuardAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -5777,7 +5802,7 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "TupleGetItemGuardAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("TupleGetItemGuardAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -5922,8 +5947,8 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
 
   std::string repr() const override {
     // Helpful when printing GuardManager tree structure.
-    return "TensorPropertyGuardAccessor<" + to_string(_prop) + +">(" +
-        std::to_string(_index) + ")";
+    return fmt::format(
+        "TensorPropertyGuardAccessor<{}>({})", to_string(_prop), _index);
   }
 
  public: // cloning functions
@@ -6538,7 +6563,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "TupleIteratorGetItemAccessor(" + std::to_string(_index) + ")";
+    return fmt::format("TupleIteratorGetItemAccessor({})", _index);
   }
 
  public: // cloning functions
@@ -7277,6 +7302,13 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
 #endif
 
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
+}
+
+bool root_guard_manager_has_no_guards(void* root) {
+  if (root == nullptr) {
+    return false;
+  }
+  return ((RootGuardManager*)root)->has_no_guards();
 }
 
 PyObject* torch_c_dynamo_guards_init() {
@@ -8462,10 +8494,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("check", &RootGuardManager::check)
       .def("check_verbose", &RootGuardManager::check_verbose)
       .def("attach_compile_id", &RootGuardManager::attach_compile_id)
-      .def(
-          "clone_manager",
-          &RootGuardManager::clone_manager,
-          py::return_value_policy::reference)
+      .def("clone_manager", &RootGuardManager::clone_manager)
       // return by reference because GuardManager has the ownership of leaf
       // guards
       .def(

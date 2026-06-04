@@ -35,6 +35,7 @@
 #include <torch/csrc/distributed/c10d/NCCLXStub.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -915,7 +916,22 @@ This class does not support ``__members__`` property.)");
             } else {
               return ::c10d::makePreMulSum(t[1].cast<at::Tensor>());
             }
-          }));
+          }))
+      .def_property_readonly(
+          "factor",
+          [](const ::c10d::ReduceOp& self) -> py::object {
+            TORCH_CHECK(
+                self.op_ == ::c10d::ReduceOp::RedOpType::PREMUL_SUM,
+                "Only PREMUL_SUM supports accessing factor");
+            const auto* preMulSupplement =
+                reinterpret_cast<::c10d::PreMulSumSupplement*>(
+                    self.supplement_.get());
+            if (!preMulSupplement->tensor_factor.defined()) {
+              return py::cast(preMulSupplement->double_factor);
+            }
+            return py::cast(preMulSupplement->tensor_factor);
+          },
+          R"(The factor of the PREMUL_SUM ReduceOp.)");
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
@@ -1299,6 +1315,46 @@ Example:
           py::arg("offset"),
           py::arg("val"),
           py::arg("count") = 1);
+
+#ifdef USE_C10D_NCCL
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  // Publish an externally-owned host ncclComm_t (passed as an opaque integer
+  // pointer) into the per-device NCCLDevCommManager under `group_name`, so
+  // NCCLSymmetricMemory can look it up by group name without the comm's
+  // producer being a ProcessGroupNCCL. Producers that aren't ProcessGroupNCCL
+  // (e.g. torchcomms backends) call this from Python to wire their comm into
+  // symmetric memory. The caller retains ownership of the comm's lifetime;
+  // pair this with `_unregister_external_nccl_comm` (see the
+  // `_NcclCommRegistration` wrapper in torch.distributed._symmetric_memory).
+  module.def(
+      "_register_external_nccl_comm",
+      [](const std::string& group_name, int64_t comm_ptr, c10::Device device) {
+        TORCH_CHECK(
+            comm_ptr != 0,
+            "_register_external_nccl_comm: comm_ptr is null for group '",
+            group_name,
+            "'");
+        ::c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
+            group_name, reinterpret_cast<ncclComm_t>(comm_ptr));
+      },
+      py::arg("group_name"),
+      py::arg("comm_ptr"),
+      py::arg("device"));
+
+  // Drop the entry published by `_register_external_nccl_comm` so a successor
+  // producer can register cleanly under the same `group_name`. Safe to call
+  // when nothing is registered. Does not destroy the comm; lifetime stays with
+  // the caller.
+  module.def(
+      "_unregister_external_nccl_comm",
+      [](const std::string& group_name, c10::Device device) {
+        ::c10d::symmetric_memory::NCCLDevCommManager::get(device)
+            .unregister_comm(group_name);
+      },
+      py::arg("group_name"),
+      py::arg("device"));
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#endif // USE_C10D_NCCL
 
   auto store =
       py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
@@ -3825,10 +3881,17 @@ such as `dist.all_reduce(tensor, async_op=True)`.
               })
           .def(
               "exception",
-              [](::c10d::Work& work) -> std::exception_ptr {
+              [](::c10d::Work& work) -> py::object {
                 TORCH_WARN_ONCE(
                     fmt::format(kDeprecationWarning, "Work::exception"));
-                return work.exception();
+                auto eptr = work.exception();
+                if (!eptr) {
+                  return py::none();
+                }
+                // pybind11 can't convert std::exception_ptr (#147312);
+                // hand back a typed Python exception object instead.
+                torch::translate_exception_to_python(eptr);
+                return py::error_already_set().value();
               })
           .def(
               "source_rank",
