@@ -1430,6 +1430,26 @@
       "Hints": []
     }
   ],
+  "GB3011": [
+    {
+      "Gb_type": "unsupported format field",
+      "Context": "field_name: {field_name}, format string: {self.format_string}",
+      "Explanation": "Dynamo only supports splitting simple positional and keyword format fields.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0416": [
+    {
+      "Gb_type": "nested format spec in splitlines",
+      "Context": "format_spec: {format_spec}",
+      "Explanation": "Dynamo does not support splitting format strings with nested replacement fields in the format spec.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0105": [
     {
       "Gb_type": "Tensor.numpy() with trace_numpy=False",
@@ -5610,6 +5630,34 @@
       "Hints": [
         "Detach the input tensor before passing to the compiled function: `tensor.detach().requires_grad_(True)` to make it a leaf tensor.",
         "Or move the autograd.grad() call outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3921": [
+    {
+      "Gb_type": "formatted field may contain line break",
+      "Context": "field_name: {field_name}, format_spec: {format_spec}",
+      "Explanation": "Dynamo cannot split a delayed format string when a formatted field may itself contain line breaks.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3922": [
+    {
+      "Gb_type": "formatted field may be empty in splitlines",
+      "Context": "format string: {self.format_string}",
+      "Explanation": "Dynamo cannot split a delayed format string when the final line may be empty.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "formatted field may be empty in splitlines",
+      "Context": "format string: {format_string}",
+      "Explanation": "Dynamo cannot split a delayed format string when the final line may be empty.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

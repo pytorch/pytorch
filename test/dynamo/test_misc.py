@@ -22,6 +22,7 @@ import random
 import re
 import sys
 import tempfile
+import textwrap
 import threading
 import traceback
 import types
@@ -16037,6 +16038,220 @@ def forward(self, L_x_ : torch.Tensor):
 
         opt = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt(), "1:2:3")
+
+    def test_str_join_with_string_format_dynamic_shape(self):
+        def fn(x):
+            return ", ".join(["static", "{}".format(x.size(0))])
+
+        x = torch.ones(2, 3)
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_textwrap_indent_string_format_dynamic_shape(self):
+        def fn(x):
+            return textwrap.indent(
+                "shape0={}\n\nshape1={}".format(x.size(0), x.size(1)),
+                "     ",
+            )
+
+        x = torch.ones(2, 3)
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_string_format_strip_dynamic_shape_format_spec(self):
+        def fn(x):
+            return "{:>5}".format(x.size(0)).strip()
+
+        x = torch.ones(2, 3)
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_string_format_isspace_dynamic_shape(self):
+        def fn(x):
+            return "{} {}".format(x.size(0), "a").isspace()
+
+        x = torch.ones(2, 3)
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_string_format_invalid_spec_isspace_graph_breaks(self):
+        def fn(x):
+            return "x {:q}".format(x.size(0)).isspace()
+
+        x = torch.ones(2, 3)
+        with self.assertRaisesRegex(ValueError, "Unknown format code 'q'"):
+            fn(x)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(Unsupported, "Unsupported method call"):
+            opt(x)
+
+    def test_string_format_converted_symbolic_precision_graph_breaks(self):
+        def isspace_fn(x):
+            return " {!s:.0}".format(x.size(0)).isspace()
+
+        def bool_fn(x):
+            if "{!s:.0}".format(x.size(0)):
+                return 1
+            return 2
+
+        x = torch.ones(2, 3)
+        self.assertEqual(isspace_fn(x), True)
+        self.assertEqual(bool_fn(x), 2)
+
+        opt = torch.compile(isspace_fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(Unsupported, "Unsupported method call"):
+            opt(x)
+
+        opt = torch.compile(bool_fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(Unsupported, "Data-dependent branching"):
+            opt(x)
+
+    def test_string_format_converted_symbolic_empty_splitlines_graph_breaks(self):
+        def fn(x):
+            return "{!s:.0}".format(x.size(0)).splitlines()
+
+        x = torch.ones(2, 3)
+        self.assertEqual(fn(x), [])
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "formatted field may be empty in splitlines",
+        ):
+            opt(x)
+
+    def test_string_format_custom_strip_truthiness_graph_breaks(self):
+        def fn(x):
+            if "{}".format(x.size(0)).strip("2"):
+                return 1
+            return 2
+
+        x = torch.ones(2, 3)
+        self.assertEqual(fn(x), 2)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(Unsupported, "Data-dependent branching"):
+            opt(x)
+
+    def test_string_format_invalid_spec_truthiness_graph_breaks(self):
+        def fn(x):
+            if "{:q}".format(x.size(0)):
+                return 1
+            return 2
+
+        x = torch.ones(2, 3)
+        with self.assertRaisesRegex(ValueError, "Unknown format code 'q'"):
+            fn(x)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(Unsupported, "Data-dependent branching"):
+            opt(x)
+
+    def test_string_format_invalid_spec_strip_truthiness_graph_breaks(self):
+        def fn(x):
+            if "x{:q}".format(x.size(0)).strip():
+                return 1
+            return 2
+
+        x = torch.ones(2, 3)
+        with self.assertRaisesRegex(ValueError, "Unknown format code 'q'"):
+            fn(x)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(Unsupported, "Data-dependent branching"):
+            opt(x)
+
+    def test_string_format_nested_strip_truthiness_graph_breaks(self):
+        def fn(x):
+            if "x{}".format(x.size(0)).strip("x").strip("2"):
+                return 1
+            return 2
+
+        x = torch.ones(2, 3)
+        self.assertEqual(fn(x), 2)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(Unsupported, "Data-dependent branching"):
+            opt(x)
+
+    def test_textwrap_indent_mixed_format_numbering_raises(self):
+        def auto_then_manual(x):
+            return textwrap.indent("{} {0}".format(x.size(0)), " ")
+
+        x = torch.ones(2, 3)
+        with self.assertRaisesRegex(
+            ValueError,
+            "cannot switch from automatic field numbering to manual field specification",
+        ):
+            auto_then_manual(x)
+
+        opt = torch.compile(
+            auto_then_manual, backend="eager", fullgraph=True, dynamic=True
+        )
+        with self.assertRaisesRegex(
+            Unsupported,
+            "ValueError.*automatic field numbering",
+        ):
+            opt(x)
+
+        def manual_then_auto(x):
+            return textwrap.indent("{0} {}".format(x.size(0), x.size(1)), " ")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "cannot switch from manual field specification to automatic field numbering",
+        ):
+            manual_then_auto(x)
+
+        opt = torch.compile(
+            manual_then_auto, backend="eager", fullgraph=True, dynamic=True
+        )
+        with self.assertRaisesRegex(
+            Unsupported,
+            "ValueError.*manual field specification",
+        ):
+            opt(x)
+
+    def test_textwrap_indent_keyword_field_preserves_auto_numbering(self):
+        def fn(x):
+            return textwrap.indent(
+                "{} {foo}\n{}".format(x.size(0), x.size(1), foo="a"), " "
+            )
+
+        x = torch.ones(2, 3)
+        self.assertEqual(fn(x), " 2 a\n 3")
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(opt(x), fn(x))
+
+    def test_textwrap_indent_formatted_field_linebreak_graph_breaks(self):
+        def fn(x):
+            return textwrap.indent("{} {}".format(x.size(0), "a\nb"), " ")
+
+        x = torch.ones(2, 3)
+        self.assertEqual(fn(x), " 2 a\n b")
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "formatted field may contain line break",
+        ):
+            opt(x)
+
+    def test_string_format_splitlines_constant_linebreak_field_graph_breaks(self):
+        def fn(x):
+            return ("\n" + "{}".format(x.size(0))).splitlines(True)
+
+        x = torch.ones(2, 3)
+        self.assertEqual(fn(x), ["\n", "2"])
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "formatted field may contain line break",
+        ):
+            opt(x)
 
 
 instantiate_parametrized_tests(MiscTests)
