@@ -115,10 +115,6 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         """Create a function to run the NVIDIA Universal GEMM kernel."""
         import cutlass_api
 
-        from torch._inductor.utils import _ensure_fp4_dtype_registered
-
-        _ensure_fp4_dtype_registered()
-
         args = self._create_gemm_arguments(cutlass_api, input_tensors, out)
 
         if self._compiled_artifact is None:
@@ -348,10 +344,6 @@ def _add_nv_gemm_choices_impl(
     """
     import cutlass_api
 
-    from torch._inductor.utils import _ensure_fp4_dtype_registered
-
-    _ensure_fp4_dtype_registered()
-
     from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
         get_compatible_kernels,
     )
@@ -549,6 +541,15 @@ def add_nv_universal_scaled_gemm_choices(
         return
 
     mat_a, mat_b, scale_a, scale_b = input_nodes[:4]
+    if (
+        mat_a.get_dtype() == torch.float4_e2m1fn_x2
+        or mat_b.get_dtype() == torch.float4_e2m1fn_x2
+    ):
+        log.debug(
+            "cutlass_api cannot represent PyTorch's packed FP4 tensor layout; "
+            "skipping NVIDIA Universal Scaled GEMM choices"
+        )
+        return
 
     scale_type_a, swizzle_type_a = infer_scale_swizzle_ir(mat_a, scale_a)
     scale_type_b, swizzle_type_b = infer_scale_swizzle_ir(

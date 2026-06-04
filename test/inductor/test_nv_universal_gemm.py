@@ -87,6 +87,12 @@ def _nvgemm_config(**overrides):
     return cfg
 
 
+def _expected_failure_nvgemm_packed_fp4(fn):
+    # PyTorch stores two FP4 values per byte, but cutlass_api only sees a scalar
+    # FP4 dtype here and cannot represent the packed tensor layout.
+    return unittest.expectedFailure(fn)
+
+
 # TODO(nikhilap): Remove Blackwell restriction once cutlass_api includes H100 kernels
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
@@ -312,6 +318,7 @@ class TestNVUniversalGemm(TestCase):
             (64, 64, 512),
         ),
     )
+    @_expected_failure_nvgemm_packed_fp4
     def test_scaled_gemm_nvf4_padded_scales(self, m, n, k):
         """Test NVF4 with padded scales (M or N < 128).
 
@@ -370,6 +377,7 @@ class TestNVUniversalGemm(TestCase):
             (512, 256, 1024),
         ),
     )
+    @_expected_failure_nvgemm_packed_fp4
     def test_scaled_gemm_nvf4(self, out_dtype, layout_a, m, n, k):
         """Test NVF4 (Float4 + Float8E4M3FN scales, block_size=16) with NVGEMM backend."""
         packed_k = k // 2
