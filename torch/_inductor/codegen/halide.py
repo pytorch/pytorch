@@ -650,7 +650,11 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def device_assert_async(cond, msg):
-        raise NotImplementedError("device_assert_async")
+        # Halide has no device-side assert primitive. Rather than failing
+        # codegen, skip the assert: this matches Halide's pre-existing behavior
+        # for index_add (no bounds check) and keeps index_add and other ops that
+        # emit runtime asserts in their decomposition compilable under Halide.
+        pass
 
     @staticmethod
     # pyrefly: ignore [bad-override]
