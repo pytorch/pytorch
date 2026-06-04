@@ -251,7 +251,7 @@ Welford<T> welford_combine(
   auto new_weight = acc.weight + T(1);
   auto delta = data - acc.mean;
   T new_mean;
-  // use new_index to fecth 1 / new_weight to avoid divisions
+  // use new_index to fetch 1 / new_weight to avoid divisions
   new_mean = acc.mean +
       ((w == nullptr || acc.index >= w->weight_recps.size())
            ? delta / new_weight
@@ -1263,7 +1263,7 @@ void _mm_get_cache_blocking(
     uint32_t L2_cache_size) {
   // See NOTE [CPP GEMM Cache Blocking Algorithm] for the cache blocking
   // algorithm.
-  // TODO(jgong5): cache cache blocking results
+  // TODO(jgong5): cache the cache blocking results
   // TODO: tune the factor here
   float L1_limit_factor = 0.8;
   float L2_limit_factor = 0.5;

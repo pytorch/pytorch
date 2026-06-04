@@ -1088,7 +1088,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
 
-  // Ensure thaht if record is True, the work obj will be enqueued via
+  // Ensure that if record is True, the work obj will be enqueued via
   // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,

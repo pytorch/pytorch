@@ -684,7 +684,7 @@ static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       auto ad = item.a.toGenericDict();
       auto bd = item.b.toGenericDict();
       for (auto& item : ad) {
-        // Dictionaory keys cannot contain List/Dicts that require tags
+        // Dictionary keys cannot contain List/Dicts that require tags
         // so we do not have to check them.
         // Furthermore without ordered dicts it is expensive to find the
         // equivalent key
