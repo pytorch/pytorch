@@ -677,10 +677,10 @@ class TensorVariable(VariableTracker):
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
-        # as_strided_ is excluded because unlike other inplace views (resize_, unsqueeze_, etc.),
-        # it only mutates size/stride metadata without changing storage layout, so the generic
-        # call_method path (wrap_fx_proxy -> get_fake_value -> _sync_if_inplace_mutation)
-        # handles it correctly. See https://github.com/pytorch/pytorch/issues/185888
+        # as_strided_ is excluded because it has a dedicated handler (method_as_strided_)
+        # that traces the op into the graph and registers the mutation. Letting it reach
+        # DelayGraphBreakVariable would incorrectly prevent tracing.
+        # See https://github.com/pytorch/pytorch/issues/185888
         if (
             self.source is not None
             and name != "as_strided_"
@@ -1915,7 +1915,27 @@ class TensorVariable(VariableTracker):
             )
         return None
 
-
+    def method_as_strided_(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> "VariableTracker | None":
+        # Trace as_strided_ into the FX graph and register the mutation.
+        # We intentionally do NOT call wrap_fx_proxy/get_fake_value here because
+        # as_strided_ can change the tensor's rank (e.g. 1D->2D), and the guard
+        # system's produce_guards_verbose assumes the rank of graph inputs is
+        # invariant (constraint_size is sized for the original rank).
+        # AOTAutograd will execute as_strided_ at runtime, correctly propagating
+        # the metadata to the caller.
+        # See https://github.com/pytorch/pytorch/issues/185888
+        tx.output.create_proxy(
+            "call_method",
+            "as_strided_",
+            *proxy_args_kwargs([self, *args], kwargs),
+        )
+        tx.output.side_effects.mutation(self)
+        return self
 
     def method_add_(
         self,
