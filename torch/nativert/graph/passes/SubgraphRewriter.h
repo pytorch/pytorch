@@ -178,23 +178,37 @@ class SubgraphRewriter {
       Graph* graph,
       const std::vector<MatchFilter>& filters);
 
+  /**
+   * Returns a map from every value name in `pattern` (graph inputs and node
+   * outputs) to its corresponding Value* in the pattern graph. Useful when a
+   * MatchFilter or a custom match-driven pass needs to look up matched target
+   * Value*s by their pattern variable name via match.value_map.
+   */
+  static c10::FastMap<std::string, const Value*> computePatternValueMap(
+      const Graph& pattern);
+
+  /**
+   * Returns true if any target node in `match` is already present in
+   * `usedNodes`. Intended for callers that drive their own match loop and need
+   * to skip matches whose nodes have already been consumed by a previously
+   * accepted match in the same pass.
+   */
+  static bool overlapsWithUsedNodes(
+      const Match& match,
+      const std::unordered_set<Node*>& usedNodes);
+
  private:
   std::string name_;
-  std::vector<RewriteRule> patterns_; // The subgraph pattern to match
-  std::unordered_set<Node*> replacedNodes_;
-  std::vector<Value*> valuesToRewrite_;
-  std::unordered_map<const Value*, Value*> valueRewrites_;
+  std::vector<RewriteRule> patterns_{}; // The subgraph pattern to match
+  std::unordered_set<Node*> replacedNodes_{};
+  std::vector<Value*> valuesToRewrite_{};
+  std::unordered_map<const Value*, Value*> valueRewrites_{};
 
   // Helper methods
-  bool overlapsWithUsedNodes(
-      const Match& match,
-      const std::unordered_set<Node*>& replacedNodes);
   void rewriteMatch(
       Graph* graph,
       const Match& match,
       const Graph& pattern,
       const Graph& replacement);
-
-  c10::FastMap<std::string, const Value*> getVmap(const Graph& pattern);
 };
 } // namespace torch::nativert
