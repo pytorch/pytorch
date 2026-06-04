@@ -801,6 +801,14 @@ class CustomOpDef:
 
     def _register_mutation_version_bump(self, schema: _C.FunctionSchema) -> None:
         mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
+        mutated_idx_defaults = tuple(
+            schema.arguments[idx].default_value for idx in mutated_idxs
+        )
+        mutated_key_defaults = {
+            arg.name: arg.default_value
+            for arg in schema.arguments
+            if arg.alias_info is not None and arg.alias_info.is_write and arg.kwarg_only
+        }
 
         is_view = schema._is_view_op()
         if is_view:
@@ -812,12 +820,14 @@ class CustomOpDef:
             after_ADInplaceOrView_keyset = _C._after_ADInplaceOrView_keyset
 
         def adinplaceorview_impl(keyset, *args, **kwargs):
-            all_args, all_kwargs = utils.fill_defaults(schema, args, kwargs)
-
-            for idx in mutated_idxs:
-                increment_version(all_args[idx])
+            # The dispatcher normalizes non-keyword-only arguments into args.
+            # Avoid filling defaults for every schema argument on this hot path.
+            for idx, default in zip(mutated_idxs, mutated_idx_defaults):
+                increment_version(args[idx] if idx < len(args) else default)
             for key in mutated_keys:
-                increment_version(all_kwargs[key])
+                increment_version(
+                    kwargs[key] if key in kwargs else mutated_key_defaults[key]
+                )
             if is_view:
                 # View ops need the C++ fallback for aliasing tracking
                 return original_kernel.call_boxed(keyset, *args, **kwargs)

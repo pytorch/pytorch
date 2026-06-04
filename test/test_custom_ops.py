@@ -3876,6 +3876,59 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(out, x)
         self.assertGreater(out._version, version)
 
+    def test_mutated_version_bump_does_not_fill_all_defaults(self):
+        @torch.library.custom_op(
+            "_torch_testing::mutated_fastpath", mutates_args={"x", "ys"}
+        )
+        def mutated_fastpath(
+            x: Tensor,
+            a: Tensor,
+            b: Tensor,
+            c: Tensor,
+            d: Tensor,
+            ys: List[Tensor],
+        ) -> None:
+            pass
+
+        @torch.library.custom_op(
+            "_torch_testing::mutated_fastpath_out",
+            mutates_args={"out"},
+            tags=torch.Tag.out,
+        )
+        def mutated_fastpath_out(x: Tensor, *, out: Tensor) -> Tensor:
+            out.copy_(x)
+            return out
+
+        x = torch.randn(3)
+        args = [torch.randn(3) for _ in range(4)]
+        ys = [torch.randn(3), torch.randn(3)]
+        out = torch.empty_like(x)
+
+        initial_versions = pytree.tree_map_only(
+            torch.Tensor, lambda t: t._version, (x, ys, out)
+        )
+        with patch(
+            "torch._library.utils.fill_defaults",
+            side_effect=AssertionError("unexpected fill_defaults"),
+        ):
+            mutated_fastpath(
+                x=x,
+                a=args[0],
+                b=args[1],
+                c=args[2],
+                d=args[3],
+                ys=ys,
+            )
+            mutated_fastpath_out(x, out=out)
+        new_versions = pytree.tree_map_only(
+            torch.Tensor, lambda t: t._version, (x, ys, out)
+        )
+
+        self.assertGreater(new_versions[0], initial_versions[0])
+        for new_version, initial_version in zip(new_versions[1], initial_versions[1]):
+            self.assertGreater(new_version, initial_version)
+        self.assertGreater(new_versions[2], initial_versions[2])
+
     def test_mutated_no_warning(self):
         # Run in subprocess since the warning is emitted only once
         script = """\
