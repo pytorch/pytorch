@@ -8,6 +8,8 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/irange.h>
 #include <caffe2/core/timer.h>
+#include <fmt/ostream.h>
+#include <fmt/ranges.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/add_if_then_else.h>
@@ -1621,34 +1623,29 @@ float BlockRunner::benchmark_model(
 
 static bool display_ivalue(const IValue& iv) {
   if (iv.isTensor()) {
-    std::cout << "Tensor " << iv.toTensor().toString() << " {";
-    const auto dims = iv.toTensor().sizes();
-    const auto n_dims = static_cast<uint32_t>(dims.size());
-    for (const auto i : c10::irange(n_dims)) {
-      std::cout << iv.toTensor().sizes()[i];
-      if (n_dims > i + 1) {
-        std::cout << ", ";
-      }
-    }
-    std::cout << "}\n";
+    fmt::print(
+        std::cout,
+        "Tensor {} {{{}}}\n",
+        iv.toTensor().toString(),
+        fmt::join(iv.toTensor().sizes(), ", "));
     return true;
   } else if (iv.isTensorList()) {
-    std::cout << "TensorList {" << iv.toTensorList().size() << "}\n";
+    fmt::print(std::cout, "TensorList {{{}}}\n", iv.toTensorList().size());
     return true;
   } else if (iv.isGenericDict()) {
-    std::cout << "Dict {" << iv.toGenericDict().size() << "}\n";
+    fmt::print(std::cout, "Dict {{{}}}\n", iv.toGenericDict().size());
     return true;
   } else if (iv.isTuple()) {
-    std::cout << "Tuple {" << iv.toTupleRef().elements().size() << "}\n";
+    fmt::print(std::cout, "Tuple {{{}}}\n", iv.toTupleRef().elements().size());
     return true;
   } else if (iv.isInt()) {
-    std::cout << "int {" << iv.toInt() << "}\n";
+    fmt::print(std::cout, "int {{{}}}\n", iv.toInt());
     return true;
   } else if (iv.isBool()) {
-    std::cout << "bool {" << iv.toBool() << "}\n";
+    fmt::print(std::cout, "bool {{{:d}}}\n", iv.toBool());
     return true;
   } else if (iv.isDouble()) {
-    std::cout << "double {" << iv.toDouble() << "}\n";
+    fmt::print(std::cout, "double {{{}}}\n", iv.toDouble());
     return true;
   }
   return false;

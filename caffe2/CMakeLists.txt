@@ -1111,6 +1111,7 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda_linalg PRIVATE
         torch_cpu
         torch_cuda
+        fmt::fmt-header-only
     )
     if($ENV{ATEN_STATIC_CUDA})
     target_link_libraries(torch_cuda_linalg PRIVATE

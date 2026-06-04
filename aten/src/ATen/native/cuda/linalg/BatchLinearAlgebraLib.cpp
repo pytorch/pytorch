@@ -10,6 +10,8 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/irange.h>
 
+#include <fmt/ranges.h>
+
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/TransposeType.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -620,23 +622,14 @@ std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_
 // batches 2, 3, 5  // or
 // batches 2, 3, 5, 7, 11 and other 65535 batches
 std::string _format_non_converging_batches(const std::vector<int64_t>& batches) {
-  std::stringstream ss;
-  const int too_long = 5;
-
-  ss << "batches ";
+  constexpr size_t too_long = 5;
   if (batches.size() <= too_long) {
-    for (const auto i : c10::irange(batches.size() - 1)) {
-      ss << batches[i] << ", ";
-    }
-    ss << batches.back();
-  } else {
-    for (const auto i : c10::irange(too_long)) {
-      ss << batches[i] << ", ";
-    }
-    ss << "and other " << batches.size() - too_long << " batches";
+    return fmt::format("batches {}", fmt::join(batches, ", "));
   }
-
-  return ss.str();
+  return fmt::format(
+      "batches {}, and other {} batches",
+      fmt::join(batches.begin(), batches.begin() + too_long, ", "),
+      batches.size() - too_long);
 }
 
 // This function returns V, not V^H.
