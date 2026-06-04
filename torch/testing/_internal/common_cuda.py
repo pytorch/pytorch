@@ -43,6 +43,7 @@ IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
+IS_SM10X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 10)
 IS_SM12X = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 12)
 
 @contextlib.contextmanager
@@ -67,7 +68,7 @@ def CDNA3OrLater():
     return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
 def CDNA2OrLater():
-    return evaluate_gfx_arch_within(["gfx90a", "gfx942"])
+    return evaluate_gfx_arch_within(["gfx90a", "gfx942", "gfx950"])
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
@@ -178,6 +179,7 @@ def evaluate_platform_supports_fp8():
             for arch in archs:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
+            return False
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
     if torch.xpu.is_available():
@@ -411,15 +413,7 @@ def _check_cusparse_generic_available():
     return not TEST_WITH_ROCM
 
 def _check_hipsparse_generic_available():
-    if not TEST_WITH_ROCM:
-        return False
-    if not torch.version.hip:
-        return False
-
-    rocm_version = str(torch.version.hip)
-    rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
-    rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
-    return not (rocm_version_tuple is None or rocm_version_tuple < (5, 1))
+    return TEST_WITH_ROCM and torch.version.hip is not None
 
 
 TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
@@ -472,9 +466,17 @@ def xfailIfSM89PreCUDA13(func):
     return func
 
 def xfailIfSM100OrLater(func):
+    # SMxxx LazyVals are derived from torch.cuda.get_device_capability(), which
+    # on ROCm reports the gfx-arch major version (e.g. (11, 0) for gfx1100). That
+    # makes SM100OrLater spuriously true on AMD gfx10/11/12, so guard with
+    # TEST_WITH_ROCM to keep the xfail NVIDIA-only.
+    if TEST_WITH_ROCM:
+        return func
     return func if not SM100OrLater else unittest.expectedFailure(func)
 
 def xfailIfSM120OrLater(func):
+    if TEST_WITH_ROCM:
+        return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
 
 def xfailIfSM12X(func):
@@ -482,6 +484,37 @@ def xfailIfSM12X(func):
 
 def xfailIfDistributedNotSupported(func):
     return func if not (IS_MACOS or IS_JETSON) else unittest.expectedFailure(func)
+
+def _xfail_cuda_on_windows_wrapper(test_fn):
+    """Wraps a test to xfail when running on a CUDA device.
+
+    Works for both device-parameterized tests (device_type == "cuda") and plain
+    TestCase CUDA tests (device_type is None). Only passes through for tests
+    explicitly running on a non-CUDA device type (e.g. "cpu", "xpu").
+    """
+    @functools.wraps(test_fn)
+    def wrapper(slf, *args, **kwargs):
+        import pytest
+        device_type = getattr(slf, "device_type", None)
+        if device_type is not None and device_type != "cuda":
+            return test_fn(slf, *args, **kwargs)
+        try:
+            test_fn(slf, *args, **kwargs)
+        except Exception as e:
+            pytest.xfail(f"Expected failure for {test_fn.__name__}: {e}")
+
+        raise AssertionError(f"Test {test_fn.__name__} was expected to fail but succeeded.")
+    return wrapper
+
+
+def xfailCUDAIfSM89OrLaterOnWindows(test_fn):
+    """Mark a CUDA test as expected failure on Windows with SM >= 8.9.
+
+    Works for both device-parameterized tests and plain TestCase CUDA tests.
+    CPU/XPU variants of device-parameterized tests are unaffected.
+    """
+    return _xfail_cuda_on_windows_wrapper(test_fn) if IS_WINDOWS and SM89OrLater else test_fn
+
 
 # When using nvcc from the CUDA toolkit its versuib must be at least the one from ptxas bundled with Triton
 TRITON_PTXAS_VERSION = (12, 8)

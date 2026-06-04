@@ -219,7 +219,7 @@ def _get_storage_alignment() -> int:
     Defaults to 64.
 
     Returns:
-        storage_alginment: int
+        storage_alignment: int
     """
     from torch.utils.serialization import config
 
@@ -817,8 +817,7 @@ class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
             # PyTorchFileWriter only supports ascii filename.
             # For filenames with non-ascii characters, we rely on Python
             # for writing out the file.
-            # pyrefly: ignore [bad-assignment]
-            self.file_stream = io.FileIO(self.name, mode="w")
+            self.file_stream = open(self.name, mode="wb")  # noqa: SIM115
             super().__init__(
                 torch._C.PyTorchFileWriter(  # pyrefly: ignore  # no-matching-overload
                     self.file_stream, get_crc32_options(), _get_storage_alignment()
@@ -1480,10 +1479,10 @@ def load(
     true_values = ["1", "y", "yes", "true"]
     # Add ability to force safe only or non-safe weight loads via environment variables
     force_weights_only_load = (
-        os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0") in true_values
+        os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in true_values
     )
     force_no_weights_only_load = (
-        os.getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "0") in true_values
+        os.getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "0").lower() in true_values
     )
 
     if force_weights_only_load and force_no_weights_only_load:
@@ -1526,6 +1525,38 @@ def load(
 
     if "encoding" not in pickle_load_args:
         pickle_load_args["encoding"] = "utf-8"
+
+    # Check if the file is a safetensors file
+    if _is_path(f):
+        fspath = os.fspath(f)
+        if fspath.endswith(".safetensors"):
+            try:
+                import safetensors.torch  # type: ignore[import-not-found]
+
+                # Convert map_location to a device string for safetensors
+                device = "cpu"
+                if map_location is not None:
+                    if isinstance(map_location, (str, bytes)):
+                        device = str(map_location)
+                    elif isinstance(map_location, torch.device):
+                        device = str(map_location)
+                    elif isinstance(map_location, dict):
+                        raise RuntimeError(
+                            "Loading safetensors file with dict map_location is not supported. "
+                            "Use a device string or torch.device instead."
+                        )
+                    elif callable(map_location):
+                        raise RuntimeError(
+                            "Loading safetensors file with callable map_location is not supported. "
+                            "Use a device string or torch.device instead."
+                        )
+
+                return safetensors.torch.load_file(fspath, device=device)
+            except ImportError as e:
+                raise RuntimeError(
+                    "Attempting to load a safetensors file but safetensors is not installed. "
+                    "Please install safetensors with: pip install safetensors"
+                ) from e
 
     with _open_file_like(f, "rb") as opened_file:
         if _is_zipfile(opened_file):
