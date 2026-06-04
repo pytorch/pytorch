@@ -2,7 +2,9 @@
 import contextlib
 import math
 import random
+import time
 import unittest
+import warnings
 
 import numpy as np
 
@@ -160,6 +162,38 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             res.append(fn(torch.ones(2)))
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
+
+    def test_time_time_unused_no_warning(self):
+        def fn():
+            time.time()
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            self.assertIsNone(opt_fn())
+
+        self.assertFalse(
+            any("time.time" in str(warning.message) for warning in caught_warnings)
+        )
+
+    def test_time_time_runtime_value(self):
+        def fn(x):
+            return x + time.time()
+
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.zeros(())
+
+        before = time.time()
+        res1 = opt_fn(x)
+        between = time.time()
+        res2 = opt_fn(x)
+        after = time.time()
+
+        self.assertTrue(before <= res1.item() <= between)
+        self.assertTrue(between <= res2.item() <= after)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
 
     def test_random_call_with_while_loop(self):
         def fn(x):
