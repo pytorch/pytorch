@@ -104,7 +104,7 @@ ProfilerConfig ProfilerConfig::fromIValue(
       c10::str(
           "Expected exactly ",
           NUM_PROFILER_CFG_IVALUE_IDX,
-          " ivalues to resconstruct ProfilerConfig."));
+          " ivalues to reconstruct ProfilerConfig."));
   return ProfilerConfig(
       static_cast<ProfilerState>(ivalues.get(ProfilerIValueIdx::STATE).toInt()),
       ivalues.get(ProfilerIValueIdx::REPORT_INPUT_SHAPES).toBool(),

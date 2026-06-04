@@ -197,7 +197,7 @@ class TORCH_API StaticRuntimeMetadata : public torch::CustomClassHolder {
   StaticModuleOptions opts_;
 };
 
-/// The static runime supports two execution modes.
+/// The static runtime supports two execution modes.
 ///
 /// Mode 1: single-threaded with no parallelism except for intra-op parallelism
 /// For this mode, you can do either:
