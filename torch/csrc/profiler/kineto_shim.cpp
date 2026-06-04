@@ -10,6 +10,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 
+#include <random>
+
 namespace torch {
 
 namespace profiler::impl::kineto {
@@ -269,13 +271,19 @@ bool collectivesProfilerExists() {
 }
 
 #ifdef USE_KINETO
+static uint64_t generate_unique_id() {
+  thread_local std::mt19937_64 gen(std::random_device{}());
+  thread_local std::uniform_int_distribution<uint64_t> dis;
+  return dis(gen);
+}
+
 static const std::string setTraceID(const std::string& trace_id) {
   if (trace_id.empty()) {
     return "";
   }
   std::stringstream configss;
   configss << "REQUEST_TRACE_ID=" << trace_id << '\n';
-  configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << '\n';
+  configss << "REQUEST_GROUP_TRACE_ID=" << generate_unique_id() << '\n';
   return configss.str();
 }
 
