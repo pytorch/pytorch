@@ -1698,7 +1698,6 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
 
 
 @register_decomposition(aten.native_group_norm_backward)
-@pw_cast_for_opmath
 def native_group_norm_backward(
     grad_output: Tensor | None,
     input: Tensor,
