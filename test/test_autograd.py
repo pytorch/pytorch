@@ -9757,6 +9757,10 @@ for shape in [(1,), ()]:
         self._do_test_autograd_simple_views_python(torch.double)
         self._do_test_autograd_simple_views_python(torch.cdouble)
 
+    @skipIfTorchDynamo(
+        "as_strided_ is now traced by Dynamo; autograd creation_meta "
+        "error checks are not triggered during tracing"
+    )
     def test_autograd_inplace_views_creation_meta(self):
         # Tests creation_meta properly handled for inplace views
 
