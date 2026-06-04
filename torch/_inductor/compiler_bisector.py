@@ -447,7 +447,7 @@ class CompilerBisector:
     @classmethod
     def advance_backend(cls, curr_backend: str) -> str | None:
         """
-        Tries Move to the next backend.
+        Tries to move to the next backend.
         """
         current_system_index = list(BACKENDS.keys()).index(curr_backend)
 

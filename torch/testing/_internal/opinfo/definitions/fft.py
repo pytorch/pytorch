@@ -553,7 +553,7 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
-        # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archss
+        # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half),
         check_batched_grad=False,
         check_batched_gradgrad=False,

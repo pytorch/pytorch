@@ -395,7 +395,7 @@ namespace impl {
 namespace {
 
 // If run_jit_decomposition were not a member function, we would be able
-// to pass this as a template parameter to c10::Boxedkernel::makeFromFunction.
+// to pass this as a template parameter to c10::BoxedKernel::makeFromFunction.
 // However, member functions cannot be passed this way - instead we wrap our
 // call in this functor so it can be passed to c10::BoxedKernel::makeFromFunctor
 class WrapperFunctor final : public c10::OperatorKernel {

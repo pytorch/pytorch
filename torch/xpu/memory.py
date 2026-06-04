@@ -601,7 +601,7 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
     Args:
         pool(torch.xpu.MemPool): a :class:`MemPool` object to be made active so that
             allocations route to this pool.
-        device (torch.device or int, optional): selected device. Uses :class:`MemPool on
+        device (torch.device or int, optional): selected device. Uses :class:`MemPool` on
             the current device, given by :func:`~torch.xpu.current_device`,
             if :attr:`device` is ``None`` (default).
 

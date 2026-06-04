@@ -68,8 +68,8 @@ class ExprPrinter(StrPrinter):
     # any explicit intervention.  We print it just like x * x, notably, we
     # never generate sympy.Pow with floats.
     #
-    # NB: this pow by natural, you should never have used builtin sympy.pow
-    # for FloatPow, and a symbolic exponent should be PowByNatural.  These
+    # NB: this is pow by natural, you should never have used builtin sympy.pow
+    # for FloatPow, and a symbolic exponent should be PowByNatural.  This
     # means exp is guaranteed to be integer.
     def _print_Pow(self, expr: sympy.Expr) -> str:
         base, exp = expr.args
