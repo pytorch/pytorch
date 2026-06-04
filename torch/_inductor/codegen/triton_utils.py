@@ -106,7 +106,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
         elif isinstance(arg.expr, bool):
             return "i1"
 
-        # if this is a integer
+        # if this is an integer
         if size_dtype == "tl.int32":
             return "i32"
         elif size_dtype == "tl.int64":
