@@ -12,12 +12,12 @@ from torch._C import FileCheck
 from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
     all_gather_into_tensor_coalesced,
-    all_gather_tensor,
+    all_gather_single,
     all_reduce,
     all_reduce_coalesced,
     all_to_all_single,
     AsyncCollectiveTensor,
-    reduce_scatter_tensor,
+    reduce_scatter_single,
     reduce_scatter_tensor_coalesced,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
@@ -223,7 +223,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError("Expected output to equal expect")
 
         # Test Python API and AsyncCollectiveTensor
-        output = all_gather_tensor(
+        output = all_gather_single(
             input,
             0,
             "default",
@@ -244,7 +244,7 @@ class TestWithNCCL(DistributedTestBase):
 
         with torch.inference_mode():
             input = torch.full((2, 2), float(self.rank), device=self.device)
-            out1 = funcol.all_gather_tensor(
+            out1 = funcol.all_gather_single(
                 input, gather_dim=0, group=torch.distributed.group.WORLD
             )
             out2 = out1.to(dtype=torch.bfloat16)
@@ -386,7 +386,7 @@ class TestWithNCCL(DistributedTestBase):
             raise AssertionError(f"Expected output to equal {self.rank}")
 
         # Test Python API and AsyncCollectiveTensor
-        output = reduce_scatter_tensor(
+        output = reduce_scatter_single(
             input,
             "avg",
             0,
@@ -618,10 +618,10 @@ class TestWithNCCL(DistributedTestBase):
         def fp8_rowwise_backward(in_, w, out_grad):
             out_grad_fp8, scale_out_grad = scale(out_grad)
             w_fp8, scale_w = scale(w.t().contiguous())
-            out_grad_fp8 = funcol.all_gather_tensor(
+            out_grad_fp8 = funcol.all_gather_single(
                 out_grad_fp8, gather_dim=0, group=torch.distributed.group.WORLD
             )
-            scale_out_grad = funcol.all_gather_tensor(
+            scale_out_grad = funcol.all_gather_single(
                 scale_out_grad, gather_dim=0, group=torch.distributed.group.WORLD
             )
             in_grad = torch._scaled_mm(
@@ -632,7 +632,7 @@ class TestWithNCCL(DistributedTestBase):
                 out_dtype=torch.bfloat16,
             )
 
-            out_grad = funcol.all_gather_tensor(
+            out_grad = funcol.all_gather_single(
                 out_grad.t().contiguous(),
                 gather_dim=0,
                 group=torch.distributed.group.WORLD,
@@ -844,7 +844,7 @@ class PyWorkTest(TestCase):
         self.assertEqual(pg.dels, 2)
 
         x = torch.rand(2, 2)
-        x = funcol.all_gather_tensor(x, 0, group=pg)
+        x = funcol.all_gather_single(x, 0, group=pg)
         gc.collect()
         self.assertEqual(pg.dels, 2)
         x.wait()
@@ -852,7 +852,7 @@ class PyWorkTest(TestCase):
         self.assertEqual(pg.dels, 3)
 
         x = torch.rand(2, 2)
-        x = funcol.reduce_scatter_tensor(x, "sum", 0, group=pg)
+        x = funcol.reduce_scatter_single(x, "sum", 0, group=pg)
         gc.collect()
         self.assertEqual(pg.dels, 3)
         x.wait()
@@ -1183,7 +1183,7 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_all_gather_into_tensor_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
-            ag0 = funcol.all_gather_tensor(arg, 0, "0")
+            ag0 = funcol.all_gather_single(arg, 0, "0")
             ag0 = funcol.wait_tensor(ag0)
             return ag0
 
@@ -1292,7 +1292,7 @@ class CompileTest(TestCase):
     @fresh_cache()
     def test_inductor_reduce_scatter_tensor_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
-            rs0 = funcol.reduce_scatter_tensor(arg, "avg", 0, "0")
+            rs0 = funcol.reduce_scatter_single(arg, "avg", 0, "0")
             rs0 = funcol.wait_tensor(rs0)
             return rs0
 
