@@ -161,6 +161,10 @@ VECTORIZABLE_DTYPES: list[torch.dtype] = [
 ]
 
 
+def _arg_reduction_value_dtype(dtype: torch.dtype) -> torch.dtype:
+    return torch.uint8 if dtype == torch.bool else dtype
+
+
 def reduction_init(reduction_type, dtype):
     if dtype in DTYPE_LOWP_FP:
         # Since load promotes all half-precision inputs to float, the initial
@@ -171,17 +175,20 @@ def reduction_init(reduction_type, dtype):
     if reduction_type == "prod":
         return 1
     if reduction_type in ("max", "argmax", "min", "argmin"):
-        cdtype = DTYPE_TO_CPP[dtype]
-        if dtype == torch.bool and reduction_type in ("argmin", "argmax"):
-            cdtype = DTYPE_TO_CPP[torch.float]
+        compute_dtype = (
+            _arg_reduction_value_dtype(dtype)
+            if reduction_type in ("argmin", "argmax")
+            else dtype
+        )
+        cdtype = DTYPE_TO_CPP[compute_dtype]
         min_var = (
             f"-std::numeric_limits<{cdtype}>::infinity()"
-            if is_float_dtype(dtype)
+            if is_float_dtype(compute_dtype)
             else f"std::numeric_limits<{cdtype}>::min()"
         )
         max_var = (
             f"std::numeric_limits<{cdtype}>::infinity()"
-            if is_float_dtype(dtype)
+            if is_float_dtype(compute_dtype)
             else f"std::numeric_limits<{cdtype}>::max()"
         )
         init_var = min_var if reduction_type in ("max", "argmax") else max_var
@@ -201,7 +208,7 @@ def reduction_acc_type(reduction_type, dtype):
         return f"Welford<{scalar_type}>"
     if reduction_type in ("argmin", "argmax"):
         if dtype == torch.bool:
-            scalar_type = DTYPE_TO_CPP[torch.float]
+            scalar_type = DTYPE_TO_CPP[_arg_reduction_value_dtype(dtype)]
         return f"IndexValue<{scalar_type}>"
     return scalar_type
 
@@ -246,11 +253,12 @@ def reduction_combine(
             and next_value.dtype == torch.bool
             and not next_value.is_vec
         ):
+            compute_type = DTYPE_TO_CPP[_arg_reduction_value_dtype(next_value.dtype)]
             if index is not None:
-                return f"{reduction_type}_combine({var}, static_cast<float>({next_value}), {index})"
+                return f"{reduction_type}_combine({var}, static_cast<{compute_type}>({next_value}), {index})"
             else:
                 return (
-                    f"{reduction_type}_combine({var}, static_cast<float>({next_value}))"
+                    f"{reduction_type}_combine({var}, static_cast<{compute_type}>({next_value}))"
                 )
         if index is not None:
             return f"{reduction_type}_combine({var}, {next_value}, {index})"
@@ -2736,6 +2744,7 @@ class CppVecKernel(CppKernel):
         tiling_factor,
         tiling_idx,
         tail_size=None,
+        use_bool_arg_reduction_loads=False,
     ):
         super().__init__(args, num_threads)
         self.vec_isa = cpu_vec_isa.pick_vec_isa()
@@ -2745,6 +2754,7 @@ class CppVecKernel(CppKernel):
         self.tiling_idx = tiling_idx
         self.tail_size = tail_size
         self.num_elems = tail_size if tail_size else tiling_factor
+        self.use_bool_arg_reduction_loads = use_bool_arg_reduction_loads
 
     def _try_get_const_stride(self, index: sympy.Expr, itervar: sympy.Symbol):
         if self.index_indirect_depends_on(index, itervar):
@@ -2818,7 +2828,14 @@ class CppVecKernel(CppKernel):
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
         if dtype == torch.bool:
             # TODO: should we consider load mask here?
-            line = f"{self._get_mask_type()}::from({loadbuf}, {cexpr_index(self.num_elems)})"
+            if self.use_bool_arg_reduction_loads:
+                line = (
+                    f"{self._get_vec_type(torch.uint8)}::loadu("
+                    f"reinterpret_cast<const uint8_t*>({loadbuf}), "
+                    f"{cexpr_index(self.num_elems)})"
+                )
+            else:
+                line = f"{self._get_mask_type()}::from({loadbuf}, {cexpr_index(self.num_elems)})"
         else:
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
@@ -2982,7 +2999,12 @@ class CppVecKernel(CppKernel):
         elif stride == 1:
             # load contiguously
             line = self._get_vec_load_line(var, index, dtype, self._load_mask)  # type: ignore[arg-type]
-            csevar = self.cse.generate(self.loads, line, dtype=dtype)  # type: ignore[assignment]
+            csevar_dtype = (
+                torch.uint8
+                if dtype == torch.bool and self.use_bool_arg_reduction_loads
+                else dtype
+            )
+            csevar = self.cse.generate(self.loads, line, dtype=csevar_dtype)  # type: ignore[assignment]
         else:
             csevar = self._load_or_store_non_contiguous(var, index, dtype)  # type: ignore[assignment]
         assert isinstance(csevar, CppCSEVariable)
@@ -3090,8 +3112,10 @@ class CppVecKernel(CppKernel):
         Returns:
             The result of the reduction operation
         """
-        # Note: For argmax and argmin on bool type, we always convert bool to float.
-        # Fix issue: https://github.com/pytorch/pytorch/issues/143568
+        # For bool argmax/argmin, keep CPU C++ values byte-sized rather than
+        # widening the whole reduction at lowering time.
+        # Fix issues: https://github.com/pytorch/pytorch/issues/143568 and
+        # https://github.com/pytorch/pytorch/issues/184893
         assert reduction_type in VECTORIZABLE_RTYPES
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
         logical_index = None
@@ -3409,20 +3433,23 @@ class CppVecKernel(CppKernel):
             return f"Welford<{vec_type}>()"
 
         if reduction_type in ("argmin", "argmax"):
-            # For bool argmin/argmax, we use float for computations
-            compute_dtype = torch.float if dtype == torch.bool else scalar_type
+            compute_dtype = (
+                _arg_reduction_value_dtype(dtype)
+                if dtype == torch.bool
+                else scalar_type
+            )
             cdtype = DTYPE_TO_CPP[compute_dtype]
             acc_type = self.reduction_acc_type_vec(reduction_type, dtype)
             if reduction_type == "argmin":
                 val = (
                     f"std::numeric_limits<{cdtype}>::infinity()"
-                    if is_float_dtype(dtype) or dtype == torch.bool
+                    if is_float_dtype(compute_dtype)
                     else f"std::numeric_limits<{cdtype}>::max()"
                 )
             else:
                 val = (
                     f"-std::numeric_limits<{cdtype}>::infinity()"
-                    if is_float_dtype(dtype) or dtype == torch.bool
+                    if is_float_dtype(compute_dtype)
                     else f"std::numeric_limits<{cdtype}>::min()"
                 )
             return f"{acc_type}({val})"
@@ -3445,10 +3472,9 @@ class CppVecKernel(CppKernel):
         if reduction_type in ("argmin", "argmax"):
             n_idx = self._get_num_vectors(torch.int64)
             if dtype == torch.bool:
-                # For bool argmin/argmax, we use float for computations
-                # so n_src must be computed from float, not bool
-                n_src = self._get_num_vectors(torch.float)
-                return f"IndexValueVec<{DTYPE_TO_CPP[torch.float]}, {n_src}, {n_idx}>"
+                compute_dtype = _arg_reduction_value_dtype(dtype)
+                n_src = self._get_num_vectors(compute_dtype)
+                return f"IndexValueVec<{DTYPE_TO_CPP[compute_dtype]}, {n_src}, {n_idx}>"
             n_src = self._get_num_vectors(scalar_type)
             return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
         if dtype == torch.bool:
@@ -3535,12 +3561,17 @@ class CppVecKernel(CppKernel):
             cdtype = DTYPE_TO_CPP[src_dtype]
             compute_dtype = src_dtype
             if src_dtype == torch.bool:
-                # For bool argmin/argmax, we use float for computations
-                cdtype = DTYPE_TO_CPP[torch.float]
-                compute_dtype = torch.float
-                # Convert bool VecMask to float vector for argmax_combine_vec
-                if isinstance(next_value, CppCSEVariable) and next_value.is_vec:
-                    (next_value,) = unify_mask_base_type(self.compute, (next_value,))
+                compute_dtype = _arg_reduction_value_dtype(src_dtype)
+                cdtype = DTYPE_TO_CPP[compute_dtype]
+                # Convert bool VecMask to byte vector for argmax_combine_vec.
+                if (
+                    isinstance(next_value, CppCSEVariable)
+                    and next_value.is_vec
+                    and next_value.dtype == torch.bool
+                ):
+                    (next_value,) = unify_mask_base_type(
+                        self.compute, (next_value,), compute_dtype
+                    )
             n_src = self._get_num_vectors(compute_dtype)
             n_idx = self._get_num_vectors(torch.int64)
             t_extra = ""
@@ -3685,6 +3716,7 @@ class CppTile2DKernel(CppVecKernel):
         tiling_indices,
         inner_tail_size=None,
         outer_tail_size=None,
+        use_bool_arg_reduction_loads=False,
     ):
         super().__init__(
             args,
@@ -3692,6 +3724,7 @@ class CppTile2DKernel(CppVecKernel):
             tiling_factor,
             tiling_indices[1],
             inner_tail_size,
+            use_bool_arg_reduction_loads,
         )
         self.tiling_indices = tiling_indices
         self.inner_tail_size = inner_tail_size
@@ -3934,6 +3967,39 @@ class KernelOpStats:
     mask_op_count: int = 0
 
 
+def _uses_bool_arg_reduction_tiling(fn_list) -> bool:
+    if not fn_list or not all(
+        isinstance(fn, functools.partial) and fn.args for fn in fn_list
+    ):
+        return False
+
+    scheduler_nodes = [fn.args[0] for fn in fn_list]
+    return all(
+        node.is_reduction()
+        and getattr(node.node.data, "src_dtype", None) == torch.bool
+        and getattr(node.node.data, "reduction_type", None) in ("argmin", "argmax")
+        for node in scheduler_nodes
+    )
+
+
+def _pick_tiling_dtype(
+    all_dtypes: OrderedSet[torch.dtype],
+    fn_list,
+) -> torch.dtype:
+    if all_dtypes and all(dtype in (torch.bool, torch.int64) for dtype in all_dtypes):
+        if _uses_bool_arg_reduction_tiling(fn_list):
+            return torch.uint8
+
+    return torch.float
+
+
+def _tiling_factor_for_dtype(dtype: torch.dtype) -> int:
+    vec_isa = cpu_vec_isa.pick_vec_isa()
+    if dtype == torch.uint8:
+        return vec_isa.bit_width() // 8
+    return vec_isa.nelements(dtype=dtype)
+
+
 class TilingSelect:
     """
     Implement the heuristic to select the tiling factors and tiling indices.
@@ -3951,7 +4017,7 @@ class TilingSelect:
         assert all_dtypes
         if any(dtype not in VECTORIZABLE_DTYPES for dtype in all_dtypes):
             return [], [], KernelOpStats()
-        dtype = torch.float
+        dtype = _pick_tiling_dtype(all_dtypes, fn_list)
         _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])[0]
         if _lowp_fp_dtype and all(
             (get_loop_body_lowp_fp(loop_body)[0] == _lowp_fp_dtype)
@@ -3959,7 +4025,7 @@ class TilingSelect:
         ):
             dtype = _lowp_fp_dtype
 
-        tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype)
+        tiling_factor = _tiling_factor_for_dtype(dtype)
         tiling_indices = self._select_tiling_indices(
             fn_list, var_sizes_list, tiling_factor
         )
@@ -4525,6 +4591,7 @@ class CppKernelProxy(CppKernel):
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
+            use_bool_arg_reduction_loads = _uses_bool_arg_reduction_tiling(fn_list)
             tiling_select = TilingSelect()
             tiling_factors, tiling_indices, tiling_stats = tiling_select.select_tiling(
                 fn_list, var_sizes_list
@@ -4575,7 +4642,11 @@ class CppKernelProxy(CppKernel):
                 metrics.generated_cpp_vec_kernel_count += 1
                 loop = self.loop_nest.tile(tiling_indices[0], factor=tiling_factors[0])
                 vec_kernel = codegen_kernel(
-                    self.vec_kernel_cls, tiling_factors[0], tiling_indices[0]
+                    self.vec_kernel_cls,
+                    tiling_factors[0],
+                    tiling_indices[0],
+                    None,
+                    use_bool_arg_reduction_loads,
                 )
                 tail_size = loop.size - loop.tiled_size
                 vec_kernel.active_ranges = {loop.var: (0, loop.tiled_size)}
@@ -4587,6 +4658,7 @@ class CppKernelProxy(CppKernel):
                         tiling_factors[0],
                         tiling_indices[0],
                         tail_size,
+                        use_bool_arg_reduction_loads,
                     )
                 else:
                     tail_kernel = scalar_kernel
@@ -4622,6 +4694,9 @@ class CppKernelProxy(CppKernel):
                     self.tile2d_kernel_cls,
                     tiling_factors[0],
                     tiling_indices,
+                    None,
+                    None,
+                    use_bool_arg_reduction_loads,
                 )
                 tile2d_kernel.active_ranges = {
                     outer_loop.var: outer_ranges["main"],
@@ -4648,6 +4723,7 @@ class CppKernelProxy(CppKernel):
                             tiling_indices,
                             _inner_tail_size,
                             _outer_tail_size,
+                            use_bool_arg_reduction_loads,
                         )
                         kernel.active_ranges = {
                             outer_loop.var: outer_ranges[outer_r],
@@ -4656,7 +4732,11 @@ class CppKernelProxy(CppKernel):
                         tail_kernel.append(kernel)
                 else:
                     vec_kernel = codegen_kernel(
-                        self.vec_kernel_cls, tiling_factors[0], tiling_indices[0]
+                        self.vec_kernel_cls,
+                        tiling_factors[0],
+                        tiling_indices[0],
+                        None,
+                        use_bool_arg_reduction_loads,
                     )
                     vec_kernel.active_ranges = {
                         outer_loop.var: outer_ranges["main"],

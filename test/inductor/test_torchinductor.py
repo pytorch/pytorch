@@ -12497,6 +12497,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 (2, 32),
                 (7, 32),
                 (32, 32),
+                # Tail shapes exercise bool min/max value reductions together
+                # with arg reductions. This catches CPU C++ vector tail codegen
+                # that is only valid for arg reductions but accidentally affects
+                # bool value reductions.
+                (9, 33),
+                (17, 19),
+                (7, 31),
+                (2, 127),
             )
 
         for seed, shape in enumerate(shapes, start=2):

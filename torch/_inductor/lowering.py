@@ -6949,17 +6949,15 @@ def make_reduction(
 ) -> Callable[..., TensorBox]:
     def inner(x, axis=None, keepdims=False, *, dtype=None) -> TensorBox:
         # For argmax/argmin on boolean tensors, cast to int32 first to ensure
-        # correct comparison in Triton and CPU C++ vectorized reductions.
+        # correct comparison in Triton. CPU C++ handles bool arg reductions in
+        # codegen so it can keep byte-sized values instead of widening at lowering.
         # See https://github.com/pytorch/pytorch/issues/174069 and
         # https://github.com/pytorch/pytorch/issues/184893.
         # Do not apply this generically; MPS handles bool comparisons natively.
         if (
             reduction_type in ("argmax", "argmin")
             and x.get_dtype() == torch.bool
-            and (
-                is_triton(x)
-                or (ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp")
-            )
+            and is_triton(x)
         ):
             x = to_dtype(x, torch.int32)
         kwargs = _make_reduction_inner(
