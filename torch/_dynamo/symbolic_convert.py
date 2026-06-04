@@ -183,7 +183,6 @@ from .variables.lists import (
 from .variables.misc import (
     CellVariable,
     ExceptionVariable,
-    GetAttrVariable,
     NullVariable,
     PythonModuleVariable,
     TracebackVariable,
@@ -950,11 +949,6 @@ def generic_jump(
                     "object with non-constant truthiness.",
                     hints=[],
                 )
-        elif not value.is_tensor() and value.has_unpack_var_sequence(self):
-            if truth_fn(len(value.unpack_var_sequence(self))):
-                if push:
-                    self.push(value)
-                self.jump(inst)
         elif isinstance(value, SymNodeVariable):
             try:
                 # if the user is branching on a SymBool, guard on it
@@ -971,6 +965,12 @@ def generic_jump(
                     return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")
                 raise
             if truth_fn(eval_result):
+                if push:
+                    self.push(value)
+                self.jump(inst)
+        elif not value.is_tensor():
+            result = generic_bool(self, value)  # type: ignore[arg-type]
+            if truth_fn(result):
                 if push:
                     self.push(value)
                 self.jump(inst)
@@ -4028,14 +4028,7 @@ class InstructionTranslatorBase(
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
-        if seq.is_tensor():
-            val = seq.unpack_var_sequence(self, idxes=range(inst.argval))  # type: ignore[arg-type]
-        elif isinstance(seq, GetAttrVariable) and seq.obj.is_tensor():
-            # x, y = a.shape
-            proxy = getattr(seq.obj.as_proxy(), seq.name)
-            val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
-        else:
-            val = unpack_iterable(self, seq)
+        val = unpack_iterable(self, seq)
         if len(val) < inst.argval:
             raise_value_error(
                 self,

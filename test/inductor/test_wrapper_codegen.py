@@ -54,8 +54,46 @@ class TestPythonWrapperCodegen(TestCase):
         with V.set_graph_handler(graph):
             wrapper.codegen_input_symbol_assignment("arg0_1", s0, bound_vars)
 
-        self.assertEqual(wrapper.prefix.getvalue().strip(), "s1 = arg0_1")
-        self.assertEqual(list(bound_vars), [s1])
+        self.assertExpectedInline(
+            wrapper.prefix.getvalue().strip(),
+            """\
+s1 = arg0_1
+s0 = arg0_1""",
+        )
+        self.assertEqual(list(bound_vars), [s1, s0])
+
+    def test_explicit_symbol_input_assignment_preserves_raw_symbol(self):
+        wrapper = self._new_wrapper()
+        bound_vars = OrderedSet()
+        s0 = sympy.Symbol("s0")
+        s1 = sympy.Symbol("s1")
+        graph = self._graph_with_sizevars()
+        graph.sizevars.simplify = lambda x: x.xreplace({s0: s1})
+
+        with V.set_graph_handler(graph):
+            wrapper.codegen_input_symbol_assignment("arg0_1", s1, bound_vars)
+            wrapper.codegen_input_symbol_assignment("arg1_1", s0, bound_vars)
+
+        self.assertExpectedInline(
+            wrapper.prefix.getvalue().strip(),
+            """\
+s1 = arg0_1
+s0 = arg1_1""",
+        )
+        self.assertEqual(list(bound_vars), [s1, s0])
+
+    def test_explicit_symbol_input_assignment_preserves_static_raw_symbol(self):
+        wrapper = self._new_wrapper()
+        bound_vars = OrderedSet()
+        s0 = sympy.Symbol("s0")
+        graph = self._graph_with_sizevars()
+        graph.sizevars.simplify = lambda x: x.xreplace({s0: sympy.Integer(8)})
+
+        with V.set_graph_handler(graph):
+            wrapper.codegen_input_symbol_assignment("arg0_1", s0, bound_vars)
+
+        self.assertEqual(wrapper.prefix.getvalue().strip(), "s0 = arg0_1")
+        self.assertEqual(list(bound_vars), [s0])
 
     def test_tensor_input_does_not_bind_size_or_stride_symbols(self):
         wrapper = self._new_wrapper()

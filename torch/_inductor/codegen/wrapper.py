@@ -2379,12 +2379,19 @@ class PythonWrapperCodegen(CodeGen):
         bound_vars: OrderedSet[sympy.Symbol],
     ):
         if isinstance(value, sympy.Expr):
-            value = V.graph.sizevars.simplify(value)
-            if not isinstance(value, sympy.Symbol) or value in bound_vars:
+            raw_value = value
+            value = V.graph.sizevars.simplify(raw_value)
+            if isinstance(value, sympy.Symbol) and value not in bound_vars:
+                self.prefix.writeline(f"{value} = {name}")
+                bound_vars.add(value)
+                self.maybe_emit_replacement_aliases(value, bound_vars)
+            if isinstance(raw_value, sympy.Symbol):
+                if raw_value not in bound_vars:
+                    self.prefix.writeline(f"{raw_value} = {name}")
+                    bound_vars.add(raw_value)
                 return
-            self.prefix.writeline(f"{value} = {name}")
-            bound_vars.add(value)
-            self.maybe_emit_replacement_aliases(value, bound_vars)
+            if not isinstance(value, sympy.Symbol):
+                return
         elif isinstance(
             value,
             (

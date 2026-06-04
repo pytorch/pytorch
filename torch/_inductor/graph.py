@@ -38,7 +38,6 @@ from torch._prims_common import (
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     _get_placeholder_expr,
     free_unbacked_symbols,
@@ -179,11 +178,6 @@ def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> torch.dtype | 
         return torch.float32
     else:
         return None
-
-
-def is_magic_method(op: Any) -> bool:
-    magic_ops = OrderedSet(method_to_operator(m) for m in magic_methods)
-    return op in magic_ops
 
 
 def getattr_recursive(
@@ -1291,12 +1285,6 @@ class GraphLowering(torch.fx.Interpreter):
             return None
         # See note: Note: [Generator arguments in AOTDispatcher]
         elif isinstance(example, torch.Generator):
-            assert len(V.graph.current_node.users) == 1 and next(
-                iter(V.graph.current_node.users)
-            ).target in (
-                torch._prims.rng_prims.graphsafe_run_with_rng_state,
-                torch.ops.higher_order.invoke_subgraph,
-            )
             gen = ir.GeneratorState(name=target, device=example.device)
             self.graph_inputs[target] = gen  # type: ignore[assignment]
             self.graph_input_names.append(target)
@@ -1938,17 +1926,6 @@ class GraphLowering(torch.fx.Interpreter):
                     raise RuntimeError(
                         f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
                     )
-            elif is_magic_method(n.target):
-                # TODO: this is sus, it probably should be handled in the
-                # lowerings themselves similarly to sym_size/sym-stride
-                # https://github.com/pytorch/pytorch/issues/127789
-                debug("is_magic_method")
-                if isinstance(
-                    n.meta["val"], (torch.SymInt, torch.SymFloat, torch.SymBool)
-                ):
-                    result = n.meta["val"].node.expr
-                else:
-                    result = super().run_node(n)
             else:
                 debug("")
                 result = super().run_node(n)
