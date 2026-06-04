@@ -3270,6 +3270,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         prev_node_1: BaseSchedulerNode | None = None,
         prev_node_2: BaseSchedulerNode | None = None,
         enable_autotune: bool = False,
+        per_subkernel_blocks: bool = False,
     ) -> None:
         self.read_to_node = {}
         self.name_to_node = {}
@@ -3339,6 +3340,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.group = (device, ((sympy.Expr("combo_kernel"),),))
         self.origins = OrderedSet[torch.fx.Node]()
         self.enable_autotune = enable_autotune
+        self.per_subkernel_blocks = per_subkernel_blocks
 
     @classmethod
     def combinable_nodes(
@@ -5357,8 +5359,10 @@ class Scheduler:
 
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
-                future_choices: list[tuple[Any, LambdaFuture | None, ModuleType]] = []
                 for hint_override in config.multi_kernel_hints:
+                    future_choices: list[
+                        tuple[Any, LambdaFuture | None, ModuleType]
+                    ] = []
                     choice_timings = multi_node.choice_timings(hint_override)
                     for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
                         if not isinstance(
@@ -5401,8 +5405,11 @@ class Scheduler:
                                 min_ms_fused = ms_fused
                                 ms_fused_choice = choice
                     multi_node._choice_timings[hint_override] = new_timings
-                    assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
-                    hint_override_best_fusion_choice[hint_override] = ms_fused_choice
+                    if ms_fused_choice is not None:
+                        assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
+                        hint_override_best_fusion_choice[hint_override] = (
+                            ms_fused_choice
+                        )
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
@@ -6225,6 +6232,7 @@ class Scheduler:
                         window,
                         use_custom_partition_algo=True,
                         enable_autotune=enable_autotune,
+                        per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
                     )
                     _register_accept(combo_node, window, num)
 
@@ -6314,6 +6322,7 @@ class Scheduler:
             group_nodes,
             use_custom_partition_algo=True,
             enable_autotune=enable_autotune,
+            per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
         )
         # Wire the combo's pred_buffers from its members so the gate
         # simulator can read `node.mpi_node.pred_buffers` uniformly.
