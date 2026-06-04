@@ -495,6 +495,24 @@ def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | No
         return value
 
 
+def _get_class_init_kind(cls: type[object]) -> str:
+    for base in cls.__mro__:
+        if "__init__" in base.__dict__:
+            init = base.__dict__["__init__"]
+            break
+    else:
+        init = object.__init__
+
+    if isinstance(init, staticmethod):
+        return "staticmethod"
+    if isinstance(init, classmethod):
+        return "classmethod"
+    return "normal"
+
+
+_get_class_init_kind._dynamo_marked_constant = True  # type: ignore[attr-defined]
+
+
 def instantiate_user_defined_class_object(
     cls: type[T], /, *args: Any, **kwargs: Any
 ) -> T:
@@ -515,17 +533,9 @@ def instantiate_user_defined_class_object(
         ):
             return obj
 
-        for base in type(obj).__mro__:
-            if "__init__" in base.__dict__:
-                init = base.__dict__["__init__"]
-                break
-        else:
-            init = object.__init__
-
-        if isinstance(init, staticmethod):
-            init.__func__(*args, **kwargs)
-        elif isinstance(init, classmethod):
-            init.__func__(type(obj), *args, **kwargs)
+        init_kind = _get_class_init_kind(type(obj))
+        if init_kind in ("staticmethod", "classmethod"):
+            type(obj).__init__(*args, **kwargs)
         else:
             type(obj).__init__(obj, *args, **kwargs)
     return obj

@@ -1030,19 +1030,34 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
+        elif self.value is collections.OrderedDict and name == "__init__" and args:
+            if len(args) > 1 or kwargs:
+                args[0].call_method(tx, "update", [*args[1:]], kwargs)
+            return variables.ConstantVariable.create(None)
+        elif (
+            issubclass(self.value, list) and name == "__init__" and args and not kwargs
+        ):
+            if len(args) > 1:
+                args[0].call_method(tx, "extend", [*args[1:]], kwargs)
+            return variables.ConstantVariable.create(None)
         elif name == "__len__" and len(args) == 1 and not kwargs:
             from .object_protocol import generic_len
 
             return generic_len(tx, args[0])
         elif name == "__init__" and not kwargs:
             init = self.lookup_cls_mro_attr("__init__")
+            if (
+                args
+                and issubclass(self.value, BaseException)
+                and init in (BaseException.__init__, Exception.__init__)
+            ):
+                return variables.ConstantVariable.create(None)
             if len(args) == 1 and (
                 init is object.__init__
                 or (
                     issubclass(self.value, BaseException)
                     and init in (BaseException.__init__, Exception.__init__)
                 )
-                or self.value is collections.OrderedDict
             ):
                 return variables.ConstantVariable.create(None)
         elif issubclass(self.value, dict) and name != "__new__":
@@ -2878,11 +2893,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
-        if self._base_vt is not None and self._base_methods is not None:
-            iter_method = self._maybe_get_baseclass_method("__iter__")
-            if iter_method is not None and iter_method in self._base_methods:
-                return self._base_vt.unpack_var_sequence(tx)
-        return super().unpack_var_sequence(tx)
+        return unpack_iterable(tx, self)
 
     def is_supported_random(self) -> bool:
         try:
