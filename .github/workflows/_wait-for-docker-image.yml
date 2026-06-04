@@ -16,7 +16,7 @@ on:
       timeout-minutes:
         required: false
         type: number
-        default: 120
+        default: 360
       poll-interval-seconds:
         required: false
         type: number
