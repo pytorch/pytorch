@@ -317,8 +317,8 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
                                       const std::optional<Scalar>& correction,
                                       bool keepdim,
                                       StdVarType stdVarType) {
-  TORCH_CHECK(input_t.is_floating_point() || input_t.is_complex(),
-              "std and var only support floating point and complex dtypes");
+  TORCH_CHECK_TYPE(input_t.is_floating_point() || input_t.is_complex(),
+                   "std and var only support floating point and complex dtypes");
   using CachedGraph = MPSUnaryCachedGraph;
 
   IntArrayRef input_shape = input_t.sizes();
