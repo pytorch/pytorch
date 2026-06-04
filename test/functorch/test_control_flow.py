@@ -1659,7 +1659,7 @@ def forward(self, pred_1, x_1):
         exp_out = _fake_scan(combine_fn, init, xs, dim=dim)
         self.assertEqual(out, exp_out)
 
-    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @parametrize("compile_mode", ["none", "eager"])
     def test_scan_closed_over_indexing(self, compile_mode):
         scan_fct = compile_mode_helper(scan, compile_mode)
@@ -1678,7 +1678,7 @@ def forward(self, pred_1, x_1):
         exp_out = _fake_scan(combine_fn, init, xs)
         self.assertEqual(out, exp_out)
 
-    @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_closed_over_indexing_autograd(self):
         table = torch.rand(2, 4, dtype=torch.float64, requires_grad=True)
         transition = torch.rand(2, 2, dtype=torch.float64, requires_grad=True)
