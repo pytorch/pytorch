@@ -141,6 +141,7 @@ class TestXpu(TestCase):
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
         self.assertTrue(device_capability["local_mem_size"] > 0)
+        self.assertTrue(device_capability["last_level_cache_size"] > 0)
         self.assertTrue(device_capability["memory_clock_rate"] > 0)
         self.assertTrue(device_capability["memory_bus_width"] > 0)
         self.assertEqual(
@@ -167,15 +168,19 @@ class TestXpu(TestCase):
             device_properties.has_subgroup_2d_block_io,
             device_capability["has_subgroup_2d_block_io"],
         )
-        if int(torch.version.xpu) >= 20250000:
-            self.assertEqual(
-                device_properties.architecture,
-                device_capability["architecture"],
-            )
+        self.assertEqual(
+            device_properties.architecture,
+            device_capability["architecture"],
+        )
         self.assertEqual(
             len(str(device_properties.uuid)), 36
         )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         self.assertEqual(len(device_properties.uuid.bytes), 16)
+        if int(torch.version.xpu) >= 20260000:
+            self.assertEqual(
+                device_properties.is_integrated_gpu,
+                device_capability["is_integrated_gpu"],
+            )
 
     def test_get_device_capability(self):
         device_capability = torch.xpu.get_device_capability()
@@ -594,14 +599,7 @@ print(torch.xpu.is_initialized())
         time.sleep(0.1)
         stream.record_event(end_event)
         torch.xpu.synchronize()
-        if int(torch.version.xpu) >= 20250000:
-            self.assertGreater(start_event.elapsed_time(end_event), 0)
-        else:
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
-            ):
-                start_event.elapsed_time(end_event)
+        self.assertGreater(start_event.elapsed_time(end_event), 0)
 
         event = torch.xpu.Event(enable_timing=True)
         self.assertEqual(event.sycl_event, 0)
@@ -645,14 +643,8 @@ print(torch.xpu.is_initialized())
         self.assertTrue(event2.query())
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_xpu.cpu(), a + b)
-        if int(torch.version.xpu) >= 20250000:
-            self.assertGreater(event1.elapsed_time(event2), 0)
-        else:
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                "elapsedTime requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
-            ):
-                event1.elapsed_time(event2)
+        self.assertGreater(event1.elapsed_time(event2), 0)
+
         xpu_event = torch.xpu.Event()
         self.assertIsInstance(xpu_event, torch.Event)
         self.assertTrue(issubclass(type(xpu_event), torch.Event))
@@ -973,10 +965,6 @@ print(torch.xpu.is_initialized())
         self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
         self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
 
-    @unittest.skipIf(
-        int(torch.version.xpu) < 20250000,
-        "Test requires SYCL compiler version 2025.0.0 or newer.",
-    )
     def test_mem_get_info(self):
         torch.xpu.synchronize()
         torch.xpu.empty_cache()
@@ -1562,20 +1550,13 @@ if __name__ == "__main__":
         if self.expandable_segments:
             self.skipTest("Skipping DLPack test for expandable segments allocator.")
         x = make_tensor((5,), dtype=torch.float32, device="xpu")
-        if IS_WINDOWS and int(torch.version.xpu) < 20250000:
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                "Default context is not supported on XPU by default on Windows for SYCL compiler versions earlier than 2025.0.0.",
-            ):
-                torch.to_dlpack(x)
-        else:
-            z = torch.from_dlpack(torch.to_dlpack(x))
-            z[0] = z[0] + 1.0
-            self.assertEqual(z, x)
-            cpu = make_tensor((5,), dtype=torch.float32, device="cpu")
-            z = torch.from_dlpack(cpu, device="xpu")
-            self.assertTrue(z.is_xpu)
-            self.assertEqual(z.cpu(), cpu)
+        z = torch.from_dlpack(torch.to_dlpack(x))
+        z[0] = z[0] + 1.0
+        self.assertEqual(z, x)
+        cpu = make_tensor((5,), dtype=torch.float32, device="cpu")
+        z = torch.from_dlpack(cpu, device="xpu")
+        self.assertTrue(z.is_xpu)
+        self.assertEqual(z.cpu(), cpu)
 
     def test_dlpack_exchange_api_current_work_stream_xpu(self):
         """Test DLPack Exchange API current_work_stream returns non-null for XPU."""

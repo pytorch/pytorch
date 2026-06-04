@@ -30,14 +30,6 @@ C10_METAL_CONSTEXPR auto simd_size = c10::metal::simdgroup_size;
 // Original work is licensed under MIT License:
 // https://github.com/ml-explore/mlx/blob/main/LICENSE
 
-inline uint64_t simd_shuffle_and_fill_up(
-    uint64_t data,
-    uint64_t filling,
-    uint16_t delta) {
-  return as_type<uint64_t>(metal::simd_shuffle_and_fill_up(
-      as_type<uint2>(data), as_type<uint2>(filling), delta));
-}
-
 inline int64_t simd_shuffle_and_fill_up(
     int64_t data,
     int64_t filling,
@@ -49,10 +41,6 @@ inline int64_t simd_shuffle_and_fill_up(
 inline bool simd_shuffle_and_fill_up(bool data, bool filling, uint16_t delta) {
   return simd_shuffle_and_fill_up(
       static_cast<uint32_t>(data), static_cast<uint32_t>(filling), delta);
-}
-
-inline uint64_t simd_shuffle(uint64_t data, uint16_t lane) {
-  return as_type<uint64_t>(metal::simd_shuffle(as_type<uint2>(data), lane));
 }
 
 inline int64_t simd_shuffle(int64_t data, uint16_t lane) {
