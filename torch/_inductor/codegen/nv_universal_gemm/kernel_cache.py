@@ -86,34 +86,6 @@ def _get_kernel_cache() -> dict[str, Any]:
     return _kernel_by_name_cache
 
 
-def get_compatible_kernels(
-    args: Any,
-    cc: int,
-    metadata_filter: Callable[[Any], bool] | None = None,
-) -> list[Any]:
-    """Get kernels compatible with the given arguments from the cache."""
-    cache = _get_kernel_cache()
-    compatible = []
-    for kernel in cache.values():
-        if kernel.metadata.min_cc > cc:
-            continue
-
-        if metadata_filter is not None and not metadata_filter(kernel.metadata):
-            continue
-
-        status = kernel.supports(args)
-        if status.error is not None:
-            continue
-        compatible.append(kernel)
-
-    log.debug(
-        "Found %d compatible kernels from cache of %d total",
-        len(compatible),
-        len(cache),
-    )
-    return compatible
-
-
 def partition_compatible_kernels(
     args: Any,
     cc: int,
