@@ -1411,6 +1411,8 @@ def generic_richcompare_bool(
     container comparisons (list_richcompare, tuplerichcompare) which call
     PyObject_RichCompareBool per element in CPython.
     """
+    if op not in ("__eq__", "__ne__"):
+        raise AssertionError(f"generic_richcompare_bool only supports eq/ne, got {op}")
     identity = vt_identity_compare(v, w)
     if identity is not None and identity.as_python_constant():
         return ConstantVariable.create(op == "__eq__")

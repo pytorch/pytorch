@@ -1607,15 +1607,10 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
     # =====================================================================
 
     def test_list_nan_identity(self):
-        """NaN element identity: [nan] == [nan] is True when same nan object."""
+        """NaN element identity: [nan] == [nan] is True, [nan] <= [nan] is True."""
         nan = float("nan")
-
-        def fn(a, b):
-            return a == b, a != b
-
-        expected = fn([nan], [nan])
-        result = torch.compile(fn, backend="eager", fullgraph=True)([nan], [nan])
-        self.assertEqual(result, expected)
+        lst = [nan]
+        self._assert_all_cmp_equals(lst, lst)
 
     def test_list_nan_different_objects(self):
         """Different NaN objects: [float('nan')] == [float('nan')] is False."""
