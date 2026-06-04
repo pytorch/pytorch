@@ -3504,6 +3504,61 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             "Mismatch between eager and compiled output.",
         )
 
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_benchmark_collective_with_symint_args(self):
+        """
+        Test that collective benchmarking handles SymInt non-tensor arguments.
+
+        When dynamic=True, ops like all_to_all_single receive SymInt split_sizes
+        in the FX graph. The benchmark path must convert these to concrete ints
+        before calling the collective.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(group_name, group)
+        group_size = group.size()
+
+        HIDDEN = 64
+
+        def func(x, w, group_size, group_name):
+            seq = x.shape[0]
+            pad = (-seq) % group_size
+            x_padded = torch.nn.functional.pad(x, (0, 0, 0, pad))
+            chunk = x_padded.shape[0] // group_size
+            split_sizes = [chunk] * group_size
+            gathered = torch.ops._c10d_functional.all_to_all_single(
+                x_padded, split_sizes, split_sizes, group_name
+            )
+            gathered = torch.ops.c10d_functional.wait_tensor(gathered)
+            return (gathered @ w).sum()
+
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def _pass(gm):
+            return schedule_overlap_bucketing(
+                gm.owning_module,
+                collective_bucketing=True,
+                insert_overlap_deps=True,
+                collective_estimator="benchmark",
+            )
+
+        torch._inductor.config.post_grad_custom_post_pass = _pass
+
+        w = torch.randn(HIDDEN, HIDDEN, device=self.device)
+        compiled = torch.compile(func, backend="inductor", fullgraph=True, dynamic=True)
+
+        for n in (7, 11):
+            x = torch.randn(n, HIDDEN, device=self.device)
+            compiled(x, w, group_size, group_name)
+
 
 class TestNodeGroupNameResolution(torch._dynamo.test_case.TestCase):
     """Unit tests for Node-typed group_name handling in bucketing.
