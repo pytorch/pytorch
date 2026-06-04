@@ -3,6 +3,7 @@ import base64
 import copy
 import functools
 import hashlib
+import io
 import json
 import logging
 import os
@@ -40,6 +41,7 @@ from torch._inductor.codecache import (
     BypassFxGraphCache,
     CacheabilityValidator,
     CacheBase,
+    compiled_fx_graph_hash,
     CppWrapperCodeCache,
     CUDACodeCache,
     FxGraphCache,
@@ -493,6 +495,43 @@ class TestFxGraphCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_caches()
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_fx_graph_cache_artifact_contains_hash_components(self):
+        def fn(x):
+            return x.sin() + 1
+
+        with (
+            fresh_cache(),
+            mock.patch("torch._inductor.compile_fx.trace_structured") as mock_trace,
+        ):
+            torch.compile(fn, backend="inductor")(torch.ones(2))
+
+        cache_payloads = []
+        for call in mock_trace.call_args_list:
+            if not call.args or call.args[0] != "artifact":
+                continue
+
+            metadata_fn = call.kwargs.get("metadata_fn")
+            if metadata_fn is None and len(call.args) > 1:
+                metadata_fn = call.args[1]
+            if metadata_fn is None:
+                continue
+
+            metadata = metadata_fn()
+            if metadata.get("name") != "fx_graph_cache_miss":
+                continue
+
+            payload_fn = call.kwargs.get("payload_fn")
+            self.assertIsNotNone(payload_fn)
+            cache_payloads.append(json.loads(payload_fn()))
+
+        self.assertEqual(len(cache_payloads), 1)
+        self.assertEqual(cache_payloads[0]["cache_state"], "miss")
+        self.assertTrue(
+            any("example_inputs[0]" in line for line in cache_payloads[0]["components"])
+        )
 
     def _find_triton_kernel_binaries(self):
         found = []
@@ -2997,6 +3036,33 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
+    def test_compiled_fx_graph_hash_details_are_not_debug_logged(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(torch.ops.aten.sin.default, (x,))
+        graph.output((y,))
+        gm = torch.fx.GraphModule({}, graph)
+
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setLevel(logging.DEBUG)
+        logger = logging.getLogger("torch._inductor.codecache")
+        old_level = logger.level
+        old_propagate = logger.propagate
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+        logger.addHandler(handler)
+        try:
+            _, debug_lines = compiled_fx_graph_hash(gm, [torch.randn(2)], {}, [])
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+            logger.propagate = old_propagate
+
+        self.assertTrue(any("example_inputs[0]" in line for line in debug_lines))
+        self.assertNotIn("FX graph cache hash details", stream.getvalue())
+        self.assertNotIn("example_inputs[0]", stream.getvalue())
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_cacheability_validator_checks_mkldnn_constant(self):
         graph = torch.fx.Graph()
