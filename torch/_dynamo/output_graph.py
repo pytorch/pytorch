@@ -837,6 +837,9 @@ class OutputGraph(OutputGraphCommon):
         self._current_tx: list[InstructionTranslatorBase] = []
         self.cleanups: list[CleanupHook] = []
         self.should_exit = False
+        self.compile_subgraph_reason = GraphCompileReason(
+            "output graph has not been compiled", [], graph_break=False
+        )
         self.unspec_variable_map: dict[str, UnspecializedPythonVariable] = {}
 
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
@@ -2901,6 +2904,13 @@ class OutputGraph(OutputGraphCommon):
                 if not isinstance(compiled_fn, _LazyGraphModule):
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
+
+            if not self.export:
+                # Run after every non-export backend compile, not only the
+                # registered backends covered by convert_frame weakref cleanup.
+                # Backends have already consumed the graph, so non-CPU Dynamo
+                # tracing constants no longer need to keep real tensors alive.
+                old_fake_mode.fake_tensor_converter.clear_non_cpu_constants()
 
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)

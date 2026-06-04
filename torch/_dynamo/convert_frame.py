@@ -235,12 +235,9 @@ def clear_compile_context_weakrefs(
             # Graph breaks resume in Python, where stale compile-time weakrefs
             # can make torch.utils.swap_tensors fail before Dynamo runs again.
             output_graph = tracer_output.output_graph_for_cleanup
-            reason = (
-                getattr(output_graph, "compile_subgraph_reason", None)
-                if output_graph is not None
-                else None
+            should_clear = bool(
+                output_graph and output_graph.compile_subgraph_reason.graph_break
             )
-            should_clear = bool(reason and reason.graph_break)
     if not should_clear or not tracer_output:
         return
     # Use output_graph_for_cleanup which is set even on error paths
