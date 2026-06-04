@@ -9,6 +9,7 @@ and /cudnn/ConvUnpackImpl.cpp, for cudnn.
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <tuple>
+#include <utility>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
@@ -89,7 +90,8 @@ class QConv1dUnpackWeightsInt8 final {
         ctx.qEngine() == at::QEngine::X86) {
       std::tie(weight, bias) = packed_weight->unpack();
       weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, std::optional<at::Tensor>>(weight, bias);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(
+          std::move(weight), std::move(bias));
     }
 #endif
 
@@ -98,7 +100,8 @@ class QConv1dUnpackWeightsInt8 final {
       std::tie(weight, bias) = packed_weight->unpack();
       at::Tensor new_weight = weight.clone();
       new_weight = new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, std::optional<at::Tensor>>(new_weight, bias);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(
+          std::move(new_weight), std::move(bias));
     }
 #endif
 
@@ -107,7 +110,8 @@ class QConv1dUnpackWeightsInt8 final {
       std::tie(weight, bias) = packed_weight->unpack();
       at::Tensor new_weight = weight.clone();
       new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, std::optional<at::Tensor>>(new_weight, bias);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(
+          std::move(new_weight), std::move(bias));
     }
 #endif
 
