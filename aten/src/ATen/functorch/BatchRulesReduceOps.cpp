@@ -122,7 +122,7 @@ static void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
-  if (std::none_of(orig_arguments.begin(), orig_arguments.end(), ivalueParticipatesInCurrentLevel)) {
+  if (std::ranges::none_of(orig_arguments, ivalueParticipatesInCurrentLevel)) {
     c10::impl::ExcludeDispatchKeyGuard guard_2(DispatchKey::FuncTorchBatched);
     op.callBoxed(stack);
     return;
@@ -348,7 +348,7 @@ static std::tuple<Tensor, std::optional<int64_t>> searchsorted_batch_rule(
   if (sorter.has_value() && sorter->defined()) {
     auto sorter__ = moveBatchDimToFront(*sorter, sorter_bdim);
     if (sorted_sequence_bdim.has_value() != sorter_bdim.has_value()) {
-      auto bdim_size = get_bdim_size2(
+      auto bdim_size = get_bdim_size(
           sorted_sequence, sorted_sequence_bdim,
           sorter.value(), sorter_bdim);
       sorter__ = ensure_has_bdim(sorter__, sorter_bdim.has_value(), bdim_size);
@@ -381,7 +381,8 @@ static std::tuple<Tensor, std::optional<int64_t>> searchsorted_batch_rule(
       auto self_ = reshape_dim_into(*self_bdim, -1, self);
       auto result = at::searchsorted(buckets, self_, out_int32, right, side, sorter_);
       result = reshape_dim_outof(-1, bdim_size, result);
-      return std::make_tuple(result, result.dim() - 2);
+      auto result_bdim = result.dim() - 2;
+      return std::make_tuple(std::move(result), result_bdim);
     }
     TORCH_INTERNAL_ASSERT(false);
   }
