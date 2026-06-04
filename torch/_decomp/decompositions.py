@@ -4440,6 +4440,8 @@ def _upsample_linear(
     align_corners: bool,
     scales: list[float | None],
 ) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import statically_known_false
+
     # get dimensions of original image
     n_channels = input.shape[1]
     inp_sizes = input.shape[2:]
@@ -4478,17 +4480,36 @@ def _upsample_linear(
         v = _maybe_convert_to_dtype(v, dtype)
         vs.append(v)
 
-    for i in reversed(range(n_dims)):
-        xscale = (xs_f32[i] - xs[i]).clamp(0.0, 1.0).to(dtype)
-        vs = [
-            # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
-            v1 + torch.mul(v2 - v1, xscale)
-            for v1, v2 in zip(vs[::2], vs[1::2])
-        ]
+    if (
+        input.device.type == "cpu"
+        and n_dims == 2
+        and not statically_known_false(output_size[0] + output_size[1] <= 128)
+    ):
+        # Match the native CPU small-output bilinear upsample accumulation
+        # order for equality-sensitive consumers like unique_consecutive.
+        weights = []
+        for i in range(n_dims):
+            xscale = (xs_f32[i] - xs[i]).clamp(0.0, 1.0).to(dtype)
+            weights.append((1.0 - xscale, xscale))
 
-    if len(vs) != 1:
-        raise AssertionError(f"Expected vs to have exactly 1 element, got {len(vs)}")
-    result = vs[0]
+        result = _sum_tensors(
+            v * reduce(torch.mul, (weights[i][a[i]] for i in range(n_dims)))
+            for a, v in zip(product(*[[0, 1]] * n_dims), vs)
+        )
+    else:
+        for i in reversed(range(n_dims)):
+            xscale = (xs_f32[i] - xs[i]).clamp(0.0, 1.0).to(dtype)
+            vs = [
+                # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
+                v1 + torch.mul(v2 - v1, xscale)
+                for v1, v2 in zip(vs[::2], vs[1::2])
+            ]
+
+        if len(vs) != 1:
+            raise AssertionError(
+                f"Expected vs to have exactly 1 element, got {len(vs)}"
+            )
+        result = vs[0]
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(input)
