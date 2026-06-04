@@ -1,20 +1,17 @@
 #  Copyright (c) Meta Platforms, Inc. and affiliates
 """Schema-discovered registration of single-dim strategy variants.
 
-Manual single-dim registrations target the semantic out-of-place ``.default``
-op.  ``auto_register_op_variants`` mechanically covers the related ATen
-overloads (in-place, out, and foreach) by reusing the base op's strategy.
+Manual single-dim registrations target the semantic base op.
+``auto_register_op_variants`` mechanically covers the related ATen overloads
+(in-place, out, functional, and foreach) by reusing the base op's strategy.
 """
+
 from collections.abc import Sequence
 from typing import Any
 
 from torch._ops import OpOverload
 from torch.distributed.tensor._dtensor_spec import TensorMeta
-from torch.distributed.tensor._op_schema import (
-    ArgsType,
-    KwargsType,
-    RuntimeSchemaInfo,
-)
+from torch.distributed.tensor._op_schema import ArgsType, KwargsType, RuntimeSchemaInfo
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _get_overload_packet,
     _get_packet_overload,
@@ -40,6 +37,15 @@ def _tensor_schema_count(schema_values: Sequence[Any]) -> int:
 def _schema_tensor_output_count(op: OpOverload) -> int:
     """Count Tensor-valued returns for an ATen overload."""
     return _tensor_schema_count(op._schema.returns)
+
+
+def _is_write_arg(arg: Any) -> bool:
+    """Return whether a schema argument is mutated by the op.
+
+    Schema alias info is the reliable way to identify explicit out args and
+    mutable inputs whose placements must be preserved.
+    """
+    return arg.alias_info is not None and arg.alias_info.is_write
 
 
 def _is_foreach_like_op_name(op_name: str) -> bool:
@@ -74,6 +80,36 @@ def _schema_args_are_same(
 def _is_explicit_out_arg(arg: Any) -> bool:
     """Return whether a schema argument is an explicit output argument."""
     return bool(getattr(arg, "is_out", False))
+
+
+def _schema_non_alias_tensor_output_indices(op: OpOverload) -> list[int]:
+    """Return tensor return indices that are not aliases of mutable inputs."""
+    indices: list[int] = []
+    for idx, ret in enumerate(op._schema.returns):
+        if "Tensor" in str(ret.type) and ret.alias_info is None:
+            indices.append(idx)
+    return indices
+
+
+def _schema_written_tensor_arg_count(op: OpOverload) -> int:
+    """Count Tensor-valued arguments written by an op."""
+    return sum(
+        1
+        for arg in op._schema.arguments
+        if _is_write_arg(arg) and "Tensor" in str(arg.type)
+    )
+
+
+def _functional_variant_tensor_output_count(base_op: OpOverload) -> int:
+    """Return expected tensor outputs for a functionalization variant.
+
+    Mutable ops can have real tensor returns and/or alias returns for mutated
+    inputs. Functionalization returns the real tensor returns plus updated
+    copies of written tensor inputs.
+    """
+    return len(_schema_non_alias_tensor_output_indices(base_op)) + (
+        _schema_written_tensor_arg_count(base_op)
+    )
 
 
 def _iter_packet_overloads(packet: Any | None) -> list[OpOverload]:
@@ -265,6 +301,39 @@ def _find_out_variant_overloads(
     return variants
 
 
+def _find_functional_variant_overloads(base_op: OpOverload) -> list[OpOverload]:
+    """Find the functional variant generated from a mutable base overload.
+
+    Functional variants return updated copies of mutable inputs, so their extra
+    outputs must follow the mutated input placements.
+    """
+    if not any(_is_write_arg(arg) for arg in base_op._schema.arguments):
+        return []
+    namespace, base_name = _canonical_variant_base_name(base_op)
+    if _is_foreach_like_op_name(base_op.name()):
+        return []
+    if any(_is_explicit_out_arg(arg) for arg in base_op._schema.arguments):
+        return []
+
+    packet = _get_overload_packet(namespace, f"{base_name}_functional")
+    if packet is None:
+        return []
+
+    variants: list[OpOverload] = []
+    expected_outputs = _functional_variant_tensor_output_count(base_op)
+    for candidate in _iter_packet_overloads(packet):
+        if candidate._schema.is_mutable:
+            continue
+        if not _schema_args_match(
+            base_op._schema.arguments, candidate._schema.arguments
+        ):
+            continue
+        if _schema_tensor_output_count(candidate) != expected_outputs:
+            continue
+        variants.append(candidate)
+    return variants
+
+
 def _find_foreach_variants(base_op: OpOverload) -> list[OpOverload]:
     """Find elementwise foreach overloads that can reuse base_op's strategy.
 
@@ -379,13 +448,70 @@ def _make_out_variant_strategy_fn(
     return strategy
 
 
+def _make_functional_variant_strategy_fn(
+    base_fn: _SingleDimStrategyFunc, base_op: OpOverload
+) -> _SingleDimStrategyFunc:
+    """Wrap mutable base_fn for functional variants with extra mutated outputs.
+
+    The added functional outputs represent updated mutable inputs and therefore
+    inherit those input placements.
+    """
+    mutable_arg_names = {
+        arg.name for arg in base_op._schema.arguments if _is_write_arg(arg)
+    }
+    base_num_outputs = _schema_tensor_output_count(base_op)
+    non_alias_output_indices = _schema_non_alias_tensor_output_indices(base_op)
+
+    def _mutable_input_rule_indices(
+        args_schema: ArgsType, kwargs_schema: KwargsType
+    ) -> list[int]:
+        """Map mutable schema args to their positions in a base strategy rule."""
+        mutable_indices: list[int] = []
+        tensor_input_idx = 0
+        positional_idx = 0
+        for arg in base_op._schema.arguments:
+            value = None
+            if arg.kwarg_only:
+                value = kwargs_schema.get(arg.name)
+            elif positional_idx < len(args_schema):
+                value = args_schema[positional_idx]
+                positional_idx += 1
+            else:
+                value = kwargs_schema.get(arg.name)
+
+            tensor_count = _count_tensor_meta_values(value)
+            if tensor_count == 0:
+                continue
+            if arg.name in mutable_arg_names:
+                mutable_indices.append(base_num_outputs + tensor_input_idx)
+            tensor_input_idx += tensor_count
+        return mutable_indices
+
+    def strategy(
+        op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+    ) -> list[list[Placement | _ShardingPlaceholder]]:
+        mutable_input_indices = _mutable_input_rule_indices(args_schema, kwargs_schema)
+        base_rules = base_fn(base_op, args_schema, kwargs_schema)
+        rules: list[list[Placement | _ShardingPlaceholder]] = []
+        for rule in base_rules:
+            output_placements = [
+                rule[output_idx] for output_idx in non_alias_output_indices
+            ]
+            output_placements.extend(
+                rule[input_idx] for input_idx in mutable_input_indices
+            )
+            rules.append([*output_placements, *rule[base_num_outputs:]])
+        return rules
+
+    return strategy
+
+
 def auto_register_op_variants() -> None:
     """Register schema-discovered variants for existing single-dim strategies.
 
-    Only out-of-place ``.default`` bases drive derivation; in-place and
-    non-default-overload bases (e.g. pointwise ``add_``/``add.out``, random
-    ``uniform_``) register their own variants explicitly, so iterating them
-    here would be redundant.
+    This keeps manual registrations focused on the semantic base op while
+    covering mechanically related ATen overloads (in-place, out, functional,
+    and foreach).
     """
     from torch.distributed.tensor._api import DTensor
 
@@ -394,8 +520,6 @@ def auto_register_op_variants() -> None:
     already_registered = set(registry)
 
     for base_op, info in list(registry.items()):
-        if base_op._overloadname != "default" or base_op._schema.is_mutable:
-            continue
         base_schema_info = propagator.op_to_schema_info_for_single_dim_strategy.get(
             base_op
         )
@@ -427,6 +551,18 @@ def auto_register_op_variants() -> None:
                 _clone_schema_info(base_schema_info),
             )
             already_registered.add(out_op)
+
+        for functional_op in _find_functional_variant_overloads(base_op):
+            if functional_op in already_registered:
+                continue
+            propagator.register_single_dim_op_strategy(
+                functional_op,
+                _clone_strategy_info(
+                    info, _make_functional_variant_strategy_fn(info.func, base_op)
+                ),
+                _clone_schema_info(base_schema_info),
+            )
+            already_registered.add(functional_op)
 
         for foreach_op in _find_foreach_variants(base_op):
             if foreach_op in already_registered:
