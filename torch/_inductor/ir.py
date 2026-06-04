@@ -988,6 +988,8 @@ class Operation:
 
 @ir_dataclass
 class Loops(IRNode):
+    """Base class for pointwise and reduction loop-body IR nodes."""
+
     device: torch.device
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
@@ -1071,7 +1073,15 @@ class Loops(IRNode):
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
         if threshold is None:
             threshold = 0
-        threshold = max(threshold, config.realize_opcount_threshold)
+        realize_opcount_threshold = config.realize_opcount_threshold
+        if realize_opcount_threshold is None:
+            if is_cpu(self):
+                realize_opcount_threshold = config.realize_cpu_opcount_threshold
+            else:
+                realize_opcount_threshold = config._realize_opcount_threshold_default
+        else:
+            assert isinstance(realize_opcount_threshold, int)
+        threshold = max(threshold, realize_opcount_threshold)
         return self.inner_fn_opcount().num_ops > threshold
 
     def inner_fn_free_symbols(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
@@ -5767,6 +5777,15 @@ class TemplateBuffer(OperationBuffer):
     def get_allowed_prologue_inps(self) -> OrderedSet[str]:
         return self.allowed_prologue_inps
 
+    def has_aliasing_or_mutation_for_prologue_fusion(self, scheduler_node: Any) -> bool:
+        """Return whether this template's aliasing/mutation blocks prologue fusion.
+
+        The default preserves the scheduler's conservative behavior. External
+        template subclasses may override this when they can prove a prologue
+        producer only feeds independent, non-mutated template inputs.
+        """
+        return scheduler_node.has_aliasing_or_mutation()
+
     def _finalize_codegen(
         self, hook_outputs: dict[str, str]
     ) -> FinalizeCodegenResult | None:
@@ -9441,12 +9460,6 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             packed.outputs = [outputs]
 
-        if kernel is torch.ops.aten._efficientzerotensor.default:
-            V.graph.never_reuse_buffers.add(packed.get_name())
-            for output in pytree.tree_leaves(outputs):
-                if isinstance(output, IRNode):
-                    V.graph.never_reuse_buffers.add(output.get_name())
-
         return outputs
 
 
@@ -10001,8 +10014,18 @@ class StorageBox(MutableBox):
         )
 
     def has_exceeded_max_reads(self) -> bool:
+        realize_acc_reads_threshold = config.realize_acc_reads_threshold
+        if realize_acc_reads_threshold is None:
+            if is_cpu(self.data):
+                realize_acc_reads_threshold = config.realize_cpu_acc_reads_threshold
+            else:
+                realize_acc_reads_threshold = (
+                    config._realize_acc_reads_threshold_default
+                )
+        else:
+            assert isinstance(realize_acc_reads_threshold, int)
         return isinstance(self.data, Pointwise) and (
-            self.num_reads() > config.realize_acc_reads_threshold
+            self.num_reads() > realize_acc_reads_threshold
             or self.has_large_inner_fn()
             or (
                 config.realize_acc_reads_size_threshold is not None
@@ -10028,6 +10051,7 @@ class StorageBox(MutableBox):
                     "log1p",
                     "log2",
                     "sigmoid",
+                    "tanh",
                 ]
                 if any(x in opcount.used_ops for x in heavy_ops):
                     return True
