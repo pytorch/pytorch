@@ -117,7 +117,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # assert_size_stride would fail to compile.
         return
 
-    def write_assert_alignment(self, name: str, alignment: int, op_name: str) -> None:
+    def _codegen_assert_alignment(
+        self,
+        code: IndentedBuffer,
+        name: str,
+        alignment: int,
+        op_name: str,
+    ) -> None:
         # Inputs/outputs are ArrayRefTensor, not AtenTensorHandle, so
         # assert_alignment would fail to compile.
         return
