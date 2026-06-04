@@ -38,7 +38,7 @@ Tensor _triu_mask(
       mask *= index_grids[i] <= index_grids[i+1];
     }
   } else {
-    for (int64_t i = 0; i < dims - 1; i++) {
+    for (int64_t i = 0; i <  dims - 1; i++) {
       mask *= index_grids[i] < index_grids[i + 1];
     }
   }
@@ -70,7 +70,7 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   if (r == 0) {
     return at::empty({0}, self.options());
   }
-  c10::SymInt num_elements = self.sym_numel();lin
+  c10::SymInt num_elements = self.sym_numel();
   Tensor mask =
       _triu_mask(std::move(num_elements), r, with_replacement, self.options());
   Tensor indices = mask.nonzero();
