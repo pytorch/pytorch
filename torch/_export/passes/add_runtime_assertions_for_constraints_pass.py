@@ -148,8 +148,10 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(PassBase):
 
                                 def sym_size_cb(node, assert_msg, dim):
                                     with node.graph.inserting_after(node):
-                                        dim_node = module.graph.create_size_node(  # type: ignore[union-attr]
-                                            node, dim
+                                        dim_node = module.graph.call_function(
+                                            torch.ops.aten.sym_size.int,
+                                            (node, dim),
+                                            {},
                                         )
                                     cb(node=dim_node, assert_msg=assert_msg)
 
