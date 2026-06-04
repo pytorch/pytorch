@@ -12,7 +12,7 @@ from torch._inductor import config
 from torch._inductor.codecache import write
 from torch._inductor.cpp_builder import CppBuilder, CppOptions, CppTorchOptions
 from torch._inductor.cpu_vec_isa import invalid_vec_isa
-from torch._inductor.ops_handler import MockHandler, OpCounterCSE
+from torch._inductor.ops_handler import MockHandler, OpCounterCSE, OpCountLimitExceeded
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import gen_gm_and_inputs
 from torch.fx import symbolic_trace
@@ -109,12 +109,20 @@ class TestStandaloneInductor(TestCase):
         mod_opt = inductor.compile(make_fx(fn)(), [])
         self.assertEqual(mod_opt(), torch.zeros((34,)))
 
-    def test_bounded_opcount_preserves_linear_counts(self):
-        opcounter = OpCounterCSE(MockHandler(), max_ops=3)
+    def test_unbounded_opcount_preserves_linear_counts(self):
+        opcounter = OpCounterCSE(MockHandler())
         for i in range(5):
             opcounter.add(str(i), "1")
 
         self.assertEqual(opcounter.getvalue().num_ops, 5)
+
+    def test_bounded_opcount_saturates_linear_counts(self):
+        opcounter = OpCounterCSE(MockHandler(), max_ops=3)
+        with self.assertRaises(OpCountLimitExceeded):
+            for i in range(5):
+                opcounter.add(str(i), "1")
+
+        self.assertEqual(opcounter.getvalue().num_ops, 4)
 
     def test_inductor_via_bare_module(self):
         mod = MyModule3().eval()

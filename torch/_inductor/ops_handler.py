@@ -37,6 +37,10 @@ StoreMode = AtomicMode | Literal["tma"] | None
 ReductionType = Literal[
     "argmax",
     "argmin",
+    "argmax_value",
+    "argmin_value",
+    "argmax_with_value",
+    "argmin_with_value",
     "welford_reduce",
     "welford_combine",
     "any",
@@ -134,9 +138,21 @@ class OpsHandler(Generic[T]):
 
     def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
         """
-        Converts a sympy expression into a scalar of type dtype.  expr is typically
-        an indexing expression, thus the name; however, it can also be used in
-        non-indexing situations.
+        Converts a sympy expression into a scalar suitable for indexing memory.
+        The kernel decides the actual computation dtype (typically int32) — the
+        ``dtype`` argument is advisory and is not honored when it would conflict
+        with the kernel's indexing dtype. For values that must respect the
+        requested dtype, use ``value_expr`` instead.
+        """
+        raise NotImplementedError
+
+    def value_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> T:
+        """
+        Converts a sympy expression into a scalar of type ``dtype`` that
+        participates in tensor value computation. Unlike ``index_expr``, the
+        result dtype is honored, so this is the right op when the user
+        explicitly requested the dtype (e.g. ``arange(dtype=torch.int64)``
+        whose result is added to a tensor rather than used as an index).
         """
         raise NotImplementedError
 
@@ -1086,30 +1102,15 @@ class OpCounterCSE(DefaultHandler):
 
     def __init__(self, inner: OpsHandler[Any], max_ops: int | None = None):
         super().__init__()
+        assert max_ops is None
         self.parent_handler = inner
-        self.max_ops = max_ops
-        # This is a work bound, not the op-count threshold. Keep it looser so
-        # common CSE-heavy expressions can still get exact counts.
-        self.max_visits = None if max_ops is None else max_ops * 100
         self.op_count = 0
-        self.visit_count = 0
-        self.limit_exceeded = False
         self.var_names: dict[str, str] = {}
         self._used_ops: OrderedSet[str] = OrderedSet()
         self._read_names: list[str] = []
         self._nontrivial_read_count = 0
 
-    def _check_limit(self) -> None:
-        if self.max_visits is not None and self.visit_count > self.max_visits:
-            self.limit_exceeded = True
-            raise OpCountLimitExceeded
-
-    def _record_visit(self) -> None:
-        self.visit_count += 1
-        self._check_limit()
-
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        self._record_visit()
         self._used_ops.add(name)
         return pytree.tree_map(
             self._update_count, getattr(self.parent_handler, name)(*args, **kwargs)
@@ -1120,17 +1121,14 @@ class OpCounterCSE(DefaultHandler):
         if not varname:
             varname = f"tmp{self.op_count}"
             self.op_count += 1
-            self._check_limit()
             self.var_names[val] = varname
         return varname
 
     def indirect_indexing(self, *args, **kwargs):
-        self._record_visit()
         self._used_ops.add("indirect_indexing")
         return self.parent_handler.indirect_indexing(*args, **kwargs)
 
     def load(self, name: str, index: sympy.Expr) -> str:
-        self._record_visit()
         val = self.parent_handler.load(name, index)
         if val not in self.var_names:
             self._used_ops.add("load")
@@ -1140,7 +1138,6 @@ class OpCounterCSE(DefaultHandler):
         return self._update_count(val)
 
     def load_seed(self, name: str, offset: T):
-        self._record_visit()
         val = self.parent_handler.load_seed(name, offset)
         if val not in self.var_names:
             self._used_ops.add("load_seed")
@@ -1160,7 +1157,6 @@ class OpCounterCSE(DefaultHandler):
         """
         See [Note: Inductor bucketize op]
         """
-        self._record_visit()
         val = self.parent_handler.bucketize(
             values,
             boundaries,
@@ -1178,9 +1174,80 @@ class OpCounterCSE(DefaultHandler):
         return self._update_count(val)
 
     def getvalue(self):
+        return OpCountResult(
+            self.op_count, self._used_ops, self._read_names, self._nontrivial_read_count
+        )
+
+    def __new__(cls, inner: OpsHandler[Any], max_ops: int | None = None):
+        if cls is OpCounterCSE and max_ops is not None:
+            return super().__new__(_BoundedOpCounterCSE)
+        return super().__new__(cls)
+
+
+class _BoundedOpCounterCSE(OpCounterCSE):
+    def __init__(self, inner: OpsHandler[Any], max_ops: int | None = None):
+        assert max_ops is not None
+        super().__init__(inner)
+        self.max_ops = max_ops
+        # This is a work bound, not the op-count threshold. Keep it looser so
+        # common CSE-heavy expressions can still get exact counts.
+        self.max_visits = max_ops * 100
+        self.visit_count = 0
+        self.limit_exceeded = False
+
+    def _record_visit(self) -> None:
+        self.visit_count += 1
+        if self.visit_count > self.max_visits:
+            self.limit_exceeded = True
+            raise OpCountLimitExceeded
+
+    def _update_count(self, val):
+        result = super()._update_count(val)
+        if self.op_count > self.max_ops:
+            self.limit_exceeded = True
+            raise OpCountLimitExceeded
+        return result
+
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        self._record_visit()
+        return super()._default(name, args, kwargs)
+
+    def indirect_indexing(self, *args, **kwargs):
+        self._record_visit()
+        return super().indirect_indexing(*args, **kwargs)
+
+    def load(self, name: str, index: sympy.Expr) -> str:
+        self._record_visit()
+        return super().load(name, index)
+
+    def load_seed(self, name: str, offset: T):
+        self._record_visit()
+        return super().load_seed(name, offset)
+
+    def bucketize(
+        self,
+        values: T,
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
+        indexing_dtype: torch.dtype,
+        right: bool,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: T | None = None,
+    ) -> T:
+        self._record_visit()
+        return super().bucketize(
+            values,
+            boundaries,
+            boundary_indices,
+            indexing_dtype,
+            right,
+            sorter,
+            sorter_indices,
+        )
+
+    def getvalue(self):
         num_ops = self.op_count
         if self.limit_exceeded:
-            assert self.max_ops is not None
             num_ops = max(num_ops, self.max_ops + 1)
         return OpCountResult(
             num_ops, self._used_ops, self._read_names, self._nontrivial_read_count
