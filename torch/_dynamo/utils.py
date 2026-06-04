@@ -1320,7 +1320,9 @@ def unpack_and_apply_fn(
             variables.DequeVariable,
             variables.ListVariable,
             variables.ListIteratorVariable,
+            variables.RangeVariable,
             variables.SetVariable,
+            variables.TensorVariable,
             variables.TupleVariable,
         ),
     ):
@@ -1358,6 +1360,21 @@ def is_lru_cache_wrapped_function(
     return isinstance(value, functools._lru_cache_wrapper) and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
+
+
+_lru_cache_wrappers_allowed_to_trace_without_warning: weakref.WeakSet[
+    functools._lru_cache_wrapper[Any]
+] = weakref.WeakSet()
+
+
+def allow_lru_cache_wrapper_trace_without_warning(
+    value: functools._lru_cache_wrapper[Any],
+) -> None:
+    _lru_cache_wrappers_allowed_to_trace_without_warning.add(value)
+
+
+def is_lru_cache_wrapper_trace_without_warning_allowed(value: Any) -> bool:
+    return value in _lru_cache_wrappers_allowed_to_trace_without_warning
 
 
 _FuncTypes: TypeAlias = (
@@ -3928,6 +3945,7 @@ def _has_active_exception_handler(tx: InstructionTranslatorBase) -> bool:
         seen.add(target)
 
         handler_idx = cur_tx.indexof[target]
+        idx = handler_idx
         for idx, inst in enumerate(
             cur_tx.instructions[handler_idx:], start=handler_idx
         ):
@@ -4197,7 +4215,7 @@ def _get_fake_value_impl(
 
             tx.output.remove_node(node)
             raise_observed_exception(
-                RuntimeError,
+                type(cause),
                 tx,
                 args=_observed_exception_args(cause, fake_mode),
             )

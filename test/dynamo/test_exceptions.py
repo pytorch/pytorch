@@ -44,6 +44,10 @@ class MyException(OSError):
     pass
 
 
+class CustomRuntimeError(RuntimeError):
+    pass
+
+
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_exception(self):
         def fn(x):
@@ -665,6 +669,38 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         node_targets = [node.target for node in backend.graphs[0].graph.nodes]
         self.assertNotIn("expand_as", node_targets)
         self.assertIn("sin", node_targets)
+
+    def test_fake_tensor_runtime_error_subclass(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.library.custom_op("test_dynamo::runtime_error_subclass", mutates_args=())
+        def runtime_error_subclass(t: torch.Tensor) -> torch.Tensor:
+            raise CustomRuntimeError("custom runtime")
+
+        @runtime_error_subclass.register_fake
+        def _(t):
+            raise CustomRuntimeError("custom runtime")
+
+        def fn(t):
+            try:
+                runtime_error_subclass(t)
+            except CustomRuntimeError:
+                return t.sin()
+            except RuntimeError:
+                return t.cos()
+            return t
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        t = torch.randn(2, 3)
+        self.assertEqual(fn(t), opt_fn(t))
+
+        self.assertEqual(len(backend.graphs), 1)
+        node_targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertNotIn(
+            torch.ops.test_dynamo.runtime_error_subclass.default, node_targets
+        )
+        self.assertIn("sin", node_targets)
+        self.assertNotIn("cos", node_targets)
 
     def test_fake_tensor_runtime_error_without_try_except(self):
         def fn(t):
