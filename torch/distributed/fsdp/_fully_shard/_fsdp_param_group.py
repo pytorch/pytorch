@@ -534,17 +534,21 @@ class FSDPParamGroup:
             # ``fully_shard([a, b])`` already registered post_backward this
             # pass; skip to avoid duplicate ``RegisterPostBackwardFunction``
             # autograd nodes.
-            entering_forward_pass = self._training_state != TrainingState.FORWARD
-            self._training_state = TrainingState.FORWARD
-            self.unshard(self.unshard_async_op)
-            self.wait_for_unshard()
+            with dist.spmd_no_typecheck():
+                entering_forward_pass = self._training_state != TrainingState.FORWARD
+                self._training_state = TrainingState.FORWARD
+                self.unshard(self.unshard_async_op)
+                self.wait_for_unshard()
             if entering_forward_pass:
                 args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
         logger.debug("%s", self._with_fqn("FSDP::post_forward"))
-        with record_function(self._with_fqn("FSDP::post_forward")):
+        with (
+            dist.spmd_no_typecheck(),
+            record_function(self._with_fqn("FSDP::post_forward")),
+        ):
             # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
             # it shouldn't change post_forward_order
             if not is_bw():
@@ -565,7 +569,10 @@ class FSDPParamGroup:
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
         logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
-        with record_function(self._with_fqn("FSDP::pre_backward")):
+        with (
+            dist.spmd_no_typecheck(),
+            record_function(self._with_fqn("FSDP::pre_backward")),
+        ):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
@@ -573,6 +580,7 @@ class FSDPParamGroup:
                 self._backward_prefetch()
 
     @_dynamo_disable
+    @dist.spmd_no_typecheck()
     def post_backward(self, *unused: Any):
         # This method should be idempotent and safe to call even when this
         # FSDP parameter group was not used in backward (should be a no-op)
@@ -1055,3 +1063,9 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
         # Drop the non-tensor param_group tangent. The output pre-backward hook
         # queues final post-backward after all primal/tangent paths finish.
         return grad_inputs
+
+
+if dist._is_spmd_types_available():
+    import spmd_types
+
+    spmd_types.register_local_autograd_function(RegisterPostBackwardFunction)

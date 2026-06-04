@@ -92,6 +92,7 @@ __all__ = [
     "is_mpi_available",
     "is_backend_available",
     "is_nccl_available",
+    "spmd_no_typecheck",
     "is_torchelastic_launched",
     "is_ucc_available",
     "is_xccl_available",
@@ -1345,6 +1346,22 @@ def is_gloo_available() -> bool:
 def is_ucc_available() -> bool:
     """Check if the UCC backend is available."""
     return _UCC_AVAILABLE
+
+
+def spmd_no_typecheck():
+    """Return a spmd_types no_typecheck context, or a no-op if not installed."""
+    from torch.distributed import _is_spmd_types_available
+
+    if _is_spmd_types_available():
+        import spmd_types
+
+        return spmd_types.no_typecheck()
+
+    @contextlib.contextmanager
+    def no_typecheck():
+        yield
+
+    return no_typecheck()
 
 
 def is_xccl_available() -> bool:
