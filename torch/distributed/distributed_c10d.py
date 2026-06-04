@@ -2906,7 +2906,9 @@ def _coalescing_manager(
                 outputs.append(not_none(op.dst_tensor))
             all_gather_opts = AllgatherOptions()
             all_gather_opts.asyncOp = async_ops
-            work = group.all_gather_single_coalesced(outputs, inputs, all_gather_opts)
+            work = group.allgather_into_tensor_coalesced(
+                outputs, inputs, all_gather_opts
+            )
         elif op0 is reduce_scatter_single:
             inputs = []
             outputs = []
@@ -2916,7 +2918,7 @@ def _coalescing_manager(
             reduce_opts = ReduceScatterOptions()
             reduce_opts.reduceOp = not_none(op_list[0].redop)
             reduce_opts.asyncOp = async_ops
-            work = group.reduce_scatter_single_coalesced(outputs, inputs, reduce_opts)
+            work = group.reduce_scatter_tensor_coalesced(outputs, inputs, reduce_opts)
         else:
             raise AssertionError(
                 f"Coalescing manager does not support fast-path coalescing of {op0}, "

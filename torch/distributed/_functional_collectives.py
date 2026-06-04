@@ -429,7 +429,7 @@ def all_reduce_coalesced(
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
-def all_gather_single_coalesced(
+def all_gather_into_tensor_coalesced(
     self: list[torch.Tensor], group: RANK_TYPES, tag: str = ""
 ) -> list[torch.Tensor]:
     """
@@ -458,7 +458,7 @@ def all_gather_single_coalesced(
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
-def reduce_scatter_single_coalesced(
+def reduce_scatter_tensor_coalesced(
     inputs: list[torch.Tensor],
     reduceOp: str,
     scatter_dim: list[int],
@@ -504,32 +504,6 @@ def reduce_scatter_single_coalesced(
     )
 
     return list(map(_maybe_wrap_tensor, tensor_list))
-
-
-@deprecated(
-    "`torch.distributed._functional_collectives.all_gather_into_tensor_coalesced` is deprecated. "
-    "Please use `torch.distributed._functional_collectives.all_gather_single_coalesced` instead.",
-    category=FutureWarning,
-)
-def all_gather_into_tensor_coalesced(
-    self: list[torch.Tensor], group: RANK_TYPES, tag: str = ""
-) -> list[torch.Tensor]:
-    return all_gather_single_coalesced(self, group, tag)
-
-
-@deprecated(
-    "`torch.distributed._functional_collectives.reduce_scatter_tensor_coalesced` is deprecated. "
-    "Please use `torch.distributed._functional_collectives.reduce_scatter_single_coalesced` instead.",
-    category=FutureWarning,
-)
-def reduce_scatter_tensor_coalesced(
-    inputs: list[torch.Tensor],
-    reduceOp: str,
-    scatter_dim: list[int],
-    group: RANK_TYPES,
-    tag: str = "",
-) -> list[torch.Tensor]:
-    return reduce_scatter_single_coalesced(inputs, reduceOp, scatter_dim, group, tag)
 
 
 # This is a bit unsafe: it checks if the first argument in the schema reports as a non-mutable alias.
