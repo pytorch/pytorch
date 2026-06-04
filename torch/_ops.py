@@ -5,7 +5,6 @@ import ctypes
 import importlib
 import inspect
 import sys
-import threading
 import types
 from collections.abc import Callable, Iterator
 from functools import cached_property
@@ -32,30 +31,6 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T", default=Any)
 _P = ParamSpec("_P", default=...)
-
-
-# TLS holding the active redispatch chain entry: [op, chain, idx]
-# where op is the target OpOverload, chain is a tuple of callables
-# (autograd_impl, [adinplaceorview_impl,] backend_dispatch), and idx
-# is the next position to dispatch.
-_redispatch_chain_tls = threading.local()
-_fast_redispatch_count: int = 0
-
-
-def _set_fast_redispatch(op: "OpOverload", chain: tuple):
-    """Set up fast redispatch chain. Returns previous entry for restore.
-
-    Split into set/unset instead of a context manager to avoid __enter__/__exit__
-    overhead on the custom_op fast path.
-    """
-    prev = getattr(_redispatch_chain_tls, "entry", None)
-    _redispatch_chain_tls.entry = [op, chain, 0]
-    return prev
-
-
-def _unset_fast_redispatch(prev):
-    """Restore previous redispatch chain entry."""
-    _redispatch_chain_tls.entry = prev
 
 
 # Query `hasattr` only once.
@@ -399,6 +374,28 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
+    def _get_overloaded_args(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[torch.Tensor, ...]:
+        # Default HOP behavior matches handle_torch_function_no_python_arg_parser
+        # in torch/csrc/utils/python_arg_parser.cpp.
+        overloaded_args: list[torch.Tensor] = []
+
+        def has_python_key(tensor):
+            return torch._C._dispatch_keys(tensor).has("Python")
+
+        def check_overloaded(arg):
+            if isinstance(arg, torch.Tensor) and has_python_key(arg):
+                overloaded_args.append(arg)
+
+        for arg in (*args, *kwargs.values()):
+            check_overloaded(arg)
+            if isinstance(arg, (list, tuple)):
+                for a in arg:
+                    check_overloaded(a)
+
+        return tuple(overloaded_args)
+
     # Use positional-only argument to avoid naming collide with custom ops arguments
     # that are named "self".
     def dispatch(self, /, dispatch_key, *args, **kwargs):
@@ -414,25 +411,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             return dispatch_functorch(self, args, kwargs)
 
         if dispatch_key == DispatchKey.Python:
-            # Keep the following 1:1 with handle_torch_function_no_python_arg_parser
-            # in torch/csrc/utils/python_arg_parser.cpp
-
-            overloaded_args_list = []
-
-            def has_python_key(tensor):
-                return torch._C._dispatch_keys(tensor).has("Python")
-
-            def check_overloaded(arg):
-                if isinstance(arg, torch.Tensor) and has_python_key(arg):
-                    overloaded_args_list.append(arg)
-
-            for arg in (*args, *kwargs.values()):
-                check_overloaded(arg)
-                if isinstance(arg, (list, tuple)):
-                    for a in arg:
-                        check_overloaded(a)
-
-            overloaded_args = tuple(overloaded_args_list)
+            overloaded_args = self._get_overloaded_args(args, kwargs)
 
             # Step 1: dispatch on any user TorchDispatchModes
             from torch.utils._python_dispatch import _pop_mode_temporarily
@@ -900,14 +879,6 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
     def redispatch(
         self, /, keyset: torch._C.DispatchKeySet, *args: _P.args, **kwargs: _P.kwargs
     ) -> _T:
-        global _fast_redispatch_count
-        entry = getattr(_redispatch_chain_tls, "entry", None)
-        if entry is not None:
-            target_op, chain, idx = entry
-            if target_op is self and idx < len(chain):
-                entry[2] += 1
-                _fast_redispatch_count += 1
-                return chain[idx](keyset, *args, **kwargs)
         return self._handle.redispatch_boxed(keyset, *args, **kwargs)  # type: ignore[return-value]
 
     def __hash__(self):
