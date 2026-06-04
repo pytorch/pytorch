@@ -78,6 +78,16 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                 result = info._backward_fn(ctx, *grads)
             finally:
                 ctx.needs_input_grad = prev_needs_input_grad
+            expected = len(prev_needs_input_grad) - 1
+            actual = len(result) if isinstance(result, tuple) else 1
+            if actual != expected:
+                raise RuntimeError(
+                    f"The backward formula for {op} returned an incorrect "
+                    f"number of gradients (expected {expected}, got {actual}). "
+                    f"Expected one gradient for each positional input to the "
+                    f"operator. Use None for inputs that do not require a "
+                    f"gradient."
+                )
             if isinstance(result, tuple):
                 return (*result, None)
             return result, None
