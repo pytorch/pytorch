@@ -232,11 +232,8 @@ dtensor_compiled_fails = {
     xfail("cartesian_prod"),
     xfail("flatten"),
     xfail("kron"),
-    xfail("linalg.tensorsolve"),
-    xfail("nn.functional.instance_norm"),
     xfail("ravel"),
     xfail("reshape_as"),
-    xfail("take_along_dim"),
     xfail("view_as"),
     # View-type ops that decompose into as_strided (at autograd level).
     # DTensor doesn't have a sharding strategy for as_strided.
@@ -286,7 +283,6 @@ dtensor_compiled_fails = {
     xfail("nn.functional.gaussian_nll_loss"),
     xfail("nn.functional.logsigmoid"),
     xfail("scatter"),
-    xfail("take_along_dim"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
     xfail("nn.functional.multilabel_soft_margin_loss"),
