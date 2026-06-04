@@ -7754,6 +7754,37 @@ class TestTorch(TestCase):
                 with self.assertRaisesRegex(RuntimeError, r'cannot set item'):
                     s.fill_(s_other)
 
+    def test_untyped_storage_invalid_allocator_raises(self):
+        t = torch.randint(0, 100, (5,), dtype=torch.int32)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"'allocator' must be a valid c10::Allocator pointer",
+        ):
+            torch.UntypedStorage(
+                t.untyped_storage().nbytes(),
+                allocator=t.untyped_storage().data_ptr(),
+            )
+
+    def test_quantized_storage_dtype_cast_raises(self):
+        quantized_storages = [
+            torch.QInt32Storage,
+            torch.QInt8Storage,
+            torch.QUInt2x4Storage,
+            torch.QUInt4x2Storage,
+            torch.QUInt8Storage,
+        ]
+        for storage_class in quantized_storages:
+            s = storage_class(4)
+            for cast_fn in (
+                s.bfloat16, s.float, s.double, s.complex_double,
+                s.complex_float, s.half, s.long, s.int, s.short,
+                s.char, s.byte, s.bool,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, r"Cannot cast quantized storage"
+                ):
+                    cast_fn()
+
     def test_storage_error_no_attribute(self):
         storage_classes = [
             torch.cuda.ByteStorage,

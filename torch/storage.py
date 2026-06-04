@@ -592,6 +592,31 @@ def _storage_type_to_dtype_map():
     return dtype_map
 
 
+@functools.cache
+def _quantized_storage_dtypes() -> frozenset[torch.dtype]:
+    return frozenset(
+        {
+            torch.qint8,
+            torch.qint32,
+            torch.quint8,
+            torch.quint4x2,
+            torch.quint2x4,
+        }
+    )
+
+
+def _raise_if_quantized_storage_cast(
+    source_dtype: torch.dtype | None, target_dtype: torch.dtype
+) -> None:
+    quantized_dtypes = _quantized_storage_dtypes()
+    if source_dtype in quantized_dtypes or target_dtype in quantized_dtypes:
+        raise RuntimeError(
+            "Cannot cast quantized storage to another dtype directly. "
+            "Quantized values require scale and zero_point; dequantize the "
+            "tensor first, then call .to()."
+        )
+
+
 def _get_storage_from_sequence(sequence, dtype, device):
     if dtype in [
         torch.quint8,
@@ -1316,6 +1341,7 @@ class TypedStorage:
     def _to(self, dtype):
         if not isinstance(dtype, torch.dtype):
             raise TypeError(f"Argument 'dtype' must be torch.dtype, not {type(dtype)}")
+        _raise_if_quantized_storage_cast(self.dtype, dtype)
         storage = (
             torch.tensor([], dtype=self.dtype, device=self.device)
             .set_(self)

@@ -121,10 +121,17 @@ static PyObject* THPStorage_pynew(
   if (allocator_opt.has_value()) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     allocator = reinterpret_cast<c10::Allocator*>(allocator_opt.value());
+    TORCH_CHECK(
+        c10::isKnownAllocator(allocator),
+        THPStorageStr,
+        "(): 'allocator' must be a valid c10::Allocator pointer. ",
+        "Do not pass tensor.data_ptr() or untyped_storage().data_ptr(). ",
+        "Use device= to select device memory, or omit allocator for the default CPU allocator.");
   } else if (device_opt.has_value()) {
     at::Device device = device_opt.value();
     torch::utils::maybe_initialize_device(device);
 
+    // NOLINTBEGIN(bugprone-branch-clone)
     switch (device.type()) {
       case at::kCPU:
         allocator = c10::GetDefaultCPUAllocator();
@@ -427,16 +434,19 @@ typedef PyObject* (*getter)(PyObject*, void*);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPStorage_properties[] = {
+    // NOLINTNEXTLINE(modernize-use-designated-initializers)
     {"device",
      reinterpret_cast<getter>(THPStorage_device),
      nullptr,
      nullptr,
      nullptr},
+    // NOLINTNEXTLINE(modernize-use-designated-initializers)
     {"_cdata",
      reinterpret_cast<getter>(THPStorage_get_cdata),
      nullptr,
      nullptr,
      nullptr},
+    // NOLINTNEXTLINE(modernize-use-designated-initializers)
     {nullptr}};
 
 bool THPStorage_init(PyObject* module) {
