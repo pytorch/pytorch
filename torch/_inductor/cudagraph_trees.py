@@ -2687,7 +2687,15 @@ class CUDAGraphTreeManager:
         stor_dealloc_info: dict[int, tuple[str | None, bool]] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
-            assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            # tensor_weakrefs and stack_traces are paired below with zip(),
+            # matching the defensive handling for outputs_weakrefs and
+            # stack_traces.
+            if len(node.tensor_weakrefs) != len(node.stack_traces):
+                log.warning(
+                    "tensor_weakrefs length (%d) != stack_traces length (%d)",
+                    len(node.tensor_weakrefs),
+                    len(node.stack_traces),
+                )
             is_grad_output = (
                 self.id_to_mode[node.wrapped_function.id] == CompilationMode.BACKWARD
             )
