@@ -5299,7 +5299,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             xfail("linalg.diagonal"),
             skip("linalg.matrix_norm", ""),
             skip("linalg.ldl_solve", ""),
-            xfail("linalg.polar"),  # no vmap batch rule
         },
     )
     def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
