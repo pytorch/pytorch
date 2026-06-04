@@ -59,6 +59,18 @@ class SpmdLinear(nn.Module):
         return x.sum()
 
 
+class HsdpLinear(nn.Module):
+    def __init__(self, dp_axis):
+        super().__init__()
+        self.dp_axis = dp_axis
+        self.weight = nn.Parameter(torch.randn(16, 16))
+        self.compute_local_type = None
+
+    def forward(self, x):
+        self.compute_local_type = dict(spmd.get_local_type(self.weight))
+        return (x @ self.weight).sum()
+
+
 @unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
 class TestFullyShardSpmdTypes(TestCase):
     @classmethod
@@ -68,6 +80,9 @@ class TestFullyShardSpmdTypes(TestCase):
             dist.destroy_process_group()
         dist.init_process_group(backend="fake", store=FakeStore(), rank=0, world_size=4)
         cls.mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("dp", "tp"))
+        cls.hsdp_mesh = init_device_mesh(
+            "cpu", (2, 2), mesh_dim_names=("dp_replicate", "dp_shard")
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -79,7 +94,8 @@ class TestFullyShardSpmdTypes(TestCase):
         """FSDP restores user SPMD metadata on params for compute.
 
         The user only annotates TP sharding; FSDP should restore the TP
-        metadata before the module sees its parameter or MP-cast input.
+        metadata and add DP:R before the module sees its parameter or
+        MP-cast input.
         """
         with spmd.set_current_mesh(self.mesh):
             for seq_parallel in (False, True):
@@ -154,8 +170,28 @@ class TestFullyShardSpmdTypes(TestCase):
                 )
         self.assertExpectedInline(
             str(cm.exception),
-            """Parameter 'sharded_weight' has V type on axis mesh_tp but no PartitionSpec shard info. Use assert_type with S(dim) or pass a PartitionSpec.""",
+            """Parameter 'sharded_weight' has V type on mesh dim 'tp' but no PartitionSpec shard info. Use assert_type with S(dim) or pass a PartitionSpec.""",
         )
+
+    def test_hsdp_uses_logical_dp_axis_for_spmd_type(self):
+        dp_axis = spmd.MeshAxis.of(
+            self.hsdp_mesh[("dp_replicate", "dp_shard")]._flatten("dp").get_group()
+        )
+        model = HsdpLinear(dp_axis)
+
+        with spmd.set_current_mesh({"dp": dp_axis}):
+            spmd.assert_type(model.weight, {"dp": spmd.R})
+
+        fully_shard(
+            model,
+            mesh=self.hsdp_mesh,
+            dp_mesh_dims=DataParallelMeshDims(
+                shard="dp_shard",
+                replicate="dp_replicate",
+            ),
+        )
+        model(torch.randn(4, 16))
+        self.assertEqual(model.compute_local_type, {dp_axis: spmd.R})
 
 
 if __name__ == "__main__":
