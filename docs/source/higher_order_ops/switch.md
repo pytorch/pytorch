@@ -41,6 +41,7 @@ Below is an example that uses switch to select between multiple operations based
 
 ```{code-cell}
 import torch
+from torch._higher_order_ops.switch import switch
 
 def branch0(x: torch.Tensor):
     return x.cos()
@@ -60,7 +61,7 @@ class BasicSwitch(torch.nn.Module):
         super().__init__()
 
     def forward(self, index: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-        return torch.switch(index, [branch0, branch1, branch2], (x,))
+        return switch(index, [branch0, branch1, branch2], (x,))
 
 switch_mod = BasicSwitch()
 ```
@@ -115,7 +116,7 @@ class DataDependentSwitch(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Select branch based on the sign of the sum
         index = torch.clamp((x.sum() > 0).long() + (x.sum() > 5).long(), 0, 2)
-        return torch.switch(index, [branch0, branch1, branch2], (x,))
+        return switch(index, [branch0, branch1, branch2], (x,))
 
 x = torch.randn(4, 3)
 ep = torch.export.export(
@@ -141,7 +142,7 @@ There are several useful invariants for `torch.ops.higher_order.switch`:
     - They are `torch.fx.GraphModule`
     - Closures in original functions become explicit inputs. No closures.
     - No mutations on inputs or globals are allowed
-    - Branch outputs must be tensors or tuples/lists/dicts of tensors. If a branch returns a single non-tensor value, it must be an int (which will be converted to a SymInt for dynamic shapes).
+    - Branch outputs must be tensors or possibly nested tuples/lists/dicts of tensors. Non-tensor leaves must be `int` or `None`. Diverging `int` values across branches are merged into a SymInt for dynamic shapes; `None` must match positionally across every branch.
 
 - For operands:
     - It will be a flat tuple of tensors
@@ -152,3 +153,4 @@ There are several useful invariants for `torch.ops.higher_order.switch`:
 
 ```{eval-rst}
 .. autofunction:: torch._higher_order_ops.switch.switch
+```

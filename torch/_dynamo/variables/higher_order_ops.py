@@ -916,25 +916,13 @@ def _call_while_loop(
         include_contiguity=False,
     )
 
-    (
-        cond_graph,
-        body_graph,
-        cond_shared,
-        _body_shared,
-        cond_unique,
-        body_unique,
-    ) = _merge_graph_inputs(
-        cond_graph,
-        cond_lifted_freevars,
-        "cond_fn",
-        body_graph,
-        body_lifted_freevars,
-        "body_fn",
+    shared, (cond_unique, body_unique) = _merge_graph_inputs(
+        [cond_graph, body_graph],
+        [cond_lifted_freevars, body_lifted_freevars],
+        ["cond_fn", "body_fn"],
     )
 
-    # Note: cond_shared and body_shared refer to the same proxy in parent graph
-    # so using either of them is OK. Use cond_shared as it doesn't matter.
-    additional_lifted_inputs = cond_shared + cond_unique + body_unique
+    additional_lifted_inputs = shared + cond_unique + body_unique
     all_while_loop_inputs: list[VariableTracker | Proxy] = (
         list(operands_seq)
         + list(additional_inputs_seq)
@@ -1246,108 +1234,110 @@ def validate_args_and_maybe_create_graph_inputs(
         return args
 
 
-# This helper function is used to make sure two graphs share the same input signature. For example,
-# in torch.cond, two branches might lift different set of tensors as inputs. This function helps to
-# dedup the inputs and modify the graphs to take the same set of inputs.
+# N-branch generalization of former _merge_graph_inputs. Used by torch.cond (2 branches)
+# and torch.switch (N branches): both must produce subgraphs with a unified
+# placeholder signature so the higher order op can pass a single operand list.
+#
+# Returns (shared, unique_per_branch):
+#   * shared: proxies present in every branch's lifted freevars. For plain
+#     proxies, "present" means by identity. For get_attr proxies, "present"
+#     means by node target (branches in separate tracing contexts can produce
+#     distinct proxies for the same nn module attr); the proxy from the first
+#     branch is chosen as the canonical representative.
+#   * unique_per_branch[i]: proxies lifted by branch i but not shared.
+# Each block is sorted by node name for determinism.
+#
+# Side effect: each graph is rewritten in-place so its placeholders follow the
+# 1 + N block layout: shared block (no suffix), then one block per branch
+# (suffixed with "_<branch_name>") holding that branch's unique freevars. Only
+# the originating branch's unique placeholders are wired to the inner uses;
+# the other branches' unique blocks become unused placeholders for signature
+# alignment.
 def _merge_graph_inputs(
-    l_graph: torch.fx.Graph,
-    l_lifted_freevars: dict[Proxy, Proxy],
-    l_name: str,
-    r_graph: torch.fx.Graph,
-    r_lifted_freevars: dict[Proxy, Proxy],
-    r_name: str,
-) -> tuple[
-    torch.fx.Graph, torch.fx.Graph, list[Proxy], list[Proxy], list[Proxy], list[Proxy]
-]:
-    def dedup_and_sort_lifted_freevars(
-        l_lifted_freevars: dict[Proxy, Proxy], r_lifted_freevars: dict[Proxy, Proxy]
-    ) -> tuple[list[Proxy], list[Proxy], list[Proxy], list[Proxy]]:
-        # The nn module attributes are guaranteed to be registered into the top-level graph module during
-        # higher order op speculation. Therefore, get_attr nodes in two branches with the same
-        # target refer to the same attribute and we can safely deduplicate them with their target.
-        #
-        # Note: ideally, dynamo should just create a single proxy for the same attribute of a nn module. But
-        # true_branch and false_branch belong to two separate tracing contexts, they may register the same
-        # attribute to top level separately. This creates two get_attr proxies for the same attribute
-        # that have different meta data such as stack_trace (one stack trace for the true_branch,
-        # and the other for false_branch). It seems better to discard the proxy explicitly in cond
-        # than make dynamo create a single proxy for the same get_attr target.
-        def shared_getattrs(
-            l_lifted_proxies: Sequence[Proxy], r_lifted_proxies: Sequence[Proxy]
-        ) -> tuple[dict[Proxy, Proxy], dict[Proxy, Proxy]]:
-            true_targets = {
-                proxy.node.target: proxy
-                for proxy in l_lifted_proxies
-                if proxy.node.op == "get_attr"
-            }
-            l_shared_getattrs = {}
-            r_shared_getattrs = {}
-
-            for false_proxy in r_lifted_proxies:
-                if (
-                    false_proxy.node.op == "get_attr"
-                    and false_proxy.node.target in true_targets
-                ):
-                    true_proxy = true_targets[false_proxy.node.target]
-                    l_shared_getattrs[true_proxy] = true_proxy
-                    r_shared_getattrs[false_proxy] = true_proxy
-            return l_shared_getattrs, r_shared_getattrs
-
-        l_shared_getattrs, r_shared_getattrs = shared_getattrs(
-            l_lifted_freevars.keys(),  # type: ignore[arg-type]
-            r_lifted_freevars.keys(),  # type: ignore[arg-type]
+    graphs: list[torch.fx.Graph],
+    lifted_freevars: list[dict[Proxy, Proxy]],
+    names: list[str],
+) -> tuple[list[Proxy], list[list[Proxy]]]:
+    if len(graphs) != len(lifted_freevars) or len(graphs) != len(names):
+        raise AssertionError(
+            "Expected graphs, lifted_freevars and names to have the same length"
         )
+    if len(graphs) == 0:
+        raise AssertionError("Expected at least one graph")
 
-        l_shared_freevars = (l_lifted_freevars.keys() & r_lifted_freevars.keys()).union(
-            l_shared_getattrs.keys()
+    # Step 1: pick a canonical proxy for every distinct outer freevar across
+    # branches, deduplicating get_attrs that share a target.
+    get_attr_canonical: dict[Any, Proxy] = {}
+    per_branch_outer_to_canonical: list[dict[Proxy, Proxy]] = []
+    for branch_lifted in lifted_freevars:
+        outer_to_canonical: dict[Proxy, Proxy] = {}
+        for outer in branch_lifted:
+            if outer.node.op == "get_attr":
+                target = outer.node.target
+                if target not in get_attr_canonical:
+                    get_attr_canonical[target] = outer
+                outer_to_canonical[outer] = get_attr_canonical[target]
+            else:
+                outer_to_canonical[outer] = outer
+        per_branch_outer_to_canonical.append(outer_to_canonical)
+
+    # Step 2: a canonical proxy is shared iff every branch contributed to it.
+    canonical_branch_count: dict[Proxy, int] = {}
+    for outer_to_canonical in per_branch_outer_to_canonical:
+        for canonical in set(outer_to_canonical.values()):
+            canonical_branch_count[canonical] = (
+                canonical_branch_count.get(canonical, 0) + 1
+            )
+    n = len(graphs)
+    shared_canonical = {c for c, count in canonical_branch_count.items() if count == n}
+
+    # Step 3: derive the shared block and the per-branch unique blocks. Plain
+    # proxies are the same object across branches, so a single canonical entry
+    # covers all of them; for shared get_attrs the canonical is the branch-0
+    # proxy.
+    def _sort_by_name(vars: Iterable[Proxy]) -> list[Proxy]:
+        return sorted(vars, key=lambda var: var.node.name)
+
+    shared = _sort_by_name(shared_canonical)
+    unique_per_branch = [
+        _sort_by_name(
+            outer
+            for outer, canonical in outer_to_canonical.items()
+            if canonical not in shared_canonical
         )
-        r_shared_freevars = (l_lifted_freevars.keys() & r_lifted_freevars.keys()).union(
-            r_shared_getattrs.keys()
-        )
-        unique_l_freevars = l_lifted_freevars.keys() - l_shared_freevars
-        unique_r_freevars = r_lifted_freevars.keys() - r_shared_freevars
+        for outer_to_canonical in per_branch_outer_to_canonical
+    ]
 
-        def _sort_by_name(vars: list[Proxy]) -> list[Proxy]:
-            return sorted(vars, key=lambda var: var.node.name)
-
-        return (
-            list(_sort_by_name(list(l_shared_freevars))),
-            list(_sort_by_name(list(r_shared_freevars))),
-            list(_sort_by_name(list(unique_l_freevars))),
-            list(_sort_by_name(list(unique_r_freevars))),
-        )
-
-    (l_shared, r_shared, unique_l, unique_r) = dedup_and_sort_lifted_freevars(
-        l_lifted_freevars, r_lifted_freevars
-    )
-
-    # Let's say we capture cond(pred, true_fn, false_fn, (x,))
+    # Let's say we capture cond(pred, true_fn, false_fn, (x,)).
     # With set_graph_input set to automatic,
-    # true_fn has lifted variables x, a, b, c
-    # false_fn has lifted variables x, a, b, d
-    # Then fixup_branch_inps make sure both branches have the same signature, i.e.:
-    # - true_fn(x, a, b, c_true_branch, d_false_branch)
-    # - false_fn(x, a, b, c_true_branch, d_false_branch)
+    #   true_fn has lifted variables x, a, b, c
+    #   false_fn has lifted variables x, a, b, d
+    # Then fixup_branch_inps makes sure both branches have the same signature, i.e.:
+    #   true_fn(x, a, b, c_true_branch, d_false_branch)
+    #   false_fn(x, a, b, c_true_branch, d_false_branch)
     #
-    # More formally, the signature has three parts in the following order:
-    # 1. used in both branches: x, a, b
-    # 2. only used in true branches: c, suffixed with _true_branch
-    # 3. only used in false branches: d, suffixed with _false_branch
-    # Within each part, we re-order the nodes by name to have a derterministic ordering for testing.
+    # For N branches the merged signature has 1 + N blocks: shared (no suffix)
+    # then one suffixed block per branch. Within each block proxies are
+    # ordered by node name for determinism.
     def fixup_branch_inps(
         graph: torch.fx.Graph,
-        lifted_freevars: dict[Proxy, Proxy],
-        shared: Sequence[Proxy],
-        unique_l: Sequence[Proxy],
-        unique_r: Sequence[Proxy],
+        branch_lifted: dict[Proxy, Proxy],
+        outer_to_canonical: dict[Proxy, Proxy],
     ) -> None:
+        # Reverse-map canonical -> this branch's outer proxy so we can find the
+        # old placeholder to replace when emitting the shared block.
+        canonical_to_branch_outer = {c: o for o, c in outer_to_canonical.items()}
+
         def _insert_or_replace_phs(new_args: Sequence[Proxy], name_suffix: str) -> None:
             for arg in new_args:
                 new_ph = graph.placeholder(arg.node.name + name_suffix)
                 new_ph.meta = arg.node.meta
-                # Override with new_ph if there exists a old placeholder.
-                if arg in lifted_freevars:
-                    old_ph = lifted_freevars[arg].node
+                # If this branch lifted `arg` (directly or via a shared
+                # get_attr target), wire the new placeholder to the existing
+                # uses and erase the old placeholder.
+                local_outer = canonical_to_branch_outer.get(arg, arg)
+                if local_outer in branch_lifted:
+                    old_ph = branch_lifted[local_outer].node
                     old_ph.replace_all_uses_with(new_ph)
                     # replace_all_uses_with doesn't clean users. Clean it manually so that we could erase it.
                     old_ph.users = {}
@@ -1358,12 +1348,15 @@ def _merge_graph_inputs(
         )
         with graph.inserting_before(first_not_ph_node):
             _insert_or_replace_phs(shared, "")
-            _insert_or_replace_phs(unique_l, "_" + l_name)
-            _insert_or_replace_phs(unique_r, "_" + r_name)
+            for other_name, other_unique in zip(names, unique_per_branch):
+                _insert_or_replace_phs(other_unique, "_" + other_name)
 
-    fixup_branch_inps(l_graph, l_lifted_freevars, l_shared, unique_l, unique_r)
-    fixup_branch_inps(r_graph, r_lifted_freevars, r_shared, unique_l, unique_r)
-    return l_graph, r_graph, l_shared, r_shared, unique_l, unique_r
+    for graph, branch_lifted, outer_to_canonical in zip(
+        graphs, lifted_freevars, per_branch_outer_to_canonical
+    ):
+        fixup_branch_inps(graph, branch_lifted, outer_to_canonical)
+
+    return shared, unique_per_branch
 
 
 # NOTE: [HigherOrderOperator subgraph input ordering]
@@ -2552,20 +2545,10 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 ],
             )
 
-        (
-            true_graph,
-            false_graph,
-            true_shared,
-            _false_shared,
-            unique_true,
-            unique_false,
-        ) = _merge_graph_inputs(
-            true_graph,
-            true_lifted_freevars,
-            "true_branch",
-            false_graph,
-            false_lifted_freevars,
-            "false_branch",
+        shared, (unique_true, unique_false) = _merge_graph_inputs(
+            [true_graph, false_graph],
+            [true_lifted_freevars, false_lifted_freevars],
+            ["true_branch", "false_branch"],
         )
 
         true_name = tx.output.install_subgraph(
@@ -2584,8 +2567,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             pred.as_proxy(),
             true_node,
             false_node,
-            # We pick true_shared but it shouldn't matter
-            tuple(true_shared + unique_true + unique_false),
+            tuple(shared + unique_true + unique_false),
         )
 
         return _call_function_and_unflatten_output(
@@ -2788,9 +2770,13 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # placeholder signature. Branches may capture different free variables
         # (e.g. different nn module attrs), so we union them and add missing
         # placeholders to any branch graph that lacks them.
-        all_lifted = _merge_switch_graph_inputs(
-            list(branch_graphs), list(branch_lifted_freevars)
+        branch_names_for_merge = [f"branch{i}" for i in range(len(branch_fns))]
+        shared, unique_per_branch = _merge_graph_inputs(
+            list(branch_graphs),
+            list(branch_lifted_freevars),
+            branch_names_for_merge,
         )
+        all_lifted = shared + [u for branch in unique_per_branch for u in branch]
 
         branch_names = [
             tx.output.install_subgraph(
@@ -2817,74 +2803,6 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
             branch_specs[0],
             branch_rets[0],
         )
-
-
-def _merge_switch_graph_inputs(
-    graphs: list[torch.fx.Graph],
-    lifted_freevars_list: list[dict[Proxy, Proxy]],
-) -> list[Proxy]:
-    """Merge lifted freevars across N branch graphs so they all share the same
-    input placeholder signature. Returns the canonical outer proxies in order.
-
-    Each lifted_freevars dict maps outer_proxy -> inner_proxy, where
-    inner_proxy.node is a placeholder in the corresponding graph. We
-    deduplicate get_attr proxies that share the same target across branches,
-    then ensure every branch graph has placeholders for the full set."""
-    if len(graphs) == 0:
-        return []
-
-    # Collect all unique outer proxies, deduplicating get_attrs with the
-    # same target (they refer to the same nn module attribute).
-    get_attr_canonical: dict[str, Proxy] = {}
-    outer_to_canonical: dict[int, Proxy] = {}  # keyed by id(outer)
-    canonical_order: list[Proxy] = []
-    canonical_seen: set[int] = set()
-
-    for lifted_freevars in lifted_freevars_list:
-        for outer in lifted_freevars:
-            if id(outer) in outer_to_canonical:
-                continue
-            if outer.node.op == "get_attr":
-                target = cast(str, outer.node.target)
-                if target not in get_attr_canonical:
-                    get_attr_canonical[target] = outer
-                outer_to_canonical[id(outer)] = get_attr_canonical[target]
-            else:
-                outer_to_canonical[id(outer)] = outer
-
-            canonical = outer_to_canonical[id(outer)]
-            if id(canonical) not in canonical_seen:
-                canonical_seen.add(id(canonical))
-                canonical_order.append(canonical)
-
-    # Sort by node name to ensure deterministic ordering across branches.
-    # FX graph node names are unique within a graph, so this provides a
-    # stable canonical order when branches capture different free variables.
-    canonical_order.sort(key=lambda p: p.node.name)
-
-    # Fix up each branch graph: create new placeholders for the full
-    # canonical set, replacing existing ones where present.
-    for graph, lifted_freevars in zip(graphs, lifted_freevars_list):
-        canonical_to_inner: dict[int, Proxy] = {}
-        for outer, inner in lifted_freevars.items():
-            canonical = outer_to_canonical[id(outer)]
-            canonical_to_inner[id(canonical)] = inner
-
-        first_not_ph = next((n for n in graph.nodes if n.op != "placeholder"), None)
-        if first_not_ph is None:
-            continue
-
-        with graph.inserting_before(first_not_ph):
-            for canonical in canonical_order:
-                new_ph = graph.placeholder(canonical.node.name)
-                new_ph.meta = dict(canonical.node.meta)
-                if id(canonical) in canonical_to_inner:
-                    old_ph = canonical_to_inner[id(canonical)].node
-                    old_ph.replace_all_uses_with(new_ph)
-                    old_ph.users = {}
-                    graph.erase_node(old_ph)
-
-    return canonical_order
 
 
 class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):

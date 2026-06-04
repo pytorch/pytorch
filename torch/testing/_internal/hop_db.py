@@ -163,6 +163,26 @@ def simple_cond(x):
     return torch.cond(x.sum() > 2, lambda x: (x.cos(),), lambda x: (x.sin(),), [x])
 
 
+def sample_inputs_switch(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2))
+
+
+def simple_switch(x):
+    # Tensor index so the HOP is actually captured (Python-constant indices
+    # would specialize away in dynamo).
+    from torch._higher_order_ops.switch import switch
+
+    idx = (x.sum() > 2).long()
+    return switch(
+        idx,
+        (lambda x: (x.cos(),), lambda x: (x.sin(),), lambda x: (x.abs(),)),
+        [x],
+    )
+
+
 def sample_inputs_invoke_subgraph(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
@@ -511,6 +531,29 @@ hop_db = [
         supports_autograd=True,
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
+    ),
+    OpInfo(
+        name="switch",
+        variant_test_name="simple",
+        op=simple_switch,
+        sample_inputs_func=sample_inputs_switch,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        # The full SwitchAutogradOp lands in PR 3. PR 1 ships only a
+        # passthrough autograd stub (CompositeExplicitAutograd-style) that
+        # is not sufficient for HOP-level backward tests.
+        supports_autograd=False,
+        # Export serialization needs SwitchOp.gen_schema, which lands in
+        # PR 4. Remove this xfail once that PR merges.
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure, "TestHOP", "test_serialize_export"
+            ),
+        ),
     ),
     OpInfo(
         name="invoke_quant",

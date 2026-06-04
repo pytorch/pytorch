@@ -3258,6 +3258,26 @@
       ]
     }
   ],
+  "GB9760": [
+    {
+      "Gb_type": "torch.switch: improper operands contents",
+      "Context": "str(operands)",
+      "Explanation": "Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB2796": [
+    {
+      "Gb_type": "torch.cond: unsupported branch return type",
+      "Context": "str(ret_val)",
+      "Explanation": "Expected branches to return a possibly nested pytree of tensors or constant ints.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0231": [
     {
       "Gb_type": "call `torch.from_numpy` with `torch._dynamo.config.trace_numpy=False`",
@@ -4596,6 +4616,14 @@
   ],
   "GB0312": [
     {
+      "Gb_type": "torch.cond: improper operands contents",
+      "Context": "str(operands)",
+      "Explanation": "Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
+    {
       "Gb_type": "torch.switch: improper operands contents",
       "Context": "str(operands)",
       "Explanation": "Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
@@ -4930,16 +4958,6 @@
       "Hints": []
     }
   ],
-  "GB5538": [
-    {
-      "Gb_type": "torch.cond: improper operands contents",
-      "Context": "str(operands)",
-      "Explanation": "Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
-      "Hints": [
-        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
   "GB8165": [
     {
       "Gb_type": "torch.switch: improper args/kwargs",
@@ -4990,31 +5008,11 @@
       ]
     }
   ],
-  "GB5223": [
-    {
-      "Gb_type": "torch.cond: unsupported branch return type",
-      "Context": "str(ret_val)",
-      "Explanation": "Expected branches to return a possibly nested pytree of tensors or constant ints.",
-      "Hints": [
-        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
   "GB9203": [
     {
       "Gb_type": "torch.switch: differing branch outputs",
       "Context": "branch{i}: {spec_a.treespec}, branch{i + 1}: {spec_b.treespec}, same_spec: {same_spec}",
       "Explanation": "Expected branches to return the same pytree structure.",
-      "Hints": [
-        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
-  "GB8742": [
-    {
-      "Gb_type": "torch.cond: unsupported branch return type (constant non-int)",
-      "Context": "str(ret_val)",
-      "Explanation": "Constants returned from branches must be ints.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
@@ -5291,6 +5289,14 @@
     }
   ],
   "GB0350": [
+    {
+      "Gb_type": "torch.cond: unsupported branch return type (constant non-int)",
+      "Context": "str(ret_val)",
+      "Explanation": "Constants returned from branches must be ints.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
     {
       "Gb_type": "torch.switch: unsupported branch return type (constant non-int)",
       "Context": "str(ret_val)",

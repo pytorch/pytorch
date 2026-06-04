@@ -1128,6 +1128,7 @@ This feature is a prototype and may have compatibility breaking changes in the f
     :nosignatures:
 
     cond
+    switch
 ```
 
 ## Optimizations
