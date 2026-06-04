@@ -63,6 +63,8 @@ from torch.utils._sympy.functions import (
     CleanDiv,
     FloorDiv,
     IsNonOverlappingAndDenseIndicator,
+    Max,
+    Min,
     Mod,
 )
 
@@ -1323,6 +1325,20 @@ def forward(self, x_1):
                 torch.sym_max(1, torch.sym_max(257, u0)) == torch.sym_max(257, u0)
             )
         )
+
+    def test_min_max_simplify_with_value_ranges(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        u1 = shape_env.create_unbacked_symint()
+        torch._check(u0 <= 5)
+        torch._check(u1 >= 10)
+
+        u0_expr = u0.node.expr
+        u1_expr = u1.node.expr
+        self.assertEqual(shape_env.simplify(Min(u0_expr, 5)), u0_expr)
+        self.assertEqual(shape_env.simplify(Max(u1_expr, 10)), u1_expr)
+        self.assertEqual(shape_env.simplify(Min(u0_expr, u1_expr, 20)), u0_expr)
+        self.assertEqual(shape_env.simplify(Max(u1_expr, u0_expr, -1)), u1_expr)
 
     def test_numpy_sym_max(self):
         self.assertEqual(torch.sym_max(np.int64(10), 12), 12)

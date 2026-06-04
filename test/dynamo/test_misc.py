@@ -9752,6 +9752,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         with self.assertRaises(RuntimeError):
             fn(torch.tensor([9, 0]))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_sym_min_simplifies_with_checked_upper_bound(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            x0, x1 = x.tolist()
+            torch._check(x0 <= 5)
+            if torch.sym_min(x0, 5) == x0:
+                return torch.tensor(True)
+            return torch.tensor(False)
+
+        self.assertEqual(fn(torch.tensor([3, 5])), torch.tensor(True))
+
     def test_unbacked_2d_expand(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
         def func(a, b):

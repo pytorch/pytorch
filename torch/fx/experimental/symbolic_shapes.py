@@ -86,6 +86,7 @@ from torch.utils._sympy.functions import (
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Max,
+    Min,
     Mod,
     PythonMod,
     TruncToInt,
@@ -7214,21 +7215,38 @@ class ShapeEnv:
         expr = safe_expand(expr)
         expr = self.replace(expr)
 
-        # Simplify max(0/1, x) to x when x >= 0/1. max(1, x) is a commonly introduced
-        # expression when creating contiguous strides.
         if not size_oblivious:
             min_max_replacements: dict[sympy.Basic, sympy.Basic] = {}
-            for atom in expr.atoms(Max):  # type: ignore[has-type]
-                if len(atom.args) > 2:
+            for atom in expr.atoms(Min, Max):  # type: ignore[has-type]
+                args = list(atom.args)
+                if len(args) < 2:
                     continue
-                a, b = atom.args
-                if b == 1 or b == 0:
-                    a, b = b, a
 
-                if a == 1 and self._maybe_evaluate_static(sympy.Ge(b, 1)):
-                    min_max_replacements[atom] = b
-                if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0)):
-                    min_max_replacements[atom] = b
+                is_min = isinstance(atom, Min)
+                keep = [True] * len(args)
+                for i, a in enumerate(args):
+                    if not keep[i]:
+                        continue
+                    for j in range(i + 1, len(args)):
+                        if not keep[j]:
+                            continue
+                        b = args[j]
+                        if self._maybe_evaluate_static(sympy.Le(a, b)) is sympy.true:
+                            if is_min:
+                                keep[j] = False
+                            else:
+                                keep[i] = False
+                                break
+                        elif self._maybe_evaluate_static(sympy.Le(b, a)) is sympy.true:
+                            if is_min:
+                                keep[i] = False
+                                break
+                            else:
+                                keep[j] = False
+
+                new_args = [arg for arg, keep_arg in zip(args, keep) if keep_arg]
+                if len(new_args) != len(args):
+                    min_max_replacements[atom] = atom.func(*new_args, evaluate=False)
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
 
