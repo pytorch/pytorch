@@ -349,6 +349,8 @@ def aot_dispatch_base_graph(
         updated_flat_args_subclasses_desugared_descs
     )
 
+    _check_no_overlapping_as_strided_views_in_graph(fw_module)
+
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
         # We update metadata to consider any assigned buffers as buffer mutations.
         i = len(dict(mod_when_exporting_non_strict.named_parameters()))
@@ -460,6 +462,60 @@ def aot_dispatch_base_graph(
     )
 
 
+def _resolve(x: Any) -> Any:
+    if isinstance(x, torch.fx.Node):
+        return x.meta.get("val", x)
+    return x
+
+def _check_no_overlapping_as_strided_views_in_graph(
+    graph: torch.fx.GraphModule,
+) -> None:
+    for node in graph.graph.nodes:
+        if (
+            node.op != "call_function"
+            or node.target != torch.ops.aten.as_strided_scatter.default
+        ):
+            continue
+        base_node = node.args[0]
+        base = base_node.meta.get("val", None) if hasattr(base_node, "meta") else None
+        if not isinstance(base, torch.Tensor):
+            continue
+
+        sizes = node.args[2]
+        strides = node.args[3]
+        if isinstance(sizes, (list, tuple)):
+            sizes = [_resolve(s) for s in sizes]
+        else:
+            continue
+        if isinstance(strides, (list, tuple)):
+            strides = [_resolve(s) for s in strides]
+        else:
+            continue
+
+        storage_offset = (
+            0 if len(node.args) < 5 or node.args[4] is None else _resolve(node.args[4])
+        )
+
+        if any(isinstance(v, torch.SymInt) for v in (*sizes, *strides)):
+            continue
+        if isinstance(storage_offset, torch.SymInt):
+            continue
+
+        view = base.as_strided(sizes, strides, storage_offset).squeeze()
+        if torch._debug_has_internal_overlap(view) != 0:
+            sq_strides = view.stride()
+            sq_sizes = view.shape
+            indices = list(range(len(sq_strides)))
+            indices = [x for _, x in sorted(zip(sq_strides, indices))]
+            for i in range(len(sq_strides)):
+                prev_stride = 1 if i == 0 else sq_strides[indices[i - 1]]
+                prev_size = 1 if i == 0 else sq_sizes[indices[i - 1]]
+                if sq_strides[indices[i]] < prev_stride * prev_size:
+                    raise RuntimeError(
+                        "torch.compile/functionalization does not support in-place mutation on overlapping as_strided views"
+                    )
+
+
 # Has the precondition that there
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
@@ -529,6 +585,8 @@ def aot_dispatch_autograd_graph(
         updated_joint_inputs_descs,
         aot_config=aot_config,
     )
+
+    _check_no_overlapping_as_strided_views_in_graph(fx_g)
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.
