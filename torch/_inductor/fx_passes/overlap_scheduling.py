@@ -26,6 +26,7 @@ from torch._inductor.fx_passes.bucketing import (
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
 from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._logging import trace_structured
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
@@ -305,7 +306,7 @@ def benchmark_node_with_cache_key(
 
         args, kwargs = torch.utils._pytree.tree_map_only(
             torch.SymInt,
-            lambda s: get_hint(s) or config.unbacked_symint_fallback,
+            lambda s: optimization_hint(s, fallback=config.unbacked_symint_fallback),
             (args, kwargs),
         )
 

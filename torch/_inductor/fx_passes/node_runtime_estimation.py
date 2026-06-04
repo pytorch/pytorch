@@ -19,6 +19,7 @@ from torch._inductor.fx_passes.bucketing import (
 )
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._logging import getArtifactLogger, trace_structured
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 
 
@@ -170,7 +171,7 @@ def _benchmark_collective_with_cuda_events_impl(
 
     args, kwargs = torch.utils._pytree.tree_map_only(
         torch.SymInt,
-        lambda s: get_hint(s) or config.unbacked_symint_fallback,
+        lambda s: optimization_hint(s, fallback=config.unbacked_symint_fallback),
         (args, kwargs),
     )
 
@@ -314,13 +315,20 @@ def _log_compute_estimations(
         "Flops",
     ]
 
+    def _fmt(v: object) -> str:
+        if isinstance(v, torch.types.py_sym_types):
+            if v.node.has_hint():
+                return f"{v}({v.node.hint:.4f})"
+            return str(v)
+        return f"{v:.4f}"
+
     rows = [
         [
             _node_summary(node),
-            f"{est_b * 1e3:.4f}",
-            f"{est_a * 1e3:.4f}",
-            f"{(est_a / est_b) if est_b > 0 else 0:.4f}",
-            f"{(est_a - est_b) * 1e3:.4f}",
+            _fmt(est_b * 1e3),
+            _fmt(est_a * 1e3),
+            _fmt((est_a / est_b) if est_b > 0 else 0),
+            _fmt((est_a - est_b) * 1e3),
             str(count_flops_fx(node)),
         ]
         for node, est_b, est_a in zip(
