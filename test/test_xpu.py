@@ -1702,6 +1702,18 @@ if __name__ == "__main__":
         restored_handle = module.get_xpu_work_stream(tensor, api_capsule)
         self.assertEqual(default_handle, restored_handle)
 
+    def test_storage_pin_memory(self):
+        t = torch.empty(10, pin_memory=True)
+        self.assertTrue(t.is_pinned())
+        storage = t.untyped_storage()
+        self.assertTrue(storage.is_pinned())
+
+        t = torch.empty(10)
+        self.assertFalse(t.is_pinned())
+        storage = t.untyped_storage()
+        s = storage.pin_memory()
+        self.assertTrue(s.is_pinned())
+
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.xpu.is_current_stream_capturing())
         s = torch.xpu.Stream()
