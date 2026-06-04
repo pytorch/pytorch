@@ -356,10 +356,9 @@ class RegisterDispatchKey:
                 updates = f"{copy_op}({func_res}, {out_arg.name});"
 
         functional_sig = self.wrapper_kernel_sig(g.functional)
-        wrapper_name = sig.name()
 
         return f"""\
-{sig.defn(name=wrapper_name)} {{
+{sig.defn(name=name)} {{
   auto {func_res} = {functional_sig.name()}({", ".join(e.expr for e in translate(sig.arguments(), functional_sig.arguments()))});
   {updates}
   return {returns};
@@ -710,11 +709,7 @@ resize_out(out, sizes, strides, options);
             output_type = "Tensor"
             output_value = "outputs_[output_idx]"
             proxy_field = ""
-        elif k is SchemaKind.inplace:
-            output_type = "std::reference_wrapper<Tensor>"
-            output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<::std::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
-        elif k is SchemaKind.out:
+        elif k is SchemaKind.inplace or k is SchemaKind.out:
             output_type = "std::reference_wrapper<Tensor>"
             output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
             proxy_field = f"std::array<::std::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
