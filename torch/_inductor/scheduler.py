@@ -3270,6 +3270,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         prev_node_1: BaseSchedulerNode | None = None,
         prev_node_2: BaseSchedulerNode | None = None,
         enable_autotune: bool = False,
+        per_subkernel_blocks: bool = False,
     ) -> None:
         self.read_to_node = {}
         self.name_to_node = {}
@@ -3339,6 +3340,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.group = (device, ((sympy.Expr("combo_kernel"),),))
         self.origins = OrderedSet[torch.fx.Node]()
         self.enable_autotune = enable_autotune
+        self.per_subkernel_blocks = per_subkernel_blocks
 
     @classmethod
     def combinable_nodes(
@@ -6155,6 +6157,7 @@ class Scheduler:
                         window,
                         use_custom_partition_algo=True,
                         enable_autotune=enable_autotune,
+                        per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
                     )
                     _register_accept(combo_node, window, num)
 
@@ -6244,6 +6247,7 @@ class Scheduler:
             group_nodes,
             use_custom_partition_algo=True,
             enable_autotune=enable_autotune,
+            per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
         )
         # Wire the combo's pred_buffers from its members so the gate
         # simulator can read `node.mpi_node.pred_buffers` uniformly.
@@ -7503,7 +7507,9 @@ class Scheduler:
                 why("prologue fusion not implemented for kernel for these inputs")
                 return False
 
-            if node1.has_aliasing_or_mutation() or node2.has_aliasing_or_mutation():
+            if node1.has_aliasing_or_mutation() or (
+                template.has_aliasing_or_mutation_for_prologue_fusion(node2)
+            ):
                 why("template prologue can only fuse functional pointwise nodes")
                 return False
 

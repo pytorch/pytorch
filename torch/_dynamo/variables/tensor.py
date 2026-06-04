@@ -342,7 +342,7 @@ class TensorVariable(VariableTracker):
         """Tensor tp_richcompare: element-wise comparison producing an FX proxy."""
         from .builder import wrap_fx_proxy_cls
 
-        if isinstance(other, UserDefinedClassVariable):
+        if not isinstance(other, (SymNodeVariable, ConstantVariable, TensorVariable)):
             return ConstantVariable.create(NotImplemented)
         op_fn = cmp_name_to_op_mapping[op]
         proxy = tx.output.create_proxy(
@@ -728,9 +728,6 @@ class TensorVariable(VariableTracker):
         if result is None:
             raise NotImplementedError
         return result
-
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return self.ndim > 0
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase", idxes: Sequence[int] | None = None
@@ -2793,7 +2790,7 @@ class NumpyNdarrayVariable(TensorVariable):
         """ndarray tp_richcompare: element-wise comparison via numpy_operator_wrapper."""
         from ..utils import numpy_operator_wrapper
 
-        if isinstance(other, UserDefinedClassVariable):
+        if not isinstance(other, (SymNodeVariable, ConstantVariable, TensorVariable)):
             return ConstantVariable.create(NotImplemented)
         op_fn = cmp_name_to_op_mapping[op]
         proxy = tx.output.create_proxy(
