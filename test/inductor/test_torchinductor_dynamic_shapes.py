@@ -59,6 +59,10 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
+    # torch.func.jvp with nn.Module doesn't retrace with symbolic sizes
+    "test_jvp_compile_backward_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu", "mps"), is_skip=True
+    ),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
@@ -114,6 +118,33 @@ if HAS_CPU:
     class DynamicShapesCpuTests(TestCase):
         common = check_model
         device = "cpu"
+
+        def test_bincount_weighted_count_nonzero_dtype(self):
+            def fn(x, weights):
+                counts = torch.bincount(x, weights=weights, minlength=6)
+                return counts, counts.count_nonzero()
+
+            x = torch.tensor(
+                [0, 2, 2, 3, 1, 0, 3, 3],
+                dtype=torch.int64,
+            )
+            weights = torch.tensor(
+                [1.0, -2.0, 3.0, 0.0, 4.0, -5.0, 6.0, 7.0],
+                dtype=torch.float32,
+            )
+
+            expected = fn(x, weights)
+            for dynamic in [False, True]:
+                torch._dynamo.reset()
+                compiled_fn = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    dynamic=dynamic,
+                )
+                actual = compiled_fn(x, weights)
+                self.assertEqual(actual[0], expected[0])
+                self.assertEqual(actual[1], expected[1])
 
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
