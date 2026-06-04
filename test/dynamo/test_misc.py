@@ -5,6 +5,7 @@ import builtins
 import collections
 import collections.abc
 import copy
+import ctypes
 import dataclasses
 import dis
 import enum
@@ -12622,6 +12623,16 @@ def ___make_guard_fn():
         self.assertEqual(x.untyped_storage().size(), 0)
         self.assertIs(s, x.untyped_storage())
 
+    def test_storage_cdata_use_count_graph_break_lifetime(self):
+        def fn():
+            a = torch.randn(10)
+            return torch._C._storage_Use_Count(a.untyped_storage()._cdata)
+
+        expected = fn()
+        ref = torch.compile(fn, backend="eager")()
+        self.assertEqual(ref, expected)
+        self.assertLess(ref, 10)
+
     def test_flat_name_to_original_fqn(self):
         class FooBarModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -14639,6 +14650,25 @@ fn
 
         expected = f(a, b)
         actual = torch.compile(f, backend="eager")(a, b)
+
+        self.assertEqual(expected, actual)
+
+    def test_data_ptr_graph_break_lifetime(self):
+        @torch._dynamo.disable
+        def read_ptr_after_alloc(ptr):
+            allocations = []
+            for _ in range(32):
+                allocation = torch.empty(1, dtype=torch.int64)
+                allocation.fill_(123456789)
+                allocations.append(allocation)
+            return ctypes.cast(ptr, ctypes.POINTER(ctypes.c_int64)).contents.value
+
+        def f():
+            x = torch.full((1,), 42, dtype=torch.int64)
+            return read_ptr_after_alloc(x.data_ptr())
+
+        expected = f()
+        actual = torch.compile(f, backend="eager")()
 
         self.assertEqual(expected, actual)
 
