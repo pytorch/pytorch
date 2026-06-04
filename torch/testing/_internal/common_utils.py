@@ -3655,6 +3655,8 @@ class TestCase(expecttest.TestCase):
                         except BaseException as e:
                             self.skipTest(e)
                         raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
+                    if getattr(wrapper, "__unittest_expecting_failure__", False):
+                        delattr(wrapper, "__unittest_expecting_failure__")
                     return wrapper
 
                 if TEST_WITH_TORCHINDUCTOR:
