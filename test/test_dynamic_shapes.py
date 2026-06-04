@@ -296,6 +296,20 @@ class TestPySymInt(TestCase):
         c = create_symbool(shape_env, True)
         self.assertIs(sympy.sympify(c), c.node.expr)
 
+    def test_branch_local_shape_refinement_restores_path_compression(self):
+        shape_env = ShapeEnv()
+        a = sympy.Symbol("a", integer=True, positive=True)
+        b = sympy.Symbol("b", integer=True, positive=True)
+        shape_env._set_replacement(a, b, "test")
+
+        with shape_env.branch_local_shape_refinement():
+            self.assertTrue(shape_env.assume_branch_local_shape_expr(sympy.Eq(b, 1)))
+            self.assertEqual(shape_env.simplify(a), sympy.Integer(1))
+
+        self.assertEqual(shape_env.replacements[a], b)
+        self.assertNotIn(b, shape_env.replacements)
+        self.assertEqual(shape_env.simplify(a), b)
+
     def test_roundtrip(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)

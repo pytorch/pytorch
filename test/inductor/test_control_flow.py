@@ -7,6 +7,7 @@ import uuid
 import torch
 import torch._dynamo.testing
 import torch.utils._pytree as pytree
+from torch._dynamo.decorators import mark_unbacked
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
@@ -649,6 +650,67 @@ class CondTests(TestCase):
                 dynamic=dynamic,
                 num_predicates=0,
             )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_shape_assert_branch_refinement(self, device):
+        def fn(x):
+            def true_fn(x):
+                return x.view(x.shape[0] * x.shape[1]).clone()
+
+            def false_fn(x):
+                assert x.shape[0] == 1  # noqa: S101
+                return x.view(x.shape[1]) * 2
+
+            return torch.cond(x.shape[0] > 1, true_fn, false_fn, (x,))
+
+        x = torch.randn(8, 12, device=device)
+        opt_fn = torch.compile(fn, dynamic=True)
+
+        torch.testing.assert_close(opt_fn(x), fn(x))
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_shape_assert_runtime_failure(self, device):
+        def fn(x):
+            def true_fn(x):
+                assert x.shape[0] < 10  # noqa: S101
+                return x + 1
+
+            def false_fn(x):
+                return x - 1
+
+            return torch.cond(x.shape[0] > 1, true_fn, false_fn, (x,))
+
+        x = torch.randn(8, 12, device=device)
+        opt_fn = torch.compile(fn, dynamic=True)
+        torch.testing.assert_close(opt_fn(x), fn(x))
+
+        with self.assertRaisesRegex(RuntimeError, "assertion error"):
+            opt_fn(torch.randn(12, 12, device=device))
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_shape_assert_scalar_truthiness(self, device):
+        def fn(x):
+            def true_fn(x):
+                assert x.shape[0]  # noqa: S101
+                return x + 1
+
+            def false_fn(x):
+                return x - 1
+
+            return torch.cond(x.shape[1] > 1, true_fn, false_fn, (x,))
+
+        x = torch.randn(8, 12, device=device)
+        mark_unbacked(x, 0, min=0, max=16)
+        opt_fn = torch.compile(fn, dynamic=True)
+        torch.testing.assert_close(opt_fn(x), fn(x))
+
+        x0 = torch.randn(0, 12, device=device)
+        mark_unbacked(x0, 0, min=0, max=16)
+        with self.assertRaisesRegex(RuntimeError, "assertion error"):
+            opt_fn(x0)
 
     @requires_gpu
     def test_cond_aliasing_outputs(self):

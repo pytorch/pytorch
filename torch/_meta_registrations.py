@@ -8,7 +8,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch._prims_common as utils
-from torch import SymBool, SymFloat, Tensor
+from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._decomp import (
     _add_op_to_registry,
     _convert_out_params,
@@ -1018,6 +1018,25 @@ def meta_angle(self):
 def meta_angle_out(self, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.angle(self))
+
+
+@register_meta(aten._assert_scalar.default)
+def assert_scalar_meta(val, assert_msg):
+    if isinstance(val, (SymInt, SymFloat)):
+        val = val != 0
+
+    if isinstance(val, SymBool):
+        if val.node.shape_env.assume_branch_local_shape_expr(val.node.expr):
+            return
+
+        from torch.fx.experimental.symbolic_shapes import expect_true
+
+        if expect_true(val):
+            return
+    elif val:
+        return
+
+    raise RuntimeError(assert_msg)
 
 
 @register_meta(aten._assert_async.default)

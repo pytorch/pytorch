@@ -4121,6 +4121,12 @@ class ShapeEnv:
         self._unbacked_replacements: dict[sympy.Expr, sympy.Expr] | None = None
 
         self.trace_asserts = trace_asserts
+        self._branch_local_shape_refinement_stack: list[
+            tuple[
+                dict[sympy.Expr, sympy.Expr | None],
+                dict[sympy.Symbol, sympy.Expr | None],
+            ]
+        ] = []
 
         self.specializations: OrderedSet[Specialization] = OrderedSet()
 
@@ -4242,6 +4248,85 @@ class ShapeEnv:
                 self.replacements.pop(k, None)
             self.frozen = False
 
+    @contextmanager
+    def branch_local_shape_refinement(self) -> Generator[None, None, None]:
+        """Temporarily add counterfactual shape facts while tracing a HOP branch."""
+        local_axioms: dict[sympy.Expr, sympy.Expr | None] = {}
+        local_replacements: dict[sympy.Symbol, sympy.Expr | None] = {}
+        self._branch_local_shape_refinement_stack.append(
+            (local_axioms, local_replacements)
+        )
+        try:
+            yield
+        finally:
+            self._branch_local_shape_refinement_stack.pop()
+            changed = False
+            for k, old in local_axioms.items():
+                if old is None:
+                    changed = self.axioms.pop(k, None) is not None or changed
+                else:
+                    changed = self.axioms.get(k) != old or changed
+                    self.axioms[k] = old
+            for k, old in local_replacements.items():
+                if old is None:
+                    changed = self.replacements.pop(k, None) is not None or changed
+                else:
+                    changed = self.replacements.get(k) != old or changed
+                    self.replacements[k] = old
+            if changed:
+                self._replacements_version_counter += 1
+                self._update_version_counter()
+                self._version_counter += 1
+                self._maybe_evaluate_static.cache_clear()
+
+    def has_branch_local_shape_refinement(self) -> bool:
+        return bool(self._branch_local_shape_refinement_stack)
+
+    def assume_branch_local_shape_expr(self, expr: SympyBoolean) -> bool:
+        if not self._branch_local_shape_refinement_stack:
+            return False
+
+        expr = self.simplify(expr)
+        if expr is sympy.false:
+            return False
+
+        local_axioms, local_replacements = self._branch_local_shape_refinement_stack[-1]
+        changed = False
+
+        for k, v in self.get_implications(expr):
+            if k not in local_axioms:
+                local_axioms[k] = self.axioms.get(k)
+            if self.axioms.get(k) != v:
+                self.axioms[k] = v
+                changed = True
+
+        if isinstance(expr, sympy.Eq):
+            for symbol, replacement in (
+                (expr.lhs, expr.rhs),
+                (expr.rhs, expr.lhs),
+            ):
+                if (
+                    isinstance(symbol, sympy.Symbol)
+                    and isinstance(replacement, sympy.Expr)
+                    and symbol not in replacement.free_symbols
+                ):
+                    if symbol not in local_replacements:
+                        local_replacements[symbol] = self.replacements.get(symbol)
+                    if self.replacements.get(symbol) != replacement:
+                        self.replacements[symbol] = replacement
+                        self._add_target_expr(
+                            sympy.Eq(symbol, replacement, evaluate=False)
+                        )
+                        changed = True
+                    break
+
+        if changed:
+            self._replacements_version_counter += 1
+            self._update_version_counter()
+            self._version_counter += 1
+            self._maybe_evaluate_static.cache_clear()
+        return True
+
     def check_equal(self, other: ShapeEnv) -> None:
         """Compare another ShapeEnv for equivalence"""
         # ShapeEnv fields that are not relevant for the outcome of
@@ -4275,6 +4360,7 @@ class ShapeEnv:
             # Cached state for optimization_hint unbacked canonicalization
             "_equality_graph",
             "_unbacked_replacements",
+            "_branch_local_shape_refinement_stack",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -7693,6 +7779,9 @@ class ShapeEnv:
         cur_replace = {s: self._find(s) for s in res.free_symbols}
         replaced, changed = self.replacements[a]._xreplace(cur_replace)
         if changed:
+            if self._branch_local_shape_refinement_stack:
+                # Do not path-compress through counterfactual branch facts.
+                return replaced
             self._set_replacement(a, replaced, "find")
         return self.replacements[a]
 

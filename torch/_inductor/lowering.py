@@ -4093,11 +4093,24 @@ def _local_scalar_dense(data):
 
 @register_lowering(aten._assert_scalar)
 def _assert_scalar(data, msg):
-    # NB: These will be handled at codegen time
-    # Not sure if we are guaranteed to be able to serve out truth from the
-    # deferred_runtime_asserts, TODO: try this assert out
-    # See [NOTE] Codegen runtime asserts in Inductor
-    # assert bool(data.scalar), data
+    if isinstance(data, torch.SymBool):
+        data = data.node.expr
+    elif isinstance(data, (torch.SymInt, torch.SymFloat)):
+        data = sympy.Ne(data.node.expr, 0)
+    elif isinstance(data, sympy.Expr):
+        data = sympy.Ne(data, 0)
+    elif isinstance(data, bool):
+        data = sympy.true if data else sympy.false
+    elif isinstance(data, (int, float)):
+        data = sympy.true if data != 0 else sympy.false
+
+    if isinstance(data, sympy.logic.boolalg.Boolean):
+        if data is sympy.true:
+            return None
+        assert_op = ir.AssertScalar(data, msg)
+        V.graph.register_buffer(assert_op, set_name=True)
+        V.graph.register_operation(assert_op)
+        V.graph.sizevars.shape_env.assume_branch_local_shape_expr(data)
     return None
 
 

@@ -8723,12 +8723,12 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
-        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
         if V.graph.fx_wrapper:
             # TODO fix
             pass
         elif V.graph.cpp_wrapper:
-            symbol_str = f"std::to_string({symbol})"
+            symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)), None)
+            symbol_str = f"std::to_string({symbol})" if symbol is not None else '""'
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
             )
@@ -10304,6 +10304,30 @@ class Conditional(ExternKernel):
                 # Symbolic integer or constant - pass directly
                 fake_operands.append(fx_op)
         fake_outputs = V.graph.current_node.meta["val"]
+        fx_pred = V.graph.current_node.args[0]
+        if isinstance(fx_pred, Node):
+            fake_pred = fx_pred.meta["val"]
+        else:
+            fake_pred = fx_pred
+
+        def _branch_refinement_context(
+            shape_env: ShapeEnv, branch: bool
+        ) -> AbstractContextManager[None]:
+            if not isinstance(fake_pred, torch.SymBool):
+                return contextlib.nullcontext()
+
+            @contextlib.contextmanager
+            def ctx() -> Generator[None, None, None]:
+                with shape_env.branch_local_shape_refinement():
+                    expr = (
+                        fake_pred.node.expr
+                        if branch
+                        else sympy.Not(fake_pred.node.expr)
+                    )
+                    shape_env.assume_branch_local_shape_expr(expr)
+                    yield
+
+            return ctx()
 
         def _require_exact_strides(
             graph_outputs: Sequence[IRNode],
@@ -10323,7 +10347,7 @@ class Conditional(ExternKernel):
             # pyrefly: ignore [bad-return]
             return ret
 
-        for subgraph in (true_fn, false_fn):
+        for subgraph, branch in ((true_fn, True), (false_fn, False)):
             if subgraph.graph is None:
                 # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
@@ -10332,7 +10356,10 @@ class Conditional(ExternKernel):
                     subgraph_name=subgraph.name,
                 )
                 with V.set_graph_handler(subgraph.graph):
-                    subgraph.graph.run(*fake_operands)
+                    with _branch_refinement_context(
+                        subgraph.graph.sizevars.shape_env, branch
+                    ):
+                        subgraph.graph.run(*fake_operands)
                     # Force subgraph outputs to have the expected strides from
                     # FakeTensor metadata. This ensures both branches produce
                     # outputs with consistent strides.
