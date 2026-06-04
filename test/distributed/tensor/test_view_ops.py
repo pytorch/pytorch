@@ -166,6 +166,28 @@ class TestViewOps(DTensorContinuousTestBase):
             (InputDim(0), InputDim(1), InputDim(2)),
         )
 
+    def test_unflatten_one_output_dim_two_mesh_axes(self):
+        """Unflatten when a single output dim is sharded by 2+ mesh axes.
+
+        With mesh (dp=2, cp=2, tp=2), flattening [8,16,32] (Shard(0), Shard(1),
+        Shard(1)) gives [128,32] (Shard(0), _SS(0,sf=4), _SS(0,sf=4)).  The
+        reverse unflatten must map the two strided axes back onto output dim 1,
+        not leave the second one on output dim 0.  Before the fix it returned
+        (Shard(0), Shard(1), _StridedShard(0,sf=4)), which gave a wrong local
+        shape (it divided the seq dim by one axis instead of both).
+        """
+        mesh_sizes = (2, 2, 2)
+        flat_placements = [
+            Shard(0),
+            _StridedShard(0, split_factor=4),
+            _StridedShard(0, split_factor=4),
+        ]
+        rule = view_groups([128, 6], [8, 16, 6])
+        _, out_placements = propagate_shape_and_sharding(
+            flat_placements, (128, 6), rule, mesh_sizes, strict_view=True
+        )
+        self.assertEqual(tuple(out_placements), (Shard(0), Shard(1), Shard(1)))
+
     def call_dt_test(self, op, args, kwargs, device_mesh: DeviceMesh):
         dim_map = dim_maps[op]
         rules = dim_map(*args, **kwargs)
