@@ -211,6 +211,7 @@ TORCH_API void prepareProfiler(
 TORCH_API void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities);
+TORCH_API void togglePythonCollectionDynamic(const bool enable);
 
 TORCH_API void startMemoryProfile();
 TORCH_API void stopMemoryProfile();
