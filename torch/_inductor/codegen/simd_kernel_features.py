@@ -146,32 +146,18 @@ class SIMDKernelFeatures:
         from .simd import SIMDScheduling
 
         if SIMDScheduling.can_use_32bit_indexing(total_numel, buffers):
-            # Extra guard: even if numel and every buffer's storage_size fit
-            # into int32, the *address expression* inside a fused kernel may
-            # contain a precomputed constant (from simplified slice_scatter +
-            # mm backward fusion) that falls outside the int32 range
-            # [-2**31, 2**31 - 1].  Triton will then fail compilation with
-            #   ValueError('Scalar <big const> is out of range for type int32')
-            if self._any_index_expr_const_overflows_int32():
+            # Fused address expressions may carry a constant term that
+            # overflows int32 even when numel/storage_size are within range.
+            if self.any_index_expr_const_overflows_int32():
                 return torch.int64
             return torch.int32
         return torch.int64
 
     @cache_on_self
-    def _any_index_expr_const_overflows_int32(self) -> bool:
-        """
-        Scan every memory dependency's indexing expression and return True iff
-        its constant term (obtained by substituting all free symbols with 0)
-        falls outside the int32 range ``[-2**31, 2**31 - 1]``.
-
-        For an index of the form ``base + x0 + stride * x1`` this extracts
-        ``base`` and checks whether that literal alone already overflows
-        int32.  Note int32's negative bound (-2**31) has a larger absolute
-        value than the positive bound (2**31 - 1), so the upper and lower
-        limits must be checked separately rather than via ``Abs(const_part)``.
-        See the caller at select_index_dtype() for why this extra check is
-        necessary.
-        """
+    def any_index_expr_const_overflows_int32(self) -> bool:
+        """Return True if any MemoryDep index has a constant term outside
+        [-2**31, 2**31 - 1].  Uses asymmetric bounds (not Abs) because
+        -2**31 is a legal int32 value."""
         int32_max = sympy.Integer(2**31 - 1)
         int32_min = sympy.Integer(-(2**31))
         for node in self.scheduler_nodes():
@@ -183,10 +169,7 @@ class SIMDKernelFeatures:
                     continue
                 free = index.free_symbols
                 try:
-                    # Replace every free symbol with 0 to extract the pure
-                    # constant term.  Division-by-zero can happen (e.g.
-                    # expressions containing 1/x); in that case we can't
-                    # cleanly extract a constant and must skip this dep.
+                    # Substitute all symbols with 0 to isolate the constant.
                     if free:
                         const_part = index.subs({s: sympy.Integer(0) for s in free})
                     else:
@@ -196,7 +179,6 @@ class SIMDKernelFeatures:
                     if const_part > int32_max or const_part < int32_min:
                         return True
                 except (ZeroDivisionError, TypeError, ValueError):
-                    # Unable to evaluate: stay safe and keep scanning.
                     continue
         return False
 
