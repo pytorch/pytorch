@@ -1251,13 +1251,6 @@ class HalideKernel(SIMDKernel):
     def lookup_cse_var(self, name: str):
         return self.cse.varname_map[re.sub(r"\[.*", "", name)]
 
-    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
-        # Halide has no device-side assert primitive. Skip the assert rather
-        # than failing codegen: this restores Halide's pre-existing behavior
-        # (no bounds check) and keeps index_add and other ops that emit a
-        # runtime assert in their decomposition compilable under Halide.
-        pass
-
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
