@@ -191,10 +191,18 @@ def remove_no_ops(
                 val = n.meta.get("val")
                 if isinstance(val, torch.Tensor) and val.device.type == "meta":
                     with graph.inserting_before(output_node):
+                        # size/stride may be symbolic under dynamic shapes;
+                        # materialize them so we never pass raw SymInts as args.
+                        # Use materialize_symints (roots backed sizes on input
+                        # placeholders) rather than create_size_node(n, d), which
+                        # would query `n` and pin it alive, blocking the
+                        # eliminate_dead_code() that removes this meta tensor.
+                        size = graph.materialize_symints(val.size())
+                        stride = graph.materialize_symints(val.stride())
                         n.replace_all_uses_with(
                             graph.call_function(
                                 torch.ops.aten.empty_strided.default,
-                                args=(val.size(), val.stride()),
+                                args=(size, stride),
                                 kwargs={"dtype": val.dtype, "device": val.device},
                             )
                         )
@@ -576,13 +584,27 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
     for invoke_quant in invoke_quant_invocations:
         kwargs = dict(invoke_quant.kwargs)
 
-        quant_options_node = kwargs.pop("quant_options", None)
-        if quant_options_node is not None:
-            assert isinstance(quant_options_node, torch.fx.Node)
-            quant_options = torch._higher_order_ops.InvokeQuant(
-                *invoke_quant.kwargs["quant_options"].args,
-                **invoke_quant.kwargs["quant_options"].kwargs,
+        quant_options_arg = kwargs.pop("quant_options", None)
+        quant_options_node = None
+        if isinstance(quant_options_arg, torch.fx.Node):
+            quant_options_node = quant_options_arg
+            codegen_low_precision = (
+                quant_options_node.args[0]
+                if quant_options_node.args
+                else quant_options_node.kwargs.get("codegen_low_precision", True)
             )
+            if not isinstance(codegen_low_precision, bool):
+                raise TypeError(
+                    f"Unexpected codegen_low_precision type: "
+                    f"{type(codegen_low_precision)}"
+                )
+            quant_options = torch._higher_order_ops.InvokeQuant(
+                codegen_low_precision=codegen_low_precision,
+            )
+        elif isinstance(quant_options_arg, torch._higher_order_ops.InvokeQuant):
+            quant_options = quant_options_arg
+        elif quant_options_arg is not None:
+            raise TypeError(f"Unexpected quant_options type: {type(quant_options_arg)}")
         else:
             quant_options = torch._higher_order_ops.InvokeQuant()
 
@@ -600,7 +622,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             invoke_quant.replace_all_uses_with(invoke_quant_replacement)
             graph.erase_node(invoke_quant)
 
-            if quant_options_node and len(quant_options_node.users) == 0:
+            if quant_options_node is not None and len(quant_options_node.users) == 0:
                 graph.erase_node(quant_options_node)
 
             first_user = next(iter(invoke_quant_replacement.users))
@@ -791,6 +813,9 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         return
 
     if arg_val.dtype in allowed and dtype1 in allowed and dtype2 in allowed:
+        # A narrower intermediate can be worth materializing before upcasting.
+        if dtype1.itemsize < dtype2.itemsize:
+            return
         if config.emulate_precision_casts and not _is_lossless_fp_widening_cast(
             arg_val.dtype, dtype1
         ):

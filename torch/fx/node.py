@@ -75,7 +75,7 @@ _R = TypeVar("_R")
 
 
 def _is_dataclass_instance(a: object) -> bool:
-    if isinstance(a, type):
+    if isinstance(a, (type, enum.Enum)):
         return False
     try:
         type.__getattribute__(type(a), "__dataclass_fields__")
@@ -289,6 +289,8 @@ def _map_aggregate_with_dataclasses(
             _map_aggregate_with_dataclasses(a.stop, fn),
             _map_aggregate_with_dataclasses(a.step, fn),
         )
+    if isinstance(a, enum.Enum):
+        return fn(a)
     if _is_dataclass_instance(a):
         return _create_dataclass_instance(
             type(a),

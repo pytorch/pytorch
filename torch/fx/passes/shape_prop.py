@@ -8,7 +8,7 @@ from torch._guards import detect_fake_mode
 from torch._prims_common import is_contiguous_for_memory_format_or_false
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx._compatibility import compatibility
-from torch.fx.node import _map_aggregate_with_dataclasses, Node
+from torch.fx.node import map_aggregate, Node
 
 
 __all__ = ["TensorMetadata", "ShapeProp"]
@@ -193,7 +193,7 @@ class ShapeProp(torch.fx.Interpreter):
             else:
                 return obj
 
-        meta = _map_aggregate_with_dataclasses(result, extract_tensor_meta)
+        meta = map_aggregate(result, extract_tensor_meta)
         if found_tensor:
             n.meta["tensor_meta"] = meta
 
