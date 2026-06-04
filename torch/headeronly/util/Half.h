@@ -236,7 +236,7 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
   /*
    * - Choose either results of conversion of input as a normalized number, or
    * as a denormalized number, depending on the input exponent. The variable
-   * two_w contains input exponent in bits 27-31, therefore if its smaller than
+   * two_w contains input exponent in bits 27-31, therefore if it's smaller than
    * 2**27, the input is either a denormal number, or zero.
    * - Combine the result of conversion of exponent and mantissa with the sign
    * of the input number.
