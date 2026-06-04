@@ -15125,25 +15125,6 @@ if __name__ == '__main__':
                     maximal_linear_bias_grad_err = err
                     worst_linear_bias_grad_err_kwargs = dict(module_kwargs)
 
-        if none_reduction:
-            # TEMP: calibration data for reduction='none' ULP caps. Re-run
-            # per host, copy the four observed values into the
-            # ``if none_reduction:`` cap block above (keyed on policy /
-            # dtype / device / bias), then delete this block.
-            print(
-                f"\n[none calibration] _resolved_policy={_resolved_policy!r}"
-                f" dtype={dtype} device={device} bias={bias}\n"
-                f"  output:        observed={maximal_output_max_ulp_diff:6d}"
-                f"  cap={expected_max_ulp_diff:6d}\n"
-                f"  input_grad:    observed={maximal_input_grad_max_ulp_diff:6d}"
-                f"  cap={expected_input_grad_max_ulp_diff:6d}\n"
-                f"  linear_weight: observed={maximal_linear_weight_grad_max_ulp_diff:6d}"
-                f"  cap={expected_weight_grad_max_ulp_diff:6d}\n"
-                f"  linear_bias:   observed={maximal_linear_bias_grad_max_ulp_diff:6d}"
-                f"  cap={expected_linear_bias_grad_max_ulp_diff:6d}",
-                flush=True,
-            )
-
         self.assertLessEqual(maximal_input_grad_err, feps,
                              msg=f"worst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
         self.assertLessEqual(maximal_linear_weight_grad_err, feps,
