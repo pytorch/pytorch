@@ -386,6 +386,7 @@ manual_torch_name_rule_map: dict[
     "torch.fx.experimental.symbolic_shapes.optimization_hint": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.guard_or_none": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.statically_known_true": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.statically_known_false": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.sym_and": TorchInGraphFunctionVariable,

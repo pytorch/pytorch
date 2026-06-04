@@ -6695,6 +6695,21 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep.module()(torch.tensor([5]))
         ep.module()(torch.tensor([1]))
 
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                u0 = x.item()
+                u1 = y.item()
+                return torch.empty(u0) + torch.empty(u1)
+
+        ep = torch.export.export(Bar(), (torch.tensor([5]), torch.tensor([5])))
+        msg = (
+            "non-broadcast path was assumed because both sizes are unbacked or "
+            "otherwise unknown"
+        )
+        self.assertIn(msg, ep.graph_module.code)
+        with self.assertRaisesRegex(RuntimeError, escape(msg)):
+            ep.module()(torch.tensor([5]), torch.tensor([4]))
+
     def test_unbacked_pad(self):
         class Foo(torch.nn.Module):
             def forward(self, xs, pad):

@@ -1858,7 +1858,7 @@ def register_fast_op_impl(
 def infer_size(
     a: Sequence[IntLikeType], b: Sequence[IntLikeType]
 ) -> tuple[IntLikeType, ...]:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import expect_true, guard_or_none
 
     dimsA = len(a)
     dimsB = len(b)
@@ -1871,24 +1871,38 @@ def infer_size(
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
 
-        # NB: It is very important to test for broadcasting, before testing
+        # NB: It is very important to test for broadcasting before testing
         # sizeA == sizeB.  This is because the broadcasting tests are likely
-        # to be statically known (in particular, if sizeA/sizeB is unbacked
-        # but size-like, we will unsoundly assume they never equal 1), but
-        # the sizeA == sizeB test may not be statically known.  However, once
-        # we have established that no broadcasting is happening, the
-        # sizeA == sizeB is now expect_true and we can defer it as a runtime
-        # assert (this works because Python will return the terminal
-        # expression of an or statement as-is, without bool()'ing it; if this
-        # were not the case, we'd need to write this using torch.sym_or() or
-        # something like that).
-        torch._check(
-            guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
-            lambda: f"The size of tensor a ({sizeA}) "
-            f"must match the size of tensor b ({sizeB}) "
-            f"at non-singleton dimension {i})",
-        )
-        expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
+        # to be statically known.  If both broadcasting checks are unknown, we
+        # assume the non-broadcast path and defer sizeA == sizeB as a runtime
+        # assert with an explicit message.
+        broadcastA = guard_or_none(sizeA == 1)
+        if broadcastA is True:
+            expandedSizes[i] = sizeB
+            continue
+
+        broadcastB = guard_or_none(sizeB == 1)
+        if broadcastB is True:
+            expandedSizes[i] = sizeA
+            continue
+
+        def message() -> str:
+            msg = (
+                f"The size of tensor a ({sizeA}) "
+                f"must match the size of tensor b ({sizeB}) "
+                f"at non-singleton dimension {i})"
+            )
+            if broadcastA is None and broadcastB is None:
+                msg += (
+                    ". The non-broadcast path was assumed because both sizes "
+                    "are unbacked or otherwise unknown"
+                )
+            return msg
+
+        # expect_true attaches the message to deferred runtime asserts;
+        # torch._check handles the immediate false case.
+        torch._check(expect_true(sizeA == sizeB, message=message), message)
+        expandedSizes[i] = sizeA
     return tuple(expandedSizes)
 
 

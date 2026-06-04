@@ -580,14 +580,20 @@ class SymNode:
             log.warning("Failed to convert to bool: %s", r)
             raise
 
-    def expect_true(self, file: builtins.str, line: int) -> bool:
+    def expect_true(
+        self,
+        file: builtins.str,
+        line: int,
+        message: Callable[[], builtins.str] | None = None,
+    ) -> bool:
         from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
         if self.shape_env is None:
             raise RuntimeError("shape_env is required for expect_true")
+        unbacked_symbols = free_unbacked_symbols(self.expr)
         if (
             self.has_hint()
-            and not free_unbacked_symbols(self.expr)
+            and not unbacked_symbols
             and not self.shape_env.prefer_deferred_runtime_asserts_over_guards
         ):
             # OK to generate guards
@@ -596,8 +602,13 @@ class SymNode:
         # a regular guard if we can!)
         # TODO: file/line here is very important, because the assert has been
         # deferred so you can't backtrace easily
+        msg = f"{file}:{line}"
+        user_msg = False
+        if message is not None and unbacked_symbols:
+            msg = str(message())
+            user_msg = True
         return self.shape_env.guard_or_defer_runtime_assert(
-            self.expr, f"{file}:{line}", fx_node=self.fx_node
+            self.expr, msg, fx_node=self.fx_node, user_msg=user_msg
         )
 
     def statically_known_true(self, file: builtins.str, line: int) -> bool:
