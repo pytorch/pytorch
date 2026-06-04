@@ -316,22 +316,14 @@ pre_grad_custom_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = No
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
 _pre_fusion_custom_pass: (
-    Callable[
-        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
-        list["torch._inductor.scheduler.BaseSchedulerNode"],
-    ]
-    | None
+    torch._inductor.custom_graph_pass.CustomSchedulerPassCallable | None
 ) = None
 
 # Registers a custom pass to be run right after fusion in Inductor scheduler.
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
 # hence custom IR passes built on top of it might break in the future.
 _post_fusion_custom_pass: (
-    Callable[
-        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
-        list["torch._inductor.scheduler.BaseSchedulerNode"],
-    ]
-    | None
+    torch._inductor.custom_graph_pass.CustomSchedulerPassCallable | None
 ) = None
 
 # Deprecated
@@ -867,13 +859,20 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
-realize_opcount_threshold = 30
+_realize_opcount_threshold_default = 30
+realize_opcount_threshold: int | None = None
+# CPU kernels tolerate larger fused pointwise bodies than GPU kernels, and
+# materializing moderate CPU expressions can add expensive full-buffer traffic.
+realize_cpu_opcount_threshold = 50
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
-realize_acc_reads_threshold = 8
+_realize_acc_reads_threshold_default = 8
+realize_acc_reads_threshold: int | None = None
+realize_cpu_acc_reads_threshold = 12
 realize_acc_reads_size_threshold: int | None = (
     None  # TODO(xuanzh): harden this to make it non optional
 )
+
 
 # Defer early realization of cheap output nodes (0 buffer reads, small opcount)
 # to prevent cascade materialization in fullgraph compilation.
@@ -1987,6 +1986,13 @@ class triton:
 
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
     force_cooperative_reductions = False
+
+    # Lower/upper bounds between two-step variance and Welford variance for
+    # non-split CUDA Triton half/bfloat16 reductions. Mid-sized reductions use
+    # two-step for throughput; smaller reductions keep the old heuristic because
+    # training gradients are more sensitive to the different accumulation order.
+    use_two_step_variance_min_numel = 1024
+    use_two_step_variance_threshold = 32768
 
     # 0: disable
     # 1/True: enable, use tuning to pick between different subkernels

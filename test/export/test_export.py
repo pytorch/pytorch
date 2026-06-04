@@ -48,6 +48,7 @@ from torch._higher_order_ops.hints_wrap import hints_wrapper
 from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
+from torch._library.opaque_object import _OPAQUE_TYPES_BY_NAME
 from torch._subclasses import FakeTensorMode
 from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._trace import (
@@ -4261,9 +4262,9 @@ graph():
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2), kwargs = {})
-    %access_subclass_inner_tensor_default_8 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%add_1, elem), kwargs = {})
-    %access_subclass_inner_tensor_default_11 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_8, elem), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%access_subclass_inner_tensor_default_11, 4), kwargs = {})
+    %access_subclass_inner_tensor_default_2 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%add_1, elem), kwargs = {})
+    %access_subclass_inner_tensor_default_3 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_2, elem), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%access_subclass_inner_tensor_default_3, 4), kwargs = {})
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
@@ -14231,6 +14232,12 @@ graph():
                 return x + f.int_1 + f.int_2
 
         torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        self.addCleanup(
+            lambda name=torch._library.opaque_object.get_opaque_type_name(MyInput): (
+                torch._C._unregister_opaque_type(name),
+                _OPAQUE_TYPES_BY_NAME.pop(name, None),
+            )
+        )
         ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
 
         inp = torch.ones(2, 2)
@@ -16019,21 +16026,18 @@ graph():
             """\
 graph():
     %b_buffer : [num_users=1] = placeholder[target=b_buffer]
-    %x : [num_users=1] = placeholder[target=x]
+    %x : [num_users=3] = placeholder[target=x]
     %twotensor___init__0 : [num_users=1] = get_attr[target=twotensor___init__0]
     %twotensor_const_func_spec0 : [num_users=1] = get_attr[target=twotensor_const_func_spec0]
-    %flat_apply : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0, %twotensor___init__0, %x, %x), kwargs = {})
-    %access_subclass_inner_tensor_default_7 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply, b), kwargs = {})
+    %flat_apply : [num_users=1] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0, %twotensor___init__0, %x, %x), kwargs = {})
     %twotensor___init__1 : [num_users=1] = get_attr[target=twotensor___init__1]
     %twotensor_const_func_spec0_1 : [num_users=1] = get_attr[target=twotensor_const_func_spec0]
-    %flat_apply_1 : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0_1, %twotensor___init__1, %access_subclass_inner_tensor_default_7, %flat_apply), kwargs = {})
-    %access_subclass_inner_tensor_default_17 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply_1, b), kwargs = {})
-    %access_subclass_inner_tensor_default_23 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_17, b), kwargs = {})
+    %flat_apply_1 : [num_users=1] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0_1, %twotensor___init__1, %x, %flat_apply), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%flat_apply_1, %b_buffer), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%access_subclass_inner_tensor_default_23, %add), kwargs = {})
-    %access_subclass_inner_tensor_default_24 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%add_1, b), kwargs = {})
-    %access_subclass_inner_tensor_default_29 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_24, a), kwargs = {})
-    return (access_subclass_inner_tensor_default_29,)""",
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add), kwargs = {})
+    %access_subclass_inner_tensor_default_13 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%add_1, b), kwargs = {})
+    %access_subclass_inner_tensor_default_14 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_13, a), kwargs = {})
+    return (access_subclass_inner_tensor_default_14,)""",
         )
 
         inp = torch.randn(4, 4)
@@ -17657,7 +17661,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 y = torch.empty(2 * 2)
-                torch.distributed.all_gather_into_tensor(y, x)
+                torch.distributed.all_gather_single(y, x)
                 return y
 
         with self.distributed_env(world_size=2):
@@ -17690,7 +17694,7 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 y = torch.empty(2)
-                torch.distributed.reduce_scatter_tensor(y, x)
+                torch.distributed.reduce_scatter_single(y, x)
                 return y
 
         with self.distributed_env(world_size=2):
