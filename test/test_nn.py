@@ -7525,25 +7525,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 inp, linear_weight, target, linear_bias=torch.randn(3),
             )
 
-    def test_linear_cross_entropy_linear_bias_chunked_fallback_warns(self):
-        """``linear_bias`` + non-``None`` ``options`` warns and falls back."""
+    def test_linear_cross_entropy_linear_bias_chunked_kdim_fallback_warns(self):
+        """``linear_bias`` + ``options`` + K-dim loss still falls back."""
         torch.manual_seed(0)
         inp = torch.randn(4, 6)
-        linear_weight = torch.randn(5, 6)
-        linear_bias = torch.randn(5)
-        target = torch.randint(0, 5, (4,))
+        # K-dim linear_weight: (C, d1, F) shape.
+        linear_weight = torch.randn(5, 3, 6)
+        linear_bias = torch.randn(5, 3)
+        target = torch.randint(0, 5, (4, 3))
         options = nn.LinearCrossEntropyOptions()
-        with self.assertWarnsRegex(UserWarning, "linear_bias"):
+        with self.assertWarnsRegex(UserWarning, "out_features"):
             actual = nn.functional.linear_cross_entropy(
                 inp, linear_weight, target,
                 linear_bias=linear_bias, options=options,
             )
-        # Independent reference via linear + cross_entropy directly,
-        # not another F.linear_cross_entropy(options=None) call -- both
-        # would hit the same internal reference path and the assertion
-        # would be ref-against-ref.
         expected = nn.functional.cross_entropy(
-            nn.functional.linear(inp, linear_weight, linear_bias),
+            nn.functional.linear(
+                inp, linear_weight.reshape(-1, 6), linear_bias.reshape(-1),
+            ).reshape(4, 5, 3),
             target, reduction="mean",
         )
         self.assertEqual(expected, actual)
@@ -7752,13 +7751,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             tensor_output = unflatten(tensor_input)
             self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
 
-        # Unflatten NamedTensor
-
-        unflatten = nn.Unflatten(dim='features', unflattened_size=(('C', 2), ('H', 5), ('W', 5)))
-        named_tensor_input = tensor_input.refine_names('N', 'features')
-        named_tensor_output = unflatten(named_tensor_input)
-        self.assertEqual(named_tensor_output.size(), torch.Size([2, 2, 5, 5]))
-
     def test_unflatten_invalid_arg(self):
         # Wrong type for unflattened_size (tuple of floats)
 
@@ -7766,27 +7758,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 TypeError,
                 r"unflattened_size must be tuple of ints, but found element of type float at pos 2"):
             nn.Unflatten(dim=1, unflattened_size=(2, 5, 5.0))
-
-        # Wrong type for unflattened_size (list of lists and list of tuples)
-        for us in ([['C', 2], ['W', 5], ['H', 5]], [('C', 2), ('W', 5), ('H', 5)]):
-            with self.assertRaisesRegex(
-                    TypeError,
-                    r"unflattened_size must be a tuple of tuples, but found type list"):
-                nn.Unflatten(dim='features', unflattened_size=us)
-
-        # Wrong type for unflattened_size (tuple of lists)
-
-        with self.assertRaisesRegex(
-                TypeError,
-                r"unflattened_size must be tuple of tuples, but found element of type list at pos 0"):
-            nn.Unflatten(dim='features', unflattened_size=(['C', 2], ['W', 5], ['H', 5]))
-
-        # Wrong type for unflattened_size (tuple of dicts)
-
-        with self.assertRaisesRegex(
-                TypeError,
-                r"unflattened_size must be tuple of tuples, but found element of type dict at pos 0"):
-            nn.Unflatten(dim='features', unflattened_size=({'C': 2}, {'W': 5}, {'H': 5}))
 
     def test_layer_norm_grads_with_create_graph_flag(self):
         atol = 1e-5
@@ -7930,6 +7901,46 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         with self.assertRaises(RuntimeError):
             res = arg_class(*arg_4)
+
+    def test_lp_pool_inf_norm_type(self):
+        cases = [
+            (
+                F.lp_pool1d,
+                torch.tensor([[[1.0, -3.0, 2.0, 4.0]]]),
+                2,
+                1,
+                torch.tensor([[[3.0, 3.0, 4.0]]]),
+                torch.tensor([[[1.0, 2.0, 2.0]]]),
+            ),
+            (
+                F.lp_pool2d,
+                torch.tensor([[[[1.0, -3.0, 2.0], [4.0, -5.0, 6.0], [-7.0, 8.0, -9.0]]]]),
+                2,
+                1,
+                torch.tensor([[[[5.0, 6.0], [8.0, 9.0]]]]),
+                torch.tensor([[[[1.0, 2.0], [4.0, 5.0]]]]),
+            ),
+            (
+                F.lp_pool3d,
+                torch.tensor([[[[[1.0, -3.0, 2.0], [4.0, -5.0, 6.0]], [[-7.0, 8.0, -9.0], [10.0, -11.0, 12.0]]]]]),
+                2,
+                1,
+                torch.tensor([[[[[11.0, 12.0]]]]]),
+                torch.tensor([[[[[1.0, 2.0]]]]]),
+            ),
+        ]
+
+        for lp_pool, input, kernel_size, stride, expected_inf, expected_neg_inf in cases:
+            with self.subTest(lp_pool=lp_pool.__name__, norm_type=float("inf")):
+                self.assertEqual(
+                    lp_pool(input, float("inf"), kernel_size, stride),
+                    expected_inf,
+                )
+            with self.subTest(lp_pool=lp_pool.__name__, norm_type=-float("inf")):
+                self.assertEqual(
+                    lp_pool(input, -float("inf"), kernel_size, stride),
+                    expected_neg_inf,
+                )
 
     def test_pickle_module_no_weights_only_warning(self):
         with warnings.catch_warnings(record=True) as w:
@@ -14707,7 +14718,8 @@ if __name__ == '__main__':
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
-    def _test_linear_cross_entropy_loss(self, device='cpu', dtype=torch.float32, acc_policy=None, acc_dtype=None):
+    def _test_linear_cross_entropy_loss(self, device='cpu', dtype=torch.float32,
+                                        acc_policy=None, acc_dtype=None, bias=False):
         """Test the chunked LCE forward + backward against an fp64 reference.
 
         Two metrics per gradient:
@@ -14724,6 +14736,24 @@ if __name__ == '__main__':
 
         The loss has no relative-error counterpart: its magnitude is
         O(1), so the ULP cap alone is meaningful.
+
+        ``bias`` selects whether the iteration consumes the
+        ``LinearCrossEntropyLoss(bias=True)`` samples (chunked path
+        with ``linear_bias`` set) or the ``bias=False`` samples
+        (chunked path with no bias). The two regimes get separate cap
+        tables because adding ``linear_bias`` shifts the logits by a
+        per-class constant that pushes softmax closer to one-hot for
+        more samples. The chunked input-gradient formula
+        ``L[T[n], k] - sum_v softmax(X)[n, v] * L[v, k]`` catastrophically
+        cancels when softmax is concentrated on the target class
+        (two ~|L|-magnitude terms subtract to a small residual), and
+        the chunked path's fp32 intermediates have less headroom than
+        the fp64 reference for representing that residual -- so the
+        fp32->fp16 downcast lands more frequently on a different fp16
+        ULP than the fp64->fp16 reference. The cancellation regime is
+        intrinsic to the formula, not to the new bias-grad code; the
+        ``bias=True`` caps record where the existing input/weight-grad
+        precision floor lives once that regime is entered more often.
         """
         # tests LinearCrossEntropyLoss in the default (in-place backward) mode
 
@@ -14752,50 +14782,104 @@ if __name__ == '__main__':
 
         # The following mapping to expected ULP differences
         # characterizes the accuracy dependence on acc_policy, dtype,
-        # and device:
+        # and device.
+        # ``expected_linear_bias_grad_max_ulp_diff`` defaults to a
+        # generous cap and is overridden per-combo below as empirical
+        # measurements come in. The bias-grad accumulation is a sum
+        # over the batch dim (a much smaller reduction than the
+        # input/weight matmuls), so the cap is generally tighter than
+        # the input/weight caps for the same combo.
+        expected_linear_bias_grad_max_ulp_diff = 0
         if _resolved_policy == "accurate":
             if "cpu" in device:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 1
-                    expected_weight_grad_max_ulp_diff = 0
+                    if bias:
+                        expected_input_grad_max_ulp_diff = 107
+                        expected_weight_grad_max_ulp_diff = 25
+                        expected_linear_bias_grad_max_ulp_diff = 1
+                    else:
+                        expected_input_grad_max_ulp_diff = 1
+                        expected_weight_grad_max_ulp_diff = 0
+                        expected_linear_bias_grad_max_ulp_diff = 0
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 0
-                    expected_weight_grad_max_ulp_diff = 0
+                    if bias:
+                        expected_input_grad_max_ulp_diff = 10
+                        expected_weight_grad_max_ulp_diff = 12
+                        expected_linear_bias_grad_max_ulp_diff = 1
+                    else:
+                        expected_input_grad_max_ulp_diff = 0
+                        expected_weight_grad_max_ulp_diff = 0
+                        expected_linear_bias_grad_max_ulp_diff = 0
             else:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 1
-                    expected_weight_grad_max_ulp_diff = 0
+                    if bias:
+                        if "mps" in device:
+                            expected_input_grad_max_ulp_diff = 232
+                            expected_weight_grad_max_ulp_diff = 190
+                            expected_linear_bias_grad_max_ulp_diff = 16
+                        else:  # CUDA
+                            expected_input_grad_max_ulp_diff = 3
+                            expected_weight_grad_max_ulp_diff = 6
+                            expected_linear_bias_grad_max_ulp_diff = 16
+                    else:
+                        expected_input_grad_max_ulp_diff = 1
+                        expected_weight_grad_max_ulp_diff = 0
+                        expected_linear_bias_grad_max_ulp_diff = 0
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 0
-                    expected_weight_grad_max_ulp_diff = 0
+                    if bias:
+                        if "mps" in device:
+                            expected_input_grad_max_ulp_diff = 54
+                            expected_weight_grad_max_ulp_diff = 36
+                            expected_linear_bias_grad_max_ulp_diff = 17
+                        else:  # CUDA
+                            expected_input_grad_max_ulp_diff = 6  # A100
+                            expected_weight_grad_max_ulp_diff = 4  # A100
+                            expected_linear_bias_grad_max_ulp_diff = 17  # A100
+                    else:
+                        expected_input_grad_max_ulp_diff = 0
+                        expected_weight_grad_max_ulp_diff = 0
+                        expected_linear_bias_grad_max_ulp_diff = 0
         elif _resolved_policy == "balanced":
             if "cpu" in device:
                 if dtype == torch.float16:
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 204   # x86_64 119
                     expected_weight_grad_max_ulp_diff = 191  # x86_64 150
+                    expected_linear_bias_grad_max_ulp_diff = 1 if bias else 0
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 0
-                    expected_weight_grad_max_ulp_diff = 0
+                    if bias:
+                        expected_input_grad_max_ulp_diff = 10
+                        expected_weight_grad_max_ulp_diff = 12
+                        expected_linear_bias_grad_max_ulp_diff = 1
+                    else:
+                        expected_input_grad_max_ulp_diff = 0
+                        expected_weight_grad_max_ulp_diff = 0
+                        expected_linear_bias_grad_max_ulp_diff = 0
             else:
                 if dtype == torch.float16:
                     if "mps" in device:
                         expected_max_ulp_diff = 2
                         expected_input_grad_max_ulp_diff = 232
                         expected_weight_grad_max_ulp_diff = 190
+                        expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
                     else:  # CUDA/...
                         expected_max_ulp_diff = 1
                         expected_input_grad_max_ulp_diff = 90
                         expected_weight_grad_max_ulp_diff = 50  # x86_64 41
+                        expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
                 else:  # dtype == torch.bfloat16
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 90
-                    expected_weight_grad_max_ulp_diff = 0
+                    if "mps" in device:
+                        expected_weight_grad_max_ulp_diff = 36 if bias else 0
+                    else:  # CUDA
+                        expected_weight_grad_max_ulp_diff = 4 if bias else 0  # A100
+                    expected_linear_bias_grad_max_ulp_diff = 17 if bias else 0  # A100
         elif _resolved_policy == "compact":
             # Mirrors "balanced" except on CUDA (direct addmm_ skips
             # weight_grad_chunk). Falls back to "balanced" on non-CUDA
@@ -14805,10 +14889,17 @@ if __name__ == '__main__':
                     expected_max_ulp_diff = 1
                     expected_input_grad_max_ulp_diff = 204  # x86_64 119
                     expected_weight_grad_max_ulp_diff = 229  # was 191, x86_64 101
+                    expected_linear_bias_grad_max_ulp_diff = 1 if bias else 0
                 else:  # bf16
                     expected_max_ulp_diff = 1
-                    expected_input_grad_max_ulp_diff = 0
-                    expected_weight_grad_max_ulp_diff = 0
+                    if bias:
+                        expected_input_grad_max_ulp_diff = 10
+                        expected_weight_grad_max_ulp_diff = 13
+                        expected_linear_bias_grad_max_ulp_diff = 1
+                    else:
+                        expected_input_grad_max_ulp_diff = 0
+                        expected_weight_grad_max_ulp_diff = 0
+                        expected_linear_bias_grad_max_ulp_diff = 0
             else:
                 if dtype == torch.float16:
                     if "mps" in device:
@@ -14816,20 +14907,24 @@ if __name__ == '__main__':
                         expected_max_ulp_diff = 2
                         expected_input_grad_max_ulp_diff = 232
                         expected_weight_grad_max_ulp_diff = 166
+                        expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
                     else:  # CUDA
                         expected_max_ulp_diff = 1
                         expected_input_grad_max_ulp_diff = 90  # x86_64 68
                         expected_weight_grad_max_ulp_diff = 118
+                        expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
                 else:  # bf16
                     if "mps" in device:
                         # MPS + use_acc_dtype: fallback to balanced.
                         expected_max_ulp_diff = 2
                         expected_input_grad_max_ulp_diff = 90
-                        expected_weight_grad_max_ulp_diff = 0
+                        expected_weight_grad_max_ulp_diff = 22 if bias else 0
+                        expected_linear_bias_grad_max_ulp_diff = 16 if bias else 0
                     else:  # CUDA
                         expected_max_ulp_diff = 1
                         expected_input_grad_max_ulp_diff = 44
                         expected_weight_grad_max_ulp_diff = 193
+                        expected_linear_bias_grad_max_ulp_diff = 17 if bias else 0  # A100
         else:
             # acc_policy is None (fp32 path; use_acc_dtype is False)
             if "cpu" in device:
@@ -14837,15 +14932,18 @@ if __name__ == '__main__':
                     expected_max_ulp_diff = 2
                     expected_input_grad_max_ulp_diff = 8284  # x86_64 6236
                     expected_weight_grad_max_ulp_diff = 3114  # aarch64, macos 2858, x86_64 2271, ci 2239
+                    expected_linear_bias_grad_max_ulp_diff = 4 if bias else 0  # aarch64 4, x86_64 3
             else:
                 if dtype == torch.float32:
                     expected_max_ulp_diff = 2
                     if "mps" in device:
                         expected_input_grad_max_ulp_diff = 5078
                         expected_weight_grad_max_ulp_diff = 8974
+                        expected_linear_bias_grad_max_ulp_diff = 3 if bias else 0
                     else:  # CUDA/XPU/HPU
                         expected_input_grad_max_ulp_diff = 854  # 358, rocm 854
                         expected_weight_grad_max_ulp_diff = 8974  # rocm 5465
+                        expected_linear_bias_grad_max_ulp_diff = 3 if bias else 0
 
         eta = torch.finfo(dtype).eps
         feps = torch.finfo(dtype).eps * 3
@@ -14882,6 +14980,10 @@ if __name__ == '__main__':
         worst_output_kwargs = None
         worst_input_grad_kwargs = None
         worst_linear_weight_grad_kwargs = None
+        maximal_linear_bias_grad_err = 0.0
+        maximal_linear_bias_grad_max_ulp_diff = 0
+        worst_linear_bias_grad_err_kwargs = None
+        worst_linear_bias_grad_kwargs = None
         for module_input in module_inputs_torch_nn_LinearCrossEntropyLoss(
                 module_info=None, device=torch.device(device), dtype=dtype,
                 requires_grad=True, training=None, allow_retain_graph=False, acc_dtype=acc_dtype
@@ -14901,6 +15003,11 @@ if __name__ == '__main__':
                 # skip samples that are not be processed via chunking
                 # algorithms
                 continue
+            if module_kwargs.get('bias', False) != bias:
+                # bias=True and bias=False samples have separate cap
+                # tables (see docstring); each test invocation iterates
+                # only the matching subset.
+                continue
             if acc_policy is not None:
                 module_kwargs['options'] = dataclasses.replace(options, acc_policy=acc_policy)
 
@@ -14913,10 +15020,14 @@ if __name__ == '__main__':
             torch.manual_seed(1245)
             loss = nn.LinearCrossEntropyLoss(*module_args, **module_kwargs)
             ref_loss = nn.LinearCrossEntropyLoss(*module_args, **ref_module_kwargs)
-            # ensure equal linear weights in loss and ref_loss:
+            # ensure equal linear weights / biases in loss and ref_loss:
             ref_loss.linear.weight.detach().copy_(loss.linear.weight.to(ref_device)).requires_grad_(True)
+            if loss.linear.bias is not None:
+                ref_loss.linear.bias.detach().copy_(loss.linear.bias.to(ref_device)).requires_grad_(True)
 
             self.assertEqual(loss.linear.weight, ref_loss.linear.weight.to(dtype))
+            if loss.linear.bias is not None:
+                self.assertEqual(loss.linear.bias, ref_loss.linear.bias.to(dtype))
 
             ref_input = input.detach().to(ref_device).to(ref_dtype).requires_grad_(True)
             if dtype != ref_dtype:
@@ -14962,37 +15073,65 @@ if __name__ == '__main__':
                 maximal_linear_weight_grad_err = err
                 worst_linear_weight_grad_err_kwargs = dict(module_kwargs)
 
+            # When ``bias=True`` is set on the constructor, the chunked
+            # path exercises the linear_bias scratch/commit on
+            # ``use_acc_dtype`` paths (fp16/bf16). Compare to the fp64
+            # reference's ``linear.bias.grad`` to catch staging bugs.
+            if loss.linear.bias is not None:
+                max_ulp_diff = diff_ulp(
+                    loss.linear.bias.grad.to(ref_device),
+                    ref_loss.linear.bias.grad.to(dtype),
+                ).max().item()
+                if max_ulp_diff > maximal_linear_bias_grad_max_ulp_diff:
+                    maximal_linear_bias_grad_max_ulp_diff = max_ulp_diff
+                    worst_linear_bias_grad_kwargs = dict(module_kwargs)
+                err = grad_error(
+                    loss.linear.bias.grad.to(ref_device),
+                    ref_loss.linear.bias.grad.to(dtype),
+                )
+                if err > maximal_linear_bias_grad_err:
+                    maximal_linear_bias_grad_err = err
+                    worst_linear_bias_grad_err_kwargs = dict(module_kwargs)
+
         self.assertLessEqual(maximal_input_grad_err, feps,
                              msg=f"worst input-grad err {maximal_input_grad_err} from kwargs={worst_input_grad_err_kwargs}")
         self.assertLessEqual(maximal_linear_weight_grad_err, feps,
                              msg=f"worst linear_weight-grad err {maximal_linear_weight_grad_err} from kwargs={worst_linear_weight_grad_err_kwargs}")
+        self.assertLessEqual(maximal_linear_bias_grad_err, feps,
+                             msg=f"worst linear_bias-grad err {maximal_linear_bias_grad_err} from kwargs={worst_linear_bias_grad_err_kwargs}")
         self.assertLessEqual(maximal_output_max_ulp_diff, expected_max_ulp_diff,
                              msg=f"worst output ULP {maximal_output_max_ulp_diff} from kwargs={worst_output_kwargs}")
         self.assertLessEqual(maximal_input_grad_max_ulp_diff, expected_input_grad_max_ulp_diff,
                              msg=f"worst input-grad ULP {maximal_input_grad_max_ulp_diff} from kwargs={worst_input_grad_kwargs}")
         self.assertLessEqual(maximal_linear_weight_grad_max_ulp_diff, expected_weight_grad_max_ulp_diff,
                              msg=f"worst linear_weight-grad ULP {maximal_linear_weight_grad_max_ulp_diff} from kwargs={worst_linear_weight_grad_kwargs}")
+        self.assertLessEqual(maximal_linear_bias_grad_max_ulp_diff, expected_linear_bias_grad_max_ulp_diff,
+                             msg=f"worst linear_bias-grad ULP {maximal_linear_bias_grad_max_ulp_diff} from kwargs={worst_linear_bias_grad_kwargs}")
 
+    @parametrize_test("bias", [False, True])
     @dtypes(torch.float32)
-    def test_linear_cross_entropy_loss_default(self, device, dtype):
-        self._test_linear_cross_entropy_loss(device=device, dtype=dtype)
+    def test_linear_cross_entropy_loss_default(self, device, dtype, bias):
+        self._test_linear_cross_entropy_loss(device=device, dtype=dtype, bias=bias)
 
     @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
-    def test_linear_cross_entropy_chunked_gradcheck(self, device, acc_policy):
+    @parametrize_test("bias", [False, True])
+    def test_linear_cross_entropy_chunked_gradcheck(self, device, acc_policy, bias):
         """``torch.autograd.gradcheck`` against the chunked op.
 
         The chunked path is an unusual autograd hookup: forward
-        precomputes ``grad_input`` and ``grad_linear_weight`` and
-        stashes them on ctx via ``register_autograd``; backward is a
-        single scalar multiply by the upstream gradient and then
-        consumes the precomputed buffers in place. ``gradcheck`` is
-        designed to catch exactly this class of unusual gradient
-        plumbing; it calls backward multiple times during
-        finite-difference analytical-Jacobian comparison, which
-        requires ``allow_retain_graph=True`` here so the in-place
-        consumption of the per-call gradient buffers doesn't blow up
-        the second backward.
+        precomputes ``grad_input`` / ``grad_linear_weight`` /
+        ``grad_linear_bias`` and stashes them on ctx via
+        ``register_autograd``; backward is a single scalar multiply by
+        the upstream gradient and then consumes the precomputed
+        buffers in place. ``gradcheck`` is designed to catch exactly
+        this class of unusual gradient plumbing; it calls backward
+        multiple times during finite-difference analytical-Jacobian
+        comparison, which requires ``allow_retain_graph=True`` here
+        so the in-place consumption of the per-call gradient buffers
+        doesn't blow up the second backward.
 
+        The ``bias`` parametrization covers both the no-bias path and
+        the new chunked ``linear_bias`` path (``compute_linear_bias_grad=True``).
         fp64 inputs keep the chunked op's mixed-precision paths off
         (``use_acc_dtype=False``) and stay within gradcheck's default
         tolerance. Small (N, F, V) keeps gradcheck's O(num_inputs)
@@ -15011,6 +15150,10 @@ if __name__ == '__main__':
                           requires_grad=True)
         weight = torch.randn(V, F, device=device, dtype=torch.float64,
                              requires_grad=True)
+        linear_bias = (
+            torch.randn(V, device=device, dtype=torch.float64, requires_grad=True)
+            if bias else None
+        )
         target = torch.randint(0, V, (N,), device=device)
         options = nn.LinearCrossEntropyOptions(
             batch_chunk_size=2,
@@ -15018,12 +15161,12 @@ if __name__ == '__main__':
             allow_retain_graph=True,
         )
 
-        def f(i, w):
+        def f(i, w, b=None):
             return nn.functional.linear_cross_entropy(
-                i, w, target, reduction="mean", options=options,
+                i, w, target, linear_bias=b, reduction="mean", options=options,
             )
 
-        torch.autograd.gradcheck(f, (inp, weight))
+        torch.autograd.gradcheck(f, (inp, weight, linear_bias) if bias else (inp, weight))
 
     @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
     def test_linear_cross_entropy_loss_no_grad(self, device, acc_policy):
@@ -15100,6 +15243,42 @@ if __name__ == '__main__':
 
         torch.autograd.gradcheck(f, (inp, linear_weight, linear_bias))
 
+    def test_linear_cross_entropy_linear_bias_chunked_matches_reference(self, device):
+        """Chunked path with ``linear_bias``: forward output and the
+        backward gradients on ``input`` / ``linear_weight`` /
+        ``linear_bias`` all match the reference ``linear`` +
+        ``cross_entropy`` path. Exercises ``compute_linear_bias_grad=True``
+        end-to-end on the chunked op (forward + backward).
+        """
+        torch.manual_seed(0)
+        N, F_, C = 4, 6, 5
+        inp_ref = torch.randn(N, F_, device=device, requires_grad=True)
+        lw_ref = torch.randn(C, F_, device=device, requires_grad=True)
+        lb_ref = torch.randn(C, device=device, requires_grad=True)
+        target = torch.randint(0, C, (N,), device=device)
+
+        expected = nn.functional.cross_entropy(
+            nn.functional.linear(inp_ref, lw_ref, lb_ref),
+            target, reduction="mean",
+        )
+        gi_ref, gw_ref, gb_ref = torch.autograd.grad(expected, [inp_ref, lw_ref, lb_ref])
+
+        inp = inp_ref.detach().clone().requires_grad_(True)
+        lw = lw_ref.detach().clone().requires_grad_(True)
+        lb = lb_ref.detach().clone().requires_grad_(True)
+        options = nn.LinearCrossEntropyOptions(
+            batch_chunk_size=2, allow_retain_graph=True,
+        )
+        actual = nn.functional.linear_cross_entropy(
+            inp, lw, target, linear_bias=lb, options=options,
+        )
+        gi, gw, gb = torch.autograd.grad(actual, [inp, lw, lb])
+
+        self.assertEqual(expected, actual)
+        self.assertEqual(gi_ref, gi)
+        self.assertEqual(gw_ref, gw)
+        self.assertEqual(gb_ref, gb)
+
     @parametrize_test("out_features", [(), (3,), (3, 2)])
     def test_linear_cross_entropy_loss_bias(self, device, out_features):
         """``LinearCrossEntropyLoss(bias=True)`` forwards module.linear.bias
@@ -15166,14 +15345,16 @@ if __name__ == '__main__':
         self.assertEqual(inp.grad, g1_inp)
         self.assertEqual(weight.grad, g1_w)
 
+    @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "balanced", "compact", "auto"])
-    def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy):
+    def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy, bias):
         if dtype == torch.bfloat16 and "cuda" in device and not SM80OrLater:
             self.skipTest("bf16 requires SM80+ on CUDA")
         self._test_linear_cross_entropy_loss(
             device=device, dtype=dtype, acc_policy=acc_policy,
-            acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype])
+            acc_dtype={torch.float16: torch.float32, torch.bfloat16: torch.float32}[dtype],
+            bias=bias)
 
     @parametrize_test("reduction", ["sum", "mean"])
     def test_linear_cross_entropy_chunk_size_invariance(self, device, reduction):

@@ -138,7 +138,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("all"),
     xfail("amax"),
     xfail("amin"),
-    xfail("aminmax"),
     xfail("any"),
     xfail("bucketize"),
     xfail("conj_physical"),
@@ -273,14 +272,10 @@ class TestCommon(TestCase):
             "aten.max.default",
             "aten.max.dim",
             "aten.max.dim_max",
-            "aten.max.names_dim",
-            "aten.max.names_dim_max",
             "aten.max.unary_out",
             "aten.min.default",
             "aten.min.dim",
             "aten.min.dim_min",
-            "aten.min.names_dim",
-            "aten.min.names_dim_min",
             "aten.min.unary_out",
             # not pointwise
             "aten.isin.Tensor_Tensor",
@@ -290,8 +285,6 @@ class TestCommon(TestCase):
             "aten.isin.Scalar_Tensor",
             "aten.isin.Scalar_Tensor_out",
             "aten.mode.default",
-            "aten.mode.dimname",
-            "aten.mode.dimname_out",
             "aten.mode.values",
         )
 
