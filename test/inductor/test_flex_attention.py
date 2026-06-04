@@ -7,6 +7,7 @@ import os
 import random
 import string
 import tempfile
+import types
 import unittest
 import warnings
 from collections import namedtuple
@@ -539,6 +540,42 @@ def query_key_value_clones(
     return query_ref, key_ref, value_ref
 
 
+def _relocate_captures(mod, device):
+    """Copy a score_mod / mask_mod with its captured tensors moved to `device`.
+
+    A score_mod / mask_mod can reference a tensor from the surrounding scope:
+
+        bias = torch.randn(S, S, device="mps")
+        score_mod = lambda s, b, h, q, kv: s + bias[q, kv]   # captures `bias`
+
+    The MPS tests check the compiled output against a reference run on CPU in
+    float64 (MPS has no float64). That reference calls `score_mod` with CPU
+    inputs, but `bias` is still on MPS, so `cpu_score + bias[q, kv]` mixes a CPU
+    and an MPS tensor and raises a device-mismatch error.
+
+    This returns a copy of `mod` with every captured tensor moved to `device`
+    (and a captured BlockMask too, recursing into its mask_mod's captures). It
+    builds a new function instead of editing `mod` in place, because the
+    original is still used for the on-device run. A mod that captures nothing is
+    returned unchanged.
+    """
+    cells = getattr(mod, "__closure__", None)
+    if not cells:
+        return mod
+    relocated = []
+    for cell in cells:
+        val = cell.cell_contents
+        if isinstance(val, BlockMask):
+            val = val.to(device)
+            val.mask_mod = _relocate_captures(val.mask_mod, device)
+        elif isinstance(val, torch.Tensor):
+            val = val.to(device)
+        relocated.append(types.CellType(val))
+    return types.FunctionType(
+        mod.__code__, mod.__globals__, mod.__name__, mod.__defaults__, tuple(relocated)
+    )
+
+
 def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
     (B,) = target_seq_len.shape
     for b in range(B):
@@ -703,7 +740,9 @@ class TestFlexAttention(InductorTestCase):
         sdpa_partial = create_attention(score_mod, block_mask, enable_gqa=(Q_H != KV_H))
         if _is_mps_device(device):
             sdpa_partial_gold = create_attention(
-                score_mod, block_mask.to("cpu"), enable_gqa=(Q_H != KV_H)
+                _relocate_captures(score_mod, "cpu"),
+                block_mask.to("cpu"),
+                enable_gqa=(Q_H != KV_H),
             )
         else:
             sdpa_partial_gold = sdpa_partial
@@ -1009,19 +1048,26 @@ class TestFlexAttention(InductorTestCase):
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
         compiled_sdpa = torch.compile(sdpa_call)
         compiled_out = compiled_sdpa(q, k, v)
-        # On MPS the gold path runs on CPU at fp64, if sdpa_call is a partial
-        # with a block_mask captured on MPS, build a CPU twin so devices match.
+        # On MPS the gold path runs on CPU at fp64; relocate any device-resident
+        # captures (block_mask, score_mod buffers, or a closed-over BlockMask) to
+        # CPU so the reference stays single-device.
         sdpa_call_gold = sdpa_call
-        if (
-            _is_mps_device(device)
-            and isinstance(sdpa_call, functools.partial)
-            and "block_mask" in sdpa_call.keywords
-        ):
-            cpu_kwargs = dict(sdpa_call.keywords)
-            cpu_kwargs["block_mask"] = cpu_kwargs["block_mask"].to("cpu")
-            sdpa_call_gold = functools.partial(
-                sdpa_call.func, *sdpa_call.args, **cpu_kwargs
-            )
+        if _is_mps_device(device):
+            if isinstance(sdpa_call, functools.partial):
+                cpu_kwargs = dict(sdpa_call.keywords)
+                if cpu_kwargs.get("block_mask") is not None:
+                    bm = cpu_kwargs["block_mask"].to("cpu")
+                    bm.mask_mod = _relocate_captures(bm.mask_mod, "cpu")
+                    cpu_kwargs["block_mask"] = bm
+                if cpu_kwargs.get("score_mod") is not None:
+                    cpu_kwargs["score_mod"] = _relocate_captures(
+                        cpu_kwargs["score_mod"], "cpu"
+                    )
+                sdpa_call_gold = functools.partial(
+                    sdpa_call.func, *sdpa_call.args, **cpu_kwargs
+                )
+            else:
+                sdpa_call_gold = _relocate_captures(sdpa_call, "cpu")
         golden_out = sdpa_call_gold(q_gold, k_gold, v_gold)
         ref_out = sdpa_call(q_ref, k_ref, v_ref)
         if not requires_grad:
@@ -1479,8 +1525,8 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods_dynamic(
         self, device, dtype: torch.dtype, score_mask_mod: tuple[Callable, Callable]
     ):
-        # Closures (even over ints) get lifted to "other buffers" by Dynamo,
-        # which the MPS captured-buffers guard rejects for now.
+        # Closures (even over ints) get lifted to "other buffers" by Dynamo as
+        # SymInts, which the MPS path does not support yet.
         captures = _is_mps_device(device) and bool(score_mask_mod[0].__closure__)
         with expect_not_implemented_if(captures):
             self.run_dynamic_test(score_mask_mod, dtype, S=1024, device=device)
@@ -2322,7 +2368,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
-    @expected_not_implemented_on_mps
     def test_padded_dense_causal(self, device, dtype):
         seq_len = torch.arange(B, device=device, dtype=torch.int32) + 1
 
@@ -2862,7 +2907,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @expected_not_implemented_on_mps
+    @expected_not_implemented_on_mps  # SymInt captures (dynamic-shape closures)
     def test_mask_mod_handles_symint_addition(self, device):
         dtype = torch.float16
 
@@ -2908,7 +2953,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @expected_not_implemented_on_mps  # captured buffers in score_mod/mask_mod unsupported
+    @expected_not_implemented_on_mps  # SymInt captures (dynamic-shape closures)
     def test_mask_mod_handles_derived_symint_closure(self, device):
         dtype = torch.float16
 
@@ -3661,7 +3706,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @expected_not_implemented_on_mps
     def test_new_empty_mask_mod(self, device):
         S = 128
         q, k, v = (torch.randn(4, 1, S, 64, device=device) for _ in range(3))
@@ -4579,7 +4623,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
 
     @supported_platform
-    @expected_not_implemented_on_mps  # no captured buffers yet
     def test_block_mask_non_divisible(self, device):
         seq = torch.arange(1023, device=device) // 128
 
@@ -4608,7 +4651,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @expected_not_implemented_on_mps
     def test_modular_indexing(self, device):
         B, H, N, D = 100, 12, 128, 64
         dtype = torch.bfloat16
@@ -5032,7 +5074,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @expected_not_implemented_on_mps  # no captured buffer syet
     def test_non_divisible_with_captured_buffer(self, device):
         Q_S = S + 3
         KV_S = S + 3
@@ -5737,7 +5778,6 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cpu
-    @expected_not_implemented_on_mps  # no captured buffers yet
     def test_custom_score_mod_layout_freeze(self, device):
         torch.manual_seed(0)
 
@@ -6853,7 +6893,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         self.assertEqual(block_mask_custom.BLOCK_SIZE, custom_block_size)
 
     @supported_platform
-    @expected_not_implemented_on_mps
     def test_upcast_appropriately(self, device):
         q = torch.randn((1, 1, 128, 16), dtype=torch.float16, device=device)
         k = torch.randn((1, 1, 128, 16), dtype=torch.float16, device=device)
@@ -7436,7 +7475,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     @skip_on_cpu
-    @expected_not_implemented_on_mps  # no captured buffers yet
     def test_broadcasted_head_block_mask(self, device):
         torch.manual_seed(42)
 
