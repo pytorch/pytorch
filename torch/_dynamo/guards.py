@@ -715,20 +715,25 @@ class GuardManagerWrapper:
                 code_parts.append(code_part)
             return code_parts
 
-        def visit(mgr: GuardManager) -> None:
+        def add_code_parts(guard: LeafGuard) -> None:
             nonlocal relational_guards_seen
-            for guard in mgr.get_leaf_guards():
-                if isinstance(guard, RelationalGuard):
-                    if guard not in relational_guards_seen:
-                        self.code_parts.extend(get_code_parts(guard))
-                        relational_guards_seen.add(guard)
-                else:
+            if isinstance(guard, RelationalGuard):
+                if guard not in relational_guards_seen:
                     self.code_parts.extend(get_code_parts(guard))
+                    relational_guards_seen.add(guard)
+            else:
+                self.code_parts.extend(get_code_parts(guard))
+
+        def visit(mgr: GuardManager) -> None:
+            for guard in mgr.get_leaf_guards():
+                add_code_parts(guard)
 
             for child_mgr in mgr.get_child_managers():
                 visit(child_mgr)
 
         visit(self.root)
+        for guard in self.root.get_epilogue_lambda_guards():
+            add_code_parts(guard)
 
 
 def from_numpy(a: Any) -> torch.Tensor:

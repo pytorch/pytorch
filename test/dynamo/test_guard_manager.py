@@ -739,6 +739,26 @@ user_stack=None)
             guard_str,
         )
 
+    def test_code_parts_include_epilogue_lambda_guards(self):
+        def fn(x):
+            if x.numel() >= 1024:
+                return x + 5
+            return x * 2
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(2)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_fn(x)
+
+        cache_entries = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(cache_entries), 1)
+        guard_manager = cache_entries[0].guard_manager
+        self.assertIn("L['x'].size()[0]", str(guard_manager))
+        self.assertTrue(
+            any("L['x'].size()[0]" in part for part in guard_manager.code_parts),
+            guard_manager.code_parts,
+        )
+
     def test_dict_getitem_accessor(self):
         foo = {
             "a": 1,
