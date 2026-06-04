@@ -10331,9 +10331,6 @@ instantiate_device_type_tests(TestCudaGreenContexts, globals(), except_for="cpu"
 # Tests for fp32_precision flag propagation that don't require an actual CUDA
 # device — they only exercise C++ context state management.
 class TestFP32PrecisionFlags(TestCase):
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182021"
-    )
     @recover_orig_fp32_precision
     @serialTest()
     def test_generic_fp32_precision_propagates_to_cudnn_conv_rnn(self):
@@ -10345,7 +10342,17 @@ class TestFP32PrecisionFlags(TestCase):
             self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cudnn.fp32_precision, "ieee")
-            self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
+            # TORCH_ALLOW_TF32_CUBLAS_OVERRIDE initializes cuda.matmul as an
+            # explicit TF32 leaf, so it does not inherit the generic context.
+            expected_matmul_precision = (
+                "tf32"
+                if "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ
+                and int(os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"])
+                else "ieee"
+            )
+            self.assertEqual(
+                torch.backends.cuda.matmul.fp32_precision, expected_matmul_precision
+            )
 
 
 if __name__ == "__main__":
