@@ -1642,6 +1642,29 @@ def forward(self, x_1):
         self.assertIsInstance(r, FakeTensor)
         self.assertEqual(r.size(), [3])
 
+    @expectedFailurePropagateRealTensors
+    def test_forward_ad_batch_norm(self):
+        fwAD = torch.autograd.forward_ad
+
+        with FakeTensorMode():
+            x = torch.randn(2, 3)
+            running_mean = torch.zeros(3)
+            running_var = torch.ones(3)
+            weight = torch.randn(3, requires_grad=True)
+            bias = torch.randn(3, requires_grad=True)
+
+            with fwAD.dual_level():
+                dual = fwAD.make_dual(x, torch.zeros_like(x))
+                out = torch.nn.functional.batch_norm(
+                    dual, running_mean, running_var, weight, bias, training=True
+                )
+                primal, tangent = fwAD.unpack_dual(out)
+
+        self.assertIsInstance(out, FakeTensor)
+        self.assertIsInstance(primal, FakeTensor)
+        self.assertIsInstance(tangent, FakeTensor)
+        self.assertEqual(out.size(), [2, 3])
+
     @parametrize("reverse", [False, True])
     def test_scan(self, reverse):
         def add(x, y):

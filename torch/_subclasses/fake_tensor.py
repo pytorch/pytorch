@@ -3046,11 +3046,15 @@ class FakeTensorMode(TorchDispatchMode):
                         raise AssertionError(
                             f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
                         )
-                    args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
-                    raise AssertionError(
-                        f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
-                        f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
-                    )
+                    # Forward AD can hand FakeTensorMode plain meta tensors
+                    # produced while running fake kernels; rewrap those but
+                    # keep rejecting real tensors.
+                    if x.device.type != "meta":
+                        args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
+                        raise AssertionError(
+                            f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
+                            f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
+                        )
 
                 out = converter.from_real_tensor(self, x)
             else:

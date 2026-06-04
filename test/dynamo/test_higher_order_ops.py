@@ -3815,6 +3815,28 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         wrapped_gm = backend.graphs[graph_idx]
         return wrapped_gm
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_compile_forward_ad_batch_norm(self):
+        fwAD = torch.autograd.forward_ad
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(model, x, device):
+            x = x.to(device)
+            tangent = torch.zeros_like(x, device=device)
+            with fwAD.dual_level():
+                dual_input = fwAD.make_dual(x, tangent)
+                model(dual_input)
+            return None
+
+        model = nn.Sequential(
+            nn.Linear(3, 3),
+            nn.BatchNorm1d(3),
+            nn.Linear(3, 1),
+        ).cuda()
+        model.train()
+
+        self.assertIsNone(fn(model, torch.randn(2, 3), "cuda"))
+
     def test_hessian(self):
         counters.clear()
 
