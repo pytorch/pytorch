@@ -1,8 +1,11 @@
 # Owner(s): ["module: dynamo"]
 import abc
 import functools
+import gc
 import inspect
 import os
+import sys
+import unittest
 import weakref
 from unittest import mock
 
@@ -13,7 +16,11 @@ from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._library.fake_class_registry import FakeScriptObject
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import (
+    set_default_dtype,
+    TEST_WITH_ASAN,
+    TEST_WITH_TSAN,
+)
 
 
 RootGuardManager = guards.RootGuardManager
@@ -2119,6 +2126,42 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
             handler.eval_fn(types.MappingProxyType({"a": 10, "b": 20}), expected)
         )
         self.assertFalse(handler.eval_fn(types.MappingProxyType({"x": 1}), expected))
+
+    @unittest.skipIf(
+        sys.platform != "linux",
+        "Only support mem leak checking on Linux.",
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN or TEST_WITH_TSAN,
+        "RSS-based leak detection is unreliable under sanitizers.",
+    )
+    def test_clone_manager_memory_leak(self):
+        def get_mem():
+            with open("/proc/self/statm") as f:
+                return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+
+        def clone_filter(mgr):
+            return True
+
+        root = RootGuardManager()
+
+        # Warmup
+        for _ in range(100):
+            root.clone_manager(clone_filter)
+        gc.collect()
+
+        # Iterate to make the leak larger
+        initial_mem = get_mem()
+        for _ in range(10000):
+            root.clone_manager(clone_filter)
+        gc.collect()
+        final_mem = get_mem()
+        delta = final_mem - initial_mem
+
+        # Only fail if the leak is larger than 1MB.
+        self.assertLessEqual(
+            delta, 1 * 1024 * 1024, f"Memory leaked: {delta / 1024 / 1024:.2f} MB"
+        )
 
     def test_dict_keys_match(self):
         from torch._dynamo.guards import GuardBuilder
