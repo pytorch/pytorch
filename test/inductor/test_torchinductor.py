@@ -3780,8 +3780,6 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    test_one_hot._expected_failure_halide = True
-
     def test_div1(self):
         def fn(a, b):
             return (
