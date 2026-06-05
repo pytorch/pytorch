@@ -103,7 +103,6 @@ dtensor_fails = {
     xfail("eye"),
     xfail("full"),
     xfail("linspace"),
-    xfail("logspace"),
     xfail("ones"),
     xfail("scalar_tensor"),
     xfail("signal.windows.bartlett"),

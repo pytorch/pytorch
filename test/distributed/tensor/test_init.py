@@ -3,7 +3,14 @@
 
 import torch
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
-from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard, zeros
+from torch.distributed.tensor import (
+    DeviceMesh,
+    DTensor,
+    logspace,
+    Replicate,
+    Shard,
+    zeros,
+)
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -141,6 +148,31 @@ class DTensorConstructorTest(DTensorTestBase):
             123.4,
             requires_grad=True,
         )
+
+    @with_comms
+    def test_logspace(self):
+        mesh = self.build_device_mesh()
+
+        steps = 8
+        dist_tensor = logspace(
+            1.0, 2.0, steps, device_mesh=mesh, placements=[Replicate()]
+        )
+        self.assertEqual(dist_tensor.size(), torch.Size([steps]))
+        self.assertEqual(dist_tensor.to_local(), torch.logspace(1.0, 2.0, steps))
+
+        dist_tensor = logspace(
+            0.0, 1.0, steps, base=2.0, device_mesh=mesh, placements=[Replicate()]
+        )
+        self.assertEqual(
+            dist_tensor.to_local(), torch.logspace(0.0, 1.0, steps, base=2.0)
+        )
+
+        dist_tensor = logspace(1.0, 2.0, 1, device_mesh=mesh, placements=[Replicate()])
+        self.assertEqual(dist_tensor.size(), torch.Size([1]))
+        self.assertEqual(dist_tensor.to_local(), torch.logspace(1.0, 2.0, 1))
+
+        dist_tensor = logspace(1.0, 2.0, 0, device_mesh=mesh, placements=[Replicate()])
+        self.assertEqual(dist_tensor.size(), torch.Size([0]))
 
     @with_comms
     def test_zeros(self):
