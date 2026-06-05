@@ -584,6 +584,27 @@ class ConstantVariable(VariableTracker):
         except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
+    def nb_true_divide_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, float, and complex define nb_true_divide; bool inherits int's.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4146 (long_true_divide)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L618 (float_div)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L518 (complex_div)
+        if not isinstance(self.value, (int, float, complex)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            return VariableTracker.build(tx, v / w)
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
     def nb_or_impl(
         self,
         tx: Any,
