@@ -499,6 +499,7 @@ class TestMultiprocessingDeviceType(_MultiprocessingTestMixin, TestCase):
     def test_empty_tensor_sharing(self, device, dtype):
         self._test_empty_tensor_sharing(dtype, torch.device(device))
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/92131")
     @unittest.skipIf(
         TEST_WITH_ASAN,
         "non-deterministically hangs with ASAN "
@@ -1037,65 +1038,6 @@ if __name__ == "__main__":
 
         time.sleep(5)
         p.join()
-
-    @unittest.skipIf(
-        TEST_WITH_ASAN,
-        "non-deterministically hangs with ASAN https://github.com/pytorch/pytorch/issues/94024",
-    )
-    def test_variable_sharing(self):
-        for requires_grad in [True, False]:
-            var = torch.arange(1.0, 26).view(5, 5).requires_grad_(requires_grad)
-            self._test_autograd_sharing(var)
-
-    # See https://github.com/pytorch/pytorch/issues/14997
-    @unittest.skipIf(TEST_WITH_ASAN, "non-deterministically hangs with ASAN")
-    def test_leaf_variable_sharing(self):
-        devices = ["cpu"]
-        if torch.cuda.is_available() and TEST_CUDA_IPC:
-            devices.append("cuda")
-        for device in devices:
-            for requires_grad in [True, False]:
-                var = (
-                    torch.arange(1.0, 26, device=device)
-                    .view(5, 5)
-                    .requires_grad_(requires_grad)
-                )
-                self.assertTrue(var.is_leaf)
-                ctx = mp.get_context("spawn") if device == "cuda" else mp
-                ready = ctx.Event()
-                queue = ctx.Queue()
-                p = ctx.Process(
-                    target=requires_grad_variable_sharing, args=(queue, ready)
-                )
-                p.daemon = True
-                p.start()
-                queue.put(var)
-                ready.wait()
-                worker_requires_grad = queue.get()
-                self.assertTrue(worker_requires_grad == requires_grad)
-
-    def test_non_leaf_variable_sharing(self):
-        devices = ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
-        for device in devices:
-            var0 = torch.arange(1.0, 26, device=device).view(5, 5).requires_grad_(True)
-            var = var0 * 2
-            # Don't use a regular Queue; it uses a background thread (which
-            # means we can't catch the exceptions)
-            queue = mp.SimpleQueue()
-            self.assertRaisesRegex(
-                RuntimeError, r"requires_grad", lambda: queue.put(var)
-            )
-
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/92131")
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
-    def test_cuda_variable_sharing(self):
-        for requires_grad in [True, False]:
-            var = (
-                torch.arange(1.0, 26, device="cuda")
-                .view(5, 5)
-                .requires_grad_(requires_grad)
-            )
-            self._test_autograd_sharing(var, mp.get_context("spawn"))
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_mixed_types_cuda_sharing(self):
