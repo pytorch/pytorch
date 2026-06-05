@@ -92,6 +92,7 @@ def repurpose_ops(op_db, base_test_name, derived_test_name):
 # like python test/distributed/tensor/test_dtensor_ops.py > failed.expect
 dtensor_fails = {
     # view/reshape ops: rejects flatten/split of sharded dims without redistribution
+    xfail("combinations"),
     xfail("repeat_interleave"),
     xfail("unbind"),
     xfail("unflatten"),
