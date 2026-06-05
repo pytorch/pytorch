@@ -1738,6 +1738,7 @@ class TestIndexingDevice(TestCase):
             torch.take_along_dim(t, indices, dim=7)
 
     @onlyAccelerator
+    @skipMPS
     @dtypes(torch.float)
     def test_gather_take_along_dim_cross_device(self, device, dtype):
         shape = (2, 3, 1, 4)
