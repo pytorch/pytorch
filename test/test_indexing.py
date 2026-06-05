@@ -2053,6 +2053,7 @@ class TestIndexingDevice(TestCase):
         }
     )
     @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
+    @dtypesIfMPS(torch.float32, torch.float64, torch.half)
     def test_index_add_fast_path(self, device, dtype):
         # Coverage for the index_add_ TMA fast path: one eligible case + five
         # fallback predicates per shape, asserted against a CPU reference.
