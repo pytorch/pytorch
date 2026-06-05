@@ -487,13 +487,15 @@ def checkpoint(
             :class:`CheckpointPolicy` values, providing a convenient form of
             selective activation checkpointing. Keys may be:
 
-            - an ``OpOverload`` (e.g. ``torch.ops.aten.mm.default``) or a string
-              naming an op (``"aten.mm.default"``, ``"aten::mm"``, or the packet
-              ``"aten.mm"`` which matches all overloads);
+            - an ``OpOverload`` (e.g. ``torch.ops.aten.mm.default``), matching
+              that op;
             - an :class:`AutoNamingMode` auto-name
               (``"layers.0.lin_mm.default_0"``) to target a specific op by its
               module-qualified name, or a module-FQN prefix (``"layers.1"``) to
-              match every op under that submodule.
+              match every op under that submodule. These resolve under
+              :func:`torch.compile` automatically; in eager they only take effect
+              if you have an :class:`AutoNamingMode` active around the call (it is
+              not enabled implicitly).
 
             Selectors are resolved most-specific first (exact auto-name, then
             longest module-FQN prefix, then op). Operators not matched default to
@@ -1406,22 +1408,6 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         # The policy dict (when built from the `policy` kwarg), consulted by
         # `name`. None when constructed from a raw policy_fn.
         self._name_policy: Optional[Dict[Any, CheckpointPolicy]] = None
-        # An AutoNamingMode whose `names` registry the `policy` dict's policy_fn
-        # consults to resolve auto-name / module-FQN keys. None when no such keys
-        # are present. In eager it must be active during the forward to populate
-        # names; we enter it here so `names` is filled before policy_fn runs.
-        self._naming: Optional[AutoNamingMode] = None
-
-    def __enter__(self):
-        if self._naming is not None:
-            self._naming.__enter__()
-        return super().__enter__()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        ret = super().__exit__(exc_type, exc_val, exc_tb)
-        if self._naming is not None:
-            self._naming.__exit__(exc_type, exc_val, exc_tb)
-        return ret
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = {} if kwargs is None else kwargs
@@ -1874,41 +1860,33 @@ class AutoNamingMode(TorchDispatchMode):
         return out
 
 
-def _is_op_name_str(key):
-    # Heuristic: does this string name an op (e.g. "aten::mm", "aten.mm",
-    # "aten.mm.default") as opposed to a module-FQN / auto-name?
-    if "::" in key:
-        return True
-    parts = key.split(".")
-    if len(parts) not in (2, 3):
-        return False
-    try:
-        getattr(getattr(torch.ops, parts[0]), parts[1])
-        return True
-    except Exception:
-        return False
+def _active_auto_naming_mode():
+    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+
+    for mode in reversed(_get_current_dispatch_mode_stack()):
+        if isinstance(mode, AutoNamingMode):
+            return mode
+    return None
 
 
-def _policy_has_name_keys(policy):
-    # Auto-name (e.g. "layers.0.lin_mm.default_0") and module-FQN-prefix (e.g.
-    # "layers.1") keys require module naming to resolve.
-    return any(isinstance(k, str) and not _is_op_name_str(k) for k in policy)
-
-
-def _checkpoint_policy_from_dict(policy, naming=None):
+def _checkpoint_policy_from_dict(policy):
     """Build a SAC ``policy_fn`` from a dict mapping selectors to ``CheckpointPolicy``.
 
     Used to implement the ``policy`` argument of :func:`checkpoint`. Keys may be:
 
-    - an ``OpOverload`` (e.g. ``torch.ops.aten.mm.default``) or a string naming an
-      op (``"aten.mm.default"``, ``"aten::mm"``, or the packet ``"aten.mm"``);
+    - an ``OpOverload`` (e.g. ``torch.ops.aten.mm.default``), matching that op;
     - an :class:`AutoNamingMode` auto-name (``"layers.0.lin_mm.default_0"``) or a
-      module-FQN prefix (``"layers.1"``, matching every op under that submodule)
-      -- these require ``naming`` and are resolved most-specific first.
+      module-FQN prefix (``"layers.1"``, matching every op under that submodule).
 
-    Resolution precedence: exact auto-name, then longest module-FQN prefix, then
-    op-identity / op-name. Ops not matched default to ``PREFER_RECOMPUTE``,
-    matching vanilla (non-selective) activation checkpointing.
+    Auto-name / module-FQN keys are only resolvable when module naming is
+    available: in eager that means the user has an :class:`AutoNamingMode` active
+    around the call; under :func:`torch.compile` they are always derivable from
+    each op's fx node. They are resolved most-specific first (exact auto-name,
+    then longest module-FQN prefix), then op identity. Ops not matched default to
+    ``PREFER_RECOMPUTE``, matching vanilla activation checkpointing.
+
+    Ops are selected by ``OpOverload`` identity only; string keys are reserved
+    for names.
     """
     if not isinstance(policy, dict):
         raise TypeError(f"checkpoint `policy` must be a dict, but got {type(policy)}.")
@@ -1924,16 +1902,28 @@ def _checkpoint_policy_from_dict(policy, naming=None):
                 "argument."
             )
 
+    # Only string keys can ever match an auto-name / module-FQN; if there are
+    # none, skip name resolution entirely (and its overhead).
+    has_str_keys = any(isinstance(k, str) for k in policy)
+
     def policy_fn(ctx, func, *args, **kwargs):
         # Per-tensor names (set via `name`) are applied directly by `name` itself,
         # not here. Auto-name / module-FQN keys (most specific first) win over
-        # op-based keys.
+        # op-based keys, but only when naming is available: an AutoNamingMode the
+        # user activated (eager), or the fx node under compile.
         out = ctx.op_output
-        if naming is not None and isinstance(out, torch.Tensor):
-            auto_name = naming.names.get(out)
+        if has_str_keys and isinstance(out, torch.Tensor):
+            mode = _active_auto_naming_mode()
+            if mode is not None:
+                auto_name, fqn = mode.names.get(out), mode.names.get_fqn(out)
+            elif _is_compiling(func, args, kwargs):
+                node = _node_from_proxy(out)
+                auto_name = _auto_name_for_node(node) if node is not None else None
+                fqn = _node_fqn(node) if node is not None else None
+            else:
+                auto_name = fqn = None
             if auto_name is not None and auto_name in policy:
                 return policy[auto_name]
-            fqn = naming.names.get_fqn(out)
             if fqn:
                 parts = fqn.split(".")
                 for i in range(len(parts), 0, -1):
@@ -1942,33 +1932,19 @@ def _checkpoint_policy_from_dict(policy, naming=None):
                         return policy[prefix]
         if func in policy:
             return policy[func]
-        candidates = [str(func)]
-        name_method = getattr(func, "name", None)
-        if callable(name_method):
-            candidates.append(str(name_method()))
-        packet = getattr(func, "overloadpacket", None)
-        if packet is not None:
-            candidates.append(str(packet))
-        for cand in candidates:
-            if cand in policy:
-                return policy[cand]
         return CheckpointPolicy.PREFER_RECOMPUTE
 
     return policy_fn
 
 
 def _checkpoint_policy_context_fn(policy):
-    naming = AutoNamingMode() if _policy_has_name_keys(policy) else None
-    policy_fn = _checkpoint_policy_from_dict(policy, naming)
+    policy_fn = _checkpoint_policy_from_dict(policy)
 
     def context_fn():
         caching_mode, cached_mode = create_selective_checkpoint_contexts(policy_fn)
         # Stash the dict so `name` can resolve a name to its policy.
         caching_mode._name_policy = policy
         cached_mode._name_policy = policy
-        # In eager, the caching mode enters `naming` so auto-names are populated
-        # during the forward; under compile they are derived from the fx graph.
-        caching_mode._naming = naming
         return caching_mode, cached_mode
 
     return context_fn

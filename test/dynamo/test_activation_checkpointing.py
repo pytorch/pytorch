@@ -1204,6 +1204,42 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         torch._dynamo.reset()
         _test({}, bw_freq=6)
 
+    def test_policy_kwarg_auto_name_eager_requires_mode(self):
+        # In eager, an auto-name policy key only resolves when the user has an
+        # AutoNamingMode active; checkpoint does not enable one implicitly. With
+        # it the named matmuls are saved (not recomputed in backward); without it
+        # the name keys are inert and both are recomputed -> more backward mm.
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class MMCounter(TorchDispatchMode):
+            def __init__(self):
+                self.count = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.mm.default:
+                    self.count += 1
+                return func(*args, **(kwargs or {}))
+
+        policy = {
+            "layers.0.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
+            "layers.1.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
+        }
+
+        def backward_mm(use_mode):
+            mod = _make_auto_naming_model()
+            x = torch.randn(4, 4, requires_grad=True)
+            ctx = AutoNamingMode() if use_mode else contextlib.nullcontext()
+            with ctx:
+                out = torch.utils.checkpoint.checkpoint(
+                    mod, x, use_reentrant=False, policy=policy
+                )
+            counter = MMCounter()
+            with counter:
+                out.sum().backward()
+            return counter.count
+
+        self.assertLess(backward_mm(use_mode=True), backward_mm(use_mode=False))
+
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
@@ -1312,15 +1348,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         result = opt_fn(a, b)
         self.assertEqual(result, expected)
 
-    @parametrize(
-        "policy_key",
-        [
-            torch.ops.aten.mm.default,  # OpOverload key
-            "aten.mm.default",  # str(op)
-            "aten::mm",  # op.name()
-            "aten.mm",  # packet, matches all overloads
-        ],
-    )
+    @parametrize("policy_key", [torch.ops.aten.mm.default])
     def test_checkpoint_policy_eager(self, policy_key):
         def gn(x):
             return torch.cos(torch.sin(torch.matmul(x, x) @ x))
@@ -1380,7 +1408,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @parametrize("policy_key", [torch.ops.aten.mm.default, "aten.mm"])
+    @parametrize("policy_key", [torch.ops.aten.mm.default])
     def test_compile_checkpoint_policy(self, policy_key):
         def gn(x):
             return torch.cos(torch.sin(torch.matmul(x, x) @ x))
