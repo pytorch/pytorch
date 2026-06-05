@@ -3,6 +3,7 @@
 
 import collections
 import copy
+import inspect
 import itertools
 import os
 import tempfile
@@ -1857,6 +1858,21 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         x = torch.randn(10, 10)
         self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_nn_module_proxy_class(self):
+        class LabelModule(torch.nn.Module):
+            def forward(self, input_ids, labels=None):
+                return input_ids if labels is None else input_ids + labels
+
+        mod = LabelModule()
+        opt_mod = torch.compile(mod, backend="eager")
+
+        self.assertIs(type(opt_mod), torch._dynamo.OptimizedModule)
+        self.assertIs(opt_mod.__class__, LabelModule)
+        self.assertIsInstance(opt_mod, torch._dynamo.OptimizedModule)
+        self.assertIsInstance(opt_mod, LabelModule)
+        self.assertIn("labels", inspect.signature(opt_mod.__class__.forward).parameters)
+        self.assertIs(opt_mod.__reduce__()[0], torch._dynamo.OptimizedModule)
 
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_attr_precedence(self):

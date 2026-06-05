@@ -569,7 +569,12 @@ class OptimizedModule(torch.nn.Module):
     def __reduce__(
         self,
     ) -> tuple[type[OptimizedModule], tuple[torch.nn.Module, _TorchDynamoContext]]:
-        return (self.__class__, (self._orig_mod, self.dynamo_ctx))
+        return (type(self), (self._orig_mod, self.dynamo_ctx))
+
+    @property
+    # pyrefly: ignore [bad-override]
+    def __class__(self) -> type[torch.nn.Module]:
+        return self._orig_mod.__class__
 
     def __getstate__(self) -> dict[str, Any]:
         state = dict(self.__dict__)
