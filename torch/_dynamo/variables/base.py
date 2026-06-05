@@ -646,13 +646,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
         raise NotImplementedError
 
-    def has_unpack_var_sequence(self, tx: Any) -> bool:
-        try:
-            self.unpack_var_sequence(tx)
-            return True
-        except NotImplementedError:
-            return False
-
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
@@ -920,6 +913,24 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_rshift_impl(tx, args[0], reverse=True)
         elif name == "__irshift__":
             return self.nb_inplace_rshift_impl(tx, args[0])
+        elif name == "__and__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_and_impl(tx, args[0])
+        elif name == "__rand__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_and_impl(tx, args[0], reverse=True)
+        elif name == "__iand__":
+            return self.nb_inplace_and_impl(tx, args[0])
+        elif name == "__xor__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_xor_impl(tx, args[0])
+        elif name == "__rxor__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_xor_impl(tx, args[0], reverse=True)
+        elif name == "__ixor__":
+            return self.nb_inplace_xor_impl(tx, args[0])
         elif name == "__floordiv__":
             return self.nb_floor_divide_impl(tx, args[0])
         elif name == "__rfloordiv__":
@@ -1202,6 +1213,31 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def tp_iteritem_impl(
+        self, tx: InstructionTranslatorBase, index: VariableTracker
+    ) -> tuple[VariableTracker, VariableTracker]:
+        """
+        Implements the 3.15 _tp_iteritem slot used by the virtual-iterator
+        FOR_ITER/SEND fast paths.
+
+        Mirrors CPython's slot signature: takes (self, index) and returns
+        (next_value, next_index).  Exhaustion is signaled by raising
+        StopIteration via raise_observed_exception, matching how the rest
+        of Dynamo signals iterator end.
+
+        ref: https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Include/object.h#L312-L313
+        """
+        unimplemented(
+            gb_type="Missing tp_iteritem",
+            context=f"_tp_iteritem on {self.python_type_name()}",
+            explanation=(
+                f"Dynamo does not support virtual iteration on "
+                f"{self.python_type_name()}."
+                " Add tp_iteritem_impl to this VariableTracker subclass."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def next_variable(self, tx: Any) -> VariableTracker:
         return self.tp_iternext_impl(tx)
 
@@ -1408,6 +1444,48 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_rshift slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_and_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_and slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rand__`` instead of ``__and__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_and_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_and slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_xor_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_xor slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rxor__`` instead of ``__xor__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_xor_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_xor slot. Default: returns NotImplemented."""
         return variables.ConstantVariable(NotImplemented)
 
     def nb_floor_divide_impl(
