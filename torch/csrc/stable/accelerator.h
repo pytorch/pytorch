@@ -1,7 +1,8 @@
 #pragma once
 
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/macros.h>
+#include <torch/csrc/stable/version.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
 
@@ -91,6 +92,15 @@ class Stream {
         aoti_torch_stream_id(stream_.get(), &stream_id));
     return stream_id;
   }
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+  void* nativeHandle() const {
+    void* native_handle = nullptr;
+    STABLE_TORCH_ERROR_CODE_CHECK(
+        torch_stream_native_handle(stream_.get(), &native_handle));
+    return native_handle;
+  }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
  private:
   std::shared_ptr<StreamOpaque> stream_;
