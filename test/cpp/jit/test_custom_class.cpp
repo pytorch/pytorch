@@ -3,6 +3,7 @@
 #include <test/cpp/jit/test_custom_class_registrations.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/custom_class.h>
+#include <torch/library.h>
 #include <torch/script.h>
 
 #include <iostream>
@@ -66,6 +67,13 @@ class TorchBindTestClass : public torch::jit::CustomClassHolder {
   }
 };
 
+class TorchBindMutatingTensorClass : public torch::jit::CustomClassHolder {
+ public:
+  void fill(at::Tensor x) {
+    x.fill_(3);
+  }
+};
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char class_doc_string[] = R"(
   I am docstring for TorchBindTestClass
@@ -88,6 +96,15 @@ static auto reg =
         .def("get", &TorchBindTestClass::get)
         .def("get_with_docstring", &TorchBindTestClass::get, method_doc_string);
 
+static auto mutating_tensor_reg =
+    torch::class_<TorchBindMutatingTensorClass>(
+        "_TorchBindTest",
+        "_TorchBindMutatingTensorClass")
+        .def(
+            torch::schema(
+                "fill(__torch__.torch.classes._TorchBindTest._TorchBindMutatingTensorClass self, Tensor(a!) x) -> None"),
+            &TorchBindMutatingTensorClass::fill);
+
 } // namespace
 
 // Tests DocString is properly propagated when defining CustomClasses.
@@ -101,6 +118,31 @@ TEST(CustomClassTest, TestDocString) {
   AT_ASSERT(
       class_type->getMethod("get_with_docstring").doc_string() ==
       method_doc_string);
+}
+
+TEST(CustomClassTest, ExplicitMethodSchemaWithTensorMutation) {
+  auto class_type = getCustomClass(
+      "__torch__.torch.classes._TorchBindTest._TorchBindMutatingTensorClass");
+  AT_ASSERT(class_type);
+
+  const auto& schema = class_type->getMethod("fill").getSchema();
+  ASSERT_EQ(
+      toString(schema),
+      "fill(__torch__.torch.classes._TorchBindTest._TorchBindMutatingTensorClass self, Tensor(a!) x) -> NoneType");
+  ASSERT_TRUE(schema.is_mutable("x"));
+
+  script::Module m("m");
+  m.define(R"(
+    def forward(self, obj : __torch__.torch.classes._TorchBindTest._TorchBindMutatingTensorClass, x : Tensor):
+      obj.fill(x)
+      return x
+  )");
+
+  auto obj = make_custom_class<TorchBindMutatingTensorClass>();
+  auto x = at::zeros({2});
+  auto out = m.run_method("forward", obj, x).toTensor();
+  ASSERT_TRUE(out.equal(at::full({2}, 3)));
+  ASSERT_TRUE(x.equal(out));
 }
 
 TEST(CustomClassTest, Serialization) {
