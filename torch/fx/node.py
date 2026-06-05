@@ -20,7 +20,7 @@ from torch.utils._dtype_abbrs import dtype_abbrs
 
 from .._ops import ops as _ops
 from ._compatibility import compatibility
-from .immutable_collections import immutable_ordered_dict
+from .immutable_collections import _immutable_ordered_dict
 
 
 if TYPE_CHECKING:
@@ -216,7 +216,7 @@ def _format_arg(arg: object, max_list_len: float = float("inf")) -> str:
             "" if len(arg) < max_list_len + 1 else f", ...[total_len={len(arg)}]"
         )
         return f"[{items}{maybe_len}]"
-    elif isinstance(arg, immutable_ordered_dict):
+    elif isinstance(arg, _immutable_ordered_dict):
         items_str = ", ".join(
             f"({_format_arg(k)}, {_format_arg(v)})" for k, v in arg.items()
         )

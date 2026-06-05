@@ -1257,6 +1257,27 @@ class TestFX(JitTestCase):
         self.assertIsInstance(traced_output["outer"], collections.OrderedDict)
         self.assertEqual(list(traced_output["outer"].keys()), ["out1", "out2"])
 
+    def test_symbolic_trace_ordered_dict_tuple_key_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return collections.OrderedDict([((1, 2), x + 1)])
+
+        x = torch.randn(3)
+        traced = symbolic_trace(M())
+        traced.graph.lint()
+        traced_output = traced(x)
+        self.assertIsInstance(traced_output, collections.OrderedDict)
+        self.assertEqual(list(traced_output.keys()), [(1, 2)])
+        self.assertEqual(traced_output[(1, 2)], x + 1)
+
+        deepcopy_output = copy.deepcopy(traced)(x)
+        self.assertIsInstance(deepcopy_output, collections.OrderedDict)
+        self.assertEqual(list(deepcopy_output.keys()), [(1, 2)])
+
+        loaded_output = pickle.loads(pickle.dumps(traced))(x)
+        self.assertIsInstance(loaded_output, collections.OrderedDict)
+        self.assertEqual(list(loaded_output.keys()), [(1, 2)])
+
     def test_tensor_constant(self):
         class ConstTensor(torch.nn.Module):
             def forward(self, x):

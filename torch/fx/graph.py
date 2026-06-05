@@ -30,9 +30,9 @@ from torch.utils._dtype_abbrs import dtype_abbrs
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 from .immutable_collections import (
-    compatibility_unwrap,
+    _compatibility_unwrap,
+    _immutable_ordered_dict,
     immutable_dict,
-    immutable_ordered_dict,
 )
 from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 from .tensor_type import TensorType
@@ -481,7 +481,7 @@ class CodeGen:
 
         See ``process_inputs`` for more details.
         """
-        return compatibility_unwrap(outputs)
+        return _compatibility_unwrap(outputs)
 
     def additional_globals(self) -> list[tuple[str, Any]]:
         """
@@ -601,7 +601,7 @@ class CodeGen:
         def _get_repr(arg: object) -> str:
             if isinstance(arg, Node):  # first because common
                 return repr(arg)
-            elif isinstance(arg, immutable_ordered_dict):
+            elif isinstance(arg, _immutable_ordered_dict):
                 global_name = add_global("collections.OrderedDict", OrderedDict)
                 return (
                     f"{global_name}(["

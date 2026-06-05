@@ -25,9 +25,9 @@ from torch.utils._traceback import CapturedTraceback
 from ._compatibility import compatibility
 from .graph import Graph, magic_methods, reflectable_magic_methods
 from .immutable_collections import (
+    _immutable_ordered_dict,
     immutable_dict,
     immutable_list,
-    immutable_ordered_dict,
 )
 from .node import Argument, base_types, Node, Target
 from .operator_schemas import check_for_mutable_operation
@@ -981,9 +981,9 @@ def _create_arg_dict(self: TracerBase, a: dict[Any, Any]) -> dict[Any, Argument]
 
 def _create_arg_ordered_dict(
     self: TracerBase, a: OrderedDict[Any, Any]
-) -> immutable_ordered_dict[Any, Argument]:
-    return immutable_ordered_dict(
-        (_create_arg_dict_key(self, k), self.create_arg(v)) for k, v in a.items()
+) -> _immutable_ordered_dict[Any, Argument]:
+    return _immutable_ordered_dict(
+        *((_create_arg_dict_key(self, k), self.create_arg(v)) for k, v in a.items())
     )
 
 

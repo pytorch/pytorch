@@ -84,8 +84,7 @@ class immutable_dict(dict[_KT, _VT]):
         return (type(self), (tuple(self.items()),))
 
 
-@compatibility(is_backward_compatible=True)
-class immutable_ordered_dict(tuple[tuple[_KT, _VT], ...]):
+class _immutable_ordered_dict(tuple[tuple[_KT, _VT], ...]):
     """An immutable ordered mapping aggregate for FX node arguments."""
 
     __slots__: tuple[()] = ()
@@ -93,35 +92,30 @@ class immutable_ordered_dict(tuple[tuple[_KT, _VT], ...]):
 
     def __new__(
         cls,
-        *items: Iterable[tuple[_KT, _VT]] | tuple[_KT, _VT],
+        *items: tuple[_KT, _VT],
     ) -> Self:
-        if len(items) == 1:
-            first = items[0]
-            if not (
-                isinstance(first, tuple)
-                and len(first) == 2
-                and not isinstance(first[0], tuple)
-            ):
-                items = tuple(first)  # type: ignore[assignment,arg-type]
         return tuple.__new__(cls, items)  # type: ignore[return-value]
+
+    def __getnewargs__(self) -> tuple[tuple[_KT, _VT], ...]:
+        return tuple(self)
 
     def items(self) -> tuple[tuple[_KT, _VT], ...]:
         return tuple(self)
 
 
-def compatibility_unwrap(value: Any) -> Any:
-    if isinstance(value, immutable_ordered_dict):
-        return OrderedDict((k, compatibility_unwrap(v)) for k, v in value.items())
+def _compatibility_unwrap(value: Any) -> Any:
+    if isinstance(value, _immutable_ordered_dict):
+        return OrderedDict((k, _compatibility_unwrap(v)) for k, v in value.items())
     if isinstance(value, tuple) and hasattr(value, "_fields"):
-        return type(value)(*(compatibility_unwrap(v) for v in value))
+        return type(value)(*(_compatibility_unwrap(v) for v in value))
     if type(value) is tuple:
-        return tuple(compatibility_unwrap(v) for v in value)
+        return tuple(_compatibility_unwrap(v) for v in value)
     if type(value) in {list, immutable_list}:
-        return [compatibility_unwrap(v) for v in value]
+        return [_compatibility_unwrap(v) for v in value]
     if type(value) is OrderedDict:
-        return OrderedDict((k, compatibility_unwrap(v)) for k, v in value.items())
+        return OrderedDict((k, _compatibility_unwrap(v)) for k, v in value.items())
     if type(value) in {dict, immutable_dict}:
-        return {k: compatibility_unwrap(v) for k, v in value.items()}
+        return {k: _compatibility_unwrap(v) for k, v in value.items()}
     return value
 
 
