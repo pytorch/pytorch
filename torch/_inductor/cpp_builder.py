@@ -79,8 +79,37 @@ log = logging.getLogger(__name__)
 
 
 # =============================== toolchain ===============================
+def _split_compiler_command(compiler: str) -> list[str]:
+    if _IS_WINDOWS:
+        return [compiler]
+    command = shlex.split(compiler)
+    if not command:
+        raise ValueError("empty compiler command")
+    return command
+
+
+@functools.cache
+def _compiler_version_string(cpp_compiler: str) -> str:
+    try:
+        return (
+            subprocess.check_output(
+                [*_split_compiler_command(cpp_compiler), "--version"],
+                stderr=subprocess.DEVNULL,
+            )
+            .strip()
+            .decode(*SUBPROCESS_DECODE_ARGS)
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, ValueError):
+        return ""
+
+
+def _compiler_version_first_line(cpp_compiler: str) -> str:
+    version_string = _compiler_version_string(cpp_compiler)
+    return version_string.splitlines()[0] if version_string else ""
+
+
 @functools.lru_cache(1)
-def cpp_compiler_search(search: str) -> str:
+def cpp_compiler_search(search: Sequence[str | None]) -> str:
     from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
 
     for cxx in search:
@@ -101,9 +130,14 @@ def cpp_compiler_search(search: str) -> str:
                 )
                 with lock:
                     cxx = install_gcc_via_conda()
-            subprocess.check_output([cxx, "--version"])
+            subprocess.check_output([*_split_compiler_command(cxx), "--version"])
             return cxx
-        except (subprocess.SubprocessError, FileNotFoundError, ImportError):
+        except (
+            subprocess.SubprocessError,
+            FileNotFoundError,
+            ImportError,
+            ValueError,
+        ):
             continue
     raise exc.InvalidCxxCompiler
 
@@ -344,7 +378,9 @@ def check_mingw_win32_flavor(compiler: str) -> str:
     """
     try:
         out = subprocess.check_output(
-            [compiler, "-v"], stderr=subprocess.STDOUT, text=True
+            [*_split_compiler_command(compiler), "-v"],
+            stderr=subprocess.STDOUT,
+            text=True,
         )
     except FileNotFoundError as e:
         raise RuntimeError(f"Compiler: {compiler} is not found.") from e
@@ -482,7 +518,7 @@ def batch_convert_cubins_to_obj(
             )
 
     subprocess.run(
-        [cpp_compiler, "-c", asm_path, "-o", obj_path],
+        [*_split_compiler_command(cpp_compiler), "-c", asm_path, "-o", obj_path],
         capture_output=True,
         text=True,
         check=True,
@@ -492,23 +528,30 @@ def batch_convert_cubins_to_obj(
 
 @functools.cache
 def _is_apple_clang(cpp_compiler: str) -> bool:
-    version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
-    return "Apple" in version_string.splitlines()[0]
+    first_line = _compiler_version_first_line(cpp_compiler)
+    return bool(re.search(r"\bApple\b.*\bclang\b", first_line))
 
 
 @functools.cache
 def _is_clang(cpp_compiler: str) -> bool:
-    # Mac OS apple clang maybe named as gcc, need check compiler info.
-    if sys.platform == "darwin":
-        return _is_apple_clang(cpp_compiler)
-    elif _IS_WINDOWS:
+    if _IS_WINDOWS:
         # clang suite have many compilers, and only clang-cl is supported.
         if re.search(r"((clang$)|(clang\+\+$))", cpp_compiler):
             raise RuntimeError(
                 "Please use clang-cl, due to torch.compile only support MSVC-like CLI (compiler flags syntax)."
             )
         return bool(re.search(r"(clang-cl)", cpp_compiler))
-    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
+
+    if sys.platform == "darwin" and _is_apple_clang(cpp_compiler):
+        return True
+
+    first_line = _compiler_version_first_line(cpp_compiler)
+    if "Intel" not in first_line and re.search(
+        r"(^|[\s/-])clang version\b", first_line
+    ):
+        return True
+
+    return bool(re.search(r"(^|[/\s-])(clang\+\+|clang)(?=[\s-]|$)", cpp_compiler))
 
 
 @functools.cache
@@ -516,7 +559,16 @@ def _is_gcc(cpp_compiler: str) -> bool:
     # Since "clang++" ends with "g++", the regex match below would validate on it.
     if _is_clang(cpp_compiler):
         return False
-    return bool(re.search(r"(gcc|g\+\+|gnu-c\+\+)", cpp_compiler))
+
+    first_line = _compiler_version_first_line(cpp_compiler)
+    if re.search(
+        r"(^|[\s/-])(gcc|g\+\+|gnu-c\+\+)(?=[\s(-]|$)",
+        first_line,
+        re.IGNORECASE,
+    ):
+        return True
+
+    return bool(re.search(r"(^|[/\s-])(gcc|g\+\+|gnu-c\+\+)(?=[\s-]|$)", cpp_compiler))
 
 
 @functools.cache
@@ -527,7 +579,11 @@ def _is_gcc_version_less_than(cpp_compiler: str, major: int) -> bool:
     try:
         output_msg = (
             subprocess.check_output(
-                [cpp_compiler, "-dumpfullversion", "-dumpversion"],
+                [
+                    *_split_compiler_command(cpp_compiler),
+                    "-dumpfullversion",
+                    "-dumpversion",
+                ],
                 stderr=subprocess.DEVNULL,
             )
             .strip()
@@ -550,7 +606,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
     try:
         result = subprocess.run(
-            [cpp_compiler, "/help"],
+            [*_split_compiler_command(cpp_compiler), "/help"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
@@ -578,14 +634,9 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
             )
 
     try:
-        output_msg = (
-            subprocess.check_output(
-                [cpp_compiler, "--version"], stderr=subprocess.DEVNULL
-            )
-            .strip()
-            .decode(*SUBPROCESS_DECODE_ARGS)
-        )
-        is_intel_compiler = "Intel" in output_msg.splitlines()[0]
+        output_msg = _compiler_version_string(cpp_compiler)
+        lines = output_msg.splitlines()
+        is_intel_compiler = bool(lines) and "Intel" in lines[0]
         if is_intel_compiler:
             if _IS_WINDOWS:
                 if re.search(r"((icx$)|(icx-cc$))", cpp_compiler):
@@ -641,12 +692,16 @@ def get_compiler_version_info(compiler: str) -> str:
     env["LC_ALL"] = "C"  # Don't localize output
     try:
         version_string = subprocess.check_output(
-            [compiler, "-v"], stderr=subprocess.STDOUT, env=env
+            [*_split_compiler_command(compiler), "-v"],
+            stderr=subprocess.STDOUT,
+            env=env,
         ).decode(*SUBPROCESS_DECODE_ARGS)
     except Exception:
         try:
             version_string = subprocess.check_output(
-                [compiler, "--version"], stderr=subprocess.STDOUT, env=env
+                [*_split_compiler_command(compiler), "--version"],
+                stderr=subprocess.STDOUT,
+                env=env,
             ).decode(*SUBPROCESS_DECODE_ARGS)
         except Exception:
             return ""
@@ -1086,14 +1141,14 @@ def _get_optimization_cflags(
     return cflags, ldflags
 
 
-def _get_shared_cflags(do_link: bool) -> list[str]:
+def _get_shared_cflags(cpp_compiler: str, do_link: bool) -> list[str]:
     if _IS_WINDOWS:
         """
         MSVC `/MD` using python `ucrtbase.dll` lib as runtime.
         https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
         """
         return ["DLL", "MD"]
-    if platform.system() == "Darwin" and "clang" in get_cpp_compiler():
+    if platform.system() == "Darwin" and _is_clang(cpp_compiler):
         # This causes undefined symbols to behave the same as linux
         return ["shared", "fPIC", "undefined dynamic_lookup"]
     flags = []
@@ -1123,7 +1178,7 @@ def get_cpp_options(
 
     cflags = (
         opt_cflags
-        + _get_shared_cflags(do_link)
+        + _get_shared_cflags(cpp_compiler, do_link)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
@@ -1418,9 +1473,9 @@ def homebrew_libomp() -> tuple[bool, str]:
 @functools.cache
 def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
     try:
-        output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
-            "utf8"
-        )
+        output = subprocess.check_output(
+            [*_split_compiler_command(cpp_compiler), "-print-file-name=bin"]
+        ).decode("utf8")
         omp_path = os.path.join(output.rstrip(), omp_name)
         if os.path.isfile(omp_path):
             os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -1434,7 +1489,10 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
     def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
         try:
             output = subprocess.check_output(
-                [cpp_compiler, f"-print-file-name={lib_name}"],
+                [
+                    *_split_compiler_command(cpp_compiler),
+                    f"-print-file-name={lib_name}",
+                ],
                 stderr=subprocess.DEVNULL,
             ).decode(*SUBPROCESS_DECODE_ARGS)
             omp_path = output.rstrip()
