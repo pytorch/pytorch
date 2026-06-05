@@ -1652,7 +1652,10 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         )
 
     def test_graphsafe_rng_state_with_insert_overlap_deps(self):
-        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch._inductor.fx_passes.control_dependencies import (
+            control_deps,
+            CONTROL_DEPS_META_KEY,
+        )
         from torch._inductor.fx_passes.overlap_scheduling import (
             schedule_overlap_bucketing,
         )
@@ -1698,17 +1701,413 @@ class TestOverlapSchedulingFixes(InductorTestCase):
             pre_bucketing_fsdp_collectives=False,
         )
 
+        self.assertFalse(
+            any(
+                n.op == "call_function" and n.target is control_deps
+                for n in traced.graph.nodes
+            )
+        )
+
+        rng_node = next(
+            n
+            for n in traced.graph.nodes
+            if n.op == "call_function" and n.target is graphsafe_run_with_rng_state
+        )
+        wait_node = next(
+            n
+            for n in traced.graph.nodes
+            if n.op == "call_function"
+            and n.target == torch.ops._c10d_functional.wait_tensor.default
+        )
+        self.assertIn(CONTROL_DEPS_META_KEY, rng_node.meta)
+        self.assertIn(CONTROL_DEPS_META_KEY, wait_node.meta)
+
         rng_placeholder = next(
             n
             for n in traced.graph.nodes
             if n.op == "placeholder" and isinstance(n.meta.get("val"), torch.Generator)
         )
-        user = next(iter(rng_placeholder.users))
-        self.assertIs(user.target, control_deps)
+        self.assertEqual(len(rng_placeholder.users), 1)
+        self.assertIs(
+            next(iter(rng_placeholder.users)).target, graphsafe_run_with_rng_state
+        )
 
         graph = GraphLowering(traced, [a, b, gen])
         with V.set_fake_mode(fake_mode), V.set_graph_handler(graph):
             graph.run(a, b, gen)
+
+    def test_insert_overlap_deps_does_not_wrap_fusible_compute(self):
+        from torch._inductor.debug import DebugContext
+        from torch._inductor.dependencies import WeakDep
+        from torch._inductor.fx_passes.control_dependencies import (
+            control_deps,
+            CONTROL_DEPS_META_KEY,
+        )
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.scheduler import Scheduler, SchedulerNode
+        from torch._inductor.virtualized import V
+
+        def func(a, b):
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(a, 2, "0")
+            x = b + 1
+            x = x * 2
+            wait = torch.ops._c10d_functional.wait_tensor(ag)
+            return wait[:4] + x
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            a = torch.empty(4, 4, device=self.device)
+            b = torch.empty(4, 4, device=self.device)
+            traced = make_fx(func)(a, b)
+
+        def custom_runtime_estimation(
+            node: fx.Node, override_size: int | None
+        ) -> float | None:
+            if node.op != "call_function":
+                return None
+            if node.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
+                return 10.0
+            if node.target in (torch.ops.aten.add.Tensor, torch.ops.aten.mul.Tensor):
+                return 10.0
+            return None
+
+        schedule_overlap_bucketing(
+            traced,
+            insert_overlap_deps=True,
+            collective_bucketing=False,
+            custom_runtime_estimation=custom_runtime_estimation,
+            collective_estimator="analytical",
+            compute_estimator="analytical",
+            pre_bucketing_fsdp_collectives=False,
+        )
+
+        self.assertFalse(
+            any(
+                n.op == "call_function" and n.target is control_deps
+                for n in traced.graph.nodes
+            )
+        )
+        self.assertTrue(
+            any(CONTROL_DEPS_META_KEY in n.meta for n in traced.graph.nodes)
+        )
+
+        graph = GraphLowering(traced, [a, b])
+        with (
+            V.set_fake_mode(fake_mode),
+            V.set_graph_handler(graph),
+            V.set_debug_handler(DebugContext()),
+        ):
+            graph.run(a, b)
+            scheduler = Scheduler(graph.operations)
+
+        weak_dep_ordering = []
+        node_order = {node: idx for idx, node in enumerate(scheduler.nodes)}
+
+        def has_scheduler_node(snode):
+            return any(isinstance(n, SchedulerNode) for n in snode.get_nodes())
+
+        for consumer in scheduler.nodes:
+            for dep in consumer.unmet_dependencies:
+                if not (isinstance(dep, WeakDep) and dep.is_fake):
+                    continue
+                buf = scheduler.name_to_buf.get(dep.name)
+                if buf is None or buf.defining_op is None:
+                    continue
+                producer = scheduler.name_to_fused_node.get(
+                    buf.defining_op.get_name(), buf.defining_op
+                )
+                if not (has_scheduler_node(producer) or has_scheduler_node(consumer)):
+                    continue
+                weak_dep_ordering.append((node_order[producer], node_order[consumer]))
+
+        self.assertTrue(weak_dep_ordering)
+        for producer_idx, consumer_idx in weak_dep_ordering:
+            self.assertLess(producer_idx, consumer_idx)
+
+    def test_insert_overlap_deps_preserves_nonfusible_compute_ordering(self):
+        from torch._inductor.debug import DebugContext
+        from torch._inductor.dependencies import WeakDep
+        from torch._inductor.fx_passes.control_dependencies import CONTROL_DEPS_META_KEY
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.scheduler import Scheduler, SchedulerNode
+        from torch._inductor.virtualized import V
+
+        def func(a, b, c):
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(a, 2, "0")
+            x = b.sum(dim=1)
+            y = c.sum(dim=0)
+            wait = torch.ops._c10d_functional.wait_tensor(ag)
+            return wait[:4, :4] + x[:, None] + y[None, :]
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            a = torch.empty(4, 4, device=self.device)
+            b = torch.empty(4, 8, device=self.device)
+            c = torch.empty(8, 4, device=self.device)
+            traced = make_fx(func)(a, b, c)
+
+        sum_nodes = [
+            n
+            for n in traced.graph.nodes
+            if n.op == "call_function" and n.target == torch.ops.aten.sum.dim_IntList
+        ]
+        self.assertEqual(len(sum_nodes), 2)
+        first_sum, second_sum = sum_nodes
+
+        def custom_runtime_estimation(
+            node: fx.Node, override_size: int | None
+        ) -> float | None:
+            if node.op != "call_function":
+                return None
+            if node.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
+                return 100.0
+            if node.target == torch.ops.aten.sum.dim_IntList:
+                return 10.0
+            return None
+
+        schedule_overlap_bucketing(
+            traced,
+            insert_overlap_deps=True,
+            collective_bucketing=False,
+            custom_runtime_estimation=custom_runtime_estimation,
+            collective_estimator="analytical",
+            compute_estimator="analytical",
+            pre_bucketing_fsdp_collectives=False,
+        )
+
+        self.assertIn(first_sum, second_sum.meta.get(CONTROL_DEPS_META_KEY, ()))
+
+        graph = GraphLowering(traced, [a, b, c])
+        with (
+            V.set_fake_mode(fake_mode),
+            V.set_graph_handler(graph),
+            V.set_debug_handler(DebugContext()),
+        ):
+            graph.run(a, b, c)
+            scheduler = Scheduler(graph.operations)
+
+        def scheduler_node_for_origin(origin: fx.Node):
+            matches = []
+            for snode in scheduler.nodes:
+                for subnode in snode.get_nodes():
+                    if not isinstance(subnode, SchedulerNode):
+                        continue
+                    if subnode.node is None:
+                        continue
+                    if origin in subnode.node.get_origins():
+                        matches.append(snode)
+            self.assertEqual(len(matches), 1)
+            return matches[0]
+
+        first_snode = scheduler_node_for_origin(first_sum)
+        second_snode = scheduler_node_for_origin(second_sum)
+        self.assertIsNot(first_snode, second_snode)
+
+        producer_buffers = first_snode.get_buffer_names()
+        self.assertTrue(
+            any(
+                isinstance(dep, WeakDep)
+                and dep.is_fake
+                and dep.name in producer_buffers
+                for dep in second_snode.unmet_dependencies
+            )
+        )
+
+        node_order = {node: idx for idx, node in enumerate(scheduler.nodes)}
+        self.assertLess(node_order[first_snode], node_order[second_snode])
+
+    def test_insert_overlap_deps_survive_multi_template_extern_replacement(self):
+        from unittest.mock import patch
+
+        from torch._inductor.dependencies import WeakDep
+        from torch._inductor.scheduler import ExternKernelSchedulerNode, Scheduler
+
+        captured_schedulers = []
+        orig_scheduler_init = Scheduler.__init__
+
+        def capture_scheduler_init(self, nodes):
+            orig_scheduler_init(self, nodes)
+            captured_schedulers.append(self)
+
+        def func(a, b, c, d, e):
+            ar = torch.ops._c10d_functional.all_reduce(a, "sum", "0")
+            mm1 = b @ c
+            mm2 = d @ e
+            wait = torch.ops._c10d_functional.wait_tensor(ar)
+            return wait + mm1 + mm2
+
+        def custom_runtime_estimation(
+            node: fx.Node, override_size: int | None = None
+        ) -> float | None:
+            if node.op != "call_function":
+                return None
+            if node.target == torch.ops._c10d_functional.all_reduce.default:
+                return 100.0
+            if node.target == torch.ops.aten.mm.default:
+                return 10.0
+            return None
+
+        inputs = [
+            torch.randn(16, 16, device=self.device),
+            torch.randn(16, 16, device=self.device),
+            torch.randn(16, 16, device=self.device),
+            torch.randn(16, 16, device=self.device),
+            torch.randn(16, 16, device=self.device),
+        ]
+
+        with (
+            torch._inductor.config.patch(
+                {
+                    "aten_distributed_optimizations.enable_overlap_scheduling": True,
+                    "aten_distributed_optimizations.collective_bucketing": False,
+                    "aten_distributed_optimizations.insert_overlap_deps": True,
+                    "aten_distributed_optimizations.custom_runtime_estimation": custom_runtime_estimation,
+                    "aten_distributed_optimizations.collective_estimator": "analytical",
+                    "aten_distributed_optimizations.compute_estimator": "analytical",
+                    "aten_distributed_optimizations.pre_bucketing_fsdp_collectives": False,
+                    "max_autotune": True,
+                    "max_autotune_gemm": True,
+                    "max_autotune_gemm_backends": "TRITON,ATEN",
+                    "test_configs.force_extern_kernel_in_multi_template": True,
+                    "triton.native_matmul": False,
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                    "force_disable_caches": True,
+                    "compile_threads": 1,
+                }
+            ),
+            patch.object(Scheduler, "__init__", capture_scheduler_init),
+        ):
+            out = torch.compile(func, dynamic=False)(*inputs)
+            torch.cuda.synchronize()
+
+        self.assertEqual(out.shape, inputs[0].shape)
+        self.assertEqual(len(captured_schedulers), 1)
+        scheduler = captured_schedulers[0]
+
+        def has_mm_origin(snode):
+            for subnode in snode.get_nodes():
+                if subnode.node is None:
+                    continue
+                for origin in subnode.node.get_origins():
+                    if (
+                        isinstance(origin, fx.Node)
+                        and origin.op == "call_function"
+                        and origin.target
+                        in (torch.ops.aten.mm.default, torch.ops.aten.addmm.default)
+                    ):
+                        return True
+            return False
+
+        mm_nodes = [n for n in scheduler.nodes if has_mm_origin(n)]
+        self.assertEqual(len(mm_nodes), 2)
+        self.assertTrue(all(isinstance(n, ExternKernelSchedulerNode) for n in mm_nodes))
+
+        node_order = {node: idx for idx, node in enumerate(scheduler.nodes)}
+        weak_mm_edges = []
+        for consumer in mm_nodes:
+            for dep in consumer.unmet_dependencies:
+                if not (isinstance(dep, WeakDep) and dep.is_fake):
+                    continue
+                buf = scheduler.name_to_buf.get(dep.name)
+                if buf is None or buf.defining_op is None:
+                    continue
+                producer = scheduler.name_to_fused_node.get(
+                    buf.defining_op.get_name(), buf.defining_op
+                )
+                if producer in mm_nodes:
+                    weak_mm_edges.append((producer, consumer))
+
+        self.assertEqual(len(weak_mm_edges), 1)
+        producer, consumer = weak_mm_edges[0]
+        self.assertLess(node_order[producer], node_order[consumer])
+
+    def test_insert_overlap_deps_preserves_fusible_kernel_count(self):
+        import torch.distributed._functional_collectives as funcol
+        from torch._inductor import async_compile as ac
+        from torch._inductor.fx_passes import overlap_scheduling as op
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 32, 3, padding=1)
+                self.ln1 = torch.nn.LayerNorm(32)
+                self.ln2 = torch.nn.LayerNorm(32)
+
+            def forward(self, y):
+                h = self.conv(y).permute(0, 2, 3, 1).contiguous()
+                h = self.ln1(h)
+                h = h + h.mean(dim=-1, keepdim=True)
+                a = funcol.all_reduce(
+                    torch.zeros_like(h), "sum", group=dist.group.WORLD
+                )
+                return self.ln2(a + h)
+
+        state = {"kernels": 0, "control_deps": 0}
+        orig_triton = ac.AsyncCompile.triton
+        orig_schedule_overlap_bucketing = op.schedule_overlap_bucketing
+
+        def wrap_triton(self, name, src, device_str="cuda"):
+            state["kernels"] += 1
+            return orig_triton(self, name, src, device_str=device_str)
+
+        def wrap_schedule_overlap_bucketing(gm, *args, **kwargs):
+            ret = orig_schedule_overlap_bucketing(gm, *args, **kwargs)
+            state["control_deps"] += sum(
+                1
+                for n in gm.graph.nodes
+                if "control_deps" in getattr(n.target, "__name__", str(n.target))
+            )
+            return ret
+
+        def run(insert_overlap_deps):
+            state["kernels"] = 0
+            state["control_deps"] = 0
+            torch._dynamo.reset()
+            torch.manual_seed(0)
+
+            with torch._inductor.config.patch(
+                {
+                    "aten_distributed_optimizations.enable_overlap_scheduling": True,
+                    "aten_distributed_optimizations.collective_bucketing": True,
+                    "aten_distributed_optimizations.insert_overlap_deps": insert_overlap_deps,
+                    "aten_distributed_optimizations.collective_estimator": "analytical",
+                    "reorder_for_compute_comm_overlap": False,
+                    "reorder_for_compute_comm_overlap_passes": [],
+                    "fx_graph_cache": False,
+                    "fx_graph_remote_cache": False,
+                    "force_disable_caches": True,
+                    "compile_threads": 1,
+                }
+            ):
+                model = Model().to(self.device).eval()
+                y = torch.randn(1, 16, 16, 16, device=self.device)
+                with torch.no_grad():
+                    out = torch.compile(model, dynamic=False)(y)
+                torch.cuda.synchronize()
+
+            return out, state["kernels"], state["control_deps"]
+
+        ac.AsyncCompile.triton = wrap_triton
+        op.schedule_overlap_bucketing = wrap_schedule_overlap_bucketing
+        try:
+            out_off, kernels_off, control_deps_off = run(False)
+            out_on, kernels_on, control_deps_on = run(True)
+        finally:
+            ac.AsyncCompile.triton = orig_triton
+            op.schedule_overlap_bucketing = orig_schedule_overlap_bucketing
+            torch._dynamo.reset()
+
+        self.assertEqual(control_deps_off, 0)
+        self.assertEqual(control_deps_on, 0)
+        self.assertEqual(kernels_on, kernels_off)
+        self.assertEqual((out_off - out_on).abs().max().item(), 0.0)
 
 
 class TestForeachGroupsUnit(InductorTestCase):
