@@ -2864,6 +2864,211 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         result = torch.func.grad(loss_fn)(x)
         self.assertEqual(result, torch.tensor([2.0, 2.0]))
 
+    def test_vmap_uses_custom_rule_when_batched_input_requires_grad(self):
+        class ForwardTimesThreeVmapTimesTwo(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 3
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 3
+
+            @staticmethod
+            def vmap(info, in_dims, x):
+                return x * 2, in_dims[0]
+
+        def fn(x):
+            return torch.vmap(lambda y: ForwardTimesThreeVmapTimesTwo.apply(y))(x)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        x_test = x.detach().clone().requires_grad_(True)
+
+        ref = fn(x_ref)
+        ref.sum().backward()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x_test)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(x_test.grad, x_ref.grad)
+
+    def test_vmap_custom_rule_with_unbatched_requires_grad_input(self):
+        class AddWeight(torch.autograd.Function):
+            @staticmethod
+            def forward(x, weight):
+                return x + weight * 3
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output * 3
+
+            @staticmethod
+            def vmap(info, in_dims, x, weight):
+                return x + weight * 2, in_dims[0]
+
+        def fn(x, weight):
+            return torch.vmap(lambda y: AddWeight.apply(y, weight))(x)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        weight = torch.randn(3, requires_grad=True)
+        eager_inputs = [t.detach().clone().requires_grad_(True) for t in (x, weight)]
+        compiled_inputs = [t.detach().clone().requires_grad_(True) for t in (x, weight)]
+
+        ref = fn(*eager_inputs)
+        ref.sum().backward()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(*compiled_inputs)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        for compiled, eager in zip(compiled_inputs, eager_inputs):
+            self.assertEqual(compiled.grad, eager.grad)
+
+    def test_vmap_generate_rule_compiled(self):
+        class AutoVmap(torch.autograd.Function):
+            generate_vmap_rule = True
+
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return torch.vmap(lambda y: AutoVmap.apply(y))(x)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        x_test = x.detach().clone().requires_grad_(True)
+
+        ref = fn(x_ref)
+        ref.sum().backward()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x_test)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(x_test.grad, x_ref.grad)
+
+    def test_vmap_custom_rule_binds_default_args(self):
+        class ScaleDefault(torch.autograd.Function):
+            @staticmethod
+            def forward(x, scale=2, bias=1):
+                return x * (scale + 1) + bias
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 3, None, None
+
+            @staticmethod
+            def vmap(info, in_dims, x, scale, bias):
+                return x * scale + bias, in_dims[0]
+
+        def fn(x):
+            return torch.vmap(lambda y: ScaleDefault.apply(y, bias=4))(x)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        x_test = x.detach().clone().requires_grad_(True)
+
+        ref = fn(x_ref)
+        ref.sum().backward()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x_test)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(x_test.grad, x_ref.grad)
+
+    def test_setup_context_binds_default_args_without_functorch(self):
+        class ScaleDefault(torch.autograd.Function):
+            @staticmethod
+            def forward(x, scale=2, bias=1):
+                return x * scale + bias
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2, None, None
+
+        def fn(x):
+            return ScaleDefault.apply(x, bias=4)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        x_test = x.detach().clone().requires_grad_(True)
+
+        ref = fn(x_ref)
+        ref.sum().backward()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x_test)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        self.assertEqual(x_test.grad, x_ref.grad)
+
+    def test_setup_context_preserves_varargs(self):
+        class VarArgs(torch.autograd.Function):
+            @staticmethod
+            def forward(x, *ys):
+                return x + sum(ys)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return (grad_output,) * 3
+
+        def fn(x, y, z):
+            return VarArgs.apply(x, y, z)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        y = torch.randn(4, 3, requires_grad=True)
+        z = torch.randn(4, 3, requires_grad=True)
+        eager_inputs = [t.detach().clone().requires_grad_(True) for t in (x, y, z)]
+        compiled_inputs = [t.detach().clone().requires_grad_(True) for t in (x, y, z)]
+
+        ref = fn(*eager_inputs)
+        ref.sum().backward()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(*compiled_inputs)
+        res.sum().backward()
+
+        self.assertEqual(res, ref)
+        for compiled, eager in zip(compiled_inputs, eager_inputs):
+            self.assertEqual(compiled.grad, eager.grad)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
