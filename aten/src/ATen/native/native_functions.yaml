@@ -2767,7 +2767,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lcm_out
+    CPU, CUDA, MPS: lcm_out
   tags: pointwise
 
 - func: lcm(Tensor self, Tensor other) -> Tensor
@@ -6528,6 +6528,7 @@
   dispatch:
     CPU: _dirichlet_grad_cpu
     CUDA: _dirichlet_grad_cuda
+    MPS: _dirichlet_grad_mps
   autogen: _dirichlet_grad.out
 
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
@@ -9348,11 +9349,6 @@
   dispatch:
     CPU, CUDA, MPS: cholesky_inverse_out
 
-- func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
-
-- func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
-  variants: method, function
-
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
     CPU, CUDA: geqrf_out
@@ -11394,6 +11390,12 @@
   dispatch:
     CompositeExplicitAutograd: _foreach_copy
     MTIA: foreach_tensor_copy_list_kernel_mtia
+
+- func: _foreach_mm(Tensor[] self, Tensor[] mat2) -> Tensor[]
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _foreach_mm
 
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:

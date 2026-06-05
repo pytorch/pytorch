@@ -55,6 +55,16 @@ treat_parameters_as_free_to_save = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+# When the partitioner's _size_of encounters a (Fake)ScriptObject in node
+# metadata, it has no general way to know the object's true memory footprint:
+# a ScriptObject may hold tensors internally. By default we raise rather than
+# guess. Enabling this flag makes _size_of assume such objects are zero size,
+# which unblocks dynamic-shapes compilation of models containing ScriptObject
+# parameters (e.g. embedding-table configs from FBGEMM) at the cost of
+# soundness. This is a temporary escape hatch until we have a principled way to
+# probe the size of a (Fake)ScriptObject.
+unsafe_treat_script_objects_as_zero_size = False
+
 from torch._environment import is_fbcode
 
 
@@ -201,7 +211,7 @@ activation_memory_budget_runtime_estimator = "flops"
 # used memory-efficient quantized DP solution
 activation_memory_budget_solver = "dp"
 
-# This dumps out a SVG visualization of the expected runtime vs. activation
+# This dumps out an SVG visualization of the expected runtime vs. activation
 # memory tradeoffs for all memory budget values from 0 to 1 in increments of
 # 0.5. See an example here:
 # https://github.com/pytorch/pytorch/pull/126320#discussion_r1625104015
@@ -435,6 +445,13 @@ force_autograd_cache = False
 # annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor
 # on to explicitly annotate. This is currently only used by inductor lite mode.
 selective_decompose: bool = False
+
+# Complex Support
+# This config disallows decomposition of complex-valued Tensors using
+# `torch._subclasses.complex_tensor.ComplexTensor` by decomposing everything into
+# real-valued operations, passing through the regular pipeline as necessary,
+# then converting back to a regular tensor.
+enable_complex_wrapper: bool = False
 
 
 if TYPE_CHECKING:
