@@ -16,7 +16,6 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -210,7 +209,6 @@ class MixOrderReductionTest(TestBase):
         self.check_numeric(f, (x,))
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/167324")
     @inductor_config.patch(unroll_reductions_threshold=1)
     def test_3layer_split_reduction(self):
         """
