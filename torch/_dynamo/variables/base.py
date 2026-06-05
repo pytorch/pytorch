@@ -931,6 +931,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_xor_impl(tx, args[0], reverse=True)
         elif name == "__ixor__":
             return self.nb_inplace_xor_impl(tx, args[0])
+        elif name == "__pow__":
+            z = args[1] if len(args) == 2 else None
+            return self.nb_power_impl(tx, args[0], z, reverse=False)
+        elif name == "__rpow__":
+            z = args[1] if len(args) == 2 else None
+            return self.nb_power_impl(tx, args[0], z, reverse=True)
+        elif name == "__ipow__":
+            return self.nb_inplace_power_impl(tx, args[0], None)
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
@@ -1480,6 +1488,35 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_xor slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_power_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_power_z_impl(
+        self,
+        tx: Any,
+        v: VariableTracker,
+        w: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_power slot when self is the modulus (z) operand.
+
+        ``v`` is the base, ``w`` is the exponent, ``self`` is the modulus.
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_power_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        z: VariableTracker | None,
+    ) -> VariableTracker:
         return variables.ConstantVariable(NotImplemented)
 
     def nb_multiply_impl(

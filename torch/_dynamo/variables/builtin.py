@@ -121,6 +121,8 @@ from .object_protocol import (
     generic_repr,
     maybe_get_python_type,
     pysequence_check,
+    ternary_iop,
+    ternary_op,
     vt_add,
     vt_getitem,
     vt_identity_compare,
@@ -581,8 +583,6 @@ class BuiltinVariable(BaseBuiltinVariable):
                 operator.ifloordiv,
             ),
             operator.mod: (["__mod__", "__rmod__", "__imod__"], operator.imod),
-            pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
-            operator.pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
             # operator.matmul
@@ -2736,6 +2736,24 @@ class BuiltinVariable(BaseBuiltinVariable):
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         return binary_iop(tx, a, b, "nb_inplace_rshift", "nb_rshift", ">>=")
+
+    def call_pow(
+        self,
+        tx: "InstructionTranslatorBase",
+        a: VariableTracker,
+        b: VariableTracker,
+        c: VariableTracker | None = None,
+    ) -> VariableTracker | None:
+        return ternary_op(tx, a, b, c, "nb_power", "** or pow()")
+
+    def call_ipow(
+        self,
+        tx: "InstructionTranslatorBase",
+        a: VariableTracker,
+        b: VariableTracker,
+        c: VariableTracker | None = None,
+    ) -> VariableTracker | None:
+        return ternary_iop(tx, a, b, c, "nb_inplace_power", "nb_power", "**=")
 
     def call_not_(
         self, tx: "InstructionTranslatorBase", a: VariableTracker

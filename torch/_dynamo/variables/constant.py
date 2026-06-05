@@ -710,6 +710,58 @@ class ConstantVariable(VariableTracker):
             tx, other, operator.add, type_implements_nb_add, reverse
         )
 
+    def nb_power_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, float, and complex all define nb_power (bool inherits int's).
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c (long_pow)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c (float_pow)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c (complex_pow)
+
+        if z is not None:
+            # 3-arg pow(x, y, mod): only int supports modular exponentiation.
+            if not isinstance(self.value, int) or not z.is_python_constant():
+                return ConstantVariable.create(NotImplemented)
+            z = z.as_python_constant()
+
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = (
+            self_.as_python_constant(),
+            other_.as_python_constant(),
+        )
+
+        try:
+            return VariableTracker.build(tx, pow(v, w, z))
+        except TypeError:
+            return ConstantVariable.create(NotImplemented)
+        except (ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
+    def nb_power_z_impl(
+        self,
+        tx: Any,
+        v: VariableTracker,
+        w: VariableTracker,
+    ) -> VariableTracker:
+        if not isinstance(self.value, int):
+            return ConstantVariable.create(NotImplemented)
+        if not v.is_python_constant() or not w.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        v_val, w_val = v.as_python_constant(), w.as_python_constant()
+        if not isinstance(v_val, int) or not isinstance(w_val, int):
+            return ConstantVariable.create(NotImplemented)
+        try:
+            return VariableTracker.build(tx, pow(v_val, w_val, self.value))
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
     def nb_absolute_impl(
         self,
         tx: Any,

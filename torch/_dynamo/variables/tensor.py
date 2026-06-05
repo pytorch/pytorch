@@ -2422,6 +2422,28 @@ class TensorVariable(VariableTracker):
             sym_num=None,
         )
 
+    def nb_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # Reaches here only via direct ``tensor.__pow__(x)`` calls — the
+        # ``operator.pow`` path goes through ``_handle_insert_op_in_graph``
+        # in ``BuiltinVariable``.  Build the same FX proxy.
+        if not (isinstance(other, TensorVariable) or _is_sym_arith_operand(other)) or z:
+            return VariableTracker.build(tx, NotImplemented)
+        from .builder import wrap_fx_proxy
+
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.pow, *proxy_args_kwargs([lhs, rhs], {})
+            ),
+        )
+
     def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, VariableTracker):
             return False
@@ -2800,6 +2822,26 @@ class SymNodeVariable(VariableTracker):
         return SymNodeVariable.create(
             tx,
             operator.abs(self.as_proxy()),
+            sym_num=None,
+        )
+
+    def nb_power_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        z: VariableTracker | None,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        if z is not None:
+            return VariableTracker.build(tx, NotImplemented)
+        if not _is_sym_arith_operand(other):
+            return VariableTracker.build(tx, NotImplemented)
+        lhs, rhs = (other, self) if reverse else (self, other)
+        return SymNodeVariable.create(
+            tx,
+            tx.output.create_proxy(
+                "call_function", operator.pow, *proxy_args_kwargs([lhs, rhs], {})
+            ),
             sym_num=None,
         )
 
