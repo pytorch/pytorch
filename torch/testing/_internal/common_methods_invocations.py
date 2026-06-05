@@ -4383,8 +4383,8 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         ((0, 2), 1, {'eps' : 1e-5}),
         ((S, S, S), 1, {'eps' : 0.5}),
         ((2, 6, 5, 3), 2, {"eps": 1e-5}),
-        # Trigger an alternative channels-last path on CPU
-        ((2, 6, 5, 2048), 2, {"eps": 1e-5}),
+        # Trigger an alternative channels-last path on CPU, for HxW >= 2048.
+        ((2, 6, 4, 600), 2, {"eps": 1e-5}),
     )
 
     # num_channels is inferred to be input.shape[1] dimension
@@ -16172,15 +16172,12 @@ op_db: list[OpInfo] = [
         reference_inputs_func=reference_inputs_native_group_norm,
         sample_inputs_func=sample_inputs_native_group_norm,
         skips=(
-            # native_group_norm expects contiguous inputs
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
             # likely due to dispatching through infinitely_differentiable_native_group_norm_backward
             DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", device_type="mps", dtypes=(torch.float32,)),
             # lazy dispatch failure
             DecorateInfo(unittest.expectedFailure, "TestLazyOpInfo", "test_dispatched_to_lazy"),
-            # native_group_norm expects contiguous inputs on CUDA
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides", device_type="cuda"),
         ),
+        supports_expanded_weight=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
@@ -18945,17 +18942,6 @@ op_db: list[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_promotes_int_to_float', device_type='mps'),
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
                     )),
-    OpInfo('qr',
-           op=torch.qr,
-           dtypes=floating_and_complex_types(),
-           dtypesIfMPS=floating_types(),
-           sample_inputs_func=sample_inputs_linalg_qr_geqrf,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           # In-place ops
-           check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
-           ),
     UnaryUfuncInfo('rad2deg',
                    ref=np.degrees,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,

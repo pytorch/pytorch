@@ -6,7 +6,6 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
-#include <core/MemoryFormat.h>
 
 namespace at::functorch {
 
@@ -339,8 +338,8 @@ native_group_norm_batch_rule(
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
   const auto weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
   const auto bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = *bias_maybe_owned;
 
   const int64_t bdim_size{get_bdim_size(input, input_bdim, weight, weight_bdim, bias, bias_bdim)};
@@ -354,9 +353,6 @@ native_group_norm_batch_rule(
     // Reshape the batch dimension to (possibly) handle channels_last.
     input_ = reshape_dim_into(0, 0, input_);
   }
-  // Only CPU native_group_norm currently supports non-contiguous input tensors.
-  auto input_mem_fmt{input_.device().is_cpu() ? input_.suggest_memory_format() : at::MemoryFormat::Contiguous};
-  input_ = input_.contiguous(input_mem_fmt);
 
   if (!weight_bdim && !bias_bdim) {
       auto [result0, mean, rstd] = at::native_group_norm_symint(input_, weight_opt, bias_opt, N * bdim_size, C, HxW, group, eps);
@@ -412,8 +408,7 @@ static inline Tensor regularize_tensors_group_norm_backward(
     const Tensor& val,
     const std::optional<int64_t>& bdim,
     int64_t bdim_size,
-    const std::optional<int64_t>& input_bdim,
-    MemoryFormat mem_fmt=MemoryFormat::Contiguous) {
+    const std::optional<int64_t>& input_bdim) {
   if (!val.defined()) {
     return val;
   }
@@ -421,11 +416,9 @@ static inline Tensor regularize_tensors_group_norm_backward(
   auto ret{moveBatchDimToFront(val, bdim)}; // [B0?, N, *]
   ret = ensure_has_bdim(ret, bdim.has_value(), bdim_size); // [B0, N, *]
   VmapDimVector batched_ret_shape{ret.sizes()};
-  ret = reshape_dim_into(0, 0, ret); // [B0 * N, *]
-  ret = ret.contiguous(mem_fmt);
-  // We batch differently if input isn't batched, so undo the reshape.
-  if (!input_bdim) {
-    ret = ret.reshape(batched_ret_shape);
+  // We batch differently if input isn't batched.
+  if (input_bdim) {
+    ret = reshape_dim_into(0, 0, ret); // [B0 * N, *]
   }
   return ret;
 }
@@ -453,12 +446,12 @@ native_group_norm_backward_multiple_grads_batch_rule(
     std::optional<int64_t> grad_rstd_bdim) {
   // See [Note: hacky wrapper removal for optional tensor]
   const auto grad_out_maybe_owned = at::borrow_from_optional_tensor(grad_out_opt);
-  const Tensor& grad_out = *grad_out_maybe_owned;
   const auto weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
   const auto grad_mean_maybe_owned = at::borrow_from_optional_tensor(grad_mean_opt);
-  const Tensor& grad_mean = *grad_mean_maybe_owned;
   const auto grad_rstd_maybe_owned = at::borrow_from_optional_tensor(grad_rstd_opt);
+  const Tensor& grad_out = *grad_out_maybe_owned;
+  const Tensor& weight = *weight_maybe_owned;
+  const Tensor& grad_mean = *grad_mean_maybe_owned;
   const Tensor& grad_rstd = *grad_rstd_maybe_owned;
 
   int64_t bdim_size{get_bdim_size(
@@ -484,14 +477,11 @@ native_group_norm_backward_multiple_grads_batch_rule(
     // Reshape the batch dimension to (possibly) handle channels_last.
     input_ = reshape_dim_into(0, 0, input_);
   }
-  // Only CPU native_group_norm_backward currently supports non-contiguous input tensors.
-  auto input_mem_fmt{input_.device().is_cpu() ? input_.suggest_memory_format() : at::MemoryFormat::Contiguous};
-  input_ = input_.contiguous(input_mem_fmt);
 
   // This looks expensive, but in normal use as a derivative these are
-  // guaranteed to be batched and contiguous already, so this will just be a
-  // view operation unless a user invokes this incorrectly, directly.
-  auto grad_out_{regularize_tensors_group_norm_backward(grad_out, grad_out_bdim, bdim_size, input_bdim, input_mem_fmt)};
+  // guaranteed to be batched already, so this will just be a view operation
+  // unless a user invokes this incorrectly, directly.
+  auto grad_out_{regularize_tensors_group_norm_backward(grad_out, grad_out_bdim, bdim_size, input_bdim)};
   auto mean_{regularize_tensors_group_norm_backward(mean, mean_bdim, bdim_size, input_bdim)};
   auto rstd_{regularize_tensors_group_norm_backward(rstd, rstd_bdim, bdim_size, input_bdim)};
   auto grad_mean_{regularize_tensors_group_norm_backward(grad_mean, grad_mean_bdim, bdim_size, input_bdim)};
@@ -553,7 +543,7 @@ native_group_norm_backward_multiple_grads_batch_rule(
 
     std::array<c10::SymInt, 2> dparam_size{bdim_size, C};
     auto dparam_options{
-      (weight.defined() ? weight.options() : input_.options()).memory_format(MemoryFormat::Contiguous)};
+      weight.defined() ? weight.options() : input_.options().memory_format(MemoryFormat::Contiguous)};
     if (output_mask[1]) {
       dweight = at::empty_symint(dparam_size, dparam_options);
     }
