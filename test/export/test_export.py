@@ -2856,6 +2856,27 @@ graph():
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_torch_assert_tensor_condition(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                torch._assert(x.min() >= 0, "x must be positive")
+                return x
+
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                inp = torch.ones(1, 32, 64)
+                ep = export(Foo(), (inp,), strict=strict)
+                self.assertTrue(
+                    any(
+                        node.target == torch.ops.aten._assert_async.msg
+                        for node in ep.graph.nodes
+                    )
+                )
+                self.assertEqual(ep.module()(inp), inp)
+
+                with self.assertRaisesRegex(RuntimeError, "x must be positive"):
+                    ep.module()(-inp)
+
     def test_symint_item(self):
         class M(torch.nn.Module):
             def forward(self, tensor):
