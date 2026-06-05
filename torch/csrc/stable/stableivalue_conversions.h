@@ -3,6 +3,7 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/device_struct.h>
+#include <torch/csrc/stable/generator_struct.h>
 #include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/DeviceType.h>
@@ -292,6 +293,23 @@ struct FromImpl<torch::stable::Tensor> {
     return torch::stable::detail::from(new_ath);
   }
 };
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+// Specialization for torch::stable::Generator => StableIValue
+// Returns a new owning reference of the underlying Generator.
+template <>
+struct FromImpl<torch::stable::Generator> {
+  static StableIValue call(
+      const torch::stable::Generator& val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    AtenGeneratorHandle new_gen = nullptr;
+    STABLE_TORCH_ERROR_CODE_CHECK(
+        torch_new_generator_handle(val.get(), &new_gen));
+    return torch::stable::detail::from(new_gen);
+  }
+};
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 // =============================================================================
 // FROM CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
@@ -649,6 +667,22 @@ struct ToImpl<torch::stable::Tensor> {
         torch::stable::detail::to<AtenTensorHandle>(val));
   }
 };
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
+// Specialization for StableIValue => torch::stable::Generator
+// The resulting stable::Generator steals ownership of the input's
+// underlying AtenGeneratorHandle.
+template <>
+struct ToImpl<torch::stable::Generator> {
+  static torch::stable::Generator call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    return torch::stable::Generator(
+        torch::stable::detail::to<AtenGeneratorHandle>(val));
+  }
+};
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
 // =============================================================================
 // TO CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
