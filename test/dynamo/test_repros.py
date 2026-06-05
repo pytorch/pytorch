@@ -2312,6 +2312,133 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref0, res0))
             self.assertTrue(same(ref1, res1))
 
+    def test_tensor_ctor_nested_numpy_ndarrays(self):
+        rot = (-0.3925, 0.3925)
+
+        def fn():
+            return torch.Tensor(
+                [
+                    [np.cos(rot), np.sin(rot)],
+                    [-np.sin(rot), np.cos(rot)],
+                ]
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            ref = fn()
+            res = opt_fn()
+
+        self.assertEqual(ref.dtype, torch.float32)
+        self.assertTrue(same(ref, res))
+
+    def test_tensor_ctor_preserves_numpy_ndarray_leaf_shapes(self):
+        def one_element_ndarray_leaf():
+            return torch.Tensor([np.array([1.0])])
+
+        def nested_size_one_ndarray_leaves():
+            rot = (0.3,)
+            return torch.Tensor(
+                [
+                    [np.cos(rot), np.sin(rot)],
+                    [-np.sin(rot), np.cos(rot)],
+                ]
+            )
+
+        for fn in (one_element_ndarray_leaf, nested_size_one_ndarray_leaves):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.subTest(fn=fn.__name__), warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                ref = fn()
+                res = opt_fn()
+
+            self.assertEqual(ref.shape, res.shape)
+            self.assertTrue(same(ref, res))
+
+    def test_tensor_ctor_zero_dim_numpy_ndarray_leaves_error(self):
+        def fn():
+            return torch.Tensor([np.array(1), np.array(2)])
+
+        with self.assertRaisesRegex(TypeError, "len\\(\\) of unsized object"):
+            fn()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "len\\(\\) of unsized object"
+        ):
+            opt_fn()
+
+    def test_tensor_ctor_explicit_non_cpu_device_error(self):
+        def fn():
+            return torch.Tensor([np.array([1.0])], device="meta")
+
+        msg = "legacy constructor expects device type: cpu.*device type: meta"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            opt_fn()
+
+    def test_tensor_ctor_non_cpu_default_device_graph_break(self):
+        def fn():
+            return torch.Tensor([np.array([1.0])])
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with (
+            mock.patch("torch._C._get_default_device", return_value="meta"),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "torch.Tensor with traced NumPy arrays and non-CPU default device",
+            ),
+        ):
+            opt_fn()
+
+    def test_tensor_ctor_nested_numpy_producer(self):
+        def fn():
+            return torch.Tensor([np.sin(np.asarray([1.0]))])
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            ref = fn()
+            res = opt_fn()
+
+        self.assertEqual(ref.shape, res.shape)
+        self.assertTrue(same(ref, res))
+
+    def test_tensor_ctor_nonscalar_tensor_leaves_error(self):
+        def fn(x):
+            return torch.Tensor([x, x + 1])
+
+        x = torch.ones(2)
+        with self.assertRaisesRegex(
+            ValueError, "only one element tensors can be converted"
+        ):
+            fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            "only one element tensors can be converted",
+        ):
+            opt_fn(x)
+
+    def test_tensor_ctor_complex_tensor_leaf_error(self):
+        def fn(x):
+            return torch.Tensor([x])
+
+        x = torch.tensor(1 + 2j)
+        with self.assertRaisesRegex(RuntimeError, "value cannot be converted"):
+            fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError,
+            r"call_function <class 'torch[.]Tensor'>.*dtype=torch[.]complex",
+        ):
+            opt_fn(x)
+
     def test_primtorch(self):
         @torch.compile(backend="eager")
         def fn(x):

@@ -1378,6 +1378,149 @@ class UserDefinedClassVariable(UserDefinedVariable):
             self.value in self._in_graph_classes()
             or is_traceable_wrapper_subclass_type(self.value)
         ):
+
+            def tensor_ctor_sequence_info(
+                x: VariableTracker,
+            ) -> tuple[bool, bool, bool]:
+                if isinstance(x, variables.NumpyNdarrayVariable):
+                    return True, False, x.ndim == 0
+                elif x.is_tensor() or isinstance(x, variables.SymNodeVariable):
+                    return False, True, False
+                elif isinstance(x, (variables.ListVariable, variables.TupleVariable)):
+                    has_numpy_ndarray = False
+                    has_disallowed_tensor = False
+                    has_zero_dim_numpy_ndarray = False
+                    for item in x.items:
+                        (
+                            child_has_numpy,
+                            child_has_disallowed,
+                            child_has_zero_dim_numpy,
+                        ) = tensor_ctor_sequence_info(item)
+                        has_numpy_ndarray = has_numpy_ndarray or child_has_numpy
+                        has_disallowed_tensor = (
+                            has_disallowed_tensor or child_has_disallowed
+                        )
+                        has_zero_dim_numpy_ndarray = (
+                            has_zero_dim_numpy_ndarray or child_has_zero_dim_numpy
+                        )
+                    return (
+                        has_numpy_ndarray,
+                        has_disallowed_tensor,
+                        has_zero_dim_numpy_ndarray,
+                    )
+                else:
+                    return False, False, False
+
+            def build_tensor_ctor_stack(
+                x: VariableTracker,
+                intermediate_tensor_kwargs: dict[str, VariableTracker],
+            ) -> VariableTracker:
+                if isinstance(x, variables.NumpyNdarrayVariable):
+                    return x
+                elif isinstance(x, (variables.ListVariable, variables.TupleVariable)):
+                    if not x.items:
+                        return variables.TorchInGraphFunctionVariable(
+                            torch._refs.tensor
+                        ).call_function(tx, [x], intermediate_tensor_kwargs)
+                    return wrap_fx_proxy(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_function",
+                            torch.stack,
+                            *proxy_args_kwargs(
+                                [
+                                    variables.ListVariable(
+                                        [
+                                            build_tensor_ctor_stack(
+                                                item, intermediate_tensor_kwargs
+                                            )
+                                            for item in x.items
+                                        ]
+                                    )
+                                ],
+                                {},
+                            ),
+                        ),
+                    )
+                else:
+                    return variables.TorchInGraphFunctionVariable(
+                        torch._refs.tensor
+                    ).call_function(tx, [x], intermediate_tensor_kwargs)
+
+            data_arg = None
+            fwd_kwargs = dict(kwargs)
+            if args:
+                data_arg = args[0]
+            elif "data" in fwd_kwargs:
+                data_arg = fwd_kwargs.pop("data")
+
+            has_numpy_ndarray = False
+            has_disallowed_tensor = False
+            has_zero_dim_numpy_ndarray = False
+            if data_arg is not None:
+                (
+                    has_numpy_ndarray,
+                    has_disallowed_tensor,
+                    has_zero_dim_numpy_ndarray,
+                ) = tensor_ctor_sequence_info(data_arg)
+
+            explicit_device = None
+            explicit_device_is_known = "device" not in fwd_kwargs
+            if "device" in fwd_kwargs:
+                try:
+                    explicit_device = torch.device(
+                        fwd_kwargs["device"].as_python_constant()
+                    )
+                    explicit_device_is_known = True
+                except AsPythonConstantNotImplementedError:
+                    pass
+                except (TypeError, RuntimeError):
+                    pass
+
+            if (
+                self.value is torch.Tensor
+                and data_arg is not None
+                and not data_arg.is_tensor()
+                and "dtype" not in fwd_kwargs
+                and all(k == "device" for k in fwd_kwargs)
+                and has_numpy_ndarray
+                and not has_disallowed_tensor
+                and explicit_device_is_known
+            ):
+                if explicit_device is not None and explicit_device.type != "cpu":
+                    raise_observed_exception(
+                        RuntimeError,
+                        tx,
+                        args=[
+                            "legacy constructor expects device type: cpu "
+                            f"but device type: {explicit_device.type} was passed"
+                        ],
+                    )
+                if torch._C._get_default_device() != "cpu":
+                    unimplemented(
+                        gb_type="torch.Tensor with traced NumPy arrays and non-CPU default device",
+                        context="torch.Tensor(data) where data contains traced NumPy arrays",
+                        explanation="Dynamo does not currently lower this legacy constructor "
+                        "case when the default device is not CPU.",
+                        hints=graph_break_hints.SUPPORTABLE,
+                    )
+                fwd_kwargs.setdefault(
+                    "dtype", VariableTracker.build(tx, torch.get_default_dtype())
+                )
+                fwd_kwargs.setdefault(
+                    "device",
+                    VariableTracker.build(tx, torch._C._get_default_device()),
+                )
+                if has_zero_dim_numpy_ndarray:
+                    raise_type_error(tx, "len() of unsized object")
+                intermediate_tensor_kwargs = {
+                    "dtype": fwd_kwargs["dtype"],
+                    "device": VariableTracker.build(tx, "cpu"),
+                }
+                return build_tensor_ctor_stack(
+                    data_arg, intermediate_tensor_kwargs
+                ).call_method(tx, "to", [], fwd_kwargs)
+
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
             from .lists import ListVariable
