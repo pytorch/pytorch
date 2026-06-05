@@ -9,6 +9,7 @@ from typing_extensions import TypeVarTuple, Unpack
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed import distributed_c10d
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import (
     _named_parameters_with_duplicates,
@@ -534,7 +535,7 @@ class FSDPParamGroup:
             # ``fully_shard([a, b])`` already registered post_backward this
             # pass; skip to avoid duplicate ``RegisterPostBackwardFunction``
             # autograd nodes.
-            with dist.spmd_no_typecheck():
+            with distributed_c10d._spmd_no_typecheck():
                 entering_forward_pass = self._training_state != TrainingState.FORWARD
                 self._training_state = TrainingState.FORWARD
                 self.unshard(self.unshard_async_op)
@@ -546,7 +547,7 @@ class FSDPParamGroup:
     def post_forward(self, module: nn.Module, input: Any, output: Any):
         logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with (
-            dist.spmd_no_typecheck(),
+            distributed_c10d._spmd_no_typecheck(),
             record_function(self._with_fqn("FSDP::post_forward")),
         ):
             # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
@@ -570,7 +571,7 @@ class FSDPParamGroup:
             return
         logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         with (
-            dist.spmd_no_typecheck(),
+            distributed_c10d._spmd_no_typecheck(),
             record_function(self._with_fqn("FSDP::pre_backward")),
         ):
             self._training_state = TrainingState.PRE_BACKWARD
@@ -581,7 +582,7 @@ class FSDPParamGroup:
 
     @_dynamo_disable
     def post_backward(self, *unused: Any):
-        with dist.spmd_no_typecheck():
+        with distributed_c10d._spmd_no_typecheck():
             # This method should be idempotent and safe to call even when this
             # FSDP parameter group was not used in backward (should be a no-op)
             logger.debug("%s", self._with_fqn("FSDP::post_backward"))
