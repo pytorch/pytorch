@@ -7067,14 +7067,24 @@ def _check_scaled_mm_sizes(
                 scale_a.numel() == expected_a_size
                 and scale_b.numel() == expected_b_size
             ):
-                torch._check(
-                    scale_a.is_contiguous(),
-                    lambda: "scale_a must be contiguous",
-                )
-                torch._check(
-                    scale_b.is_contiguous(),
-                    lambda: "scale_b must be contiguous",
-                )
+                if device_hint(self) == "xpu":
+                    torch._check(
+                        scale_a.is_contiguous() or scale_a.t().is_contiguous(),
+                        lambda: "scale_a must be contiguous or column-major contiguous",
+                    )
+                    torch._check(
+                        scale_b.is_contiguous() or scale_b.t().is_contiguous(),
+                        lambda: "scale_b must be contiguous or column-major contiguous",
+                    )
+                else:
+                    torch._check(
+                        scale_a.is_contiguous(),
+                        lambda: "scale_a must be contiguous",
+                    )
+                    torch._check(
+                        scale_b.is_contiguous(),
+                        lambda: "scale_b must be contiguous",
+                    )
             else:
                 torch._check(
                     False,
