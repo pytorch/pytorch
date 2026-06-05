@@ -3849,7 +3849,7 @@ def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Conf
         ):
             raise AssertionError(
                 f"Not all TMA block types found in config kwargs: "
-                f"missing {set(tma_min_block_sizes) - set(configs[0].kwargs)}"
+                f"missing {OrderedSet(tma_min_block_sizes) - OrderedSet(configs[0].kwargs)}"
             )
 
         # Add a config that is guaranteed to compile
@@ -4434,7 +4434,7 @@ def adapt_config_for_tiling(
     """
     if not all(s in tiling_scores for s in size_hints):
         raise AssertionError(
-            f"Missing size_hints in tiling_scores: {set(size_hints) - set(tiling_scores)}"
+            f"Missing size_hints in tiling_scores: {OrderedSet(size_hints) - OrderedSet(tiling_scores)}"
         )
     target_block_product = original_x * original_r
     block_sizes = match_target_block_product(
