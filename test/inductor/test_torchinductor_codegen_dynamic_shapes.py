@@ -458,6 +458,12 @@ test_failures = {
     "test_bucketize_scalar_with_options_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_searchsorted_scalar_unbacked_value_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_bucketize_scalar_unbacked_value_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
 }
 
 add_test_failures(test_failures, dynamic_shapes_test_failures)
