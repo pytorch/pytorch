@@ -993,6 +993,89 @@ def forward(self, L_x_ : torch.Tensor):
                 with compiled_bwd_ctx:
                     test_fn(compiled_fn)
 
+    def test_post_acc_grad_hook_tiebreaker_order_matches_eager(self):
+        x = torch.randn(10, 10)
+
+        def get_order(module_factory, backend=None, args=(), compiled_bwd_backend=None):
+            module = module_factory()
+            hook_order = []
+
+            def hook(param, idx):
+                hook_order.append(idx)
+
+            for idx, param in enumerate(module.parameters()):
+                param.register_post_accumulate_grad_hook(
+                    functools.partial(hook, idx=idx)
+                )
+
+            fn = module
+            if backend is not None:
+                fn = torch.compile(module, backend=backend, fullgraph=True)
+            compiled_bwd_ctx = (
+                compiled_autograd._enable(
+                    torch.compile(backend=compiled_bwd_backend, fullgraph=True)
+                )
+                if compiled_bwd_backend is not None
+                else contextlib.nullcontext()
+            )
+            with compiled_bwd_ctx:
+                fn(x, *args).sum().backward()
+            return hook_order
+
+        def reordered_layers():
+            class ReorderedLayers(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.layer0 = torch.nn.Linear(10, 10, bias=False)
+                    self.layer1 = torch.nn.Linear(10, 10, bias=False)
+                    self.layer2 = torch.nn.Linear(10, 10, bias=False)
+
+                def forward(self, x):
+                    x = self.layer1(x)
+                    x = self.layer0(x)
+                    x = self.layer2(x)
+                    return x
+
+            return ReorderedLayers()
+
+        def linear_with_bias():
+            return torch.nn.Linear(10, 10, bias=True)
+
+        def reordered_layers_with_scale():
+            class ReorderedLayersWithScale(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.layer0 = torch.nn.Linear(10, 10, bias=False)
+                    self.layer1 = torch.nn.Linear(10, 10, bias=False)
+                    self.layer2 = torch.nn.Linear(10, 10, bias=False)
+
+                def forward(self, x, scale):
+                    x = self.layer1(x)
+                    x = scale * self.layer0(x)
+                    x = self.layer2(x)
+                    return x
+
+            return ReorderedLayersWithScale()
+
+        for module_factory, args in (
+            (reordered_layers, ()),
+            (linear_with_bias, ()),
+            (reordered_layers_with_scale, (2.0,)),
+        ):
+            eager_order = get_order(module_factory, args=args)
+            self.assertEqual(
+                get_order(module_factory, "aot_eager", args=args), eager_order
+            )
+            self.assertEqual(
+                get_order(
+                    module_factory,
+                    "aot_eager",
+                    args=args,
+                    compiled_bwd_backend="aot_eager",
+                ),
+                eager_order,
+            )
+
     def test_recompile(self):
         def hook(param):
             param.grad *= 2
