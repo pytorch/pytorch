@@ -235,7 +235,9 @@ static inline float gelu_dispatch_tanh(float x) {
   if IF_CONSTEXPR (::metal::is_same_v<T, float>) {
     return ::metal::tanh(x);
   } else {
-    return ::metal::fast::tanh(x);
+    // Clamp to avoid fast::tanh's internals overflowing to NaN,
+    // tanh is already saturated here.
+    return ::metal::fast::tanh(::metal::clamp(x, -10.0f, 10.0f));
   }
 }
 
