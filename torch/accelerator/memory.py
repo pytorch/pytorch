@@ -39,8 +39,6 @@ def empty_host_cache() -> None:
     .. note:: This function is a no-op if the memory allocator for the current
         :ref:`accelerator <accelerators>` has not been initialized.
     """
-    if not torch._C._accelerator_isAllocatorInitialized():
-        return
     torch._C._accelerator_emptyHostCache()
 
 
@@ -269,14 +267,10 @@ def _snapshot(device=None, augment_with_fx_traces: bool = False):
         dict: a dictionary containing memory allocator state information.
     """
     acc = torch.accelerator.current_accelerator()
-    if acc is not None:
-        if acc.type == "xpu":
-            return torch.xpu.memory._snapshot(
-                device, augment_with_fx_traces=augment_with_fx_traces
-            )
-        elif acc.type == "cuda":
-            return torch.cuda.memory._snapshot(
-                device, augment_with_fx_traces=augment_with_fx_traces
-            )
-
-    raise RuntimeError(f"Memory snapshots are not supported on accelerator: {getattr(acc, 'type', 'None')}")
+    if acc is not None and acc.type == "xpu":
+        return torch.xpu.memory._snapshot(
+            device, augment_with_fx_traces=augment_with_fx_traces
+        )
+    return torch.cuda.memory._snapshot(
+        device, augment_with_fx_traces=augment_with_fx_traces
+    )
