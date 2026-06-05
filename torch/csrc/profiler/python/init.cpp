@@ -760,13 +760,19 @@ void initPythonBindings(PyObject* module) {
             &torch::profiler::impl::cuptiMonitorBufferCompletedV2);
       },
       py::arg("version") = 1);
-  // Returns the v2 user-defined record layouts snapshotted at buffer
-  // completion, as a list of (kind, record_size, [(field_id, offset, size)]).
-  // Empty until a v2 buffer has completed.
-  m.def("_cupti_monitor_record_layouts", []() {
+  // Opens a new layout epoch (called by the reconfigure path after flushing the
+  // old config and before enabling the new one) and returns its id.
+  m.def("_cupti_monitor_next_layout_epoch", []() {
+    return CuptiMonitorBuffers::get().next_layout_epoch();
+  });
+  // Returns the v2 user-defined record layout captured for the given epoch (the
+  // layout_epoch field of a completed buffer), as a list of
+  // (kind, record_size, [(field_id, offset, size)]). Empty if that epoch has no
+  // captured layout.
+  m.def("_cupti_monitor_record_layouts", [](uint64_t epoch) {
     py::list result;
     for (const auto& layout :
-         torch::profiler::impl::CuptiMonitorBuffers::get().record_layouts()) {
+         CuptiMonitorBuffers::get().record_layouts(epoch)) {
       py::list fields;
       for (const auto& field : layout.fields) {
         fields.append(py::make_tuple(field.field_id, field.offset, field.size));
@@ -789,7 +795,8 @@ void initPythonBindings(PyObject* module) {
         reinterpret_cast<uintptr_t>(buf->ptr),
         buf->valid_size,
         buf->ctx,
-        buf->stream);
+        buf->stream,
+        buf->layout_epoch);
   });
   m.def("_cupti_monitor_return_buffer", [](uintptr_t ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)

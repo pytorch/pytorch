@@ -836,7 +836,8 @@ class TestProfiler(TestCase):
         do_complete(ptr_a)
         self.assertEqual(pyprof._cupti_monitor_pending_buffers(), 1)
         item = pyprof._cupti_monitor_get_completed()
-        self.assertEqual(item, (ptr_a, 4096, expected_ctx, expected_stream))
+        # 5th field is layout_epoch, 0 here (no reconfiguration in this test).
+        self.assertEqual(item, (ptr_a, 4096, expected_ctx, expected_stream, 0))
         self.assertEqual(pyprof._cupti_monitor_pending_buffers(), 0)
         pyprof._cupti_monitor_return_buffer(ptr_a)
 
@@ -851,11 +852,13 @@ class TestProfiler(TestCase):
         self.assertEqual(pyprof._cupti_monitor_allocated_buffers(), 2)
 
     def test_cupti_monitor_v2_record_layout_capture(self):
-        # The v2 complete callback snapshots the CUPTI user-defined record
-        # layout (only valid during the callback) so the decode thread can parse
-        # records afterward. Build the CUPTI >= 13.2 complete-info / record-layout
-        # structs with ctypes and drive the native v2 callbacks directly (no
-        # CUDA/cupti-python); this also pins the C++ ABI mirror of those structs.
+        # The v2 complete callback snapshots the CUPTI user-defined record layout
+        # (valid only during the callback) into the current layout epoch, so the
+        # decode thread can parse records afterward and reconfiguring (a new
+        # epoch) does not clobber the layout of buffers still queued under the old
+        # one. Build the CUPTI >= 13.2 complete-info / record-layout structs with
+        # ctypes and drive the native v2 callbacks directly (no CUDA/cupti-python);
+        # this also pins the C++ ABI mirror of those structs.
         import ctypes
 
         pyprof = torch._C._profiler
@@ -940,9 +943,48 @@ class TestProfiler(TestCase):
         # Drain the completed buffer so the pool is tidy for the reset cleanup.
         item = pyprof._cupti_monitor_get_completed()
         pyprof._cupti_monitor_return_buffer(item[0])
-
+        # Captured under the initial epoch 0, and the buffer is tagged with it.
+        self.assertEqual(item[4], 0)
         self.assertEqual(
-            pyprof._cupti_monitor_record_layouts(),
+            pyprof._cupti_monitor_record_layouts(0),
+            [(9, 16, [(0, 0, 4), (5, 8, 8)])],
+        )
+
+        # Reconfiguring opens a new epoch with a different layout; the old epoch's
+        # layout is retained so buffers still queued under it decode correctly.
+        self.assertEqual(pyprof._cupti_monitor_next_layout_epoch(), 1)
+        entries_b = (FieldEntry * 1)(FieldEntry(ctypes.sizeof(FieldEntry), 0, 0, 4, 4))
+        layout_b = RecordLayout(
+            ctypes.sizeof(RecordLayout),
+            ctypes.cast(entries_b, ctypes.POINTER(FieldEntry)),
+            1,
+            8,
+        )
+        layouts_arr_b = (ctypes.POINTER(RecordLayout) * 4)()
+        layouts_arr_b[3] = ctypes.pointer(layout_b)
+        info_b = CompleteInfo(
+            ctypes.sizeof(CompleteInfo),
+            1234,
+            ctypes.cast(layouts_arr_b, ctypes.POINTER(ctypes.POINTER(RecordLayout))),
+            4,
+        )
+        request(ctypes.byref(buf), ctypes.byref(size), ctypes.byref(max_records), None)
+        complete(
+            ctypes.c_void_p(buf.value),
+            8,
+            8,
+            ctypes.cast(ctypes.pointer(info_b), ctypes.c_void_p),
+        )
+        item_b = pyprof._cupti_monitor_get_completed()
+        pyprof._cupti_monitor_return_buffer(item_b[0])
+        self.assertEqual(item_b[4], 1)
+        self.assertEqual(
+            pyprof._cupti_monitor_record_layouts(1),
+            [(3, 8, [(0, 0, 4)])],
+        )
+        # Epoch 0 still holds the original layout.
+        self.assertEqual(
+            pyprof._cupti_monitor_record_layouts(0),
             [(9, 16, [(0, 0, 4), (5, 8, 8)])],
         )
 
