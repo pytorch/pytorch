@@ -79,7 +79,7 @@ def index(
     from itertools import islice
 
     for i, elem in islice(enumerate(iterator), start, end):
-        if item == elem:
+        if elem is item or elem == item:
             return i
     # This will not run in dynamo
     raise ValueError(f"{item} is not in {type(iterator)}")
@@ -273,8 +273,12 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
     if all(isinstance(a, OrderedDict) for a in (d, other)):
         return list(d.items()) == list(other.items())
 
+    # CPython's dict_equal uses PyObject_RichCompareBool for value
+    # comparison, which has an identity shortcut (if v is w, eq is True).
+    # This matters for NaN: {k: nan} == {k: nan} is True when same nan.
     for k, v in d.items():
-        if v != other[k]:
+        ov = other[k]
+        if v is not ov and v != ov:
             return False
 
     return True
