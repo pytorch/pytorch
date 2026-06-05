@@ -99,6 +99,8 @@ def remove_dupe_metadata(
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
+                is_conj=o.is_conj,
+                is_neg=o.is_neg,
             )
             for o in m.output_info
         ],
@@ -199,7 +201,9 @@ def create_synthetic_base_metadata(
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
-            keep_input_mutations=m.keep_input_mutations,
+            keep_input_mutations=all(
+                m.input_info[x].keep_input_mutations for x in outer_indices
+            ),
         )
         input_infos.append(inpt_info)
 
@@ -227,6 +231,8 @@ def create_synthetic_base_metadata(
             base_idx=synthetic_base_info[outer_idx][0],  # type: ignore[index]
             requires_grad=(requires_grad := outer_args[outer_idx].requires_grad),
             requires_grad_for_backward=requires_grad,
+            is_conj=outer_args[outer_idx].is_conj(),
+            is_neg=outer_args[outer_idx].is_neg(),
         )
         for outer_idx in outer_aliased_arg_idx_with_metadata_mutations
     ]
@@ -274,6 +280,8 @@ def create_synthetic_base_metadata(
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
                 view_meta_sequence=o.view_meta_sequence,
+                is_conj=o.is_conj,
+                is_neg=o.is_neg,
             )
         )
 

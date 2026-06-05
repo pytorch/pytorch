@@ -7346,6 +7346,38 @@ class CommonTemplate:
 
         self.common(fn, (x,))
 
+    @xfail_if_mps
+    def test_lazy_negative_input(self):
+        def clone_fn(x):
+            return torch.ops.aten.clone.default(x)
+
+        inputs = [torch.randn(4, device=self.device)._neg_view()]
+        if self.is_dtype_supported(torch.complex64):
+            inputs.append(
+                torch.randn(4, dtype=torch.complex64, device=self.device).conj().imag
+            )
+
+        for x in inputs:
+            self.assertTrue(x.is_neg())
+            expected = clone_fn(x)
+            actual = torch.compile(clone_fn, fullgraph=True)(x)
+            self.assertEqual(actual, expected)
+            self.assertFalse(actual.is_neg())
+
+        def mutation_fn(x):
+            x.add_(1)
+            return x.clone()
+
+        base_eager = torch.tensor([1.0, -2.0], device=self.device)
+        x_eager = base_eager._neg_view()
+        out_eager = mutation_fn(x_eager)
+        base_compiled = torch.tensor([1.0, -2.0], device=self.device)
+        x_compiled = base_compiled._neg_view()
+        out_compiled = torch.compile(mutation_fn, fullgraph=True)(x_compiled)
+        self.assertEqual(out_compiled, out_eager)
+        self.assertEqual(x_compiled, x_eager)
+        self.assertEqual(base_compiled, base_eager)
+
     def test_complex_conv2d_conj(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/171665
         # Tests that complex convolution works on conjugated inputs when compiled.

@@ -23,6 +23,7 @@ from .descriptors import AOTInput, BackwardTokenAOTInput
 from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
+    resolve_input_view_bits,
 )
 from .graph_capture_wrappers import (
     aot_dispatch_subclass,
@@ -274,8 +275,25 @@ def _create_graph_and_save_traced_inputs(
     aot_config: AOTConfig,
 ) -> tuple[torch.fx.GraphModule, Any]:
     saved_flat_args = _detach_traced_inputs(flat_args)
+    graph = _create_graph(
+        fn_to_trace, flat_args, flat_args_descs, aot_config=aot_config
+    )
+    saved_flat_args = pytree.tree_map_only(
+        torch.Tensor, resolve_input_view_bits, saved_flat_args
+    )
+    flat_resolved_args, _ = pytree.tree_flatten(saved_flat_args)
+    idx = 0
+    for node in graph.graph.nodes:
+        if node.op != "placeholder" or node.name.startswith("tangents_token"):
+            continue
+        if idx >= len(flat_resolved_args):
+            break
+        val = flat_resolved_args[idx]
+        if isinstance(val, torch.Tensor):
+            node.meta["val"] = val
+        idx += 1
     return (
-        _create_graph(fn_to_trace, flat_args, flat_args_descs, aot_config=aot_config),
+        graph,
         saved_flat_args,
     )
 
