@@ -80,9 +80,31 @@ void CuptiMonitorBuffers::on_complete(
     size_t valid_size) {
   {
     std::lock_guard<std::mutex> guard(mutex_);
-    completed_.push_back({buffer, valid_size, ctx, stream});
+    completed_.push_back({buffer, valid_size, ctx, stream, current_epoch_});
   }
   cv_.notify_one();
+}
+
+void CuptiMonitorBuffers::on_complete_v2(
+    void* complete_info,
+    uint8_t* buffer,
+    size_t /*size*/,
+    size_t valid_size) {
+  {
+    std::lock_guard<std::mutex> guard(mutex_);
+    // Capture + tag under one lock so the buffer's epoch and its layout stay
+    // consistent even if next_layout_epoch() races a completion. v2 delivers
+    // neither CUcontext nor streamId (they are selectable record fields), so
+    // ctx/stream are 0.
+    capture_layouts_locked(complete_info);
+    completed_.push_back({buffer, valid_size, 0, 0, current_epoch_});
+  }
+  cv_.notify_one();
+}
+
+uint64_t CuptiMonitorBuffers::next_layout_epoch() {
+  std::lock_guard<std::mutex> guard(mutex_);
+  return ++current_epoch_;
 }
 
 std::optional<CompletedCuptiBuffer> CuptiMonitorBuffers::get_completed() {
@@ -130,15 +152,15 @@ void CuptiMonitorBuffers::reset() {
   all_.clear();
   allocated_ = 0;
   shutdown_ = false;
-  record_layouts_.clear();
-  layouts_captured_ = false;
+  current_epoch_ = 0;
+  layouts_.clear();
 }
 
-void CuptiMonitorBuffers::capture_layouts(void* complete_info) {
-  std::lock_guard<std::mutex> guard(mutex_);
-  if (layouts_captured_ || complete_info == nullptr) {
+void CuptiMonitorBuffers::capture_layouts_locked(void* complete_info) {
+  if (complete_info == nullptr || layouts_.contains(current_epoch_)) {
     return;
   }
+  std::vector<CuptiRecordLayout> snapshot;
   const auto* info = static_cast<const AbiBufferCompleteInfo*>(complete_info);
   if (info->ppRecordLayouts != nullptr) {
     // ppRecordLayouts is indexed by activity kind; entries are null for kinds
@@ -156,15 +178,21 @@ void CuptiMonitorBuffers::capture_layouts(void* complete_info) {
         const AbiFieldLayoutEntry& e = layout->pEntries[f];
         out.fields.push_back({e.fieldId, e.offset, e.size});
       }
-      record_layouts_.push_back(std::move(out));
+      snapshot.push_back(std::move(out));
     }
   }
-  layouts_captured_ = true;
+  // Insert even when empty so this epoch is not re-parsed on every buffer.
+  layouts_.emplace(current_epoch_, std::move(snapshot));
 }
 
-std::vector<CuptiRecordLayout> CuptiMonitorBuffers::record_layouts() {
+std::vector<CuptiRecordLayout> CuptiMonitorBuffers::record_layouts(
+    uint64_t epoch) {
   std::lock_guard<std::mutex> guard(mutex_);
-  return record_layouts_;
+  auto it = layouts_.find(epoch);
+  if (it == layouts_.end()) {
+    return {};
+  }
+  return it->second;
 }
 
 void cuptiMonitorBufferRequested(
@@ -197,13 +225,10 @@ void cuptiMonitorBufferCompletedV2(
     size_t size,
     size_t valid_size,
     void* complete_info) {
-  auto& buffers = CuptiMonitorBuffers::get();
-  // The record layout in complete_info is valid only for this call, so snapshot
-  // it (once) before the buffer is handed to the decode thread.
-  buffers.capture_layouts(complete_info);
-  // v2 delivers neither CUcontext nor streamId (they are selectable record
-  // fields), so report ctx/stream as 0.
-  buffers.on_complete(/*ctx=*/0, /*stream=*/0, buffer, size, valid_size);
+  // The record layout in complete_info is valid only for this call;
+  // on_complete_v2 snapshots it into the current epoch before queuing.
+  CuptiMonitorBuffers::get().on_complete_v2(
+      complete_info, buffer, size, valid_size);
 }
 
 } // namespace torch::profiler::impl

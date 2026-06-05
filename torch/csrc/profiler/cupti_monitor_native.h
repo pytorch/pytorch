@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -35,11 +36,15 @@ struct CompletedCuptiBuffer {
   size_t valid_size;
   uint64_t ctx;
   uint32_t stream;
+  // Layout epoch active when this buffer completed; selects which captured v2
+  // record layout decodes it. 0 for v1 (no user-defined layout).
+  uint64_t layout_epoch;
 };
 
 // Snapshot of a CUPTI v2 user-defined record layout. The layout is fixed by the
-// field selection set at enable time (constant for the session), so it is
-// captured once. byte offset / size of one selected field within a record:
+// field selection in effect, which changes when activities are reconfigured, so
+// it is captured per epoch (see next_layout_epoch). byte offset / size of one
+// selected field within a record:
 struct CuptiRecordFieldLayout {
   int field_id;
   size_t offset;
@@ -71,6 +76,15 @@ class TORCH_API CuptiMonitorBuffers {
       uint8_t* buffer,
       size_t size,
       size_t valid_size);
+  // v2 completion: snapshots the user-defined record layout from a CUPTI
+  // CUpti_BufferCallbackCompleteInfo* (taken as void*) into the current epoch
+  // if not yet captured, then enqueues the buffer tagged with that epoch -- all
+  // under one lock so the layout and the buffer's epoch tag stay consistent.
+  void on_complete_v2(
+      void* complete_info,
+      uint8_t* buffer,
+      size_t size,
+      size_t valid_size);
 
   // Block until a completed buffer is available or shutdown() is called.
   // Callers must release the GIL before calling this.
@@ -82,17 +96,22 @@ class TORCH_API CuptiMonitorBuffers {
   void shutdown();
   void reset();
 
-  // Capture the v2 user-defined record layout from a CUPTI
-  // CUpti_BufferCallbackCompleteInfo* (taken as void*). Snapshots on the first
-  // call and is a no-op afterwards; the layout is constant for a session and
-  // the info pointer is only valid for the duration of the completion callback.
-  void capture_layouts(void* complete_info);
-  // Copy of the captured layouts for the Python decoder. Empty until a v2
-  // buffer has completed.
-  std::vector<CuptiRecordLayout> record_layouts();
+  // Open a new layout epoch and return its id. The reconfigure path calls this
+  // after flushing the old config and before enabling the new one; the next v2
+  // completion then captures the new layout under this epoch. The flush ensures
+  // all old-config buffers are already queued (tagged with the prior epoch), so
+  // epochs never mix configs even though the decode thread lags.
+  uint64_t next_layout_epoch();
+  // Copy of the layout captured for a given epoch (as returned in a completed
+  // buffer's layout_epoch). Empty if that epoch has no captured layout.
+  std::vector<CuptiRecordLayout> record_layouts(uint64_t epoch);
 
  private:
   CuptiMonitorBuffers() = default;
+
+  // Capture the layout for current_epoch_ from complete_info if not already
+  // captured. Caller must hold mutex_.
+  void capture_layouts_locked(void* complete_info);
 
   std::mutex mutex_;
   std::condition_variable cv_;
@@ -103,8 +122,8 @@ class TORCH_API CuptiMonitorBuffers {
   size_t buffer_size_ = 4UL * 1024 * 1024;
   size_t allocated_ = 0;
   bool shutdown_ = false;
-  std::vector<CuptiRecordLayout> record_layouts_;
-  bool layouts_captured_ = false;
+  uint64_t current_epoch_ = 0;
+  std::map<uint64_t, std::vector<CuptiRecordLayout>> layouts_;
 };
 
 // Free functions matching the CUPTI v1 buffer-callback signatures. CUcontext is
