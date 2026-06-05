@@ -295,9 +295,7 @@ class TestAutocastDeviceType(DeviceTypeTestBase):
         dtype = self._get_amp_dtype()
 
         with torch.autocast(device_type=self.device_type, enabled=True, dtype=dtype):
-            t = torch.randn(
-                [3, 4, 5], dtype=dtype, device=device, requires_grad=True
-            )
+            t = torch.randn([3, 4, 5], dtype=dtype, device=device, requires_grad=True)
             index = torch.randint(
                 low=0, high=3, size=[3, 4, 5], dtype=torch.int64, device=device
             )
@@ -442,9 +440,7 @@ class TestAutocastMPS(TestCase):
                 x, w_t = ctx.saved_tensors
                 with torch.autocast(device_type="mps"):
                     dL_dX = torch.matmul(grad_output, w_t)
-                    dL_dW = torch.matmul(x.transpose(0, 1), grad_output).transpose(
-                        0, 1
-                    )
+                    dL_dW = torch.matmul(x.transpose(0, 1), grad_output).transpose(0, 1)
                 return dL_dX, dL_dW
 
         data = torch.randn(2, 3).to("mps")
