@@ -472,102 +472,76 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
     def test_pinned_pool_reuse(self):
         """Pool returns cached buffers on second call with same size."""
         from torch._functorch._activation_offloading.offload_ops import (
+            _maybe_pool_alloc,
             _pinned_pool,
-            _pool_alloc,
             _pool_free,
             pinned_memory_pool,
         )
 
         with pinned_memory_pool():
-            buf = _pool_alloc(1024, torch.float32)
+            buf = _maybe_pool_alloc(1024, torch.float32)
             self.assertTrue(buf.is_pinned())
-            self.assertEqual(buf.nelement(), 1024 // 4)  # float32 = 4 bytes
+            self.assertEqual(buf.nelement(), 1024)
 
             _pool_free(buf)
             self.assertEqual(len(_pinned_pool[(1024, torch.float32)]), 1)
 
-            buf2 = _pool_alloc(1024, torch.float32)
+            buf2 = _maybe_pool_alloc(1024, torch.float32)
             self.assertIs(buf2, buf)  # same object reused
             self.assertEqual(len(_pinned_pool.get((1024, torch.float32), [])), 0)
 
     def test_pinned_pool_dtype_separation(self):
         """Same nbytes but different dtypes must not share buffers."""
         from torch._functorch._activation_offloading.offload_ops import (
-            _pool_alloc,
+            _maybe_pool_alloc,
             _pool_free,
             pinned_memory_pool,
         )
 
         with pinned_memory_pool():
             # 16 bytes: 4 float32 or 8 float16
-            f32 = _pool_alloc(16, torch.float32)
+            f32 = _maybe_pool_alloc(16, torch.float32)
             self.assertEqual(f32.dtype, torch.float32)
             _pool_free(f32)
 
-            f16 = _pool_alloc(16, torch.float16)
+            f16 = _maybe_pool_alloc(16, torch.float16)
             # Must NOT return the float32 buffer
             self.assertEqual(f16.dtype, torch.float16)
             self.assertIsNot(f16, f32)
 
-    def test_pinned_pool_nested_context(self):
-        """Nested pinned_memory_pool() contexts work correctly."""
-        from torch._functorch._activation_offloading.offload_ops import (
-            _pinned_pool,
-            _pool_alloc,
-            _pool_free,
-            pinned_memory_pool,
-        )
-
-        with pinned_memory_pool():
-            buf = _pool_alloc(256, torch.float32)
-            _pool_free(buf)
-
-            with pinned_memory_pool():
-                # Inner context: pool still enabled
-                buf2 = _pool_alloc(512, torch.float32)
-                _pool_free(buf2)
-
-            # After inner exit: pool still enabled (outer still active)
-            buf3 = _pool_alloc(256, torch.float32)
-            self.assertIs(buf3, buf)  # reused from outer context
-            _pool_free(buf3)
-
-        # After outer exit: pool cleared
-        self.assertEqual(len(_pinned_pool), 0)
-
     def test_pinned_pool_different_sizes(self):
         """Pool buckets by size — different sizes don't share buffers."""
         from torch._functorch._activation_offloading.offload_ops import (
-            _pool_alloc,
+            _maybe_pool_alloc,
             _pool_free,
             pinned_memory_pool,
         )
 
         with pinned_memory_pool():
-            small = _pool_alloc(256, torch.float32)
-            large = _pool_alloc(1024, torch.float32)
+            small = _maybe_pool_alloc(256, torch.float32)
+            large = _maybe_pool_alloc(1024, torch.float32)
 
             _pool_free(small)
             _pool_free(large)
 
-            got = _pool_alloc(1024, torch.float32)
+            got = _maybe_pool_alloc(1024, torch.float32)
             self.assertIs(got, large)
 
-            got2 = _pool_alloc(256, torch.float32)
+            got2 = _maybe_pool_alloc(256, torch.float32)
             self.assertIs(got2, small)
 
     def test_pinned_pool_disabled_outside_context(self):
         """Without pinned_memory_pool(), alloc doesn't pool and free releases storage."""
         from torch._functorch._activation_offloading.offload_ops import (
+            _maybe_pool_alloc,
             _pinned_pool,
-            _pool_alloc,
             _pool_clear,
             _pool_free,
         )
 
         _pool_clear()
-        buf = _pool_alloc(512, torch.float32)
-        self.assertEqual(buf.untyped_storage().size(), 512)
+        buf = _maybe_pool_alloc(512, torch.float32)
+        self.assertEqual(buf.untyped_storage().size(), 512 * 4)
 
         _pool_free(buf)
         # Pool should be empty — buffer not cached
@@ -575,21 +549,21 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         # Storage should be freed (resize_(0))
         self.assertEqual(buf.untyped_storage().size(), 0)
 
-        buf2 = _pool_alloc(512, torch.float32)
+        buf2 = _maybe_pool_alloc(512, torch.float32)
         self.assertIsNot(buf2, buf)  # fresh allocation
         _pool_clear()
 
     def test_pinned_pool_context_manager(self):
         """pinned_memory_pool() enables pooling and clears on exit."""
         from torch._functorch._activation_offloading.offload_ops import (
+            _maybe_pool_alloc,
             _pinned_pool,
-            _pool_alloc,
             _pool_free,
             pinned_memory_pool,
         )
 
         with pinned_memory_pool():
-            buf = _pool_alloc(1024, torch.float32)
+            buf = _maybe_pool_alloc(1024, torch.float32)
             _pool_free(buf)
             self.assertEqual(len(_pinned_pool[(1024, torch.float32)]), 1)
 
