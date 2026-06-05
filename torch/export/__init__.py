@@ -297,7 +297,8 @@ def load(
         :func:`torch.export.load()` uses pickle under the hood to load models. **Never load data from an untrusted source.**
 
     Loads an :class:`ExportedProgram` previously saved with
-    :func:`torch.export.save <torch.export.save>`.
+    :func:`torch.export.save <torch.export.save>`. When ``weights_only=True``,
+    only weights will be loaded and no complex pickled objects.
 
     Args:
         f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to

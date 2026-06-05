@@ -1103,7 +1103,8 @@ def load_pt2(
     weights_only: bool = False,
 ) -> PT2ArchiveContents:  # type: ignore[type-arg]
     """
-    Loads all the artifacts previously saved with ``package_pt2``.
+    Loads all the artifacts previously saved with ``package_pt2``. When ``weights_only=True``,
+    only weights will be loaded and no complex pickled objects.
 
     Args:
         f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
