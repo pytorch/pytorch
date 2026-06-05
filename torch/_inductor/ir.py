@@ -10010,10 +10010,10 @@ class StorageBox(MutableBox):
         """
         Called on buffers we expect to be forced to realize later.
         """
-        if isinstance(self.data, (Pointwise, Reduction)) and (
-            self.has_large_inner_fn()
-            or self.data.inner_fn_opcount().nontrivial_read_count > 1
-        ):
+        if not isinstance(self.data, (Pointwise, Reduction)):
+            return
+        threshold, opcount = self.data.bounded_inner_fn_opcount_for_large_check()
+        if opcount.num_ops <= threshold and opcount.nontrivial_read_count > 1:
             self.realize()
 
     def has_accumulated_enough_reads_by_size(self, threshold: int) -> bool:

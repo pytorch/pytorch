@@ -308,7 +308,7 @@ class DeviceMeshTest(DTensorTestBase):
         mesh = DeviceMesh(device_type, torch.arange(self.world_size))
 
         local_tensor = torch.randn(2, 8)
-        global_tensor = funcol.all_gather_tensor(
+        global_tensor = funcol.all_gather_single(
             local_tensor, gather_dim=0, group=(mesh, 0)
         ).wait()
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
@@ -1352,7 +1352,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 contiguous=True,
             )
             local_tensor = tensor_padded_list[my_rank]
-            big_tensor = funcol.all_gather_tensor(
+            big_tensor = funcol.all_gather_single(
                 local_tensor, gather_dim=shard_dim, group=(device_mesh, 0)
             )
             big_tensor_chunks = list(
@@ -1447,7 +1447,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             res_num = ((0 + self.world_size - 1) * self.world_size) / 2
 
-            scattered_tensor = funcol.reduce_scatter_tensor(
+            scattered_tensor = funcol.reduce_scatter_single(
                 tensor_to_reduce,
                 reduceOp="sum",
                 scatter_dim=shard_dim,
