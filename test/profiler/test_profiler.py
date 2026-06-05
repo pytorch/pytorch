@@ -16,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 import warnings
 from dataclasses import dataclass, field
@@ -1147,6 +1148,40 @@ class TestProfiler(TestCase):
             # Now validate the json
             with open(fname) as f:
                 json.load(f)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profiler_trace_sanitizes_python_function_names(self):
+        def template():
+            return None
+
+        bad_code = template.__code__.replace(
+            co_filename='profiler_bad"file.py',
+            co_name='bad"name',
+        )
+        bad_fn = types.FunctionType(bad_code, {})
+
+        with profile(activities=[ProfilerActivity.CPU], with_stack=True) as prof:
+            bad_fn()
+
+        del bad_fn, bad_code
+        gc.collect()
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+
+        python_function_names = [
+            event.get("name", "")
+            for event in trace["traceEvents"]
+            if event.get("cat") == "python_function"
+        ]
+        self.assertTrue(
+            any(
+                "profiler_bad'file.py" in name and "bad'name" in name
+                for name in python_function_names
+            )
+        )
 
     def test_profiler_tracing(self):
         self._test_profiler_tracing(False)

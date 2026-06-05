@@ -877,6 +877,12 @@ void generateForwardBackwardLinks(
 
 static constexpr const char* indexKey = "Ev Idx";
 
+std::string sanitizeNameForKinetoJSON(std::string name) {
+  // Kineto's Chrome trace writer quotes names itself but does not escape '"'.
+  std::replace(name.begin(), name.end(), '"', '\'');
+  return name;
+}
+
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
     uint64_t start_time_ns,
@@ -898,6 +904,7 @@ void passEventsToKineto(
     if (!e->overload_name().empty()) {
       name = fmt::format("{}.{}", e->name(), e->overload_name());
     }
+    name = sanitizeNameForKinetoJSON(std::move(name));
     auto* activity = cpu_trace.addCPUActivity(
         name,
         e->kinetoType(),
