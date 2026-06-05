@@ -949,7 +949,7 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
+  "USE_CUDA OR USE_ROCM"
   OFF)
 
 
