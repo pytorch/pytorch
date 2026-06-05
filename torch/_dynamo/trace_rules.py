@@ -250,6 +250,8 @@ manual_torch_name_rule_map: dict[
     "torch.cuda.set_device": SkipFunctionVariable,
     "torch.cuda.current_device": TorchInGraphFunctionVariable,
     "torch.autograd.grad": TorchInGraphFunctionVariable,
+    "torch.autograd.grad_mode._enter_inference_mode": TorchInGraphFunctionVariable,
+    "torch.autograd.grad_mode._exit_inference_mode": TorchInGraphFunctionVariable,
     "torch.autograd.backward": SkipFunctionVariable,
     "torch.distributions.constraints.is_dependent": SkipFunctionVariable,
     "torch.jit.isinstance": SkipFunctionVariable,
@@ -323,6 +325,7 @@ manual_torch_name_rule_map: dict[
     "torch.autograd.forward_ad.exit_dual_level": UserFunctionVariable,
     "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
+    "torch.autograd.graph.region_activation_memory_budget": UserFunctionVariable,
     # functorch/linearize
     "torch._functorch.eager_transforms.linearize": FunctorchHigherOrderVariable,
     # functorch/jacfwd
@@ -2535,8 +2538,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.autograd.functional.jvp",
         "torch.autograd.functional.vhp",
         "torch.autograd.functional.vjp",
-        "torch.autograd.grad_mode._enter_inference_mode",
-        "torch.autograd.grad_mode._exit_inference_mode",
         "torch.autograd.graph._get_sid",
         "torch.autograd.graph._get_tid",
         "torch.autograd.graph.allow_mutation_on_saved_tensors",
@@ -3502,6 +3503,7 @@ MOD_INLINELIST = [
     "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
+    "torch.ao.quantization.fx._decomposed",
     "torch.autograd.function",
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
