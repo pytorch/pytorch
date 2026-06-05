@@ -997,7 +997,8 @@ class TestMPS(TestCaseMPS):
         bias = torch.randn(4)
         y_cpu = F.conv2d(x, weight, bias=bias, groups=2)
         y_mps = F.conv2d(x.to("mps"), weight.to("mps"), bias=bias.to("mps"), groups=2).cpu()
-        self.assertEqual(y_cpu, y_mps)
+        # Same loose fp32 tolerance as test_conv2d_large_kernel (large-K accumulation).
+        self.assertEqual(y_cpu, y_mps, atol=5e-4, rtol=1e-4)
 
     def test_conv2d_large_kernel_channels_last(self):
         # im2col routing must preserve channels_last for output and grads;
