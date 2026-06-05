@@ -70,9 +70,8 @@ from torch.utils.checkpoint import (
     create_selective_checkpoint_contexts,
 )
 
-ACC_TYPE = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
+
+ACC_TYPE = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 HAS_ACCELERATOR = torch.accelerator.is_available()
 
 
