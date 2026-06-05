@@ -435,8 +435,6 @@ coverage_ignore_functions = [
     # torch.backends.cudnn.rnn
     "get_cudnn_mode",
     "init_dropout_state",
-    # torch.backends.xeon.run_cpu
-    "create_args",
     # torch.cuda.amp.autocast_mode
     "custom_bwd",
     "custom_fwd",
@@ -453,18 +451,7 @@ coverage_ignore_functions = [
     # torch.cuda.profiler
     "init",
     # torch.distributed.checkpoint.default_planner
-    "create_default_global_load_plan",
-    "create_default_global_save_plan",
     "create_default_local_load_plan",
-    "create_default_local_save_plan",
-    # torch.distributed.checkpoint.optimizer
-    "load_sharded_optimizer_state_dict",
-    # torch.distributed.checkpoint.planner_helpers
-    "create_read_items_for_chunk_list",
-    # torch.distributed.checkpoint.state_dict_loader
-    "load_state_dict",
-    # torch.distributed.checkpoint.state_dict_saver
-    "save_state_dict",
     # torch.distributed.checkpoint.utils
     "find_state_dict_object",
     "find_tensor_shard",
@@ -476,6 +463,8 @@ coverage_ignore_functions = [
     "recv",
     "reduce",
     "reduce_scatter",
+    # deprecated aliases of all_gather_single / reduce_scatter_single
+    "all_gather_into_tensor",
     "reduce_scatter_tensor",
     "scatter",
     "scatter_object_list",
@@ -542,7 +531,6 @@ coverage_ignore_functions = [
     # torch.distributed.rendezvous
     "rendezvous",
     # torch.distributed.rpc.api
-    "get_worker_info",
     "method_factory",
     "new_method",
     "remote",
@@ -550,19 +538,11 @@ coverage_ignore_functions = [
     "rpc_sync",
     "shutdown",
     # torch.distributed.rpc.backend_registry
-    "backend_registered",
     "construct_rpc_backend_options",
     "init_backend",
-    "register_backend",
     # torch.distributed.rpc.internal
     "deserialize",
     "serialize",
-    # torch.distributed.tensor.parallel.api
-    "parallelize_module",
-    # torch.distributed.tensor.parallel.input_reshard
-    "input_reshard",
-    # torch.distributed.tensor.parallel.loss
-    "loss_parallel",
     # torch.distributed.tensor.parallel.style
     "make_sharded_output_tensor",
     # torch.fx.passes.dialect.common.cse_pass
@@ -934,18 +914,6 @@ coverage_ignore_functions = [
     "storage_to_tensor_type",
     "validate_cuda_device",
     "validate_hpu_device",
-    # torch.signal.windows.windows
-    "bartlett",
-    "blackman",
-    "cosine",
-    "exponential",
-    "gaussian",
-    "general_cosine",
-    "general_hamming",
-    "hamming",
-    "hann",
-    "kaiser",
-    "nuttall",
     # torch.utils.backend_registration
     "generate_methods_for_privateuse1_backend",
     "rename_privateuse1_backend",
@@ -981,8 +949,6 @@ coverage_ignore_functions = [
     "detach_variable",
     "get_device_states",
     "noop_context_fn",
-    # torch.utils.cpp_backtrace
-    "get_cpp_backtrace",
     # torch.utils.cpp_extension
     "check_compiler_is_gcc",
     "check_compiler_ok_for_platform",
@@ -1037,7 +1003,6 @@ coverage_ignore_functions = [
     "apply_shuffle_settings",
     "get_all_graph_pipes",
     # torch.utils.hooks
-    "unserializable_hook",
     "warn_if_has_hooks",
     # torch.utils.jit.log_extract
     "extract_ir",
@@ -1071,8 +1036,6 @@ coverage_ignore_functions = [
     "tensor_proto",
     "text",
     "video",
-    # torch.utils.throughput_benchmark
-    "format_time",
 ]
 
 coverage_ignore_classes = [

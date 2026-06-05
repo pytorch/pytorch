@@ -22,7 +22,6 @@ __all__ = [
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
-    "align_tensors",
     "broadcast_shapes",
     "broadcast_tensors",
     "cartesian_prod",
@@ -84,7 +83,7 @@ def broadcast_shapes(*shapes):
 
     This is equivalent to
     ``torch.broadcast_tensors(*map(torch.empty, shapes))[0].shape``
-    but avoids the need create to intermediate tensors. This is useful for
+    but avoids the need to create intermediate tensors. This is useful for
     broadcasting tensors of common batch shape but different rightmost shape,
     e.g. to broadcast mean vectors with covariance matrices.
 
@@ -1163,7 +1162,7 @@ def _consecutive_return_inverse_and_counts(
     return_counts=False,
     dim=None,
 ):
-    # type: (Tensor, bool, bool, Optional[int]) -> tuple[Tensor]
+    # type: (Tensor, bool, bool, Optional[int]) -> tuple[Tensor, Tensor, Tensor]
     if has_torch_function_unary(input):
         return _unique_consecutive_torch_function(
             input, return_inverse, return_counts, dim
@@ -2266,7 +2265,3 @@ lu = boolean_dispatch(
     func_name="lu",
 )
 lu.__doc__ = _lu_impl.__doc__
-
-
-def align_tensors(*tensors):
-    raise RuntimeError("`align_tensors` not yet implemented.")

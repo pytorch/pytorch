@@ -1993,6 +1993,60 @@ except RuntimeError as e:
         out = torch.ops.libtorch_agn_2_13.identity_with_fake_module.default(t)
         self.assertEqual(out, t)
 
+    @skipIfTorchVersionLessThan(2, 12)
+    def test_my_exception_what(self, device):
+        """Test exception what() handling."""
+        import libtorch_agn_2_13 as libtorch_agnostic
+
+        # We'll subtract two tensors of different sizes to create an exception.
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(1, 2, device=device)
+
+        # Verify that the provided two tensors should error if subtracted.
+        self.assertRaises(RuntimeError, lambda: torch.subtract(a, b))
+
+        # Function to generate an exception that uses TORCH_ERROR_CHECK internally.
+        def make_exception_torch():
+            libtorch_agnostic.ops.our_subtract_torch_error_check(a, b)
+
+        # Regex to match the simple error.
+        expect_re = (
+            "aoti_torch_aten_subtract_Tensor\\(self.get\\(\\), other.get\\(\\), alpha, &ret0\\) API call"
+            " failed at .+?, line \\d+$"
+        )
+        # Verify that an operation using TORCH_ERROR_CHECK provides simple errors.
+        self.assertRaisesRegex(RuntimeError, expect_re, make_exception_torch)
+
+        # Function that generates an exception that uses STABLE_TORCH_ERROR_CODE_CHECK internally.
+        def make_exception_stable():
+            libtorch_agnostic.ops.our_subtract_stable_error_check(a, b)
+
+        # This is the actual string we'll expect.
+        expect = (
+            "The size of tensor a (4) must match the size of tensor b (2) at"
+            " non-singleton dimension 1"
+        )
+
+        # This is a regular expression to match the error against.
+        expect_re = (
+            "^The size of tensor a \\(\\d\\) must match the size of "
+            "tensor b \\(\\d\\) at non-singleton dimension \\d.*"
+        )
+        # Verify that an operation using STABLE_TORCH_ERROR_CHECK provides detailed errors.
+        self.assertRaisesRegex(RuntimeError, expect_re, make_exception_stable)
+
+        # Retrieve the exception message directly.
+        self.assertEqual(
+            libtorch_agnostic.ops.my_exception_get_what_without_backtrace(), expect
+        )
+
+        # Verify the one with backtrace contains additional information.
+        with_backtrace = libtorch_agnostic.ops.my_exception_what()
+        self.assertTrue(with_backtrace.startswith(expect))
+        self.assertTrue(
+            with_backtrace.count("\n") > 10
+        )  # Conservative, backtrace is 25 lines.
+
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

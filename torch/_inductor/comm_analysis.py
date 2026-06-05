@@ -457,7 +457,7 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> float | None:  # t
     kernel = snode.node
     assert kernel is not None
     py_kernel_name = getattr(kernel, "python_kernel_name", "")
-    pg_name = kernel.constant_args[-1]
+    pg_name = kernel.constant_args[-1]  # type: ignore[attr-defined]
     from torch.distributed.distributed_c10d import _resolve_process_group
 
     pg = _resolve_process_group(pg_name)
@@ -747,7 +747,7 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
     args, kwargs = fx_node.args, fx_node.kwargs
     kwargs = dict(kwargs)
 
-    # dont double count pre-allocated buffer passed in
+    # don't double count pre-allocated buffer passed in
     kwargs.pop("out", None)
 
     def tensor_bytes(t: torch.Tensor) -> int:

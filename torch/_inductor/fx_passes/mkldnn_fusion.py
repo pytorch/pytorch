@@ -30,7 +30,6 @@ from .post_grad import register_lowering_pattern
 from .quantization import (
     _register_int8_woq_concat_linear_pattern,
     _register_quantization_lowerings,
-    _register_quantization_weight_pack_pass,
     _register_woq_lowerings,
 )
 
@@ -185,7 +184,7 @@ if torch._C._has_mkldnn:
         computation_op = mkldnn._linear_pointwise.default
         act = computation_nodes[0].args[0]
         wgt = computation_nodes[0].args[1]
-        wgt_size = wgt.meta.get("val").size()
+        wgt_size = wgt.meta.get("val").size()  # type: ignore[union-attr]
         return len(computation_nodes) >= 2 and all(
             (
                 node.target == computation_op
@@ -456,6 +455,7 @@ if torch._C._has_mkldnn:
         @register_lowering_pattern(
             pattern,
             extra_check=_is_valid_computation_unary_fusion(computation_op, lowp_dtype),
+            output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
             computation_args = list(args)[:-3] + [
@@ -473,7 +473,9 @@ if torch._C._has_mkldnn:
 
     def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
+            pattern,
+            extra_check=_is_single_computation_op(computation_op, lowp_dtype),
+            output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
             negative_slope = kwargs.get("negative_slope")
@@ -519,7 +521,9 @@ if torch._C._has_mkldnn:
 
     def _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
+            pattern,
+            extra_check=_is_single_computation_op(computation_op, lowp_dtype),
+            output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
             min_value = kwargs.get("min_value")
@@ -739,7 +743,9 @@ if torch._C._has_mkldnn:
         unary_attr=None,
     ):
         @register_lowering_pattern(
-            pattern, extra_check=_is_valid_computation_binary(computation_op, binary_op)
+            pattern,
+            extra_check=_is_valid_computation_binary(computation_op, binary_op),
+            output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
             other = kwargs.get("other")
@@ -795,7 +801,7 @@ if torch._C._has_mkldnn:
                 for op in V.graph.operations:
                     if (
                         isinstance(op, mkldnn_ir.QLinearPointwiseBinaryPT2E)
-                        and unwrap_buffer(data) == op.inputs[6]
+                        and unwrap_buffer(data) == op.inputs[6]  # type: ignore[attr-defined]
                     ):
                         return True
             return False
@@ -818,6 +824,7 @@ if torch._C._has_mkldnn:
             extra_check=_is_valid_computation_binary_inplace(
                 computation_op, binary_op, other_index
             ),
+            output_metadata_ignores_input_storage=True,
         )
         def fn(match, *args, **kwargs):
             other = kwargs.get("other")
@@ -1107,10 +1114,9 @@ if torch._C._has_mkldnn:
             )
             weight_meta = transpose_weight_node.args[0].meta.get("val")
             bias_node = add_node.args[1]
-            if isinstance(bias_node, int):
-                # we only folding bias if it is a constant
+            if not isinstance(bias_node, torch.fx.Node):
                 return False
-            bias_meta = add_node.args[1].meta.get("val")
+            bias_meta = bias_node.meta.get("val")
             if weight_meta is None or bias_meta is None:
                 return False
 
@@ -1587,5 +1593,4 @@ if torch._C._has_mkldnn:
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_weight_pack_pass()
             _recover_linear()
-            _register_quantization_weight_pack_pass()
             _register_int8_woq_concat_linear_pattern()
