@@ -772,6 +772,29 @@ class FakeTensorTest(TestCase):
         with torch._subclasses.CrossRefFakeMode():
             y = torch.full((4, 4), 1)
 
+    def test_tensor_constructor_meta_device(self):
+        with FakeTensorMode(), torch.device("meta"):
+            scalar = torch.tensor(3.0)
+            values = torch.tensor([1.0, 2.0, 3.0])
+
+        self.assertIsInstance(scalar, FakeTensor)
+        self.assertEqual(scalar.device, torch.device("meta"))
+        self.assertEqual(scalar.shape, ())
+        self.assertIsInstance(values, FakeTensor)
+        self.assertEqual(values.device, torch.device("meta"))
+        self.assertEqual(values.shape, (3,))
+
+        with FakeTensorMode():
+            explicit = torch.tensor(3.0, device="meta")
+            explicit_indexed = torch.tensor(3.0, device="meta:0")
+
+        self.assertIsInstance(explicit, FakeTensor)
+        self.assertEqual(explicit.device, torch.device("meta"))
+        self.assertEqual(explicit.shape, ())
+        self.assertIsInstance(explicit_indexed, FakeTensor)
+        self.assertEqual(explicit_indexed.device, torch.device("meta"))
+        self.assertEqual(explicit_indexed.shape, ())
+
     def check_function_with_fake(self, fn):
         out = fn()
         with torch._subclasses.FakeTensorMode():
