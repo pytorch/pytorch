@@ -268,6 +268,20 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             code,
         )
 
+    def test_codegen_config_skips_non_importable_callables(self):
+        with config3.patch(
+            {
+                "e_func": lambda x: x,
+                "e_set": {lambda x: x},
+            }
+        ):
+            code = config3.codegen_config()
+
+        self.assertIn("e_func omitted", code)
+        self.assertIn("e_set omitted", code)
+        self.assertNotIn("<lambda>", code)
+        compile(code, "<config>", "exec")
+
     def test_get_hash(self):
         hash_value = b"#d\x8b\xd3\xbc'\xf5\x0c\xcd\xb6\x87zDw6g"
 

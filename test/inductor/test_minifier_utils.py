@@ -88,17 +88,42 @@ class MinifierUtilsTests(TestCase):
         model = M()
         gm = torch.export.export(model, inputs, strict=False).module(check_guards=False)
 
-        # TODO: make NNModuleToString.convert() generate string for nested submodules.
         model_string = get_module_string(gm)
         self.assertExpectedInline(
             model_string.strip(),
             """\
 # from torch.nn import *
+# class Repro_0_true_graph_0(torch.nn.Module):
+#     def __init__(self) -> None:
+#         super().__init__()
+
+
+
+#     def forward(self, x):
+#         clone = torch.ops.aten.clone.default(x);  x = None
+#         return (clone,)
+
+
+
+# from torch.nn import *
+# class Repro_1_false_graph_0(torch.nn.Module):
+#     def __init__(self) -> None:
+#         super().__init__()
+
+
+
+#     def forward(self, x):
+#         clone = torch.ops.aten.clone.default(x);  x = None
+#         return (clone,)
+
+
+
+# from torch.nn import *
 # class Repro(torch.nn.Module):
 #     def __init__(self) -> None:
 #         super().__init__()
-#         self.true_graph_0 = <lambda>()
-#         self.false_graph_0 = <lambda>()
+#         self.true_graph_0 = Repro_0_true_graph_0()
+#         self.false_graph_0 = Repro_1_false_graph_0()
 
 
 
