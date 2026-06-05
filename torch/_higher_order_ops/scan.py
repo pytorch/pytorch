@@ -878,8 +878,7 @@ def scan_autograd(combine_fn, init, xs, additional_inputs):
         flipped = [
             t
             for t in init
-            if (t.dtype.is_floating_point or t.dtype.is_complex)
-            and not t.requires_grad
+            if (t.dtype.is_floating_point or t.dtype.is_complex) and not t.requires_grad
         ]
         try:
             for t in flipped:
