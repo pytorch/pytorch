@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import \
     (instantiate_parametrized_tests, parametrize, run_tests, skipIfNoCuteDSL,
      subtest, TestCase, DeterministicGuard, TEST_CUDA, TEST_WITH_ROCM, serialTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+    (instantiate_device_type_tests, onlyCPU, onlyAccelerator, dtypes, dtypesIfCUDA,
      toleranceOverride, tol,)
 from torch.testing._internal.common_dtype import \
     (get_all_dtypes,)
@@ -74,7 +74,7 @@ class TestScatterGather(TestCase):
     def test_gather_large(self, device, dtype):
         # test larger shapes to check vectorized implementation
         for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192)):
-            torch.cuda.empty_cache()
+            torch.accelerator.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
             alloc0 = torch.empty(src.nelement() * 2, device=device, dtype=dtype)
             discontig = alloc0.view(m, 2 * k)[:, ::2].copy_(src)
@@ -284,7 +284,7 @@ class TestScatterGather(TestCase):
                 self.assertEqual(res1[:, 0], n * torch.ones(m, device=device, dtype=dtype), atol=0, rtol=0)
 
     @serialTest()
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32, torch.half, torch.bfloat16)
     def test_scatter_add_large(self, device, dtype):
         # test larger shapes that exercise the vectorized/TMA scatter_add path
@@ -303,7 +303,7 @@ class TestScatterGather(TestCase):
         else:
             shapes.append((4, 4, 16384 * 256))
         for (m, n, k) in shapes:
-            torch.cuda.empty_cache()
+            torch.accelerator.empty_cache()
             self_tensor = torch.zeros(m, k, device=device, dtype=dtype)
             src = make_tensor((n, k), device=device, dtype=dtype)
             # contiguous + aligned (should hit fast path on dim=0)
