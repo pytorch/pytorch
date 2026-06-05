@@ -128,7 +128,25 @@ def {{ kernel_name }}_precompile(precompile_shapes, precompile_strides, precompi
 {{ compute_cache_key() }}
     mem_key = (cache_key, device_index)
     if mem_key not in _compiled_cache:
-        artifact = kernel.compile(args)
+        # cutlass_api needs an initialized CUDA context to query device
+        # occupancy while compiling. This precompile may run in an async-compile
+        # worker that was forked from a CUDA-initialized parent, where CUDA
+        # cannot be (re)initialized. In that case skip precompile and let the
+        # kernel compile lazily on first call in the main process, matching the
+        # dynamic-shapes skip in NVUniversalGemmScheduling. The proper fix is
+        # to run CUDA-dependent compile workers under 'spawn'; until then this
+        # avoids a hard CUDA_ERROR_NOT_INITIALIZED crash. Only the forked-init
+        # failure is swallowed; other RuntimeErrors propagate.
+        try:
+            torch.cuda.init()
+        except RuntimeError as exc:
+            if "forked subprocess" not in str(exc):
+                raise
+            return
+        # Use a scoped device guard so precompile does not permanently change
+        # the current device of the (possibly main) process it runs in.
+        with torch.cuda.device(device_index):
+            artifact = kernel.compile(args)
         disk_cache_set(
             _disk_fn_cache, __file__, _DISK_CACHE_CONFIG_KEY,
             cache_key, artifact.compiled_obj, device_index,
