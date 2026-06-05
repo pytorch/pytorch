@@ -7630,9 +7630,16 @@ def reduce_max(x, dim=None, keepdim=False):
                 reduce_argmax_value(x, axis=dim, keepdims=keepdim),
                 reduce_argmax(x, axis=dim, keepdims=keepdim),
             )
+        arg_x = x
+        if (
+            x.get_dtype() == torch.bool
+            and ir.get_device_type(x) == "cpu"
+            and config.cpu_backend == "cpp"
+        ):
+            arg_x = to_dtype(x, torch.int32)
         return (
             reduce_amax(x, axis=dim, keepdims=keepdim),
-            reduce_argmax(x, axis=dim, keepdims=keepdim),
+            reduce_argmax(arg_x, axis=dim, keepdims=keepdim),
         )
 
     return reduce_amax(x, axis=None, keepdims=keepdim)
@@ -7648,9 +7655,16 @@ def reduce_min(x, dim=None, keepdim=False):
                 reduce_argmin_value(x, axis=dim, keepdims=keepdim),
                 reduce_argmin(x, axis=dim, keepdims=keepdim),
             )
+        arg_x = x
+        if (
+            x.get_dtype() == torch.bool
+            and ir.get_device_type(x) == "cpu"
+            and config.cpu_backend == "cpp"
+        ):
+            arg_x = to_dtype(x, torch.int32)
         return (
             reduce_amin(x, axis=dim, keepdims=keepdim),
-            reduce_argmin(x, axis=dim, keepdims=keepdim),
+            reduce_argmin(arg_x, axis=dim, keepdims=keepdim),
         )
 
     return reduce_amin(x, axis=None, keepdims=keepdim)

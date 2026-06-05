@@ -257,9 +257,7 @@ def reduction_combine(
             if index is not None:
                 return f"{reduction_type}_combine({var}, static_cast<{compute_type}>({next_value}), {index})"
             else:
-                return (
-                    f"{reduction_type}_combine({var}, static_cast<{compute_type}>({next_value}))"
-                )
+                return f"{reduction_type}_combine({var}, static_cast<{compute_type}>({next_value}))"
         if index is not None:
             return f"{reduction_type}_combine({var}, {next_value}, {index})"
         else:
@@ -2800,6 +2798,15 @@ class CppVecKernel(CppKernel):
         num_vectors = self._get_num_vectors(dtype)
         return f"{mask}.template cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>()"
 
+    def _arg_reduction_compute_dtype(self, dtype: torch.dtype) -> torch.dtype:
+        if dtype != torch.bool:
+            return DTYPE_TO_COMPUTATION_DTYPE[dtype]
+        return (
+            _arg_reduction_value_dtype(dtype)
+            if self.use_bool_arg_reduction_loads
+            else torch.float
+        )
+
     def _get_vec_load_line(
         self,
         var: str,
@@ -3140,7 +3147,12 @@ class CppVecKernel(CppKernel):
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
-        acc_type = reduction_acc_type(reduction_type, init_dtype)
+        acc_dtype = (
+            self._arg_reduction_compute_dtype(init_dtype)
+            if argmax_or_argmin
+            else init_dtype
+        )
+        acc_type = reduction_acc_type(reduction_type, acc_dtype)
         acc_type_vec = self.reduction_acc_type_vec(reduction_type, init_dtype)
 
         acc = self.reduction_cse.generate(
@@ -3154,7 +3166,7 @@ class CppVecKernel(CppKernel):
         self.is_reduction = True
         self.reduction_prefix_generators.append(
             self._gen_reduction_prefix(
-                acc, acc_type, reduction_type, init_dtype, reduction_init
+                acc, acc_type, reduction_type, acc_dtype, reduction_init
             )
         )
         self.reduction_prefix_generators.append(
@@ -3277,7 +3289,7 @@ class CppVecKernel(CppKernel):
             acc,
             acc_type,
             reduction_type,
-            init_dtype,
+            acc_dtype,
             reduction_combine_fn=reduction_combine,
             reduction_init_fn=reduction_init,
         )
@@ -3433,11 +3445,7 @@ class CppVecKernel(CppKernel):
             return f"Welford<{vec_type}>()"
 
         if reduction_type in ("argmin", "argmax"):
-            compute_dtype = (
-                _arg_reduction_value_dtype(dtype)
-                if dtype == torch.bool
-                else scalar_type
-            )
+            compute_dtype = self._arg_reduction_compute_dtype(dtype)
             cdtype = DTYPE_TO_CPP[compute_dtype]
             acc_type = self.reduction_acc_type_vec(reduction_type, dtype)
             if reduction_type == "argmin":
@@ -3472,7 +3480,7 @@ class CppVecKernel(CppKernel):
         if reduction_type in ("argmin", "argmax"):
             n_idx = self._get_num_vectors(torch.int64)
             if dtype == torch.bool:
-                compute_dtype = _arg_reduction_value_dtype(dtype)
+                compute_dtype = self._arg_reduction_compute_dtype(dtype)
                 n_src = self._get_num_vectors(compute_dtype)
                 return f"IndexValueVec<{DTYPE_TO_CPP[compute_dtype]}, {n_src}, {n_idx}>"
             n_src = self._get_num_vectors(scalar_type)
@@ -3561,9 +3569,9 @@ class CppVecKernel(CppKernel):
             cdtype = DTYPE_TO_CPP[src_dtype]
             compute_dtype = src_dtype
             if src_dtype == torch.bool:
-                compute_dtype = _arg_reduction_value_dtype(src_dtype)
+                compute_dtype = self._arg_reduction_compute_dtype(src_dtype)
                 cdtype = DTYPE_TO_CPP[compute_dtype]
-                # Convert bool VecMask to byte vector for argmax_combine_vec.
+                # Convert bool VecMask to the arg-reduction value vector type.
                 if (
                     isinstance(next_value, CppCSEVariable)
                     and next_value.is_vec
