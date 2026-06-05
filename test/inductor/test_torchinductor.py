@@ -3998,6 +3998,15 @@ class CommonTemplate:
                 b = torch.full((8,), b_val, dtype=dtype, device=self.device)
                 self.common(fn, (a, b))
 
+    def test_normal_negative_std(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/185248
+        # compiled torch.normal must reject negative std like eager does.
+        def fn(mean, std):
+            return torch.normal(mean, std)
+
+        mean = torch.zeros(4, device=self.device)
+        std = torch.full((4,), -1.0, device=self.device)
+        self.common(fn, (mean, std))
     def test_div_precision(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/101039
 

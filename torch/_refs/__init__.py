@@ -6524,6 +6524,11 @@ def normal(
         torch._check(
             std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}"
         )
+    else:
+        torch._check(
+            torch.all(std >= 0),
+            lambda: "normal expects all elements of std >= 0.0",
+        )
 
     if size is None:
         tensors = tuple(t for t in (mean, std) if isinstance(t, TensorLike))
