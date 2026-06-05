@@ -6,16 +6,33 @@ Uses the vendored quack subset at ``torch._vendor.quack``.
 
 from __future__ import annotations
 
+import math
+
 import torch
 
 from ... import cutedsl_utils as cu
 
 
 def _is_supported(input: torch.Tensor) -> bool:
+    if input.device.type != "cuda":
+        return False
+    if torch.version.hip is not None:
+        return False
     if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
         return False
     major, _ = torch.cuda.get_device_capability(input.device)
     return major in (9, 10)
+
+
+def _n_yields_valid_cp_size(n: int, dtype: torch.dtype) -> bool:
+    # quack picks vecsize = gcd(N, 128 // dtype_bits) and lowers each thread's
+    # gmem->smem copy to cp.async, whose PTX cp_size only accepts 32, 64, or
+    # 128 bits. Narrow dtypes with an unfriendly N (e.g. odd N for bf16/fp16)
+    # produce a 16-bit vector copy that fails CuTe IR verification at compile
+    # time; fall through to aten in that case.
+    dtype_bits = torch.finfo(dtype).bits
+    vecsize = math.gcd(n, 128 // dtype_bits)
+    return vecsize * dtype_bits in (32, 64, 128)
 
 
 def _shape_is_valid(
@@ -57,6 +74,8 @@ def _fused_rms_norm_cond(
     # rmsnorm_bwd guards against this with `if x.numel() > 0` (rmsnorm.py:1111)
     # but the fwd path doesn't.
     if input.numel() == 0:
+        return False
+    if not _n_yields_valid_cp_size(math.prod(normalized_shape), input.dtype):
         return False
     # Non-contiguous weight would require a reshape+copy that we haven't
     # measured; fall through to aten until we do.
@@ -107,6 +126,8 @@ def _fused_rms_norm_backward_cond(
     ):
         return False
     if input.numel() == 0:
+        return False
+    if not _n_yields_valid_cp_size(math.prod(normalized_shape), input.dtype):
         return False
     if weight is not None and not weight.is_contiguous():
         return False

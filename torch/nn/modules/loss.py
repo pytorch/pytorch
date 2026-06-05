@@ -1417,6 +1417,17 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         out_features (tuple[int], optional): specifies dimensions
             :math:`(d_1, d_2, ..., d_K)` for K-dimensional loss.
             Default: ``()``.
+        bias (bool, optional): If ``True``, the internal :class:`Linear`
+            adds a learnable bias to the logits. Logical shape is
+            ``(C, *out_features)``; storage is flat
+            (``self.linear.bias.shape == (C * prod(out_features),)``)
+            for the same reason as ``self.linear.weight`` -- reshaping
+            happens in :meth:`forward` before passing through to
+            :func:`~torch.nn.functional.linear_cross_entropy` as
+            ``linear_bias``. With ``options != None``, K-dimensional
+            bias (``out_features != ()``) falls back to the reference
+            implementation with a warning; the chunked path supports
+            only ``(C,)``-shaped bias. Default: ``False``.
         device (:class:`torch.device`, optional): the desired device
             of linear weight.  Default: ``None``.
         dtype (:class:`torch.dtype`, optional): the desired dtype of
@@ -1526,6 +1537,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         num_classes: int,
         *,
         out_features: tuple[int, ...] = (),
+        bias: bool = False,
         device=None,
         dtype=None,
         reduction: str = "mean",
@@ -1557,7 +1569,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         self.linear = Linear(
             in_features,
             math.prod(out_features, start=num_classes),
-            bias=False,
+            bias=bias,
             device=device,
             dtype=dtype,
         )
@@ -1568,10 +1580,16 @@ class LinearCrossEntropyLoss(_WeightedLoss):
         linear_weight = self.linear.weight.reshape(
             (self.num_classes, *self.out_features, self.linear.in_features)
         )
+        linear_bias = (
+            self.linear.bias.reshape((self.num_classes, *self.out_features))
+            if self.linear.bias is not None
+            else None
+        )
         return F.linear_cross_entropy(
             input,
             linear_weight,
             target,
+            linear_bias=linear_bias,
             weight=self.weight,
             reduction=self.reduction,
             ignore_index=self.ignore_index,
@@ -1584,6 +1602,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
             f"in_features={self.linear.in_features},"
             f" num_classes={self.num_classes},"
             f" out_features={self.out_features},"
+            f" bias={self.linear.bias is not None},"
             f" reduction={self.reduction},"
             f" ignore_index={self.ignore_index},"
             f" label_smoothing={self.label_smoothing},"
@@ -1724,7 +1743,7 @@ class MarginRankingLoss(_Loss):
     inputs :math:`x1`, :math:`x2`, two 1D mini-batch or 0D `Tensors`,
     and a label 1D mini-batch or 0D `Tensor` :math:`y` (containing 1 or -1).
 
-    If :math:`y = 1` then it assumed the first input should be ranked higher
+    If :math:`y = 1` then it is assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for :math:`y = -1`.
 
     The loss function for each pair of samples in the mini-batch is:
