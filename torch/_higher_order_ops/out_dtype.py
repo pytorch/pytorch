@@ -143,7 +143,7 @@ def out_dtype_proxy(
     return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
 
 
-@register_fake(out_dtype)
+@register_fake(out_dtype, skip_cache=True)
 def out_dtype_fake_tensor_mode(
     op: torch._ops.OpOverload,
     output_dtype: torch.dtype,

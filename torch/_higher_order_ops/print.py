@@ -85,7 +85,7 @@ def print_proxy_torch_dispatch_mode(
     )
 
 
-@register_fake(print)
+@register_fake(print, skip_cache=True)
 # pyre-ignore
 def print_fake_tensor_mode(format_str: str, *args: object, **kwargs: object):
     return None

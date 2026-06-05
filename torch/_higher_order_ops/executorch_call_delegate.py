@@ -130,7 +130,7 @@ def call_delegate_proxy_torch_dispatch_mode(mode, lowered_module, *args):
     return res
 
 
-@register_fake(executorch_call_delegate)
+@register_fake(executorch_call_delegate, skip_cache=True)
 # pyre-ignore
 def call_delegate_fake_tensor_mode(lowered_module, *args):
     return call_delegate_cpu(lowered_module, *args)

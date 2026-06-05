@@ -77,7 +77,7 @@ def trace_strict_mode(mode, strict_mode_op, callable, operands):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
 
 
-@register_fake(strict_mode_op)
+@register_fake(strict_mode_op, skip_cache=True)
 def strict_mode_fake_tensor_mode(callable, operands):
     return callable(*operands)
 

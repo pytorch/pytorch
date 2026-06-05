@@ -557,7 +557,7 @@ def functional_mode_key(
         return ctx.wrap_tensors(out)
 
 
-@register_fake(local_map_hop)
+@register_fake(local_map_hop, skip_cache=True)
 def fake_mode_key(
     gm: GraphModule,
     *args: Any,

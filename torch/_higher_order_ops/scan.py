@@ -879,7 +879,7 @@ def scan_proxy_mode(mode, combine_fn, init, xs, additional_inputs):
     return trace_scan(mode, scan_op, combine_fn, init, xs, additional_inputs)
 
 
-@register_fake(scan_op)
+@register_fake(scan_op, skip_cache=True)
 def scan_fake_tensor_mode(combine_fn, init, xs, additional_inputs):
     scan_length = xs[0].shape[0]
     carry, outputs = _extract_carry_and_out(

@@ -155,7 +155,7 @@ def with_effects_dense(
     return (new_token, out)
 
 
-@register_fake(with_effects)
+@register_fake(with_effects, skip_cache=True)
 def with_effects_fake(
     token: torch.Tensor,
     op: torch._ops.OpOverload,

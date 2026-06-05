@@ -130,7 +130,7 @@ def call_delegate_proxy_torch_dispatch_mode(
     return res
 
 
-@register_fake(aoti_call_delegate)
+@register_fake(aoti_call_delegate, skip_cache=True)
 def call_delegate_fake_tensor_mode(
     lowered_module: AOTI_LOWERED_MODULE,  # type: ignore[valid-type]
     original_gm: torch.fx.GraphModule,

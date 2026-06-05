@@ -65,7 +65,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         self.py_autograd_impl(self._call_Autograd)
         self.py_functionalize_impl(self._call_Functionalize)
         self.py_impl(ProxyTorchDispatchMode)(self._call_ProxyTorchDispatchMode)
-        register_fake(self, self._fake_impl)
+        register_fake(self, self._fake_impl, skip_cache=True)
         self.py_impl(DispatchKey.CompositeExplicitAutograd)(
             self._call_CompositeExplicitAutograd
         )

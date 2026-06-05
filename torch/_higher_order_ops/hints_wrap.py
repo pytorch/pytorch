@@ -79,7 +79,7 @@ hints_wrapper.py_autograd_impl(
 )
 
 
-@register_fake(hints_wrapper)
+@register_fake(hints_wrapper, skip_cache=True)
 def hints_wrapper_fake_tensor_mode(body_func, args, kwargs, hints):
     flat_args = pytree.tree_leaves(args)
     return body_func(*flat_args, **kwargs)

@@ -346,7 +346,7 @@ def map_proxy_torch_dispatch_mode(mode, f, xs, args):
     return trace_map(mode, map_impl, f, xs, args)
 
 
-@register_fake(map_impl)
+@register_fake(map_impl, skip_cache=True)
 def map_fake_tensor_mode(f, xs, args):
     from torch._higher_order_ops.utils import first_slice_copy
 

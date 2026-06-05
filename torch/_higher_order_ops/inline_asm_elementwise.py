@@ -248,7 +248,7 @@ def _elementwise_output_like(*inputs, dtype):
     )
 
 
-@register_fake(inline_asm_elementwise)
+@register_fake(inline_asm_elementwise, skip_cache=True)
 def _(*inputs, asm_str, constraints, dtype, is_pure=True, pack=1):
     return _elementwise_output_like(*inputs, dtype=dtype)
 

@@ -45,7 +45,7 @@ def export_tracepoint_dispatch_mode(mode, *args, **kwargs):
     return track_tensor_tree(args, proxy, constant=None, tracer=mode.tracer)
 
 
-@register_fake(_export_tracepoint)
+@register_fake(_export_tracepoint, skip_cache=True)
 def export_tracepoint_fake_tensor_mode(*args, **kwargs):
     return args
 

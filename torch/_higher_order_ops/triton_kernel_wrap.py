@@ -1406,7 +1406,7 @@ def triton_kernel_wrapper_mutation_dense(
     kernel[grid_fn](*args, **kwargs, **constant_args)
 
 
-@register_fake(triton_kernel_wrapper_mutation)
+@register_fake(triton_kernel_wrapper_mutation, skip_cache=True)
 def triton_kernel_wrapper_mutation_fake_tensor_mode(
     *,
     kernel_idx: int,
@@ -1575,7 +1575,7 @@ def triton_kernel_wrapper_functional_dense(
     return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
 
 
-@register_fake(triton_kernel_wrapper_functional)
+@register_fake(triton_kernel_wrapper_functional, skip_cache=True)
 def triton_kernel_wrapper_functional_fake_tensor_mode(
     *,
     kernel_idx: int,

@@ -2018,7 +2018,7 @@ class FakeTensorMode(TorchDispatchMode):
         prevent caching it.
         """
         from torch._higher_order_ops.utils import (
-            output_alias_hops,
+            hops_that_skip_faketensor_cache,
             registered_hop_fake_fns,
         )
         from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
@@ -2030,8 +2030,8 @@ class FakeTensorMode(TorchDispatchMode):
         # caching.
         # NB: Note that the HOPs that sta alive till FakeTensor are functional,
         # once they support mutations, we will have to revisit this logic.
-        # We cannot cache HOPs that do output aliasing because cache does not store
-        # the alias relationship so on a cache hit, you'll get two different tensors
+        # Skipping caching for HOPs that used to be registered with @py.impl(FakeTensorMode)
+        # to preserve original behaviour
         if (
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
@@ -2043,11 +2043,12 @@ class FakeTensorMode(TorchDispatchMode):
                     and has_free_unbacked_symbols(o)
                     for o in outs
                 )
-                or func in output_alias_hops
+                or func in hops_that_skip_faketensor_cache
             )
             if non_cacheable:
                 raise _BypassDispatchCache(
-                    f"non_cacheable, unbacked symbol in HOP {func} output or HOP {func} does output aliasing"
+                    f"unbacked symbol in HOP {func} output \
+                    or {func} in hops_that_skip_faketensor_cache"
                 )
 
         if isinstance(output, (int, torch.SymInt, type(None))):

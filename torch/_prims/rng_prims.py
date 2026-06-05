@@ -192,7 +192,7 @@ def register_run_and_save_rng_state_op():
         impl = impl_map[device]
         return impl(op, *args, **kwargs)
 
-    @register_fake(run_and_save_rng_state)
+    @register_fake(run_and_save_rng_state, skip_cache=True)
     def impl_fake_tensor_mode(op, *args, **kwargs):
         # Check device to call the right impl
         return impl_backend_select(op, *args, **kwargs)
@@ -286,7 +286,7 @@ def register_run_with_rng_state_op():
         impl = impl_map[device]
         return impl(rng_state, op, *args, **kwargs)
 
-    @register_fake(run_with_rng_state)
+    @register_fake(run_with_rng_state, skip_cache=True)
     def impl_fake_tensor_mode(rng_state, op, *args, **kwargs):
         # Skip setting the set_rng_state as it does not work well with fake tensors.
         # And it does not matter for the fake tensor mode.
@@ -357,7 +357,7 @@ def register_graphsafe_run_with_rng_state_op():
             )
         return _impl_graphsafe_rng(op, *args, rng_state=rng_state, **kwargs)
 
-    @register_fake(graphsafe_run_with_rng_state)
+    @register_fake(graphsafe_run_with_rng_state, skip_cache=True)
     def impl_fake_tensor_mode(op, *args, rng_state=None, **kwargs):
         return op(*args, **kwargs)
 
@@ -488,7 +488,7 @@ def register_run_dtensor_rng_op():
             )
         return impl_cuda(start_offset_incr, end_offset_incr, op, *args, **kwargs)
 
-    @register_fake(run_dtensor_rng_op)
+    @register_fake(run_dtensor_rng_op, skip_cache=True)
     def impl_fake_tensor_mode(start_offset_incr, end_offset_incr, op, *args, **kwargs):
         return op(*args, **kwargs)
 

@@ -61,7 +61,7 @@ run_const_graph.py_autograd_impl(
 )
 
 
-@register_fake(run_const_graph)
+@register_fake(run_const_graph, skip_cache=True)
 def run_const_graph_fake_tensor_mode(
     graph: torch.fx.GraphModule, args: tuple[object, ...]
 ) -> object:
