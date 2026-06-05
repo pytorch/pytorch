@@ -23,7 +23,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymNode,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Max, Min, Mod, ModularIndexing
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
@@ -186,7 +186,8 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
-    index = sympy.simplify(index)
+    if not index.has(sympy.Rel):
+        index = sympy.simplify(index)
     if index != original_index:
         return simplify_index_in_vec_range(index, var, vec_length)
 
@@ -936,10 +937,10 @@ class SizeVarAllocator:
                 return self.guard_or_false(sympy.Le(a, rhs))
 
             # Min(Min(a, b), c) ==> Min(a, b) if (a <= c) or (b <= c).
-            if isinstance(lhs, sympy.Min) and any(le_rhs(a) for a in lhs.args):
+            if isinstance(lhs, (sympy.Min, Min)) and any(le_rhs(a) for a in lhs.args):
                 return lhs
             # Min(Max(a, b), c) ==> Max(a, b) if (a <= c) and (b <= c).
-            if isinstance(lhs, sympy.Max) and all(le_rhs(a) for a in lhs.args):
+            if isinstance(lhs, (sympy.Max, Max)) and all(le_rhs(a) for a in lhs.args):
                 return lhs
 
         raise TypeError(
@@ -1339,7 +1340,9 @@ class SizeVarAllocator:
         return index
 
     def expand_floor_div(
-        self, index: sympy.Expr
+        self,
+        index: sympy.Expr,
+        candidate_vars: Iterable[sympy.Symbol] | None = None,
     ) -> bool | tuple[sympy.Expr, sympy.Expr]:
         """
         Expand the FloorDiv to the entire expression so that the expression may
@@ -1352,10 +1355,73 @@ class SizeVarAllocator:
         '(x1 * 2b + x2) // 2'. This transformation allows us to merge loops
         for the numerator!
 
-        Return false if this optimization can be applied;
+        Return false if this optimization cannot be applied;
         Return the new expression and the denominator otherwise.
         The original expression will be equivalent to 'new_expression // denominator'
         """
+        candidate_vars_set = (
+            OrderedSet(candidate_vars) if candidate_vars is not None else None
+        )
+
+        def parse_static_term(
+            term: sympy.Expr,
+        ) -> tuple[sympy.Expr, sympy.Symbol] | None:
+            if not isinstance(term, sympy.Mul):
+                return None
+            # For dynamic shape, term like '2*s1*x1' has 3 child nodes.
+            # Without candidate loop vars we cannot tell shape and loop
+            # symbols apart, so preserve the historical conservative path.
+            if len(term.args) != 2:
+                return None
+            factor, var = term.args
+            if not isinstance(factor, sympy.Integer) or not isinstance(
+                var, sympy.Symbol
+            ):
+                return None
+            return factor, var
+
+        def parse_term(term: sympy.Expr) -> tuple[sympy.Expr, sympy.Symbol] | None:
+            if candidate_vars_set is None:
+                parsed = parse_static_term(term)
+                if parsed is None:
+                    return None
+                factor, var = parsed
+            else:
+                if isinstance(term, sympy.Symbol):
+                    factor = sympy.S.One
+                    var = term
+                elif isinstance(term, sympy.Mul):
+                    vars_in_term = [
+                        symbol
+                        for symbol in term.free_symbols
+                        if symbol in candidate_vars_set
+                    ]
+                    if len(vars_in_term) == 0:
+                        parsed = parse_static_term(term)
+                        if parsed is None:
+                            return None
+                        factor, var = parsed
+                    elif len(vars_in_term) == 1:
+                        var = vars_in_term[0]
+                        factor = sympy.cancel(term / var)
+                        if factor.has(*candidate_vars_set):
+                            return None
+                        if factor.is_integer is not True:
+                            return None
+                    else:
+                        return None
+                else:
+                    return None
+
+                if var not in candidate_vars_set:
+                    return None
+
+            # It's easier to reason about the correctness of the transformation
+            # for non-negative integers.
+            if not self.statically_known_geq(var, 0):
+                return None
+            return factor, var
+
         if not isinstance(index, sympy.Add):
             return False
         terms = index.args
@@ -1366,30 +1432,17 @@ class SizeVarAllocator:
         varlist = []
         factorlist = []
         for idx, term in enumerate(terms):
-            if isinstance(term, sympy.Mul):
-                # For dynamic shape, term like '2*s1*x1' has 3 child nodes.
-                # - A integer for 2
-                # - A symbol for s1
-                # - A symbol for x1
-                # Skip for now.
-                if len(term.args) != 2:
-                    return False
-                factor, var = term.args
+            if parsed := parse_term(term):
+                factor, var = parsed
                 varlist.append(var)
                 factorlist.append(factor)
-                if not isinstance(factor, sympy.Integer) or not isinstance(
-                    var, sympy.Symbol
-                ):
-                    return False
-                # It's easier to reason about the correceness of the transformation
-                # for non-negative integers.
-                if not self.statically_known_geq(var, 0):
-                    return False
             elif isinstance(term, FloorDiv):
                 var, factor = term.args
                 if not isinstance(factor, sympy.Integer) or not isinstance(
                     var, sympy.Symbol
                 ):
+                    return False
+                if candidate_vars_set is not None and var not in candidate_vars_set:
                     return False
                 if not self.statically_known_geq(var, 0):
                     return False
@@ -1505,6 +1558,9 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
 
     def index_expr(self, index, dtype):
         return self._inner.index_expr(self._simplify(index), dtype)
+
+    def value_expr(self, index, dtype):
+        return self._inner.value_expr(self._simplify(index), dtype)
 
     def check_bounds(self, index, size, lower, upper):
         return self._inner.check_bounds(self._simplify(index), size, lower, upper)
