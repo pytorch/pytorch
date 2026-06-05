@@ -2583,6 +2583,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         return self.call_method(tx, "__imod__", [other], {})
 
+    def nb_divmod_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10335-L10336
+        return self.SLOT1BIN(
+            tx,
+            other,
+            "__divmod__",
+            "__rdivmod__",
+            nb_slot=PyNumberSlots.NB_DIVMOD,
+            reverse=reverse,
+        )
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
