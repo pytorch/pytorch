@@ -1290,6 +1290,15 @@ class _TorchDynamoContext:
         return compile_wrapper
 
 
+def _suspend_module_tracking_enter_hook() -> Callable[[], Any]:
+    # Suspend torch.utils.checkpoint.AutoNamingMode's module-FQN tracker around a
+    # compiled region: its global module forward hooks cannot be present while
+    # Dynamo traces. Returns a callable that resumes it. No-op if inactive.
+    from torch.utils.checkpoint import _suspend_module_tracking_for_compile
+
+    return _suspend_module_tracking_for_compile()
+
+
 class OptimizeContext(_TorchDynamoContext):
     def __init__(
         self,
@@ -1327,6 +1336,8 @@ class OptimizeContext(_TorchDynamoContext):
             isolate_recompiles=isolate_recompiles,
             shapes_spec=shapes_spec,
         )
+
+        self.enter_exit_hooks.append(_suspend_module_tracking_enter_hook)
 
         if config.compiled_autograd:
             _dynamic = self._dynamic

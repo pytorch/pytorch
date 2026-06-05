@@ -1156,6 +1156,154 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         torch._dynamo.reset()
         _test(set(), bw_freq=6)
 
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @parametrize(
+        "policy",
+        [
+            # exact auto-names
+            {
+                "layers.0.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
+                "layers.1.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
+            },
+            # module-FQN prefixes
+            {
+                "layers.0": CheckpointPolicy.MUST_SAVE,
+                "layers.1": CheckpointPolicy.MUST_SAVE,
+            },
+        ],
+    )
+    def test_compile_policy_kwarg_auto_name(self, policy):
+        # Auto-names / module-FQN prefixes work directly via the policy= kwarg,
+        # with no context_fn. Saving both matmuls -> no recompute (4 bwd mm);
+        # the empty policy recomputes both (6).
+        def make_fn(pol):
+            mod = _make_auto_naming_model()
+
+            def fn(x):
+                return torch.utils.checkpoint.checkpoint(
+                    mod, x, use_reentrant=False, policy=pol
+                )
+
+            return fn
+
+        def _test(pol, bw_freq):
+            x = torch.randn(4, 4, requires_grad=True)
+            backend = aot_autograd(
+                fw_compiler=functools.partial(
+                    count_ops, freq=2, op=torch.ops.aten.mm.default
+                ),
+                bw_compiler=functools.partial(
+                    count_ops, freq=bw_freq, op=torch.ops.aten.mm.default
+                ),
+                partition_fn=min_cut_rematerialization_partition,
+            )
+            self._validate(make_fn(pol), backend, x)
+
+        torch._dynamo.reset()
+        _test(policy, bw_freq=4)
+        torch._dynamo.reset()
+        _test({}, bw_freq=6)
+
+    def test_policy_kwarg_auto_name_eager_requires_mode(self):
+        # In eager, an auto-name policy key only resolves when the user has an
+        # AutoNamingMode active; checkpoint does not enable one implicitly. With
+        # it the named matmuls are saved (not recomputed in backward); without it
+        # the name keys are inert and both are recomputed -> more backward mm.
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class MMCounter(TorchDispatchMode):
+            def __init__(self):
+                self.count = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.mm.default:
+                    self.count += 1
+                return func(*args, **(kwargs or {}))
+
+        policy = {
+            "layers.0.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
+            "layers.1.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
+        }
+
+        def backward_mm(use_mode):
+            mod = _make_auto_naming_model()
+            x = torch.randn(4, 4, requires_grad=True)
+            ctx = AutoNamingMode() if use_mode else contextlib.nullcontext()
+            with ctx:
+                out = torch.utils.checkpoint.checkpoint(
+                    mod, x, use_reentrant=False, policy=policy
+                )
+            counter = MMCounter()
+            with counter:
+                out.sum().backward()
+            return counter.count
+
+        self.assertLess(backward_mm(use_mode=True), backward_mm(use_mode=False))
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    def test_compile_submodule_policy_absolute_auto_name(self):
+        # Case 1: checkpoint(policy=) lives INSIDE a compiled submodule, and an
+        # eager AutoNamingMode supplies the module-path prefix so an absolute
+        # auto-name ("layers.0.lin_mm.default_0") resolves across the compile
+        # boundary -- the same name a whole-model compile would produce.
+        def make_block(policy):
+            class Block(torch.nn.Module):
+                def __init__(s):
+                    super().__init__()
+                    s.lin = torch.nn.Linear(4, 4, bias=False)
+
+                def forward(s, x):
+                    def inner(y):
+                        return torch.relu(s.lin(y))
+
+                    return torch.utils.checkpoint.checkpoint(
+                        inner, x, use_reentrant=False, policy=policy
+                    )
+
+            return Block()
+
+        class Model(torch.nn.Module):
+            def __init__(self, policy):
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [make_block(policy), make_block(policy)]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        def total_backward_mm(policy):
+            count = {"n": 0}
+
+            def bw(gm, args):
+                count["n"] += sum(
+                    1 for n in gm.graph.nodes if n.target == torch.ops.aten.mm.default
+                )
+                return gm
+
+            backend = aot_autograd(
+                fw_compiler=lambda gm, args: gm,
+                bw_compiler=bw,
+                partition_fn=min_cut_rematerialization_partition,
+            )
+            torch._dynamo.reset()
+            m = Model(policy)
+            m.layers[0] = torch.compile(m.layers[0], fullgraph=True, backend=backend)
+            m.layers[1] = torch.compile(m.layers[1], fullgraph=True, backend=backend)
+            x = torch.randn(4, 4, requires_grad=True)
+            with AutoNamingMode():
+                m(x).sum().backward()
+            return count["n"]
+
+        save = {
+            "layers.0.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
+            "layers.1.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
+        }
+        # Saved -> producing matmuls not recomputed; empty -> both recomputed.
+        self.assertLess(total_backward_mm(save), total_backward_mm({}))
+
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
