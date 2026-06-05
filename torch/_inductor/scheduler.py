@@ -4151,6 +4151,7 @@ class Scheduler:
 
         self.merge_loops()
         self.finalize_multi_template_buffers()
+        self.apply_control_deps_from_fx_metadata()
         if (
             config.max_autotune_gemm or config.max_autotune
         ) and use_pipelined_autotuning():
@@ -4388,6 +4389,102 @@ class Scheduler:
             return ExternKernelSchedulerNode(self, node)
         else:
             raise NotImplementedError(node)
+
+    def apply_control_deps_from_fx_metadata(self) -> bool:
+        """
+        Apply FX-level ordering constraints after fusion and template finalization.
+
+        Overlap scheduling records extra deps in FX metadata so that regular
+        Inductor lowering and fusion can still see through compute nodes. After
+        fusion and MultiTemplateBuffer replacement, map those FX origins onto the
+        final scheduler nodes and encode the constraints as weak buffer deps.
+        """
+        from torch._inductor.fx_passes.control_dependencies import CONTROL_DEPS_META_KEY
+
+        origin_to_nodes: defaultdict[torch.fx.Node, OrderedSet[BaseSchedulerNode]] = (
+            defaultdict(OrderedSet)
+        )
+        dependent_origins: OrderedSet[torch.fx.Node] = OrderedSet()
+
+        for node in self.nodes:
+            for sub_node in node.get_nodes():
+                assert sub_node.node is not None
+                for origin in sub_node.node.get_origins():
+                    if isinstance(origin, torch.fx.Node):
+                        origin_to_nodes[origin].add(node)
+                        if origin.meta.get(CONTROL_DEPS_META_KEY):
+                            dependent_origins.add(origin)
+
+        if not dependent_origins:
+            return False
+
+        direct_data_deps: dict[BaseSchedulerNode, OrderedSet[BaseSchedulerNode]] = {
+            node: OrderedSet() for node in self.nodes
+        }
+        for node in self.nodes:
+            for dep in node.read_writes.reads:
+                # Existing WeakDeps are ordering-only edges. Use only material
+                # data deps when checking whether a new ordering edge would
+                # point backwards and create a scheduler cycle.
+                if isinstance(dep, WeakDep):
+                    continue
+                buf = self.name_to_buf.get(dep.name)
+                if buf is None or buf.defining_op is None:
+                    continue
+                dep_node = self.name_to_fused_node.get(buf.defining_op.get_name())
+                if dep_node is not None and dep_node is not node:
+                    direct_data_deps[node].add(dep_node)
+
+        @functools.cache
+        def data_ancestors(node: BaseSchedulerNode) -> tuple[BaseSchedulerNode, ...]:
+            ancestors: OrderedSet[BaseSchedulerNode] = OrderedSet()
+            for dep_node in direct_data_deps.get(node, ()):
+                ancestors.add(dep_node)
+                ancestors.update(data_ancestors(dep_node))
+            return tuple(ancestors)
+
+        applied = False
+        for dependent_origin in dependent_origins:
+            dep_origins = dependent_origin.meta.get(CONTROL_DEPS_META_KEY, ())
+            for consumer_node in origin_to_nodes.get(dependent_origin, ()):
+                for dep_origin in dep_origins:
+                    if not isinstance(dep_origin, torch.fx.Node):
+                        continue
+                    for producer_node in origin_to_nodes.get(dep_origin, ()):
+                        if producer_node is consumer_node:
+                            continue
+                        if consumer_node in data_ancestors(producer_node):
+                            continue
+                        for output in producer_node.get_outputs():
+                            dep_name = output.get_name()
+                            weak_dep = WeakDep(
+                                dep_name,
+                                consumer_node.get_name(),
+                                is_fake=True,
+                            )
+                            consumer_node.set_read_writes(
+                                consumer_node.read_writes.with_read(weak_dep)
+                            )
+                            consumer_node.unmet_dependencies.add(weak_dep)
+                            self.name_to_buf[dep_name].users.append(
+                                NodeUser(consumer_node, is_weak=True)
+                            )
+                            self.name_to_buf[dep_name].set_users(
+                                self.name_to_buf[dep_name].users
+                            )
+                            applied = True
+
+        if applied:
+            self.nodes = self.topological_sort_schedule(self.nodes)
+            self.name_to_fused_node = {}
+            for node in self.nodes:
+                self.name_to_fused_node[node.get_name()] = node
+                for name in node.get_operation_names():
+                    self.name_to_fused_node[name] = node
+            self.compute_ancestors()
+            self.compute_input_distances()
+
+        return applied
 
     def create_foreach_nodes(self) -> None:
         removed_node_names: OrderedSet[str] = OrderedSet()
@@ -4916,10 +5013,15 @@ class Scheduler:
         for node in self.nodes:
             ancestors: OrderedSet[str] = OrderedSet()
             for dep in node.unmet_dependencies:
-                dep_node_name = self.name_to_buf[dep.name].defining_op_name()
-                ancestors.add(dep_node_name)
-                ancestors |= name_to_ancestors[dep_node_name]
+                dep_op_name = self.name_to_buf[dep.name].defining_op_name()
+                dep_node = self.name_to_fused_node[dep_op_name]
+                if dep_node is node:
+                    continue
+                ancestors.add(dep_op_name)
+                ancestors |= name_to_ancestors[dep_op_name]
             name_to_ancestors[node.get_name()] = ancestors
+            for op_name in node.get_operation_names():
+                name_to_ancestors[op_name] = ancestors
             node.ancestors = ancestors
 
         for order, node in enumerate(self.nodes):
@@ -4939,20 +5041,30 @@ class Scheduler:
                 min_dist = 0
                 max_dist = 0
             else:
+                dep_node_names = []
+                for dep in node.unmet_dependencies:
+                    dep_op_name = self.name_to_buf[dep.name].defining_op_name()
+                    dep_node = self.name_to_fused_node[dep_op_name]
+                    if dep_node is node:
+                        continue
+                    dep_node_names.append(dep_op_name)
                 dep_min_dists = [
-                    name_to_min_distance[self.name_to_buf[dep.name].defining_op_name()]
-                    + 1
-                    for dep in node.unmet_dependencies
+                    name_to_min_distance[dep_node_name] + 1
+                    for dep_node_name in dep_node_names
                 ]
                 dep_max_dists = [
-                    name_to_max_distance[self.name_to_buf[dep.name].defining_op_name()]
-                    + 1
-                    for dep in node.unmet_dependencies
+                    name_to_max_distance[dep_node_name] + 1
+                    for dep_node_name in dep_node_names
                 ]
-                min_dist = min(dep_min_dists)
-                max_dist = max(dep_max_dists)
-            name_to_min_distance[node.get_name()] = min_dist
-            name_to_max_distance[node.get_name()] = max_dist
+                if not dep_min_dists or not dep_max_dists:
+                    min_dist = 0
+                    max_dist = 0
+                else:
+                    min_dist = min(dep_min_dists)
+                    max_dist = max(dep_max_dists)
+            for name in itertools.chain((node.get_name(),), node.get_operation_names()):
+                name_to_min_distance[name] = min_dist
+                name_to_max_distance[name] = max_dist
             node.min_input_distance = min_dist
             node.max_input_distance = max_dist
 
