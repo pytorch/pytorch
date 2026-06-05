@@ -196,6 +196,19 @@ class TestSerialization(TestCase):
             loaded_tensor = torch.load(path)
             self.assertEqual(torch._utils.get_tensor_metadata(loaded_tensor), metadata)
 
+    def test_fake_tensor_metadata_preservation(self):
+        """Test that backend metadata is propagated to a FakeTensor"""
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+        tensor = torch.empty(3, 3, device="openreg")
+        metadata = {"version_number": True, "format_number": True}
+        torch._utils.set_tensor_metadata(tensor, metadata)
+
+        with FakeTensorMode() as mode:
+            fake_tensor = mode.from_tensor(tensor)
+        self.assertIsInstance(fake_tensor, FakeTensor)
+        self.assertEqual(torch._utils.get_tensor_metadata(fake_tensor), metadata)
+
     def test_serialization_map_location_cpu(self):
         """Test serialization with map_location to CPU"""
         tensor = torch.randn(3, 3, device="openreg")
