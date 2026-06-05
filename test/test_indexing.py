@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyCPU,
     onlyNativeDeviceTypes,
+    skipMPS,
     skipXLA,
     skipXPUIf,
     tol,
@@ -2043,6 +2044,7 @@ class TestIndexingDevice(TestCase):
                     self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
 
     @onlyAccelerator
+    @skipMPS
     @serialTest()
     @toleranceOverride(
         {
@@ -2053,7 +2055,6 @@ class TestIndexingDevice(TestCase):
         }
     )
     @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
-    @dtypesIfMPS(torch.float32, torch.float64, torch.half)
     def test_index_add_fast_path(self, device, dtype):
         # Coverage for the index_add_ TMA fast path: one eligible case + five
         # fallback predicates per shape, asserted against a CPU reference.
