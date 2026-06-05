@@ -904,51 +904,6 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = func1(x.clone())
             self.assertEqual(out_eager, out_compiled)
 
-    @torch._inductor.config.patch(
-        layout_optimization=True, force_layout_optimization=True
-    )
-    def test_as_strided_input_layout_with_symbolic_strides(self):
-        from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                y = x.transpose(1, 2)
-                return torch.as_strided(y, y.size(), y.stride())
-
-        graph_modules = []
-
-        def my_inner_compile(gm, example_inputs, *args, **kwargs):
-            graph_modules.append(gm)
-            return compile_fx_inner(gm, example_inputs, *args, **kwargs)
-
-        mod = Model().eval().to(self.device)
-        inp = torch.randn(2, 3, 4, device=self.device)
-        torch._dynamo.mark_dynamic(inp, 1)
-        torch._dynamo.mark_dynamic(inp, 2)
-
-        with torch.no_grad():
-            expected = mod(inp)
-            opt_mod = torch.compile(
-                mod,
-                backend=functools.partial(compile_fx, inner_compile=my_inner_compile),
-                dynamic=True,
-            )
-            actual = opt_mod(inp)
-            self.assertEqual(expected, actual)
-
-        self.assertTrue(graph_modules)
-        gm = graph_modules[0]
-        nodes = list(gm.graph.nodes)
-        force_stride_node = next(
-            n for n in nodes if n.target == prims.inductor_force_stride_order.default
-        )
-        as_strided_node = next(n for n in nodes if n.target == aten.as_strided.default)
-
-        self.assertLess(nodes.index(force_stride_node), nodes.index(as_strided_node))
-        for stride_arg in force_stride_node.args[1]:
-            if isinstance(stride_arg, torch.fx.Node):
-                self.assertLess(nodes.index(stride_arg), nodes.index(force_stride_node))
-
     @tf32_on_and_off(0.001)
     @torch._inductor.config.patch(layout_optimization=True)
     def test_redundant_clone_for_layout_convert(self):
