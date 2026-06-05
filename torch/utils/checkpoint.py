@@ -484,11 +484,9 @@ def checkpoint(
             Default: ``True``.
         policy(Dict, optional): A dict mapping operators to
             :class:`CheckpointPolicy` values, providing a convenient form of
-            selective activation checkpointing. Keys may be ``OpOverload``\\ s
-            (e.g. ``torch.ops.aten.mm.default``) or strings naming an op
-            (``"aten.mm.default"``, ``"aten::mm"``, or the packet ``"aten.mm"``
-            which matches all overloads). Operators not present in the dict
-            default to recompute. ``MUST_SAVE`` saves the op's output instead of
+            selective activation checkpointing. Keys are ``OpOverload``\\ s
+            (e.g. ``torch.ops.aten.mm.default``). Operators not present in the
+            dict default to recompute. ``MUST_SAVE`` saves the op's output instead of
             recomputing it; ``MUST_RECOMPUTE`` forces recompute even under
             subsystems like ``torch.compile`` that might otherwise save it (in
             eager it is a no-op since recompute is already the default). CPU
@@ -1696,11 +1694,10 @@ def name(tensor, name):
 def _checkpoint_policy_from_dict(policy):
     """Build a SAC ``policy_fn`` from a dict mapping ops to ``CheckpointPolicy``.
 
-    Used to implement the ``policy`` argument of :func:`checkpoint`. Keys may be
-    ``OpOverload``\\ s or strings naming an op (``str(op)`` e.g.
-    ``"aten.mm.default"``, ``op.name()`` e.g. ``"aten::mm"``, or the packet
-    ``"aten.mm"``). Ops not present default to ``PREFER_RECOMPUTE``, matching
-    vanilla (non-selective) activation checkpointing.
+    Used to implement the ``policy`` argument of :func:`checkpoint`. Keys are
+    ``OpOverload``\\ s (e.g. ``torch.ops.aten.mm.default``). Ops not present
+    default to ``PREFER_RECOMPUTE``, matching vanilla (non-selective) activation
+    checkpointing.
     """
     if not isinstance(policy, dict):
         raise TypeError(f"checkpoint `policy` must be a dict, but got {type(policy)}.")
@@ -1721,16 +1718,6 @@ def _checkpoint_policy_from_dict(policy):
         # not here; this only resolves op-based keys.
         if func in policy:
             return policy[func]
-        candidates = [str(func)]
-        name_method = getattr(func, "name", None)
-        if callable(name_method):
-            candidates.append(str(name_method()))
-        packet = getattr(func, "overloadpacket", None)
-        if packet is not None:
-            candidates.append(str(packet))
-        for cand in candidates:
-            if cand in policy:
-                return policy[cand]
         return CheckpointPolicy.PREFER_RECOMPUTE
 
     return policy_fn
