@@ -935,19 +935,19 @@ def tuned_scaled_mm_v2(
     name = "scaled_mm"
     check_supported_striding(mat_a, mat_b)
 
-    assert len(scale_a) >= 1 and len(scale_b) >= 1, (
-        "scale_a and scale_b must each have at least one entry"
-    )
+    if not (len(scale_a) >= 1 and len(scale_b) >= 1):
+        raise AssertionError("scale_a and scale_b must each have at least one entry")
 
     is_single_level_scale = len(scale_a) == 1 and len(scale_b) == 1
 
     # Swizzling is not yet wired into any template here; reject anything other
     # than NO_SWIZZLE (=0) so we don't silently produce wrong results once a
     # caller starts passing real swizzle patterns.
-    assert all(s == 0 for s in swizzle_a) and all(s == 0 for s in swizzle_b), (
-        "Inductor _scaled_mm_v2 lowering does not yet support non-trivial "
-        f"swizzles (got swizzle_a={list(swizzle_a)}, swizzle_b={list(swizzle_b)})"
-    )
+    if not (all(s == 0 for s in swizzle_a) and all(s == 0 for s in swizzle_b)):
+        raise AssertionError(
+            "Inductor _scaled_mm_v2 lowering does not yet support non-trivial "
+            f"swizzles (got swizzle_a={list(swizzle_a)}, swizzle_b={list(swizzle_b)})"
+        )
 
     def check_supported_recipe(recipe: list[int]) -> bool:
         disallowed = OrderedSet([ScalingType.BlockWise1x16, ScalingType.BlockWise1x32])

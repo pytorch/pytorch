@@ -364,8 +364,10 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         if self.function is not None:
             return
 
-        assert hasattr(self, "cubin_path")
-        assert self.cubin_path is not None
+        if not hasattr(self, "cubin_path"):
+            raise AssertionError("expected cubin_path attribute to be set")
+        if self.cubin_path is None:
+            raise AssertionError("expected cubin_path to not be None")
         # The XPU static launcher returns a PyCapsule for the loaded SYCL kernel,
         # not a separate module/function pair like the CUDA/HIP launcher.
         (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
