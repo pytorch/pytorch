@@ -51,6 +51,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     ShapeEnv,
     ShapeEnvSettings,
+    StatefulSymbolicContext,
     StatelessSymbolicContext,
     statically_known_true,
 )
@@ -438,6 +439,24 @@ class FakeTensorTest(TestCase):
         t = torch.rand([4], requires_grad=True)
         fake_t = mode.from_tensor(t)
         self.assertEqual(fake_t.requires_grad, t.requires_grad)
+
+    @expectedFailurePropagateRealTensors
+    def test_non_parameter_grad_tensor_subclass_stateful_context(self):
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        t = torch.ones(2, requires_grad=True)
+        t.grad = TwoTensor(torch.ones(2), torch.ones(2))
+        source = LocalSource("t", is_input=True)
+        symbolic_context = StatefulSymbolicContext(
+            dynamic_sizes=[DimDynamic.STATIC] * t.dim(),
+            constraint_sizes=[None] * t.dim(),
+            tensor_source=source,
+        )
+
+        fake_t = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
+
+        self.assertIsInstance(fake_t.grad, TwoTensor)
+        self.assertIsInstance(fake_t.grad.a, FakeTensor)
+        self.assertIsInstance(fake_t.grad.b, FakeTensor)
 
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"

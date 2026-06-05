@@ -848,6 +848,11 @@ def _grad_context_compatible(
     if not _view_base_compatible(symbolic_context, grad_desc):
         return False
 
+    if grad_desc.is_traceable_wrapper_subclass and not isinstance(
+        symbolic_context, SubclassSymbolicContext
+    ):
+        return False
+
     # Check inner (subclass) level
     if isinstance(symbolic_context, SubclassSymbolicContext):
         if grad_desc.attrs is None:
