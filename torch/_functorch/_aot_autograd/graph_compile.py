@@ -2356,7 +2356,7 @@ def _compute_indices_of_inps_to_detach(
     bw_output = next(reversed(bw_module.graph.find_nodes(op="output")))
     bw_outs = bw_output.args[0]
 
-    num_backward_tokens = inner_meta.num_backward_tokens
+    num_backward_tokens = fw_metadata.num_backward_tokens
     num_backward_outputs = (
         sum(
             _num_flat_subclass_args(grad_input_meta)

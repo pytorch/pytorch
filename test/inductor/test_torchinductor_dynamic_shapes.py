@@ -11,7 +11,7 @@ from functools import partial
 import torch
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
-from torch._inductor import metrics
+from torch._inductor import config, metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
@@ -59,10 +59,6 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
-    # torch.func.jvp with nn.Module doesn't retrace with symbolic sizes
-    "test_jvp_compile_backward_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu", "mps"), is_skip=True
-    ),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
@@ -113,6 +109,26 @@ def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
 DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
 
 
+class DynamicShapesTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._triton_assert_stack = contextlib.ExitStack()
+        cls._triton_assert_stack.enter_context(
+            config.patch(
+                {
+                    "test_configs.runtime_triton_dtype_assert": True,
+                    "test_configs.runtime_triton_shape_assert": True,
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._triton_assert_stack.close()
+        super().tearDownClass()
+
+
 if HAS_CPU:
 
     class DynamicShapesCpuTests(TestCase):
@@ -151,7 +167,7 @@ if HAS_CPU:
 
 if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
-    class DynamicShapesGPUTests(TestCase):
+    class DynamicShapesGPUTests(DynamicShapesTestCase):
         common = check_model_gpu
         device = GPU_TYPE
 
@@ -169,8 +185,18 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
             )
         )
 
+    if HAS_GPU and hasattr(
+        DynamicShapesGPUTests, "test_randint_distribution_dynamic_shapes_cuda"
+    ):
+        # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
+        DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda = (
+            skipIfRocmArch(MI350_ARCH)(
+                DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda
+            )
+        )
 
-class TestInductorDynamic(TestCase):
+
+class TestInductorDynamic(DynamicShapesTestCase):
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
@@ -895,6 +921,49 @@ class TestInductorDynamic(TestCase):
         expect = fn(a, 2)
         actual = cfn(a, 2)
         self.assertEqual(expect, actual)
+
+    def test_magic_method_lowerings_with_symbolic_scalars(self, device):
+        def mod(x):
+            return x.new_ones((x.shape[0] % 3) + 1)
+
+        def floordiv(x):
+            return x.new_ones((x.shape[0] // 3) + 1)
+
+        def shifts(x):
+            return (
+                x.new_ones((x.shape[0] << 1) + 1),
+                x.new_ones((x.shape[0] >> 1) + 1),
+            )
+
+        def comparison(x):
+            n = torch.sym_ite(x.shape[0] < 10, x.shape[0], x.shape[0] + 1)
+            return x.new_ones(n)
+
+        def sym_min_max(x):
+            return (
+                x.new_ones(torch.sym_min(x.shape[0], 3) + 1),
+                x.new_ones(torch.sym_max(x.shape[0], 3) + 1),
+            )
+
+        def pow_log2(x):
+            return x + 2 ** (math.floor(math.log2(x.shape[0]) + 1))
+
+        def float_constant(x):
+            return x + ((x.numel() ** 0) / 1.0)
+
+        x = torch.randn(7, 5, device=device)
+        for fn in (
+            mod,
+            floordiv,
+            shifts,
+            comparison,
+            sym_min_max,
+            pow_log2,
+            float_constant,
+        ):
+            with self.subTest(fn=fn.__name__):
+                cfn = self.compile_fn(fn, fullgraph=True)
+                self.assertEqual(fn(x), cfn(x))
 
     @onlyCPU
     def test_arithmetic_constant_folding(self, device):
