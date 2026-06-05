@@ -1740,6 +1740,78 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             vec_amx = VecAMX()
             self._check_amx_counter(vec_amx)
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @requires_onednn
+    @dtypes(torch.bfloat16)
+    @unittest.skipIf(
+        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED, "flaky on AArch64 (no SVE)"
+    )
+    def test_int8_woq_mm_residual_add_rmsnorm_epilogue_fusion(self, dtype):
+        def _convert_weight_to_int8pack(w):
+            scale, zp = _calculate_dynamic_per_channel_qparams(
+                w.to(torch.float), torch.int8
+            )
+            scale = torch.from_numpy(scale)
+            zp = torch.from_numpy(zp)
+            w_int8 = torch.ao.quantization.fx._decomposed.quantize_per_channel(
+                input=w,
+                scales=scale,
+                zero_points=zp,
+                axis=0,
+                quant_min=-128,
+                quant_max=127,
+                dtype=torch.int8,
+            )
+            return w_int8, scale.to(torch.bfloat16)
+
+        class M(torch.nn.Module):
+            def __init__(self, w_gate, w_up, w_down):
+                super().__init__()
+                self.w_gate = torch.nn.Parameter(w_gate, requires_grad=False)
+                self.w_up = torch.nn.Parameter(w_up, requires_grad=False)
+                self.w_down = torch.nn.Parameter(w_down, requires_grad=False)
+
+            def _woq_linear(self, x, weight, scale):
+                out_features = weight.size(0)
+                out = torch._weight_int8pack_mm(
+                    x.reshape(-1, x.size(-1)), weight, scale
+                )
+                return out.reshape(*x.shape[:-1], out_features)
+
+            def forward(self, x, s_gate, s_up, s_down, norm_weight):
+                residual = x
+                gate = self._woq_linear(x, self.w_gate, s_gate)
+                up = self._woq_linear(x, self.w_up, s_up)
+                hidden = torch.nn.functional.silu(gate) * up
+                down = self._woq_linear(hidden, self.w_down, s_down)
+                y = down + residual
+                variance = y.to(torch.float32).pow(2).mean(-1, keepdim=True)
+                y = y * torch.rsqrt(variance + 1e-5).to(y.dtype)
+                return y * norm_weight
+
+        counters.clear()
+        batch_size, mid_dim = 1, 8
+        hidden_features, intermediate_features = 128, 256
+        x = torch.rand((batch_size, mid_dim, hidden_features), dtype=dtype)
+        w_gate = torch.rand((intermediate_features, hidden_features), dtype=dtype)
+        w_up = torch.rand((intermediate_features, hidden_features), dtype=dtype)
+        w_down = torch.rand((hidden_features, intermediate_features), dtype=dtype)
+        w_gate_int8pack, s_gate = _convert_weight_to_int8pack(w_gate)
+        w_up_int8pack, s_up = _convert_weight_to_int8pack(w_up)
+        w_down_int8pack, s_down = _convert_weight_to_int8pack(w_down)
+        norm_weight = torch.rand((hidden_features,), dtype=dtype)
+        mod = M(w_gate_int8pack, w_up_int8pack, w_down_int8pack).eval()
+        self.common(
+            mod,
+            (x, s_gate, s_up, s_down, norm_weight),
+            atol=2e-2,
+            rtol=2e-2,
+        )
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 3)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 3)
+
     @inductor_config.patch({"freezing": True, "cpp.enable_concat_linear": True})
     @patches
     @torch.no_grad
