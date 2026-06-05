@@ -9375,6 +9375,29 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(opt_f)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_device_context_matmul_avoids_native_bmm_router_graph_break(self):
+        torch._dynamo.utils.counters.clear()
+
+        @torch.compile(dynamic=False)
+        def fn(q, k):
+            with torch.device("cuda"):
+                a = torch.reshape(q, [-1, 8, 1, 32])
+                return torch.matmul(a, k)
+
+        q = torch.randn(64, 8 * 32, device="cuda", dtype=torch.float16)
+        k = torch.randn(1, 8, 32, 128, device="cuda", dtype=torch.float16)
+
+        out = fn(q, k)
+        torch.cuda.synchronize()
+        self.assertEqual(out.shape, (64, 8, 1, 128))
+
+        graph_break_reasons = "\n".join(
+            torch._dynamo.utils.counters["graph_break"].keys()
+        )
+        self.assertNotIn("_is_cow_tensor", graph_break_reasons)
+        self.assertNotIn("call_boxed", graph_break_reasons)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
     # TODO: Remoe this skip once nccl issue if fixed
     @unittest.skip(

@@ -417,6 +417,29 @@ class TestRegistryRuntime(TestCase):
         self.assertTrue(torch.equal(out, torch.tensor([8.0, 15.0])))
         self.assertFalse(sentinel_called[0])
 
+    def test_compile_session_flag_falls_through_without_recursion(self):
+        """The eager router must not redispatch to its own aten override when
+        compile-session state is set but Dynamo is not actively tracing it.
+        """
+
+        def cond(*a, **k):
+            return False
+
+        def impl(a, b):
+            raise AssertionError("impl should not be called when cond=False")
+
+        self.registry.register_op_override(
+            "test_dsl", "aten", "mul.Tensor", "CPU", cond, impl
+        )
+        self._install("mul.Tensor", "CPU")
+
+        a = torch.tensor([2.0, 3.0])
+        b = torch.tensor([4.0, 5.0])
+        with torch.compiler._compile_session_context():
+            out = torch.ops.aten.mul.Tensor(a, b)
+
+        self.assertTrue(torch.equal(out, torch.tensor([8.0, 15.0])))
+
     def test_cond_true_routes_to_impl(self):
         """cond=True must route the call to the registered impl."""
 
