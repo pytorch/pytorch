@@ -30,7 +30,7 @@ def worker_main() -> Generator[None, None, None]:
     This is a context manager that wraps your main entry function. This combines
     the existing ``errors.record`` logic as well as a new ``_WorkerServer`` that
     exposes handlers via a unix socket specified by
-    ``Torch_WORKER_SERVER_SOCKET``.
+    ``TORCH_WORKER_SERVER_SOCKET``.
 
     Example
 
