@@ -230,6 +230,14 @@ class TestFlexGemmRuntime(TestCase):
                 epilogue_args=(row_scale.t(),),
                 epilogue_arg_kinds=("row",),
             )
+        bad_layout = self.makeTensor(256, 128)[::2, ::2]
+        with self.assertRaisesRegex(NotImplementedError, "row- or column-major"):
+            gemm_epilogue(
+                bad_layout,
+                b,
+                self.row_scale_epilogue,
+                "test_flex_gemm_runtime_reject_bad_layout",
+            )
         with self.assertRaisesRegex(NotImplementedError, "tuned=True"):
             gemm_epilogue(
                 a,

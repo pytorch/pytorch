@@ -29,6 +29,13 @@ def _check_same_device(a: torch.Tensor, b: torch.Tensor, *rest: torch.Tensor) ->
         raise RuntimeError("FlexGEMM inputs must be on the same device")
 
 
+def _check_matrix_major_layout(name: str, tensor: torch.Tensor) -> None:
+    if tensor.stride(-1) != 1 and tensor.stride(-2) != 1:
+        raise NotImplementedError(
+            f"FlexGEMM requires {name} to be row- or column-major"
+        )
+
+
 def _check_epilogue_arg_kinds(epilogue_arg_kinds: tuple[str, ...]) -> None:
     for kind in epilogue_arg_kinds:
         if kind not in ("tile", "row", "col"):
@@ -144,12 +151,15 @@ def gemm_epilogue(
     """
     _check_matrix("a", a)
     _check_matrix("b", b)
+    _check_matrix_major_layout("a", a)
+    _check_matrix_major_layout("b", b)
     if a.shape[1] != b.shape[0]:
         raise RuntimeError(
             f"mat1 and mat2 shapes cannot be multiplied ({a.shape} and {b.shape})"
         )
     if C is not None:
         _check_matrix("C", C)
+        _check_matrix_major_layout("C", C)
         if tuple(C.shape) != (a.shape[0], b.shape[1]):
             raise RuntimeError(
                 f"C shape must be {(a.shape[0], b.shape[1])}, got {tuple(C.shape)}"
@@ -170,6 +180,8 @@ def gemm_epilogue(
     tensors = (C, *epilogue_args) if C is not None else epilogue_args
     _check_same_device(a, b, *(tensor for tensor in tensors if tensor is not None))
     inferred_arg_kinds = _epilogue_arg_kinds(a, b, epilogue_args, epilogue_arg_kinds)
+    for index, arg in enumerate(epilogue_args):
+        _check_matrix_major_layout(f"epilogue_args[{index}]", arg)
     row_args, col_args, tile_args = _split_epilogue_args(
         epilogue_args, inferred_arg_kinds
     )
