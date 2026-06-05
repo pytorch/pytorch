@@ -19,6 +19,7 @@ from unittest import expectedFailure, mock, skip, skipUnless
 from unittest.mock import patch
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import config, metrics
@@ -98,6 +99,11 @@ torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
+
+if dist._is_spmd_types_available():
+    import spmd_types as spmd
+    from spmd_types.checker import typecheck
+    from spmd_types.runtime import get_partition_spec
 
 
 T = TypeVar("T")
@@ -546,6 +552,70 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
             torch.tensor(b),
             target_seq_len[b],
         )
+
+
+@unittest.skipUnless(dist._is_spmd_types_available(), "requires spmd_types")
+class TestFlexAttentionSpmdTypes(common_utils.TestCase):
+    def setUp(self):
+        super().setUp()
+
+    def test_global_typecheck_batch_and_head_sharded_inputs(self):
+        """SPMD typechecking shouldn't crash on FlexAttention."""
+        batch_axis = spmd.MeshAxis.of(2, stride=2)
+        head_axis = spmd.MeshAxis.of(2, stride=1)
+        q = torch.randn(2, 2, 4, 8)
+        k = torch.randn(2, 2, 4, 8)
+        v = torch.randn(2, 2, 4, 8)
+
+        with typecheck(strict_mode="strict", local=False):
+            spmd.assert_type(q, {batch_axis: spmd.S(0), head_axis: spmd.S(1)})
+            spmd.assert_type(k, {batch_axis: spmd.S(0), head_axis: spmd.S(1)})
+            spmd.assert_type(v, {batch_axis: spmd.S(0), head_axis: spmd.S(1)})
+            out = flex_attention(q, k, v)
+
+        # output should follow query typing
+        self.assertEqual(
+            spmd.get_local_type(out), {batch_axis: spmd.V, head_axis: spmd.V}
+        )
+        self.assertEqual(
+            get_partition_spec(out),
+            spmd.PartitionSpec(batch_axis, head_axis, None, None),
+        )
+
+    def test_global_typecheck_rejects_unsupported_input_sharding(self):
+        cases = (
+            (
+                "sequence sharding",
+                lambda q, k, v, axis: (
+                    spmd.assert_type(q, {axis: spmd.S(2)}),
+                    spmd.assert_type(k, {axis: spmd.S(2)}),
+                    spmd.assert_type(v, {axis: spmd.S(2)}),
+                ),
+                "only supports q/k/v sharding on batch or head dimensions",
+            ),
+            (
+                "mismatched qkv sharding",
+                lambda q, k, v, axis: spmd.assert_type(q, {axis: spmd.S(1)}),
+                "requires q/k/v to have matching SPMD sharding",
+            ),
+            (
+                "partial input",
+                lambda q, k, v, axis: spmd.assert_type(q, {axis: spmd.P}),
+                "does not support Partial SPMD inputs",
+            ),
+        )
+
+        for name, annotate, error in cases:
+            with self.subTest(name=name):
+                axis = spmd.MeshAxis.of(2, stride=1)
+                q = torch.randn(1, 1, 4, 8)
+                k = torch.randn(1, 1, 4, 8)
+                v = torch.randn(1, 1, 4, 8)
+
+                with typecheck(strict_mode="strict", local=False):
+                    with self.assertRaisesRegex(spmd.SpmdTypeError, error):
+                        annotate(q, k, v, axis)
+                        flex_attention(q, k, v)
 
 
 @large_tensor_test_class("2GB", device=test_device[0])

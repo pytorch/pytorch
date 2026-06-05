@@ -11,12 +11,20 @@ if TYPE_CHECKING:
     from ._fsdp_api import DataParallelMeshDims
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+
+
+if dist._is_spmd_types_available():
+    import spmd_types as spmd
+    from spmd_types.runtime import get_partition_spec
+    from spmd_types.types import partition_spec_get_shard
+
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
-from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor import DTensor, Partial, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
@@ -265,6 +273,13 @@ class FSDPParam:
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
+        self.is_spmd_types = (
+            dist._is_spmd_types_available()
+            and bool(spmd.get_local_type(param))
+            and not isinstance(param, DTensor)
+        )
+        if self.is_spmd_types:
+            param = self._spmd_types_to_dtensor(param, mesh_info)
         self.is_dtensor = isinstance(param, DTensor)
         self._orig_param_uid = _get_orig_param_uid(param)
         param_data = self._init_sharding_spec(param, fsdp_placement, shard_dim)
@@ -330,6 +345,171 @@ class FSDPParam:
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
         self.sharded_state = ShardedState.SHARDED
+
+    def _get_spmd_logical_dp_axis(
+        self,
+        spmd_mesh: DeviceMesh,
+        dp_dim_names: "DataParallelMeshDims",
+    ):
+        """
+        Return FSDP's physical DP dims and their logical SPMD DP axis.
+
+        HSDP may use separate mesh dims for replication and sharding, but the
+        user's SPMD annotation can describe the combined DP/CP dimension as one
+        logical axis. The returned names identify the physical DTensor dims,
+        while the returned MeshAxis is used for local spmd_types metadata.
+        """
+        dp_names = tuple(
+            itertools.chain(dp_dim_names.shard_names, dp_dim_names.replicate_names)
+        )
+        dp_names_set = frozenset(dp_names)
+        if spmd_mesh.mesh_dim_names is None:
+            raise ValueError("spmd_mesh.mesh_dim_names must not be None")
+        ordered_dp_names = tuple(
+            name for name in spmd_mesh.mesh_dim_names if name in dp_names_set
+        )
+        if len(ordered_dp_names) == 1:
+            dp_axis = spmd.MeshAxis.of(spmd_mesh.get_group(ordered_dp_names[0]))
+        else:
+            flattened_dp_mesh = spmd_mesh[ordered_dp_names]._flatten(
+                "_".join(ordered_dp_names)
+            )
+            dp_axis = spmd.MeshAxis.of(flattened_dp_mesh.get_group())
+        return ordered_dp_names, dp_names_set, dp_axis
+
+    def _spmd_types_to_dtensor(
+        self,
+        param: nn.Parameter,
+        mesh_info: DataParallelMeshInfo,
+    ) -> nn.Parameter:
+        """
+        Translate an spmd_types-annotated plain tensor for FSDP storage.
+
+        spmd_types metadata is expected to be the un-FSDP-sharded, per-axis
+        placement metadata on the full mesh, with mesh_info telling FSDP which
+        axes to shard. Since FSDP storage-time representation is DTensor, this
+        translates the metadata to DTensor placements and wraps as DTensor
+        (i.e. spmd.S -> Shard, spmd.I/R -> Replicate). fully_shard then
+        proceeds as usual.
+
+        The spmd_types annotations are stored, and at compute time the DTensor
+        is unsharded, unwrapped, and the metadata is restored to the
+        plain-tensor parameter.
+
+        BWD behavior: spmd_types' FWD-BWD typing is tied, so we translate and
+        store the BWD types (i.e. I->I, S->S, R->P). Then when the gradient is
+        received, we wrap them as DTensors with the inferred gradient
+        placements, allowing FSDP to handle any pending redistributions in
+        DTensor form (see _get_grad_inner_tensor).
+
+        Note: on DP/CP axes FSDP stamps spmd.R (FWD), even if unannotated by
+        user, as FSDP assumes a pending gradient reduction (spmd.P BWD).
+        """
+        spmd_mesh = mesh_info.spmd_mesh
+        if spmd_mesh is None or spmd_mesh.mesh_dim_names is None:
+            raise ValueError(
+                "spmd_types parameters require a named SPMD mesh "
+                "(pass dp_mesh_dims to fully_shard)"
+            )
+
+        local_type = dict(spmd.get_local_type(param))
+        orig_partition_spec = get_partition_spec(param)
+        self._spmd_types_orig_partition_spec = orig_partition_spec
+
+        dp_dim_names = mesh_info.dp_mesh_dims
+        if dp_dim_names is None:
+            raise ValueError(
+                "spmd_types parameters require dp_mesh_dims to be passed to fully_shard"
+            )
+
+        # Interpret all FSDP DP/CP dims as one logical SPMD DP axis.
+        ordered_dp_names, dp_names_set, dp_axis = self._get_spmd_logical_dp_axis(
+            spmd_mesh, dp_dim_names
+        )
+
+        # Validate/stamp the compute-time SPMD type on that logical DP axis.
+        # FSDP expects DP axes to have R, or will stamp R if unannotated.
+        for name in ordered_dp_names:
+            axis = spmd.MeshAxis.of(spmd_mesh.get_group(name))
+            if axis != dp_axis and (axis_type := local_type.get(axis)) is not None:
+                raise ValueError(
+                    f"Expected spmd.R or no annotation on logical DP mesh axis "
+                    f"for parameter '{self._module_info.param_name}' but got "
+                    f"{axis_type} on DP mesh dim '{name}'. FSDP requires DP "
+                    "parameters to be R (Partial in BWD) since it handles "
+                    "the DP gradient reduction."
+                )
+        axis_type = local_type.get(dp_axis)
+        if axis_type is None:
+            if dp_axis.size() > 1:
+                local_type[dp_axis] = spmd.R
+        elif axis_type is not spmd.R:
+            raise ValueError(
+                f"Expected spmd.R or no annotation on logical DP mesh axis "
+                f"for parameter '{self._module_info.param_name}' but got "
+                f"{axis_type}. FSDP requires DP parameters to be Replicated "
+                "since it handles the DP gradient reduction."
+            )
+
+        self._spmd_types_orig_type = local_type
+
+        # Expand logical SPMD types into per-mesh-dim DTensor placements.
+        placements: list[Placement] = []
+        grad_placements: list[Placement] = []
+        for name in spmd_mesh.mesh_dim_names:
+            axis = spmd.MeshAxis.of(spmd_mesh.get_group(name))
+            is_dp_dim = name in dp_names_set
+            axis_type = spmd.R if is_dp_dim else local_type.get(axis)
+            shard_info = (
+                None
+                if is_dp_dim
+                else partition_spec_get_shard(orig_partition_spec, axis)
+            )
+            if shard_info is not None:
+                placements.append(Shard(shard_info.dim))
+                grad_placements.append(Shard(shard_info.dim))
+                continue
+            if axis_type is None or axis_type is spmd.I or axis_type is spmd.R:
+                if is_dp_dim and axis_type is spmd.I:
+                    raise ValueError(
+                        f"Expected spmd.R or no annotation on DP mesh dim "
+                        f"'{name}' for parameter '{self._module_info.param_name}' "
+                        f"but got {axis_type}."
+                    )
+                placements.append(Replicate())
+                grad_placements.append(
+                    Partial() if axis_type is spmd.R else Replicate()
+                )
+            elif axis_type is spmd.V:
+                raise ValueError(
+                    f"Parameter '{self._module_info.param_name}' has V type "
+                    f"on mesh dim '{name}' but no PartitionSpec shard info. "
+                    f"Use assert_type with S(dim) or pass a PartitionSpec."
+                )
+            else:
+                raise ValueError(
+                    f"Unexpected spmd_types type {axis_type} on mesh dim "
+                    f"'{name}' for parameter '{self._module_info.param_name}'"
+                )
+
+        self._spmd_types_grad_placements: tuple[Placement, ...] = tuple(grad_placements)
+        dtensor_param = nn.Parameter(
+            DTensor.from_local(param.data, spmd_mesh, placements, run_check=False),
+            requires_grad=param.requires_grad,
+        )
+        return dtensor_param
+
+    def _restore_spmd_types(self, tensor: torch.Tensor) -> None:
+        """Restore the saved spmd_types annotation onto a tensor."""
+        if not self.is_spmd_types:
+            return
+        orig_type = self._spmd_types_orig_type
+        if orig_type:
+            spmd.assert_type(
+                tensor,
+                orig_type,
+                partition_spec=self._spmd_types_orig_partition_spec,
+            )
 
     def _init_sharding_spec(
         self,
@@ -667,7 +847,9 @@ class FSDPParam:
             self._contiguous_orig_stride,
             storage_offset=0,
         )
-        if self._unsharded_dtensor_spec is not None:
+        if self.is_spmd_types:
+            pass  # keep as plain tensor; spmd_types restored in to_unsharded()
+        elif self._unsharded_dtensor_spec is not None:
             unsharded_dtensor_spec = self._get_unsharded_dtensor_spec(unsharded_param)
             unsharded_param = _from_local_no_grad(
                 unsharded_param, unsharded_dtensor_spec
@@ -746,6 +928,9 @@ class FSDPParam:
     def to_unsharded(self) -> None:
         # Assume that the data has been allocated and all-gathered
         set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
+        if self.is_spmd_types:
+            self._restore_spmd_types(self._unsharded_param)
+            self._restore_spmd_types(self._unsharded_param.data)
         self._setattr_on_modules(self._unsharded_param)
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # The data is allocated in the default stream via the post-forward
@@ -930,6 +1115,23 @@ class FSDPParam:
         return self._get_grad_inner_tensor(torch.zeros_like(self.unsharded_param))
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
+        if self.is_spmd_types:
+            if self._unsharded_dtensor_spec is None:
+                raise AssertionError(
+                    "Expected _unsharded_dtensor_spec for spmd_types param"
+                )
+            grad = DTensor.from_local(
+                grad,
+                self._unsharded_dtensor_spec.mesh,
+                self._spmd_types_grad_placements,
+                run_check=False,
+            )
+            if not self.is_dtensor:
+                raise AssertionError(
+                    "Expected spmd_types -> DTensor wrapping to use the DTensor gradient "
+                    "path for correct gradient redistribution."
+                )
+
         if self.is_dtensor:
             if isinstance(grad, AsyncCollectiveTensor):
                 grad = grad.wait()
