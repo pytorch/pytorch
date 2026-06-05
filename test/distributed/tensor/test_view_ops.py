@@ -2852,9 +2852,25 @@ class TestViewOps(DTensorContinuousTestBase):
         result = view_groups([4, u9], [4, u10])
         self.assertEqual(result, (InputDim(0), InputDim(1)))
 
+        # Splitting a product by a concrete prefix should not guard on
+        # unbacked divisibility such as ``8 % (8 * u0) == 0``.
+        u11 = fresh_sym()
+        self.assertEqual(
+            view_groups([8 * u11, 256], [8, u11, 256]),
+            (
+                Split(InputDim(0), (8, u11), 0),
+                Split(InputDim(0), (8, u11), 1),
+                InputDim(1),
+            ),
+        )
+
     def test_view_groups_unbacked_sharding_propagation(self):
         """Test that sharding is correctly propagated through view_groups with symbolic shapes."""
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.fx.experimental.symbolic_shapes import (
+            free_symbols,
+            optimization_hint,
+            ShapeEnv,
+        )
 
         shape_env = ShapeEnv()
 
@@ -2908,6 +2924,48 @@ class TestViewOps(DTensorContinuousTestBase):
             input_placements, from_shape, rule, mesh_sizes
         )
         self.assertEqual(out_plc, [Shard(0), Replicate()])
+
+        # Strict view with a non-leftmost shard needs _StridedShard. Preserve
+        # the symbolic split_factor as semantic placement metadata; list-based
+        # lowering can still use the explicit hint as a guarded unroll count.
+        u4_hint = fresh_sym()
+        torch._dynamo.override_optimization_hint(u4_hint, 4)
+        from_shape = (u4_hint, 16, 8)
+        to_shape = (u4_hint * 16, 8)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(1), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes, strict_view=True
+        )
+        self.assertIsInstance(out_plc[0], _StridedShard)
+        self.assertEqual(out_plc[0].dim, 0)
+        self.assertEqual(out_plc[1], Replicate())
+        self.assertEqual(free_symbols(out_plc[0].split_factor), free_symbols(u4_hint))
+        self.assertEqual(optimization_hint(out_plc[0].split_factor), 4)
+        self.assertTrue(free_symbols(u4_hint))
+
+        u4_unhinted = fresh_sym()
+        from_shape = (u4_unhinted, 16, 8)
+        to_shape = (u4_unhinted * 16, 8)
+        rule = view_groups(from_shape, to_shape)
+        with self.assertRaisesRegex(RuntimeError, "symbolic _StridedShard"):
+            propagate_shape_and_sharding(
+                input_placements, from_shape, rule, mesh_sizes, strict_view=True
+            )
+
+        # Unflattening a symbolic _StridedShard should match the Split prefix
+        # factor by guarded hint without specializing the symbol.
+        u5_hint = fresh_sym()
+        torch._dynamo.override_optimization_hint(u5_hint, 8)
+        from_shape = (u5_hint * 2048, 256)
+        to_shape = (u5_hint, 2048, 256)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [_StridedShard(0, split_factor=u5_hint), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes, strict_view=True
+        )
+        self.assertEqual(out_plc, [Shard(1), Replicate()])
+        self.assertTrue(free_symbols(u5_hint))
 
         # Flatten [16, u] -> [16*u] with Shard(1) on unbacked dim (non-leftmost):
         # should force replicate since non-leftmost dims can't propagate through flatten
