@@ -858,6 +858,7 @@ NB_SLOT_MAPPING = {
     "nb_inplace_true_divide": PyNumberSlots.NB_INPLACE_TRUE_DIVIDE,
     "nb_remainder": PyNumberSlots.NB_REMAINDER,
     "nb_inplace_remainder": PyNumberSlots.NB_INPLACE_REMAINDER,
+    "nb_divmod": PyNumberSlots.NB_DIVMOD,
 }
 
 
