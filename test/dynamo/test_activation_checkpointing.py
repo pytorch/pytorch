@@ -33,6 +33,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
+    AutoNamingMode,
     checkpoint,
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
@@ -161,6 +162,28 @@ def op_count(gm):
         if "call" in node.op:
             result += 1
     return result
+
+
+def _make_auto_naming_model():
+    class Block(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.lin = torch.nn.Linear(4, 4, bias=False)
+
+        def forward(self, x):
+            return torch.relu(self.lin(x))
+
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layers = torch.nn.ModuleList([Block(), Block()])
+
+        def forward(self, x):
+            for layer in self.layers:
+                x = layer(x)
+            return x
+
+    return Model()
 
 
 def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
@@ -1035,6 +1058,75 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         # MUST_RECOMPUTE: producing matmul recomputed -> 1 recompute + 2 grad.
         torch._dynamo.reset()
         _test(CheckpointPolicy.MUST_RECOMPUTE, bw_freq=3)
+
+    def test_auto_naming_eager(self):
+        # AutoNamingMode names op output tensors by module-qualified op name.
+        # Run the model under the mode in eager and assert the names assigned to
+        # the stable matmul/relu outputs.
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        collected = []
+
+        class Collect(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = func(*args, **(kwargs or {}))
+                if isinstance(out, torch.Tensor):
+                    collected.append(out)
+                return out
+
+        mod = _make_auto_naming_model()
+        naming = AutoNamingMode()
+        x = torch.randn(4, 4)
+        # Collect sits above naming so it captures each tensor after naming has
+        # assigned it a name; holding references keeps the weak name map alive.
+        with naming, Collect():
+            mod(x)
+
+        names = {naming.names.get(t) for t in collected}
+        names.discard(None)
+        expected = {
+            "layers.0.lin_mm.default_0",
+            "layers.0_relu.default_0",
+            "layers.1.lin_mm.default_0",
+            "layers.1_relu.default_0",
+        }
+        self.assertTrue(expected.issubset(names), names)
+
+    def test_policy_kwarg_auto_name_eager_requires_mode(self):
+        # In eager, an auto-name policy key only resolves when the user has an
+        # AutoNamingMode active; checkpoint does not enable one implicitly. With
+        # it the named matmuls are saved (not recomputed in backward); without it
+        # the name keys are inert and both are recomputed -> more backward mm.
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class MMCounter(TorchDispatchMode):
+            def __init__(self):
+                self.count = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.mm.default:
+                    self.count += 1
+                return func(*args, **(kwargs or {}))
+
+        policy = {
+            "layers.0.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
+            "layers.1.lin_mm.default_0": CheckpointPolicy.MUST_SAVE,
+        }
+
+        def backward_mm(use_mode):
+            mod = _make_auto_naming_model()
+            x = torch.randn(4, 4, requires_grad=True)
+            ctx = AutoNamingMode() if use_mode else contextlib.nullcontext()
+            with ctx:
+                out = torch.utils.checkpoint.checkpoint(
+                    mod, x, use_reentrant=False, policy=policy
+                )
+            counter = MMCounter()
+            with counter:
+                out.sum().backward()
+            return counter.count
+
+        self.assertLess(backward_mm(use_mode=True), backward_mm(use_mode=False))
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
