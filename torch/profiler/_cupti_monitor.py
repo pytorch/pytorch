@@ -90,6 +90,12 @@ def _find_cupti_library() -> str:
     override = os.environ.get(_LIBCUPTI_PATH_ENV)
     if override:
         return override
+    # Resolve via pathfinder, the same mechanism cupti-python and torch use, so
+    # we share the single libcupti already loaded in the process. Diverging here
+    # (e.g. preferring a newer site-packages wheel for the v2 API) would create a
+    # second CUPTI instance that collides with the stock profiler's subscriber
+    # (CUPTI_ERROR_MULTIPLE_SUBSCRIBERS). Reaching a different libcupti has to be
+    # done at load time (e.g. LD_PRELOAD) so every consumer agrees on one.
     from cuda.pathfinder import (  # pyrefly: ignore[missing-import]
         load_nvidia_dynamic_lib,
     )
@@ -874,6 +880,14 @@ class CuptiMonitor:
         return retained_events
 
     def _decode_record(self, record_addr: int) -> dict[str, Any] | None:
+        # Runs on the decode worker thread, after CUPTI's buffer-completed
+        # callback has returned -- and that is fine for the const char* fields
+        # (e.g. kernel `name`): CUPTI interns those strings in process-persistent
+        # storage, not in our buffer, so the pointers stay valid well past the
+        # callback and the names are found here. Verified: identical kernels
+        # share one name pointer, stable across collections. Only raw buffer
+        # DUMPS lose names, since the dumped bytes hold the pointer, not the
+        # string.
         cc = _require_cupti_python()
         kind = int(ctypes.c_int.from_address(record_addr).value)
         if kind == _CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL:
