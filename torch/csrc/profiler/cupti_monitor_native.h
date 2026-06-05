@@ -37,6 +37,23 @@ struct CompletedCuptiBuffer {
   uint32_t stream;
 };
 
+// Snapshot of a CUPTI v2 user-defined record layout. The layout is fixed by the
+// field selection set at enable time (constant for the session), so it is
+// captured once. byte offset / size of one selected field within a record:
+struct CuptiRecordFieldLayout {
+  int field_id;
+  size_t offset;
+  size_t size;
+};
+
+// Layout of one activity kind's user-defined record: total record size plus the
+// selected fields. kind is the CUPTI activity-kind enum value.
+struct CuptiRecordLayout {
+  uint32_t kind;
+  size_t record_size;
+  std::vector<CuptiRecordFieldLayout> fields;
+};
+
 // Process-wide singleton. The v1 Activity-API buffer callbacks carry no user
 // data, so the callbacks reach the pool through a global; there is at most one
 // CUPTI monitor per process.
@@ -65,6 +82,15 @@ class TORCH_API CuptiMonitorBuffers {
   void shutdown();
   void reset();
 
+  // Capture the v2 user-defined record layout from a CUPTI
+  // CUpti_BufferCallbackCompleteInfo* (taken as void*). Snapshots on the first
+  // call and is a no-op afterwards; the layout is constant for a session and
+  // the info pointer is only valid for the duration of the completion callback.
+  void capture_layouts(void* complete_info);
+  // Copy of the captured layouts for the Python decoder. Empty until a v2
+  // buffer has completed.
+  std::vector<CuptiRecordLayout> record_layouts();
+
  private:
   CuptiMonitorBuffers() = default;
 
@@ -74,9 +100,11 @@ class TORCH_API CuptiMonitorBuffers {
   std::vector<uint8_t*> free_;
   std::vector<uint8_t*> all_; // every buffer ever allocated (for reset)
   std::deque<CompletedCuptiBuffer> completed_;
-  size_t buffer_size_ = 4 * 1024 * 1024;
+  size_t buffer_size_ = 4UL * 1024 * 1024;
   size_t allocated_ = 0;
   bool shutdown_ = false;
+  std::vector<CuptiRecordLayout> record_layouts_;
+  bool layouts_captured_ = false;
 };
 
 // Free functions matching the CUPTI v1 buffer-callback signatures. CUcontext is
@@ -91,5 +119,26 @@ TORCH_API void cuptiMonitorBufferCompleted(
     uint8_t* buffer,
     size_t size,
     size_t valid_size);
+
+// Free functions matching the CUPTI v2 (subscriber-scoped, user-defined
+// record) buffer-callback signatures, registered via
+// cuptiActivityRegisterCallbacks_v2. They feed the same pool/queue as v1; only
+// the CUPTI-side argument lists differ. The trailing info pointers
+// (CUpti_BufferCallbackRequestInfo* / CUpti_BufferCallbackCompleteInfo*) are
+// taken as void* to avoid a CUPTI v2 header dependency. v2 does not pass
+// CUcontext/streamId to the completion callback (they become selectable record
+// fields), so buffers completed on this path carry ctx and stream of 0; the
+// record-layout descriptor in the complete info is snapshotted once via
+// capture_layouts() so the decoder can parse records after the callback.
+TORCH_API void cuptiMonitorBufferRequestedV2(
+    uint8_t** buffer,
+    size_t* size,
+    size_t* max_num_records,
+    void* request_info);
+TORCH_API void cuptiMonitorBufferCompletedV2(
+    uint8_t* buffer,
+    size_t size,
+    size_t valid_size,
+    void* complete_info);
 
 } // namespace torch::profiler::impl
