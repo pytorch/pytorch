@@ -561,7 +561,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
   const int64_t num_kv_heads = k_.size(1);
   const int gqa_factor = static_cast<int>(num_heads / num_kv_heads);
 
-  auto out = at::empty_like(q_);
+  auto out = at::empty(q_.sizes(), q_.options());
 
   // Strides for [B, H, L, D] layout. Last-dim stride must be 1.
   TORCH_CHECK(q_.stride(-1) == 1, "sdpa prefill:query last-dim must be contiguous");
