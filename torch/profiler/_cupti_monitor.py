@@ -733,7 +733,9 @@ class CuptiMonitor:
                 item = _PY_PROFILER._cupti_monitor_get_completed()
                 if item is None:
                     break
-                buffer_ptr, valid_size, ctx, stream_id = item
+                # layout_epoch is only meaningful for the v2 user-defined
+                # record path; the v1 decoder here ignores it.
+                buffer_ptr, valid_size, ctx, stream_id, _layout_epoch = item
                 with self._lock:
                     self._processing_inflight += 1
                     self._buffers_completed += 1
