@@ -279,6 +279,12 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_data = False
 
             requires_grad = isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
+            # Lazy view bits are resolved before backend graph capture. If such
+            # an input is mutated, the runtime epilogue must copy the resolved
+            # updated value back through the original lazy view.
+            keep_input_mutations_for_arg = keep_input_mutations and not (
+                isinstance(arg, Tensor) and (arg.is_conj() or arg.is_neg())
+            )
 
             input_info.append(
                 InputAliasInfo(
@@ -290,7 +296,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
-                    keep_input_mutations=keep_input_mutations,
+                    keep_input_mutations=keep_input_mutations_for_arg,
                 )
             )
 
@@ -689,6 +695,8 @@ from a multi-output view call"
                     view_meta_sequence = ViewMetaSequence(o)
 
             requires_grad = isinstance(o, torch.Tensor) and o.requires_grad
+            is_conj = isinstance(o, torch.Tensor) and o.is_conj()
+            is_neg = isinstance(o, torch.Tensor) and o.is_neg()
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
@@ -701,6 +709,8 @@ from a multi-output view call"
                 requires_grad_for_backward=requires_grad
                 and (o._base is None or grad_fn is not None),
                 view_meta_sequence=view_meta_sequence,
+                is_conj=is_conj,
+                is_neg=is_neg,
             )
             output_info.append(out_info)
 

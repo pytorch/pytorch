@@ -120,6 +120,11 @@ class OutputAliasInfo:
     # we compare the ViewMeta elements appropriately, i.e. their type and
     # the elements returned by the `as_tuple()` call.
     view_meta_sequence: ViewMetaSequence | None = None
+    # Lazy dispatcher view bits from the original user output. Backend graph
+    # outputs may be resolved before compilation, so alias replay cannot read
+    # these from the compiled output tensor.
+    is_conj: bool = False
+    is_neg: bool = False
 
 
 class MutationType(Enum):

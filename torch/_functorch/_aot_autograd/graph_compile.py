@@ -57,6 +57,7 @@ from .autograd_cache import (
     should_use_remote_autograd_cache,
 )
 from .descriptors import AOTOutput, PlainAOTOutput
+from .functional_utils import resolve_input_view_bits
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -2351,6 +2352,9 @@ def _aot_stage2b_bw_compile(
                     ph_size = ph_arg.size()
 
                     placeholder_list[i] = ph_arg.as_strided(ph_size, real_stride)
+            placeholder_list = pytree.tree_map_only(
+                torch.Tensor, resolve_input_view_bits, placeholder_list
+            )
             compiled_bw_func = None
             if (
                 num_symints_saved_for_bw > 0
@@ -2794,6 +2798,9 @@ def _aot_stage2b_compile_forward_or_inference(
             fw_module = decompose_complex_in_graph(
                 fw_module, adjusted_flat_args, aot_config.decompositions
             )
+        adjusted_flat_args = pytree.tree_map_only(
+            torch.Tensor, resolve_input_view_bits, adjusted_flat_args
+        )
 
         with TracingContext.report_output_strides() as fwd_output_strides:
             # pyrefly: ignore[not-callable]

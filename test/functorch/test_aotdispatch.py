@@ -429,6 +429,172 @@ def skipIfDynamoInput(reason):
 
 
 class TestAOTAutograd(AOTTestCase):
+    def test_lazy_view_bits_are_resolved_before_backend(self):
+        def compiler(gm, example_inputs):
+            for x in example_inputs:
+                if isinstance(x, torch.Tensor):
+                    self.assertFalse(x.is_conj())
+                    self.assertFalse(x.is_neg())
+            for node in gm.graph.nodes:
+                if node.op != "placeholder":
+                    continue
+                val = node.meta.get("val")
+                if isinstance(val, torch.Tensor):
+                    self.assertFalse(val.is_conj())
+                    self.assertFalse(val.is_neg())
+
+            def compiled(*args):
+                for x in args:
+                    if isinstance(x, torch.Tensor):
+                        self.assertFalse(x.is_conj())
+                        self.assertFalse(x.is_neg())
+                return gm.forward(*args)
+
+            return make_boxed_func(compiled)
+
+        def f(x):
+            return x.clone() if x.is_neg() else -x
+
+        x = torch.randn(5, dtype=torch.complex64).conj().imag
+        self.assertTrue(x.is_neg())
+        compiled_f = aot_function(f, fw_compiler=compiler)
+        out = compiled_f(x)
+        self.assertEqual(out, f(x))
+        self.assertFalse(out.is_neg())
+
+    def test_lazy_view_bits_resolve_under_trace_joint_grad_mode(self):
+        def f(x):
+            with torch.enable_grad():
+                return x.sin()
+
+        x = torch.randn(5, requires_grad=True)._neg_view()
+        compiled_f = aot_function(f, fw_compiler=nop)
+        with torch.no_grad():
+            out = compiled_f(x)
+            expected = f(x)
+
+        self.assertEqual(out, expected)
+        self.assertTrue(out.requires_grad)
+
+    def test_lazy_view_bits_preserve_boundary_aliases_and_mutations(self):
+        def identity(x):
+            return x
+
+        x = torch.randn(4)._neg_view()
+        self.assertTrue(x.is_neg())
+        compiled_identity = aot_function(identity, fw_compiler=nop)
+        self.assertIs(compiled_identity(x), x)
+
+        def mutation(x):
+            x.add_(1)
+            return x.clone()
+
+        base_eager = torch.tensor([1.0, -2.0])
+        x_eager = base_eager._neg_view()
+        out_eager = mutation(x_eager)
+
+        base_compiled = torch.tensor([1.0, -2.0])
+        x_compiled = base_compiled._neg_view()
+        compiled_mutation = aot_function(mutation, fw_compiler=nop)
+        out_compiled = compiled_mutation(x_compiled)
+
+        self.assertEqual(out_compiled, out_eager)
+        self.assertEqual(x_compiled, x_eager)
+        self.assertEqual(base_compiled, base_eager)
+
+        def mutation_with_alias(x, y):
+            x.add_(1)
+            return x.clone(), y.clone()
+
+        base_eager = torch.tensor([1.0, -2.0])
+        x_eager = base_eager._neg_view()
+        y_eager = base_eager
+        out_eager = mutation_with_alias(x_eager, y_eager)
+
+        base_compiled = torch.tensor([1.0, -2.0])
+        x_compiled = base_compiled._neg_view()
+        y_compiled = base_compiled
+        compiled_mutation_with_alias = aot_function(
+            mutation_with_alias,
+            fw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        out_compiled = compiled_mutation_with_alias(x_compiled, y_compiled)
+
+        self.assertEqual(out_compiled, out_eager)
+        self.assertEqual(x_compiled, x_eager)
+        self.assertEqual(y_compiled, y_eager)
+        self.assertEqual(base_compiled, base_eager)
+
+        def view(x):
+            return x[1:5]
+
+        base_eager = torch.arange(6.0)
+        x_eager = base_eager._neg_view()
+        out_eager = view(x_eager)
+
+        base_compiled = torch.arange(6.0)
+        x_compiled = base_compiled._neg_view()
+        compiled_view = aot_function(view, fw_compiler=nop)
+        out_compiled = compiled_view(x_compiled)
+
+        self.assertEqual(out_compiled, out_eager)
+        self.assertTrue(out_compiled.is_neg())
+        out_compiled.add_(10)
+        out_eager.add_(10)
+        self.assertEqual(base_compiled, base_eager)
+
+        with patch("torch._functorch.config.view_replay_for_aliased_outputs", False):
+
+            def clear_neg(x):
+                return x._neg_view()
+
+            base_eager = torch.tensor([1.0, -2.0, 3.0])
+            x_eager = base_eager._neg_view()
+            out_eager = clear_neg(x_eager)
+
+            base_compiled = torch.tensor([1.0, -2.0, 3.0])
+            x_compiled = base_compiled._neg_view()
+            compiled_clear_neg = aot_function(clear_neg, fw_compiler=nop)
+            out_compiled = compiled_clear_neg(x_compiled)
+
+            self.assertEqual(out_compiled, out_eager)
+            self.assertFalse(out_compiled.is_neg())
+            out_compiled.add_(10)
+            out_eager.add_(10)
+            self.assertEqual(base_compiled, base_eager)
+
+    def test_lazy_view_bits_are_resolved_before_backward_backend(self):
+        def bw_compiler(gm, example_inputs):
+            for x in example_inputs:
+                if isinstance(x, torch.Tensor):
+                    self.assertFalse(x.is_conj())
+                    self.assertFalse(x.is_neg())
+
+            def compiled(*args):
+                for x in args:
+                    if isinstance(x, torch.Tensor):
+                        self.assertFalse(x.is_conj())
+                        self.assertFalse(x.is_neg())
+                return gm.forward(*args)
+
+            return make_boxed_func(compiled)
+
+        def f(x):
+            return x.sin()
+
+        x_eager = torch.randn(4, requires_grad=True)
+        grad_out = torch.randn(4)._neg_view()
+        (grad_eager,) = torch.autograd.grad(f(x_eager), x_eager, grad_out)
+
+        x_compiled = x_eager.detach().clone().requires_grad_()
+        compiled_f = aot_function(f, fw_compiler=nop, bw_compiler=bw_compiler)
+        (grad_compiled,) = torch.autograd.grad(
+            compiled_f(x_compiled), x_compiled, grad_out
+        )
+
+        self.assertEqual(grad_compiled, grad_eager)
+
     def run_autograd(
         self,
         f: Callable,
