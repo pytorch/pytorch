@@ -6956,7 +6956,7 @@ class Scheduler:
             read_expr_index = "index0"
             write_expr_index = "index1"
         else:
-            if read_expr != node2._body.indexing_exprs["index1"]:
+            if read_expr != node2._body.indexing_exprs["index1"]:  # type: ignore[attr-defined]
                 raise AssertionError("expected read_expr to match node2 index1 expr")
             read_expr_index = "index1"
             write_expr_index = "index0"
