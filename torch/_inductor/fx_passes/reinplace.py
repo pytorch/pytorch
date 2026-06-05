@@ -154,7 +154,10 @@ def _decompose_scatter_functional(
     view_updated = aten.slice_scatter(view, src, 1, 10, -10)
     inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
     """
-    assert node.target is _generalized_scatter
+    if node.target is not _generalized_scatter:
+        raise AssertionError(
+            f"expected node.target to be _generalized_scatter, got {node.target}"
+        )
     return _decompose_scatter_functional_helper(graph, *node.args)  # type: ignore[arg-type]
 
 
@@ -173,9 +176,13 @@ def _decompose_scatter_mutating(
     slice2.copy_(src)
 
     """
-    assert node.target in (_generalized_scatter, _inplace_generalized_scatter)
+    if node.target not in (_generalized_scatter, _inplace_generalized_scatter):
+        raise AssertionError(
+            f"expected node.target to be a generalized scatter, got {node.target}"
+        )
     inp, src, view_ops = node.args
-    assert not node.kwargs
+    if node.kwargs:
+        raise AssertionError(f"expected no kwargs, got {node.kwargs}")
 
     if node.target is _generalized_scatter:
         inp = graph_call_function(graph, aten.clone, inp)
@@ -300,10 +307,14 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
         ]
 
     def handle_view_scatter(node: torch.fx.Node):
-        assert len(node.args) >= 2
+        if len(node.args) < 2:
+            raise AssertionError(f"expected at least 2 args, got {len(node.args)}")
         inp, src = node.args[:2]
 
-        assert isinstance(node.target, torch._ops.OpOverload)
+        if not isinstance(node.target, torch._ops.OpOverload):
+            raise AssertionError(
+                f"expected node.target to be an OpOverload, got {type(node.target)}"
+            )
         scatter_view_op = ViewOp(
             _SCATTER_OP_TO_VIEW[node.target],
             args=node.args[2:],
@@ -630,7 +641,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             return get_node_storage(mutated_arg) in storage_of_reinplaced_args
 
         for arg in old_tensors_to_clone:
-            assert arg in kwargs
+            if arg not in kwargs:
+                raise AssertionError(f"expected {arg} to be in kwargs")
 
             mutated_arg = kwargs[arg]
 
@@ -759,9 +771,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
                 for position, idx in enumerate(mutated_arg_indices):
                     actual_idx = idx + 2  # offset for token and op
-                    assert actual_idx < len(node.args), (
-                        f"mutated arg idx {actual_idx} out of range {len(node.args)}"
-                    )
+                    if actual_idx >= len(node.args):
+                        raise AssertionError(
+                            f"mutated arg idx {actual_idx} out of range {len(node.args)}"
+                        )
                     arg = node.args[actual_idx]
 
                     # Output index is position + 1 (index 0 is the token)
