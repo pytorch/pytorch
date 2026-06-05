@@ -232,6 +232,21 @@ class TestUserDefinedObjectConstruction(TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_explicit_list_subclass_init_replaces_contents(self):
+        class MyList(list):
+            pass
+
+        def fn(t):
+            l = MyList([t])
+            MyList.__init__(l, [t + 1])
+            first = l[0]
+            MyList.__init__(l)
+            return first, len(l)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_instantiate_class_with_custom_getattribute_reads_init_state(self):
         class Foo:
             def __init__(self, a):
