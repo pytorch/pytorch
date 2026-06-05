@@ -635,6 +635,32 @@ class ConstantVariable(VariableTracker):
         except (MemoryError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
+    def nb_and_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int, frozenset, and type all define nb_and.
+        # https://github.com/python/cpython/blob/3.13/Objects/longobject.c#L5574 (long_and)
+        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1506-L1518 (set_and)
+        # bool inherits int's nb_and via slot inheritance.
+        from .object_protocol import type_implements_nb_and
+
+        if not type_implements_nb_and(type(self.value)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        and_method = getattr(self_.python_type(), "__and__", None)
+        if and_method is None:
+            return ConstantVariable.create(NotImplemented)
+        result = and_method(v, w)
+        if result is NotImplemented:
+            return ConstantVariable.create(NotImplemented)
+        return VariableTracker.build(tx, result)
+
     def nb_negative_impl(
         self,
         tx: Any,
