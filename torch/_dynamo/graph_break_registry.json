@@ -20,6 +20,16 @@
       ]
     }
   ],
+  "GB9832": [
+    {
+      "Gb_type": "random.Random.setstate() with dynamic state",
+      "Context": "setstate() with non-constant random.Random state",
+      "Explanation": "Dynamo cannot replay random.Random.setstate() when its state argument is produced dynamically outside the current compiled region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0002": [
     {
       "Gb_type": "Assertion failed on symbolic shapes",
@@ -641,6 +651,16 @@
       "Gb_type": "missing_mp_subscript",
       "Context": "mp_subscript_impl not defined for {type(self).__name__}",
       "Explanation": "Dynamo does not yet support subscripting '{self.python_type_name()}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4675": [
+    {
+      "Gb_type": "random.Random.getstate() dynamic state inspection",
+      "Context": "inspect dynamic random.Random state",
+      "Explanation": "Dynamo cannot replay this random.Random.getstate() access from inside the compiled graph.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -5309,6 +5329,16 @@
       "Gb_type": "repr() on non-constant dict view",
       "Context": "repr() on {type(self).__name__} with non-constant backing dict",
       "Explanation": "Dynamo could not safely evaluate repr() for this dict view because its backing dict could not be materialized as a Python constant.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3513": [
+    {
+      "Gb_type": "random.Random method with dynamic random argument",
+      "Context": "random.Random method with dynamic random.Random-derived argument",
+      "Explanation": "Dynamo cannot replay random.Random object state when an in-frame RNG receives an argument produced dynamically from another random.Random object.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

@@ -31,7 +31,7 @@ import weakref
 from collections.abc import Callable, Sequence
 from random import Random
 from types import BuiltinFunctionType
-from typing import Any, TYPE_CHECKING, TypeGuard, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeGuard, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -47,13 +47,16 @@ from ..bytecode_transformation import (
     create_instruction,
 )
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import raise_observed_exception, raise_type_error, unimplemented
+from ..exc import raise_observed_exception, raise_type_error, SkipFrame, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
     GenericAttrSource,
     GetItemSource,
+    is_constant_source,
+    is_random_value_source,
+    RandomValueSource,
     TypeMROSource,
     TypeSource,
     WeakRefCallSource,
@@ -66,7 +69,12 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
 )
-from .base import AsPythonConstantNotImplementedError, NO_SUCH_SUBOBJ, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    NO_SUCH_SUBOBJ,
+    ValueMutationExisting,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
@@ -2341,9 +2349,84 @@ class RandomClassVariable(VariableTracker):
                 ],
             )
         seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
+        if RandomVariable.has_dynamic_or_sourced_arg([seed], {}):
+            if RandomVariable.has_lazy_value(seed):
+                skip_dynamic_random_boundary()
+            unimplemented_dynamic_random_arg()
         return RandomVariable(
             seed=seed, mutation_type=variables.base.ValueMutationNew()
         )
+
+
+def unimplemented_dynamic_random_state_inspection() -> NoReturn:
+    unimplemented(
+        gb_type="random.Random.getstate() dynamic state inspection",
+        context="inspect dynamic random.Random state",
+        explanation=(
+            "Dynamo cannot replay this random.Random.getstate() access from "
+            "inside the compiled graph."
+        ),
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
+
+
+def unimplemented_dynamic_random_arg() -> NoReturn:
+    unimplemented(
+        gb_type="random.Random method with dynamic random argument",
+        context="random.Random method with dynamic random.Random-derived argument",
+        explanation=(
+            "Dynamo cannot replay random.Random object state when an in-frame "
+            "RNG receives an argument produced dynamically from "
+            "another random.Random object."
+        ),
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
+
+
+def skip_dynamic_random_boundary() -> NoReturn:
+    raise SkipFrame(
+        "random.Random state derived before a graph break cannot be safely "
+        "compiled in the resumed frame"
+    )
+
+
+class RandomStateVariable(TupleVariable):
+    def _wrap_indexed_value(
+        self, tx: "InstructionTranslatorBase", index: int
+    ) -> VariableTracker:
+        source = GetItemSource(self.source, index) if self.source is not None else None
+        item = self.items[index]
+        value = item.as_python_constant()
+        if isinstance(item, variables.TupleVariable):
+            return RandomStateVariable(item.items, source=source)
+        if source is not None and is_random_value_source(source):
+            if value is None:
+                unimplemented_dynamic_random_state_inspection()
+            # Local import avoids a circular dependency with variables.builder.
+            from .builder import VariableBuilder
+
+            return VariableBuilder(tx, source).wrap_unspecialized_primitive(value)
+        return item
+
+    def getitem_const(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        index = arg.as_python_constant()
+        if isinstance(index, slice):
+            unimplemented_dynamic_random_state_inspection()
+        if not isinstance(index, int):
+            raise AssertionError(f"index must be int, got {type(index).__name__}")
+        if index < 0:
+            index += len(self.items)
+        try:
+            return self._wrap_indexed_value(tx, index)
+        except IndexError:
+            raise_observed_exception(IndexError, tx, args=["tuple index out of range"])
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
+        return [self._wrap_indexed_value(tx, i) for i in range(len(self.items))]
 
 
 class RandomVariable(VariableTracker):
@@ -2427,17 +2510,17 @@ class RandomVariable(VariableTracker):
             )
 
     @staticmethod
-    def wrap_state(state: tuple[int, tuple[int, ...], float | None]) -> TupleVariable:
+    def wrap_state(
+        state: tuple[int, tuple[int, ...], float | None],
+        source: Source | None = None,
+    ) -> TupleVariable:
         RandomVariable.check_state(state)
-        return variables.TupleVariable(
-            [
-                variables.ConstantVariable.create(state[0]),
-                variables.TupleVariable(
-                    [variables.ConstantVariable.create(x) for x in state[1]]
-                ),
-                variables.ConstantVariable.create(state[2]),
-            ]
-        )
+        state_var = variables.ConstantVariable.create(state)
+        if not isinstance(state_var, variables.TupleVariable):
+            raise AssertionError(f"expected TupleVariable, got {type(state_var)}")
+        if source is not None:
+            return RandomStateVariable(state_var.items, source=source)
+        return state_var
 
     @staticmethod
     def unwrap_state(
@@ -2447,6 +2530,137 @@ class RandomVariable(VariableTracker):
         RandomVariable.check_state(state_obj)
         return state_obj
 
+    def use_runtime_source(self) -> bool:
+        return self.source is not None and isinstance(
+            self.mutation_type, ValueMutationExisting
+        )
+
+    def check_runtime_source_mutation(self, tx: "InstructionTranslatorBase") -> None:
+        tx.output.side_effects.check_allowed_mutation(self)
+
+    @staticmethod
+    def random_arg_replay_value(arg: VariableTracker) -> object:
+        arg = arg.realize()
+        if (
+            isinstance(arg, RandomStateVariable)
+            and arg.source is not None
+            and is_random_value_source(arg.source)
+        ):
+            return arg.source
+        if isinstance(arg, variables.TupleVariable):
+            return tuple(RandomVariable.random_arg_replay_value(x) for x in arg.items)
+        if isinstance(arg, variables.ListVariable):
+            return [RandomVariable.random_arg_replay_value(x) for x in arg.items]
+        if arg.source is not None and is_random_value_source(arg.source):
+            return arg.source
+        return arg.as_python_constant()
+
+    @staticmethod
+    def has_dynamic_random_value(arg: VariableTracker) -> bool:
+        arg = arg.realize()
+        if arg.source is not None and is_random_value_source(arg.source):
+            return True
+        if isinstance(arg, variables.BaseListVariable):
+            return any(RandomVariable.has_dynamic_random_value(x) for x in arg.items)
+        return False
+
+    @staticmethod
+    def has_lazy_value(arg: VariableTracker) -> bool:
+        # Avoid importing LazyVariableTracker here; it would create a circular import.
+        if type(arg).__name__ == "LazyVariableTracker":
+            return True
+        arg = arg.realize()
+        if isinstance(arg, variables.BaseListVariable):
+            return any(RandomVariable.has_lazy_value(x) for x in arg.items)
+        return False
+
+    @staticmethod
+    def has_non_constant_source_value(arg: VariableTracker) -> bool:
+        if arg.source is not None and not is_constant_source(arg.source):
+            return True
+        if type(arg).__name__ in {"LazyVariableTracker", "LazyConstantVariable"}:
+            return True
+        arg = arg.realize()
+        if arg.source is not None and not is_constant_source(arg.source):
+            return True
+        if isinstance(arg, variables.BaseListVariable):
+            return any(
+                RandomVariable.has_non_constant_source_value(x) for x in arg.items
+            )
+        return False
+
+    @staticmethod
+    def has_dynamic_random_arg(
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> bool:
+        return any(
+            RandomVariable.has_dynamic_random_value(arg)
+            for arg in itertools.chain(args, kwargs.values())
+        )
+
+    @staticmethod
+    def random_arg_example_value(arg: VariableTracker) -> object:
+        arg = arg.realize()
+        if isinstance(arg, variables.TupleVariable):
+            return tuple(RandomVariable.random_arg_example_value(x) for x in arg.items)
+        if isinstance(arg, variables.ListVariable):
+            return [RandomVariable.random_arg_example_value(x) for x in arg.items]
+        if arg.source is not None and is_random_value_source(arg.source):
+            raw_value = getattr(arg, "raw_value", None)
+            if raw_value is None:
+                unimplemented_dynamic_random_state_inspection()
+            return raw_value
+        return arg.as_python_constant()
+
+    @staticmethod
+    def random_args_replay_values(
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> tuple[list[object], dict[str, object]]:
+        args_replay = [RandomVariable.random_arg_replay_value(arg) for arg in args]
+        kwargs_replay = {
+            key: RandomVariable.random_arg_replay_value(val)
+            for key, val in kwargs.items()
+        }
+        return args_replay, kwargs_replay
+
+    @staticmethod
+    def random_args_example_values(
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> tuple[list[object], dict[str, object]]:
+        args_example = [RandomVariable.random_arg_example_value(arg) for arg in args]
+        kwargs_example = {
+            key: RandomVariable.random_arg_example_value(val)
+            for key, val in kwargs.items()
+        }
+        return args_example, kwargs_example
+
+    @staticmethod
+    def has_dynamic_or_sourced_arg(
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> bool:
+        return any(
+            RandomVariable.has_dynamic_random_value(arg)
+            or RandomVariable.has_non_constant_source_value(arg)
+            for arg in itertools.chain(args, kwargs.values())
+        )
+
+    @staticmethod
+    def unimplemented_dynamic_state() -> NoReturn:
+        unimplemented(
+            gb_type="random.Random.setstate() with dynamic state",
+            context="setstate() with non-constant random.Random state",
+            explanation=(
+                "Dynamo cannot replay random.Random.setstate() when its "
+                "state argument is produced dynamically outside the current "
+                "compiled region."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -2455,35 +2669,137 @@ class RandomVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "seed":
-            tx.output.side_effects.mutation(self)
-            self.random.seed(
-                *[x.as_python_constant() for x in args],
-                **{key: val.as_python_constant() for key, val in kwargs.items()},
-            )
+            if not self.use_runtime_source() and self.has_dynamic_or_sourced_arg(
+                args, kwargs
+            ):
+                if any(
+                    self.has_lazy_value(arg)
+                    for arg in itertools.chain(args, kwargs.values())
+                ):
+                    skip_dynamic_random_boundary()
+                unimplemented_dynamic_random_arg()
+            args_example, kwargs_example = self.random_args_example_values(args, kwargs)
+            if self.use_runtime_source():
+                args_replay, kwargs_replay = self.random_args_replay_values(
+                    args, kwargs
+                )
+                self.check_runtime_source_mutation(tx)
+                cast(Any, self.random.seed)(*args_example, **kwargs_example)
+                tx.output.add_random_call(
+                    None,
+                    tuple(args_replay),
+                    kwargs_replay,
+                    source=self.source,
+                    method_name=name,
+                )
+            else:
+                tx.output.side_effects.mutation(self)
+                cast(Any, self.random.seed)(*args_example, **kwargs_example)
             return variables.ConstantVariable.create(None)
         elif name == "getstate":
-            return self.wrap_state(self.random.getstate())
+            state = self.random.getstate()
+            if self.use_runtime_source():
+                random_call_index = tx.output.add_random_call(
+                    None,
+                    (),
+                    {},
+                    source=self.source,
+                    method_name=name,
+                )
+                return self.wrap_state(
+                    state, source=RandomValueSource(random_call_index)
+                )
+            return self.wrap_state(state)
         elif name == "setstate":
-            tx.output.side_effects.mutation(self)
-            self.random.setstate(self.unwrap_state(args[0]))
+            state_arg = args[0]
+            state_from_random_call = self.has_dynamic_random_arg([state_arg], {})
+            if self.use_runtime_source():
+                self.check_runtime_source_mutation(tx)
+                if not state_from_random_call and self.has_non_constant_source_value(
+                    state_arg
+                ):
+                    if self.has_lazy_value(state_arg):
+                        skip_dynamic_random_boundary()
+                    self.unimplemented_dynamic_state()
+            elif state_from_random_call or self.has_non_constant_source_value(
+                state_arg
+            ):
+                self.unimplemented_dynamic_state()
+            if state_from_random_call:
+                state_obj = self.random_arg_example_value(state_arg)
+                state = cast(
+                    tuple[int, tuple[int, ...], float | None],
+                    state_obj,
+                )
+                self.check_state(state)
+            else:
+                try:
+                    state = self.unwrap_state(state_arg)
+                except AsPythonConstantNotImplementedError:
+                    self.unimplemented_dynamic_state()
+            self.random.setstate(state)
+            if self.use_runtime_source():
+                # Constant states can be replayed directly; RandomValueSource states
+                # are resolved from earlier RNG calls in _gen_rand_values.
+                runtime_state = (
+                    self.random_arg_replay_value(state_arg)
+                    if state_from_random_call
+                    else state
+                )
+                tx.output.add_random_call(
+                    None,
+                    (runtime_state,),
+                    {},
+                    source=self.source,
+                    method_name=name,
+                )
+            else:
+                tx.output.side_effects.mutation(self)
             return variables.ConstantVariable.create(None)
         elif name in self._supported_fn_names:
-            tx.output.side_effects.mutation(self)
-            state = self.random.getstate()
+            args_example, kwargs_example = self.random_args_example_values(args, kwargs)
+            if self.use_runtime_source():
+                self.check_runtime_source_mutation(tx)
+                args_replay, kwargs_replay = self.random_args_replay_values(
+                    args, kwargs
+                )
+                example_value = getattr(self.random, name)(
+                    *args_example, **kwargs_example
+                )
+                # Local import avoids a circular dependency with variables.builder.
+                from .builder import VariableBuilder
 
-            def call_random_meth(*args: Any, **kwargs: Any) -> Any:
-                r = random.Random()
-                r.setstate(state)
-                return getattr(r, name)(*args, **kwargs)
+                random_call_index = tx.output.add_random_call(
+                    None,
+                    tuple(args_replay),
+                    kwargs_replay,
+                    source=self.source,
+                    method_name=name,
+                )
+                return VariableBuilder(
+                    tx, RandomValueSource(random_call_index)
+                ).wrap_unspecialized_primitive(example_value)
+            else:
+                if self.has_dynamic_or_sourced_arg(args, kwargs):
+                    if any(
+                        self.has_lazy_value(arg)
+                        for arg in itertools.chain(args, kwargs.values())
+                    ):
+                        skip_dynamic_random_boundary()
+                    unimplemented_dynamic_random_arg()
+                tx.output.side_effects.mutation(self)
+                state = self.random.getstate()
 
-            # self.random state not actually updated by call_random_meth, so update here
-            # by calling the method
-            getattr(self.random, name)(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
+                def call_random_meth(*args: Any, **kwargs: Any) -> Any:
+                    r = random.Random()
+                    r.setstate(state)
+                    return getattr(r, name)(*args, **kwargs)
 
-            return call_random_fn(tx, call_random_meth, args, kwargs)
+                # self.random state not actually updated by call_random_meth, so update here
+                # by calling the method
+                getattr(self.random, name)(*args_example, **kwargs_example)
+
+                return call_random_fn(tx, call_random_meth, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:

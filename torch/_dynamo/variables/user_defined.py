@@ -1589,24 +1589,38 @@ class RemovableHandleClass:
 
 def call_random_fn(
     tx: "InstructionTranslatorBase",
-    fn: Callable[..., Any],
+    fn: Callable[..., Any] | None,
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
+    *,
+    source: Source | None = None,
+    method_name: str | None = None,
+    example_value: Any | None = None,
 ) -> VariableTracker:
     from .builder import VariableBuilder
 
-    args = [x.as_python_constant() for x in args]
-    kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-    random_call_index = len(tx.output.random_calls)
+    args_const = [x.as_python_constant() for x in args]
+    kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
     # NB: it is probably not important for the example_value to be exactly correct,
     # we just need the right type
-    example_value = fn(*args, **kwargs)
-    source = RandomValueSource(random_call_index)
-    tx.output.random_calls.append((fn, args, kwargs))  # type: ignore[arg-type]
+    if example_value is None:
+        if fn is None:
+            raise AssertionError("example_value is required for source-backed random")
+        example_value = fn(*args_const, **kwargs_const)
+    random_call_index = tx.output.add_random_call(
+        fn,
+        tuple(args_const),
+        kwargs_const,
+        source=source,
+        method_name=method_name,
+    )
+    random_value_source = RandomValueSource(random_call_index)
     # TODO: arguably, this should route to wrap_symint/wrap_symfloat
     # (currently hypothetical), but I'm not going to poke my hand in
     # this nest for now
-    return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
+    return VariableBuilder(tx, random_value_source).wrap_unspecialized_primitive(
+        example_value
+    )
 
 
 class UserDefinedObjectVariable(UserDefinedVariable):
