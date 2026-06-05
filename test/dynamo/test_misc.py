@@ -51,7 +51,6 @@ from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
-    expectedFailureDynamic,
     same,
     skipIfNotPy311,
     unsupported,
@@ -1956,6 +1955,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         f(torch.tensor([3]))
         f(torch.tensor([4]))
         self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_symbool_python_not(self):
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def f(x):
+            c = x.item()
+            torch._check(not (c * 2 == 0))
+            return torch.ones(c * 2)
+
+        out = f(torch.tensor(3, dtype=torch.int64))
+        self.assertEqual(out.shape, (6,))
+        self.assertEqual(len(backend.graphs), 1)
+
+        targets = [node.target for node in backend.graphs[0].graph.nodes]
+        self.assertIn(torch.sym_not, targets)
+        self.assertIn(torch._check, targets)
+        self.assertNotIn(operator.not_, targets)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_torch_check_symbolic_shape_rel(self):
@@ -7053,7 +7071,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional",
             "addcdiv",
             "addcdiv_positional",
-            subtest("baddbmm", decorators=[expectedFailureDynamic]),
+            "baddbmm",
         ],
     )
     def test_scalar_arg_0d_tensor(self, op):
@@ -7074,8 +7092,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             "addcmul_positional": lambda: a.addcmul(beta, b, c),
             "addcdiv": lambda: a.addcdiv(b, c.abs() + 1, value=beta),
             "addcdiv_positional": lambda: a.addcdiv(beta, b, c.abs() + 1),
-            # Z3 translation validation doesn't support unbacked symbols from
-            # baddbmm's scalar args (https://github.com/pytorch/pytorch/issues/162287).
             "baddbmm": lambda: m_batch.baddbmm(batch1, batch2, alpha=alpha, beta=beta),
         }
 

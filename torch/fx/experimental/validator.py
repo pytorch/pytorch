@@ -284,7 +284,7 @@ try:
         # This is needed because the argument of some FX nodes were
         # literal integers, instead of booleans. So, whenever this flag
         # is set, we also convert ints to booleans.
-        boolean_ops = {operator.not_}
+        boolean_ops = {operator.not_, torch.sym_not}
         as_bool = op in boolean_ops
 
         # Lifts the function into 'z3.ExprRef' domain.
@@ -318,6 +318,7 @@ try:
         replacement_map = {
             # Operator module.
             operator.not_: lift(z3.Not),
+            torch.sym_not: lift(z3.Not),
             operator.and_: lift(ops.bitwise_and),
             operator.or_: lift(ops.bitwise_or),
             operator.lshift: lift(ops.lshift),

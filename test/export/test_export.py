@@ -6739,6 +6739,30 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.tensor(6), torch.tensor(6), torch.tensor(6), torch.randn(1)),
         )
 
+    def test_torch_check_symbool_python_not_strict(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                c = x.item()
+                torch._check(not (c * 2 == 0))
+                if c * 2 == 0:
+                    return x.sin()
+                return x + 1
+
+        export(M(), (torch.tensor(3, dtype=torch.int64),), strict=True)
+
+    def test_torch_check_symbool_python_not_nonstrict_error(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                c = x.item()
+                torch._check(not (c * 2 == 0))
+                return x + 1
+
+        with self.assertRaisesRegex(
+            torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+            "Python `not` on a symbolic boolean",
+        ):
+            export(M(), (torch.tensor(3, dtype=torch.int64),), strict=False)
+
     def test_replaced_unbacked_bindings(self):
         import sympy
 
