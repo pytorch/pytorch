@@ -3807,6 +3807,163 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_scalar_round(self):
+        def literal_fn(x):
+            n = int(round(np.floor(3.1)))
+            return x + n
+
+        def arg_fn(n, x):
+            p = int(round(np.floor(n)))
+            return x + p
+
+        def constructor_fn(x):
+            return x + int(round(np.float64(3.1)))
+
+        def constructor_arg_fn(n, x):
+            return x + int(round(np.float64(n)))
+
+        def zero_dim_array_ufunc_fn(x):
+            return x + int(round(np.floor(np.array(3.1))))
+
+        def reduction_function_fn(x):
+            return x + int(round(np.sum([3.1])))
+
+        def reduction_method_fn(x):
+            return x + int(round(np.array([3.1]).sum()))
+
+        def scalar_preserving_function_fn(x):
+            return x + int(round(np.round(np.array(3.1))))
+
+        def scalar_preserving_alias_fn(x):
+            return x + int(round(np.around(np.array(3.1))))
+
+        def scalar_preserving_method_fn(x):
+            return x + int(round(np.array(3.1).round()))
+
+        x = torch.ones(1)
+        for fn, args in [
+            (literal_fn, (x,)),
+            (arg_fn, (3.1, x)),
+            (constructor_fn, (x,)),
+            (constructor_arg_fn, (3.1, x)),
+            (zero_dim_array_ufunc_fn, (x,)),
+            (reduction_function_fn, (x,)),
+            (reduction_method_fn, (x,)),
+            (scalar_preserving_function_fn, (x,)),
+            (scalar_preserving_alias_fn, (x,)),
+            (scalar_preserving_method_fn, (x,)),
+        ]:
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(*args), fn(*args))
+            torch._dynamo.reset()
+
+        opt_arg_fn = torch.compile(arg_fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_arg_fn(3.1, x), arg_fn(3.1, x))
+        self.assertEqual(opt_arg_fn(4.1, x), arg_fn(4.1, x))
+
+        opt_constructor_arg_fn = torch.compile(
+            constructor_arg_fn, backend="eager", fullgraph=True
+        )
+        self.assertEqual(opt_constructor_arg_fn(3.1, x), constructor_arg_fn(3.1, x))
+        self.assertEqual(opt_constructor_arg_fn(4.1, x), constructor_arg_fn(4.1, x))
+
+    def test_numpy_scalar_dtype_semantics(self):
+        def fn(x):
+            y = np.float32(3e38)
+            z = y * y
+            return x + (0 if np.isinf(z) else 1)
+
+        x = torch.ones(1)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", "overflow encountered")
+            ref = fn(x)
+            opt_fn = torch.compile(fn, backend="eager")
+            self.assertEqual(opt_fn(x), ref)
+
+        def round_ndigits_fn(x):
+            return x + round(np.float32(123456.789), 7)
+
+        self.assertEqual(
+            torch.compile(round_ndigits_fn, backend="eager")(torch.zeros(())),
+            round_ndigits_fn(torch.zeros(())),
+        )
+
+        def round_none_fn(x):
+            return (
+                x + round(np.float32(1.2), None) + round(np.float32(1.2), ndigits=None)
+            )
+
+        self.assertEqual(
+            torch.compile(round_none_fn, backend="eager", fullgraph=True)(
+                torch.zeros(())
+            ),
+            round_none_fn(torch.zeros(())),
+        )
+
+    def test_numpy_array_dunder_round_still_errors(self):
+        def fn(x):
+            round(np.floor([3.1]))
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_fn(torch.ones(1))
+
+        def zero_dim_array_fn(x):
+            round(np.array(3.1))
+            return x
+
+        opt_zero_dim_array_fn = torch.compile(zero_dim_array_fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_zero_dim_array_fn(torch.ones(1))
+
+        def non_scalar_reduction_fn(x):
+            round(np.sum([[3.1]], axis=0))
+            return x
+
+        opt_non_scalar_reduction_fn = torch.compile(
+            non_scalar_reduction_fn, backend="eager"
+        )
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_non_scalar_reduction_fn(torch.ones(1))
+
+        def bool_scalar_fn(x):
+            round(np.greater(np.float64(2), np.float64(1)))
+            return x
+
+        opt_bool_scalar_fn = torch.compile(bool_scalar_fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_bool_scalar_fn(torch.ones(1))
+
+        def ufunc_out_fn(x):
+            out = np.array(0.0)
+            round(np.floor(3.1, out))
+            return x
+
+        opt_ufunc_out_fn = torch.compile(ufunc_out_fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_ufunc_out_fn(torch.ones(1))
+
+        def round_function_out_fn(x):
+            out = np.array(0.0)
+            round(np.round(np.array(3.1), 0, out))
+            return x
+
+        opt_round_function_out_fn = torch.compile(
+            round_function_out_fn, backend="eager"
+        )
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_round_function_out_fn(torch.ones(1))
+
+        def round_method_out_fn(x):
+            out = np.array(0.0)
+            round(np.array(3.1).round(out=out))
+            return x
+
+        opt_round_method_out_fn = torch.compile(round_method_out_fn, backend="eager")
+        with self.assertRaisesRegex(TypeError, "__round__"):
+            opt_round_method_out_fn(torch.ones(1))
+
     def test_numpy_array_of_arrays(self):
         def fn(x, y):
             return np.array([x, y])
