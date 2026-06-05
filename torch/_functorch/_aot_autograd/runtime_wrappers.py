@@ -11,6 +11,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import operator
 import pprint
 import typing
 import warnings
@@ -48,7 +49,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map
 
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
@@ -91,6 +92,7 @@ from .subclass_utils import (
     wrap_tensor_subclasses,
 )
 from .utils import (
+    _is_tangent,
     call_and_expect_output_descs,
     call_func_at_runtime_with_args,
     make_boxed_func,
@@ -2566,6 +2568,567 @@ class AOTDispatchAutogradCompileSpec:
     try_save_cache_entry: Callable[..., Any] | None
 
 
+def _grad_output_surviving_indices(fw_metadata: ViewAndMutationMeta) -> list[int]:
+    num_mutated_runtime_inps = fw_metadata.num_mutated_inp_runtime_indices
+    num_outputs = fw_metadata.num_outputs
+    expected_grad_outs = (
+        num_outputs + num_mutated_runtime_inps + fw_metadata.num_intermediate_bases
+    )
+    input_info = fw_metadata.input_info
+
+    inp_surviving: list[int] = []
+    for i, info_idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
+        if input_info[info_idx].mutates_data and input_info[info_idx].requires_grad:
+            inp_surviving.append(i)
+
+    out_surviving: list[int] = []
+    for i, info in enumerate(fw_metadata.output_info):
+        if (
+            info.output_type
+            in [
+                OutputType.non_alias,
+                OutputType.unsafe_view_alias,
+                OutputType.custom_function_view,
+            ]
+            and issubclass(info.raw_type, torch.Tensor)
+            and info.requires_grad_for_backward
+        ):
+            out_surviving.append(num_mutated_runtime_inps + i)
+
+    intermediate_start = num_mutated_runtime_inps + num_outputs
+    return (
+        inp_surviving
+        + out_surviving
+        + list(range(intermediate_start, expected_grad_outs))
+    )
+
+
+def _tangent_meta_arg_count(meta: PlainTensorMeta | SubclassCreationMeta) -> int:
+    if isinstance(meta, PlainTensorMeta):
+        return 1
+    if isinstance(meta, SubclassCreationMeta):
+        return meta.arg_count
+    raise AssertionError(f"unexpected tangent metadata: {type(meta)}")
+
+
+def _undefined_tangent_flat_indices(
+    fw_metadata: ViewAndMutationMeta,
+    undefined_grad_out_indices: Sequence[int],
+) -> frozenset[int]:
+    undefined_grad_out_indices_set = set(undefined_grad_out_indices)
+    flat_indices: set[int] = set()
+    curr_flat_idx = 0
+    for grad_out_idx, tangent_meta in zip(
+        _grad_output_surviving_indices(fw_metadata),
+        fw_metadata.subclass_tangent_meta,
+    ):
+        arg_count = _tangent_meta_arg_count(tangent_meta)
+        if grad_out_idx in undefined_grad_out_indices_set:
+            flat_indices.update(range(curr_flat_idx, curr_flat_idx + arg_count))
+        curr_flat_idx += arg_count
+    return frozenset(flat_indices)
+
+
+def _specializable_user_grad_output_indices(
+    fw_metadata: ViewAndMutationMeta,
+    undefined_grad_out_indices: Sequence[int],
+) -> tuple[int, ...]:
+    num_mutated_runtime_inps = fw_metadata.num_mutated_inp_runtime_indices
+    user_outputs_start = num_mutated_runtime_inps
+    user_outputs_end = user_outputs_start + fw_metadata.num_outputs
+    surviving_grad_outputs = set(_grad_output_surviving_indices(fw_metadata))
+    return tuple(
+        i
+        for i in sorted(set(undefined_grad_out_indices))
+        if user_outputs_start <= i < user_outputs_end and i in surviving_grad_outputs
+    )
+
+
+def _grad_output_prototype(x: Any) -> torch.Tensor | None:
+    if isinstance(x, TensorAlias):
+        x = x.alias
+    if isinstance(x, torch.Tensor):
+        return x.detach()
+    return None
+
+
+def _grad_output_prototypes(
+    raw_returns: Sequence[Any],
+    num_grad_outputs: int,
+) -> tuple[torch.Tensor | None, ...]:
+    return tuple(_grad_output_prototype(x) for x in raw_returns[:num_grad_outputs])
+
+
+def _materialize_missing_grad_outputs(
+    flat_args: list[Any],
+    grad_output_prototypes: Sequence[torch.Tensor | None],
+    grad_output_indices: Sequence[int],
+    skip_indices: Sequence[int],
+) -> None:
+    skip_indices_set = set(skip_indices)
+    for idx in grad_output_indices:
+        if idx in skip_indices_set:
+            continue
+        if idx >= len(flat_args) or idx >= len(grad_output_prototypes):
+            continue
+        if flat_args[idx] is not None:
+            continue
+        prototype = grad_output_prototypes[idx]
+        if prototype is not None:
+            flat_args[idx] = torch.zeros_like(prototype)
+
+
+def _materialize_missing_tangent_args(
+    all_args: list[Any],
+    bw_module: torch.fx.GraphModule,
+    fw_metadata: ViewAndMutationMeta,
+    undefined_grad_out_indices: Sequence[int],
+    grad_output_prototypes: Sequence[torch.Tensor | None],
+) -> None:
+    undefined_grad_out_indices_set = set(undefined_grad_out_indices)
+    if not undefined_grad_out_indices_set:
+        return
+
+    placeholders = bw_module.graph.find_nodes(op="placeholder")
+    tangent_placeholders = [node for node in placeholders if _is_tangent(node)]
+    placeholder_positions = {node: i for i, node in enumerate(placeholders)}
+
+    if len(tangent_placeholders) != sum(
+        _tangent_meta_arg_count(meta) for meta in fw_metadata.subclass_tangent_meta
+    ):
+        raise AssertionError(
+            "expected tangent placeholders to line up with tangent metadata, "
+            f"got {len(tangent_placeholders)} != "
+            f"{sum(_tangent_meta_arg_count(meta) for meta in fw_metadata.subclass_tangent_meta)}"
+        )
+
+    curr_flat_idx = 0
+    for tangent_idx, (grad_out_idx, tangent_meta) in enumerate(
+        zip(
+            _grad_output_surviving_indices(fw_metadata),
+            fw_metadata.subclass_tangent_meta,
+        )
+    ):
+        arg_count = _tangent_meta_arg_count(tangent_meta)
+        if grad_out_idx not in undefined_grad_out_indices_set:
+            curr_flat_idx += arg_count
+            continue
+        if grad_out_idx >= len(grad_output_prototypes):
+            curr_flat_idx += arg_count
+            continue
+
+        prototype = grad_output_prototypes[grad_out_idx]
+        if prototype is None:
+            curr_flat_idx += arg_count
+            continue
+
+        tangent = torch.zeros_like(prototype)
+        _, flat_tangents = AOTDispatchAutograd.process_runtime_tangent(
+            tangent,
+            tangent_meta,
+            tangent_idx,
+            fw_metadata.traced_tangents_descs[tangent_idx],
+            fw_metadata.compile_id_str,
+            (
+                fw_metadata.tangent_source_stack_traces[tangent_idx]
+                if fw_metadata.tangent_source_stack_traces
+                else None
+            ),
+        )
+        if len(flat_tangents) != arg_count:
+            raise AssertionError(
+                f"expected {arg_count} flattened tangents, got {len(flat_tangents)}"
+            )
+
+        for offset, flat_tangent in enumerate(flat_tangents):
+            placeholder = tangent_placeholders[curr_flat_idx + offset]
+            all_args_idx = placeholder_positions[placeholder]
+            all_args[all_args_idx] = flat_tangent
+
+        curr_flat_idx += arg_count
+
+
+class _PrunedZero:
+    pass
+
+
+@dataclass(frozen=True)
+class _TangentDependency:
+    depends_pruned: bool
+    depends_live: bool
+
+
+_PRUNED_ZERO = _PrunedZero()
+_UNHANDLED_ZERO_SIMPLIFICATION = object()
+_UNKNOWN_ZERO_SIMPLIFICATION = object()
+
+
+def _is_pruned_zero(x: Any) -> bool:
+    return x is _PRUNED_ZERO
+
+
+def _contains_pruned_zero(x: Any) -> bool:
+    flat, _ = tree_flatten(x)
+    return any(_is_pruned_zero(item) for item in flat)
+
+
+def _pruned_zero_to_none(x: Any) -> Any:
+    return None if _is_pruned_zero(x) else x
+
+
+def _kwargs_alpha_is_one(kwargs: dict[str, Any]) -> bool:
+    return kwargs.get("alpha", 1) == 1
+
+
+def _is_zero_literal_node(x: Any) -> bool:
+    if not isinstance(x, torch.fx.Node):
+        return False
+    if x.target is torch.ops.aten.scalar_tensor.default and x.args:
+        value = x.args[0]
+        return isinstance(value, (int, float, bool)) and value == 0
+    return False
+
+
+def _is_pruned_or_literal_zero(x: Any) -> bool:
+    return _is_pruned_zero(x) or _is_zero_literal_node(x)
+
+
+def _get_arg_by_schema_name(
+    args: Any,
+    kwargs: dict[str, Any],
+    idx: int,
+    name: str,
+) -> Any:
+    if idx < len(args):
+        return args[idx]
+    return kwargs.get(name)
+
+
+def _all_backward_grad_args_are_pruned_zeros(
+    target: Any,
+    args: Any,
+    kwargs: dict[str, Any],
+) -> bool:
+    if not isinstance(target, OpOverload):
+        return False
+    if "backward" not in target.overloadpacket.__name__:
+        return False
+
+    grad_arg_indices: list[tuple[int, str]] = []
+    for idx, arg in enumerate(target._schema.arguments):
+        if arg.name in {"grad", "grad_out", "grad_output"} or arg.name.startswith(
+            "grad_"
+        ):
+            grad_arg_indices.append((idx, arg.name))
+
+    return bool(grad_arg_indices) and all(
+        _is_pruned_zero(_get_arg_by_schema_name(args, kwargs, idx, name))
+        for idx, name in grad_arg_indices
+    )
+
+
+def _simplify_with_pruned_zeros(
+    graph: torch.fx.Graph,
+    target: Any,
+    args: Any,
+    kwargs: dict[str, Any],
+) -> Any:
+    aten = torch.ops.aten
+
+    if target in (aten.mul.Tensor, aten.mul.Scalar):
+        if any(_is_pruned_zero(arg) for arg in args[:2]):
+            return _PRUNED_ZERO
+
+    if target in (aten.mm.default, aten.bmm.default, aten.matmul.default):
+        if any(_is_pruned_zero(arg) for arg in args[:2]):
+            return _PRUNED_ZERO
+
+    if target in (aten.div.Tensor, aten.div.Scalar):
+        if args and _is_pruned_zero(args[0]):
+            return _PRUNED_ZERO
+
+    if target is aten.neg.default:
+        if args and _is_pruned_zero(args[0]):
+            return _PRUNED_ZERO
+
+    if target is aten.where.self:
+        true_value, false_value = args[1:3]
+        if (
+            _is_pruned_or_literal_zero(true_value)
+            and _is_pruned_or_literal_zero(false_value)
+            and any(_is_pruned_zero(arg) for arg in args[1:3])
+        ):
+            return _PRUNED_ZERO
+
+    if _all_backward_grad_args_are_pruned_zeros(target, args, kwargs):
+        return _PRUNED_ZERO
+
+    if target is aten.add.Tensor:
+        lhs, rhs = args[:2]
+        if _is_pruned_zero(lhs) and _is_pruned_zero(rhs):
+            return _PRUNED_ZERO
+        if _is_pruned_zero(rhs):
+            return lhs
+        if _is_pruned_zero(lhs) and _kwargs_alpha_is_one(kwargs):
+            return rhs
+
+    if target is aten.sub.Tensor:
+        lhs, rhs = args[:2]
+        if _is_pruned_zero(lhs) and _is_pruned_zero(rhs):
+            return _PRUNED_ZERO
+        if _is_pruned_zero(rhs):
+            return lhs
+        if _is_pruned_zero(lhs) and _kwargs_alpha_is_one(kwargs):
+            return graph.call_function(aten.neg.default, (rhs,))
+
+    zero_preserving_unary = {
+        aten.alias.default,
+        aten.clone.default,
+        aten.contiguous.default,
+        aten.detach.default,
+        aten.expand.default,
+        aten.permute.default,
+        aten.reshape.default,
+        aten.select.int,
+        aten.slice.Tensor,
+        aten.squeeze.default,
+        aten.squeeze.dim,
+        aten.t.default,
+        aten.transpose.int,
+        aten.unsqueeze.default,
+        aten.view.default,
+    }
+    if target in zero_preserving_unary and args and _is_pruned_zero(args[0]):
+        return _PRUNED_ZERO
+
+    if target is operator.getitem and args and _is_pruned_zero(args[0]):
+        return _PRUNED_ZERO
+
+    return _UNHANDLED_ZERO_SIMPLIFICATION
+
+
+def _specialize_bw_module_for_undefined_grad_outputs(
+    bw_module: torch.fx.GraphModule,
+    placeholder_list: list[Any],
+    fw_metadata: ViewAndMutationMeta,
+    undefined_grad_out_indices: Sequence[int],
+    all_args: list[Any],
+) -> tuple[torch.fx.GraphModule, list[Any], tuple[int, ...]] | None:
+    undefined_tangent_flat_indices = _undefined_tangent_flat_indices(
+        fw_metadata, undefined_grad_out_indices
+    )
+    if not undefined_tangent_flat_indices:
+        return None
+
+    bw_module = copy.deepcopy(bw_module)
+    placeholders = bw_module.graph.find_nodes(op="placeholder")
+    tangent_placeholders = [node for node in placeholders if _is_tangent(node)]
+    if len(tangent_placeholders) != sum(
+        _tangent_meta_arg_count(meta) for meta in fw_metadata.subclass_tangent_meta
+    ):
+        raise AssertionError(
+            "expected tangent placeholders to line up with tangent metadata, "
+            f"got {len(tangent_placeholders)} != "
+            f"{sum(_tangent_meta_arg_count(meta) for meta in fw_metadata.subclass_tangent_meta)}"
+        )
+    if len(placeholders) != len(placeholder_list):
+        raise AssertionError(
+            f"expected {len(placeholders)} placeholders, got {len(placeholder_list)} placeholder values"
+        )
+    if len(placeholders) != len(all_args):
+        raise AssertionError(
+            f"expected {len(placeholders)} placeholders, got {len(all_args)} runtime args"
+        )
+
+    placeholders_to_prune = {
+        tangent_placeholders[i] for i in undefined_tangent_flat_indices
+    }
+
+    new_graph = torch.fx.Graph()
+    env: dict[torch.fx.Node, Any] = {}
+    new_placeholder_list: list[Any] = []
+    kept_arg_indices: list[int] = []
+
+    def load_arg(n: torch.fx.Node) -> Any:
+        return env[n]
+
+    for node in bw_module.graph.nodes:
+        if node.op == "placeholder":
+            if node in placeholders_to_prune:
+                env[node] = _PRUNED_ZERO
+                continue
+
+            new_node = new_graph.placeholder(node.target, type_expr=node.type)
+            new_node.meta = copy.copy(node.meta)
+            env[node] = new_node
+            idx = placeholders.index(node)
+            new_placeholder_list.append(placeholder_list[idx])
+            kept_arg_indices.append(idx)
+            continue
+
+        if node.op == "output":
+            output_arg = torch.fx.map_arg(node.args[0], load_arg)
+            output_arg = tree_map(_pruned_zero_to_none, output_arg)
+            new_graph.output(output_arg)
+            continue
+
+        args = torch.fx.map_arg(node.args, load_arg)
+        kwargs = torch.fx.map_arg(node.kwargs, load_arg)
+        if _contains_pruned_zero((args, kwargs)):
+            replacement = _simplify_with_pruned_zeros(
+                new_graph, node.target, args, kwargs
+            )
+            if replacement is _UNHANDLED_ZERO_SIMPLIFICATION:
+                return None
+            env[node] = replacement
+            if isinstance(replacement, torch.fx.Node):
+                replacement.meta.update(copy.copy(node.meta))
+            continue
+
+        new_node = new_graph.node_copy(node, load_arg)
+        new_node.meta = copy.copy(node.meta)
+        env[node] = new_node
+
+    new_graph.eliminate_dead_code()
+    new_graph.lint()
+    specialized_bw_module = torch.fx.GraphModule(bw_module, new_graph)
+    return specialized_bw_module, new_placeholder_list, tuple(kept_arg_indices)
+
+
+def _union_tangent_dependencies(x: Any) -> _TangentDependency:
+    flat, _ = tree_flatten(x)
+    return _TangentDependency(
+        any(
+            isinstance(item, _TangentDependency) and item.depends_pruned
+            for item in flat
+        ),
+        any(
+            isinstance(item, _TangentDependency) and item.depends_live for item in flat
+        ),
+    )
+
+
+def _pruned_backward_output_indices_for_undefined_grad_outputs(
+    bw_module: torch.fx.GraphModule,
+    fw_metadata: ViewAndMutationMeta,
+    undefined_grad_out_indices: Sequence[int],
+) -> tuple[int, ...]:
+    undefined_tangent_flat_indices = _undefined_tangent_flat_indices(
+        fw_metadata, undefined_grad_out_indices
+    )
+    if not undefined_tangent_flat_indices:
+        return ()
+
+    placeholders = bw_module.graph.find_nodes(op="placeholder")
+    tangent_placeholders = [node for node in placeholders if _is_tangent(node)]
+    if len(tangent_placeholders) != sum(
+        _tangent_meta_arg_count(meta) for meta in fw_metadata.subclass_tangent_meta
+    ):
+        return ()
+
+    placeholders_to_prune = {
+        tangent_placeholders[i] for i in undefined_tangent_flat_indices
+    }
+
+    env: dict[torch.fx.Node, _TangentDependency] = {}
+
+    def load_arg(n: torch.fx.Node) -> Any:
+        return env[n]
+
+    for node in bw_module.graph.nodes:
+        if node.op == "placeholder":
+            env[node] = _TangentDependency(
+                depends_pruned=node in placeholders_to_prune,
+                depends_live=node in tangent_placeholders
+                and node not in placeholders_to_prune,
+            )
+            continue
+
+        if node.op == "output":
+            output_arg = torch.fx.map_arg(node.args[0], load_arg)
+            flat_outputs, _ = tree_flatten(output_arg)
+            return tuple(
+                i
+                for i, output in enumerate(flat_outputs)
+                if isinstance(output, _TangentDependency)
+                and output.depends_pruned
+                and not output.depends_live
+            )
+
+        args = torch.fx.map_arg(node.args, load_arg)
+        kwargs = torch.fx.map_arg(node.kwargs, load_arg)
+        env[node] = _union_tangent_dependencies((args, kwargs))
+
+    return ()
+
+
+def _mask_pruned_backward_outputs(
+    out: list[Any],
+    pruned_output_indices: Sequence[int],
+) -> list[Any]:
+    for idx in pruned_output_indices:
+        if idx < len(out):
+            out[idx] = None
+    return out
+
+
+def _subclass_tensor_leaf_indices(
+    meta: SubclassCreationMeta,
+    start_idx: int,
+) -> tuple[list[int], int]:
+    indices: list[int] = []
+    curr_idx = start_idx
+    for attr_meta in meta.attrs.values():
+        if isinstance(attr_meta, PlainTensorMeta):
+            indices.append(curr_idx)
+            curr_idx += 1
+        elif isinstance(attr_meta, SubclassCreationMeta):
+            child_indices, curr_idx = _subclass_tensor_leaf_indices(attr_meta, curr_idx)
+            indices.extend(child_indices)
+        elif isinstance(attr_meta, OpaqueMeta):
+            curr_idx += 1
+        else:
+            raise AssertionError(
+                f"unexpected subclass attr metadata: {type(attr_meta)}"
+            )
+    return indices, start_idx + meta.arg_count
+
+
+def _subclass_grad_is_fully_pruned(
+    unwrapped_outs: Sequence[Any],
+    meta: SubclassCreationMeta,
+) -> bool:
+    tensor_leaf_indices, _ = _subclass_tensor_leaf_indices(
+        meta, meta.flat_tensor_start_idx
+    )
+    return bool(tensor_leaf_indices) and all(
+        idx < len(unwrapped_outs) and unwrapped_outs[idx] is None
+        for idx in tensor_leaf_indices
+    )
+
+
+def _wrap_backward_outputs_with_subclasses(
+    unwrapped_outs: Sequence[Any],
+    *,
+    subclass_metas: list[PlainTensorMeta | SubclassCreationMeta],
+    make_subclass_override: Callable[..., Any] | None = None,
+) -> tuple[Any, ...]:
+    wrapped_outs: list[Any] = []
+    for meta in subclass_metas:
+        if isinstance(meta, PlainTensorMeta):
+            wrapped_outs.append(unwrapped_outs[meta.unwrapped_idx])
+            continue
+        if not isinstance(meta, SubclassCreationMeta):
+            raise AssertionError(f"unexpected subclass metadata: {type(meta)}")
+        if _subclass_grad_is_fully_pruned(unwrapped_outs, meta):
+            wrapped_outs.append(None)
+        elif make_subclass_override is not None:
+            wrapped_outs.append(make_subclass_override(meta, True, unwrapped_outs))
+        else:
+            wrapped_outs.append(meta.creation_fn(unwrapped_outs, is_runtime=True))
+    return tuple(wrapped_outs)
+
+
 @dataclass
 class _AutogradSavedState:
     metadata: ViewAndMutationMeta
@@ -2704,7 +3267,14 @@ class _AutogradForwardEpilogue:
             for (i, x) in enumerate(raw_returns_not_including_intermediate_bases)
             if isinstance(x, torch.Tensor) and not raw_returns_meta[i].requires_grad
         ]
+        ctx._aot_grad_output_prototypes = _grad_output_prototypes(
+            raw_returns,
+            num_mutated_runtime_inps
+            + num_outputs
+            + self.metadata.num_intermediate_bases,
+        )
         ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+        ctx.set_materialize_grads(False)
         ctx._materialize_non_diff_grads = False
         return tuple(raw_returns)
 
@@ -2805,25 +3375,129 @@ class _AutogradBackwardCompiler:
     aot_config: AOTConfig
     fw_metadata: ViewAndMutationMeta
     try_save_cache_entry: Callable[..., Any] | None
+    specialized_compiled_bws: dict[
+        tuple[int, ...], tuple[Callable[..., Any], tuple[int, ...]]
+    ] = field(default_factory=dict)
+    pruned_backward_output_indices: dict[tuple[int, ...], tuple[int, ...]] = field(
+        default_factory=dict
+    )
+    lazy_backward_context_prepared: bool = False
 
-    def get_or_compile(self, *, saved_tensors_use_once: bool) -> Callable[..., Any]:
-        if self.compiled_bw is not None:
-            return self.compiled_bw
+    def can_specialize_undefined_grad_outputs(self) -> bool:
+        return (
+            self.compiled_bw is None
+            and self.bw_compiler is not None
+            and isinstance(self.lazy_backward_info, AutogradLazyBackwardCompileInfo)
+        )
+
+    def get_pruned_backward_output_indices(
+        self,
+        undefined_grad_out_indices: Sequence[int],
+    ) -> tuple[int, ...]:
+        specialization_key = _specializable_user_grad_output_indices(
+            self.fw_metadata, undefined_grad_out_indices
+        )
+        if not specialization_key:
+            return ()
+        if specialization_key in self.pruned_backward_output_indices:
+            return self.pruned_backward_output_indices[specialization_key]
+
+        if isinstance(self.lazy_backward_info, AutogradLazyBackwardCompileInfo):
+            bw_module = typing.cast(
+                torch.fx.GraphModule, self.lazy_backward_info.bw_module
+            )
+        elif isinstance(self.lazy_backward_info, CachedAutogradLazyBackwardCompileInfo):
+            bw_module = typing.cast(
+                torch.fx.GraphModule, self.lazy_backward_info.bw_module_fn()
+            )
+        else:
+            return ()
+
+        pruned_output_indices = (
+            _pruned_backward_output_indices_for_undefined_grad_outputs(
+                bw_module, self.fw_metadata, specialization_key
+            )
+        )
+        self.pruned_backward_output_indices[specialization_key] = pruned_output_indices
+        return pruned_output_indices
+
+    def get_or_compile(
+        self,
+        *,
+        saved_tensors_use_once: bool,
+        undefined_grad_out_indices: Sequence[int],
+        grad_output_prototypes: Sequence[torch.Tensor | None],
+        all_args: list[Any],
+    ) -> tuple[Callable[..., Any], list[Any], tuple[int, ...]]:
+        specialization_key = _specializable_user_grad_output_indices(
+            self.fw_metadata, undefined_grad_out_indices
+        )
+        if not specialization_key and self.compiled_bw is not None:
+            return self.compiled_bw, all_args, ()
+
+        if specialization_key in self.specialized_compiled_bws:
+            compiled_bw, kept_arg_indices = self.specialized_compiled_bws[
+                specialization_key
+            ]
+            return compiled_bw, [all_args[i] for i in kept_arg_indices], ()
 
         if self.lazy_backward_info is None:
             raise AssertionError("lazy_backward_info must not be None")
-        if not isinstance(self.lazy_backward_info, AutogradLazyBackwardCompileInfo):
+
+        if specialization_key and not self.can_specialize_undefined_grad_outputs():
+            if self.compiled_bw is None:
+                raise AssertionError("compiled_bw must not be None")
+            return (
+                self.compiled_bw,
+                all_args,
+                self.get_pruned_backward_output_indices(undefined_grad_out_indices),
+            )
+
+        bw_compiler = self.bw_compiler
+        if isinstance(self.lazy_backward_info, AutogradLazyBackwardCompileInfo):
+            self._prepare_lazy_backward_context(saved_tensors_use_once)
+            bw_module = typing.cast(
+                torch.fx.GraphModule, self.lazy_backward_info.bw_module
+            )
+            placeholder_list = self.lazy_backward_info.placeholder_list
+            saved_context = self.lazy_backward_info.saved_context
+            saved_compile_context = self.lazy_backward_info.saved_compile_context
+        elif isinstance(self.lazy_backward_info, CachedAutogradLazyBackwardCompileInfo):
+            if self.compiled_bw is None:
+                raise AssertionError("compiled_bw must not be None")
+            return (
+                self.compiled_bw,
+                all_args,
+                self.get_pruned_backward_output_indices(undefined_grad_out_indices),
+            )
+        else:
             raise AssertionError(
-                "expected AutogradLazyBackwardCompileInfo, "
+                "expected AutogradLazyBackwardCompileInfo or "
+                "CachedAutogradLazyBackwardCompileInfo, "
                 f"got {type(self.lazy_backward_info)}"
             )
 
-        self._prepare_lazy_backward_context(saved_tensors_use_once)
+        kept_arg_indices: tuple[int, ...] | None = None
 
-        bw_module = self.lazy_backward_info.bw_module
-        placeholder_list = self.lazy_backward_info.placeholder_list
-        saved_context = self.lazy_backward_info.saved_context
-        saved_compile_context = self.lazy_backward_info.saved_compile_context
+        if specialization_key:
+            specialized = _specialize_bw_module_for_undefined_grad_outputs(
+                bw_module,
+                placeholder_list,
+                self.fw_metadata,
+                specialization_key,
+                all_args,
+            )
+            if specialized is None:
+                _materialize_missing_tangent_args(
+                    all_args,
+                    bw_module,
+                    self.fw_metadata,
+                    specialization_key,
+                    grad_output_prototypes,
+                )
+                specialization_key = ()
+            else:
+                bw_module, placeholder_list, kept_arg_indices = specialized
 
         context = torch._C._DisableAutocast if self.disable_amp else nullcontext
         metrics_context = get_metrics_context()
@@ -2848,21 +3522,33 @@ class _AutogradBackwardCompiler:
         ):
             CompileEventLogger.compilation_metric(is_forward=False)
             # See Note: [Backward graph lazy lowering]
-            if self.bw_compiler is None:
+            if bw_compiler is None:
                 raise AssertionError("bw_compiler must not be None")
-            self.compiled_bw = self.bw_compiler(
-                copy.deepcopy(bw_module), placeholder_list
-            )
+            compiled_bw = bw_compiler(copy.deepcopy(bw_module), placeholder_list)
             # Maybe save cache entry
-            if self.try_save_cache_entry is not None:
+            if self.try_save_cache_entry is not None and not specialization_key:
                 self.try_save_cache_entry(
-                    self.compiled_bw,
+                    compiled_bw,
                     bw_module,
                     self.fw_metadata,
                     self.aot_config,
                 )
 
-        return self.compiled_bw
+        if specialization_key:
+            if kept_arg_indices is None:
+                raise AssertionError("kept_arg_indices must not be None")
+            self.specialized_compiled_bws[specialization_key] = (
+                compiled_bw,
+                kept_arg_indices,
+            )
+            return compiled_bw, [all_args[i] for i in kept_arg_indices], ()
+
+        self.compiled_bw = compiled_bw
+        return (
+            compiled_bw,
+            all_args,
+            self.get_pruned_backward_output_indices(undefined_grad_out_indices),
+        )
 
     def _prepare_lazy_backward_context(self, saved_tensors_use_once: bool) -> None:
         if self.lazy_backward_info is None:
@@ -2873,7 +3559,9 @@ class _AutogradBackwardCompiler:
                 f"got {type(self.lazy_backward_info)}"
             )
 
-        if (
+        if self.lazy_backward_context_prepared:
+            pass
+        elif (
             hasattr(self.lazy_backward_info, "saved_context")
             and self.lazy_backward_info.saved_context is not None
         ):
@@ -2911,6 +3599,9 @@ class _AutogradBackwardCompiler:
                 # - the graph we are currently compiling in our DDPOptimizer region.
                 ddp_ctx.curr_bucket -= 1
                 self.lazy_backward_info.saved_context.fw_metadata = curr_fw_meta
+            self.lazy_backward_context_prepared = True
+        else:
+            self.lazy_backward_context_prepared = True
 
         if not saved_tensors_use_once:
             self.fw_metadata.bw_donated_idxs = []
@@ -2947,38 +3638,13 @@ def _codegen_backward_prologue(
     has_mutations_in_bw = bool(
         fw_metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw
     )
-    input_info = fw_metadata.input_info
-
-    inp_surviving: list[int] = []
-    for i, info_idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
-        if input_info[info_idx].mutates_data and input_info[info_idx].requires_grad:
-            inp_surviving.append(i)
-
-    out_surviving: list[int] = []
-    for i, info in enumerate(fw_metadata.output_info):
-        if (
-            info.output_type
-            in [
-                OutputType.non_alias,
-                OutputType.unsafe_view_alias,
-                OutputType.custom_function_view,
-            ]
-            and issubclass(info.raw_type, torch.Tensor)
-            and info.requires_grad_for_backward
-        ):
-            out_surviving.append(num_mutated_runtime_inps + i)
-
-    intermediate_start = num_mutated_runtime_inps + num_outputs
-    all_surviving = (
-        inp_surviving
-        + out_surviving
-        + list(range(intermediate_start, expected_grad_outs))
-    )
+    all_surviving = _grad_output_surviving_indices(fw_metadata)
     num_flat_bw_args_with_grads = len(all_surviving)
 
     L: list[str] = [
         "def _backward_prologue("
-        "ctx_saved_tensors, ctx_symints, ctx_opaque_objects, flat_args):"
+        "ctx_saved_tensors, ctx_symints, ctx_opaque_objects, flat_args,"
+        " ctx_grad_output_prototypes, skip_materialize_grad_output_indices):"
     ]
     G: dict[str, object] = {"torch": torch}
 
@@ -3015,6 +3681,13 @@ def _codegen_backward_prologue(
         f"f'expected {expected_grad_outs} grad_outs, "
         f"got {{len(flat_args)}}')"
     )
+
+    G["_materialize_missing_grad_outputs_"] = _materialize_missing_grad_outputs
+    G["_materialize_grad_output_indices_"] = all_surviving
+    L.append("    _materialize_missing_grad_outputs_(")
+    L.append("        flat_args, ctx_grad_output_prototypes,")
+    L.append("        _materialize_grad_output_indices_,")
+    L.append("        skip_materialize_grad_output_indices)")
 
     if all_surviving:
         items = ", ".join(f"flat_args[{i}]" for i in all_surviving)
@@ -3129,6 +3802,9 @@ def _codegen_backward_epilogue(
 
     if has_subclass:
         code_globals["_wrap_subclasses_"] = wrap_tensor_subclasses
+        code_globals["_wrap_backward_outputs_with_subclasses_"] = (
+            _wrap_backward_outputs_with_subclasses
+        )
         if (
             maybe_subclass_meta.grad_input_metas is None
         ):  # pyrefly: ignore [missing-attribute]
@@ -3136,13 +3812,18 @@ def _codegen_backward_epilogue(
         code_globals["_grad_input_metas_"] = (
             maybe_subclass_meta.grad_input_metas
         )  # pyrefly: ignore [missing-attribute]
+        lines.append("    _has_none = any(_x is None for _x in out)")
         if codegen_wrap_fn is not None:
             code_globals["_wrap_"] = codegen_wrap_fn
-            lines.append("    if make_subclass_override is None:")
+            lines.append("    if make_subclass_override is None and not _has_none:")
             lines.append("        return _wrap_(out)")
-        lines.append("    return _wrap_subclasses_(out,")
+        lines.append("    if not _has_none:")
+        lines.append("        return _wrap_subclasses_(out,")
+        lines.append("            subclass_metas=_grad_input_metas_,")
+        lines.append("            included_subclass_symints=True, is_runtime=True,")
+        lines.append("            make_subclass_override=make_subclass_override)")
+        lines.append("    return _wrap_backward_outputs_with_subclasses_(out,")
         lines.append("        subclass_metas=_grad_input_metas_,")
-        lines.append("        included_subclass_symints=True, is_runtime=True,")
         lines.append("        make_subclass_override=make_subclass_override)")
     else:
         lines.append("    return out")
@@ -3232,7 +3913,9 @@ def _codegen_compiled_backward(
 
     lines.append(
         "    all_args = _prologue_(_saved, _ctx_.symints,"
-        " _ctx_.opaque_objects, grad_args)"
+        " _ctx_.opaque_objects, grad_args,"
+        " _ctx_._aot_grad_output_prototypes,"
+        " _ctx_._aot_skip_materialize_grad_output_indices)"
     )
     lines.append("    del _saved")
 
@@ -3432,7 +4115,14 @@ class _AOTDispatchAutogradFunctionFactory:
                         raise AssertionError(
                             "expected no TensorAlias in intermediates_raw"
                         )
+            ctx._aot_grad_output_prototypes = _grad_output_prototypes(
+                raw_returns,
+                num_mutated_runtime_inps
+                + num_outputs
+                + fw_metadata.num_intermediate_bases,
+            )
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+            ctx.set_materialize_grads(False)
             ctx._materialize_non_diff_grads = False
             return tuple(raw_returns)
 
@@ -3470,6 +4160,22 @@ class _AOTDispatchAutogradFunctionFactory:
 
             @staticmethod
             def backward(ctx: Any, *flat_args: Any) -> tuple[Any, ...]:
+                if len(flat_args) == 1 and isinstance(flat_args[0], list):
+                    undefined_grad_out_indices = tuple(
+                        i for i, grad in enumerate(flat_args[0]) if grad is None
+                    )
+                    ctx._undefined_grad_out_indices = undefined_grad_out_indices
+                    if backward_compiler.can_specialize_undefined_grad_outputs():
+                        ctx._aot_skip_materialize_grad_output_indices = (
+                            _specializable_user_grad_output_indices(
+                                fw_metadata, undefined_grad_out_indices
+                            )
+                        )
+                    else:
+                        ctx._aot_skip_materialize_grad_output_indices = ()
+                else:
+                    ctx._undefined_grad_out_indices = ()
+                    ctx._aot_skip_materialize_grad_output_indices = ()
                 return CompiledFunction._bwd_fn(
                     flat_args,
                     ctx,
@@ -3526,10 +4232,19 @@ class _AOTDispatchAutogradFunctionFactory:
                 saved_tensors_use_once = (
                     not torch._C._autograd._get_current_graph_task_keep_graph()
                 )
-                compiled_bw = backward_compiler.get_or_compile(
-                    saved_tensors_use_once=saved_tensors_use_once
+                undefined_grad_out_indices = getattr(
+                    ctx, "_undefined_grad_out_indices", ()
                 )
-                CompiledFunction.compiled_bw = compiled_bw
+                compiled_bw, all_args, pruned_output_indices = (
+                    backward_compiler.get_or_compile(
+                        saved_tensors_use_once=saved_tensors_use_once,
+                        undefined_grad_out_indices=undefined_grad_out_indices,
+                        grad_output_prototypes=ctx._aot_grad_output_prototypes,
+                        all_args=all_args,
+                    )
+                )
+                if not undefined_grad_out_indices:
+                    CompiledFunction.compiled_bw = compiled_bw
 
                 if (
                     torch._functorch.config.donated_buffer
@@ -3548,12 +4263,13 @@ class _AOTDispatchAutogradFunctionFactory:
                         ),
                     )
 
-                return call_func_at_runtime_with_args(
+                out = call_func_at_runtime_with_args(
                     compiled_bw,
                     all_args,
                     steal_args=True,
                     disable_amp=disable_amp,
                 )
+                return _mask_pruned_backward_outputs(out, pruned_output_indices)
 
         return CompiledFunction
 
@@ -3645,6 +4361,9 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
         compile_id_str: str | None = None,
         tangent_stack_trace: str | None = None,
     ) -> tuple[Any, list[Any]]:
+        if x is None:
+            return x, [None] * _tangent_meta_arg_count(meta)
+
         if not isinstance(x, torch.Tensor):
             return x, [x]
 

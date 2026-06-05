@@ -973,6 +973,249 @@ def forward(self, primals_1):
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertEqual(x_ref_view.grad, x_test_view.grad)
 
+    def test_unused_differentiable_outputs_prune_independent_branches(self):
+        bw_graphs = []
+
+        def bw_compiler(gm, _):
+            bw_graphs.append(gm)
+            return gm
+
+        def fn(x, y, z):
+            return x.sin(), y.sin(), z.sin()
+
+        compiled_fn = aot_function(fn, fw_compiler=nop, bw_compiler=bw_compiler)
+
+        x_ref = torch.randn(4, requires_grad=True)
+        y_ref = torch.randn(4, requires_grad=True)
+        z_ref = torch.randn(4, requires_grad=True)
+        x_test = x_ref.detach().clone().requires_grad_()
+        y_test = y_ref.detach().clone().requires_grad_()
+        z_test = z_ref.detach().clone().requires_grad_()
+
+        out_ref = fn(x_ref, y_ref, z_ref)
+        out_test = compiled_fn(x_test, y_test, z_test)
+
+        out_ref[0].sum().backward()
+        out_test[0].sum().backward()
+
+        self.assertEqual(x_ref.grad, x_test.grad)
+        self.assertIsNone(y_ref.grad)
+        self.assertIsNone(z_ref.grad)
+        self.assertIsNone(y_test.grad)
+        self.assertIsNone(z_test.grad)
+        self.assertEqual(
+            sum(
+                node.target is torch.ops.aten.cos.default
+                for node in bw_graphs[0].graph.nodes
+            ),
+            1,
+        )
+
+    def test_unused_differentiable_outputs_prune_shared_input_branches(self):
+        bw_graphs = []
+
+        def bw_compiler(gm, _):
+            bw_graphs.append(gm)
+            return gm
+
+        def fn(x):
+            return x.sin(), x.cos(), x.tan()
+
+        compiled_fn = aot_function(fn, fw_compiler=nop, bw_compiler=bw_compiler)
+
+        x_ref = torch.randn(4, requires_grad=True)
+        x_test = x_ref.detach().clone().requires_grad_()
+
+        out_ref = fn(x_ref)
+        out_test = compiled_fn(x_test)
+
+        out_ref[0].sum().backward()
+        out_test[0].sum().backward()
+
+        self.assertEqual(x_ref.grad, x_test.grad)
+        bw_targets = [node.target for node in bw_graphs[0].graph.nodes]
+        self.assertEqual(bw_targets.count(torch.ops.aten.cos.default), 1)
+        self.assertEqual(bw_targets.count(torch.ops.aten.sin.default), 0)
+        self.assertEqual(bw_targets.count(torch.ops.aten.pow.Tensor_Scalar), 0)
+
+    def test_unused_differentiable_outputs_prune_backward_ops(self):
+        bw_graphs = []
+
+        def bw_compiler(gm, _):
+            bw_graphs.append(gm)
+            return gm
+
+        def fn(x, y, z):
+            return x.sin(), y.relu(), z.relu()
+
+        compiled_fn = aot_function(fn, fw_compiler=nop, bw_compiler=bw_compiler)
+
+        x_ref = torch.randn(4, requires_grad=True)
+        y_ref = torch.randn(4, requires_grad=True)
+        z_ref = torch.randn(4, requires_grad=True)
+        x_test = x_ref.detach().clone().requires_grad_()
+        y_test = y_ref.detach().clone().requires_grad_()
+        z_test = z_ref.detach().clone().requires_grad_()
+
+        out_ref = fn(x_ref, y_ref, z_ref)
+        out_test = compiled_fn(x_test, y_test, z_test)
+
+        out_ref[0].sum().backward()
+        out_test[0].sum().backward()
+
+        self.assertEqual(x_ref.grad, x_test.grad)
+        self.assertIsNone(y_ref.grad)
+        self.assertIsNone(z_ref.grad)
+        self.assertIsNone(y_test.grad)
+        self.assertIsNone(z_test.grad)
+        bw_targets = [node.target for node in bw_graphs[0].graph.nodes]
+        self.assertEqual(bw_targets.count(torch.ops.aten.cos.default), 1)
+        self.assertNotIn(torch.ops.aten.threshold_backward.default, bw_targets)
+
+    def test_unused_differentiable_subclass_outputs_pruned_to_none(self):
+        @torch.compile(backend="aot_eager")
+        def fn(x, y):
+            return x.sin(), y.sin()
+
+        def make_two_tensor():
+            a = torch.randn(4, requires_grad=True)
+            b = torch.randn(4, requires_grad=True)
+            return TwoTensor(a, b), a, b
+
+        x_ref, xa_ref, xb_ref = make_two_tensor()
+        y_ref, ya_ref, yb_ref = make_two_tensor()
+        x_test = TwoTensor(
+            xa_ref.detach().clone().requires_grad_(),
+            xb_ref.detach().clone().requires_grad_(),
+        )
+        y_test = TwoTensor(
+            ya_ref.detach().clone().requires_grad_(),
+            yb_ref.detach().clone().requires_grad_(),
+        )
+
+        def fn_ref(x, y):
+            return x.sin(), y.sin()
+
+        fn_ref(x_ref, y_ref)[0].sum().backward()
+        fn(x_test, y_test)[0].sum().backward()
+
+        self.assertEqual(x_ref.grad, x_test.grad)
+        self.assertTrue(isinstance(x_test.grad, TwoTensor))
+        self.assertIsNone(y_ref.grad)
+        self.assertIsNone(y_test.grad)
+        self.assertEqual(xa_ref.grad, x_test.a.grad)
+        self.assertEqual(xb_ref.grad, x_test.b.grad)
+        self.assertIsNone(ya_ref.grad)
+        self.assertIsNone(yb_ref.grad)
+        self.assertIsNone(y_test.a.grad)
+        self.assertIsNone(y_test.b.grad)
+
+    def test_unused_differentiable_outputs_with_view_output(self):
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            return x.sin(), x.view(-1)
+
+        for include_view_output in (False, True):
+            x_ref = torch.randn(4, requires_grad=True)
+            x_test = x_ref.detach().clone().requires_grad_()
+
+            y0_ref, y1_ref = x_ref.sin(), x_ref.view(-1)
+            y0_test, y1_test = fn(x_test)
+
+            loss_ref = y0_ref.sum()
+            loss_test = y0_test.sum()
+            if include_view_output:
+                loss_ref = loss_ref + y1_ref.sum()
+                loss_test = loss_test + y1_test.sum()
+
+            loss_ref.backward()
+            loss_test.backward()
+
+            self.assertEqual(x_ref.grad, x_test.grad)
+
+    def test_unused_differentiable_outputs_multiple_masks_retain_graph(self):
+        bw_graphs = []
+
+        def bw_compiler(gm, _):
+            bw_graphs.append(gm)
+            return gm
+
+        def fn(x, y, z):
+            return x.sin(), y.sin(), z.sin()
+
+        compiled_fn = aot_function(fn, fw_compiler=nop, bw_compiler=bw_compiler)
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4, requires_grad=True)
+        z = torch.randn(4, requires_grad=True)
+
+        out = compiled_fn(x, y, z)
+        out[0].sum().backward(retain_graph=True)
+        self.assertIsNotNone(x.grad)
+        self.assertIsNone(y.grad)
+        self.assertIsNone(z.grad)
+        self.assertEqual(
+            sum(
+                node.target is torch.ops.aten.cos.default
+                for node in bw_graphs[-1].graph.nodes
+            ),
+            1,
+        )
+
+        out[1].sum().backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(y.grad)
+        self.assertIsNone(z.grad)
+        self.assertEqual(len(bw_graphs), 2)
+        self.assertEqual(
+            sum(
+                node.target is torch.ops.aten.cos.default
+                for node in bw_graphs[-1].graph.nodes
+            ),
+            1,
+        )
+
+    def test_unused_differentiable_outputs_first_fallback_preserves_none_grads(self):
+        def fn(x, y):
+            return x.sin(), y.std()
+
+        compiled_fn = aot_function(fn, fw_compiler=nop, bw_compiler=nop)
+
+        x_ref = torch.randn(4, requires_grad=True)
+        y_ref = torch.randn(4, requires_grad=True)
+        x_test = x_ref.detach().clone().requires_grad_()
+        y_test = y_ref.detach().clone().requires_grad_()
+
+        fn(x_ref, y_ref)[0].sum().backward()
+        compiled_fn(x_test, y_test)[0].sum().backward()
+
+        self.assertEqual(x_ref.grad, x_test.grad)
+        self.assertIsNone(y_ref.grad)
+        self.assertIsNone(y_test.grad)
+
+    def test_unused_differentiable_outputs_fallback_preserves_none_grads(self):
+        def fn(x, y):
+            return x.sin(), y.std()
+
+        compiled_fn = aot_function(fn, fw_compiler=nop, bw_compiler=nop)
+
+        x_compile = torch.randn(4, requires_grad=True)
+        y_compile = torch.randn(4, requires_grad=True)
+        out_compile = compiled_fn(x_compile, y_compile)
+        (out_compile[0].sum() + out_compile[1].sum()).backward()
+
+        x_ref = torch.randn(4, requires_grad=True)
+        y_ref = torch.randn(4, requires_grad=True)
+        x_test = x_ref.detach().clone().requires_grad_()
+        y_test = y_ref.detach().clone().requires_grad_()
+
+        fn(x_ref, y_ref)[0].sum().backward()
+        compiled_fn(x_test, y_test)[0].sum().backward()
+
+        self.assertEqual(x_ref.grad, x_test.grad)
+        self.assertIsNone(y_ref.grad)
+        self.assertIsNone(y_test.grad)
+
     def test_nested_subclasses(self):
         @torch.compile(backend="aot_eager")
         def f(x):
