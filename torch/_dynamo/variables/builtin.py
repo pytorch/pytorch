@@ -2721,41 +2721,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_and_(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        # Rely on constant_handler
-        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
-            return None
-        if a.is_symnode_like() and b.is_symnode_like():
-            return SymNodeVariable.create(
-                tx,
-                tx.output.create_proxy(
-                    "call_function", operator.and_, *proxy_args_kwargs([a, b], {})
-                ),
-                sym_num=None,
-            )
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
-            return a.call_method(tx, "__and__", [b], {})
-        # None no-ops this handler and lets the driving function proceed
-        return None
+        return binary_op(tx, a, b, "nb_and", "&")
 
     def call_iand(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        # Rely on constant_handler
-        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
-            return None
-        if a.is_symnode_like() and b.is_symnode_like():
-            # In-place bitwise ops on immutable bool/int values rebind the local.
-            # Emit the out-of-place op so FX codegen does not assign to a literal.
-            return SymNodeVariable.create(
-                tx,
-                tx.output.create_proxy(
-                    "call_function", operator.and_, *proxy_args_kwargs([a, b], {})
-                ),
-                sym_num=None,
-            )
-        if isinstance(a, _SET_LIKE_OP_SUPPORT):
-            return a.call_method(tx, "__iand__", [b], {})
-        return None
+        return binary_iop(tx, a, b, "nb_inplace_and", "nb_and", "&=")
 
     def call_or_(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
