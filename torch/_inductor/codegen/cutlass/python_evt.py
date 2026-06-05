@@ -307,6 +307,14 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         def _provably_equal_or_zero(a: sympy.Expr, b: sympy.Expr) -> bool:
             # sympy.Eq can return an unevaluated Equality object; only accept
             # cases sympy can prove true.
+            if a == b:
+                return True
+            if V.graph.sizevars.statically_known_equals(a, b):
+                return True
+            if V.graph.sizevars.statically_known_equals(a, 0):
+                return True
+            if V.graph.sizevars.statically_known_equals(b, 0):
+                return True
             return (
                 sympy.Eq(a, b) is sympy.true
                 or sympy.Eq(a, 0) is sympy.true
