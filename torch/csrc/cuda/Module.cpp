@@ -1526,7 +1526,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         for (size_t ptr_int : stale_storages_ptr) {
           // NOLINTNEXTLINE(performance-no-int-to-ptr)
           c10::StorageImpl* ptr = (c10::StorageImpl*)ptr_int;
-          if (!ptr_set.contains(ptr)) {
+          if (!ptr_set.count(ptr)) {
             ptrs.push_back(ptr);
             ptr_set.insert(ptr);
           }
@@ -1542,7 +1542,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         std::unordered_set<void*> freed_pointer_set;
         size_t definite_freed_count = 0;
         for (void* ptr : freed_pointers) {
-          if (!allocd_set.contains(ptr)) {
+          if (!allocd_set.count(ptr)) {
             definite_freed_count += 1;
           }
           freed_pointer_set.insert(ptr);

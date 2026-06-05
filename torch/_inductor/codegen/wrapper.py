@@ -2366,16 +2366,38 @@ class PythonWrapperCodegen(CodeGen):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
 
+        def maybe_emit_replacement_aliases(sym: sympy.Symbol) -> None:
+            # Deferred runtime asserts reference pre-replacement backed
+            # symbols (e.g. s77) that were replaced to this canonical
+            # symbol (s31) during constraint solving. Emit aliases so
+            # the asserts compile. Skip unbacked symbols — they are
+            # defined separately by the unbacked symbol codegen path.
+            from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+            for src, tgt in V.graph.sizevars.shape_env.replacements.items():
+                if (
+                    tgt == sym
+                    and isinstance(src, sympy.Symbol)
+                    and src not in bound_vars
+                    and not symbol_is_type(
+                        src, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)
+                    )
+                ):
+                    code.writeline(f"{src} = {sym}")
+                    bound_vars.add(src)
+
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
             code.writeline(f"{value} = {name}")
             bound_vars.add(value)
+            maybe_emit_replacement_aliases(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
                 if isinstance(size, sympy.Symbol) and size not in bound_vars:
                     code.writeline(f"{size} = {sizeof(name)}[{dim}]")
                     bound_vars.add(size)
+                    maybe_emit_replacement_aliases(size)
             for dim, stride in enumerate(value.get_stride()):
                 if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
                     code.writeline(f"{stride} = {strideof(name)}[{dim}]")
@@ -2545,6 +2567,12 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_device_copy(self, src, dst, non_blocking: bool | str):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
+
+    def sync_d2h_copy(self, buffer_name: str) -> None:
+        event_var = f"_d2h_event_{buffer_name}"
+        self.writeline(f"{event_var} = torch.Event()")
+        self.writeline(f"{event_var}.record()")
+        self.writeline(f"{event_var}.synchronize()")
 
     def codegen_multi_output(self, node: ir.MultiOutput):
         result_name = node.get_name()

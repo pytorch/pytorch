@@ -46,7 +46,7 @@ class SubgraphSlicer {
     GRAPH_DUMP("before unfuseAliasedOutputs", graph_);
     unfuseAliasedOutputs(block_);
     cleanupSubgraphs();
-    // Run CSE globally onceto eliminate duplicates that may have occurred
+    // Run CSE globally once to eliminate duplicates that may have occurred
     // while inlining subgraphs.
     EliminateCommonSubexpression(graph_);
   }
@@ -351,7 +351,7 @@ struct ContextMapping {
   }
 
   bool has(const Node* n) const {
-    return node_to_ctx_.contains(n);
+    return node_to_ctx_.find(n) != node_to_ctx_.end();
   }
 };
 

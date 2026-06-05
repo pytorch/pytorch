@@ -68,7 +68,7 @@ backendPreprocessFunctions() {
 } // namespace
 
 bool hasBackendPreprocessFunction(const std::string& name) {
-  return backendPreprocessFunctions().contains(name);
+  return backendPreprocessFunctions().count(name);
 }
 
 void registerBackendPreprocessFunction(

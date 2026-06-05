@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
     from ..codegen import PyCodegen
     from ..side_effects import SideEffects
-    from ..symbolic_convert import InstructionTranslator
+    from ..symbolic_convert import InstructionTranslatorBase
     from .constant import ConstantVariable
     from .functions import UserFunctionVariable
 
@@ -459,7 +459,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
-    def bool_impl(self, tx: InstructionTranslator) -> VariableTracker | None:
+    def bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker | None:
         # Mirrors CPython's tp_as_number->nb_bool slot.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
         #
@@ -480,7 +480,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return True
 
-    def hash_impl(self, tx: InstructionTranslator) -> tuple[int, bool]:
+    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Default tp_hash: object.__hash__ = PyObject_GenericHash (identity hash).
 
         PyObject_GenericHash: https://github.com/python/cpython/blob/e76aa128fe/Python/pyhash.c#L143-L147
@@ -517,7 +517,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def richcompare_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         op: str,
     ) -> VariableTracker:
@@ -563,9 +563,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.source.make_guard(fn)
         raise NotImplementedError
 
-    # TODO[@lucaskabela] - change this type to `InstructionTranslatorBase`
-    # and cascade that (large blast radius)
-    def const_getattr(self, tx: InstructionTranslator, name: str) -> Any:
+    def const_getattr(self, tx: InstructionTranslatorBase, name: str) -> Any:
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError
 
@@ -590,7 +588,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
-    def var_getattr(self, tx: InstructionTranslator, name: str) -> VariableTracker:
+    def var_getattr(self, tx: InstructionTranslatorBase, name: str) -> VariableTracker:
         """getattr(self, name) returning a new variable"""
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
@@ -648,41 +646,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
         raise NotImplementedError
 
-    def force_unpack_var_sequence(self, tx: Any) -> list[VariableTracker]:
-        # like unpack_var_sequence, but should only be used when it is
-        # safe to eagerly (vs. lazily) unpack this variable.
-        # e.g. map(f, x) is normally evaluated lazily but sometimes
-        # we want to force eager unpacking, e.g. when converting to a list.
-        # NOTE: this method is allowed to mutate the VariableTracker, so
-        # it should only be called once.
-        return self.unpack_var_sequence(tx)
-
-    def has_unpack_var_sequence(self, tx: Any) -> bool:
-        try:
-            self.unpack_var_sequence(tx)
-            return True
-        except NotImplementedError:
-            return False
-
-    # NB: don't call force_unpack_var_sequence, especially if it mutates!
-    def has_force_unpack_var_sequence(self, tx: Any) -> bool:
-        return self.has_unpack_var_sequence(tx)
-
-    # Forces unpacking the var sequence while also applying a function to each element.
-    # Only use when it is safe to eagerly unpack this variable (like force_unpack_var_sequence).
-    # INVARIANT: variable must satisfy has_force_unpack_var_sequence() == True!
-    def force_apply_to_var_sequence(
-        self, tx: Any, fn: Callable[[VariableTracker], Any]
-    ) -> None:
-        if not self.has_force_unpack_var_sequence(tx):
-            raise AssertionError(
-                "force_apply_to_var_sequence requires has_force_unpack_var_sequence(tx) == True"
-            )
-        for v in self.unpack_var_sequence(tx):
-            fn(v)
-
     def call_obj_hasattr(
-        self, tx: InstructionTranslator, name: str
+        self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
         unimplemented(
             gb_type="Unsupported hasattr call",
@@ -694,7 +659,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def tp_iter_impl(self, tx: InstructionTranslator) -> VariableTracker:
+    def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """
         Implements PyObject_GetIter semantics (tp_iter slot).
         Subclasses override this to support iteration.
@@ -743,7 +708,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def mp_subscript_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem: https://github.com/python/cpython/blob/62a6e898e01/Objects/abstract.c#L155-L206
@@ -759,7 +724,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_item_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         key: VariableTracker,
     ) -> VariableTracker:
         # PyObject_GetItem Branch 2: tp_as_sequence->sq_item
@@ -783,7 +748,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def mp_ass_subscript_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         key: VariableTracker,
         value: VariableTracker | None,
     ) -> VariableTracker:
@@ -796,7 +761,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_ass_item_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         key: VariableTracker,
         value: VariableTracker | None,
     ) -> VariableTracker:
@@ -809,7 +774,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_concat_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """Sequence concatenation via + operator (sq_concat slot)."""
@@ -822,7 +787,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_inplace_concat_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """In-place sequence concatenation via += operator (sq_inplace_concat slot)."""
@@ -948,6 +913,24 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_rshift_impl(tx, args[0], reverse=True)
         elif name == "__irshift__":
             return self.nb_inplace_rshift_impl(tx, args[0])
+        elif name == "__and__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_and_impl(tx, args[0])
+        elif name == "__rand__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_and_impl(tx, args[0], reverse=True)
+        elif name == "__iand__":
+            return self.nb_inplace_and_impl(tx, args[0])
+        elif name == "__xor__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10231-L10233
+            #      https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8551-L8561
+            return self.nb_xor_impl(tx, args[0])
+        elif name == "__rxor__":
+            # ref: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L8563-L8573
+            return self.nb_xor_impl(tx, args[0], reverse=True)
+        elif name == "__ixor__":
+            return self.nb_inplace_xor_impl(tx, args[0])
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
@@ -1224,6 +1207,31 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def tp_iteritem_impl(
+        self, tx: InstructionTranslatorBase, index: VariableTracker
+    ) -> tuple[VariableTracker, VariableTracker]:
+        """
+        Implements the 3.15 _tp_iteritem slot used by the virtual-iterator
+        FOR_ITER/SEND fast paths.
+
+        Mirrors CPython's slot signature: takes (self, index) and returns
+        (next_value, next_index).  Exhaustion is signaled by raising
+        StopIteration via raise_observed_exception, matching how the rest
+        of Dynamo signals iterator end.
+
+        ref: https://github.com/python/cpython/blob/f31a89bb901067dd105b00cfa90523cf7ffdbbdd/Include/object.h#L312-L313
+        """
+        unimplemented(
+            gb_type="Missing tp_iteritem",
+            context=f"_tp_iteritem on {self.python_type_name()}",
+            explanation=(
+                f"Dynamo does not support virtual iteration on "
+                f"{self.python_type_name()}."
+                " Add tp_iteritem_impl to this VariableTracker subclass."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def next_variable(self, tx: Any) -> VariableTracker:
         return self.tp_iternext_impl(tx)
 
@@ -1256,9 +1264,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             # won't cause recompilation when their values change.
             return variables.LazyConstantVariable.create(value, source)
         else:
-            return variables.LazyVariableTracker.create(value, source)
+            return variables.LazyVariableTracker.create(value, source, tx=tx)
 
-    def get_id(self, tx: InstructionTranslator) -> int | None:
+    def get_id(self, tx: InstructionTranslatorBase) -> int | None:
         """Return id() of the underlying Python object, or None if unavailable.
 
         The base implementation uses source resolution for sourceful VTs.
@@ -1432,9 +1440,51 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """tp_as_number->nb_inplace_rshift slot. Default: returns NotImplemented."""
         return variables.ConstantVariable(NotImplemented)
 
+    def nb_and_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_and slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rand__`` instead of ``__and__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_and_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_and slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_xor_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_xor slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rxor__`` instead of ``__xor__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_xor_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_xor slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
     def nb_multiply_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
@@ -1449,7 +1499,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def nb_inplace_multiply_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_multiply slot. Default: graph-breaks."""
@@ -1457,7 +1507,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_repeat_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         count: VariableTracker,
     ) -> VariableTracker:
         """tp_as_sequence->sq_repeat slot.
@@ -1475,7 +1525,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_inplace_repeat_impl(
         self,
-        tx: InstructionTranslator,
+        tx: InstructionTranslatorBase,
         count: VariableTracker,
     ) -> VariableTracker:
         """tp_as_sequence->sq_inplace_repeat slot."""

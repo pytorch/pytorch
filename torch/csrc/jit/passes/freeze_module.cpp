@@ -241,7 +241,7 @@ class AttributePropagator {
       const Iter& end) {
     for (Iter it = begin; it != end; ++it) {
       const std::string& moduleName = *it;
-      if (preservedAttrs_.contains(attrModule.attr(moduleName))) {
+      if (preservedAttrs_.count(attrModule.attr(moduleName))) {
         return false;
       }
       attrModule = attrModule.attr(moduleName).toModule();
@@ -312,10 +312,10 @@ class AttributePropagator {
     auto attr = attrModule.attr(name);
     if (!AliasDb::isMutableType(attr.type())) {
       auto it = preservedScalarAttrs_.find(attrModule._ivalue());
-      return it == preservedScalarAttrs_.end() || !it->second.contains(name);
+      return it == preservedScalarAttrs_.end() || !it->second.count(name);
     }
 
-    if (preservedAttrs_.contains(attr)) {
+    if (preservedAttrs_.count(attr)) {
       return false;
     }
     if (!attr.type()->cast<ClassType>()) {
@@ -687,7 +687,7 @@ class AttributePropagator {
               attr = overrideGradient(attr);
             }
             if (attr.isObject()) {
-              if (object_memo_.contains(attr.toObject())) {
+              if (object_memo_.count(attr.toObject())) {
                 attr = object_memo_[attr.toObject()];
               } else {
                 auto weak_class_obj =
@@ -767,7 +767,7 @@ class AttributePropagator {
         return true;
       }
     }
-    return preservedSubModule_.contains(subModule._ivalue());
+    return preservedSubModule_.count(subModule._ivalue());
   }
 
   void removeExtraWaitCalls(Block* b) {
@@ -895,10 +895,10 @@ class AttributePropagator {
 
       bool isMutable = false;
       if (AliasDb::isMutableType(attrTy)) {
-        isMutable = preservedAttrs_.contains(attr);
+        isMutable = preservedAttrs_.count(attr);
       } else {
         isMutable =
-            it2 != preservedScalarAttrs_.end() && it2->second.contains(name);
+            it2 != preservedScalarAttrs_.end() && it2->second.count(name);
       }
       if (isMutable) {
         attrsToKeep_[type].insert(i);
@@ -924,16 +924,16 @@ class AttributePropagator {
     for (auto& it : attrsToKeep_) {
       auto& type = it.first;
       size_t N = type->numAttributes();
-      if (it.second.contains(N)) {
+      if (it.second.count(N)) {
         continue;
       }
       for (const auto i : c10::irange(N)) {
-        if (!it.second.contains(i)) {
+        if (it.second.count(i) == 0) {
           attrsToRemove.push_back(type->getAttributeName(i));
         }
       }
       for (auto& fn : type->methods()) {
-        if (preservedMethods_.contains(fn)) {
+        if (preservedMethods_.count(fn)) {
           continue;
         }
         funcsToRemove.push_back(fn);

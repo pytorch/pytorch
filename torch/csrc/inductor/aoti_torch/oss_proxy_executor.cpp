@@ -17,7 +17,7 @@ at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle) {
 bool has_key(
     const std::unordered_map<std::string, c10::IValue>& map,
     const std::string& key) {
-  return map.contains(key);
+  return map.find(key) != map.end();
 }
 
 using torch::aot_inductor::convertSerializedLayout;

@@ -51,7 +51,7 @@ bool schemaTypeMatch(const c10::FunctionSchema& schema, const Node& node) {
   // Make sure we have all the required arguments.
   for (const auto& schemaArg : schema.arguments()) {
     if (!schemaArg.default_value()) {
-      if (!inputNames.contains(schemaArg.name())) {
+      if (inputNames.find(schemaArg.name()) == inputNames.end()) {
         return false;
       }
     }
@@ -113,7 +113,7 @@ std::string selectScalarOverloadName(const Node& node) {
       overloadName != "Tensor_mode") {
     return overloadName;
   }
-  if (!allowed.contains(opName)) {
+  if (allowed.find(opName) == allowed.end()) {
     return overloadName;
   }
   auto op = c10::Dispatcher::singleton().findSchemaOrThrow(

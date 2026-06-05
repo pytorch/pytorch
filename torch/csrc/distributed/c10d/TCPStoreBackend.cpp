@@ -4,6 +4,7 @@
 #include <array>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <c10/util/thread_name.h>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
@@ -220,11 +221,16 @@ void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
 }
 
 void TCPStoreMasterDaemon::clearSocketWaitState(int socket) {
-  // Remove all the tracking state of the close FD
-  std::erase_if(waitingSockets_, [&](auto& entry) {
-    std::erase(entry.second, socket);
-    return entry.second.empty();
-  });
+  // Remove all the tracking state of the closed FD
+  for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
+    auto& vec = it->second;
+    std::erase(vec, socket);
+    if (vec.empty()) {
+      it = waitingSockets_.erase(it);
+    } else {
+      ++it;
+    }
+  }
   keysAwaited_.erase(socket);
 }
 
@@ -421,7 +427,7 @@ void TCPStoreMasterDaemon::waitHandler(int socket) {
     int numKeysToAwait = 0;
     for (auto& key : keys) {
       // Only count keys that have not already been set
-      if (!tcpStore_.contains(key)) {
+      if (tcpStore_.find(key) == tcpStore_.end()) {
         waitingSockets_[key].push_back(socket);
         numKeysToAwait++;
       }
@@ -510,12 +516,12 @@ void TCPStoreMasterDaemon::barrierHandler(int socket) {
 bool TCPStoreMasterDaemon::checkKeys(
     const std::vector<std::string>& keys) const {
   return std::all_of(keys.begin(), keys.end(), [this](const std::string& s) {
-    return tcpStore_.contains(s);
+    return tcpStore_.count(s) > 0;
   });
 }
 
 void TCPStoreMasterDaemon::addMiscellaneousSocket(int socket) {
-  if (!miscellaneousSockets_.contains(socket)) {
+  if (miscellaneousSockets_.find(socket) == miscellaneousSockets_.end()) {
     miscellaneousSockets_.insert(socket);
   }
 }
@@ -528,7 +534,7 @@ void TCPStoreMasterDaemon::removeMiscellaneousSocket(int socket) {
 }
 
 bool TCPStoreMasterDaemon::isMiscellaneousSocket(int socket) {
-  return miscellaneousSockets_.contains(socket);
+  return miscellaneousSockets_.find(socket) != miscellaneousSockets_.end();
 }
 
 #ifdef _WIN32

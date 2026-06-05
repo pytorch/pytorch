@@ -8359,6 +8359,58 @@ Example::
 )
 
 add_docstr(
+    torch.nonzero_static,
+    r"""
+nonzero_static(input, *, size, fill_value=-1) -> Tensor
+
+Returns a 2-D tensor where each row is the index for a non-zero value.
+The returned Tensor has the same `torch.dtype` as `torch.nonzero()`.
+
+Args:
+    {input}
+
+Keyword args:
+    size (int): the size of non-zero elements expected to be included in the out
+        tensor. Pad the out tensor with `fill_value` if the `size` is larger
+        than total number of non-zero elements, truncate out tensor if `size`
+        is smaller. The size must be a non-negative integer.
+    fill_value (int, optional): the value to fill the output tensor with when `size` is larger
+        than the total number of non-zero elements. Default is `-1` to represent
+        invalid index.
+
+Example::
+
+    # Example 1: Padding
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 4
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0],
+            [  1,   1],
+            [  -1, -1]], dtype=torch.int64)
+
+    # Example 2: Truncating
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[  0,   0],
+            [  1,   0]], dtype=torch.int64)
+
+    # Example 3: 0 size
+    >>> input_tensor = torch.tensor([10])
+    >>> static_size = 0
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(0, 1), dtype=torch.int64)
+
+    # Example 4: 0 rank input
+    >>> input_tensor = torch.tensor(10)
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(2, 0), dtype=torch.int64)
+""".format(**common_args),
+)
+
+add_docstr(
     torch.normal,
     r"""
 normal(mean, std, *, generator=None, out=None) -> Tensor
@@ -8861,90 +8913,6 @@ Example::
     torch.float32
     >>> torch.promote_types(torch.uint8, torch.long)
     torch.long
-""",
-)
-
-add_docstr(
-    torch.qr,
-    r"""
-qr(input: Tensor, some: bool = True, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor], None]) -> (Tensor, Tensor)
-
-Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
-and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
-with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
-:math:`R` being an upper triangular matrix or batch of upper triangular matrices.
-
-If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
-Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
-
-.. warning::
-
-    :func:`torch.qr` is deprecated in favor of :func:`torch.linalg.qr`
-    and will be removed in a future PyTorch release. The boolean parameter :attr:`some` has been
-    replaced with a string parameter :attr:`mode`.
-
-    ``Q, R = torch.qr(A)`` should be replaced with
-
-    .. code:: python
-
-        Q, R = torch.linalg.qr(A)
-
-    ``Q, R = torch.qr(A, some=False)`` should be replaced with
-
-    .. code:: python
-
-        Q, R = torch.linalg.qr(A, mode="complete")
-
-.. warning::
-          If you plan to backpropagate through QR, note that the current backward implementation
-          is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
-          columns of :attr:`input` are linearly independent.
-          This behavior will probably change once QR supports pivoting.
-
-.. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
-          and may produce different (valid) decompositions on different device types
-          or different platforms.
-
-Args:
-    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
-                batch dimensions consisting of matrices of dimension :math:`m \times n`.
-    some (bool, optional): Set to ``True`` for reduced QR decomposition and ``False`` for
-                complete QR decomposition. If `k = min(m, n)` then:
-
-                  * ``some=True`` : returns `(Q, R)` with dimensions (m, k), (k, n) (default)
-
-                  * ``'some=False'``: returns `(Q, R)` with dimensions (m, m), (m, n)
-
-Keyword args:
-    out (tuple, optional): tuple of `Q` and `R` tensors.
-                The dimensions of `Q` and `R` are detailed in the description of :attr:`some` above.
-
-Example::
-
-    >>> a = torch.tensor([[12., -51, 4], [6, 167, -68], [-4, 24, -41]])
-    >>> q, r = torch.qr(a)
-    >>> q
-    tensor([[-0.8571,  0.3943,  0.3314],
-            [-0.4286, -0.9029, -0.0343],
-            [ 0.2857, -0.1714,  0.9429]])
-    >>> r
-    tensor([[ -14.0000,  -21.0000,   14.0000],
-            [   0.0000, -175.0000,   70.0000],
-            [   0.0000,    0.0000,  -35.0000]])
-    >>> torch.mm(q, r).round()
-    tensor([[  12.,  -51.,    4.],
-            [   6.,  167.,  -68.],
-            [  -4.,   24.,  -41.]])
-    >>> torch.mm(q.t(), q).round()
-    tensor([[ 1.,  0.,  0.],
-            [ 0.,  1., -0.],
-            [ 0., -0.,  1.]])
-    >>> a = torch.randn(3, 4, 5)
-    >>> q, r = torch.qr(a, some=False)
-    >>> torch.allclose(torch.matmul(q, r), a)
-    True
-    >>> torch.allclose(torch.matmul(q.mT, q), torch.eye(5))
-    True
 """,
 )
 

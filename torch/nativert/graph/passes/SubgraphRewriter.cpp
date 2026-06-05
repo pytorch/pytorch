@@ -140,7 +140,7 @@ bool SubgraphMatcher::tryMatchNodeInputs(
   // match pattern node inputs
   for (const auto i : c10::irange(target_node->attributes().size())) {
     const auto& it = target_node->attributes()[i];
-    if (matched_attributes.contains(it.name)) {
+    if (matched_attributes.find(it.name) != matched_attributes.end()) {
       continue; // Skip attributes already matched
     }
     const auto& patternInput = findInputByName(pattern_node, it.name);
@@ -159,7 +159,7 @@ bool SubgraphMatcher::tryMatchNodeInputs(
     Value* dummyOutput = dummyNode->addOutput(
         targetGraph->getUniqueValueName(), Type::Kind::None);
     targetGraph->insertBefore(dummyNode, target_node);
-    if (match.value_map.contains(patternInput->value)) {
+    if (match.value_map.find(patternInput->value) != match.value_map.end()) {
       return match.value_map[patternInput->value]->producer()->target() ==
           kDummyTarget;
     }
@@ -173,7 +173,7 @@ bool SubgraphMatcher::tryMatchNode(
     const Node* pattern_node,
     Node* target_node,
     Match& match) {
-  if (match.node_map.contains(pattern_node)) {
+  if (match.node_map.find(pattern_node) != match.node_map.end()) {
     return match.node_map[pattern_node] == target_node;
   }
 
@@ -225,7 +225,7 @@ bool SubgraphMatcher::tryMatchValue(
     const Value* pval,
     Value* tval,
     Match& match) {
-  if (match.value_map.contains(pval)) {
+  if (match.value_map.find(pval) != match.value_map.end()) {
     return match.value_map[pval] == tval;
   }
 
@@ -251,6 +251,31 @@ bool SubgraphMatcher::tryMatchValue(
 //-------------------------
 // SubgraphRewriter
 //-------------------------
+
+c10::FastMap<std::string, const Value*> SubgraphRewriter::
+    computePatternValueMap(const Graph& pattern) {
+  c10::FastMap<std::string, const Value*> vmap;
+  for (const auto& v : pattern.inputs()) {
+    vmap[std::string(v->name())] = v;
+  }
+  for (const auto& n : pattern.nodes()) {
+    for (const Value* v : n.outputs()) {
+      vmap[std::string(v->name())] = v;
+    }
+  }
+  return vmap;
+}
+
+bool SubgraphRewriter::overlapsWithUsedNodes(
+    const Match& match,
+    const std::unordered_set<Node*>& usedNodes) {
+  for (const auto& kv : match.node_map) {
+    if (usedNodes.find(kv.second) != usedNodes.end()) {
+      return true;
+    }
+  }
+  return false;
+}
 
 void SubgraphRewriter::registerRewritePattern(
     const std::string& pattern,
@@ -282,9 +307,10 @@ bool SubgraphRewriter::runForPattern(
   VLOG(1) << "[GraphPasses] Found " << matches.size()
           << " matches for : " << name_;
 
+  const auto vmap = computePatternValueMap(pattern);
   for (auto& m : matches) {
     if (!std::all_of(filters.begin(), filters.end(), [&](const MatchFilter& f) {
-          return f(m, getVmap(pattern));
+          return f(m, vmap);
         })) {
       continue;
     }
@@ -322,20 +348,6 @@ bool SubgraphRewriter::runForPattern(
   return mutated;
 }
 
-bool SubgraphRewriter::overlapsWithUsedNodes(
-    const Match& match,
-    const std::unordered_set<Node*>& usedNodes) {
-  // If any node or value used by this match is already in usedNodes/usedValues,
-  // then this match overlaps with a previously selected match.
-  for (auto& kv : match.node_map) {
-    Node* target_node = kv.second;
-    if (usedNodes.contains(target_node)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void SubgraphRewriter::rewriteMatch(
     Graph* graph,
     const Match& match,
@@ -349,7 +361,7 @@ void SubgraphRewriter::rewriteMatch(
   Node* insertionPoint = nullptr;
   std::vector<Value*> inputs, outputs;
   for (Value* v : pattern.inputs()) {
-    if (!match.value_map.contains(v)) {
+    if (match.value_map.find(v) == match.value_map.end()) {
       continue;
     }
     Value* input = match.value_map.at(v);
@@ -393,7 +405,7 @@ void SubgraphRewriter::rewriteMatch(
   }
 
   for (auto& patternNode : pattern.nodes()) {
-    if (match.node_map.contains(&patternNode)) {
+    if (match.node_map.find(&patternNode) != match.node_map.end()) {
       Node* n = match.node_map.at(&patternNode);
       replacedNodes_.insert(n);
     }
@@ -436,17 +448,4 @@ void SubgraphRewriter::rewriteMatch(
   }
 }
 
-c10::FastMap<std::string, const Value*> SubgraphRewriter::getVmap(
-    const Graph& pattern) {
-  c10::FastMap<std::string, const Value*> vmap;
-  for (const auto& v : pattern.inputs()) {
-    vmap[std::string(v->name())] = v;
-  }
-  for (const auto& n : pattern.nodes()) {
-    for (const Value* v : n.outputs()) {
-      vmap[std::string(v->name())] = v;
-    }
-  }
-  return vmap;
-}
 } // namespace torch::nativert
