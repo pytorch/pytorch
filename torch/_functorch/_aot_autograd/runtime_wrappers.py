@@ -3168,6 +3168,22 @@ def _codegen_compiled_forward(
         "torch": torch,
         "BackwardState": BackwardState,
     }
+    compiled_autograd_output_deps = tuple(
+        getattr(fw_metadata, "compiled_autograd_output_deps", ())
+    )
+    if not compiled_autograd_output_deps:
+        compiled_autograd_output_deps = tuple(
+            () for _ in range(fw_metadata.num_outputs)
+        )
+    code_globals["_compiled_autograd_output_deps_"] = compiled_autograd_output_deps
+
+    lines.append("    ctx._aot_autograd_compiled_function = True")
+    lines.append(
+        "    ctx._aot_autograd_num_mutated_runtime_inps = "
+        f"{fw_metadata.num_mutated_inp_runtime_indices}"
+    )
+    lines.append(f"    ctx._aot_autograd_num_outputs = {fw_metadata.num_outputs}")
+    lines.append("    ctx._aot_autograd_output_deps = _compiled_autograd_output_deps_")
 
     if backward_state_indices:
         idx = backward_state_indices[0]
