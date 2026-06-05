@@ -772,14 +772,6 @@ inline IValue createGenericDict(
   return IValue(elems);
 }
 
-template <class T>
-inline void guardAgainstNamedTensor(const T& var) {
-  TORCH_CHECK(
-      !var.has_names(),
-      "NYI: Named tensors are currently unsupported in TorchScript. As a  "
-      "workaround please drop names via `tensor = tensor.rename(None)`.");
-}
-
 // Extract custom class registered with torchbind
 template <typename T>
 c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
@@ -1203,6 +1195,10 @@ inline std::optional<py::object> maybeTorchFunctionDispatch(
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
     const c10::QualifiedName& qualname) {
+  if (consume_should_skip_torch_function()) {
+    return std::nullopt;
+  }
+
   std::vector<py::handle> args_vec;
   for (const auto& arg : args_no_self) {
     args_vec.push_back(arg);

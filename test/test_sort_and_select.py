@@ -844,6 +844,44 @@ class TestSortAndSelect(TestCase):
         for curr_size in (small, large, verylarge):
             self._test_topk_dtype(device, dtype, True, curr_size)
 
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
+    def test_topk_integral_warp_sort_path(self, device, dtype):
+        # Regression test for the warpMergeSortTopK integer-sentinel bug on
+        # ROCm >= 7.0: slice sizes in (0, 256] and k == slice_size dispatched
+        # through warpMergeSortTopK, which used numeric_limits::infinity() as a
+        # padding sentinel. For integer scalar_t that evaluates to 0, a legal
+        # input value, and OOB placeholder indices leaked into the output.
+        #
+        # Exercise the k == slice_size boundary and a few neighbouring sizes,
+        # in both largest=True and largest=False modes, with enough slices to
+        # flush out the bad case.
+        torch.manual_seed(0)
+        num_slices = 1024
+        for slice_size in (1, 33, 63, 64, 65, 71, 127, 128, 129, 255, 256):
+            iinfo = torch.iinfo(dtype)
+            a = torch.randint(
+                iinfo.min,
+                iinfo.max,
+                size=(num_slices, slice_size),
+                dtype=dtype,
+                device=device,
+            )
+            for largest in (True, False):
+                for k in (1, slice_size // 2 or 1, slice_size):
+                    vals, idx = a.topk(k, dim=1, largest=largest)
+                    self.assertTrue(
+                        (idx >= 0).all().item() and (idx < slice_size).all().item(),
+                        f"OOB index from topk k={k} slice_size={slice_size} "
+                        f"dtype={dtype} largest={largest}",
+                    )
+                    ref = a.gather(1, idx)
+                    self.assertEqual(
+                        vals,
+                        ref,
+                        f"value/index mismatch k={k} slice_size={slice_size} "
+                        f"dtype={dtype} largest={largest}",
+                    )
+
     @dtypes(torch.bfloat16, torch.half)
     def test_topk_lower_precision(self, device, dtype):
         small = 10

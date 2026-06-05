@@ -552,6 +552,7 @@ endif()
 if(USE_CUDA)
   list(APPEND Caffe2_GPU_CU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+  target_compile_definitions(caffe2_nvrtc PRIVATE TORCH_CUDA_BUILD_MAIN_LIB)
   if(MSVC)
     # Delay load nvcuda.dll so we can import torch compiled with cuda on a CPU-only machine
     set(DELAY_LOAD_FLAGS "-DELAYLOAD:nvcuda.dll;delayimp.lib")
@@ -640,6 +641,7 @@ if(USE_ROCM)
   # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
   # See NOTE [ ATen NVRTC Stub and HIP ]
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+  target_compile_definitions(caffe2_nvrtc PRIVATE TORCH_CUDA_BUILD_MAIN_LIB)
   target_link_libraries(caffe2_nvrtc hip::amdhip64 hiprtc::hiprtc)
   target_include_directories(caffe2_nvrtc PRIVATE ${CMAKE_BINARY_DIR})
   target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_AMD__)
@@ -925,15 +927,23 @@ if(HAVE_SOVERSION)
 endif()
 
 if(USE_ROCM)
-  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
-  set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  # Only .cu/.hip sources need LANGUAGE HIP; .cpp files compile as CXX.
+  # Matches legacy hip_add_library behavior. Compiling .cpp as HIP emits
+  # per-TU __hip_cuid_<hash> symbols; under sccache those symbols can collide
+  # and cause "multiple definition" link errors.
+  set(__caffe2_hip_srcs_hip ${Caffe2_HIP_SRCS})
+  list(FILTER __caffe2_hip_srcs_hip INCLUDE REGEX "\\.(cu|hip)$")
+  set_source_files_properties(${__caffe2_hip_srcs_hip} PROPERTIES LANGUAGE HIP)
 endif()
 
 # Compile exposed libraries.
 if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
-  hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
+  add_library(torch_hip ${Caffe2_HIP_SRCS})
+  # Use CXX linker (clang-cl) which handles MSVC-style link flags natively.
+  # HIP device code is compiled with -fno-gpu-rdc so no device link step needed.
+  set_target_properties(torch_hip PROPERTIES LINKER_LANGUAGE CXX)
   if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
   endif()
@@ -1363,6 +1373,7 @@ if(BUILD_TEST)
     add_subdirectory(${TORCH_ROOT}/test/cpp/profiler ${CMAKE_BINARY_DIR}/test_profiler)
     add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
     add_subdirectory(${TORCH_ROOT}/test/cpp/aoti_abi_check ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/shim ${CMAKE_BINARY_DIR}/test_shim)
     if(BUILD_AOT_INDUCTOR_TEST)
       add_subdirectory(${TORCH_ROOT}/test/cpp/aoti_inference ${CMAKE_BINARY_DIR}/test_aoti_inference)
     endif()
@@ -1454,7 +1465,7 @@ if(USE_ROCM)
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
   endif()
-  if(USE_ROCM_CK_SDPA)
+  if(TARGET ck_sdpa)
     target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
   endif()
 
@@ -1488,17 +1499,11 @@ if(USE_ROCM)
         )
         set_source_files_properties(${TORCH_ROCSHMEM_SRCS} PROPERTIES LANGUAGE HIP)
 
-        # FindHIP's generated compile script bakes in global HIP_CLANG_FLAGS. Override
-        # -fno-gpu-rdc with -fgpu-rdc so device linker can pull in rocSHMEM device APIs.
-        set(HIP_CLANG_FLAGS_SAVED ${HIP_CLANG_FLAGS})
-        set(HIP_CLANG_FLAGS_FOR_ROCSHMEM ${HIP_CLANG_FLAGS})
-        list(FILTER HIP_CLANG_FLAGS_FOR_ROCSHMEM EXCLUDE REGEX "^-fno-gpu-rdc$")
-        list(APPEND HIP_CLANG_FLAGS_FOR_ROCSHMEM -fgpu-rdc)
-        set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_FOR_ROCSHMEM})
+        add_library(torch_rocshmem SHARED ${TORCH_ROCSHMEM_SRCS})
 
-        hip_add_library(torch_rocshmem SHARED ${TORCH_ROCSHMEM_SRCS})
-
-        set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_SAVED})
+        # Override the global -fno-gpu-rdc with -fgpu-rdc so device linker
+        # can pull in rocSHMEM device APIs.
+        target_compile_options(torch_rocshmem PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-fgpu-rdc>)
 
         set_target_properties(torch_rocshmem PROPERTIES LINKER_LANGUAGE HIP)
 
@@ -1712,7 +1717,7 @@ if(USE_CUDA)
   # FIXME: If kineto is linked with CUPTI it pollutes torch_cpu with CUDA dependencies
   # Even worse, it never declares that it depends on cudart, but calls the API, see
   # https://github.com/pytorch/kineto/blob/aef2f5c0f15e3be52406ac0b885e8689de6bc9f6/libkineto/src/CudaDeviceProperties.cpp#L24
-  if(USE_KINETO AND NOT LIBKINETO_NOCUPTI)
+  if(USE_KINETO AND KINETO_BACKEND STREQUAL "cuda")
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
@@ -1826,21 +1831,8 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
-  # Get Compile Definitions from the directory (FindHIP.cmake bug)
-  get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
-  if(MY_DEFINITIONS)
-    foreach(_item ${MY_DEFINITIONS})
-      list(APPEND HIP_CLANG_FLAGS "-D${_item}")
-    endforeach()
-  endif()
-
-  if(WIN32)
-    list(APPEND HIP_CXX_FLAGS "-fms-extensions")
-  endif()
-
-  # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
-  hip_include_directories(${Caffe2_HIP_INCLUDE})
+  # Add Caffe2 HIP include dirs (extended with ATen include dirs by this point).
+  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
@@ -1858,7 +1850,7 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
-  if(USE_ROCM_CK_SDPA)
+  if(TARGET ck_sdpa)
     target_link_libraries(torch_hip PRIVATE ck_sdpa)
   endif()
 
@@ -2053,25 +2045,16 @@ if(BUILD_TEST)
   endif()
 
   if(USE_ROCM)
-    string(JOIN " " HIP_HIPCC_FLAGS_STR ${HIP_HIPCC_FLAGS})
-    set(HIP_HIPCC_FLAGS ${HIP_HIPCC_FLAGS_STR})
-
-    set(BASE_HIPCC_FLAGS ${HIP_HIPCC_FLAGS})
-
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       if(test_src MATCHES "^.*\.hip$")
-        # Solves bug with hip_add_executable propagating flags from the previous tests
-        set(HIP_HIPCC_FLAGS ${BASE_HIPCC_FLAGS})
-        set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-        hip_add_executable(${test_name} "${test_src}")
-        list(JOIN PYTORCH_ROCM_ARCH " " ROCM_PROPERTY_ARCH_LIST)
-        set_target_properties(${test_name} PROPERTIES HIP_ARCHITECTURES ${ROCM_PROPERTY_ARCH_LIST})
+        set_source_files_properties(${test_src} PROPERTIES LANGUAGE HIP)
+        add_executable(${test_name} "${test_src}")
+        set_target_properties(${test_name} PROPERTIES
+          LINKER_LANGUAGE CXX
+          HIP_ARCHITECTURES "${PYTORCH_ROCM_ARCH}")
       else()
         add_executable(${test_name} "${test_src}")
-      endif()
-      if(test_src MATCHES "^.*\.hip$")
-        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE CXX)
       endif()
       target_link_libraries(${test_name} torch_library gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)

@@ -235,6 +235,57 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
 
     @requires_gpu_and_triton
+    def test_sort_in_combo_kernel_forces_persistent_reduction(self):
+        # ops.sort only works under persistent reduction. Combo kernel codegen
+        # must override the persistent_reduction heuristic for sort sub-kernels,
+        # otherwise the TritonKernel.sort() assertion fires.
+        from torch._inductor.choices import InductorChoices
+
+        def fn(a, b, c, d):
+            a1 = torch.sort(a, dim=1).values
+            b1 = torch.sort(b, dim=1).values
+            c1 = torch.sort(c, dim=1).values
+            d1 = torch.nn.functional.tanh(d)
+            return a1, b1, c1, d1
+
+        inps = [
+            torch.randint(0, 1000, (10, 200), device=GPU_TYPE),
+            torch.randint(0, 1000, (20, 200), device=GPU_TYPE),
+            torch.randint(0, 1000, (10, 200), device=GPU_TYPE),
+            torch.rand(30, 8, device=GPU_TYPE),
+        ]
+
+        orig = InductorChoices.should_use_persistent_reduction
+
+        @staticmethod
+        def force_non_persistent_for_sort(features, cooperative_reduction):
+            if features.contains_op("sort"):
+                return False
+            return orig(features, cooperative_reduction)
+
+        out_eager = fn(*inps)
+        with (
+            patch.object(
+                InductorChoices,
+                "should_use_persistent_reduction",
+                force_non_persistent_for_sort,
+            ),
+            torch._inductor.config.patch(
+                {
+                    "combo_kernel_per_subkernel_blocks": True,
+                    "combo_kernel_max_num_nodes": 128,
+                    "combo_kernel_allow_mixed_sizes": 2,
+                    "combo_kernels_autotune": 2,
+                    "combo_kernel_autotune_grouping": True,
+                }
+            ),
+        ):
+            fn_c = torch.compile(fn)
+            out_compiled, code = run_and_get_code(fn_c, *inps)
+        self.assertEqual(out_eager, out_compiled)
+        FileCheck().check("triton_heuristics.persistent_reduction").run(code[0])
+
+    @requires_gpu_and_triton
     def test_fuse_mix_order_reductions_combo_kernels(self):
         def fn(x, y, z):
             # FusedMixOrderReductions produces row_sum (buf0)
@@ -456,6 +507,8 @@ class ComboKernelTests(TestCase):
         # 3D poi (x, y, z) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180024")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180018")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_block_size(self):
@@ -535,6 +588,8 @@ class ComboKernelTests(TestCase):
         else:
             FileCheck().check("pid_offset = pid").run(code[0])
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180023")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180017")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @torch._dynamo.config.patch("assume_static_by_default", False)
@@ -677,6 +732,8 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180026")
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180019")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
@@ -738,6 +795,7 @@ class ComboKernelBenchmarkTests(TestCase):
 
     def setUp(self):
         super().setUp()
+        torch._dynamo.reset()
         torch._inductor.metrics.reset()
         self._test_stack = contextlib.ExitStack()
         self._test_stack.enter_context(
@@ -755,6 +813,7 @@ class ComboKernelBenchmarkTests(TestCase):
 
     def tearDown(self):
         self._test_stack.close()
+        torch._dynamo.reset()
         torch._inductor.metrics.reset()
         super().tearDown()
 
@@ -988,6 +1047,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertTrue(4 < torch._inductor.metrics.generated_kernel_count <= 10)
 
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181863")
     @requires_gpu_and_triton
     def test_dynamic_shapes_mutated(self):
         # combo kernel dispatch strategy: round robin
@@ -2178,6 +2238,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
         self.assertIsNotNone(combo)
 
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/182444
     @requires_cuda_and_triton
     def test_combo_kernel_peak_memory_wide_resnet(self):
         """A tight peak-memory threshold must measurably reduce the

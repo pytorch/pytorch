@@ -59,6 +59,9 @@ on:
       use-arc:
         description: Whether to use ARC runners
         value: ${{ jobs.runner-determinator.outputs.use-arc }}
+      ci-docker-hash:
+        description: "Git tree hash of .ci/docker, used as the suffix of CI docker image tags"
+        value: ${{ jobs.runner-determinator.outputs.ci-docker-hash }}
 
 jobs:
   runner-determinator:
@@ -71,6 +74,7 @@ jobs:
       runner-type: ${{ steps.set-runner-info.outputs.runner-type }}
       runner-label: ${{ steps.set-runner-info.outputs.runner-label }}
       use-arc: ${{ steps.set-condition.outputs.use-arc }}
+      ci-docker-hash: ${{ steps.ci-docker-hash.outputs.ci-docker-hash }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ inputs.issue_number }}
@@ -79,13 +83,23 @@ jobs:
       CHECK_EXPERIMENTS: ${{ inputs.check_experiments }}
       OPT_OUT_EXPERIMENTS: ${{ inputs.opt_out_experiments }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
+      WORKFLOW_NAME: ${{ github.workflow }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
           sparse-checkout: |
             .github/scripts/runner_determinator.py
+            .ci/docker
+          sparse-checkout-cone-mode: false
+
+      - name: Compute .ci/docker tree hash
+        id: ci-docker-hash
+        shell: bash
+        run: |
+          echo "ci-docker-hash=$(git rev-parse HEAD:.ci/docker)" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: python3 -m pip install urllib3==1.26.18 PyGithub==2.3.0
@@ -97,6 +111,18 @@ jobs:
           curr_ref_type="${{ inputs.curr_ref_type }}"
           echo "Current branch is '$curr_branch'"
 
+          # The workflow YAML is loaded from main (via @main in callers) but the
+          # script is checked out from the PR head, so PRs that predate a newly
+          # added optional flag will reject it. Probe --help and only pass flags
+          # the checked-out script supports.
+          extra_args=()
+          help_text="$(python3 .github/scripts/runner_determinator.py --help 2>&1 || true)"
+          if grep -q -- '--workflow-name' <<<"$help_text"; then
+            extra_args+=(--workflow-name "${WORKFLOW_NAME}")
+          else
+            echo "::warning::runner_determinator.py on this branch is missing --workflow-name; skipping. Rebase the PR onto main to pick it up."
+          fi
+
           python3 .github/scripts/runner_determinator.py \
             --github-token "$GITHUB_TOKEN" \
             --github-issue "$ISSUE_NUMBER" \
@@ -107,7 +133,8 @@ jobs:
             --github-repo "$GITHUB_REPOSITORY" \
             --eligible-experiments "$CHECK_EXPERIMENTS" \
             --opt-out-experiments "$OPT_OUT_EXPERIMENTS" \
-            --pr-number "${PR_NUMBER}"
+            --pr-number "${PR_NUMBER}" \
+            "${extra_args[@]}"
 
       - name: Determine runner configuration
         id: set-runner-info
