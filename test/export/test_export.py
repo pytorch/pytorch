@@ -10928,6 +10928,33 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
+    def test_export_decomps_linalg_vector_norm(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.vector_norm(x, ord=2, dim=1, keepdim=True)
+
+        inp = (torch.randn(2, 3),)
+        m = M()
+        ep = export(m, inp)
+        self.assertTrue(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in ep.graph.nodes
+            )
+        )
+
+        core_aten_ep = ep.run_decompositions()
+        self.assertFalse(
+            any(
+                node.target == torch.ops.aten.linalg_vector_norm.default
+                for node in core_aten_ep.graph.nodes
+            )
+        )
+        FileCheck().check("torch.ops.aten.pow.Tensor_Scalar").check(
+            "torch.ops.aten.sum.dim_IntList"
+        ).run(core_aten_ep.graph_module.code)
+        self.assertEqual(core_aten_ep.module()(*inp), m(*inp))
+
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     def test_export_decomp_torture_case_1(self):
         class M(torch.nn.Module):
