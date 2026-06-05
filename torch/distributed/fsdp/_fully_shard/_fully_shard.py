@@ -704,6 +704,57 @@ class FSDPModule:
                         reduce_scatter_unused_params
                     )
 
+    def set_reduce_scatter_max_input_buffers(
+        self, max_input_buffers: int, *, recurse: bool = True
+    ) -> None:
+        """
+        Sets how many gradient reduce-scatter input buffers may be in flight at
+        once -- the copy-in (``chunk_cat``) buffer cap-K (experimental).
+
+        FSDP keeps **1** such buffer in flight by default, so the compute stream
+        must wait on the previous reduce-scatter before the next copy-in can
+        reuse that buffer. When the reduce-scatter is exposed (communication
+        slower than the backward compute meant to hide it), that recycle wait
+        stalls the compute stream. Raising the cap lets the next copy-in write a
+        **fresh** buffer instead of waiting -- removing the stall -- at the cost
+        of extra peak memory for the retained buffers. The copy-in stays on the
+        compute stream; there is no extra stream and no ``record_stream``. This
+        helps only when the reduce-scatter is exposed.
+
+        Args:
+            max_input_buffers (int): Max reduce-scatter input buffers retained in
+                flight (the memory<->overlap dial); must be ``>= 1``. ``1`` is
+                FSDP's default behavior (single buffer; the exposed-RS stall). A
+                small value (e.g. ``2``) bounds peak memory and adds no stall as
+                long as it is ``>=`` the reduce-scatter pipeline depth (otherwise
+                an exposed reduce-scatter trades back a tail stall); a larger
+                value retains more buffers for deeper overlap at higher peak
+                memory.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        # bool is an int subclass; reject it so True does not silently mean 1.
+        if isinstance(max_input_buffers, bool) or not isinstance(
+            max_input_buffers, int
+        ):
+            raise TypeError(
+                "max_input_buffers must be an int, got "
+                f"{type(max_input_buffers).__name__}"
+            )
+        if max_input_buffers < 1:
+            raise ValueError(
+                f"max_input_buffers must be a positive int, got {max_input_buffers}"
+            )
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.reduce_scatter_max_input_buffers = (
+                        max_input_buffers
+                    )
+
     def set_unshard_in_backward(self, unshard_in_backward: bool) -> None:
         """
         Sets whether the FSDP module's parameters need to be unsharded in
