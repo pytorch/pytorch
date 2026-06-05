@@ -4066,6 +4066,7 @@ class ShapeEnv:
         self.ignorable_fresh_unbacked_symbols: list[sympy.Symbol] = []
 
         # Version counter used to invalidate cached values
+        self._range_refinement_counter = 0
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
         # Separate counter tracking only replacement changes, used by
@@ -4074,6 +4075,8 @@ class ShapeEnv:
 
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
+        # Each time ranges are refined, PythonMod may become equivalent to Mod.
+        self._resimplify_python_mod_axioms = True
 
         # Cache for FX nodes.
         # Maps an already built node a tuple of:
@@ -4264,12 +4267,14 @@ class ShapeEnv:
             "source_name_to_debug_name",
             "_prev_cache_key",
             "_version_counter",
+            "_range_refinement_counter",
             "dim_constraints",
             # source locations are OK to diverge
             "var_to_range_sloc",
             "replacements_slocs",
             "_replacements_version_counter",
             "_resimplify_floor_div_axioms",
+            "_resimplify_python_mod_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
             # Cached state for optimization_hint unbacked canonicalization
@@ -4641,7 +4646,7 @@ class ShapeEnv:
             self.frozen = old_frozen
             self._error_on_new_guards = old_error
 
-    def _get_key(self) -> tuple[int, int, int, int]:
+    def _get_key(self) -> tuple[int, int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -4651,6 +4656,7 @@ class ShapeEnv:
             len(self.divisible),
             self.num_deferred_runtime_asserts,
             len(self.real_tensor_prop_unbacked_vals),
+            self._range_refinement_counter,
         )
 
     def _update_version_counter(self) -> None:
@@ -7115,10 +7121,19 @@ class ShapeEnv:
 
         expr = canonicalize_bool_expr(expr)
 
-        def resimplify_floor_div(axioms: dict[sympy.Expr, sympy.Expr]) -> None:
-            if not self._resimplify_floor_div_axioms:
+        def resimplify_axioms(
+            axioms: dict[sympy.Expr, sympy.Expr], *, persistent: bool
+        ) -> None:
+            if (
+                not self._resimplify_floor_div_axioms
+                and not self._resimplify_python_mod_axioms
+            ):
                 return
-            self._resimplify_floor_div_axioms = False
+            resimplify_floor_div_axioms = self._resimplify_floor_div_axioms
+            resimplify_python_mod_axioms = self._resimplify_python_mod_axioms
+            if persistent:
+                self._resimplify_floor_div_axioms = False
+                self._resimplify_python_mod_axioms = False
             new_items = {}
             for k, v in list(axioms.items()):
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
@@ -7126,13 +7141,15 @@ class ShapeEnv:
                 # simplification that depends on the global state of shape env.
                 # TODO try to get rid of CleanDiv since it breaks the invariant that's simplifications of sympy
                 # expressions only depend on the expression itself.
-                if k.has(FloorDiv):
+                if (resimplify_floor_div_axioms and k.has(FloorDiv)) or (
+                    resimplify_python_mod_axioms and k.has(PythonMod)
+                ):
                     new_items.update({self.simplify(k): v})
             axioms.update(new_items)
 
         # Pattern matching
         if axioms is None:
-            resimplify_floor_div(self.axioms)
+            resimplify_axioms(self.axioms, persistent=True)
             subst = self.axioms
         else:
             subst = {}
@@ -7140,7 +7157,7 @@ class ShapeEnv:
                 if e.free_symbols.issubset(expr.free_symbols):
                     subst.update(dict(self.get_implications(self.simplify(e))))
 
-            resimplify_floor_div(subst)
+            resimplify_axioms(subst, persistent=False)
 
         expr = expr.xreplace(subst)
         # TODO: compute hint might have gotten broken here
@@ -7285,6 +7302,17 @@ class ShapeEnv:
                 # divisions simplified away
                 if new_pows.issubset(pows) and new_rationals.issubset(rationals):
                     expr = new_expr
+        if expr.has(PythonMod):
+            mod_replacements: dict[sympy.Basic, sympy.Basic] = {}
+            for atom in expr.atoms(PythonMod):
+                base, divisor = atom.args
+                if (
+                    self.bound_sympy(base).lower >= 0
+                    and self.bound_sympy(divisor).lower >= 0
+                ):
+                    mod_replacements[atom] = Mod(base, divisor)
+            if mod_replacements:
+                expr = expr.xreplace(mod_replacements)
         return expr
 
     # TODO: overload for allow_none literal
@@ -7467,6 +7495,9 @@ class ShapeEnv:
                 sloc = self._get_sloc()
                 vr_sloc = ValueRangesSLoc(sloc, sloc)
             self.var_to_range_sloc[symbol] = vr_sloc
+            self._range_refinement_counter += 1
+            self._resimplify_python_mod_axioms = True
+            self._update_version_counter()
         else:
             old = self.var_to_range[symbol]
             new = old & vr
@@ -7480,6 +7511,9 @@ class ShapeEnv:
                     self.var_to_range_sloc[symbol].upper = vr_sloc.upper
                 self.var_to_range[symbol] = new
                 self.log.debug("_update_var_to_range %s = %s (update)", symbol, new)
+                self._range_refinement_counter += 1
+                self._resimplify_python_mod_axioms = True
+                self._update_version_counter()
 
         if (v := self.backed_var_to_val.get(symbol)) is not None:
             r = self.var_to_range[symbol]
