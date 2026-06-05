@@ -1735,6 +1735,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and condition.evaluate_expr()
             ):
                 return ConstantVariable.create(None)
+            if condition.is_tensor():
+                tx.output.create_proxy(
+                    "call_function",
+                    torch._assert_async,
+                    *proxy_args_kwargs((condition, message), {}),
+                )
+                return ConstantVariable.create(None)
             return None
 
         @register(SDPAParams)
