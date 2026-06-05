@@ -29,6 +29,8 @@ std::unordered_set<PyCodeObject*> breakpoint_code_objects;
 // -1 means inactive, >= 0 means active with that many compiled frames.
 thread_local int fullgraph_compiled_frame_count = -1;
 thread_local int fullgraph_graph_frame_count = -1;
+thread_local int fullgraph_skipped_frame_count = -1;
+thread_local PyCodeObject* fullgraph_root_code = nullptr;
 
 // When true and fullgraph_compiled_frame_count > 0, sub-frames under fullgraph
 // compilation will error (via get_fail_callback) instead of being silently
@@ -81,6 +83,19 @@ extern "C" bool increment_fullgraph_compiled_frame_count_if_active(
   return true;
 }
 
+extern "C" void increment_fullgraph_skipped_frame_count_if_active() {
+  if (fullgraph_skipped_frame_count >= 0) {
+    fullgraph_skipped_frame_count++;
+  }
+}
+
+extern "C" void increment_fullgraph_root_skipped_frame_count_if_active(
+    PyCodeObject* code) {
+  if (fullgraph_root_code == code) {
+    increment_fullgraph_skipped_frame_count_if_active();
+  }
+}
+
 extern "C" int set_fullgraph_compiled_frame_count(int val) {
   int old = fullgraph_compiled_frame_count;
   if (val < 0 || old < 0) {
@@ -94,6 +109,20 @@ extern "C" int set_fullgraph_graph_frame_count(int val) {
   if (val < 0 || old < 0) {
     fullgraph_graph_frame_count = val;
   }
+  return old;
+}
+
+extern "C" int set_fullgraph_skipped_frame_count(int val) {
+  int old = fullgraph_skipped_frame_count;
+  if (val < 0 || old < 0) {
+    fullgraph_skipped_frame_count = val;
+  }
+  return old;
+}
+
+extern "C" PyCodeObject* set_fullgraph_root_code(PyCodeObject* code) {
+  PyCodeObject* old = fullgraph_root_code;
+  fullgraph_root_code = code;
   return old;
 }
 
@@ -574,13 +603,11 @@ PyObject* dynamo__custom_eval_frame(
 
   if (strategy.cur_action == FrameAction::SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
+    increment_fullgraph_root_skipped_frame_count_if_active(F_CODE(frame));
     eval_default();
     return eval_result;
   }
 
-  // default and run-only mode require guard eval
-  std::unique_ptr<FrameLocalsMapping> locals =
-      std::make_unique<FrameLocalsMapping>(frame);
   PyObject* backend = get_backend(callback.ptr()); // borrowed
 
   // We don't run the current custom_eval_frame behavior for guards.
@@ -591,20 +618,31 @@ PyObject* dynamo__custom_eval_frame(
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
 
-  _PytorchRecordFunctionState* rf =
-      _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = nullptr;
   bool fullgraph_count_frame = false;
-  lookup(
-      extra,
-      locals.get(),
-      backend,
-      isolate_recompiles_id,
-      &maybe_cached_code,
-      &trace_annotation,
-      &fullgraph_count_frame,
-      is_skip_guard_eval_unsafe);
-  _pytorch_record_function_exit(rf);
+  std::unique_ptr<FrameLocalsMapping> locals;
+  if (!try_lookup_without_guard_eval(
+          extra,
+          backend,
+          isolate_recompiles_id,
+          &maybe_cached_code,
+          &trace_annotation,
+          &fullgraph_count_frame,
+          is_skip_guard_eval_unsafe)) {
+    locals = std::make_unique<FrameLocalsMapping>(frame);
+    _PytorchRecordFunctionState* rf =
+        _pytorch_record_function_enter(cache_lookup_profiler_str);
+    lookup(
+        extra,
+        locals.get(),
+        backend,
+        isolate_recompiles_id,
+        &maybe_cached_code,
+        &trace_annotation,
+        &fullgraph_count_frame,
+        is_skip_guard_eval_unsafe);
+    _pytorch_record_function_exit(rf);
+  }
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
@@ -662,6 +700,9 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // call callback
+  if (locals == nullptr) {
+    locals = std::make_unique<FrameLocalsMapping>(frame);
+  }
   CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
   FrameState* frame_state = extract_frame_state(extra);
   py::object callback_result;
@@ -685,7 +726,7 @@ PyObject* dynamo__custom_eval_frame(
     guarded_code = callback_result.attr("guarded_code").ptr();
   } catch (py::error_already_set& e) {
     // internal exception, returning here will leak the exception into user
-    // code this is useful for debugging -- but we dont want it to happen
+    // code this is useful for debugging -- but we don't want it to happen
     // outside of testing NB: we intentionally DO NOT re-enable custom
     // behavior to prevent cascading failure from internal exceptions.  The
     // upshot is if Dynamo barfs, that's it for Dynamo, even if you catch the

@@ -186,13 +186,32 @@ class BaseListVariable(VariableTracker):
         """Sequence length for lists, tuples, and range objects."""
         return VariableTracker.build(tx, len(self.items))
 
+    def tp_iteritem_impl(
+        self, tx: "InstructionTranslatorBase", index: VariableTracker
+    ) -> tuple[VariableTracker, VariableTracker]:
+        # 3.15 _tp_iteritem slot.  list/tuple (and tuple subclasses like
+        # torch.Size) all share the same algorithm: index into self.items,
+        # bump the index, signal exhaustion with StopIteration.  Subclasses
+        # whose Python type does NOT install _tp_iteritem (range, deque)
+        # override this to fall back to the base "missing" behavior.
+        # ref: https://github.com/python/cpython/blob/f31a89bb9010/Objects/listobject.c#L3916-L3921 (list_iteritem)
+        # ref: https://github.com/python/cpython/blob/f31a89bb9010/Objects/tupleobject.c#L876-L885 (tuple_iteritem)
+        if not isinstance(self, (ListVariable, TupleVariable)):
+            return super().tp_iteritem_impl(tx, index)
+        i = index.as_python_constant()
+        if i < 0:
+            raise AssertionError(f"Invalid index {i}")
+        if i >= len(self.items):
+            raise_observed_exception(IndexError, tx)
+        return self.items[i], ConstantVariable.create(i + 1)
+
     def sq_contains(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L635-L652
         # TODO(dynamo-team): Replace iter_contains by a proper impl. once we
         # implement PyObject_RichCompare
-        return iter_contains(self.unpack_var_sequence(tx), item, tx)
+        return iter_contains(unpack_iterable(tx, self), item, tx)
 
     def call_tree_map_branch(
         self,
@@ -318,6 +337,8 @@ class BaseListVariable(VariableTracker):
         count: VariableTracker,
     ) -> VariableTracker:
         n = count.as_python_constant()
+        if pytuple_checkexact(self) and (n == 1 or not self.items):
+            return self
         try:
             new_items = self.items * n
         except (MemoryError, OverflowError) as e:
@@ -328,34 +349,36 @@ class BaseListVariable(VariableTracker):
             kwargs["mutation_type"] = ValueMutationNew()
         return type(self)(new_items, **kwargs)
 
-    def richcompare_impl(
+    def _seq_richcompare(
         self,
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
         op: str,
+        accepted_type: type,
     ) -> VariableTracker:
-        """list_richcompare / tuplerichcompare.
+        """Shared list_richcompare / tuplerichcompare core.
 
         https://github.com/python/cpython/blob/e76aa128fe/Objects/listobject.c#L3352
         https://github.com/python/cpython/blob/e76aa128fe/Objects/tupleobject.c#L821
         CPython operates on the internal C array directly, so we compare
         VT items without going through a polyfill.
         """
-        from .object_protocol import generic_richcompare
+        from .object_protocol import generic_richcompare, generic_richcompare_bool
         from .tensor import SymNodeVariable
 
-        if not isinstance(other, BaseListVariable):
-            return ConstantVariable.create(NotImplemented)
         try:
-            self_base = list if issubclass(self.python_type(), list) else tuple
-            other_base = list if issubclass(other.python_type(), list) else tuple
-            if self_base is not other_base:
-                return ConstantVariable.create(NotImplemented)
+            other_type = other.python_type()
         except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+        if not issubclass(other_type, accepted_type):
             return ConstantVariable.create(NotImplemented)
 
         left = self.items
-        right = other.items
+        # CPython uses ob_item (the C array) directly, bypassing __iter__.
+        # For user-defined subclasses (UserDefinedListVariable etc.),
+        # the items live on the _base_vt.
+        other_vt = getattr(other, "_base_vt", None) or other
+        right = other_vt.items  # pyrefly: ignore[missing-attribute]
 
         cmp_op = cmp_name_to_op_mapping[op]
 
@@ -366,7 +389,9 @@ class BaseListVariable(VariableTracker):
 
         sym_eq_acc = None
         for a, b in zip(left, right):
-            eq_result = generic_richcompare(tx, a, b, "__eq__")
+            # CPython uses PyObject_RichCompareBool per element, which has
+            # an identity shortcut before the full do_richcompare dispatch.
+            eq_result = generic_richcompare_bool(tx, a, b, "__eq__")
             if eq_result.is_python_constant():
                 if not eq_result.as_python_constant():
                     if cmp_op in (operator.eq, operator.ne):
@@ -1028,6 +1053,14 @@ class ListVariable(CommonListMethodsVariable):
     _cpython_type = list
     _has_instance_dict = False
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        return self._seq_richcompare(tx, other, op, list)
+
     def python_type(self) -> type:
         return list
 
@@ -1285,7 +1318,7 @@ class ListVariable(CommonListMethodsVariable):
                 f"can only concatenate list (not '{other.python_type_name()}') to list",
             )
 
-        items = self.items + other.unpack_var_sequence(tx)
+        items = self.items + unpack_iterable(tx, other)
         return ListVariable(items, mutation_type=ValueMutationNew())
 
     def sq_inplace_concat_impl(
@@ -1311,6 +1344,14 @@ class DequeVariable(CommonListMethodsVariable):
     # deque_spec: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L1866
     # tp_hash = PyObject_HashNotImplemented (unhashable)
     _cpython_type = collections.deque
+
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        return self._seq_richcompare(tx, other, op, collections.deque)
 
     def is_hashable(self) -> bool:
         return False
@@ -1393,7 +1434,7 @@ class DequeVariable(CommonListMethodsVariable):
             )
 
         return DequeVariable(
-            self.items + other.unpack_var_sequence(tx),
+            self.items + unpack_iterable(tx, other),
             maxlen=self.maxlen,
             mutation_type=ValueMutationNew(),
         )
@@ -1559,6 +1600,14 @@ class TupleVariable(BaseListVariable):
     # PyTuple_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/tupleobject.c#L846
     _cpython_type = tuple
 
+    def richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        return self._seq_richcompare(tx, other, op, tuple)
+
     def python_type(self) -> type[tuple]:  # type: ignore[type-arg]
         return tuple
 
@@ -1622,7 +1671,7 @@ class TupleVariable(BaseListVariable):
             )
 
         return TupleVariable(
-            self.items + other.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
+            self.items + unpack_iterable(tx, other), mutation_type=ValueMutationNew()
         )
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
@@ -1902,7 +1951,7 @@ class SizeVariable(TupleVariable):
         if not pytuple_check(other):
             return ConstantVariable(NotImplemented)
         self_, other_ = (other, self) if reverse else (self, other)
-        a, b = self_.unpack_var_sequence(tx), other_.unpack_var_sequence(tx)
+        a, b = unpack_iterable(tx, self_), unpack_iterable(tx, other_)
         return SizeVariable(list(a) + list(b), mutation_type=ValueMutationNew())
 
 
@@ -2106,9 +2155,6 @@ class ListIteratorVariable(IteratorVariable):
         if self.index > 0:
             raise NotImplementedError
         return iter([x.as_python_constant() for x in self.items])
-
-    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
-        return True
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"

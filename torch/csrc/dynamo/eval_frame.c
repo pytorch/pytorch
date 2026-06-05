@@ -73,8 +73,8 @@ static PyObject* set_eval_frame_isolate_recompiles_id_py(
   return PyLong_FromLongLong(old_id);
 }
 
-// 3.15 Not supported at all. See cpython_defs.c for hints
-#if !(IS_PYTHON_3_15_PLUS)
+// 3.16 Not supported at all. See cpython_defs.c for hints
+#if !(IS_PYTHON_3_16_PLUS)
 
 #define DECLARE_PYOBJ_ATTR(name)                        \
   static PyObject* THPPyInterpreterFrame_##name(        \
@@ -782,6 +782,36 @@ static PyObject* set_fullgraph_graph_frame_count_py(
   return PyLong_FromLong(old);
 }
 
+// Set the C++ thread-local fullgraph skipped-frame counter and return the old
+// value. The C++ setter owns the active-to-active no-op behavior.
+static PyObject* set_fullgraph_skipped_frame_count_py(
+    PyObject* dummy,
+    PyObject* arg) {
+  long val = PyLong_AsLong(arg);
+  if (val == -1 && PyErr_Occurred()) {
+    return NULL;
+  }
+  int old = set_fullgraph_skipped_frame_count((int)val);
+  return PyLong_FromLong(old);
+}
+
+// Set the root code object for fullgraph skipped-frame accounting.
+static PyObject* set_fullgraph_root_code_py(PyObject* dummy, PyObject* obj) {
+  PyCodeObject* code = NULL;
+  if (!Py_IsNone(obj)) {
+    if (!PyCode_Check(obj)) {
+      PyErr_SetString(PyExc_TypeError, "expected a code object or None");
+      return NULL;
+    }
+    code = (PyCodeObject*)obj;
+  }
+  PyCodeObject* old = set_fullgraph_root_code(code);
+  if (old == NULL) {
+    Py_RETURN_NONE;
+  }
+  return Py_NewRef((PyObject*)old);
+}
+
 // Set fullgraph_error_on_nested_compile and return the old value.
 static PyObject* set_fullgraph_error_on_nested_compile_py(
     PyObject* dummy,
@@ -818,6 +848,11 @@ static PyMethodDef _methods[] = {
      set_fullgraph_graph_frame_count_py,
      METH_O,
      NULL},
+    {"set_fullgraph_skipped_frame_count",
+     set_fullgraph_skipped_frame_count_py,
+     METH_O,
+     NULL},
+    {"set_fullgraph_root_code", set_fullgraph_root_code_py, METH_O, NULL},
     {"set_fullgraph_error_on_nested_compile",
      set_fullgraph_error_on_nested_compile_py,
      METH_O,

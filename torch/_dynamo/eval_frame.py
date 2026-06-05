@@ -65,6 +65,8 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     set_fullgraph_compiled_frame_count,
     set_fullgraph_error_on_nested_compile,
     set_fullgraph_graph_frame_count,
+    set_fullgraph_root_code,
+    set_fullgraph_skipped_frame_count,
     set_guard_complete_hook,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
@@ -1086,9 +1088,16 @@ class _TorchDynamoContext:
             prior_error_on_nested_compile: bool | None = None
             prior_isolated_fullgraph_count: int | None = None
             prior_isolated_fullgraph_graph_count: int | None = None
+            prior_isolated_fullgraph_skipped_count: int | None = None
+            prior_fullgraph_root_code: types.CodeType | None = None
             prior_skip_reasons: list[str] | None = None
             fullgraph_count_enabled = False
             fullgraph_count_isolated = False
+            fullgraph_root_code = getattr(fn, "__code__", None)
+            if fullgraph_root_code is not None and trace_rules.check(
+                fullgraph_root_code
+            ):
+                fullgraph_root_code = None
             if self.fullgraph:
                 prior_error_on_nested_compile = set_fullgraph_error_on_nested_compile(
                     torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code
@@ -1098,6 +1107,10 @@ class _TorchDynamoContext:
                     fullgraph_count_enabled = prior_fullgraph_count < 0
                     if fullgraph_count_enabled:
                         set_fullgraph_graph_frame_count(0)
+                        set_fullgraph_skipped_frame_count(0)
+                        prior_fullgraph_root_code = set_fullgraph_root_code(
+                            fullgraph_root_code
+                        )
                         reset_skip_reasons()
                     elif prior_fullgraph_count > 0:
                         # Keep nested torch.compile(fullgraph=True) calls from
@@ -1108,6 +1121,9 @@ class _TorchDynamoContext:
                         prior_isolated_fullgraph_graph_count = (
                             set_fullgraph_graph_frame_count(-1)
                         )
+                        prior_isolated_fullgraph_skipped_count = (
+                            set_fullgraph_skipped_frame_count(-1)
+                        )
                         prior_skip_reasons = dynamo_tls.skip_reasons
                         fullgraph_count_isolated = True
                         # Deactivate before reactivating because the C++ setter
@@ -1115,6 +1131,10 @@ class _TorchDynamoContext:
                         set_fullgraph_compiled_frame_count(-1)
                         set_fullgraph_compiled_frame_count(0)
                         set_fullgraph_graph_frame_count(0)
+                        set_fullgraph_skipped_frame_count(0)
+                        prior_fullgraph_root_code = set_fullgraph_root_code(
+                            fullgraph_root_code
+                        )
                         reset_skip_reasons()
             try:
                 # We shouldn't compile inside kernel invocation.
@@ -1214,6 +1234,7 @@ class _TorchDynamoContext:
                         ) and call_succeeded:
                             count = set_fullgraph_compiled_frame_count(-1)
                             graph_count = set_fullgraph_graph_frame_count(-1)
+                            skipped_count = set_fullgraph_skipped_frame_count(-1)
                             if _stance.stance == "default":
                                 if count == 0:
                                     skip_reasons = get_skip_reasons()
@@ -1229,7 +1250,7 @@ class _TorchDynamoContext:
                                             " code was found."
                                         )
                                     fullgraph_error = RuntimeError(msg)
-                                if graph_count > 1:
+                                if skipped_count > 0 and graph_count > 1:
                                     fullgraph_error = RuntimeError(
                                         "torch.compile with fullgraph=True expected exactly one "
                                         f"compiled frame, but found {graph_count} compiled frames."
@@ -1253,6 +1274,8 @@ class _TorchDynamoContext:
                 if fullgraph_count_enabled:
                     set_fullgraph_compiled_frame_count(-1)
                     set_fullgraph_graph_frame_count(-1)
+                    set_fullgraph_skipped_frame_count(-1)
+                    set_fullgraph_root_code(prior_fullgraph_root_code)
                     dynamo_tls.skip_reasons = None
                 elif prior_isolated_fullgraph_count is not None:
                     set_fullgraph_compiled_frame_count(-1)
@@ -1262,6 +1285,12 @@ class _TorchDynamoContext:
                         set_fullgraph_graph_frame_count(
                             prior_isolated_fullgraph_graph_count
                         )
+                    set_fullgraph_skipped_frame_count(-1)
+                    if prior_isolated_fullgraph_skipped_count is not None:
+                        set_fullgraph_skipped_frame_count(
+                            prior_isolated_fullgraph_skipped_count
+                        )
+                    set_fullgraph_root_code(prior_fullgraph_root_code)
                     dynamo_tls.skip_reasons = prior_skip_reasons
                 if prior_error_on_nested_compile is not None:
                     set_fullgraph_error_on_nested_compile(prior_error_on_nested_compile)
