@@ -36,7 +36,7 @@ class TimmEmulatePrecisionCastsTest(TestCase):
         try:
             import timm  # noqa: F401
         except ImportError:
-            raise unittest.SkipTest("timm not installed")
+            raise unittest.SkipTest("timm not installed") from None
         sys.path.insert(0, str(BENCHMARKS_DYNAMO))
         from timm_models import TimmRunner
 
