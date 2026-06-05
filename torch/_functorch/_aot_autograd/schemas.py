@@ -554,6 +554,13 @@ class ViewAndMutationMeta:
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: list[str | None] | None = None
 
+    # compiled_autograd_output_deps[i] contains the user output indices that
+    # user output i depends on inside the compiled forward graph. Autograd only
+    # sees compiled graph outputs as siblings of the same CompiledFunction, so
+    # this lets torch.autograd.grad reject unsupported sibling-output gradients
+    # with a targeted error instead of silently returning None/partial grads.
+    compiled_autograd_output_deps: list[tuple[int, ...]] = field(default_factory=list)
+
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
@@ -613,6 +620,14 @@ class ViewAndMutationMeta:
         self.aliased_out_indices = aliased_out_indices
         self.unsafe_view_out_indices = unsafe_view_out_indices
         self.num_outputs = len(self.output_info)
+        if not self.compiled_autograd_output_deps:
+            self.compiled_autograd_output_deps = [() for _ in range(self.num_outputs)]
+        elif len(self.compiled_autograd_output_deps) != self.num_outputs:
+            raise AssertionError(
+                "expected compiled_autograd_output_deps to have one entry per "
+                f"user output, got {len(self.compiled_autograd_output_deps)} "
+                f"for {self.num_outputs} outputs"
+            )
         self.num_outputs_non_aliased = len(
             [
                 x
@@ -845,6 +860,8 @@ class ViewAndMutationMeta:
                 x.shape == y.shape and x.dtype == y.dtype
                 for x, y in zip(self.traced_tangents, other.traced_tangents)
             )
+            and self.compiled_autograd_output_deps
+            == other.compiled_autograd_output_deps
             and self.num_backward_tokens == other.num_backward_tokens
         )
 

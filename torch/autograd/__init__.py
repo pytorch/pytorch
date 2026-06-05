@@ -10,7 +10,7 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import cast, overload
+from typing import Any, cast, overload
 
 import torch
 from torch import _vmap_internals
@@ -252,6 +252,83 @@ def _tensor_or_tensors_to_tuple(
     return tuple(tensors)
 
 
+def _gradient_edge(
+    tensor_or_edge: torch.Tensor | graph.GradientEdge,
+) -> tuple[graph.Node, int] | None:
+    if isinstance(tensor_or_edge, graph.GradientEdge):
+        return tensor_or_edge.node, tensor_or_edge.output_nr
+    if tensor_or_edge.grad_fn is None:
+        return None
+    return tensor_or_edge.grad_fn, tensor_or_edge.output_nr
+
+
+def _compiled_autograd_user_output_index(node: Any, output_nr: int) -> int | None:
+    if not getattr(node, "_aot_autograd_compiled_function", False):
+        return None
+    output_idx = output_nr - node._aot_autograd_num_mutated_runtime_inps
+    if 0 <= output_idx < node._aot_autograd_num_outputs:
+        return output_idx
+    return None
+
+
+def _validate_outputs_do_not_depend_on_compiled_graph_sibling(
+    outputs: Sequence[torch.Tensor] | Sequence[graph.GradientEdge],
+    inputs: Sequence[torch.Tensor] | Sequence[graph.GradientEdge],
+    api_name: str,
+) -> None:
+    compiled_input_edges: list[tuple[graph.Node, int]] = []
+    for inp in inputs:
+        edge = _gradient_edge(inp)
+        if edge is None:
+            continue
+        node, output_nr = edge
+        output_idx = _compiled_autograd_user_output_index(node, output_nr)
+        if output_idx is not None:
+            compiled_input_edges.append((node, output_idx))
+
+    if not compiled_input_edges:
+        return
+
+    stack: list[tuple[graph.Node, int]] = []
+    for out in outputs:
+        edge = _gradient_edge(out)
+        if edge is not None:
+            stack.append(edge)
+
+    seen: set[tuple[int, int]] = set()
+    while stack:
+        node, output_nr = stack.pop()
+        key = (id(node), output_nr)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        output_idx = _compiled_autograd_user_output_index(node, output_nr)
+        if output_idx is not None:
+            compiled_node = cast(Any, node)
+            output_deps = compiled_node._aot_autograd_output_deps
+            if output_idx < len(output_deps):
+                deps = output_deps[output_idx]
+                for input_node, input_idx in compiled_input_edges:
+                    if node is input_node and input_idx in deps:
+                        raise RuntimeError(
+                            f"{api_name} is not supported when `outputs` depends "
+                            "on one torch.compile graph output and `inputs` "
+                            "contains a different output from the same compiled "
+                            "graph. torch.compile's AOTAutograd backend only "
+                            "computes gradients of compiled graph outputs with "
+                            "respect to compiled graph inputs; it does not "
+                            "preserve internal gradient edges between sibling "
+                            "outputs. Split the compiled region, for example by "
+                            "compiling the producer and consumer submodules "
+                            "separately, or run this part without torch.compile."
+                        )
+
+        for next_node, next_output_nr in node.next_functions:
+            if next_node is not None:
+                stack.append((next_node, next_output_nr))
+
+
 def backward(
     tensors: _TensorOrTensorsOrGradEdge,
     grad_tensors: _TensorOrOptionalTensors | None = None,
@@ -388,6 +465,13 @@ def backward(
     grad_tensors_ = _make_grads(tensors, grad_tensors_, is_grads_batched=False)
     if retain_graph is None:
         retain_graph = create_graph
+
+    if inputs_tuple:
+        _validate_outputs_do_not_depend_on_compiled_graph_sibling(
+            tensors,
+            inputs_tuple,
+            "torch.autograd.backward",
+        )
 
     # The reason we repeat the same comment below is that
     # some Python versions print out the first line of a multi-line function
@@ -570,6 +654,12 @@ def grad(
 
     if retain_graph is None:
         retain_graph = create_graph
+
+    _validate_outputs_do_not_depend_on_compiled_graph_sibling(
+        outputs,
+        inputs_tuple,
+        "torch.autograd.grad",
+    )
 
     # The reason we repeat the same comment several times below is because
     # some Python versions print out the first line of multi-line function
