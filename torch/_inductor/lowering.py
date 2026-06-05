@@ -50,6 +50,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     has_free_unbacked_symbols,
     resolve_unbacked_bindings,
+    SymTypes,
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
@@ -1034,7 +1035,8 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         # fallback to aten eager implementation for differing bitwidths
-        return fallback_handler(aten.view.dtype)(x, dtype)
+        x_cont = ir.ExternKernel.require_contiguous_strides(x)
+        return fallback_handler(aten.view.dtype)(x_cont, dtype)
     else:
         return TensorBox(DtypeView.create(x, dtype))
 
@@ -3047,8 +3049,8 @@ def inductor_randint(
         return ops.randint64(
             seed_loader([]),
             ops.index_expr(random_pos(index), torch.int32),
-            ops.index_expr(low, torch.int64),
-            ops.index_expr(high, torch.int64),
+            ops.value_expr(low, torch.int64),
+            ops.value_expr(high, torch.int64),
         )
 
     return Pointwise.create(
@@ -3688,9 +3690,6 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
 
-# Needs dimname support
-make_fallback(aten.zeros.names)
-
 # 6) Pattern-matched
 make_fallback(
     aten._scaled_dot_product_efficient_attention.default,
@@ -3779,7 +3778,9 @@ def copy(self, src, non_blocking=False):
 
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=None):
-    # TODO(jansel): memory format
+    # Don't materialize the layout here based on memory_format,
+    # as we want to give the scheduler opportunity to perform layout optimization.
+    # Let the downstream op handle the input stride as needed.
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
@@ -4145,14 +4146,12 @@ def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(
         *size,
-        names=None,
         dtype=None,
         device=None,
         layout=None,
         pin_memory=False,
         memory_format=None,
     ):
-        assert_nyi(names is None, "named tensors")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         assert_nyi(not memory_format, "memory_format")
         device = decode_device(device)
@@ -4179,14 +4178,12 @@ def tensor_constructor(fill_value):
 @register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
-    names=None,
     dtype=None,
     layout=None,
     device=None,
     pin_memory=None,
     memory_format=None,
 ):
-    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
@@ -7055,9 +7052,13 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     return x_var, x_mean
 
 
-def use_two_step_variance(x, axis, keepdim):
-    # two-step algorithm can get better performance in small reductions size
-    # while it can accumulate more numerical error than Welford algorithm.
+def use_two_step_variance(x, axis, keepdim, input_dtype):
+    # The two-step algorithm can be faster for non-split reductions because
+    # Welford does more work per element. Preserve the old tiny-reduction
+    # two-step path, keep Welford for the rest of the small reductions where
+    # the speedup is limited and training gradients are more sensitive to the
+    # different accumulation order, and keep Welford for larger or split
+    # reductions where avoiding another full pass over the data is profitable.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
@@ -7066,17 +7067,39 @@ def use_two_step_variance(x, axis, keepdim):
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
     device = x.get_device()
-    if not (device and device.type == "cpu"):
-        threshold = config.unroll_reductions_threshold
-    else:
+    check_for_split = False
+    min_numel = 0
+    is_cuda_two_step_dtype = input_dtype in (torch.bfloat16, torch.float16)
+    if device and device.type == "cpu":
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-    return (
-        isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) <= threshold
-        and sympy_product(ranges) != 1
+    elif device and device.type == "cuda" and is_triton(x) and is_cuda_two_step_dtype:
+        min_numel = config.triton.use_two_step_variance_min_numel
+        threshold = config.triton.use_two_step_variance_threshold
+        check_for_split = True
+    else:
+        threshold = config.unroll_reductions_threshold
+
+    if not isinstance(reduction_numel, sympy.Integer):
+        return False
+
+    reduction_numel = int(reduction_numel)
+    if reduction_numel > threshold or sympy_product(ranges) == 1:
+        return False
+
+    if min_numel and config.unroll_reductions_threshold < reduction_numel < min_numel:
+        return False
+
+    if not check_for_split:
+        return True
+
+    _, split = ir.Reduction.num_splits(
+        reduction_numel=reduction_numel,
+        reduction_type="sum",
+        **kwargs,
     )
+    return V.graph.sizevars.statically_known_leq(split, 1)
 
 
 def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
@@ -7137,7 +7160,9 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
         var_mean_sum_(**kwargs)
         if (
             config.mtia.disable_welford_reduction
-            or use_two_step_variance(x, axis=axis, keepdim=keepdim)
+            or use_two_step_variance(
+                x, axis=axis, keepdim=keepdim, input_dtype=out_dtype
+            )
         )
         else var_mean_welford_(**kwargs)
     )
@@ -8137,7 +8162,21 @@ reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
-register_pointwise(aten.signbit, override_return_dtype=torch.bool)
+
+
+@register_lowering(aten.signbit)
+def signbit(x):
+    if x.get_dtype() in (
+        torch.bool,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+    ):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("signbit")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
 
 register_lowering(aten._neg_view)(neg)
 
@@ -8365,8 +8404,31 @@ def sym_numel(a):
     return a.get_numel()
 
 
+def _unwrap_symbolic_magic_arg(x):
+    if isinstance(x, SymTypes):
+        return x.node.expr
+    if isinstance(x, (int, float, bool)):
+        return sympy.sympify(x)
+    return x
+
+
 for method, func in magic_methods.items():
-    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
+
+    @register_lowering(method_to_operator(method))
+    def wrapped(*args, _func=func, **kwargs):
+        node = V.graph.current_node
+        meta_val = node.meta.get("val") if node is not None else None
+        if isinstance(meta_val, SymTypes):
+            return meta_val.node.expr
+        if any(
+            isinstance(x, (SymTypes, sympy.Basic))
+            for x in itertools.chain(args, kwargs.values())
+        ):
+            return _func(
+                *(_unwrap_symbolic_magic_arg(x) for x in args),
+                **{k: _unwrap_symbolic_magic_arg(v) for k, v in kwargs.items()},
+            )
+        return _func(*args, **kwargs)
 
 
 @register_lowering(torch.sym_sum)
