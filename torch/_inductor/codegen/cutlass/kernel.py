@@ -42,6 +42,7 @@ from ..common import (
     IndentedBuffer,
     Kernel,
     OpOverrides,
+    RemovedArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -756,9 +757,15 @@ class CUTLASSTemplateCaller(ChoiceCaller):
             if isinstance(arg_type, torch_dtype):
                 tensor_args.append(arg)
 
-        # The last tensor arg is the output; the rest are inputs
+        # The last tensor arg is the output; the rest are inputs. This relies on
+        # python_argdefs ordering (inputs before outputs) and assumes no inplace
+        # buffers, which holds for the GEMM + activation epilogues handled here.
         if not tensor_args:
             return float("inf")
+        assert not any(
+            not isinstance(buf, RemovedArg)
+            for buf in kernel.args.inplace_buffers.values()
+        ), "benchmark_fused does not support inplace buffers"
 
         input_names = tensor_args[:-1]
         output_name = tensor_args[-1]
@@ -789,8 +796,8 @@ class CUTLASSTemplateCaller(ChoiceCaller):
         # 3. Compute extra_args (size_args + offset_args + runtime_arg_values)
         size_args = V.graph.sizevars.optimization_hints(kernel.get_dynamic_shape_args())
         offset_args = V.graph.sizevars.optimization_hints(kernel.get_offset_args())
-        extra_args = tuple(
-            list(size_args) + list(offset_args) + list(kernel.runtime_arg_values)
+        extra_args = (
+            tuple(size_args) + tuple(offset_args) + tuple(kernel.runtime_arg_values)
         )
 
         # 4. Create the fused benchmark request
