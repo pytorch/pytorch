@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_nn import _test_module_empty_input, NNTestCase
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     dtype2prec_DONTUSE,
     gradcheck,
     gradgradcheck,
@@ -1400,6 +1401,20 @@ class TestConvolutionNNDeviceType(NNTestCase):
             enabled=None, deterministic=None, allow_tf32=True
         ):
             self.assertTrue(torch.backends.mkldnn.allow_tf32)
+
+    @onlyXPU
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_conv2d_deterministic_mode(self, device, dtype):
+        # intel/torch-xpu-ops#3216: convolution stays flag-gated (matching
+        # CUDA cuDNN), but when deterministic algorithms are requested the
+        # oneDNN convolution primitive must engage a deterministic
+        # implementation and produce reproducible results run-to-run.
+        with DeterministicGuard(True):
+            x = torch.randn(2, 4, 16, 16, device=device, dtype=dtype)
+            w = torch.randn(8, 4, 3, 3, device=device, dtype=dtype)
+            first = F.conv2d(x, w, padding=1)
+            for _ in range(10):
+                self.assertEqual(first, F.conv2d(x, w, padding=1), atol=0.0, rtol=0.0)
 
 
 instantiate_device_type_tests(

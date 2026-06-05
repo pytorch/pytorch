@@ -188,10 +188,14 @@ sycl::event matmul(
   dnnl::primitive_attr pattr;
   pattr.set_post_ops(po);
 
+  // mm/addmm/linear are deterministic ops in PyTorch: they carry no
+  // nondeterministic alert or reproducibility note, and on CUDA cuBLAS GEMM is
+  // deterministic regardless of use_deterministic_algorithms(). Request a
+  // deterministic oneDNN implementation unconditionally so XPU matmul is
+  // reproducible by default and consistent with CUDA. See
+  // intel/torch-xpu-ops#3216.
 #if ONEDNN_SUPPORT_DETERMINISTIC
-  if (at::globalContext().deterministicAlgorithms() ||
-      at::globalContext().deterministicMkldnn())
-    pattr.set_deterministic(true);
+  pattr.set_deterministic(true);
 #endif
 
   // scratchpad

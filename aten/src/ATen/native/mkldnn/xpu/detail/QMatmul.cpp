@@ -515,10 +515,11 @@ sycl::event scaled_matmul(
 
   dnnl::primitive_attr op_attr = dnnl::primitive_attr();
 
+  // Scaled matmul is part of the matmul family and is deterministic by
+  // default, matching CUDA. See the rationale in Matmul.cpp and
+  // intel/torch-xpu-ops#3216.
 #if ONEDNN_SUPPORT_DETERMINISTIC
-  if (at::globalContext().deterministicAlgorithms() ||
-      at::globalContext().deterministicMkldnn())
-    op_attr.set_deterministic(true);
+  op_attr.set_deterministic(true);
 #endif
 
   std::vector<int64_t> default_groups;

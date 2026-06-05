@@ -15,8 +15,14 @@
 
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
+// oneDNN exposes primitive_attr::set_deterministic() since v3.4. Compare the
+// full version so this stays correct across major bumps: a raw
+// "DNNL_VERSION_MINOR >= 4" check wrongly evaluates to false on oneDNN >= 4.0
+// (the minor number resets on a major bump) and would silently drop
+// deterministic support.
 #define ONEDNN_SUPPORT_DETERMINISTIC \
-  (DNNL_VERSION_MAJOR >= 3 && DNNL_VERSION_MINOR >= 4)
+  ((DNNL_VERSION_MAJOR > 3) ||       \
+   (DNNL_VERSION_MAJOR == 3 && DNNL_VERSION_MINOR >= 4))
 
 namespace at::native::onednn {
 

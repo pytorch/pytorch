@@ -121,11 +121,11 @@ void woq_matmul_int4_impl(
 
   dnnl::primitive_attr pattr;
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  // Weight-only-quantized matmul is part of the matmul family and is
+  // deterministic by default, matching CUDA. See the rationale in Matmul.cpp
+  // and intel/torch-xpu-ops#3216.
 #if ONEDNN_SUPPORT_DETERMINISTIC
-  if (at::globalContext().deterministicAlgorithms() ||
-      at::globalContext().deterministicMkldnn()) {
-    pattr.set_deterministic(true);
-  }
+  pattr.set_deterministic(true);
 #endif
 
   // Set scales with multiple scales along K dimension and with groups along  K.
@@ -230,11 +230,10 @@ void woq_matmul_int4_impl_cache(
 
     set_quant_primitive_attr(pattr, scale, zp, group_size);
 
+    // Weight-only-quantized matmul is deterministic by default, matching CUDA.
+    // See the rationale in Matmul.cpp and intel/torch-xpu-ops#3216.
 #if ONEDNN_SUPPORT_DETERMINISTIC
-    if (at::globalContext().deterministicAlgorithms() ||
-        at::globalContext().deterministicMkldnn()) {
-      pattr.set_deterministic(true);
-    }
+    pattr.set_deterministic(true);
 #endif
   };
 

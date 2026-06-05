@@ -880,6 +880,28 @@ class TestBasicGEMM(TestCase):
             for _ in range(10):
                 self.assertEqual(first, torch.matmul(inp, inp), atol=0.0, rtol=0.0)
 
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_matmul_deterministic_by_default(self, device, dtype):
+        # intel/torch-xpu-ops#3216: mm/addmm/linear must produce identical
+        # results regardless of use_deterministic_algorithms(), matching CUDA
+        # where cuBLAS GEMM is deterministic by default. The XPU oneDNN backend
+        # requests a deterministic implementation unconditionally for the
+        # matmul family, so toggling the flag must not change the output.
+        a = torch.randn(13, 512, device=device, dtype=dtype)
+        b = torch.randn(512, 64, device=device, dtype=dtype)
+        c = torch.randn(13, 64, device=device, dtype=dtype)
+        w = torch.randn(128, 512, device=device, dtype=dtype)
+        for op, args in (
+            (torch.mm, (a, b)),
+            (torch.addmm, (c, a, b)),
+            (torch.nn.functional.linear, (a, w)),
+        ):
+            with DeterministicGuard(False):
+                out_nondet = op(*args)
+            with DeterministicGuard(True):
+                out_det = op(*args)
+            self.assertEqual(out_det, out_nondet, atol=0.0, rtol=0.0)
+
     @dtypes(
         torch.int16,
         torch.int32,
