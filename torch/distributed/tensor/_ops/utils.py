@@ -4,7 +4,7 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
-from typing import TypeAlias, TypeVar
+from typing import Any, cast, TypeAlias, TypeVar
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
@@ -193,7 +193,12 @@ def is_tensor_shardable(
         True: assumes shardability; we return True, allowing zero-size shards at runtime when u0 < num_shards.
         False: returns False, and lower-bounding u0, e.g. torch._check(u0 >= num_shards), is needed to enable sharding.
     """
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+    from torch.fx.experimental.symbolic_shapes import (
+        free_unbacked_symbols,
+        guard_or_false,
+        guard_or_true,
+        optimization_hint,
+    )
 
     if allow_unbacked_sharding not in [None, True, False]:
         raise AssertionError
@@ -202,6 +207,24 @@ def is_tensor_shardable(
         True: guard_or_false,
         False: guard_or_true,
     }[allow_unbacked_sharding]
+
+    def hint_proves_at_least(size, lower_bound: int) -> bool:
+        if guard_or_false(size >= lower_bound):
+            return True
+        if not (
+            isinstance(size, torch.SymInt)
+            and (shape_env := getattr(size.node, "shape_env", None)) is not None
+            and (unbacked_symbols := free_unbacked_symbols(size.node.expr))
+            and unbacked_symbols.issubset(shape_env.var_to_hint_override.keys())
+            and optimization_hint(size, fallback=None) >= lower_bound
+        ):
+            return False
+
+        # Shardability is a correctness property, not just an optimization.
+        # A user-provided unbacked hint can select the shardable branch, but
+        # the runtime extent must still be checked before the strategy is used.
+        torch._check(size >= lower_bound)
+        return True
 
     # number of shards in each tensor dimension
     num_shards = [1] * len(shape)
@@ -214,12 +237,16 @@ def is_tensor_shardable(
             if isinstance(placement, _StridedShard):
                 # make sure tensor dim `shard_dim` is shardable after splitting
                 # with split_factor
-                if guard_fn(
-                    shape[shard_dim] < num_shards[shard_dim] * placement.split_factor
+                lower_bound = cast(Any, num_shards[shard_dim]) * placement.split_factor
+                if not hint_proves_at_least(shape[shard_dim], lower_bound) and guard_fn(
+                    shape[shard_dim] < lower_bound
                 ):
                     return False
             else:
-                if guard_fn(shape[shard_dim] < num_shards[shard_dim]):
+                lower_bound = num_shards[shard_dim]
+                if not hint_proves_at_least(shape[shard_dim], lower_bound) and guard_fn(
+                    shape[shard_dim] < lower_bound
+                ):
                     return False
 
     return True
@@ -237,7 +264,8 @@ def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
             num_shards[shard_dim] *= spec.mesh.size(i)
             if isinstance(placement, _StridedShard):
                 if (
-                    shape[shard_dim] % (placement.split_factor * num_shards[shard_dim])
+                    cast(Any, shape[shard_dim])
+                    % (placement.split_factor * num_shards[shard_dim])
                     != 0
                 ):
                     return False
@@ -264,7 +292,7 @@ def is_tensor_evenly_shardable_on_dim(
                 # than the final num_shards check and implies it.  Note:
                 # num_shards already includes spec.mesh.size(i) from this
                 # iteration, so the check covers the full shard count.
-                if shape[dim] % (placement.split_factor * num_shards) != 0:
+                if cast(Any, shape[dim]) % (placement.split_factor * num_shards) != 0:
                     return False
 
     return shape[dim] % num_shards == 0
@@ -570,17 +598,27 @@ def expand_to_full_mesh_op_strategy(
                 blocking_inplace_input_placements = self_spec.placements
             continue
 
-        # For out= variant ops, output placement must match the "out" kwarg's placement
-        if (
-            op_schema.is_out_variant_op()
-            and "out" in op_schema.kwargs_schema
-            and isinstance(op_schema.kwargs_schema["out"], OpStrategy)
-        ):
-            out_kwarg_spec = op_schema.kwargs_schema["out"].strategies[0].output_spec
-            # spec_list[0] is the output spec for this strategy combination
-            if spec_list[0] is not None:
-                if spec_list[0].placements != out_kwarg_spec.placements:
+        # For out= variant ops, output placement must match each out kwarg's
+        # placement. Kwargs are intentionally not redistributed in dispatch.
+        if op_schema.is_out_variant_op():
+            out_arg_idx = 0
+            mismatched_out_arg = False
+            for argument in op_schema.op._schema.arguments:
+                if not argument.is_out:
                     continue
+                out_arg = op_schema.kwargs_schema.get(argument.name)
+                if isinstance(out_arg, OpStrategy):
+                    output_spec = spec_list[out_arg_idx]
+                    out_arg_spec = out_arg.strategies[0].output_spec
+                    if (
+                        output_spec is None
+                        or output_spec.placements != out_arg_spec.placements
+                    ):
+                        mismatched_out_arg = True
+                        break
+                out_arg_idx += 1
+            if mismatched_out_arg:
+                continue
 
         output_specs: tuple[DTensorSpec | None, ...] | DTensorSpec | None
         if input_index == 0:
