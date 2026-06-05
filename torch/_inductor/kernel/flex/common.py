@@ -53,7 +53,8 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
     """To support backwards on captured buffers we register a specific lowering for our specific custom up"""
     # Always accumulate into fp32 then cast
     grad = _full(0, values.get_device(), torch.float32, shape)
-    assert isinstance(grad, TensorBox)
+    if not isinstance(grad, TensorBox):
+        raise AssertionError(f"Expected TensorBox, got {type(grad)}")
     grad.realize()
     x_size = grad.get_size()
     values = to_dtype(values, grad.get_dtype())
@@ -76,7 +77,8 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
 
     values = expand(values, expected_vals_size)
     device = grad.get_device()
-    assert device is not None
+    if device is None:
+        raise AssertionError("device must not be None")
     scatter = Scatter(
         device=device,
         dtype=grad.get_dtype(),
@@ -140,16 +142,17 @@ def build_subgraph_module_buffer(
         if isinstance(output_buffer, ComputedBuffer):
             # These nodes are coming from the output of zeros_and_scatter
             return output_buffer
-        assert isinstance(output_buffer, TensorBox), (
-            "The output node for flex attention's subgraph must be a TensorBox, but got: ",
-            type(output_buffer),
-        )
-        assert isinstance(output_buffer.data, StorageBox), (
-            "The output node for the flex attention subgraph must be a StorageBox, but got: ",
-            type(output_buffer),
-        )
+        if not isinstance(output_buffer, TensorBox):
+            raise AssertionError(
+                f"The output node for flex attention's subgraph must be a TensorBox, but got: {type(output_buffer)}"
+            )
+        if not isinstance(output_buffer.data, StorageBox):
+            raise AssertionError(
+                f"The output node for the flex attention subgraph must be a StorageBox, but got: {type(output_buffer.data)}"
+            )
         device = output_buffer.data.get_device()
-        assert device is not None
+        if device is None:
+            raise AssertionError("device must not be None for output buffer")
         subgraph_buffer = ComputedBuffer(
             name=None,
             layout=FlexibleLayout(
@@ -221,9 +224,8 @@ def construct_strides(
 ) -> Sequence[_IntLike]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
-    assert len(sizes) == len(fill_order), (
-        "Length of sizes must match the length of the fill order"
-    )
+    if len(sizes) != len(fill_order):
+        raise AssertionError("Length of sizes must match the length of the fill order")
     strides: list[_IntLike] = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension

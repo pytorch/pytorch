@@ -142,7 +142,8 @@ def run_triton_kernel_with_autotune(
     else:
         raise RuntimeError(f"Unexpected kernel object type: {type(kernel_obj)}")
 
-    assert isinstance(kernel_fn, CachingAutotuner)
+    if not isinstance(kernel_fn, CachingAutotuner):
+        raise AssertionError(f"Expected CachingAutotuner, got {type(kernel_fn)}")
 
     inductor_meta = kernel_fn.inductor_meta
     inductor_meta["store_cubin"] = True
