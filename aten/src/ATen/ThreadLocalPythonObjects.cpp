@@ -21,6 +21,10 @@ bool ThreadLocalPythonObjects::contains(const std::string& key) {
   return py_objects.obj_dict_.count(key);
 }
 
+void ThreadLocalPythonObjects::erase(const std::string& key) {
+  py_objects.obj_dict_.erase(key);
+}
+
 void ThreadLocalPythonObjects::set_state(ThreadLocalPythonObjects state) {
   py_objects = std::move(state);
 }
