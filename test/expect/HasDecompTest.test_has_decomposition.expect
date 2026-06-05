@@ -689,12 +689,8 @@ aten::adaptive_avg_pool1d.out
 aten::adaptive_avg_pool2d.out
 aten::adaptive_avg_pool3d.out
 aten::adaptive_avg_pool3d_backward.grad_input
-aten::adaptive_max_pool2d
-aten::adaptive_max_pool2d.out
 aten::adaptive_max_pool2d_backward
 aten::adaptive_max_pool2d_backward.grad_input
-aten::adaptive_max_pool3d
-aten::adaptive_max_pool3d.out
 aten::adaptive_max_pool3d_backward
 aten::adaptive_max_pool3d_backward.grad_input
 aten::addbmm
