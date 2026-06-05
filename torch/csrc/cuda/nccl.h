@@ -7,10 +7,11 @@
 #include <optional>
 #include <vector>
 
-// NCCL BFloat16 is enabled for CUDA builds where the bf16 type exists and NCCL
-// is present (NCCL is required to be 2.27+), or for HIP 3.1+
+// NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
+// HIP 3.1+
 #if defined(__CUDA_BF16_TYPES_EXIST__)
-#define HAS_NCCL_BF16_DATATYPE (NCCL_MAJOR >= 2)
+#define HAS_NCCL_BF16_DATATYPE \
+  ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
 #elif defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301)
 #define HAS_NCCL_BF16_DATATYPE 1
 #else
