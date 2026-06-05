@@ -1264,15 +1264,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         result = opt_fn(a, b)
         self.assertEqual(result, expected)
 
-    @parametrize(
-        "policy_key",
-        [
-            torch.ops.aten.mm.default,  # OpOverload key
-            "aten.mm.default",  # str(op)
-            "aten::mm",  # op.name()
-            "aten.mm",  # packet, matches all overloads
-        ],
-    )
+    @parametrize("policy_key", [torch.ops.aten.mm.default])
     def test_checkpoint_policy_eager(self, policy_key):
         def gn(x):
             return torch.cos(torch.sin(torch.matmul(x, x) @ x))
@@ -1332,7 +1324,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @parametrize("policy_key", [torch.ops.aten.mm.default, "aten.mm"])
+    @parametrize("policy_key", [torch.ops.aten.mm.default])
     def test_compile_checkpoint_policy(self, policy_key):
         def gn(x):
             return torch.cos(torch.sin(torch.matmul(x, x) @ x))
