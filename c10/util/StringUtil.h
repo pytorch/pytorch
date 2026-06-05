@@ -226,7 +226,7 @@ inline void printQuotedString(std::ostream& stmt, const std::string_view str) {
           s /= 8;
           // NOLINTNEXTLINE(*narrowing-conversions)
           buf[0] += s;
-          stmt << "\\" << buf;
+          stmt << '\\' << buf;
         }
         break;
     }
