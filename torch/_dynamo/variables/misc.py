@@ -2566,6 +2566,7 @@ class RandomVariable(VariableTracker):
 
     @staticmethod
     def has_lazy_value(arg: VariableTracker) -> bool:
+        # Avoid importing LazyVariableTracker here; it would create a circular import.
         if type(arg).__name__ == "LazyVariableTracker":
             return True
         arg = arg.realize()
@@ -2711,11 +2712,9 @@ class RandomVariable(VariableTracker):
             return self.wrap_state(state)
         elif name == "setstate":
             state_arg = args[0]
-            state_arg_source = state_arg.source
             state_from_random_call = self.has_dynamic_random_arg([state_arg], {})
             if self.use_runtime_source():
                 self.check_runtime_source_mutation(tx)
-            if self.use_runtime_source():
                 if not state_from_random_call and self.has_non_constant_source_value(
                     state_arg
                 ):
@@ -2724,12 +2723,6 @@ class RandomVariable(VariableTracker):
                     self.unimplemented_dynamic_state()
             elif state_from_random_call or self.has_non_constant_source_value(
                 state_arg
-            ):
-                self.unimplemented_dynamic_state()
-            if (
-                not state_from_random_call
-                and state_arg_source is not None
-                and not is_constant_source(state_arg_source)
             ):
                 self.unimplemented_dynamic_state()
             if state_from_random_call:
@@ -2760,8 +2753,6 @@ class RandomVariable(VariableTracker):
                     source=self.source,
                     method_name=name,
                 )
-            elif state_from_random_call:
-                self.unimplemented_dynamic_state()
             else:
                 tx.output.side_effects.mutation(self)
             return variables.ConstantVariable.create(None)

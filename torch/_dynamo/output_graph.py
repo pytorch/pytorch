@@ -359,6 +359,8 @@ def _resolve_random_call_arg(arg: object, random_values: list[Any]) -> object:
         base = _resolve_random_call_arg(arg.base, random_values)
         index = arg.unpack_slice() if arg.index_is_slice else arg.index
         return cast(Any, base)[index]
+    if isinstance(arg, Source):
+        raise AssertionError(f"unexpected Source type in random call arg: {type(arg)}")
     if isinstance(arg, tuple):
         return tuple(_resolve_random_call_arg(x, random_values) for x in arg)
     if isinstance(arg, list):
