@@ -102,8 +102,6 @@ TEST_CUDA_IPC = (
     #    and not TEST_WITH_ROCM
 )  # https://github.com/pytorch/pytorch/issues/90940
 
-TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
-
 TEST_PIN_MEMORY = torch.accelerator.is_available()
 
 # We want to use `spawn` if able because some of our tests check that the
