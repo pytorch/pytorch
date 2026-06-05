@@ -1,4 +1,4 @@
-name: inductor-rocm-mi355
+name: inductor-rocm-mi350
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - main
       - release/*
     tags:
-      - ciflow/inductor-rocm-mi355/*
+      - ciflow/inductor-rocm-mi350/*
   workflow_dispatch:
 
 concurrency:
@@ -36,12 +36,12 @@ jobs:
       opt_out_experiments: lf
 
   linux-noble-rocm-py3_12-inductor-build:
-    name: linux-noble-rocm-py3.12-mi355
+    name: linux-noble-rocm-py3.12-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-noble-rocm-py3.12-mi355
+      build-environment: linux-noble-rocm-py3.12-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       test-matrix: |
         { include: [
@@ -51,7 +51,7 @@ jobs:
     secrets: inherit
 
   linux-noble-rocm-py3_12-inductor-test:
-    name: linux-noble-rocm-py3.12-mi355
+    name: linux-noble-rocm-py3.12-mi350
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-noble-rocm-py3_12-inductor-build
     with:

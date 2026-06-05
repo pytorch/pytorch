@@ -52,8 +52,8 @@ WORKFLOWS = {
         "name": "inductor-perf-nightly-rocm-mi300",
         "id": 197925166,
     },
-    "rocm-mi355": {
-        "name": "inductor-perf-nightly-rocm-mi355",
+    "rocm-mi350": {
+        "name": "inductor-perf-nightly-rocm-mi350",
         "id": 197925165,
     },
     "x86": {
