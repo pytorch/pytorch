@@ -1990,6 +1990,57 @@ class TestForeachMM(TestCase):
 
         gradcheck(fn, (*A, *B))
 
+    @unittest.skipUnless(
+        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+    )
+    @parametrize(
+        "a_dtype,b_dtype",
+        [(torch.bfloat16, torch.float32), (torch.float32, torch.bfloat16)],
+    )
+    def test_foreach_mm_cond_rejects_mixed_dtype(self, a_dtype, b_dtype):
+        from torch._native.ops.foreach_mm.impl import _foreach_mm_cond
+
+        A = [torch.randn(16, 16, dtype=a_dtype, device="cuda") for _ in range(2)]
+        B = [torch.randn(16, 16, dtype=b_dtype, device="cuda") for _ in range(2)]
+
+        self.assertFalse(_foreach_mm_cond(A, B))
+
+    @parametrize("can_use_nvmath", [True, False])
+    def test_foreach_mm_impl_routing(self, can_use_nvmath):
+        from torch._native.ops.foreach_mm.impl import _foreach_mm_impl
+
+        A = [torch.randn(16, 16, dtype=torch.bfloat16) for _ in range(2)]
+        B = [torch.randn(16, 16, dtype=torch.bfloat16) for _ in range(2)]
+        nvmath_result = [torch.empty(0)]
+        stack_result = [torch.empty(1)]
+
+        with (
+            unittest.mock.patch(
+                "torch._native.ops.foreach_mm.impl._can_use_nvmath_cublaslt",
+                return_value=can_use_nvmath,
+            ),
+            unittest.mock.patch(
+                "torch._native.ops.foreach_mm.impl._check_nvmath_cublaslt",
+                return_value=True,
+            ),
+            unittest.mock.patch(
+                "torch._native.ops.foreach_mm.impl._foreach_mm_impl_nvmath",
+                return_value=nvmath_result,
+            ) as nvmath_mock,
+            unittest.mock.patch(
+                "torch._native.ops.foreach_mm.impl._foreach_mm_impl_stack",
+                return_value=stack_result,
+            ) as stack_mock,
+        ):
+            if can_use_nvmath:
+                self.assertIs(_foreach_mm_impl(A, B), nvmath_result)
+                nvmath_mock.assert_called_once_with(A, B)
+                stack_mock.assert_not_called()
+            else:
+                self.assertIs(_foreach_mm_impl(A, B), stack_result)
+                nvmath_mock.assert_not_called()
+                stack_mock.assert_called_once_with(A, B)
+
     @skipIfNoNvmath
     @unittest.skipUnless(
         torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"

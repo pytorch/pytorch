@@ -6,13 +6,15 @@ Dispatch (CUDA, SM90+):
   bf16 + nvmath + N,K 16-byte aligned?
   |-- YES --> nvmath cublasLt grouped GEMM (uniform and mixed shapes)
   |
-  bf16/fp32 + uniform K,N + aligned + min(M,N,K) < 2048?
-  |-- YES --> torch.cat + _grouped_mm with offs (CUTLASS, uniform or variable-M)
+  bf16/fp32 + same dtype + aligned + min(M,N,K) < 2048?
+  |-- YES --> torch.cat + _grouped_mm with offs if K,N are uniform,
+  |           otherwise Python loop of torch.mm
   |
   |-- else -> C++ fallback (loop of at::mm)
 
 Notes:
 - cublasLt grouped GEMM is bf16-only (fp32 returns CUBLAS_STATUS_NOT_SUPPORTED).
+- cublasLt grouped GEMM rejects mixed bf16/fp32 A/B layouts.
 - cublasLt grouped GEMM requires N and K to be 16-byte aligned.
 - At dim >= 2048 each mm saturates the GPU; loop fallback is equivalent.
 """
@@ -39,6 +41,21 @@ def _check_nvmath_cublaslt() -> bool:
     return _unavailable_reason(_NVMATH_DEPS) is None
 
 
+def _can_use_nvmath_cublaslt(
+    self: list[torch.Tensor],
+    mat2: list[torch.Tensor],
+) -> bool:
+    if self[0].dtype != torch.bfloat16 or not _check_nvmath_cublaslt():
+        return False
+
+    elem_size = self[0].element_size()
+    alignment = 16 // elem_size
+    return all(
+        a.size(1) % alignment == 0 and b.size(1) % alignment == 0
+        for a, b in zip(self, mat2)
+    )
+
+
 def _foreach_mm_cond(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
@@ -53,8 +70,9 @@ def _foreach_mm_cond(
         return False
     if torch.version.hip:
         return False
-    _SUPPORTED_DTYPES = {torch.bfloat16, torch.float32}
-    if first_a.dtype not in _SUPPORTED_DTYPES or first_b.dtype not in _SUPPORTED_DTYPES:
+    if first_a.dtype != first_b.dtype:
+        return False
+    if first_a.dtype not in {torch.bfloat16, torch.float32}:
         return False
     props = torch.cuda.get_device_properties(first_a.device)
     if props.major < 9:
@@ -82,6 +100,8 @@ def _foreach_mm_cond(
             return False
         if a.device != first_a.device or b.device != first_a.device:
             return False
+        if a.dtype != first_a.dtype or b.dtype != first_a.dtype:
+            return False
         K_i, N_i = a.size(1), b.size(1)
         if nvmath_ok and (N_i % alignment != 0 or K_i % alignment != 0):
             nvmath_ok = False
@@ -90,8 +110,6 @@ def _foreach_mm_cond(
                 return False
         max_dim = max(max_dim, a.size(0), K_i, N_i)
         if i > 0:
-            if a.dtype != first_a.dtype or b.dtype != first_b.dtype:
-                return False
             if (a.stride(-1) == 1) != first_a_rm or (b.stride(-1) == 1) != first_b_rm:
                 return False
 
@@ -160,19 +178,21 @@ def _foreach_mm_impl(
     self: list[torch.Tensor],
     mat2: list[torch.Tensor],
 ) -> list[torch.Tensor]:
-    if self[0].dtype == torch.bfloat16:
+    if _can_use_nvmath_cublaslt(self, mat2):
+        return _foreach_mm_impl_nvmath(self, mat2)
+
+    if self[0].dtype == torch.bfloat16 and mat2[0].dtype == torch.bfloat16:
         global _nvmath_warned
         if _check_nvmath_cublaslt():
-            return _foreach_mm_impl_nvmath(self, mat2)
-        else:
-            if not _nvmath_warned:
-                _nvmath_warned = True
-                reason = _unavailable_reason(_NVMATH_DEPS)
-                warnings.warn(
-                    f"_foreach_mm: nvmath cublasLt grouped GEMM unavailable ({reason}), "
-                    f"using slower fallback.",
-                    stacklevel=3,
-                )
+            return _foreach_mm_impl_stack(self, mat2)
+        if not _nvmath_warned:
+            _nvmath_warned = True
+            reason = _unavailable_reason(_NVMATH_DEPS)
+            warnings.warn(
+                f"_foreach_mm: nvmath cublasLt grouped GEMM unavailable ({reason}), "
+                f"using slower fallback.",
+                stacklevel=3,
+            )
 
     return _foreach_mm_impl_stack(self, mat2)
 
