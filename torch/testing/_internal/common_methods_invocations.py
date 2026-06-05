@@ -12143,6 +12143,27 @@ foreach_reduce_op_db: list[ForeachFuncInfo] = [
     ),
 ]
 
+def _sample_inputs_foreach_mm(opinfo, device, dtype, requires_grad, **kwargs):
+    # _foreach_mm uses grouped GEMM or loop-of-mm, not multi_tensor_apply
+    for num_tensors in [2, 5]:
+        for m, k, n in [(32, 16, 24), (16, 16, 16)]:
+            self_tensors = [
+                make_tensor(
+                    (m, k), dtype=dtype, device=device, requires_grad=requires_grad
+                )
+                for _ in range(num_tensors)
+            ]
+            mat2_tensors = [
+                make_tensor(
+                    (k, n), dtype=dtype, device=device, requires_grad=requires_grad
+                )
+                for _ in range(num_tensors)
+            ]
+            yield ForeachSampleInput(
+                self_tensors, args=(mat2_tensors,), disable_fastpath=True
+            )
+
+
 foreach_other_op_db: list[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
@@ -12200,6 +12221,17 @@ foreach_other_op_db: list[ForeachFuncInfo] = [
                 "test_dispatch_symbolic_meta_outplace_all_strides",
                 dtypes=integral_types_and(torch.bool),
             ),
+        ),
+    ),
+    ForeachFuncInfo(
+        "mm",
+        sample_inputs_func=_sample_inputs_foreach_mm,
+        supports_autograd=True,
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            # _foreach_mm decomposes into per-element at::mm; meta output
+            # storage_offset/strides may differ from the real implementation
+            DecorateInfo(unittest.skip("decomposed op"), "TestMeta"),
         ),
     ),
 ]
