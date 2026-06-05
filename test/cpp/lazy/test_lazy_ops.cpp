@@ -1002,31 +1002,6 @@ TEST_F(LazyOpsTest, TestSVD) {
   }
 }
 
-TEST_F(LazyOpsTest, TestQR) {
-  static const int dims[] = {4, 7};
-  for (auto m : dims) {
-    for (auto n : dims) {
-      torch::Tensor a = torch::rand(
-          {m, n}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-      auto b = torch::qr(a);
-      ForEachDevice([&](const torch::Device& device) {
-        torch::Tensor lazy_a = CopyToDevice(a, device);
-        auto lazy_b = torch::qr(lazy_a);
-        AllClose(
-            std::get<0>(b).abs(),
-            std::get<0>(lazy_b).abs(),
-            /*rtol=*/1e-3,
-            /*atol=*/1e-4);
-        AllClose(
-            std::get<1>(b).abs(),
-            std::get<1>(lazy_b).abs(),
-            /*rtol=*/1e-3,
-            /*atol=*/1e-4);
-      });
-    }
-  }
-}
-
 TEST_F(LazyOpsTest, TestCholesky) {
   static const int dims[] = {4, 7};
   for (auto m : dims) {

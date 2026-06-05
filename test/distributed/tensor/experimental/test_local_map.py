@@ -41,13 +41,13 @@ replicate = [Replicate()]  # replicate placements on 1-d mesh
 
 def equal_allgather_forward(device_mesh, X, Y):
     eq = torch.tensor([torch.equal(X, Y)], device=X.device)
-    eq_gather = funcol.all_gather_tensor(eq, 0, device_mesh)
+    eq_gather = funcol.all_gather_single(eq, 0, device_mesh)
     return torch.all(eq_gather).item()
 
 
 def mm_all_gather_forward(device_mesh, A, B):
     local_mm_result = torch.mm(A, B)
-    return funcol.all_gather_tensor(local_mm_result, 0, device_mesh).wait()
+    return funcol.all_gather_single(local_mm_result, 0, device_mesh).wait()
 
 
 def mm_forward(A, B):  # no device mesh needed since we don't do collective
@@ -174,7 +174,7 @@ class TestLocalMap(DTensorTestBase):
         self.assertEqual(
             comm_mode.get_comm_counts()[funcol_py.all_gather_into_tensor], 1
         )
-        X_replicate = funcol.all_gather_tensor(X, 0, device_mesh).wait()
+        X_replicate = funcol.all_gather_single(X, 0, device_mesh).wait()
         Y_replicate = torch.mm(X_replicate, W)
         self.assertEqual(Y, Y_replicate)  # Y is a torch.Tensor
 
