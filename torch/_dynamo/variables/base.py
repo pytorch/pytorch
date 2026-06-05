@@ -943,6 +943,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self.nb_true_divide_impl(tx, args[0], reverse=True)
         elif name == "__itruediv__":
             return self.nb_inplace_true_divide_impl(tx, args[0])
+        elif name == "__mod__":
+            return self.nb_remainder_impl(tx, args[0])
+        elif name == "__rmod__":
+            return self.nb_remainder_impl(tx, args[0], reverse=True)
+        elif name == "__imod__":
+            return self.nb_inplace_remainder_impl(tx, args[0])
         elif name == "__hash__" and not args and not kwargs:
             from .object_protocol import generic_hash
 
@@ -1534,6 +1540,27 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
     ) -> VariableTracker:
         """tp_as_number->nb_inplace_true_divide slot. Default: returns NotImplemented."""
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_remainder_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        """tp_as_number->nb_remainder slot. Default: returns NotImplemented.
+
+        ``reverse=True`` means self is the right-hand operand (CPython would
+        look up ``__rmod__`` instead of ``__mod__``).
+        """
+        return variables.ConstantVariable(NotImplemented)
+
+    def nb_inplace_remainder_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+    ) -> VariableTracker:
+        """tp_as_number->nb_inplace_remainder slot. Default: returns NotImplemented."""
         return variables.ConstantVariable(NotImplemented)
 
     def nb_multiply_impl(
