@@ -605,6 +605,28 @@ class ConstantVariable(VariableTracker):
         except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
+    def nb_remainder_impl(
+        self,
+        tx: Any,
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # CPython: int and float define nb_remainder (bool inherits int's); complex
+        # does NOT. str/bytes/bytearray define nb_remainder for %-formatting.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4116 (long_mod)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L640 (float_rem)
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L15170 (unicode_mod)
+        if not isinstance(self.value, (int, float, str, bytes, bytearray)):
+            return ConstantVariable.create(NotImplemented)
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        self_, other_ = (other, self) if reverse else (self, other)
+        v, w = self_.as_python_constant(), other_.as_python_constant()
+        try:
+            return VariableTracker.build(tx, v % w)
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+
     def nb_or_impl(
         self,
         tx: Any,
