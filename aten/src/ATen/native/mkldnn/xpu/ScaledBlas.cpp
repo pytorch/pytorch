@@ -955,10 +955,12 @@ Tensor& _scaled_mm_xpu_v2_out(
   auto scale_recipe_b_enum = convert_int_to_enum<ScalingType>(scale_recipe_b);
   auto swizzle_b_enum = convert_int_to_enum<SwizzleType>(swizzle_b);
 
-  // XPU does not support swizzle for now. So directly return false.
+  // XPU does not support swizzle. Accept empty (not specified) or NO_SWIZZLE.
   TORCH_CHECK_VALUE(
-      swizzle_a_enum[0] == at::blas::SwizzleType::NO_SWIZZLE &&
-          swizzle_b_enum[0] == at::blas::SwizzleType::NO_SWIZZLE,
+      (swizzle_a_enum.empty() ||
+       swizzle_a_enum[0] == at::blas::SwizzleType::NO_SWIZZLE) &&
+          (swizzle_b_enum.empty() ||
+           swizzle_b_enum[0] == at::blas::SwizzleType::NO_SWIZZLE),
       "XPU does not support swizzle yet.");
 
   // at this point we can start working out what we want to be doing
