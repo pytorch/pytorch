@@ -18,6 +18,7 @@ Notes:
 """
 
 import warnings
+from functools import cache
 
 import torch
 from torch._prims_common import is_non_overlapping_and_dense_or_false
@@ -26,11 +27,6 @@ from ... import registry
 from ...common_utils import _unavailable_reason
 
 
-# nvmath cublasLt grouped GEMM availability (requires cuBLAS >= 13.2 runtime).
-# Checked lazily on first use — the ForeachMMCublasLt constructor calls
-# grouped_matrix_layout_create which raises FunctionNotFoundError if the
-# runtime library lacks the symbol. We cache the result after first attempt.
-_nvmath_available: "bool | None" = None
 _nvmath_warned = False
 
 _NVMATH_DEPS = [
@@ -38,12 +34,9 @@ _NVMATH_DEPS = [
 ]
 
 
+@cache
 def _check_nvmath_cublaslt() -> bool:
-    global _nvmath_available
-    if _nvmath_available is not None:
-        return _nvmath_available
-    _nvmath_available = _unavailable_reason(_NVMATH_DEPS) is None
-    return _nvmath_available
+    return _unavailable_reason(_NVMATH_DEPS) is None
 
 
 def _foreach_mm_cond(
@@ -168,15 +161,13 @@ def _foreach_mm_impl(
     mat2: list[torch.Tensor],
 ) -> list[torch.Tensor]:
     if self[0].dtype == torch.bfloat16:
-        global _nvmath_available, _nvmath_warned
+        global _nvmath_warned
         if _check_nvmath_cublaslt():
             return _foreach_mm_impl_nvmath(self, mat2)
         else:
             if not _nvmath_warned:
                 _nvmath_warned = True
-                reason = _unavailable_reason(_NVMATH_DEPS) or (
-                    "cublasLt >= 13.2 runtime not found"
-                )
+                reason = _unavailable_reason(_NVMATH_DEPS)
                 warnings.warn(
                     f"_foreach_mm: nvmath cublasLt grouped GEMM unavailable ({reason}), "
                     f"using slower fallback.",
