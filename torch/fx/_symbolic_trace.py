@@ -23,7 +23,14 @@ from ._compatibility import compatibility
 from ._lazy_graph_module import _make_graph_module
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
 from .graph_module import GraphModule
-from .node import Argument, base_types, map_aggregate
+from .node import (
+    _get_dataclass_field_value,
+    _get_dataclass_fields,
+    _is_dataclass_instance,
+    Argument,
+    base_types,
+    map_aggregate,
+)
 from .proxy import ParameterProxy, Proxy, Scope, ScopeContextManager, TracerBase
 
 
@@ -419,6 +426,14 @@ class Tracer(TracerBase):
         if isinstance(a, tuple) and hasattr(a, "_fields"):
             args = tuple(self.create_arg(elem) for elem in a)
             return self.create_node("call_function", a.__class__, args, {})
+        # Preserve symbolic_trace BC for dataclass instances. Dynamo/make_fx use
+        # the base Tracer path, which keeps dataclass constructors out of graphs.
+        if self._proxy_dataclass and _is_dataclass_instance(a):
+            kwargs = {
+                field.name: self.create_arg(_get_dataclass_field_value(a, field.name))
+                for field in _get_dataclass_fields(a)
+            }
+            return self.create_node("call_function", a.__class__, (), kwargs)
 
         # Tensors do not have a reliable string repr() from which they can be
         # constructed (and we probably don't want to rely on that, either), so

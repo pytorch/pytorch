@@ -1,5 +1,7 @@
 # Nodes represent a definition of a value in our graph of operators.
 import builtins
+import dataclasses
+import enum
 import inspect
 import logging
 import operator
@@ -20,6 +22,7 @@ from torch.utils._dtype_abbrs import dtype_abbrs
 
 from .._ops import ops as _ops
 from ._compatibility import compatibility
+from .immutable_collections import immutable_dict, immutable_list
 
 
 if TYPE_CHECKING:
@@ -46,6 +49,11 @@ BaseArgumentTypes = Union[  # noqa: UP007
     torch.SymFloat,
 ]
 base_types = typing.get_args(BaseArgumentTypes)
+_known_non_dataclass_types = {
+    *base_types,
+    type(None),
+    type(...),
+}
 
 Target: TypeAlias = Callable[..., Any] | str
 
@@ -64,6 +72,248 @@ Argument = Optional[  # noqa: UP045
 ArgumentT = TypeVar("ArgumentT", bound=Argument)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+
+
+def _is_dataclass_instance(a: object) -> bool:
+    if isinstance(a, (type, enum.Enum)):
+        return False
+    try:
+        type.__getattribute__(type(a), "__dataclass_fields__")
+    except AttributeError:
+        return False
+    return True
+
+
+def _get_dataclass_fields(
+    cls_or_instance: object,
+) -> tuple[dataclasses.Field[Any], ...]:
+    cls = (
+        cls_or_instance if isinstance(cls_or_instance, type) else type(cls_or_instance)
+    )
+    try:
+        fields = type.__getattribute__(cls, "__dataclass_fields__")
+    except AttributeError as exc:
+        raise TypeError(f"{cls!r} is not a dataclass") from exc
+    field_type = typing.cast(Any, dataclasses)._FIELD
+    return tuple(field for field in fields.values() if field._field_type is field_type)
+
+
+def _get_dataclass_type_qualified_name(cls: type[object]) -> str:
+    try:
+        module = type.__getattribute__(cls, "__module__")
+    except AttributeError:
+        module = None
+    try:
+        name = type.__getattribute__(cls, "__qualname__")
+    except AttributeError:
+        name = type.__getattribute__(cls, "__name__")
+    if module is None or module == "builtins":
+        return typing.cast(str, name)
+    return f"{module}.{name}"
+
+
+def _get_dataclass_type_display_name(cls: type[object]) -> str:
+    try:
+        return typing.cast(str, type.__getattribute__(cls, "__qualname__"))
+    except AttributeError:
+        return typing.cast(str, type.__getattribute__(cls, "__name__"))
+
+
+def _create_dataclass_instance(
+    cls: type[object], field_values: Mapping[str, object]
+) -> object:
+    result = object.__new__(cls)
+    for name, value in field_values.items():
+        _set_dataclass_field_value(result, name, value)
+    return result
+
+
+def _lookup_dataclass_field_descriptor(
+    cls: type[object], field_name: str
+) -> object | None:
+    for base in type.__getattribute__(cls, "__mro__"):
+        namespace = type.__getattribute__(base, "__dict__")
+        if field_name in namespace:
+            return namespace[field_name]
+    return None
+
+
+def _descriptor_type_defines(descriptor: object, name: str) -> bool:
+    return any(
+        name in type.__getattribute__(cls, "__dict__")
+        for cls in type.__getattribute__(type(descriptor), "__mro__")
+    )
+
+
+def _is_data_descriptor(descriptor: object) -> bool:
+    return _descriptor_type_defines(descriptor, "__set__") or _descriptor_type_defines(
+        descriptor, "__delete__"
+    )
+
+
+def _is_any_descriptor(descriptor: object) -> bool:
+    return _descriptor_type_defines(descriptor, "__get__") or _is_data_descriptor(
+        descriptor
+    )
+
+
+def _is_safe_dataclass_slot_descriptor(descriptor: object | None) -> bool:
+    return isinstance(descriptor, types.MemberDescriptorType)
+
+
+def _raise_unsafe_dataclass_descriptor(cls: type[object], field_name: str) -> None:
+    raise TypeError(
+        f"Cannot safely reconstruct dataclass "
+        f"{_get_dataclass_type_display_name(cls)!r}: field {field_name!r} is "
+        f"backed by a descriptor"
+    )
+
+
+def _get_dataclass_field_value(instance: object, field_name: str) -> object:
+    cls = type(instance)
+    descriptor = _lookup_dataclass_field_descriptor(cls, field_name)
+    if _is_safe_dataclass_slot_descriptor(descriptor):
+        return typing.cast(Any, descriptor).__get__(instance, cls)
+    if descriptor is not None and _is_data_descriptor(descriptor):
+        _raise_unsafe_dataclass_descriptor(cls, field_name)
+
+    try:
+        instance_dict = object.__getattribute__(instance, "__dict__")
+    except AttributeError:
+        instance_dict = None
+    if isinstance(instance_dict, dict) and field_name in instance_dict:
+        return instance_dict[field_name]
+
+    if descriptor is not None:
+        if _is_any_descriptor(descriptor):
+            _raise_unsafe_dataclass_descriptor(cls, field_name)
+        return descriptor
+
+    raise AttributeError(
+        f"Cannot safely read dataclass "
+        f"{_get_dataclass_type_display_name(cls)!r} field {field_name!r}"
+    )
+
+
+def _set_dataclass_field_value(
+    instance: object, field_name: str, value: object
+) -> None:
+    cls = type(instance)
+    descriptor = _lookup_dataclass_field_descriptor(cls, field_name)
+    if _is_safe_dataclass_slot_descriptor(descriptor):
+        typing.cast(Any, descriptor).__set__(instance, value)
+        return
+    if descriptor is not None and _is_data_descriptor(descriptor):
+        _raise_unsafe_dataclass_descriptor(cls, field_name)
+
+    try:
+        instance_dict = object.__getattribute__(instance, "__dict__")
+    except AttributeError:
+        instance_dict = None
+    if isinstance(instance_dict, dict):
+        instance_dict[field_name] = value
+        return
+
+    if descriptor is not None and _is_any_descriptor(descriptor):
+        _raise_unsafe_dataclass_descriptor(cls, field_name)
+
+    raise TypeError(
+        f"Cannot safely reconstruct dataclass "
+        f"{_get_dataclass_type_display_name(cls)!r}: field {field_name!r} has "
+        f"no instance dictionary or safe slot storage"
+    )
+
+
+def _contains_dataclass(a: object) -> bool:
+    if type(a) in _known_non_dataclass_types or isinstance(a, _NodeBase):
+        return False
+    if isinstance(a, (tuple, list)):
+        for elem in a:
+            if _contains_dataclass(elem):
+                return True
+        return False
+    if isinstance(a, dict):
+        for key, value in a.items():
+            if _contains_dataclass(key) or _contains_dataclass(value):
+                return True
+        return False
+    if isinstance(a, slice):
+        return (
+            _contains_dataclass(a.start)
+            or _contains_dataclass(a.stop)
+            or _contains_dataclass(a.step)
+        )
+    if isinstance(a, enum.Enum):
+        return False
+    return _is_dataclass_instance(a)
+
+
+def _contains_dataclass_args_kwargs(
+    args: tuple[object, ...], kwargs: Mapping[str, object]
+) -> bool:
+    for arg in args:
+        if type(arg) in _known_non_dataclass_types or isinstance(arg, _NodeBase):
+            continue
+        if _contains_dataclass(arg):
+            return True
+    for value in kwargs.values():
+        if type(value) in _known_non_dataclass_types or isinstance(value, _NodeBase):
+            continue
+        if _contains_dataclass(value):
+            return True
+    return False
+
+
+def _map_aggregate_with_dataclasses(
+    a: object, fn: Callable[[object], object]
+) -> object:
+    if isinstance(a, tuple):
+        tuple_a = typing.cast(tuple[object, ...], a)
+        mapped = tuple(_map_aggregate_with_dataclasses(elem, fn) for elem in tuple_a)
+        if hasattr(a, "_fields"):
+            return typing.cast(Callable[..., object], type(a))(*mapped)
+        return mapped
+    if isinstance(a, list):
+        return immutable_list(_map_aggregate_with_dataclasses(elem, fn) for elem in a)
+    if isinstance(a, dict):
+        return immutable_dict(
+            (
+                _map_aggregate_with_dataclasses(key, fn),
+                _map_aggregate_with_dataclasses(value, fn),
+            )
+            for key, value in a.items()
+        )
+    if isinstance(a, slice):
+        return slice(
+            _map_aggregate_with_dataclasses(a.start, fn),
+            _map_aggregate_with_dataclasses(a.stop, fn),
+            _map_aggregate_with_dataclasses(a.step, fn),
+        )
+    if isinstance(a, enum.Enum):
+        return fn(a)
+    if _is_dataclass_instance(a):
+        return _create_dataclass_instance(
+            type(a),
+            {
+                field.name: _map_aggregate_with_dataclasses(
+                    _get_dataclass_field_value(a, field.name), fn
+                )
+                for field in _get_dataclass_fields(a)
+            },
+        )
+    return fn(a)
+
+
+def _map_arg_with_dataclasses(
+    a: ArgumentT, fn: Callable[["Node"], Argument]
+) -> ArgumentT:
+    return typing.cast(
+        ArgumentT,
+        _map_aggregate_with_dataclasses(
+            a, lambda x: fn(x) if isinstance(x, Node) else x
+        ),
+    )
+
 
 _legal_ops = dict.fromkeys(
     [
@@ -379,6 +629,44 @@ class Node(_NodeBase):
         for k, v in state.items():
             setattr(self, k, v)
 
+    def _update_args_kwargs(
+        self, new_args: tuple["Argument", ...], new_kwargs: dict[str, "Argument"]
+    ) -> None:
+        if not _contains_dataclass_args_kwargs(new_args, new_kwargs):
+            super()._update_args_kwargs(new_args, new_kwargs)  # type: ignore[attr-defined]
+            return
+
+        for old_use in list(self._input_nodes):
+            old_use.users.pop(self, None)
+        self._input_nodes.clear()
+
+        def visit(n: Node) -> Node:
+            self._input_nodes.setdefault(n)
+            n.users.setdefault(self)
+            return n
+
+        self._args = _map_arg_with_dataclasses(new_args, visit)
+        self._kwargs = _map_arg_with_dataclasses(new_kwargs, visit)
+
+    def _replace_input_with_dataclass_aware(
+        self, old_input: "Node", new_input: "Node"
+    ) -> None:
+        if not (_contains_dataclass(self._args) or _contains_dataclass(self._kwargs)):
+            self._replace_input_with(old_input, new_input)
+            return
+
+        def maybe_replace(n: Node) -> Argument:
+            return new_input if n is old_input else n
+
+        self.args = typing.cast(
+            tuple[Argument, ...],
+            _map_arg_with_dataclasses(self.args, maybe_replace),
+        )
+        self.kwargs = typing.cast(
+            dict[str, Argument],
+            _map_arg_with_dataclasses(self.kwargs, maybe_replace),
+        )
+
     @property
     def next(self) -> "Node":
         """
@@ -524,7 +812,7 @@ class Node(_NodeBase):
         self._args = args_left + (arg,) + args_right
 
         _new_input_nodes: dict[Node, None] = {}
-        _fx_map_arg(arg, _new_input_nodes.setdefault)
+        _map_arg_with_dataclasses(arg, _new_input_nodes.setdefault)
 
         for new_use in _new_input_nodes:
             if new_use not in self._input_nodes:
@@ -733,7 +1021,7 @@ class Node(_NodeBase):
                 for replace_hook in replace_hooks:
                     replace_hook(old=self, new=replace_with.name, user=use_node)
 
-            use_node._replace_input_with(self, replace_with)
+            use_node._replace_input_with_dataclass_aware(self, replace_with)
         return result
 
     @compatibility(is_backward_compatible=False)
@@ -862,7 +1150,7 @@ class Node(_NodeBase):
             for replace_hook in m._replace_hooks:
                 replace_hook(old=old_input, new=new_input.name, user=self)
 
-        self._replace_input_with(old_input, new_input)
+        self._replace_input_with_dataclass_aware(old_input, new_input)
 
     def _rename(self, candidate: str) -> None:
         if candidate == self.name:

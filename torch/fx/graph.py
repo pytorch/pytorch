@@ -23,14 +23,27 @@ from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import _fx_map_arg as map_arg, _NodeIter
+from torch._C import _NodeIter
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 from .immutable_collections import immutable_dict
-from .node import _get_qualified_name, _type_repr, Argument, Node, Target
+from .node import (
+    _create_dataclass_instance,
+    _get_dataclass_field_value,
+    _get_dataclass_fields,
+    _get_dataclass_type_qualified_name,
+    _get_qualified_name,
+    _is_dataclass_instance,
+    _map_arg_with_dataclasses,
+    _type_repr,
+    Argument,
+    map_arg,  # noqa: F401 - re-exported as torch.fx.graph.map_arg
+    Node,
+    Target,
+)
 from .tensor_type import TensorType
 
 
@@ -516,7 +529,13 @@ class CodeGen:
         )
         include_meta = os.environ.get("FX_GRAPH_SHOW_META", "0") == "1"
 
-        def add_global(name_hint: str, obj: Any) -> str:
+        def add_global(
+            name_hint: str,
+            obj: Any,
+            *,
+            skip_torch_lookup: bool = False,
+            associate_with_namespace: bool = True,
+        ) -> str:
             """Add an obj to be tracked as a global.
 
             We call this for names that reference objects external to the
@@ -525,7 +544,7 @@ class CodeGen:
             Returns: the global name that should be used to reference 'obj' in generated source.
             """
             if (
-                _is_from_torch(obj) and obj != torch.device
+                not skip_torch_lookup and _is_from_torch(obj) and obj != torch.device
             ):  # to support registering torch.device
                 # HACK: workaround for how torch custom ops are registered. We
                 # can't import them like normal modules so they must retain their
@@ -533,10 +552,13 @@ class CodeGen:
                 return _get_qualified_name(obj)
 
             # normalize the name hint to get a proper identifier
-            global_name = namespace.create_name(name_hint, obj)
+            global_name = namespace.create_name(
+                name_hint, obj if associate_with_namespace else None
+            )
 
             if global_name in globals_:
-                if globals_[global_name] != obj:
+                existing = globals_[global_name]
+                if existing is not obj and (skip_torch_lookup or existing != obj):
                     raise AssertionError(
                         f"Global name {global_name} already assigned to different object"
                     )
@@ -602,6 +624,22 @@ class CodeGen:
                 qualified_name = _get_qualified_name(type(arg))
                 global_name = add_global(qualified_name, type(arg))
                 return f"{global_name}{repr(tuple(arg))}"
+            elif _is_dataclass_instance(arg):
+                qualified_name = _get_dataclass_type_qualified_name(type(arg))
+                global_name = add_global(
+                    qualified_name,
+                    type(arg),
+                    skip_torch_lookup=True,
+                    associate_with_namespace=False,
+                )
+                helper_name = add_global(
+                    "_create_dataclass_instance", _create_dataclass_instance
+                )
+                field_values = ", ".join(
+                    f"{field.name!r}: {_get_repr(_get_dataclass_field_value(arg, field.name))}"
+                    for field in _get_dataclass_fields(arg)
+                )
+                return f"{helper_name}({global_name}, {{{field_values}}})"
             elif isinstance(
                 arg, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
             ):
@@ -623,6 +661,15 @@ class CodeGen:
                     return "(" + ", ".join(_get_repr(a) for a in arg) + ")"
             elif isinstance(arg, list):
                 return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
+            elif isinstance(arg, dict):
+                return (
+                    "{"
+                    + ", ".join(
+                        f"{_get_repr(key)}: {_get_repr(value)}"
+                        for key, value in arg.items()
+                    )
+                    + "}"
+                )
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
             elif is_opaque_value_type(type(arg)):
@@ -1455,7 +1502,7 @@ class Graph:
             if node in val_map:
                 continue
             if node.op == "output":
-                rv = map_arg(node.args[0], lambda n: val_map[n])
+                rv = _map_arg_with_dataclasses(node.args[0], lambda n: val_map[n])
                 return rv if not return_output_node else (rv, node)
             val_map[node] = self.node_copy(node, lambda n: val_map[n])
         return None
@@ -1604,8 +1651,8 @@ class Graph:
         # Null out this Node's argument nodes so that the Nodes referred to
         # can update their ``users`` accordingly
         to_erase._update_args_kwargs(
-            map_arg(to_erase._args, lambda n: None),
-            map_arg(to_erase._kwargs, lambda n: None),
+            _map_arg_with_dataclasses(to_erase._args, lambda n: None),
+            _map_arg_with_dataclasses(to_erase._kwargs, lambda n: None),
         )
 
     @compatibility(is_backward_compatible=True)
@@ -1918,8 +1965,8 @@ class Graph:
                 retrieve a value out of a table mapping Nodes in the original
                 graph to ``self``.
         """
-        args = map_arg(node.args, arg_transform)
-        kwargs = map_arg(node.kwargs, arg_transform)
+        args = _map_arg_with_dataclasses(node.args, arg_transform)
+        kwargs = _map_arg_with_dataclasses(node.kwargs, arg_transform)
         if not isinstance(args, tuple):
             raise AssertionError(f"Expected args to be tuple, got {type(args)}")
         if not isinstance(kwargs, dict):

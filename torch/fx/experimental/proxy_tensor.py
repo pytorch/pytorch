@@ -1430,6 +1430,7 @@ class PythonKeyTracer(Tracer):
 
     def __init__(self) -> None:
         super().__init__(autowrap_modules=())  # type: ignore[arg-type]
+        self._proxy_dataclass = False
         _init_proxy_trackers(self)
 
     # In general, we don't want to make modules leaves. In principle, users of
@@ -1460,6 +1461,12 @@ class PythonKeyTracer(Tracer):
             setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
+        elif isinstance(a, Tensor):
+            proxy = get_proxy_slot(a, self, None, lambda x: x.proxy)
+            if proxy is not None:
+                if not isinstance(proxy, fx.Proxy):
+                    raise AssertionError(f"Expected Proxy, got {type(proxy)}")
+                return proxy.node
         elif isinstance(a, py_sym_types):
             if a.node.constant is None:
                 raise AssertionError("a.node.constant should not be None")
@@ -2133,6 +2140,7 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
 
     def __init__(self, graph: fx.graph.Graph) -> None:
         super().__init__(graph)
+        self._proxy_dataclass = False
         _init_proxy_trackers(self)
 
 
