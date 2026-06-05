@@ -1625,6 +1625,45 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         )
 
 
+class AutoNamingModeVariable(ContextWrappingVariable):
+    """
+    torch.utils.checkpoint.AutoNamingMode is a TorchDispatchMode whose op names
+    are derived from the fx graph (nn_module_stack) under compile rather than from
+    eager dispatch. So during tracing the context manager is a no-op: we just let
+    the body trace normally without entering the dispatch mode (which would
+    otherwise graph break).
+    """
+
+    def __init__(
+        self, target_values: Any = None, initial_values: Any = None, **kwargs: Any
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def enter(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
+        self.set_cleanup_hook(tx, lambda: None)
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self) -> str:
+        return "torch.utils.checkpoint"
+
+    def fn_name(self) -> str:
+        return "AutoNamingMode"
+
+    def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        unimplemented(
+            gb_type="torch.utils.checkpoint.AutoNamingMode escaped from compiled region",
+            context=str(self),
+            explanation="Dynamo doesn't support graph break on AutoNamingMode.",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
+
 class DynamoConfigPatchVariable(ContextWrappingVariable):
     """represents torch._dynamo.patch_dynamo_config"""
 
