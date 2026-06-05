@@ -304,13 +304,21 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
     def _stride_compatible(
         self, left: Iterable[sympy.Expr], right: Iterable[sympy.Expr]
     ) -> bool:
+        def _provably_equal_or_zero(a: sympy.Expr, b: sympy.Expr) -> bool:
+            # sympy.Eq can return an unevaluated Equality object; only accept
+            # cases sympy can prove true.
+            return (
+                sympy.Eq(a, b) is sympy.true
+                or sympy.Eq(a, 0) is sympy.true
+                or sympy.Eq(b, 0) is sympy.true
+            )
+
         left_list = list(left)
         right_list = list(right)
         # Same length: direct comparison
         if len(left_list) == len(right_list):
             return all(
-                sympy.Eq(l, r) or sympy.Eq(l, 0) or sympy.Eq(r, 0)
-                for l, r in zip(left_list, right_list)
+                _provably_equal_or_zero(l, r) for l, r in zip(left_list, right_list)
             )
         # Different lengths: allow compatible reshapes where trailing strides match.
         # This handles view/reshape between template output and consumer, e.g.,
@@ -323,9 +331,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         n = len(shorter)
         # Check that the trailing strides match
         return all(
-            sympy.Eq(shorter[-(i + 1)], longer[-(i + 1)])
-            or sympy.Eq(shorter[-(i + 1)], 0)
-            or sympy.Eq(longer[-(i + 1)], 0)
+            _provably_equal_or_zero(shorter[-(i + 1)], longer[-(i + 1)])
             for i in range(n)
         )
 
