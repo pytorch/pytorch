@@ -27,7 +27,7 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
-from torch._inductor import config, metrics
+from torch._inductor import config, config_comms, metrics
 from torch._inductor.cache_key import (
     AUTOTUNE_CACHE_KEY_STRATEGY,
     CacheKeyStrategy,
@@ -344,6 +344,34 @@ class TestPyCodeCache(TestCase):
         PyCodeCache.load_by_key_path(key, path, linemap=[])
         stack_frames = PyCodeCache.stack_frames_for_code(path, 0)
         self.assertEqual(stack_frames, None)
+
+    def test_load_by_key_path_can_defer_sys_modules_registration(self):
+        """
+        Benchmark-only modules should not need a global ``sys.modules`` entry,
+        but a later normal runtime load must still be able to publish the same
+        cached module there.
+        """
+        module_name = None
+        try:
+            PyCodeCache.cache_clear()
+            key, path = PyCodeCache.write("value = 1\n")
+
+            module = PyCodeCache.load_by_key_path(
+                key,
+                path,
+                set_sys_modules=False,
+            )
+            module_name = module.__name__
+            self.assertNotIn(module_name, sys.modules)
+
+            registered_module = PyCodeCache.load_by_key_path(key, path)
+            self.assertIs(registered_module, module)
+            self.assertIn(module_name, sys.modules)
+            self.assertIs(sys.modules[module_name], module)
+        finally:
+            if module_name is not None:
+                sys.modules.pop(module_name, None)
+            PyCodeCache.cache_clear()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_editable_cached_wrapper(self):
@@ -1556,6 +1584,90 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
+    @requires_gpu()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_cache_hit_aligned_and_unaligned_inputs(self):
+        """
+        A function compiled with an aligned GPU input should share a cache
+        entry with the same function called with an unaligned GPU input.
+
+        `inputs_to_check` (derived from the example input's actual alignment)
+        used to feed into the cache key, so an aligned vs. unaligned first
+        call produced different keys and a second cache miss. It is no longer
+        part of the key: codegen still picks the aligned vs. unaligned kernel
+        based on the example, but the compiled artifact carries its own runtime
+        realignment (copy_if_misaligned for the inputs the kernel assumes
+        aligned). The cached graph therefore services both alignments --
+        whichever variant compiled first realigns the other at runtime.
+        """
+        device = GPU_TYPE
+
+        def fn(x):
+            return torch.nn.functional.relu(x) * 2
+
+        # Aligned: storage_offset == 0.
+        aligned = torch.randn(1024, device=device)
+        # Unaligned: storage_offset == 1, so data_ptr is offset by
+        # sizeof(float) and is no longer 16-byte aligned.
+        unaligned = torch.randn(1024 + 16, device=device)[1:-15]
+        self.assertEqual(aligned.data_ptr() % 16, 0)
+        self.assertNotEqual(unaligned.data_ptr() % 16, 0)
+        self.assertEqual(aligned.shape, unaligned.shape)
+
+        compiled_fn = torch.compile(fn)
+
+        # First call with the aligned tensor: cache miss.
+        self.assertEqual(fn(aligned), compiled_fn(aligned))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # Drop in-memory state so the cache lookup is exercised.
+        self.reset()
+
+        # Call with the unaligned tensor: should hit.
+        self.assertEqual(fn(unaligned), compiled_fn(unaligned))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        # And back to aligned: still a hit, same cached graph.
+        self.reset()
+        self.assertEqual(fn(aligned), compiled_fn(aligned))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+
+    @requires_gpu()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_aligned_unaligned_inputs_no_recompile(self):
+        """
+        Alignment is deliberately not guarded (storage_offset guards cause
+        recompiles), so calling a compiled function in-process with an aligned
+        then an unaligned variant of the same input must reuse the same graph
+        without recompiling. The unaligned input is realigned at runtime via
+        copy_if_misaligned.
+        """
+        device = GPU_TYPE
+
+        def fn(x):
+            return torch.nn.functional.relu(x) * 2
+
+        aligned = torch.randn(1024, device=device)
+        unaligned = torch.randn(1024 + 16, device=device)[1:-15]
+        self.assertEqual(aligned.data_ptr() % 16, 0)
+        self.assertNotEqual(unaligned.data_ptr() % 16, 0)
+        self.assertEqual(aligned.shape, unaligned.shape)
+
+        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_fn = torch.compile(fn, backend=backend)
+
+        self.assertEqual(fn(aligned), compiled_fn(aligned))
+        self.assertEqual(backend.frame_count, 1)
+
+        # A differently-aligned input must NOT trigger a recompile.
+        self.assertEqual(fn(unaligned), compiled_fn(unaligned))
+        self.assertEqual(backend.frame_count, 1)
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("variant", ("v1", "v2"))
@@ -2474,6 +2586,38 @@ class TestStandaloneCompile(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_save_training_artifact_compiles_backward(self) -> None:
+        mod = torch.nn.Linear(4, 3)
+        x = torch.randn(2, 4)
+        eager_out = mod(x).detach()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with fresh_cache():
+                gm, args, kwargs = self.capture(mod)(x)
+                if kwargs:
+                    raise AssertionError
+
+                compiled_artifact = torch._inductor.standalone_compile(gm, args)
+                self.assertTrue(compiled_artifact.is_saveable())
+                compiled_artifact.save(path=temp_dir, format="unpacked")
+
+            with fresh_cache():
+                mod.zero_grad(set_to_none=True)
+                loaded = torch._inductor.CompiledArtifact.load(
+                    path=temp_dir, format="unpacked"
+                )
+                compiled_out = loaded(*args)[0]
+                self.assertEqual(eager_out, compiled_out)
+
+                compiled_out.sum().backward()
+                self.assertEqual(
+                    mod.weight.grad, torch.ones_like(eager_out).t().matmul(x)
+                )
+                self.assertEqual(mod.bias.grad, torch.full_like(mod.bias, x.shape[0]))
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
     def test_modify_unpacked_file(self, device: str) -> None:
         if device == GPU_TYPE and not HAS_GPU:
@@ -3248,6 +3392,31 @@ class TestFxGraphCacheHashing(TestCase):
             details2 = FxGraphHashDetails(None, [], {}, [])
 
         with config.patch({"max_autotune": True}):
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+
+    def test_hash_config_comms_changes(self):
+        """
+        Test that changes to config_comms settings affect hashes.
+        """
+        with config_comms.patch(
+            {"runtime_estimations_use_nccl_lib_estimations": False}
+        ):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with config_comms.patch({"runtime_estimations_use_nccl_lib_estimations": True}):
             details3 = FxGraphHashDetails(None, [], {}, [])
 
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
