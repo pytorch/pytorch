@@ -21,64 +21,25 @@ in a context manager that may change its behavior.
 This page documents how ``torch.compile``'s autograd semantics differ from
 eager-mode PyTorch and how to work around it.
 
-Activation checkpointing memory budget
---------------------------------------
-
-``torch.compile`` uses AOTAutograd to trace the forward and backward pass
-ahead of time. For training graphs, AOTAutograd's partitioner decides which
-forward intermediates to save for backward and which intermediates to recompute.
-Use ``torch._functorch.config.activation_memory_budget`` to control that
-memory/runtime tradeoff for compiled regions:
-
-```py
-import torch
-import torch._functorch.config
-
-with torch._functorch.config.patch(activation_memory_budget=0.5):
-    compiled_step = torch.compile(train_step)
-    # The first call triggers compilation with the patched budget.
-    loss = compiled_step(*args)
-    loss.backward()
-```
-
-The option is in the ``torch._functorch.config`` namespace, not
-``torch._dynamo.config``, because it is consumed by AOTAutograd after
-TorchDynamo captures the graph. Set it before the relevant compile trace, or
-use ``torch._functorch.config.patch(...)`` around the ``torch.compile`` call
-and first invocation that triggers compilation.
-
-Valid values are floats in the inclusive range ``0.0`` to ``1.0``. Values
-outside that range raise an error. The default is ``1.0``, which chooses the
-runtime-optimized partitioning strategy. ``0.0`` corresponds to applying
-activation checkpointing to the full compiled region, saving the minimum
-eligible activation state and recomputing more during backward. Intermediate
-values ask the partitioner to choose the fastest plan that fits within the
-normalized activation memory budget. Lower budgets can reduce saved activation
-memory, but may increase backward compute.
-
-Related advanced knobs live in the same namespace:
-
-- ``torch._functorch.config.activation_memory_budget_solver`` selects the
-  knapsack solver used by the partitioner. The default is ``"dp"``; other
-  built-in choices include ``"greedy"``, ``"ilp"`` (requires SciPy), and
-  ``"dp_knapsack_sliding_hirschberg"``.
-- ``torch._functorch.config.activation_memory_budget_runtime_estimator``
-  controls how recomputation cost is estimated. The default is ``"flops"``;
-  ``"profile"`` benchmarks operators, and ``"testing"`` is intended for tests.
-- Setting ``torch._functorch.config.visualize_memory_budget_pareto`` to
-  ``True`` causes the partitioner to write an SVG Pareto frontier for memory
-  budget versus recomputation runtime. Use
-  ``torch._functorch.config.memory_budget_pareto_dir`` to choose the output
-  directory.
-
 ``Autocast`` behavior
 ---------------------
 
-``torch.compile`` bakes in an assumption on if the backward pass will be
-run under an ambient autocast context manager. By default,
-Use ``torch._functorch.config.backward_pass_autocast``
-to control that assumption; an incorrect assumption may lead to silent
-incorrectness.
+``torch.compile`` bakes in an assumption about whether the backward pass will be
+run under an ambient autocast context manager. Use
+``torch._functorch.config.backward_pass_autocast`` to control that assumption;
+an incorrect assumption may lead to silent incorrectness.
+
+:::{warning}
+AMP recommends that {class}`torch.autocast` wrap only the forward pass and loss
+computation. Backward passes under autocast are not recommended; see the
+{class}`torch.autocast` guidance in {ref}`autocasting`. The default compiler
+setting, ``"same_as_forward"``, intentionally preserves existing
+``torch.compile`` behavior by assuming the compiled backward runs under the
+same autocast context as the compiled forward. If your code follows the AMP
+recommendation and runs backward outside autocast, set
+``torch._functorch.config.backward_pass_autocast`` to ``"off"`` for the
+compiled region.
+:::
 
 The options are either:
 - `"same_as_forward"` (default).
