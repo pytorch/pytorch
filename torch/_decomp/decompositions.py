@@ -3282,6 +3282,8 @@ def _index_add(
 @register_decomposition(aten.pad_sequence.default)
 @aten.pad_sequence.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="right"):
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
     torch._check(len(sequences) > 0, lambda: "received an empty list of sequences")
     torch._check(
         padding_side == "left" or padding_side == "right",
@@ -3290,7 +3292,15 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0, padding_side="
     sequences_size = len(sequences)
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
-    max_len = max(x.size(0) for x in sequences)
+    max_len = max_size[0]
+    for i in range(1, sequences_size):
+        x_len = sequences[i].size(0)
+        if statically_known_true(max_len >= x_len):
+            continue
+        if statically_known_true(x_len >= max_len):
+            max_len = x_len
+            continue
+        max_len = torch.sym_max(max_len, x_len)
     if batch_first:
         out_dims = (sequences_size, max_len)
     else:
