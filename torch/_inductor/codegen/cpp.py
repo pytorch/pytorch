@@ -429,7 +429,8 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
             )
         ):
             raise AssertionError(
-                "expected all( type(node) in ( OuterLoopFusedSchedulerNode, Schedul..."
+                "expected all nodes to be OuterLoopFusedSchedulerNode, "
+                "SchedulerNode, or FusedSchedulerNode"
             )
         if any(type(node) is OuterLoopFusedSchedulerNode for node in (node1, node2)):
             return cls(
