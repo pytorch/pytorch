@@ -331,8 +331,8 @@ def _reduction_single_dim_strategy(
     For reduction dims (if reduction_linear): shard input on reduction dim, output is
     Partial. Also adds partial propagation rules for linear reductions.
 
-    Note: For "avg" reductions, S(reduction_dim)->P(avg) is skipped because avg of
-    unequal-sized chunks != overall avg, and mesh size is unknown at rule time.
+    "avg" reductions do not shard reduced dims because averaging uneven local
+    averages does not produce the global average.
     """
     input_meta = args_schema[0]
     if not isinstance(input_meta, TensorMeta):
@@ -345,7 +345,7 @@ def _reduction_single_dim_strategy(
 
     for d in range(ndim):
         if d in reduce_dims:
-            if reduction_linear:
+            if reduction_linear and reduction_op != "avg":
                 # Shard on reduction dim -> Partial output.
                 strategies.append(
                     [
@@ -551,8 +551,9 @@ def _shard_non_reduction_dim(
             continue
         out_d = d if keep_dim or d < dim else d - 1
         strategies.append(
-            [_ShardingPlaceholder(out_d)] * n_outputs
-            + [_ShardingPlaceholder(d)]  # pyrefly: ignore[bad-argument-type]
+            [_ShardingPlaceholder(out_d)]
+            * n_outputs  # pyrefly: ignore[bad-argument-type]
+            + [_ShardingPlaceholder(d)]
         )
     return strategies
 
