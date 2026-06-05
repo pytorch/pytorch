@@ -16,6 +16,7 @@ import itertools
 import logging
 import os
 import random
+import subprocess
 import sys
 import types
 import typing
@@ -9343,10 +9344,49 @@ class CUDAReproTests(torch._dynamo.test_case.TestCase):
             return x + 2
 
         inp = torch.randn(3)
-        self.assertEqual(f(inp), inp + 1)
+        expected = inp + 1 if torch.cuda.is_initialized() else inp + 2
+        self.assertEqual(f(inp), expected)
 
         with mock.patch("torch.cuda.is_initialized", lambda: False):
             self.assertEqual(f(inp), inp + 2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cpu_compile_does_not_initialize_cuda(self):
+        script = """\
+import torch
+
+assert torch.cuda.is_available()
+assert not torch.cuda.is_initialized()
+
+def f(x):
+    return torch.pow(x, 0.1) / 2
+
+for backend in ("eager", "inductor"):
+    torch._dynamo.reset()
+    opt_f = torch.compile(f, backend=backend)
+
+    with torch.device("cpu"):
+        x = torch.ones([3, 32, 32], device="cpu")
+        assert not torch.cuda.is_initialized()
+        y = opt_f(x)
+
+    torch.testing.assert_close(y, torch.pow(x, 0.1) / 2)
+    assert not torch.cuda.is_initialized()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env={**os.environ, "MKL_SERVICE_FORCE_INTEL": "1"},
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"subprocess failed:\nstdout:\n{result.stdout.decode()}\n"
+                f"stderr:\n{result.stderr.decode()}"
+            ),
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_graph_metadata_does_not_retain_cuda_fake_constants(self):

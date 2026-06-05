@@ -1989,7 +1989,7 @@ def record_compilation_metrics(
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "compiler_config": _compiler_config_for_logging(),
         "cuda_version": torch.version.cuda,
-        "triton_version": triton.__version__ if has_triton() else "",
+        "triton_version": triton.__version__ if has_triton_package() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
@@ -2658,21 +2658,23 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
 def preserve_rng_state() -> Generator[None, None, None]:
     disable_functorch = torch._C._DisableFuncTorch
     disable_current_modes = torch.utils._python_dispatch._disable_current_modes
+    cuda_rng_state = None
+    xpu_rng_state = None
     with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
-        if torch.cuda.is_available():
+        if torch.cuda.is_initialized():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        if torch.xpu.is_available():
+        if torch.xpu.is_initialized():
             xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
     try:
         yield
     finally:
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
-            if torch.cuda.is_available():
+            if cuda_rng_state is not None:
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
-            if torch.xpu.is_available():
+            if xpu_rng_state is not None:
                 torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
 
 
@@ -2791,7 +2793,8 @@ def namedtuple_fields(cls: type) -> tuple[str, ...]:
 def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
     with torch.no_grad():
         rng_state = torch.clone(torch.random.get_rng_state())
-        if torch.cuda.is_available():
+        cuda_rng_state = None
+        if torch.cuda.is_initialized():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
         saved_state = [
             (param, param._version, torch.clone(param))
@@ -2802,7 +2805,7 @@ def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
     def restore() -> None:
         with torch.no_grad():
             torch.random.set_rng_state(rng_state)
-            if torch.cuda.is_available():
+            if cuda_rng_state is not None:
                 torch.cuda.set_rng_state(cuda_rng_state)
             for param, version, original_value in saved_state:
                 if param._version != version:

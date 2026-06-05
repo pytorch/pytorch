@@ -8480,13 +8480,13 @@ class Scheduler:
         if device_scheduling is None:
             raise RuntimeError(f"Unsupported device type: {device.type}")
 
-        if not has_triton():
+        if is_gpu(device.type) and device.type != "mps" and not has_triton():
             if (
                 device.type == "cuda"
                 and (device_props := torch.cuda.get_device_properties(device)).major < 7
             ):
                 raise GPUTooOldForTriton(device_props, inspect.currentframe())
-            elif is_gpu(device.type) and not device.type == "mps":
+            else:
                 raise TritonMissing(inspect.currentframe())
 
         return device_scheduling(self)

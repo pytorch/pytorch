@@ -264,6 +264,8 @@ class NNModuleToString:
 def _cuda_system_info_comment() -> str:
     if not torch.cuda.is_available():
         return "# torch.cuda.is_available()==False, no GPU info collected\n"
+    if not torch.cuda.is_initialized():
+        return "# torch.cuda.is_initialized()==False, no GPU info collected\n"
 
     model_str = "# CUDA Info: \n"
     try:

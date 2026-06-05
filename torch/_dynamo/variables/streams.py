@@ -35,6 +35,14 @@ from torch._library.custom_ops import custom_op
 Tensor = torch.Tensor
 
 
+def _device_module_is_initialized(device: torch.device) -> bool:
+    device_module = torch.get_device_module(device)
+    is_initialized = getattr(device_module, "is_initialized", None)
+    if is_initialized is None:
+        return True
+    return is_initialized()
+
+
 def new_event(*args: Any, **kwargs: Any) -> int:
     event = torch.Event(*args, **kwargs)
     return register_graph_created_object(
@@ -269,7 +277,12 @@ class SymbolicStreamState:
         from ..source import CurrentStreamSource
 
         cur_stack: list[StreamVariable] = []
-        if torch.accelerator.is_available():
+        current_accelerator = torch.accelerator.current_accelerator(
+            check_available=True
+        )
+        if current_accelerator is not None and _device_module_is_initialized(
+            current_accelerator
+        ):
             # Reset the registry so the current stream is guaranteed index 0.
             reset_user_object_tracking()
             stream = torch.accelerator.current_stream()

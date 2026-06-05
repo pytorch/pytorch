@@ -42,6 +42,12 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
 
+    def test_device_module_without_is_initialized_is_initialized(self):
+        from torch._dynamo.variables.streams import _device_module_is_initialized
+
+        with patch.object(torch, "get_device_module", return_value=object()):
+            self.assertTrue(_device_module_is_initialized(torch.device("mps")))
+
     @requires_cuda
     def test_stream_weakref(self):
         s = torch.Stream()
