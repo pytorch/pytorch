@@ -14,7 +14,7 @@ try:
     # from being inherited in a forked child process. The reduce_storage method
     # requires this module indirectly through DupFd(). The built-in mp.Queue
     # class pickles arguments in a background thread which may overlap with the
-    # forking process.
+    # fork.
     import multiprocessing.resource_sharer
 except ImportError:
     pass
@@ -690,17 +690,9 @@ def reduce_typed_storage_child(storage):
 def reduce_storage(storage):
     from . import get_sharing_strategy
 
-    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
-    privateuse1_like_device_types = {privateuse1_backend_name, "xpu"}
-
     if storage.is_cuda:
         raise RuntimeError(
             "Cannot pickle CUDA storage; try pickling a CUDA tensor instead"
-        )
-    elif storage.device.type in privateuse1_like_device_types:
-        raise RuntimeError(
-            f"Cannot pickle {storage.device.type.upper()} storage; "
-            f"try pickling a {storage.device.type.upper()} tensor instead"
         )
     elif storage.device.type == "meta":
         raise RuntimeError(
