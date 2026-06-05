@@ -2328,9 +2328,6 @@ s50 > 3""",
         s = SubTensor(torch.randn(3, 10))
         f(s)
 
-    # Guard validation upsets the guard
-    # https://github.com/pytorch/pytorch/issues/129936
-    @unittest.expectedFailure
     def test_recompile_with_symbool_inputs(self):
         def f(pred: bool):
             if pred:
@@ -2355,6 +2352,7 @@ s50 > 3""",
                         dynamic_sizes=[DimDynamic.DYNAMIC for i in range(x.dim())]
                     ),
                 )
+                dim0_sym = str(fake_inp.size(0).node.expr)
                 for i, size in enumerate(sizes):
                     pred = fake_inp.size(0) == size
                     f_cond(pred)
@@ -2363,7 +2361,10 @@ s50 > 3""",
                             print_output=False
                         )
                     )
-                    actual_guard_str = [str(guard.expr) for guard in shape_env.guards]
+                    actual_guard_str = [
+                        str(guard.expr).replace(dim0_sym, "s0")
+                        for guard in shape_env.guards
+                    ]
                     self.assertExpectedInline(actual, exp_graphs[i])
                     self.assertEqual(cnt.frame_count, exp_frame_count[i])
                     self.assertEqual(actual_guard_str, exp_shape_env_guards[i])
@@ -2418,7 +2419,6 @@ class GraphModule(torch.nn.Module):
                 ],
                 [
                     "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
-                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
                     "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
                 ],
             ],

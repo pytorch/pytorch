@@ -4490,17 +4490,20 @@ class CheckFunctionManager:
         latency = 0.0
 
         if not output_graph.skip_guards_check and not output_graph.export:
-            if not self.guard_manager.check(output_graph.local_scope):
-                reasons = get_guard_fail_reason_helper(
-                    self.guard_manager,
-                    output_graph.local_scope,
-                    CompileContext.current_compile_id(),
-                    backend=None,  # no need to set this because we are trying to find the offending guard entry
-                )
-                raise AssertionError(
-                    "Guard failed on the same frame it was created. This is a bug - please create an issue."
-                    f"Guard fail reason: {reasons}"
-                )
+            # Guard validation happens before compilation has fully committed.
+            # Keep it from specializing any user-owned ShapeEnv reached via locals.
+            with output_graph.shape_env.suppress_guards():
+                if not self.guard_manager.check(output_graph.local_scope):
+                    reasons = get_guard_fail_reason_helper(
+                        self.guard_manager,
+                        output_graph.local_scope,
+                        CompileContext.current_compile_id(),
+                        backend=None,  # no need to set this because we are trying to find the offending guard entry
+                    )
+                    raise AssertionError(
+                        "Guard failed on the same frame it was created. This is a bug - please create an issue."
+                        f"Guard fail reason: {reasons}"
+                    )
 
             if guard_manager_testing_hook_fn is not None:
                 guard_manager_testing_hook_fn(
@@ -4513,9 +4516,10 @@ class CheckFunctionManager:
             # Note  - If you are working on a guard optimization, it might be a
             # good idea to increase this number for more stability during
             # development.
-            latency = profile_guard_manager(
-                self.guard_manager.root, output_graph.local_scope, 1
-            )
+            with output_graph.shape_env.suppress_guards():
+                latency = profile_guard_manager(
+                    self.guard_manager.root, output_graph.local_scope, 1
+                )
             guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
             # Note: We use `increment_toplevel` instead of `compilation_metric`
             # here.  This is because, in scenarios where `torch._dynamo.reset`
