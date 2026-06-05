@@ -273,6 +273,8 @@ class FSDPParam:
         # `distribute_tensor` after https://github.com/pytorch/pytorch/issues/116101
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
+        # Tracks that this parameter contained FSDP-init-time spmd_types annotations;
+        # this remains true even if spmd typechecking is disabled at runtime.
         self.is_spmd_types = (
             dist._is_spmd_types_available()
             and bool(spmd.get_local_type(param))
@@ -350,19 +352,26 @@ class FSDPParam:
         self,
         spmd_mesh: DeviceMesh,
         dp_dim_names: "DataParallelMeshDims",
-    ):
+    ) -> "tuple[tuple[str, ...], spmd.MeshAxis]":
         """
-        Return FSDP's physical DP dims and their logical SPMD DP axis.
+        Collapse FSDP's data-parallel mesh dims into one SPMD DP axis.
 
-        HSDP may use separate mesh dims for replication and sharding, but the
-        user's SPMD annotation can describe the combined DP/CP dimension as one
-        logical axis. The returned names identify the physical DTensor dims,
-        while the returned MeshAxis is used for local spmd_types metadata.
+        FSDP may use multiple named DTensor mesh dims for data parallelism:
+        HSDP replication dims plus the dims that shard parameters. For example,
+        with mesh dims ("dp_replicate", "dp_shard", "cp", "tp") and
+        DataParallelMeshDims(replicate="dp_replicate", shard=("dp_shard", "cp")),
+        this returns:
+          - ordered_dp_names = ("dp_replicate", "dp_shard", "cp")
+          - dp_axis = MeshAxis for the flattened process group over those dims
+
+        The returned names are DTensor mesh dims used for FSDP storage, while
+        dp_axis is the single spmd_types axis used for compute-time metadata on
+        the unsharded plain parameter.
         """
         dp_names = tuple(
             itertools.chain(dp_dim_names.shard_names, dp_dim_names.replicate_names)
         )
-        dp_names_set = frozenset(dp_names)
+        dp_names_set = set(dp_names)
         if spmd_mesh.mesh_dim_names is None:
             raise ValueError("spmd_mesh.mesh_dim_names must not be None")
         ordered_dp_names = tuple(
@@ -375,7 +384,7 @@ class FSDPParam:
                 "_".join(ordered_dp_names)
             )
             dp_axis = spmd.MeshAxis.of(flattened_dp_mesh.get_group())
-        return ordered_dp_names, dp_names_set, dp_axis
+        return ordered_dp_names, dp_axis
 
     def _spmd_types_to_dtensor(
         self,
@@ -385,11 +394,11 @@ class FSDPParam:
         """
         Translate an spmd_types-annotated plain tensor for FSDP storage.
 
-        spmd_types metadata is expected to be the un-FSDP-sharded, per-axis
-        placement metadata on the full mesh, with mesh_info telling FSDP which
-        axes to shard. Since FSDP storage-time representation is DTensor, this
-        translates the metadata to DTensor placements and wraps as DTensor
-        (i.e. spmd.S -> Shard, spmd.I/R -> Replicate). fully_shard then
+        spmd_types metadata is expected to describe the un-FSDP-sharded,
+        compute-time tensor on the full computation mesh, with mesh_info telling
+        FSDP which axes to shard. Since FSDP storage-time representation is
+        DTensor, this translates the metadata to DTensor placements and wraps as
+        DTensor (i.e. spmd.S -> Shard, spmd.I/R -> Replicate). fully_shard then
         proceeds as usual.
 
         The spmd_types annotations are stored, and at compute time the DTensor
@@ -423,9 +432,10 @@ class FSDPParam:
             )
 
         # Interpret all FSDP DP/CP dims as one logical SPMD DP axis.
-        ordered_dp_names, dp_names_set, dp_axis = self._get_spmd_logical_dp_axis(
+        ordered_dp_names, dp_axis = self._get_spmd_logical_dp_axis(
             spmd_mesh, dp_dim_names
         )
+        dp_names_set = set(ordered_dp_names)
 
         # Validate/stamp the compute-time SPMD type on that logical DP axis.
         # FSDP expects DP axes to have R, or will stamp R if unannotated.
