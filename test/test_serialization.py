@@ -39,6 +39,7 @@ from torch.serialization import (
     SourceChangeWarning,
 )
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCUDA,
@@ -850,57 +851,6 @@ class SerializationMixin:
         with self.assertRaisesRegex(AttributeError, expected_err_msg):
             # weights_only=False as this is legacy code that saves the model
             torch.load(resource, weights_only=False)
-
-    def test_save_different_dtype_unallocated(self):
-        def save_load_check(a, b):
-            with io.BytesIO() as f:
-                torch.save([a, b], f)
-                f.seek(0)
-                a_loaded, b_loaded = torch.load(f)
-            self.assertEqual(a, a_loaded)
-            self.assertEqual(b, b_loaded)
-
-        for dtype in all_types_and_complex_and(torch.half,
-                                               torch.bfloat16, torch.bool):
-            a = torch.tensor([], dtype=dtype)
-
-            for other_dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
-                s = torch.TypedStorage(
-                    wrap_storage=a.storage().untyped(),
-                    dtype=other_dtype)
-                save_load_check(a, s)
-                save_load_check(a.storage(), s)
-                b = torch.tensor([], dtype=other_dtype)
-                save_load_check(a, b)
-
-    def test_save_different_dtype_error(self):
-        error_msg = r"Cannot save multiple tensors or storages that view the same data as different types"
-
-        a = torch.randn(10, dtype=torch.complex128)
-        f = io.BytesIO()
-
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            torch.save([a, a.imag], f)
-
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            torch.save([a.storage(), a.imag], f)
-
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            torch.save([a, a.imag.storage()], f)
-
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            torch.save([a.storage(), a.imag.storage()], f)
-
-        a = torch.randn(10)
-        s_bytes = torch.TypedStorage(
-            wrap_storage=a.storage().untyped(),
-            dtype=torch.uint8)
-
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            torch.save([a, s_bytes], f)
-
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            torch.save([a.storage(), s_bytes], f)
 
     def test_safe_load_basic_types(self):
         with tempfile.NamedTemporaryFile() as f:
@@ -4873,6 +4823,32 @@ class TestSerializationDeviceType(TestCase):
 
         check_map_locations(map_locations, torch.float, intended_device)
 
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_serialization_map_location_multi_device(self, devices):
+        test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
+        last_device = torch.device(devices[-1])
+        device_type = last_device.type
+        device_index = last_device.index
+
+        def load_bytes():
+            with open(test_file_path, 'rb') as f:
+                return io.BytesIO(f.read())
+
+        fileobject_lambdas = [lambda: test_file_path, load_bytes]
+        map_locations = [f'{device_type}:{device_index}']
+        intended_device = torch.device(device_type, device_index)
+
+        for fileobject_lambda in fileobject_lambdas:
+            for map_location in map_locations:
+                tensor = torch.load(fileobject_lambda(), map_location=map_location)
+                self.assertEqual(tensor.device, intended_device)
+                self.assertEqual(tensor.dtype, torch.float)
+                self.assertEqual(
+                    tensor,
+                    torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float, device=intended_device),
+                )
+
     def test_save_different_dtype_unallocated(self, device):
         def save_load_check(a, b):
             with io.BytesIO() as f:
@@ -4974,12 +4950,14 @@ class TestSerializationDeviceType(TestCase):
 
     @parametrize("materialize_fake", (True, False))
     def test_skip_data_serialization(self, device, materialize_fake):
+        # Create one tensor that uses each of the paths in __reduce_ex__ that should work
         t_v2 = torch.randn(2, 3, device=device)
         t_v3 = torch.randn(2, 3, dtype=torch.complex32, device=device)
         i = torch.tensor([[0, 1, 1],
                           [2, 0, 2]])
         v = torch.tensor([3, 4, 5], dtype=torch.float32)
         if not materialize_fake:
+            # FakeTensorConverter messes up sizes of i and v for the sparse tensor
             st = torch.sparse_coo_tensor(i, v, (2, 4))
         tt = TwoTensor(torch.randn(2, device=device), torch.randn(2, device=device))
 
@@ -5009,6 +4987,7 @@ class TestSerializationDeviceType(TestCase):
             self.assertFalse(getattr(torch.serialization._serialization_tls, "materialize_fake_tensors", False))
             self.assertFalse(getattr(torch.serialization._serialization_tls, "skip_data", False))
 
+        # Test that without materialize_fake_tensor, behavior for fake_tensors is not altered by ctx
         if not materialize_fake:
             ft = converter.from_real_tensor(mode, torch.randn(2, device=device))
             exc = pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
