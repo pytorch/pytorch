@@ -696,6 +696,8 @@ class OutputGraph(OutputGraphCommon):
         self.cleanup_hooks: list[Callable[[], Any]] = []
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
+        # True once this frame emits an FX graph to the user backend.
+        self.fullgraph_count_frame = False
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
 
@@ -2730,6 +2732,7 @@ class OutputGraph(OutputGraphCommon):
             if count_calls(self.graph) == 0 and len(rv) == 0:
                 return [], None
 
+            self.fullgraph_count_frame = True
             name = unique_id("__compiled_fn", with_uuid=True)
 
             if not isinstance(rv, list):

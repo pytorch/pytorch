@@ -69,6 +69,7 @@ class GuardedCode:
     guard_manager: GuardFn
     compile_id: CompileId
     trace_annotation: str = "Unknown"
+    fullgraph_count_frame: bool = True
 
 
 @dataclasses.dataclass

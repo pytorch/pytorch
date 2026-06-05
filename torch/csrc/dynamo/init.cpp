@@ -15,14 +15,18 @@
 
 #include <Python.h>
 
-static struct PyModuleDef _module =
-    {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
+static struct PyModuleDef _module = {
+    .m_base = PyModuleDef_HEAD_INIT,
+    .m_name = "torch._C._dynamo",
+    .m_doc = "",
+    .m_size = -1,
+    .m_methods = nullptr};
 
 PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>)
 
 namespace torch::dynamo {
 
-std::vector<uint8_t> _PyOpcode_Caches_vec;
+static std::vector<uint8_t> _PyOpcode_Caches_vec;
 
 using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
@@ -472,7 +476,9 @@ void initDynamoBindings(PyObject* torch) {
           &CacheEntry::update_diff_guard_root_manager);
 
   py::class_<PrecompileEntry>(m, "_PrecompileEntry")
-      .def_readonly("guard_manager", &PrecompileEntry::guard_manager);
+      .def_readonly("guard_manager", &PrecompileEntry::guard_manager)
+      .def_readonly(
+          "fullgraph_count_frame", &PrecompileEntry::fullgraph_count_frame);
 
   py::class_<ExtraState>(m, "_ExtraState")
       .def("invalidate", &ExtraState::invalidate);
@@ -499,7 +505,13 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_get_cache_entries_for_region", &_get_cache_entries_for_region);
   m.def("_get_total_cache_entry_count", &_get_total_cache_entry_count);
   m.def("_reset_precompile_entries", &_reset_precompile_entries);
-  m.def("_load_precompile_entry", &_load_precompile_entry);
+  m.def(
+      "_load_precompile_entry",
+      &_load_precompile_entry,
+      py::arg("code_obj"),
+      py::arg("guard_manager"),
+      py::arg("dynamo_code"),
+      py::arg("fullgraph_count_frame") = true);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
   m.def("_set_lru_cache", &_set_lru_cache);
   m.def(
@@ -526,11 +538,12 @@ void initDynamoBindings(PyObject* torch) {
   _register_functions(dynamo);
 
   auto dynamo_module = py::handle(dynamo).cast<py::module>();
-  dynamo_module.def("has_slot", [](int64_t slots, py::object slot_bit_obj) {
-    // Convert slot_bit to int - handle both int and pybind11 enums
-    int64_t slot_bit = py::cast<int64_t>(slot_bit_obj.attr("__index__")());
-    return (slots & (1LL << slot_bit)) != 0;
-  });
+  dynamo_module.def(
+      "has_slot", [](int64_t slots, const py::object& slot_bit_obj) {
+        // Convert slot_bit to int - handle both int and pybind11 enums
+        int64_t slot_bit = py::cast<int64_t>(slot_bit_obj.attr("__index__")());
+        return (slots & (1LL << slot_bit)) != 0;
+      });
   py::enum_<PySequenceSlotBit>(dynamo_module, "PySequenceSlots")
       .value("SQ_LENGTH", PySequenceSlotBit::SQ_LENGTH)
       .value("SQ_CONCAT", PySequenceSlotBit::SQ_CONCAT)

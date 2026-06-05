@@ -3,7 +3,9 @@
 import inspect
 import io
 import os
+import queue
 import tempfile
+import threading
 from unittest.mock import patch
 
 import torch
@@ -343,6 +345,197 @@ class FullgraphTests(TestCase):
         x = torch.randn(5)
         result = torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(result, 5)
+
+    def test_fullgraph_errors_on_multiple_frames_under_skipped_frame(self):
+        def g(x):
+            return x + 1
+
+        def h(x):
+            return x + 2
+
+        def f(x):
+            return g(x) + h(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch._dynamo.eval_frame.skip_code(f.__code__)
+        try:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "fullgraph=True expected exactly one compiled frame, but found 2",
+            ):
+                torch.compile(f, backend=cnt, fullgraph=True)(torch.ones(3))
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            torch._dynamo.eval_frame.reset_code(f.__code__)
+
+    def test_fullgraph_precompile_entry_uses_graph_frame_metadata(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+
+        def g(x):
+            return x + 1
+
+        def h(x):
+            return x + 2
+
+        def f(x):
+            return g(x) + h(x)
+
+        def injected_g(x):
+            return x + 1
+
+        def injected_h(x):
+            return x + 2
+
+        torch._dynamo.eval_frame.skip_code(f.__code__)
+        try:
+            _load_precompile_entry(
+                g.__code__,
+                torch._dynamo.guards.GuardManagerWrapper(),
+                injected_g.__code__,
+                False,
+            )
+            _load_precompile_entry(
+                h.__code__,
+                torch._dynamo.guards.GuardManagerWrapper(),
+                injected_h.__code__,
+                True,
+            )
+            self.assertEqual(
+                torch.compile(f, backend="eager", fullgraph=True)(torch.ones(3)),
+                torch.ones(3) * 2 + 3,
+            )
+        finally:
+            torch._dynamo.eval_frame.reset_code(f.__code__)
+            _reset_precompile_entries(g.__code__)
+            _reset_precompile_entries(h.__code__)
+
+    def test_fullgraph_frame_count_is_thread_local(self):
+        first_thread_entered = threading.Event()
+        second_thread_done = threading.Event()
+        results = queue.Queue()
+
+        def g(x):
+            return x + 1
+
+        def h(x):
+            return x + 2
+
+        def f(x):
+            y = g(x)
+            first_thread_entered.set()
+            self.assertTrue(second_thread_done.wait(timeout=60))
+            return y + h(x)
+
+        def k(x):
+            return x + 3
+
+        cnt1 = torch._dynamo.testing.CompileCounter()
+        cnt2 = torch._dynamo.testing.CompileCounter()
+        torch._dynamo.eval_frame.skip_code(f.__code__)
+
+        def run_first_thread():
+            try:
+                torch.compile(f, backend=cnt1, fullgraph=True)(torch.ones(3))
+            except Exception as e:
+                results.put(("first", type(e).__name__, str(e)))
+            else:
+                results.put(("first", None, None))
+
+        def run_second_thread():
+            try:
+                self.assertTrue(first_thread_entered.wait(timeout=60))
+                result = torch.compile(k, backend=cnt2, fullgraph=True)(torch.ones(3))
+                self.assertEqual(result, torch.ones(3) + 3)
+            except Exception as e:
+                results.put(("second", type(e).__name__, str(e)))
+            else:
+                results.put(("second", None, None))
+            finally:
+                second_thread_done.set()
+
+        try:
+            thread1 = threading.Thread(target=run_first_thread)
+            thread2 = threading.Thread(target=run_second_thread)
+            thread1.start()
+            thread2.start()
+            thread1.join(timeout=60)
+            thread2.join(timeout=60)
+            self.assertFalse(thread1.is_alive())
+            self.assertFalse(thread2.is_alive())
+
+            actual = {}
+            while not results.empty():
+                name, error_type, message = results.get_nowait()
+                actual[name] = (error_type, message)
+
+            self.assertIn("first", actual)
+            self.assertIn("second", actual)
+            self.assertEqual(actual["second"], (None, None))
+            self.assertEqual(actual["first"][0], "RuntimeError")
+            self.assertIn(
+                "fullgraph=True expected exactly one compiled frame, but found 2",
+                actual["first"][1],
+            )
+            self.assertEqual(cnt1.frame_count, 2)
+            self.assertEqual(cnt2.frame_count, 1)
+        finally:
+            second_thread_done.set()
+            torch._dynamo.eval_frame.reset_code(f.__code__)
+
+    @torch._dynamo.config.patch(
+        error_on_dynamo_callback_in_fullgraph_compiled_code=True
+    )
+    def test_fullgraph_nested_compile_policy_restored_after_fx_trace_skip(self):
+        def f(x):
+            return x + 1
+
+        set_policy = torch._dynamo.eval_frame.set_fullgraph_error_on_nested_compile
+        prior = set_policy(False)
+        try:
+            self.assertFalse(prior)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "FX to symbolically trace a dynamo-optimized function",
+            ):
+                torch.fx.symbolic_trace(
+                    torch.compile(f, backend="eager", fullgraph=True)
+                )
+            self.assertFalse(set_policy(False))
+        finally:
+            set_policy(prior)
+
+    def test_fullgraph_nested_active_counter_validates_local_call(self):
+        def g(x):
+            return x + 1
+
+        def h(x):
+            return x + 2
+
+        def f(x):
+            return g(x) + h(x)
+
+        set_count = torch._dynamo.eval_frame.set_fullgraph_compiled_frame_count
+        prior = set_count(-1)
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch._dynamo.eval_frame.skip_code(f.__code__)
+        try:
+            self.assertLess(prior, 0)
+            set_count(1)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "fullgraph=True expected exactly one compiled frame, but found 2",
+            ):
+                torch.compile(f, backend=cnt, fullgraph=True)(torch.ones(3))
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(set_count(-1), 1)
+        finally:
+            set_count(-1)
+            if prior >= 0:
+                set_count(prior)
+            torch._dynamo.eval_frame.reset_code(f.__code__)
 
     def test_fullgraph_skip_reason_message(self):
         def my_function(x):
