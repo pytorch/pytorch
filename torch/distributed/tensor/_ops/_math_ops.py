@@ -1100,6 +1100,42 @@ def foreach_max_strategy(op_schema: OpSchema) -> TupleStrategy:
     return TupleStrategy(output_tuple_strategy_children)
 
 
+_REPLICATE_ONLY_OPS = [
+    aten._linalg_svd.default,
+    aten.linalg_qr.default,
+    # TODO: The diagonal ops can have an improved sharding strategy for
+    # shard placements that does not require redistributing to replicate.
+    aten.diagonal_copy.default,
+    aten.diag_embed.default,
+    aten.diag.default,
+    aten.diagonal.default,
+    aten.tril.default,
+    aten.triu.default,
+    aten._linalg_eigh.default,
+    aten.upsample_bicubic2d.default,
+    aten.upsample_bilinear2d.default,
+    aten.upsample_linear1d.default,
+    aten.upsample_nearest2d.default,
+    aten.upsample_trilinear3d.default,
+    # TODO: support the full F.interpolate set of options.
+]
+
+
+# Category H: Replicate-only ops
+# @register_single_dim_strategy(
+#     _REPLICATE_ONLY_OPS,
+#     schema_info=RuntimeSchemaInfo(1),
+#     allow_uneven_sharding=True,
+# )
+def linalg_replicate_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Replicate-only ops: only the all-Replicate strategy is valid."""
+    return []
+
+
 @register_op_strategy(
     [
         aten._linalg_svd.default,
@@ -1186,6 +1222,46 @@ MAX_POOL_OPS = [
     aten.max_pool2d_with_indices.default,
     aten.max_pool3d_with_indices.default,
 ]
+
+
+# Category G: Pooling ops
+# @register_single_dim_strategy(
+#     AVG_POOL_OPS + MAX_POOL_OPS,
+#     schema_info=RuntimeSchemaInfo(1),
+#     allow_uneven_sharding=True,
+# )
+def pooling_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+
+    ndim = len(input_meta.shape)
+    num_outputs = sum(1 for r in op._schema.returns if "Tensor" in str(r.type))
+    num_inputs = sum(1 for a in args_schema if isinstance(a, TensorMeta))
+    n = num_outputs + num_inputs
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+
+    # S(0) for batch dim — always valid
+    strategies.append([_ShardingPlaceholder(0)] * n)
+
+    # avg_pool is linear: Partial(sum) and Partial(avg) pass through unchanged.
+    if op in AVG_POOL_OPS:
+        strategies.append([Partial("sum")] * n)
+        strategies.append([Partial("avg")] * n)
+
+    # S(1) is safe when dim 1 is the channel dim (pooling never touches it).
+    # Batched inputs have layout (N, C, *spatial) with ndim = spatial_rank + 2.
+    spatial_rank = POOL_SPATIAL_RANK[op]
+    is_batched = ndim >= spatial_rank + 2
+    if is_batched:
+        strategies.append([_ShardingPlaceholder(1)] * n)
+
+    return strategies
 
 
 @register_op_strategy(
@@ -1859,9 +1935,32 @@ def sort_stable_strategy(op_schema: OpSchema) -> OpStrategy:
     return sort_strategy(op_schema, sort_dim)
 
 
+# Category L: Histc
+# @register_single_dim_strategy(
+#     [aten.histc.default],
+#     schema_info=RuntimeSchemaInfo(2),
+#     allow_uneven_sharding=True,
+# )
+def histc_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    # histc supports sharded input -> partial output only when min/max are specified
+    if len(args_schema) == 4:
+        for dim in range(ndim):
+            strategies.append([Partial(), _ShardingPlaceholder(dim)])
+    return strategies
+
+
 @register_op_strategy(
     [aten.histc.default],
-    # strategy choice depends on the value of 'min' and 'max' kwargs, which are position 2 and 3
     schema_info=RuntimeSchemaInfo(2),
 )
 def histc_strategy(op_schema: OpSchema) -> OpStrategy:
