@@ -658,7 +658,9 @@ class FSDPParam:
                 submeshes.append(self.mesh_info.mesh)
                 if isinstance(self.mesh_info, HSDPMeshInfo):
                     spec_placements.append(Replicate())
-                spec_placements.append(fsdp_placement)
+                # Reuse the placement already computed for this DP shard dim
+                # so that we don't loss _StridedShard.
+                spec_placements.append(spmd_placements[i])
                 skip = len(dp_dim_names.shard_names) - 1
             elif name in replicate_names_set and isinstance(
                 self.mesh_info, HSDPMeshInfo
