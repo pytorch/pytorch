@@ -418,6 +418,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
     )
+
+    # Fix aliasing detection for dtype views AFTER reinplace determines cloning needs
+    GraphTransformObserver(gm, "fix_auto_functionalized_dtype_views").apply_graph_pass(
+        fix_auto_functionalized_dtype_views
+    )
+
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
@@ -1424,6 +1430,53 @@ def decompose_triton_kernel_wrapper_functional(graph):
         raise AssertionError("triton_kernel_wrapper_functional was not removed")
 
 
+def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:
+    """
+    Fix aliasing detection for dtype views in auto_functionalized_v2.
+
+    When a dtype view shares storage with a graph input, we can skip cloning
+    it during decomposition because the view can be safely regenerated.
+
+    This pass identifies such cases and updates the reinplace metadata to
+    indicate no clone is needed.
+    """
+    storage_to_input: dict[int, torch.fx.Node] = {}
+    for node in graph.find_nodes(op="placeholder"):
+        storage = get_node_storage(node)
+        if storage is not None:
+            storage_to_input[storage] = node
+
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
+    ):
+        all_bases = node.kwargs.get("_all_bases")
+        only_clone_these = node.meta.get("only_clone_these_tensors")
+        if all_bases is None or only_clone_these is None:
+            continue
+
+        keep = []
+        for idx in only_clone_these:
+            if idx >= len(all_bases):
+                keep.append(idx)
+                continue
+            base = all_bases[idx]
+            if not isinstance(base, torch.fx.Node):
+                keep.append(idx)
+                continue
+            base_storage = get_node_storage(base)
+            if base_storage is None or base_storage not in storage_to_input:
+                keep.append(idx)
+                continue
+            input_val = storage_to_input[base_storage].meta["val"]
+            if input_val.dtype == base.meta["val"].dtype:
+                keep.append(idx)
+                continue
+            counters["inductor"]["fix_auto_functionalized_dtype_views"] += 1
+
+        if len(keep) != len(only_clone_these):
+            node.meta["only_clone_these_tensors"] = keep
+
+
 def decompose_auto_functionalized(graph):
     """Decomposes auto_functionalized nodes into clones and the underlying
     mutation node.
@@ -1661,37 +1714,12 @@ def view_to_reshape(gm):
     _recursive_view_to_reshape(gm.graph)
 
 
-def _is_bias_like_addmm_input(inp: torch.fx.Node, output: torch.fx.Node) -> bool:
-    inp_val = inp.meta.get("val")
-    output_val = output.meta.get("val")
-    if not (isinstance(inp_val, torch.Tensor) and isinstance(output_val, torch.Tensor)):
-        return False
-
-    if len(inp_val.shape) != len(output_val.shape):
-        return True
-
-    same_shape = statically_known_true(sym_eq(inp_val.shape, output_val.shape))
-    if not same_shape:
-        for inp_dim, output_dim in zip(inp_val.shape, output_val.shape):
-            if statically_known_true(sym_eq(inp_dim, 1)) and not statically_known_true(
-                sym_eq(output_dim, 1)
-            ):
-                return True
-        return False
-
-    return inp_val.layout == torch.strided and any(
-        statically_known_true(sym_eq(stride, 0)) for stride in inp_val.stride()
-    )
-
-
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
     output = match.output_node()
-    if not _is_bias_like_addmm_input(inp, output):
-        return False
     return all(is_pointwise_use(use) for use in output.users)
 
 
