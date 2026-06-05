@@ -100,6 +100,12 @@ def pinned_memory_pool():
         _pool_enabled = False
 
 
+# --- Stride registry: preserves original tensor layout across offload/reload ---
+# offload stores the original (size, stride) keyed by CPU tensor data_ptr.
+# reload pops it to reconstruct the GPU tensor with the original layout.
+_stride_registry: dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
+
+
 # --- Wait registry: maps data_ptr() -> (completion_event, device) ---
 # Created by ao.offload / ao.reload, consumed (popped) by ao.wait_tensor.
 # Not thread-safe — graph execution is single-threaded Python.
@@ -148,6 +154,10 @@ def offload(tensor: torch.Tensor) -> torch.Tensor:
 
     torch.accelerator.set_stream(transfer_stream)
     result = _maybe_pool_alloc(tensor.nelement(), tensor.dtype).view(tensor.shape)
+    _stride_registry[result.data_ptr()] = (
+        tuple(tensor.size()),
+        tuple(tensor.stride()),
+    )
     completion_event = _register_wait(result, device)
     result.copy_(tensor, non_blocking=True)
     transfer_stream.record_event(completion_event)
@@ -158,6 +168,8 @@ def offload(tensor: torch.Tensor) -> torch.Tensor:
 
 @offload.register_fake
 def _(tensor: torch.Tensor) -> torch.Tensor:
+    # Contiguous CPU buffer — strides are NOT preserved here (DMA needs contiguous).
+    # Original strides are restored by reload via _stride_registry.
     return torch.empty(tensor.shape, dtype=tensor.dtype, device="cpu")
 
 
@@ -175,10 +187,15 @@ def reload(
     transfer_stream = _get_or_create_transfer_stream(device)
     current_stream = torch.accelerator.current_stream(device)
 
-    # Allocate on compute stream so the allocator tracks ownership correctly.
-    # Use empty (not empty_like) to get a contiguous tensor matching the
-    # contiguous CPU buffer produced by offload.
-    result = torch.empty(tensor.shape, dtype=tensor.dtype, device=device)
+    # Restore original strides if available (set by offload), otherwise contiguous.
+    stride_info = _stride_registry.pop(tensor.data_ptr(), None)
+    if stride_info is not None:
+        orig_size, orig_stride = stride_info
+        result = torch.empty_strided(
+            orig_size, orig_stride, dtype=tensor.dtype, device=device
+        )
+    else:
+        result = torch.empty(tensor.shape, dtype=tensor.dtype, device=device)
     completion_event = _register_wait(result, device)
 
     transfer_stream.wait_stream(current_stream)
@@ -196,6 +213,8 @@ def _(
     tensor: torch.Tensor,
     device: torch.device,
 ) -> torch.Tensor:
+    # Fake impl can't access _stride_registry, so returns contiguous.
+    # Real impl restores original strides via _stride_registry.
     return torch.empty(tensor.shape, dtype=tensor.dtype, device=device)
 
 
