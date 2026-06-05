@@ -105,6 +105,13 @@ def out_dtype_dense(op: torch._ops.OpOverload, output_dtype: torch.dtype, *args)
     return out_dtype_fallback(op, output_dtype, *args)
 
 
+@out_dtype.py_impl(torch.Tensor)
+def out_dtype_tensor_subclass(
+    op: torch._ops.OpOverload, output_dtype: torch.dtype, *args
+):
+    return out_dtype_dense(op, output_dtype, *args)
+
+
 def is_int_mm(op, output_dtype, args):
     return (
         op is torch.ops.aten.mm.default
