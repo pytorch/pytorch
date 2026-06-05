@@ -5882,9 +5882,9 @@ class CommonTemplate:
             atol = 6e-5
             rtol = 0.001
         else:
-            # Greatest absolute difference: 0.0001675300 at index (100, 120, 0, 0) (up to 6e-05 allowed)
-            # Greatest relative difference: 0.1761541813 at index (10, 0, 0, 0) (up to 0.001 allowed)
-            atol = 2e-4
+            # Greatest absolute difference: 0.00027943775057792664 at index (92, 109, 0, 0) (up to 0.0002 allowed)
+            # Greatest relative difference: 0.007547957822680473 at index (92, 109, 0, 0) (up to 0.001 allowed)
+            atol = 3e-4
             rtol = 0.001
 
         weight = torch.randn([out_channels, in_channels // groups, kernel, kernel])
@@ -14369,6 +14369,27 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
         self.assertEqual(actual, expected)
 
+    @skip_if_halide
+    @skip_if_pallas  # cpp-only fusion path
+    @skip_if_triton_cpu
+    def test_group_norm_flatten_batch_norm_cpu_cpp_fusion(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("cpu only")
+
+        bn = nn.BatchNorm1d(140).eval()
+
+        def fn(x):
+            y = F.group_norm(x, 14)
+            y = torch.flatten(y, start_dim=1)
+            y = torch.exp(torch.clamp(y, max=20))
+            return bn(y)
+
+        torch.manual_seed(0)
+        x = torch.randn(12, 14, 2, 5)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
     @xfail_if_mps_unimplemented
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Some archs don't support mem eff SDPA"
@@ -15570,6 +15591,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn(x, source)
 
         with self.assertRaises(RuntimeError):
+            torch.compile(fn)(x, source)
+
+    @parametrize("inplace", [False, True])
+    def test_index_add_source_shape_mismatch(self, inplace):
+        def fn(x, source):
+            index = torch.arange(source.numel(), device=x.device)
+            if inplace:
+                x = x.clone()
+                x.index_add_(0, index, source)
+                return x
+            return torch.index_add(x, 0, index, source)
+
+        x = torch.randn(10, 5, device=self.device)
+        source = torch.randn(5, device=self.device)
+        msg = "source tensor shape must match self tensor shape"
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(x, source)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(x, source)
 
     @skip_if_gpu_halide  # cuda error
